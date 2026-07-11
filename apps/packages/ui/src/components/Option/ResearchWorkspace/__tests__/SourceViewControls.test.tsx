@@ -1,0 +1,502 @@
+import React from "react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { beforeEach, describe, expect, it, vi } from "vitest"
+import type { WorkspaceSourceSavedViewResponse } from "@/services/tldw/domains/workspace-api"
+import {
+  SourceViewControls,
+  SourceViewOverlayHost,
+  type SourceViewOverlayRequest
+} from "../SourcesPane/SourceViewControls"
+import { DEFAULT_SOURCE_LIST_VIEW_STATE } from "../SourcesPane/source-list-view"
+import type { SourceSavedViewsController } from "../SourcesPane/use-source-saved-views"
+
+const validView = (
+  overrides: Partial<WorkspaceSourceSavedViewResponse> = {}
+): WorkspaceSourceSavedViewResponse => ({
+  id: "view-1",
+  workspace_id: "workspace-a",
+  name: "My PDFs",
+  schema_version: 1,
+  version: 2,
+  created_at: "2026-07-10T00:00:00Z",
+  updated_at: "2026-07-10T00:00:00Z",
+  valid: true,
+  invalid_reason: null,
+  state: {
+    type_filters: ["pdf"],
+    status_filters: [],
+    review_state_filters: [],
+    lifecycle_state_filters: [],
+    date_field: "added_at",
+    date_from: null,
+    date_to: null,
+    require_url: false,
+    require_file_size: false,
+    require_duration: false,
+    require_page_count: false,
+    file_size_min: null,
+    file_size_max: null,
+    duration_min: null,
+    duration_max: null,
+    page_count_min: null,
+    page_count_max: null,
+    sort: "name_asc"
+  },
+  ...overrides
+} as WorkspaceSourceSavedViewResponse)
+
+const invalidView = (): WorkspaceSourceSavedViewResponse => ({
+  ...validView(),
+  id: "view-invalid",
+  name: "Old view",
+  valid: false,
+  state: null,
+  invalid_reason: "unsupported_schema_version"
+})
+
+const controller = (
+  overrides: Partial<SourceSavedViewsController> = {}
+): SourceSavedViewsController =>
+  ({
+    available: true,
+    generation: 3,
+    views: [validView(), invalidView()],
+    loading: false,
+    listError: null,
+    activeViewId: null,
+    activeSnapshot: null,
+    currentSignature: "signature",
+    modified: false,
+    serializationIssues: [],
+    duplicateConflict: null,
+    limitState: null,
+    versionConflict: null,
+    mutation: null,
+    busy: false,
+    mutationError: null,
+    announcement: null,
+    canRetryMutation: false,
+    canRetryVersion: false,
+    load: vi.fn(),
+    retry: vi.fn(),
+    retryMutation: vi.fn(),
+    retryVersionConflict: vi.fn(),
+    applyView: vi.fn(),
+    createView: vi.fn(),
+    confirmReplace: vi.fn(),
+    replaceView: vi.fn(),
+    resetView: vi.fn(),
+    deleteView: vi.fn(),
+    ...overrides
+  }) as SourceSavedViewsController
+
+const Harness = ({
+  model = controller(),
+  showControls = true
+}: {
+  model?: SourceSavedViewsController
+  showControls?: boolean
+}) => {
+  const [request, setRequest] = React.useState<SourceViewOverlayRequest | null>(null)
+  return (
+    <div>
+      {showControls && (
+        <SourceViewControls
+          controller={model}
+          sourceListViewState={DEFAULT_SOURCE_LIST_VIEW_STATE}
+          onApplySourceListViewState={vi.fn()}
+          onOpenOverlay={setRequest}
+        />
+      )}
+      <div role="complementary" aria-label="Sources" tabIndex={-1} />
+      <SourceViewOverlayHost
+        controller={model}
+        request={request}
+        onRequestHandled={() => setRequest(null)}
+      />
+    </div>
+  )
+}
+
+describe("SourceViewControls", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it("renders fixed-order grouped built-ins and saved views and applies them by keyboard", async () => {
+    const model = controller()
+    const applyState = vi.fn()
+    render(
+      <SourceViewControls
+        controller={model}
+        sourceListViewState={DEFAULT_SOURCE_LIST_VIEW_STATE}
+        onApplySourceListViewState={applyState}
+        onOpenOverlay={vi.fn()}
+      />
+    )
+
+    const trigger = screen.getByRole("button", { name: "Source views" })
+    fireEvent.keyDown(trigger, { key: "Enter" })
+
+    const menu = await screen.findByRole("menu")
+    const labels = within(menu)
+      .getAllByRole("menuitem")
+      .map((item) => item.textContent?.replace(/\s+/g, " ").trim())
+    expect(labels).toEqual([
+      "Needs review",
+      "Unreviewed",
+      "Failed ingest",
+      "Partially indexed",
+      "PDFs",
+      "Web captures",
+      "Large files",
+      "My PDFs",
+      "Old view"
+    ])
+    expect(within(menu).getByText("Built-in views")).toBeInTheDocument()
+    expect(within(menu).getByText("Saved views")).toBeInTheDocument()
+
+    menu.focus()
+    fireEvent.keyDown(menu, { key: "ArrowDown", keyCode: 40, which: 40 })
+    fireEvent.keyDown(menu, { key: "Enter", keyCode: 13, which: 13 })
+    await waitFor(() => expect(applyState).toHaveBeenCalled())
+
+    fireEvent.keyDown(trigger, { key: " " })
+    expect(await screen.findByRole("menu")).toBeInTheDocument()
+    fireEvent.keyDown(document, { key: "Escape" })
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument())
+  })
+
+  it("keeps built-ins enabled while disabling save for a null workspace", async () => {
+    const model = controller({ available: false, views: [] })
+    const open = vi.fn()
+    const applyState = vi.fn()
+    render(
+      <SourceViewControls
+        controller={model}
+        sourceListViewState={DEFAULT_SOURCE_LIST_VIEW_STATE}
+        onApplySourceListViewState={applyState}
+        onOpenOverlay={open}
+      />
+    )
+
+    const save = screen.getByRole("button", { name: "Save source view" })
+    expect(save).toBeDisabled()
+    expect(save).toHaveAccessibleDescription("Select a workspace")
+    fireEvent.click(save)
+    expect(open).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole("button", { name: "Source views" }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: "PDFs" }))
+    expect(applyState).toHaveBeenCalledWith(
+      expect.objectContaining({ typeFilters: ["pdf"] })
+    )
+  })
+
+  it("shows Modified, retryable errors, invalid recovery actions, and one polite status", async () => {
+    const model = controller({
+      activeViewId: "view-1",
+      modified: true,
+      listError: { message: "Offline", retryable: true },
+      announcement: "Saved view reset."
+    })
+    render(<Harness model={model} />)
+
+    expect(screen.getByText("Modified")).toBeInTheDocument()
+    expect(screen.getByRole("alert")).toHaveTextContent("Offline")
+    fireEvent.click(screen.getByRole("button", { name: "Retry saved views" }))
+    expect(model.retry).toHaveBeenCalled()
+    expect(screen.getAllByRole("status")).toHaveLength(1)
+
+    fireEvent.click(screen.getByRole("button", { name: "Source views" }))
+    const invalid = await screen.findByRole("menuitem", { name: /Old view/ })
+    expect(invalid).toHaveAttribute("aria-disabled", "true")
+    expect(screen.getByRole("button", { name: "Reset saved view Old view" })).toBeEnabled()
+    expect(screen.getByRole("button", { name: "Delete saved view Old view" })).toBeEnabled()
+  })
+
+  it("validates save fields, confirms replacement, exposes busy state, and returns focus", async () => {
+    const createView = vi.fn().mockResolvedValue(undefined)
+    const confirmReplace = vi.fn().mockResolvedValue(undefined)
+    const initial = controller({ createView })
+    const { rerender } = render(<Harness model={initial} />)
+
+    const invoker = screen.getByRole("button", { name: "Save source view" })
+    fireEvent.click(invoker)
+    const dialog = await screen.findByRole("dialog", { name: "Save source view" })
+    const save = within(dialog).getByRole("button", { name: "Save" })
+    expect(save).toBeDisabled()
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "View name" }), {
+      target: { value: "   " }
+    })
+    expect(within(dialog).getByText(/between 1 and 120/)).toBeInTheDocument()
+
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "View name" }), {
+      target: { value: "My PDFs" }
+    })
+    fireEvent.click(save)
+    await waitFor(() => expect(createView).toHaveBeenCalledWith("My PDFs"))
+
+    rerender(
+      <Harness
+        model={controller({
+          createView,
+          activeViewId: "view-1",
+          announcement: "Saved view created."
+        })}
+      />
+    )
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+    await waitFor(() => expect(document.activeElement).toBe(invoker))
+
+    fireEvent.click(invoker)
+    expect(
+      await screen.findByRole("dialog", { name: "Save source view" })
+    ).toBeInTheDocument()
+
+    const duplicate = {
+      viewId: "view-1",
+      version: 2,
+      name: "My PDFs",
+      state: validView().state
+    }
+    rerender(<Harness model={controller({ duplicateConflict: duplicate, confirmReplace })} />)
+    const replacement = await screen.findByRole("alertdialog", {
+      name: "Replace saved view?"
+    })
+    fireEvent.click(within(replacement).getByRole("button", { name: "Replace" }))
+    await waitFor(() => expect(confirmReplace).toHaveBeenCalled())
+
+    rerender(<Harness model={controller({ busy: true, mutation: "create" })} />)
+    expect(screen.getByRole("button", { name: "Save source view" })).toHaveAttribute(
+      "aria-busy",
+      "true"
+    )
+  })
+
+  it("renders field-specific local validation and nonretryable limit guidance", async () => {
+    const model = controller({
+      serializationIssues: [
+        { field: "fileSizeMax", message: "Must be greater than fileSizeMin." }
+      ],
+      limitState: {
+        limit: 100,
+        retryable: false,
+        guidance: "Delete an existing saved view before creating another."
+      }
+    })
+    render(<Harness model={model} />)
+    fireEvent.click(screen.getByRole("button", { name: "Save source view" }))
+
+    const dialog = await screen.findByRole("dialog", { name: "Save source view" })
+    expect(within(dialog).getByText(/File size max/i)).toBeInTheDocument()
+    expect(within(dialog).getByRole("button", { name: "Save" })).toBeDisabled()
+    const limitAlert = screen.getByText(/Saved view limit of 100/).closest("[role='alert']")
+    expect(limitAlert).toHaveTextContent("100")
+    expect(limitAlert).toHaveTextContent(/Delete an existing saved view/)
+    expect(screen.queryByRole("button", { name: /Retry/ })).not.toBeInTheDocument()
+  })
+
+  it.each([
+    { label: "another workspace", available: true },
+    { label: "no workspace", available: false }
+  ])("invalidates overlays for $label and refuses stale submit", async ({ available }) => {
+    const createA = vi.fn()
+    const { rerender } = render(<Harness model={controller({ generation: 1, createView: createA })} />)
+    fireEvent.click(screen.getByRole("button", { name: "Save source view" }))
+    const dialog = await screen.findByRole("dialog", { name: "Save source view" })
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "View name" }), {
+      target: { value: "Workspace A" }
+    })
+
+    rerender(<Harness model={controller({ generation: 2, available })} />)
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+    expect(createA).not.toHaveBeenCalled()
+    expect(screen.queryByDisplayValue("Workspace A")).not.toBeInTheDocument()
+  })
+
+  it("falls back to the Sources landmark when the invoking pane unmounts", async () => {
+    const model = controller()
+    const { rerender } = render(<Harness model={model} />)
+    fireEvent.click(screen.getByRole("button", { name: "Save source view" }))
+    expect(await screen.findByRole("dialog", { name: "Save source view" })).toBeInTheDocument()
+
+    rerender(<Harness model={model} showControls={false} />)
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("complementary", { name: "Sources" })
+      )
+    )
+  })
+
+  it("closes after a repeated success announcement completes a new mutation cycle", async () => {
+    const createView = vi.fn().mockResolvedValue(undefined)
+    const initial = controller({
+      announcement: "Saved view created.",
+      createView
+    })
+    const { rerender } = render(<Harness model={initial} />)
+    fireEvent.click(screen.getByRole("button", { name: "Save source view" }))
+    const dialog = await screen.findByRole("dialog", { name: "Save source view" })
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "View name" }), {
+      target: { value: "Second save" }
+    })
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }))
+
+    rerender(
+      <Harness
+        model={controller({
+          announcement: null,
+          busy: true,
+          mutation: "create",
+          createView
+        })}
+      />
+    )
+    rerender(
+      <Harness
+        model={controller({
+          announcement: "Saved view created.",
+          createView
+        })}
+      />
+    )
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+  })
+
+  it("falls back to another visible saved-view trigger when the invoking pane unmounts", async () => {
+    const model = controller()
+    const DualHarness = ({ showFirst }: { showFirst: boolean }) => {
+      const [request, setRequest] = React.useState<SourceViewOverlayRequest | null>(null)
+      return (
+        <div>
+          {showFirst && (
+            <SourceViewControls
+              controller={model}
+              sourceListViewState={DEFAULT_SOURCE_LIST_VIEW_STATE}
+              onApplySourceListViewState={vi.fn()}
+              onOpenOverlay={setRequest}
+            />
+          )}
+          <SourceViewControls
+            controller={model}
+            sourceListViewState={DEFAULT_SOURCE_LIST_VIEW_STATE}
+            onApplySourceListViewState={vi.fn()}
+            onOpenOverlay={setRequest}
+          />
+          <SourceViewOverlayHost
+            controller={model}
+            request={request}
+            onRequestHandled={() => setRequest(null)}
+          />
+        </div>
+      )
+    }
+    const { rerender } = render(<DualHarness showFirst />)
+    fireEvent.click(screen.getAllByRole("button", { name: "Save source view" })[0]!)
+    expect(await screen.findByRole("dialog", { name: "Save source view" })).toBeInTheDocument()
+
+    rerender(<DualHarness showFirst={false} />)
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: "Source views" })
+      )
+    )
+  })
+
+  it("skips a connected invoker inside a hidden pane during focus restoration", async () => {
+    const model = controller()
+    const HiddenPaneHarness = ({ hideFirst }: { hideFirst: boolean }) => {
+      const [request, setRequest] = React.useState<SourceViewOverlayRequest | null>(null)
+      return (
+        <div>
+          <div style={{ display: hideFirst ? "none" : "block" }}>
+            <SourceViewControls
+              controller={model}
+              sourceListViewState={DEFAULT_SOURCE_LIST_VIEW_STATE}
+              onApplySourceListViewState={vi.fn()}
+              onOpenOverlay={setRequest}
+            />
+          </div>
+          <SourceViewControls
+            controller={model}
+            sourceListViewState={DEFAULT_SOURCE_LIST_VIEW_STATE}
+            onApplySourceListViewState={vi.fn()}
+            onOpenOverlay={setRequest}
+          />
+          <SourceViewOverlayHost
+            controller={model}
+            request={request}
+            onRequestHandled={() => setRequest(null)}
+          />
+        </div>
+      )
+    }
+    const { rerender } = render(<HiddenPaneHarness hideFirst={false} />)
+    fireEvent.click(screen.getAllByRole("button", { name: "Save source view" })[0]!)
+    expect(await screen.findByRole("dialog", { name: "Save source view" })).toBeInTheDocument()
+
+    rerender(<HiddenPaneHarness hideFirst />)
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: "Source views" })
+      )
+    )
+  })
+
+  it.each([
+    { label: "workspace B", available: true },
+    { label: "a null workspace", available: false }
+  ])("discards replacement confirmation on transition to $label", async ({ available }) => {
+    const confirmReplace = vi.fn()
+    const initial = controller({ generation: 8, confirmReplace })
+    const { rerender } = render(<Harness model={initial} />)
+    fireEvent.click(screen.getByRole("button", { name: "Save source view" }))
+    expect(await screen.findByRole("dialog", { name: "Save source view" })).toBeInTheDocument()
+
+    const duplicate = {
+      viewId: "view-1",
+      version: 2,
+      name: "My PDFs",
+      state: validView().state
+    }
+    rerender(
+      <Harness
+        model={controller({ generation: 8, duplicateConflict: duplicate, confirmReplace })}
+      />
+    )
+    expect(
+      await screen.findByRole("alertdialog", { name: "Replace saved view?" })
+    ).toBeInTheDocument()
+
+    rerender(<Harness model={controller({ generation: 9, available })} />)
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
+    expect(confirmReplace).not.toHaveBeenCalled()
+  })
+
+  it("routes invalid Reset and Delete actions through the one overlay host", async () => {
+    const model = controller()
+    render(<Harness model={model} />)
+    fireEvent.click(screen.getByRole("button", { name: "Source views" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Reset saved view Old view" }))
+    const resetDialog = await screen.findByRole("alertdialog", {
+      name: "Reset saved view?"
+    })
+    fireEvent.click(within(resetDialog).getByRole("button", { name: "Reset" }))
+    await waitFor(() => expect(model.resetView).toHaveBeenCalledWith(model.views[1]))
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+    fireEvent.click(screen.getByRole("button", { name: "Source views" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Delete saved view Old view" }))
+    expect(
+      await screen.findByRole("alertdialog", { name: "Delete saved view?" })
+    ).toBeInTheDocument()
+  })
+})

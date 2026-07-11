@@ -1,6 +1,42 @@
 import { fireEvent, render, screen } from "@testing-library/react"
+import React from "react"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { ResearchWorkspace } from "../index"
+
+const savedViewMocks = vi.hoisted(() => ({
+  useSourceSavedViews: vi.fn(),
+  controller: {
+    available: true,
+    generation: 7,
+    views: [],
+    loading: false,
+    listError: null,
+    activeViewId: null,
+    activeSnapshot: null,
+    currentSignature: null,
+    modified: false,
+    serializationIssues: [],
+    duplicateConflict: null,
+    limitState: null,
+    versionConflict: null,
+    mutation: null,
+    busy: false,
+    mutationError: null,
+    announcement: null,
+    canRetryMutation: false,
+    canRetryVersion: false,
+    load: vi.fn(),
+    retry: vi.fn(),
+    retryMutation: vi.fn(),
+    retryVersionConflict: vi.fn(),
+    applyView: vi.fn(),
+    createView: vi.fn(),
+    confirmReplace: vi.fn(),
+    replaceView: vi.fn(),
+    resetView: vi.fn(),
+    deleteView: vi.fn()
+  }
+}))
 
 const testState = {
   isMobile: false,
@@ -145,14 +181,46 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 
+vi.mock("../SourcesPane/use-source-saved-views", () => ({
+  useSourceSavedViews: savedViewMocks.useSourceSavedViews
+}))
+
+vi.mock("../SourcesPane/SourceViewControls", () => ({
+  SourceViewOverlayHost: (props: {
+    controller: unknown
+    request: { kind: string } | null
+  }) => (
+    <div data-testid="source-view-overlay-host">
+      {props.request && (
+        <div role="dialog" aria-label="Source view overlay">
+          {props.request.kind}
+        </div>
+      )}
+    </div>
+  )
+}))
+
 vi.mock("../WorkspaceHeader", () => ({
-  WorkspaceHeader: () => <div data-testid="workspace-header" />
+  WorkspaceHeader: (props: { onToggleLeftPane: () => void }) => (
+    <div data-testid="workspace-header">
+      <button type="button" onClick={props.onToggleLeftPane}>
+        Toggle sources
+      </button>
+    </div>
+  )
 }))
 
 vi.mock("../SourcesPane", () => ({
   SourcesPane: (props: {
     sourceListViewState?: { sort?: string }
     onPatchSourceListViewState?: (patch: { sort: string }) => void
+    sourceSavedViewsController?: unknown
+    onOpenSourceViewOverlay?: (request: {
+      id: number
+      kind: "save"
+      generation: number
+      invoker: HTMLElement
+    }) => void
   }) => (
     <div data-testid="workspace-sources-pane">
       <div data-testid="source-list-sort-state">
@@ -164,6 +232,25 @@ vi.mock("../SourcesPane", () => ({
       >
         Patch source list sort
       </button>
+      <button
+        type="button"
+        aria-label="Open mock saved view"
+        onClick={(event) =>
+          props.onOpenSourceViewOverlay?.({
+            id: 1,
+            kind: "save",
+            generation: 7,
+            invoker: event.currentTarget
+          })
+        }
+      >
+        Open saved view
+      </button>
+      <div data-testid="saved-view-controller-identity">
+        {props.sourceSavedViewsController === savedViewMocks.controller
+          ? "shared"
+          : "different"}
+      </div>
     </div>
   )
 }))
@@ -235,6 +322,8 @@ describe("ResearchWorkspace source list view state", () => {
     }
     testState.workspaceChatSessions = {}
     testState.setSourceStatusByMediaId = vi.fn()
+    savedViewMocks.useSourceSavedViews.mockReset()
+    savedViewMocks.useSourceSavedViews.mockReturnValue(savedViewMocks.controller)
   })
 
   it("preserves source list view state across sources pane remounts", async () => {
@@ -256,6 +345,53 @@ describe("ResearchWorkspace source list view state", () => {
     rerender(<ResearchWorkspace />)
     expect(await screen.findByTestId("source-list-sort-state")).toHaveTextContent(
       "name_asc"
+    )
+  })
+
+  it("shares one saved-view controller and one overlay host across desktop and drawer panes", async () => {
+    testState.isMobile = true
+    const { rerender } = render(<ResearchWorkspace />)
+    fireEvent.click(screen.getByRole("button", { name: "Toggle sources" }))
+
+    testState.isMobile = false
+    rerender(<ResearchWorkspace />)
+
+    const panes = await screen.findAllByTestId("workspace-sources-pane")
+    expect(panes).toHaveLength(2)
+    expect(screen.getAllByTestId("saved-view-controller-identity")).toHaveLength(2)
+    expect(
+      screen.getAllByTestId("saved-view-controller-identity").every(
+        (node) => node.textContent === "shared"
+      )
+    ).toBe(true)
+    expect(screen.getAllByTestId("source-view-overlay-host")).toHaveLength(1)
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Open mock saved view" })[1]!)
+    expect(
+      screen.getAllByRole("dialog", { name: "Source view overlay" })
+    ).toHaveLength(1)
+  })
+
+  it("passes the raw nullable workspace identity to the single page controller", () => {
+    const { rerender } = render(<ResearchWorkspace />)
+    expect(savedViewMocks.useSourceSavedViews).toHaveBeenCalledWith(
+      "workspace-1",
+      expect.any(Object),
+      expect.any(Function)
+    )
+
+    testState.workspaceId = null
+    rerender(<ResearchWorkspace />)
+
+    expect(savedViewMocks.useSourceSavedViews).toHaveBeenLastCalledWith(
+      null,
+      expect.any(Object),
+      expect.any(Function)
+    )
+    expect(savedViewMocks.useSourceSavedViews).not.toHaveBeenCalledWith(
+      "local",
+      expect.anything(),
+      expect.anything()
     )
   })
 })

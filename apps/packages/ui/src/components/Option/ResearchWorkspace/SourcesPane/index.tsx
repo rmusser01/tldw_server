@@ -77,6 +77,11 @@ import {
 } from "./SourceFolderTree"
 import { SourceAdvancedControls } from "./SourceAdvancedControls"
 import {
+  SourceViewControls,
+  type SourceViewOverlayRequest
+} from "./SourceViewControls"
+import type { SourceSavedViewsController } from "./use-source-saved-views"
+import {
   buildSourceFilterSummary,
   DEFAULT_SOURCE_LIST_VIEW_STATE,
   filterSources as applyAdvancedSourceFilters,
@@ -398,6 +403,12 @@ interface SourcesPaneProps {
   onPatchSourceListViewState?: (patch: Partial<SourceListViewState>) => void
   /** Reset advanced controls without clearing search/folder state. */
   onResetAdvancedSourceFilters?: () => void
+  /** Page-owned saved-view controller shared by every responsive pane instance. */
+  sourceSavedViewsController?: SourceSavedViewsController
+  /** Replace the complete source-list view state. */
+  onApplySourceListViewState?: (state: SourceListViewState) => void
+  /** Route a portal request to the single page-level overlay host. */
+  onOpenSourceViewOverlay?: (request: SourceViewOverlayRequest) => void
   /** Non-blocking server-side context/status warning for this workspace. */
   statusProjectionError?: string | null
   /** Workspace capability state used to gate discovery actions. */
@@ -414,6 +425,9 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
   sourceListViewState = DEFAULT_SOURCE_LIST_VIEW_STATE,
   onPatchSourceListViewState,
   onResetAdvancedSourceFilters,
+  sourceSavedViewsController,
+  onApplySourceListViewState,
+  onOpenSourceViewOverlay,
   statusProjectionError = null,
   researchWorkspaceCapabilities
 }) => {
@@ -2051,6 +2065,16 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
               size="small"
               allowClear
             />
+            {sourceSavedViewsController &&
+              onApplySourceListViewState &&
+              onOpenSourceViewOverlay && (
+                <SourceViewControls
+                  controller={sourceSavedViewsController}
+                  sourceListViewState={sourceListViewState}
+                  onApplySourceListViewState={onApplySourceListViewState}
+                  onOpenOverlay={onOpenSourceViewOverlay}
+                />
+              )}
             <SourceAdvancedControls
               viewState={sourceListViewState}
               summary={sourceFilterSummary}

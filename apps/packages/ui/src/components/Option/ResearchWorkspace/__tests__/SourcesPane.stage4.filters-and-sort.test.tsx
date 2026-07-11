@@ -7,6 +7,8 @@ import {
   type SourceListViewState
 } from "../SourcesPane/source-list-view"
 import type { WorkspaceSource } from "@/types/workspace"
+import type { SourceSavedViewsController } from "../SourcesPane/use-source-saved-views"
+import type { SourceViewOverlayRequest } from "../SourcesPane/SourceViewControls"
 
 const mockToggleSourceSelection = vi.fn()
 const mockToggleSourceFolderSelection = vi.fn()
@@ -128,9 +130,13 @@ vi.mock("../SourcesPane/AddSourceModal", () => ({
 }))
 
 const ControlledSourcesPane = ({
-  initialState = DEFAULT_SOURCE_LIST_VIEW_STATE
+  initialState = DEFAULT_SOURCE_LIST_VIEW_STATE,
+  savedViewsController,
+  onOpenSourceViewOverlay
 }: {
   initialState?: SourceListViewState
+  savedViewsController?: SourceSavedViewsController
+  onOpenSourceViewOverlay?: (request: SourceViewOverlayRequest) => void
 }) => {
   const [sourceListViewState, setSourceListViewState] = React.useState<SourceListViewState>(
     initialState
@@ -148,9 +154,77 @@ const ControlledSourcesPane = ({
           expanded: current.expanded
         }))
       }
+      sourceSavedViewsController={savedViewsController}
+      onApplySourceListViewState={setSourceListViewState}
+      onOpenSourceViewOverlay={onOpenSourceViewOverlay}
     />
   )
 }
+
+const savedViewsController = (): SourceSavedViewsController =>
+  ({
+    available: true,
+    generation: 4,
+    views: [
+      {
+        id: "view-pdfs",
+        workspace_id: "workspace-1",
+        name: "Saved PDFs",
+        schema_version: 1,
+        version: 1,
+        created_at: "2026-07-10T00:00:00Z",
+        updated_at: "2026-07-10T00:00:00Z",
+        valid: true,
+        invalid_reason: null,
+        state: {
+          type_filters: ["pdf"],
+          status_filters: [],
+          review_state_filters: [],
+          lifecycle_state_filters: [],
+          date_field: "added_at",
+          date_from: null,
+          date_to: null,
+          require_url: false,
+          require_file_size: false,
+          require_duration: false,
+          require_page_count: false,
+          file_size_min: null,
+          file_size_max: null,
+          duration_min: null,
+          duration_max: null,
+          page_count_min: null,
+          page_count_max: null,
+          sort: "name_asc"
+        }
+      }
+    ],
+    loading: false,
+    listError: null,
+    activeViewId: null,
+    activeSnapshot: null,
+    currentSignature: "signature",
+    modified: false,
+    serializationIssues: [],
+    duplicateConflict: null,
+    limitState: null,
+    versionConflict: null,
+    mutation: null,
+    busy: false,
+    mutationError: null,
+    announcement: null,
+    canRetryMutation: false,
+    canRetryVersion: false,
+    load: vi.fn(),
+    retry: vi.fn(),
+    retryMutation: vi.fn(),
+    retryVersionConflict: vi.fn(),
+    applyView: vi.fn(),
+    createView: vi.fn(),
+    confirmReplace: vi.fn(),
+    replaceView: vi.fn(),
+    resetView: vi.fn(),
+    deleteView: vi.fn()
+  }) as SourceSavedViewsController
 
 const getRenderedSourceTitles = (): string[] =>
   Array.from(document.querySelectorAll("[data-source-id]"))
@@ -192,6 +266,46 @@ describe("SourcesPane stage 4 filters and sort", () => {
 
     expect(screen.getByText(/Status=Ready/)).toBeInTheDocument()
     expect(screen.getByText(/Sort: Added date/)).toBeInTheDocument()
+  })
+
+  it("renders portal-free saved-view controls and preserves search, folder, selection, and expanded state", async () => {
+    const model = savedViewsController()
+    const openOverlay = vi.fn()
+    workspaceStoreState.sourceSearchQuery = "Alpha"
+    workspaceStoreState.activeFolderId = "folder-1"
+    workspaceStoreState.selectedSourceIds = ["s1"]
+
+    render(
+      <ControlledSourcesPane
+        initialState={{ ...DEFAULT_SOURCE_LIST_VIEW_STATE, expanded: true }}
+        savedViewsController={model}
+        onOpenSourceViewOverlay={openOverlay}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Source views" }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: "PDFs" }))
+
+    expect(screen.getByRole("button", { name: "Advanced" })).toHaveAttribute(
+      "aria-expanded",
+      "true"
+    )
+    expect(workspaceStoreState.sourceSearchQuery).toBe("Alpha")
+    expect(workspaceStoreState.activeFolderId).toBe("folder-1")
+    expect(workspaceStoreState.selectedSourceIds).toEqual(["s1"])
+    expect(mockSetSourceSearchQuery).not.toHaveBeenCalled()
+    expect(mockSetActiveFolder).not.toHaveBeenCalled()
+    expect(mockSetSelectedSourceIds).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole("button", { name: "Save source view" }))
+    expect(openOverlay).toHaveBeenCalledWith(
+      expect.objectContaining({ generation: 4, kind: "save" })
+    )
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Source views" }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Saved PDFs/ }))
+    expect(model.applyView).toHaveBeenCalledWith(model.views[0])
   })
 
   it.each([false, true])(
