@@ -63,6 +63,12 @@ interface ControllerState {
   announcement: string | null;
 }
 
+interface OperationToken {
+  generation: number;
+  lifecycle: number;
+  epoch: number;
+}
+
 interface PatchOptions {
   kind: "replace" | "reset";
   viewId: string;
@@ -71,7 +77,10 @@ interface PatchOptions {
     Parameters<typeof tldwClient.updateWorkspaceSourceView>[2],
     "version"
   >;
-  onSuccess: (view: WorkspaceSourceSavedViewValidResponse) => void;
+  onSuccess: (
+    view: WorkspaceSourceSavedViewValidResponse,
+    token: OperationToken,
+  ) => void;
 }
 
 interface VersionRetry {
@@ -99,6 +108,16 @@ const emptyState = (generation: number): ControllerState => ({
   mutation: null,
   mutationError: null,
   announcement: null,
+});
+
+const clearTransientState = (state: ControllerState): ControllerState => ({
+  ...state,
+  listError: null,
+  serializationIssues: [],
+  duplicateConflict: null,
+  limitState: null,
+  versionConflict: null,
+  mutationError: null,
 });
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -183,11 +202,12 @@ export const useSourceSavedViews = (
 ) => {
   const identityRef = React.useRef(workspaceId);
   const generationRef = React.useRef(0);
-  if (identityRef.current !== workspaceId) {
-    identityRef.current = workspaceId;
-    generationRef.current += 1;
-  }
-  const renderGeneration = generationRef.current;
+  const mountedRef = React.useRef(false);
+  const lifecycleRef = React.useRef(0);
+  const operationEpochRef = React.useRef(0);
+  const identityPending = identityRef.current !== workspaceId;
+  const renderGeneration =
+    generationRef.current + (identityPending ? 1 : 0);
 
   const [state, setState] = React.useState<ControllerState>(() =>
     emptyState(renderGeneration),
@@ -195,113 +215,209 @@ export const useSourceSavedViews = (
   const versionRetryRef = React.useRef<VersionRetry | null>(null);
   const mutationRetryRef = React.useRef<MutationRetry | null>(null);
 
-  const commit = React.useCallback(
+  const isGenerationCurrent = React.useCallback(
+    (generation: number) =>
+      mountedRef.current && generationRef.current === generation,
+    [],
+  );
+
+  const isOperationCurrent = React.useCallback(
+    (token: OperationToken) =>
+      mountedRef.current &&
+      generationRef.current === token.generation &&
+      lifecycleRef.current === token.lifecycle &&
+      operationEpochRef.current === token.epoch,
+    [],
+  );
+
+  const beginOperation = React.useCallback(
+    (generation: number): OperationToken | null => {
+      if (!isGenerationCurrent(generation)) return null;
+      operationEpochRef.current += 1;
+      return {
+        generation,
+        lifecycle: lifecycleRef.current,
+        epoch: operationEpochRef.current,
+      };
+    },
+    [isGenerationCurrent],
+  );
+
+  const commitGeneration = React.useCallback(
     (
       generation: number,
       update: (current: ControllerState) => ControllerState,
     ) => {
-      if (generationRef.current !== generation) return false;
-      setState((current) =>
-        update(
+      if (!isGenerationCurrent(generation)) return false;
+      setState((current) => {
+        if (!isGenerationCurrent(generation)) return current;
+        return update(
           current.generation === generation ? current : emptyState(generation),
-        ),
-      );
+        );
+      });
       return true;
     },
-    [],
+    [isGenerationCurrent],
+  );
+
+  const commitOperation = React.useCallback(
+    (
+      token: OperationToken,
+      update: (current: ControllerState) => ControllerState,
+    ) => {
+      if (!isOperationCurrent(token)) return false;
+      setState((current) => {
+        if (!isOperationCurrent(token)) return current;
+        return update(
+          current.generation === token.generation
+            ? current
+            : emptyState(token.generation),
+        );
+      });
+      return true;
+    },
+    [isOperationCurrent],
   );
 
   const load = React.useCallback(
-    async (generation: number, targetWorkspaceId: string) => {
-      commit(generation, (current) => ({
-        ...current,
-        loading: true,
-        listError: null,
-      }));
+    async (
+      generation: number,
+      targetWorkspaceId: string,
+      prepare?: (current: ControllerState) => ControllerState,
+    ) => {
+      const token = beginOperation(generation);
+      if (!token) return;
+      commitOperation(token, (current) => {
+        const loadingState = {
+          ...current,
+          loading: true,
+          listError: null,
+        };
+        return prepare ? prepare(loadingState) : loadingState;
+      });
       try {
         const response =
           await tldwClient.listWorkspaceSourceViews(targetWorkspaceId);
-        commit(generation, (current) => ({
+        commitOperation(token, (current) => ({
           ...current,
           views: response.items,
           loading: false,
           listError: null,
         }));
       } catch (error) {
-        commit(generation, (current) => ({
+        commitOperation(token, (current) => ({
           ...current,
           loading: false,
           listError: requestError(error),
         }));
       }
     },
-    [commit],
+    [beginOperation, commitOperation],
   );
 
-  React.useEffect(() => {
-    const generation = renderGeneration;
+  React.useLayoutEffect(() => {
+    mountedRef.current = true;
+    lifecycleRef.current += 1;
+    return () => {
+      mountedRef.current = false;
+      lifecycleRef.current += 1;
+      operationEpochRef.current += 1;
+      versionRetryRef.current = null;
+      mutationRetryRef.current = null;
+    };
+  }, []);
+
+  React.useLayoutEffect(() => {
+    if (identityRef.current !== workspaceId) {
+      identityRef.current = workspaceId;
+      generationRef.current += 1;
+    }
+    operationEpochRef.current += 1;
     versionRetryRef.current = null;
     mutationRetryRef.current = null;
-    setState(emptyState(generation));
-    if (workspaceId !== null) void load(generation, workspaceId);
-  }, [load, renderGeneration, workspaceId]);
+    setState(emptyState(generationRef.current));
+  }, [workspaceId]);
+
+  React.useEffect(() => {
+    if (
+      workspaceId === null ||
+      identityRef.current !== workspaceId ||
+      !mountedRef.current
+    ) {
+      return;
+    }
+    void load(generationRef.current, workspaceId);
+  }, [load, workspaceId]);
 
   const exposed =
-    state.generation === renderGeneration
+    !identityPending && state.generation === renderGeneration
       ? state
       : emptyState(renderGeneration);
 
   const retry = React.useCallback(async () => {
-    if (workspaceId === null || renderGeneration !== generationRef.current) {
+    if (
+      workspaceId === null ||
+      identityRef.current !== workspaceId ||
+      !isGenerationCurrent(renderGeneration)
+    ) {
       return;
     }
     await load(renderGeneration, workspaceId);
-  }, [load, renderGeneration, workspaceId]);
+  }, [isGenerationCurrent, load, renderGeneration, workspaceId]);
 
   const applyView = React.useCallback(
     (view: WorkspaceSourceSavedViewResponse) => {
-      if (!view.valid || renderGeneration !== generationRef.current) return;
+      if (!view.valid || !isGenerationCurrent(renderGeneration)) return;
       const canonical = deserializeSourceViewState(view.state);
       if (canonical === null) return;
       const signature = getSourceViewStateSignature(canonical);
       if (signature === null) return;
-      onApplyState(applySavedSourceViewState(currentState, canonical));
-      commit(renderGeneration, (current) => ({
-        ...current,
-        activeViewId: view.id,
-        activeSnapshot: canonical,
-        activeSignature: signature,
-      }));
+      if (
+        commitGeneration(renderGeneration, (current) => ({
+          ...clearTransientState(current),
+          activeViewId: view.id,
+          activeSnapshot: canonical,
+          activeSignature: signature,
+        }))
+      ) {
+        versionRetryRef.current = null;
+        mutationRetryRef.current = null;
+        onApplyState(applySavedSourceViewState(currentState, canonical));
+      }
     },
-    [commit, currentState, onApplyState, renderGeneration],
+    [
+      commitGeneration,
+      currentState,
+      isGenerationCurrent,
+      onApplyState,
+      renderGeneration,
+    ],
   );
 
   const finishValidMutation = React.useCallback(
     (
-      generation: number,
+      token: OperationToken,
       view: WorkspaceSourceSavedViewValidResponse,
       announcement: string,
       activeState: WorkspaceSourceSavedViewStateV1 = view.state,
     ) => {
       const signature = getSourceViewStateSignature(activeState);
       if (signature === null) return false;
+      if (!isOperationCurrent(token)) return false;
       versionRetryRef.current = null;
       mutationRetryRef.current = null;
-      return commit(generation, (current) => ({
-        ...current,
+      return commitOperation(token, (current) => ({
+        ...clearTransientState(current),
         views: upsertView(current.views, view),
+        loading: false,
         activeViewId: view.id,
         activeSnapshot: activeState,
         activeSignature: signature,
-        duplicateConflict: null,
-        limitState: null,
-        versionConflict: null,
         mutation: null,
-        mutationError: null,
         announcement,
       }));
     },
-    [commit],
+    [commitOperation, isOperationCurrent],
   );
 
   const performPatch = React.useCallback(
@@ -310,9 +426,11 @@ export const useSourceSavedViews = (
       targetWorkspaceId: string,
       options: PatchOptions,
     ): Promise<void> => {
-      if (generation !== generationRef.current) return;
-      commit(generation, (current) => ({
+      const token = beginOperation(generation);
+      if (!token) return;
+      commitOperation(token, (current) => ({
         ...current,
+        loading: false,
         mutation: options.kind,
         mutationError: null,
         limitState: null,
@@ -325,13 +443,13 @@ export const useSourceSavedViews = (
           options.viewId,
           { version: options.version, ...options.body },
         );
-        if (generation !== generationRef.current) return;
+        if (!isOperationCurrent(token)) return;
         if (!validResponse(response)) {
           throw new Error("The server returned an invalid saved view.");
         }
-        options.onSuccess(response);
+        options.onSuccess(response, token);
       } catch (error) {
-        if (generation !== generationRef.current) return;
+        if (!isOperationCurrent(token)) return;
         const detail = parseConflictDetail(error);
         if (detail?.code === "source_view_version_conflict") {
           versionRetryRef.current = {
@@ -342,7 +460,7 @@ export const useSourceSavedViews = (
                 version,
               }),
           };
-          commit(generation, (current) => ({
+          await load(generation, targetWorkspaceId, (current) => ({
             ...current,
             duplicateConflict:
               current.duplicateConflict?.viewId === detail.view_id
@@ -359,26 +477,28 @@ export const useSourceSavedViews = (
             mutation: null,
             mutationError: null,
           }));
-          await load(generation, targetWorkspaceId);
           return;
         }
         mutationRetryRef.current = {
           generation,
           run: () => performPatch(generation, targetWorkspaceId, options),
         };
-        commit(generation, (current) => ({
+        commitOperation(token, (current) => ({
           ...current,
           mutation: null,
           mutationError: requestError(error),
         }));
       }
     },
-    [commit, load],
+    [beginOperation, commitOperation, isOperationCurrent, load],
   );
 
   const createView = React.useCallback(
     async (rawName: string) => {
-      if (workspaceId === null || renderGeneration !== generationRef.current) {
+      if (
+        workspaceId === null ||
+        !isGenerationCurrent(renderGeneration)
+      ) {
         return;
       }
       const name = rawName.trim();
@@ -392,7 +512,7 @@ export const useSourceSavedViews = (
       const serialized = serializeSourceListViewState(currentState);
       if (!serialized.ok) issues.push(...serialized.issues);
       if (issues.length > 0 || !serialized.ok) {
-        commit(renderGeneration, (current) => ({
+        commitGeneration(renderGeneration, (current) => ({
           ...current,
           serializationIssues: issues,
           mutation: null,
@@ -402,9 +522,11 @@ export const useSourceSavedViews = (
       }
 
       const run = async () => {
-        if (renderGeneration !== generationRef.current) return;
-        commit(renderGeneration, (current) => ({
+        const token = beginOperation(renderGeneration);
+        if (!token) return;
+        commitOperation(token, (current) => ({
           ...current,
+          loading: false,
           serializationIssues: [],
           duplicateConflict: null,
           limitState: null,
@@ -422,22 +544,22 @@ export const useSourceSavedViews = (
               state: serialized.state,
             },
           );
-          if (renderGeneration !== generationRef.current) return;
+          if (!isOperationCurrent(token)) return;
           if (!validResponse(response)) {
             throw new Error("The server returned an invalid saved view.");
           }
           finishValidMutation(
-            renderGeneration,
+            token,
             response,
             "Saved view created.",
             serialized.state,
           );
         } catch (error) {
-          if (renderGeneration !== generationRef.current) return;
+          if (!isOperationCurrent(token)) return;
           const detail = parseConflictDetail(error);
           if (detail?.code === "source_view_name_exists") {
             mutationRetryRef.current = null;
-            commit(renderGeneration, (current) => ({
+            commitOperation(token, (current) => ({
               ...current,
               duplicateConflict: {
                 viewId: detail.view_id,
@@ -452,7 +574,7 @@ export const useSourceSavedViews = (
           }
           if (detail?.code === "source_view_limit_reached") {
             mutationRetryRef.current = null;
-            commit(renderGeneration, (current) => ({
+            commitOperation(token, (current) => ({
               ...current,
               limitState: {
                 limit: detail.limit,
@@ -466,7 +588,7 @@ export const useSourceSavedViews = (
             return;
           }
           mutationRetryRef.current = { generation: renderGeneration, run };
-          commit(renderGeneration, (current) => ({
+          commitOperation(token, (current) => ({
             ...current,
             mutation: null,
             mutationError: requestError(error),
@@ -475,7 +597,17 @@ export const useSourceSavedViews = (
       };
       await run();
     },
-    [commit, currentState, finishValidMutation, renderGeneration, workspaceId],
+    [
+      beginOperation,
+      commitGeneration,
+      commitOperation,
+      currentState,
+      finishValidMutation,
+      isGenerationCurrent,
+      isOperationCurrent,
+      renderGeneration,
+      workspaceId,
+    ],
   );
 
   const confirmReplace = React.useCallback(async () => {
@@ -483,7 +615,7 @@ export const useSourceSavedViews = (
     if (
       workspaceId === null ||
       conflict === null ||
-      renderGeneration !== generationRef.current
+      !isGenerationCurrent(renderGeneration)
     ) {
       return;
     }
@@ -496,9 +628,9 @@ export const useSourceSavedViews = (
         schema_version: SOURCE_SAVED_VIEW_SCHEMA_VERSION,
         state: conflict.state,
       },
-      onSuccess: (view) => {
+      onSuccess: (view, token) => {
         finishValidMutation(
-          renderGeneration,
+          token,
           view,
           "Saved view replaced.",
           conflict.state,
@@ -508,6 +640,7 @@ export const useSourceSavedViews = (
   }, [
     exposed.duplicateConflict,
     finishValidMutation,
+    isGenerationCurrent,
     performPatch,
     renderGeneration,
     workspaceId,
@@ -515,10 +648,16 @@ export const useSourceSavedViews = (
 
   const replaceView = React.useCallback(
     async (view: WorkspaceSourceSavedViewResponse) => {
-      if (workspaceId === null || !view.valid) return;
+      if (
+        workspaceId === null ||
+        !view.valid ||
+        !isGenerationCurrent(renderGeneration)
+      ) {
+        return;
+      }
       const serialized = serializeSourceListViewState(currentState);
       if (!serialized.ok) {
-        commit(renderGeneration, (current) => ({
+        commitGeneration(renderGeneration, (current) => ({
           ...current,
           serializationIssues: serialized.issues,
         }));
@@ -533,9 +672,9 @@ export const useSourceSavedViews = (
           schema_version: SOURCE_SAVED_VIEW_SCHEMA_VERSION,
           state: serialized.state,
         },
-        onSuccess: (response) => {
+        onSuccess: (response, token) => {
           finishValidMutation(
-            renderGeneration,
+            token,
             response,
             "Saved view replaced.",
             serialized.state,
@@ -544,9 +683,10 @@ export const useSourceSavedViews = (
       });
     },
     [
-      commit,
+      commitGeneration,
       currentState,
       finishValidMutation,
+      isGenerationCurrent,
       performPatch,
       renderGeneration,
       workspaceId,
@@ -555,7 +695,10 @@ export const useSourceSavedViews = (
 
   const resetView = React.useCallback(
     async (view: WorkspaceSourceSavedViewResponse) => {
-      if (workspaceId === null || renderGeneration !== generationRef.current)
+      if (
+        workspaceId === null ||
+        !isGenerationCurrent(renderGeneration)
+      )
         return;
       const wireState = defaultWireState();
       await performPatch(renderGeneration, workspaceId, {
@@ -566,10 +709,10 @@ export const useSourceSavedViews = (
           schema_version: SOURCE_SAVED_VIEW_SCHEMA_VERSION,
           state: wireState,
         },
-        onSuccess: (response) => {
+        onSuccess: (response, token) => {
           if (
             finishValidMutation(
-              renderGeneration,
+              token,
               response,
               "Saved view reset.",
               wireState,
@@ -583,6 +726,7 @@ export const useSourceSavedViews = (
     [
       currentState,
       finishValidMutation,
+      isGenerationCurrent,
       onApplyState,
       performPatch,
       renderGeneration,
@@ -592,22 +736,28 @@ export const useSourceSavedViews = (
 
   const deleteView = React.useCallback(
     async (view: WorkspaceSourceSavedViewResponse) => {
-      if (workspaceId === null || renderGeneration !== generationRef.current)
+      if (
+        workspaceId === null ||
+        !isGenerationCurrent(renderGeneration)
+      )
         return;
       const run = async () => {
-        if (renderGeneration !== generationRef.current) return;
-        commit(renderGeneration, (current) => ({
+        const token = beginOperation(renderGeneration);
+        if (!token) return;
+        commitOperation(token, (current) => ({
           ...current,
+          loading: false,
           mutation: "delete",
           mutationError: null,
           announcement: null,
         }));
         try {
           await tldwClient.deleteWorkspaceSourceView(workspaceId, view.id);
-          if (renderGeneration !== generationRef.current) return;
+          if (!isOperationCurrent(token)) return;
+          versionRetryRef.current = null;
           mutationRetryRef.current = null;
-          commit(renderGeneration, (current) => ({
-            ...current,
+          commitOperation(token, (current) => ({
+            ...clearTransientState(current),
             views: current.views.filter(
               (candidate) => candidate.id !== view.id,
             ),
@@ -618,13 +768,12 @@ export const useSourceSavedViews = (
             activeSignature:
               current.activeViewId === view.id ? null : current.activeSignature,
             mutation: null,
-            mutationError: null,
             announcement: "Saved view deleted.",
           }));
         } catch (error) {
-          if (renderGeneration !== generationRef.current) return;
+          if (!isOperationCurrent(token)) return;
           mutationRetryRef.current = { generation: renderGeneration, run };
-          commit(renderGeneration, (current) => ({
+          commitOperation(token, (current) => ({
             ...current,
             mutation: null,
             mutationError: requestError(error),
@@ -633,27 +782,39 @@ export const useSourceSavedViews = (
       };
       await run();
     },
-    [commit, renderGeneration, workspaceId],
+    [
+      beginOperation,
+      commitOperation,
+      isGenerationCurrent,
+      isOperationCurrent,
+      renderGeneration,
+      workspaceId,
+    ],
   );
 
   const retryMutation = React.useCallback(async () => {
     const retryOperation = mutationRetryRef.current;
-    if (retryOperation?.generation !== generationRef.current) return;
+    if (
+      !retryOperation ||
+      !isGenerationCurrent(retryOperation.generation)
+    )
+      return;
     await retryOperation.run();
-  }, []);
+  }, [isGenerationCurrent]);
 
   const retryVersionConflict = React.useCallback(async () => {
     const retryOperation = versionRetryRef.current;
     const conflict =
       state.generation === generationRef.current ? state.versionConflict : null;
     if (
-      retryOperation?.generation !== generationRef.current ||
+      !retryOperation ||
+      !isGenerationCurrent(retryOperation.generation) ||
       conflict === null
     ) {
       return;
     }
     await retryOperation.run(conflict.currentVersion);
-  }, [state.generation, state.versionConflict]);
+  }, [isGenerationCurrent, state.generation, state.versionConflict]);
 
   const currentSignature = getSourceListViewStateSignature(currentState);
   const modified =
@@ -678,7 +839,9 @@ export const useSourceSavedViews = (
     busy: exposed.mutation !== null,
     mutationError: exposed.mutationError,
     announcement: exposed.announcement,
-    canRetryMutation: mutationRetryRef.current?.generation === renderGeneration,
+    canRetryMutation:
+      mutationRetryRef.current?.generation === renderGeneration &&
+      isGenerationCurrent(renderGeneration),
     load: retry,
     retry,
     retryMutation,

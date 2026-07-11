@@ -26,15 +26,12 @@ import type {
 } from "@/types/workspace"
 import type {
   WorkspaceSourceSavedViewInvalidReason,
-  WorkspaceSourceSavedViewSort,
   WorkspaceSourceSavedViewStateV1
 } from "@/types/workspace-source-saved-view"
 import {
   normalizeEffectiveWorkspaceAssistantDefault,
   normalizeWorkspaceAssistantDefaults
 } from "@/types/workspace-assistant-defaults"
-
-export type { WorkspaceSourceSavedViewSort }
 
 /**
  * Minimal interface for the TldwApiClient methods referenced via `this`.
