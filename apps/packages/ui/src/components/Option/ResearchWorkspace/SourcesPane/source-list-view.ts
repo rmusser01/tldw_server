@@ -1,30 +1,20 @@
 import type {
   WorkspaceSource,
+  WorkspaceSourceLifecycleState,
   WorkspaceSourceReviewState,
   WorkspaceSourceStatus,
   WorkspaceSourceType
 } from "@/types/workspace"
+import type { WorkspaceSourceSavedViewSort } from "@/types/workspace-source-saved-view"
 
-export type SourceListSortOption =
-  | "manual"
-  | "name_asc"
-  | "name_desc"
-  | "added_desc"
-  | "added_asc"
-  | "source_created_desc"
-  | "source_created_asc"
-  | "file_size_desc"
-  | "file_size_asc"
-  | "duration_desc"
-  | "duration_asc"
-  | "page_count_desc"
-  | "page_count_asc"
+export type SourceListSortOption = WorkspaceSourceSavedViewSort
 
 export interface SourceListViewState {
   expanded: boolean
   typeFilters: WorkspaceSourceType[]
   statusFilters: WorkspaceSourceStatus[]
   reviewStateFilters: WorkspaceSourceReviewState[]
+  lifecycleStateFilters: WorkspaceSourceLifecycleState[]
   dateField: "addedAt" | "sourceCreatedAt"
   dateFrom: string | null
   dateTo: string | null
@@ -46,6 +36,7 @@ export const DEFAULT_SOURCE_LIST_VIEW_STATE: SourceListViewState = {
   typeFilters: [],
   statusFilters: [],
   reviewStateFilters: [],
+  lifecycleStateFilters: [],
   dateField: "addedAt",
   dateFrom: null,
   dateTo: null,
@@ -110,6 +101,7 @@ export const hasActiveSourceFilters = (viewState: SourceListViewState): boolean 
   viewState.typeFilters.length > 0 ||
   viewState.statusFilters.length > 0 ||
   (viewState.reviewStateFilters?.length ?? 0) > 0 ||
+  viewState.lifecycleStateFilters.length > 0 ||
   viewState.dateFrom !== null ||
   viewState.dateTo !== null ||
   viewState.requireUrl ||
@@ -148,6 +140,15 @@ export const filterSources = (
     if (
       reviewStateFilters.length > 0 &&
       !reviewStateFilters.includes(reviewState)
+    ) {
+      return false
+    }
+
+    if (
+      viewState.lifecycleStateFilters.length > 0 &&
+      !viewState.lifecycleStateFilters.includes(
+        source.statusDetails?.lifecycleState as WorkspaceSourceLifecycleState
+      )
     ) {
       return false
     }
@@ -290,6 +291,9 @@ export const sortSources = (
 const capitalize = (value: string): string =>
   value.length === 0 ? value : value[0].toUpperCase() + value.slice(1)
 
+const humanizeToken = (value: string): string =>
+  capitalize(value.replaceAll("_", " "))
+
 const REVIEW_STATE_LABELS: Record<WorkspaceSourceReviewState, string> = {
   unset: "Unreviewed",
   needs_review: "Needs review",
@@ -338,6 +342,12 @@ export const buildSourceFilterSummary = (viewState: SourceListViewState): string
       `Review=${reviewStateFilters
         .map((value) => REVIEW_STATE_LABELS[value])
         .join(", ")}`
+    )
+  }
+
+  if (viewState.lifecycleStateFilters.length > 0) {
+    parts.push(
+      `Lifecycle=${viewState.lifecycleStateFilters.map(humanizeToken).join(", ")}`
     )
   }
 

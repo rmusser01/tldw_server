@@ -28,6 +28,11 @@ const parseOptionalNumber = (value: string): number | null => {
   return Number.isFinite(parsed) ? parsed : null
 }
 
+const humanizeLifecycleState = (value: string): string => {
+  const label = value.replaceAll("_", " ")
+  return label[0].toUpperCase() + label.slice(1)
+}
+
 const SORT_OPTIONS: SourceListSortOption[] = [
   "manual",
   "name_asc",
@@ -82,6 +87,31 @@ export const SourceAdvancedControls: React.FC<SourceAdvancedControlsProps> = ({
           </button>
         ) : null}
       </div>
+
+      {viewState.lifecycleStateFilters.length > 0 ? (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {viewState.lifecycleStateFilters.map((lifecycleState) => {
+            const label = humanizeLifecycleState(lifecycleState)
+            return (
+              <button
+                key={lifecycleState}
+                type="button"
+                aria-label={`Clear lifecycle filter ${label}`}
+                onClick={() =>
+                  onPatchViewState({
+                    lifecycleStateFilters: viewState.lifecycleStateFilters.filter(
+                      (value) => value !== lifecycleState
+                    )
+                  })
+                }
+                className="rounded border border-border bg-surface px-2 py-1 text-[11px] text-text-muted transition hover:bg-surface2 hover:text-text"
+              >
+                {`Lifecycle: ${label} x`}
+              </button>
+            )
+          })}
+        </div>
+      ) : null}
 
       {viewState.expanded ? (
         <div className="mt-3 space-y-3">
@@ -300,6 +330,7 @@ export const SourceAdvancedControls: React.FC<SourceAdvancedControlsProps> = ({
                     <input
                       aria-label="File size min"
                       type="number"
+                      min={0}
                       value={viewState.fileSizeMin ?? ""}
                       onChange={(event) =>
                         onPatchViewState({
@@ -316,6 +347,7 @@ export const SourceAdvancedControls: React.FC<SourceAdvancedControlsProps> = ({
                     <input
                       aria-label="File size max"
                       type="number"
+                      min={0}
                       value={viewState.fileSizeMax ?? ""}
                       onChange={(event) =>
                         onPatchViewState({
@@ -337,6 +369,7 @@ export const SourceAdvancedControls: React.FC<SourceAdvancedControlsProps> = ({
                     <input
                       aria-label="Duration min"
                       type="number"
+                      min={0}
                       value={viewState.durationMin ?? ""}
                       onChange={(event) =>
                         onPatchViewState({
@@ -353,6 +386,7 @@ export const SourceAdvancedControls: React.FC<SourceAdvancedControlsProps> = ({
                     <input
                       aria-label="Duration max"
                       type="number"
+                      min={0}
                       value={viewState.durationMax ?? ""}
                       onChange={(event) =>
                         onPatchViewState({
@@ -374,6 +408,7 @@ export const SourceAdvancedControls: React.FC<SourceAdvancedControlsProps> = ({
                     <input
                       aria-label="Page count min"
                       type="number"
+                      min={0}
                       value={viewState.pageCountMin ?? ""}
                       onChange={(event) =>
                         onPatchViewState({
@@ -390,6 +425,7 @@ export const SourceAdvancedControls: React.FC<SourceAdvancedControlsProps> = ({
                     <input
                       aria-label="Page count max"
                       type="number"
+                      min={0}
                       value={viewState.pageCountMax ?? ""}
                       onChange={(event) =>
                         onPatchViewState({

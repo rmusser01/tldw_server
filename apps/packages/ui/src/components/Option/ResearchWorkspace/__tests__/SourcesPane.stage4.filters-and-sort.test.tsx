@@ -32,6 +32,7 @@ const defaultSources: WorkspaceSource[] = [
     title: "Alpha PDF",
     type: "pdf",
     status: "ready",
+    statusDetails: { lifecycleState: "partially_queryable" },
     addedAt: new Date("2026-03-11T00:00:00.000Z"),
     pageCount: 12,
     fileSize: 2_048
@@ -42,8 +43,10 @@ const defaultSources: WorkspaceSource[] = [
     title: "Bravo Website",
     type: "website",
     status: "error",
+    statusDetails: { lifecycleState: "failed" },
     addedAt: new Date("2026-03-12T00:00:00.000Z"),
-    url: "https://example.com"
+    url: "https://example.com",
+    duration: 60
   }
 ]
 
@@ -124,9 +127,13 @@ vi.mock("../SourcesPane/AddSourceModal", () => ({
   AddSourceModal: () => <div data-testid="add-source-modal" />
 }))
 
-const ControlledSourcesPane = () => {
+const ControlledSourcesPane = ({
+  initialState = DEFAULT_SOURCE_LIST_VIEW_STATE
+}: {
+  initialState?: SourceListViewState
+}) => {
   const [sourceListViewState, setSourceListViewState] = React.useState<SourceListViewState>(
-    DEFAULT_SOURCE_LIST_VIEW_STATE
+    initialState
   )
 
   return (
@@ -185,6 +192,58 @@ describe("SourcesPane stage 4 filters and sort", () => {
 
     expect(screen.getByText(/Status=Ready/)).toBeInTheDocument()
     expect(screen.getByText(/Sort: Added date/)).toBeInTheDocument()
+  })
+
+  it.each([false, true])(
+    "keeps an active lifecycle predicate visible and clearable when expanded is %s",
+    (expanded) => {
+      render(
+        <ControlledSourcesPane
+          initialState={{
+            ...DEFAULT_SOURCE_LIST_VIEW_STATE,
+            expanded,
+            lifecycleStateFilters: ["partially_queryable"]
+          }}
+        />
+      )
+
+      expect(screen.getByText("Alpha PDF")).toBeInTheDocument()
+      expect(screen.queryByText("Bravo Website")).not.toBeInTheDocument()
+
+      const clearLifecycle = screen.getByRole("button", {
+        name: "Clear lifecycle filter Partially queryable"
+      })
+      clearLifecycle.focus()
+      expect(clearLifecycle).toHaveFocus()
+      fireEvent.click(clearLifecycle)
+
+      expect(screen.getByText("Bravo Website")).toBeInTheDocument()
+      expect(
+        screen.queryByRole("button", {
+          name: "Clear lifecycle filter Partially queryable"
+        })
+      ).not.toBeInTheDocument()
+    }
+  )
+
+  it("sets a nonnegative minimum on every numeric range input", () => {
+    render(<ControlledSourcesPane />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }))
+
+    for (const label of [
+      "File size min",
+      "File size max",
+      "Duration min",
+      "Duration max",
+      "Page count min",
+      "Page count max"
+    ]) {
+      expect(screen.getByRole("spinbutton", { name: label })).toHaveAttribute(
+        "min",
+        "0"
+      )
+    }
   })
 
   it("labels quick-add and source search fields beyond placeholders", () => {
@@ -427,7 +486,14 @@ describe("SourcesPane stage 4 filters and sort", () => {
   })
 
   it("clears only advanced filters without clearing search text", () => {
-    const { rerender } = render(<ControlledSourcesPane />)
+    const { rerender } = render(
+      <ControlledSourcesPane
+        initialState={{
+          ...DEFAULT_SOURCE_LIST_VIEW_STATE,
+          lifecycleStateFilters: ["partially_queryable"]
+        }}
+      />
+    )
 
     fireEvent.change(screen.getByPlaceholderText("Search sources..."), {
       target: { value: "Alpha" }
@@ -441,5 +507,10 @@ describe("SourcesPane stage 4 filters and sort", () => {
 
     expect(screen.getByDisplayValue("Alpha")).toBeInTheDocument()
     expect(screen.getByRole("checkbox", { name: "Status Ready" })).not.toBeChecked()
+    expect(
+      screen.queryByRole("button", {
+        name: "Clear lifecycle filter Partially queryable"
+      })
+    ).not.toBeInTheDocument()
   })
 })
