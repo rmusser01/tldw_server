@@ -35,7 +35,7 @@
 **Goal:** Load, save, apply, replace, reset, and delete saved views without blocking ordinary filters or built-ins.
 **Success Criteria:** Reload restore, duplicate confirmation, invalid recovery, nonblocking failures, keyboard operation, and focus behavior pass.
 **Tests:** API client, hook, and component/integration Vitest suites.
-**Status:** Not Started
+**Status:** In Progress
 
 ## Stage 5: Integration And Release Gates
 **Goal:** Register tests in CI, run focused/full verification, security checks, and finalize Backlog evidence.
@@ -396,11 +396,11 @@ git commit -m "Expose workspace source saved view API (TASK-12093.2)"
 - Create: `apps/packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/use-source-saved-views.ts`
 - Create: `apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/use-source-saved-views.test.tsx`
 
-- [ ] **Step 1: Write failing API-client request tests**
+- [x] **Step 1: Write failing API-client request tests**
 
 Test encoded workspace/view paths, the `{"items": [...]}` list envelope, exact POST/PATCH bodies and statuses, and bodyless DELETE for source views. Ensure slash-delimited or blank view IDs fail before requests.
 
-- [ ] **Step 2: Run API-client tests and verify RED**
+- [x] **Step 2: Run API-client tests and verify RED**
 
 ```bash
 bun run test:run -- ../packages/ui/src/services/__tests__/tldw-api-client.workspace-api.test.ts --maxWorkers=1 --no-file-parallelism
@@ -408,11 +408,11 @@ bun run test:run -- ../packages/ui/src/services/__tests__/tldw-api-client.worksp
 
 Expected: FAIL because methods/types are absent.
 
-- [ ] **Step 3: Add API response/request types and methods**
+- [x] **Step 3: Add API response/request types and methods**
 
 Import the exact V1 snake_case state and invalid-reason types from `@/types/workspace-source-saved-view`; do not redeclare them in the service layer. Model structured conflict details and valid/invalid response envelopes. Add list/create/update/delete methods to `workspaceApiMethods` using `workspacePath` and `encodeWorkspacePathSegment`.
 
-- [ ] **Step 4: Write failing orchestration-hook tests**
+- [x] **Step 4: Write failing orchestration-hook tests**
 
 Test null workspace availability (no request), non-null to null synchronously clearing rows/active/conflict/limit/error/mutation state, stale completions after nulling, workspace-scoped loading, retry, apply valid view, disable invalid apply, create success, local serialization validation blocking requests with field issues, `source_view_name_exists` confirmation data, `source_view_limit_reached` non-retryable limit state, replacement, version-conflict refresh, reset to V1 defaults, delete active view, workspace switch, deferred list and mutation responses after a switch, A to B to A stale-response rejection, and built-ins remaining usable when list fails.
 
@@ -429,7 +429,7 @@ const conflict = {
 
 The hook's conflict parser reads `error.details?.detail`, validates the code-specific fields, and treats malformed details as an ordinary retryable request error. A valid `source_view_limit_reached` detail is a non-retryable state containing the server limit and deletion guidance.
 
-- [ ] **Step 5: Run hook tests and verify RED**
+- [x] **Step 5: Run hook tests and verify RED**
 
 ```bash
 bun run test:run -- ../packages/ui/src/components/Option/ResearchWorkspace/__tests__/use-source-saved-views.test.tsx --maxWorkers=1 --no-file-parallelism
@@ -437,15 +437,15 @@ bun run test:run -- ../packages/ui/src/components/Option/ResearchWorkspace/__tes
 
 Expected: FAIL because the hook is absent.
 
-- [ ] **Step 6: Implement minimal hook state machine**
+- [x] **Step 6: Implement minimal hook state machine**
 
 The hook accepts raw `workspaceId: string | null`, current view state, and `onApplyState`. It exposes `available = workspaceId !== null` and performs no request while unavailable. Every identity change first increments a monotonic generation and synchronously clears rows, active snapshot, conflicts, limit state, errors, announcements, and mutation state. Every async operation captures the generation and may commit only when it still matches; comparing workspace IDs alone is insufficient because A to B to A can reuse an ID. Abort requests where supported as an additional optimization. The hook otherwise owns only server view loading/mutations, active-view snapshot/signature, Modified detection, local serialization issues, duplicate/replace state, saved-view-limit state, success announcements, exact nested `error.details.detail` conflict extraction, and retryable errors. It is a single page-level controller: do not instantiate it inside `SourcesPane` and do not move source filters into a second store.
 
-- [ ] **Step 7: Re-run client/hook tests and verify GREEN**
+- [x] **Step 7: Re-run client/hook tests and verify GREEN**
 
 Run both commands above. Expected: PASS.
 
-- [ ] **Step 8: Commit Task 4**
+- [x] **Step 8: Commit Task 4**
 
 ```bash
 git add apps/packages/ui/src/services/tldw/domains/workspace-api.ts apps/packages/ui/src/services/__tests__/tldw-api-client.workspace-api.test.ts apps/packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/use-source-saved-views.ts apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/use-source-saved-views.test.tsx
