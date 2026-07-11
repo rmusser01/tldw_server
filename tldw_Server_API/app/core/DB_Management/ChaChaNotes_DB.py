@@ -43,6 +43,7 @@ import sqlite3  # noqa: E402
 import tempfile  # noqa: E402
 import threading  # noqa: E402
 import time  # noqa: E402
+import unicodedata  # noqa: E402
 import uuid  # noqa: E402
 from collections import Counter
 from collections.abc import Mapping
@@ -86,6 +87,7 @@ from tldw_Server_API.app.core.DB_Management.backends.factory import (  # noqa: E
 from tldw_Server_API.app.core.DB_Management.backends.fts_translator import FTSQueryTranslator  # noqa: E402
 from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import (  # noqa: E402
     build_source_review_rls_sql,
+    build_workspace_source_saved_view_rls_sql,
 )
 from tldw_Server_API.app.core.DB_Management.backends.query_utils import (  # noqa: E402
     normalise_params,
@@ -315,6 +317,35 @@ class ConflictError(CharactersRAGDBError):
         if self.entity_id:
             details.append(f"ID: {self.entity_id}")
         return f"{base} ({', '.join(details)})" if details else base
+
+
+SOURCE_VIEW_MAX_COUNT = 100
+SOURCE_VIEW_MAX_STATE_BYTES = 16 * 1024
+SOURCE_VIEW_MIN_NAME_LENGTH = 1
+SOURCE_VIEW_MAX_NAME_LENGTH = 120
+SOURCE_VIEW_NAME_EXISTS = "source_view_name_exists"
+SOURCE_VIEW_LIMIT_REACHED = "source_view_limit_reached"
+SOURCE_VIEW_VERSION_CONFLICT = "source_view_version_conflict"
+SOURCE_VIEW_NOT_FOUND = "source_view_not_found"
+
+
+class WorkspaceSourceSavedViewConflictError(ConflictError):
+    """Saved-view conflict with a stable code and non-sensitive metadata."""
+
+    def __init__(self, code: str, metadata: Mapping[str, Any]):
+        super().__init__("Workspace source saved view conflict.")
+        self.code = code
+        self.metadata = dict(metadata)
+
+
+class WorkspaceSourceSavedViewNotFoundError(CharactersRAGDBError):
+    """Scoped saved-view/workspace lookup failure without existence leakage."""
+
+    code = SOURCE_VIEW_NOT_FOUND
+
+    def __init__(self):
+        super().__init__("Workspace source saved view not found.")
+        self.metadata: dict[str, Any] = {}
 
 
 class RestoreWindowExpiredError(ConflictError):
@@ -616,7 +647,7 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 53  # Schema v53 adds EMQ question group metadata
+    _CURRENT_SCHEMA_VERSION = 54  # Schema v54 adds workspace source saved views
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _SQLITE_SCHEMA_INIT_LOCKS_GUARD: ClassVar[threading.RLock] = threading.RLock()
     _SQLITE_SCHEMA_INIT_LOCKS: ClassVar[dict[str, threading.RLock]] = {}
@@ -7395,6 +7426,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (50, "_migrate_from_v50_to_v51"),
             (51, "_migrate_from_v51_to_v52"),
             (52, "_migrate_from_v52_to_v53"),
+            (53, "_migrate_from_v53_to_v54"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -8853,6 +8885,32 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 f"Unexpected error migrating to V53 for '{self._SCHEMA_NAME}': {exc}"
             ) from exc  # noqa: TRY003
 
+    def _migrate_from_v53_to_v54(self, conn: sqlite3.Connection) -> None:
+        """Migrate schema from V53 to V54 (workspace source saved views)."""
+        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V53 to V54 for DB: {self.db_path_str}...")
+        try:
+            self._ensure_workspace_source_saved_view_schema_sqlite(conn)
+            conn.execute(
+                "UPDATE db_schema_version SET version = 54 WHERE schema_name = ? AND version < 54",
+                (self._SCHEMA_NAME,),
+            )
+            final_version = self._get_db_version(conn)
+            if final_version != 54:
+                raise SchemaError(  # noqa: TRY003, TRY301
+                    f"[{self._SCHEMA_NAME}] Migration V53->V54 failed version check. Expected 54, got: {final_version}"
+                )
+            logger.info(f"[{self._SCHEMA_NAME}] Migration to V54 completed.")
+        except sqlite3.Error as exc:
+            logger.error(f"[{self._SCHEMA_NAME}] Migration V53->V54 failed: {exc}", exc_info=True)
+            raise SchemaError(f"Migration V53->V54 failed for '{self._SCHEMA_NAME}': {exc}") from exc  # noqa: TRY003
+        except SchemaError:
+            raise
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
+            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V53->V54: {exc}", exc_info=True)
+            raise SchemaError(
+                f"Unexpected error migrating to V54 for '{self._SCHEMA_NAME}': {exc}"
+            ) from exc  # noqa: TRY003
+
     def _ensure_persona_persistence_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Ensure persona persistence tables and columns exist for drifted SQLite schemas."""
         try:
@@ -9824,6 +9882,68 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             with self.transaction() as transaction_conn:
                 return _execute(transaction_conn)
         return _execute(conn)
+
+    def _ensure_workspace_source_saved_view_schema_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Idempotently ensure portable workspace source saved-view storage."""
+        try:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS workspace_source_saved_views (
+                    id              TEXT NOT NULL,
+                    workspace_id    TEXT NOT NULL,
+                    owner_user_id   TEXT NOT NULL,
+                    name            TEXT NOT NULL,
+                    name_key        TEXT NOT NULL,
+                    schema_version  INTEGER NOT NULL,
+                    state_json      TEXT NOT NULL,
+                    version         INTEGER NOT NULL,
+                    created_at      TEXT NOT NULL,
+                    updated_at      TEXT NOT NULL,
+                    PRIMARY KEY (workspace_id, id),
+                    CONSTRAINT uq_workspace_source_saved_views_owner_name
+                        UNIQUE (owner_user_id, workspace_id, name_key),
+                    FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_workspace_source_saved_views_list "
+                "ON workspace_source_saved_views(owner_user_id, workspace_id, updated_at DESC, name_key, id)"
+            )
+        except sqlite3.Error as exc:
+            raise SchemaError(f"Failed ensuring SQLite workspace source saved-view schema: {exc}") from exc  # noqa: TRY003
+
+    def _ensure_workspace_source_saved_view_schema_postgres(self, conn: Any) -> None:
+        """Idempotently ensure saved-view storage and forced RLS on PostgreSQL."""
+        statements = [
+            """
+            CREATE TABLE IF NOT EXISTS workspace_source_saved_views (
+                id              TEXT NOT NULL,
+                workspace_id    TEXT NOT NULL,
+                owner_user_id   TEXT NOT NULL,
+                name            TEXT NOT NULL,
+                name_key        TEXT NOT NULL,
+                schema_version  INTEGER NOT NULL,
+                state_json      TEXT NOT NULL,
+                version         INTEGER NOT NULL,
+                created_at      TEXT NOT NULL,
+                updated_at      TEXT NOT NULL,
+                PRIMARY KEY (workspace_id, id),
+                CONSTRAINT uq_workspace_source_saved_views_owner_name
+                    UNIQUE (owner_user_id, workspace_id, name_key),
+                FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_workspace_source_saved_views_list "
+            "ON workspace_source_saved_views(owner_user_id, workspace_id, updated_at DESC, name_key, id)",
+        ]
+        try:
+            for statement in statements:
+                self.backend.execute(statement, connection=conn)
+            for statement in build_workspace_source_saved_view_rls_sql():
+                self.backend.execute(statement, connection=conn)
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
+            raise SchemaError(f"Failed ensuring PostgreSQL workspace source saved-view schema: {exc}") from exc  # noqa: TRY003
 
     def _ensure_workspace_subresource_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Ensure workspace settings columns and sub-resource tables exist for SQLite."""
@@ -11173,6 +11293,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         self._ensure_workspace_assistant_defaults_schema_sqlite(conn)
                         self._ensure_manuscript_annotations_schema_sqlite(conn)
                         self._ensure_source_review_schema_sqlite(conn)
+                        self._ensure_workspace_source_saved_view_schema_sqlite(conn)
                         # Seed/heal character_cards_fts before request traffic. Schema V4
                         # inserts "Default Assistant" before FTS triggers are created.
                         self._self_heal_character_cards_fts_sqlite(conn)
@@ -11335,6 +11456,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         current_db_version = self._get_db_version(conn)
                     if target_version >= 53 and current_db_version == 52:
                         self._migrate_from_v52_to_v53(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 54 and current_db_version == 53:
+                        self._migrate_from_v53_to_v54(conn)
                         current_db_version = self._get_db_version(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
@@ -11744,6 +11868,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if target_version >= 53 and current_db_version == 52:
                     self._migrate_from_v52_to_v53(conn)
                     current_db_version = self._get_db_version(conn)
+                if target_version >= 54 and current_db_version == 53:
+                    self._migrate_from_v53_to_v54(conn)
+                    current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
                 self._ensure_recent_voice_command_schema_sqlite(conn)
@@ -11755,6 +11882,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._ensure_workspace_activity_events_schema_sqlite(conn)
                 self._ensure_manuscript_annotations_schema_sqlite(conn)
                 self._ensure_source_review_schema_sqlite(conn)
+                self._ensure_workspace_source_saved_view_schema_sqlite(conn)
 
                 final_version_check = self._get_db_version(conn)
                 if final_version_check != target_version:
@@ -15656,6 +15784,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     expected_version=53,
                 )
                 current_version = 53
+            if current_version < 54:
+                self._ensure_workspace_source_saved_view_schema_postgres(conn)
+                self._set_schema_version_postgres(conn, 54)
+                current_version = 54
 
             if current_version > target_version:
                 raise SchemaError(  # noqa: TRY003
@@ -15668,6 +15800,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             self._ensure_flashcard_deck_sharing_schema_postgres(conn)
             self._ensure_study_pack_schema_postgres(conn)
             self._ensure_source_review_schema_postgres(conn)
+            self._ensure_workspace_source_saved_view_schema_postgres(conn)
             self._ensure_study_assistant_schema_postgres(conn)
             self._ensure_workspace_study_material_schema_postgres(conn)
             self._ensure_quiz_remediation_conversion_schema_postgres(conn)
@@ -17984,6 +18117,420 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             conn.execute("DELETE FROM workspace_resource_memberships WHERE workspace_id = ?", (workspace_id,))
             conn.execute("DELETE FROM workspace_project_roots WHERE workspace_id = ?", (workspace_id,))
             conn.execute("DELETE FROM workspaces WHERE id = ?", (workspace_id,))
+
+    @staticmethod
+    def _normalize_workspace_source_saved_view_name(name: str) -> tuple[str, str]:
+        """Return the trimmed display name and Python NFKC/casefold key."""
+        if not isinstance(name, str):
+            raise InputError("Saved view name must be a string.")  # noqa: TRY003
+        display_name = name.strip()
+        if not SOURCE_VIEW_MIN_NAME_LENGTH <= len(display_name) <= SOURCE_VIEW_MAX_NAME_LENGTH:
+            raise InputError(  # noqa: TRY003
+                f"Saved view name must contain {SOURCE_VIEW_MIN_NAME_LENGTH} to "
+                f"{SOURCE_VIEW_MAX_NAME_LENGTH} characters after trimming."
+            )
+        return display_name, unicodedata.normalize("NFKC", display_name).casefold()
+
+    @staticmethod
+    def _validate_workspace_source_saved_view_state_json(state_json: str) -> str:
+        """Validate only the raw UTF-8 storage bound; parsing belongs to the API."""
+        if not isinstance(state_json, str):
+            raise InputError("Saved view state_json must be a string.")  # noqa: TRY003
+        if len(state_json.encode("utf-8")) > SOURCE_VIEW_MAX_STATE_BYTES:
+            raise InputError(  # noqa: TRY003
+                f"Saved view state_json must not exceed {SOURCE_VIEW_MAX_STATE_BYTES} UTF-8 bytes."
+            )
+        return state_json
+
+    @staticmethod
+    def _validate_workspace_source_saved_view_schema_version(schema_version: int) -> int:
+        """Require a positive portable integer without interpreting its schema."""
+        if isinstance(schema_version, bool) or not isinstance(schema_version, int) or schema_version < 1:
+            raise InputError("Saved view schema_version must be a positive integer.")  # noqa: TRY003
+        return schema_version
+
+    @staticmethod
+    def _validate_workspace_source_saved_view_expected_version(expected_version: int) -> int:
+        """Require a positive optimistic-lock version."""
+        if isinstance(expected_version, bool) or not isinstance(expected_version, int) or expected_version < 1:
+            raise InputError("Saved view expected_version must be a positive integer.")  # noqa: TRY003
+        return expected_version
+
+    def _require_workspace_source_saved_view_workspace(
+        self,
+        conn: Any,
+        owner_user_id: str,
+        workspace_id: str,
+        *,
+        lock: bool = False,
+    ) -> None:
+        """Require an active workspace owned by the explicitly supplied principal."""
+        query = "SELECT id FROM workspaces WHERE id = ? AND client_id = ? AND deleted = ?"
+        if lock and self.backend_type == BackendType.POSTGRESQL:
+            query += " FOR UPDATE"
+        row = conn.execute(
+            query,
+            (workspace_id, owner_user_id, self._workspace_active_deleted_value()),
+        ).fetchone()
+        if row is None:
+            raise WorkspaceSourceSavedViewNotFoundError
+
+    @staticmethod
+    def _workspace_source_saved_view_row(row: Any) -> dict[str, Any]:
+        """Convert a saved-view database row without parsing state_json."""
+        return dict(row)
+
+    def _get_workspace_source_saved_view_with_conn(
+        self,
+        conn: Any,
+        owner_user_id: str,
+        workspace_id: str,
+        view_id: str,
+    ) -> dict[str, Any] | None:
+        """Load one row through the complete owner/workspace/view predicate."""
+        row = conn.execute(
+            """
+            SELECT id, workspace_id, owner_user_id, name, name_key, schema_version,
+                   state_json, version, created_at, updated_at
+              FROM workspace_source_saved_views
+             WHERE owner_user_id = ? AND workspace_id = ? AND id = ?
+            """,
+            (owner_user_id, workspace_id, view_id),
+        ).fetchone()
+        return self._workspace_source_saved_view_row(row) if row is not None else None
+
+    def _find_workspace_source_saved_view_name_with_conn(
+        self,
+        conn: Any,
+        owner_user_id: str,
+        workspace_id: str,
+        name_key: str,
+        *,
+        exclude_view_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Find an owned name conflict and return only safe response metadata."""
+        query = (
+            "SELECT id, version FROM workspace_source_saved_views "
+            "WHERE owner_user_id = ? AND workspace_id = ? AND name_key = ?"
+        )
+        params: tuple[Any, ...] = (owner_user_id, workspace_id, name_key)
+        if exclude_view_id is not None:
+            query += " AND id <> ?"
+            params += (exclude_view_id,)
+        row = conn.execute(query, params).fetchone()
+        return dict(row) if row is not None else None
+
+    @staticmethod
+    def _raise_workspace_source_saved_view_name_conflict(row: Mapping[str, Any]) -> None:
+        """Raise the stable duplicate-name conflict using owned row metadata."""
+        raise WorkspaceSourceSavedViewConflictError(
+            SOURCE_VIEW_NAME_EXISTS,
+            {"view_id": str(row["id"]), "version": int(row["version"])},
+        )
+
+    @staticmethod
+    def _is_workspace_source_saved_view_sqlite_unique_error(exc: sqlite3.IntegrityError) -> bool:
+        """Match only the saved-view owner/workspace/name SQLite unique key."""
+        expected_columns = (
+            "workspace_source_saved_views.owner_user_id, "
+            "workspace_source_saved_views.workspace_id, "
+            "workspace_source_saved_views.name_key"
+        )
+        return (
+            getattr(exc, "sqlite_errorname", None) == "SQLITE_CONSTRAINT_UNIQUE"
+            and expected_columns in str(exc)
+        )
+
+    @staticmethod
+    def _is_workspace_source_saved_view_postgres_unique_error(exc: Exception) -> bool:
+        """Match only SQLSTATE 23505 for the named saved-view unique constraint."""
+        current: BaseException | None = exc
+        while current is not None:
+            sqlstate = getattr(current, "sqlstate", None) or getattr(current, "pgcode", None)
+            diagnostics = getattr(current, "diag", None)
+            constraint_name = getattr(diagnostics, "constraint_name", None)
+            if (
+                sqlstate == "23505"
+                and constraint_name == "uq_workspace_source_saved_views_owner_name"
+            ):
+                return True
+            current = current.__cause__
+        return False
+
+    def _is_workspace_source_saved_view_unique_error(self, exc: Exception) -> bool:
+        """Dispatch precise unique-constraint detection by active backend."""
+        if isinstance(exc, sqlite3.IntegrityError):
+            return self._is_workspace_source_saved_view_sqlite_unique_error(exc)
+        return self._is_workspace_source_saved_view_postgres_unique_error(exc)
+
+    def _raise_workspace_source_saved_view_duplicate_after_rollback(
+        self,
+        owner_user_id: str,
+        workspace_id: str,
+        name_key: str,
+    ) -> None:
+        """Resolve duplicate metadata in a fresh scoped transaction after rollback."""
+        with self.transaction() as conn:
+            self._require_workspace_source_saved_view_workspace(conn, owner_user_id, workspace_id)
+            conflict = self._find_workspace_source_saved_view_name_with_conn(
+                conn,
+                owner_user_id,
+                workspace_id,
+                name_key,
+            )
+            if conflict is None:
+                raise WorkspaceSourceSavedViewNotFoundError
+            self._raise_workspace_source_saved_view_name_conflict(conflict)
+
+    def create_workspace_source_saved_view(
+        self,
+        owner_user_id: str,
+        workspace_id: str,
+        *,
+        name: str,
+        schema_version: int,
+        state_json: str,
+    ) -> dict[str, Any]:
+        """Create one raw saved view for an active owned workspace."""
+        display_name, name_key = self._normalize_workspace_source_saved_view_name(name)
+        stored_schema_version = self._validate_workspace_source_saved_view_schema_version(schema_version)
+        stored_state_json = self._validate_workspace_source_saved_view_state_json(state_json)
+        view_id = str(uuid.uuid4())
+        now = self._get_current_utc_timestamp_iso()
+        try:
+            with self.transaction() as conn:
+                self._require_workspace_source_saved_view_workspace(
+                    conn,
+                    owner_user_id,
+                    workspace_id,
+                    lock=True,
+                )
+                count_row = conn.execute(
+                    "SELECT COUNT(*) AS total FROM workspace_source_saved_views "
+                    "WHERE owner_user_id = ? AND workspace_id = ?",
+                    (owner_user_id, workspace_id),
+                ).fetchone()
+                if count_row is not None and int(count_row["total"]) >= SOURCE_VIEW_MAX_COUNT:
+                    raise WorkspaceSourceSavedViewConflictError(
+                        SOURCE_VIEW_LIMIT_REACHED,
+                        {"limit": SOURCE_VIEW_MAX_COUNT},
+                    )
+                conflict = self._find_workspace_source_saved_view_name_with_conn(
+                    conn,
+                    owner_user_id,
+                    workspace_id,
+                    name_key,
+                )
+                if conflict is not None:
+                    self._raise_workspace_source_saved_view_name_conflict(conflict)
+                conn.execute(
+                    """
+                    INSERT INTO workspace_source_saved_views (
+                        id, workspace_id, owner_user_id, name, name_key, schema_version,
+                        state_json, version, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                    """,
+                    (
+                        view_id,
+                        workspace_id,
+                        owner_user_id,
+                        display_name,
+                        name_key,
+                        stored_schema_version,
+                        stored_state_json,
+                        now,
+                        now,
+                    ),
+                )
+                created = self._get_workspace_source_saved_view_with_conn(
+                    conn,
+                    owner_user_id,
+                    workspace_id,
+                    view_id,
+                )
+                if created is None:  # pragma: no cover - defensive database invariant
+                    raise CharactersRAGDBError("Failed to load created workspace source saved view.")
+                return created
+        except (sqlite3.IntegrityError, BackendDatabaseError) as exc:
+            if not self._is_workspace_source_saved_view_unique_error(exc):
+                raise
+            self._raise_workspace_source_saved_view_duplicate_after_rollback(
+                owner_user_id,
+                workspace_id,
+                name_key,
+            )
+            raise AssertionError("unreachable") from exc  # pragma: no cover
+
+    def list_workspace_source_saved_views(
+        self,
+        owner_user_id: str,
+        workspace_id: str,
+    ) -> list[dict[str, Any]]:
+        """List raw owned saved views in stable newest-first order."""
+        with self.transaction() as conn:
+            self._require_workspace_source_saved_view_workspace(conn, owner_user_id, workspace_id)
+            rows = conn.execute(
+                """
+                SELECT id, workspace_id, owner_user_id, name, name_key, schema_version,
+                       state_json, version, created_at, updated_at
+                  FROM workspace_source_saved_views
+                 WHERE owner_user_id = ? AND workspace_id = ?
+                 ORDER BY updated_at DESC, name_key ASC, id ASC
+                """,
+                (owner_user_id, workspace_id),
+            ).fetchall()
+            return [self._workspace_source_saved_view_row(row) for row in rows]
+
+    def get_workspace_source_saved_view(
+        self,
+        owner_user_id: str,
+        workspace_id: str,
+        view_id: str,
+    ) -> dict[str, Any]:
+        """Get one raw owned saved view or raise the focused not-found error."""
+        with self.transaction() as conn:
+            self._require_workspace_source_saved_view_workspace(conn, owner_user_id, workspace_id)
+            row = self._get_workspace_source_saved_view_with_conn(
+                conn,
+                owner_user_id,
+                workspace_id,
+                view_id,
+            )
+            if row is None:
+                raise WorkspaceSourceSavedViewNotFoundError
+            return row
+
+    def update_workspace_source_saved_view(
+        self,
+        owner_user_id: str,
+        workspace_id: str,
+        view_id: str,
+        *,
+        expected_version: int,
+        name: str | None = None,
+        schema_version: int | None = None,
+        state_json: str | None = None,
+    ) -> dict[str, Any]:
+        """Version-update the supplied raw saved-view fields in one transaction."""
+        stored_expected_version = self._validate_workspace_source_saved_view_expected_version(expected_version)
+        if name is None and schema_version is None and state_json is None:
+            raise InputError("Saved view update requires name, schema_version, or state_json.")  # noqa: TRY003
+        display_name: str | None = None
+        name_key: str | None = None
+        if name is not None:
+            display_name, name_key = self._normalize_workspace_source_saved_view_name(name)
+        stored_schema_version = (
+            self._validate_workspace_source_saved_view_schema_version(schema_version)
+            if schema_version is not None
+            else None
+        )
+        stored_state_json = (
+            self._validate_workspace_source_saved_view_state_json(state_json)
+            if state_json is not None
+            else None
+        )
+        try:
+            with self.transaction() as conn:
+                self._require_workspace_source_saved_view_workspace(
+                    conn,
+                    owner_user_id,
+                    workspace_id,
+                    lock=True,
+                )
+                current = self._get_workspace_source_saved_view_with_conn(
+                    conn,
+                    owner_user_id,
+                    workspace_id,
+                    view_id,
+                )
+                if current is None:
+                    raise WorkspaceSourceSavedViewNotFoundError
+                if int(current["version"]) != stored_expected_version:
+                    raise WorkspaceSourceSavedViewConflictError(
+                        SOURCE_VIEW_VERSION_CONFLICT,
+                        {"view_id": view_id, "current_version": int(current["version"])},
+                    )
+                if name_key is not None:
+                    conflict = self._find_workspace_source_saved_view_name_with_conn(
+                        conn,
+                        owner_user_id,
+                        workspace_id,
+                        name_key,
+                        exclude_view_id=view_id,
+                    )
+                    if conflict is not None:
+                        self._raise_workspace_source_saved_view_name_conflict(conflict)
+
+                assignments = ["updated_at = ?", "version = version + 1"]
+                params: list[Any] = [self._get_current_utc_timestamp_iso()]
+                if display_name is not None and name_key is not None:
+                    assignments.extend(("name = ?", "name_key = ?"))
+                    params.extend((display_name, name_key))
+                if stored_schema_version is not None:
+                    assignments.append("schema_version = ?")
+                    params.append(stored_schema_version)
+                if stored_state_json is not None:
+                    assignments.append("state_json = ?")
+                    params.append(stored_state_json)
+                params.extend((owner_user_id, workspace_id, view_id, stored_expected_version))
+                cursor = conn.execute(
+                    f"UPDATE workspace_source_saved_views SET {', '.join(assignments)} "  # nosec B608
+                    "WHERE owner_user_id = ? AND workspace_id = ? AND id = ? AND version = ?",
+                    tuple(params),
+                )
+                if cursor.rowcount != 1:
+                    latest = self._get_workspace_source_saved_view_with_conn(
+                        conn,
+                        owner_user_id,
+                        workspace_id,
+                        view_id,
+                    )
+                    if latest is None:
+                        raise WorkspaceSourceSavedViewNotFoundError
+                    raise WorkspaceSourceSavedViewConflictError(
+                        SOURCE_VIEW_VERSION_CONFLICT,
+                        {"view_id": view_id, "current_version": int(latest["version"])},
+                    )
+                updated = self._get_workspace_source_saved_view_with_conn(
+                    conn,
+                    owner_user_id,
+                    workspace_id,
+                    view_id,
+                )
+                if updated is None:  # pragma: no cover - defensive database invariant
+                    raise WorkspaceSourceSavedViewNotFoundError
+                return updated
+        except (sqlite3.IntegrityError, BackendDatabaseError) as exc:
+            if name_key is None or not self._is_workspace_source_saved_view_unique_error(exc):
+                raise
+            self._raise_workspace_source_saved_view_duplicate_after_rollback(
+                owner_user_id,
+                workspace_id,
+                name_key,
+            )
+            raise AssertionError("unreachable") from exc  # pragma: no cover
+
+    def delete_workspace_source_saved_view(
+        self,
+        owner_user_id: str,
+        workspace_id: str,
+        view_id: str,
+    ) -> None:
+        """Unconditionally delete one owned view after active-workspace validation."""
+        with self.transaction() as conn:
+            self._require_workspace_source_saved_view_workspace(
+                conn,
+                owner_user_id,
+                workspace_id,
+                lock=True,
+            )
+            cursor = conn.execute(
+                "DELETE FROM workspace_source_saved_views "
+                "WHERE owner_user_id = ? AND workspace_id = ? AND id = ?",
+                (owner_user_id, workspace_id, view_id),
+            )
+            if cursor.rowcount != 1:
+                raise WorkspaceSourceSavedViewNotFoundError
 
     def upsert_workspace_primary_root(self, workspace_id: str, data: dict[str, Any]) -> dict[str, Any]:
         """Create or replace the primary project root for a workspace."""
