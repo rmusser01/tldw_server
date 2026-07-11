@@ -271,7 +271,7 @@ describe("ItemsTab scale and responsive behavior", () => {
     expect(screen.getByTestId("watchlists-items-list-pane")).toBeInTheDocument()
     expect(screen.getByTestId("watchlists-items-reader-pane")).toBeInTheDocument()
 
-    fireEvent.click(screen.getByTestId("watchlists-item-row-101"))
+    fireEvent.click(screen.getByRole("button", { name: "Open update: Item One" }))
     expect(screen.getByTestId("watchlists-item-include-briefing")).toBeInTheDocument()
   })
 

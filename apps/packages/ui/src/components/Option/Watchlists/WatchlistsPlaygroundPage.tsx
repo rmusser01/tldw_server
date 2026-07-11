@@ -2095,11 +2095,14 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
         </Tooltip>
       </div>
 
-      {renderWatchlistContainerShell()}
+      <div data-testid="watchlists-canonical-controls">
+        <div data-testid="watchlists-outcome-first-region">
+          {renderWatchlistContainerShell()}
+        </div>
 
-      {watchlistViewsAvailable && activeTab !== "overview" && (
-        <WatchlistsHealthBar onOpenSettings={() => setSettingsDrawerOpen(true)} onNavigate={navigateToTab} />
-      )}
+        {watchlistViewsAvailable && activeTab !== "overview" && (
+          <WatchlistsHealthBar onOpenSettings={() => setSettingsDrawerOpen(true)} onNavigate={navigateToTab} />
+        )}
 
       {showGuidedTourCompletion && (
         <DesignSystemAlert
@@ -2167,6 +2170,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
       {watchlistViewsAvailable && activeTab === "overview" && (
         <WatchlistsHealthBar onOpenSettings={() => setSettingsDrawerOpen(true)} onNavigate={navigateToTab} />
       )}
+      </div>
 
       {/* Settings drawer (accessible from health bar gear icon) */}
       <Drawer
@@ -2395,15 +2399,19 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
         title={t("watchlists:accessibilityHardening.help.title", "Watchlists help")}
         footer={null}
         width={isConstrained ? "100%" : 520}
+        className={isConstrained ? "max-w-full" : undefined}
         data-testid="watchlists-shortcuts-help"
       >
-        <div className="space-y-5 text-sm" data-testid="watchlists-help-panel">
-          <div className="flex flex-wrap gap-3">
+        <div
+          className="min-w-0 max-w-full space-y-5 overflow-x-hidden break-words text-sm text-start"
+          data-testid="watchlists-help-panel"
+        >
+          <div className="flex min-w-0 flex-wrap gap-3">
             <a
               href={WATCHLISTS_MAIN_DOCS_URL}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex min-h-11 items-center gap-1 text-primary hover:underline"
+              className="inline-flex min-h-11 min-w-0 max-w-full items-center gap-1 break-words text-primary [overflow-wrap:anywhere] hover:underline"
               data-testid="watchlists-main-docs-link"
             >
               {t("watchlists:help.docs", "Watchlists docs")}
@@ -2413,7 +2421,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
               href={activeTabHelpHref}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex min-h-11 items-center gap-1 text-primary hover:underline"
+              className="inline-flex min-h-11 min-w-0 max-w-full items-center gap-1 break-words text-primary [overflow-wrap:anywhere] hover:underline"
               data-testid="watchlists-context-docs-link"
             >
               {t("watchlists:help.learnMoreTab", "Learn more: {{tab}}", { tab: activeTabHelpLabel })}
@@ -2423,14 +2431,14 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
               href={WATCHLISTS_ISSUE_REPORT_URL}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex min-h-11 items-center gap-1 text-primary hover:underline"
+              className="inline-flex min-h-11 min-w-0 max-w-full items-center gap-1 break-words text-primary [overflow-wrap:anywhere] hover:underline"
             >
               {t("watchlists:help.reportIssue", "Report an issue")}
               <ExternalLink className="h-3.5 w-3.5" aria-hidden />
             </a>
           </div>
 
-          <div className="flex flex-wrap gap-2">
+          <div className="flex min-w-0 flex-wrap gap-2">
             {selectedWatchlist && (
               <>
                 <Button
@@ -2487,7 +2495,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
             <div className="font-medium text-text" data-testid="watchlists-orientation-title">
               {activeTabOrientation.title}
             </div>
-            <p className="mt-1 text-text-muted" data-testid="watchlists-orientation-description">
+            <p className="mt-1 break-words text-text-muted [overflow-wrap:anywhere]" data-testid="watchlists-orientation-description">
               {activeTabOrientation.description}
             </p>
             <div className="mt-2 flex flex-wrap gap-2">

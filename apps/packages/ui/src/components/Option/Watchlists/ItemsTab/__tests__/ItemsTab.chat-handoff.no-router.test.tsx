@@ -171,7 +171,7 @@ describe("ItemsTab chat handoff without router context", () => {
       expect(screen.getByTestId("watchlists-item-row-101")).toBeInTheDocument()
     })
 
-    fireEvent.click(screen.getByTestId("watchlists-item-row-101"))
+    fireEvent.click(screen.getByRole("button", { name: "Open update: Item One" }))
     fireEvent.click(screen.getByTestId("watchlists-item-chat-about"))
 
     await waitFor(() => {

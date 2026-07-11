@@ -287,10 +287,12 @@ describe("ItemsTab keyboard shortcuts", () => {
       expect(screen.getByTestId("watchlists-item-row-101")).toBeInTheDocument()
     })
 
-    expect(screen.getByTestId("watchlists-item-row-101")).toHaveAttribute(
-      "aria-label",
-      "Item One from Tech Daily. Unread."
+    const openButton = screen.getByRole("button", { name: "Open update: Item One" })
+    expect(openButton).toHaveAttribute(
+      "aria-describedby",
+      "watchlists-item-row-description-101"
     )
+    expect(screen.getByText("Unread. Source: Tech Daily.")).toHaveClass("sr-only")
   })
 
   it("opens shortcut help panel from keyboard", async () => {

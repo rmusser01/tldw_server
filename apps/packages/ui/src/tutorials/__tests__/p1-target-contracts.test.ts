@@ -11,6 +11,26 @@ const readSource = (relativePath: string): string =>
   readFileSync(path.resolve(srcRoot, relativePath), "utf8")
 
 describe("P0/P1 tutorial selector contracts", () => {
+  it("keeps every Watchlists tutorial target on a permanent reachable page region", () => {
+    const tutorial = getTutorialById("watchlists-basics")
+    const pageContent = readSource(
+      "components/Option/Watchlists/WatchlistsPlaygroundPage.tsx"
+    )
+
+    expect(tutorial?.steps.map((step) => step.target)).toEqual([
+      '[data-testid="watchlists-outcome-first-region"]',
+      '[data-testid="watchlists-help-icon"]',
+      '[data-testid="watchlists-canonical-controls"]',
+      '[data-testid="watchlists-canonical-controls"]'
+    ])
+
+    for (const step of tutorial?.steps ?? []) {
+      const match = step.target.match(/^\[data-testid="([^"]+)"\]$/)
+      expect(match, `unstable Watchlists target: ${step.target}`).not.toBeNull()
+      expect(pageContent).toContain(`data-testid="${match?.[1]}"`)
+    }
+  })
+
   it("uses stable selector formats for all P0/P1 tutorial steps", () => {
     const p0p1TutorialIds = [
       "playground-basics",

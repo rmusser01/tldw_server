@@ -29,11 +29,6 @@ import { humanizeMilliseconds } from "@/utils/humanize-milliseconds"
 import { formatRelativeTime } from "@/utils/dateFormatters"
 import { useWatchlistsViewport, WatchlistsHelpTooltip } from "../shared"
 import { WATCHLISTS_HELP_DOCS } from "../shared/help-docs"
-import {
-  type WatchlistsOnboardingPath,
-  readWatchlistsOnboardingPath,
-  writeWatchlistsOnboardingPath
-} from "../shared/onboarding-path"
 
 export const SettingsTab: React.FC = () => {
   const { t } = useTranslation(["watchlists", "common"])
@@ -57,9 +52,6 @@ export const SettingsTab: React.FC = () => {
   const [clusterSearch, setClusterSearch] = useState("")
   const [jobClusters, setJobClusters] = useState<WatchlistClusterSubscription[]>([])
   const [clusterUpdates, setClusterUpdates] = useState<number[]>([])
-  const [onboardingPath, setOnboardingPath] = useState<WatchlistsOnboardingPath>(() =>
-    readWatchlistsOnboardingPath()
-  )
 
   // Fetch settings
   const loadSettings = useCallback(async () => {
@@ -233,16 +225,6 @@ export const SettingsTab: React.FC = () => {
     return humanizeMilliseconds(seconds * 1000)
   }
 
-  const handleOnboardingPathChange = (nextValue: string | null) => {
-    const nextPath: WatchlistsOnboardingPath =
-      nextValue === "advanced" ? "advanced" : "beginner"
-    setOnboardingPath(nextPath)
-    writeWatchlistsOnboardingPath(nextPath)
-    message.success(
-      t("watchlists:settings.onboarding.saved", "Onboarding mode saved.")
-    )
-  }
-
   const renderClusterSubscriptions = () => {
     if (isConstrained) {
       if (clustersLoading) {
@@ -399,56 +381,6 @@ export const SettingsTab: React.FC = () => {
               />
             </Card>
           )}
-
-          <Card
-            title={t("watchlists:settings.onboarding.title", "Onboarding")}
-          >
-            <div className="space-y-3">
-              <p className="text-sm text-text-muted">
-                {t(
-                  "watchlists:settings.onboarding.description",
-                  "Choose the default onboarding path shown in Overview."
-                )}
-              </p>
-              <div className="space-y-2">
-                <div className="text-sm font-medium">
-                  {t("watchlists:settings.onboarding.modeLabel", "Default onboarding mode")}
-                </div>
-                <Select
-                  value={onboardingPath}
-                  onChange={(value) => handleOnboardingPathChange(String(value))}
-                  data-testid="watchlists-settings-onboarding-path-select"
-                  options={[
-                    {
-                      value: "beginner",
-                      label: t(
-                        "watchlists:settings.onboarding.modeBeginner",
-                        "Beginner (guided)"
-                      )
-                    },
-                    {
-                      value: "advanced",
-                      label: t(
-                        "watchlists:settings.onboarding.modeAdvanced",
-                        "Advanced (direct forms)"
-                      )
-                    }
-                  ]}
-                />
-              </div>
-              <p className="text-xs text-text-muted">
-                {onboardingPath === "beginner"
-                  ? t(
-                      "watchlists:settings.onboarding.beginnerHint",
-                      "Beginner keeps setup guided and avoids cron/template details at first."
-                    )
-                  : t(
-                      "watchlists:settings.onboarding.advancedHint",
-                      "Advanced skips guided setup and prioritizes direct Feed and Monitor forms."
-                    )}
-              </p>
-            </div>
-          </Card>
 
           {/* Claim Clusters */}
           <Card

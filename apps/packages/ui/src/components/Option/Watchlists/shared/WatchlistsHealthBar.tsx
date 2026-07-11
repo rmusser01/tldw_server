@@ -445,17 +445,10 @@ const HealthCard: React.FC<HealthCardProps> = ({
   detail,
   onClick
 }) => (
-  <div
+  <button
+    type="button"
     className="flex cursor-pointer items-start gap-2 rounded-md border border-border p-2 transition-colors hover:bg-surface-hover"
     onClick={onClick}
-    role="button"
-    tabIndex={0}
-    onKeyDown={(e) => {
-      if ((e.key === "Enter" || e.key === " ") && onClick) {
-        e.preventDefault()
-        onClick()
-      }
-    }}
   >
     <span className={statusColor(status)}>{icon}</span>
     <div className="min-w-0 flex-1">
@@ -463,5 +456,5 @@ const HealthCard: React.FC<HealthCardProps> = ({
       <div className="text-sm font-semibold">{value}</div>
       {detail && <div className="text-xs text-text-muted">{detail}</div>}
     </div>
-  </div>
+  </button>
 )

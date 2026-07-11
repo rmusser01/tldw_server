@@ -1057,7 +1057,7 @@ describe("ItemsTab batch throughput controls", () => {
       expect(screen.getByTestId("watchlists-item-row-103")).toBeInTheDocument()
     })
 
-    fireEvent.click(screen.getByTestId("watchlists-item-row-103"))
+    fireEvent.click(screen.getByRole("button", { name: "Open update: Item Three" }))
     fireEvent.click(screen.getByTestId("watchlists-item-include-briefing"))
 
     await waitFor(() => {
@@ -1102,12 +1102,12 @@ describe("ItemsTab batch throughput controls", () => {
       expect(screen.getByTestId("watchlists-item-row-101")).toBeInTheDocument()
     })
 
-    fireEvent.click(screen.getByTestId("watchlists-item-row-101"))
+    fireEvent.click(screen.getByRole("button", { name: "Open update: Item One" }))
     expect(screen.getByTestId("watchlists-item-include-briefing")).toHaveTextContent(
       "Include in next briefing"
     )
 
-    fireEvent.click(screen.getByTestId("watchlists-item-row-103"))
+    fireEvent.click(screen.getByRole("button", { name: "Open update: Item Three" }))
     const includeButton = screen.getByTestId("watchlists-item-include-briefing")
     fireEvent.click(includeButton)
 

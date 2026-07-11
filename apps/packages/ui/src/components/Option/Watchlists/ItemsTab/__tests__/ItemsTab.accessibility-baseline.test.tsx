@@ -4,6 +4,7 @@ import React from "react"
 import i18next from "i18next"
 import { beforeAll, beforeEach, describe, expect, it, vi, type Mock } from "vitest"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { ItemsTab } from "../ItemsTab"
 import { useWatchlistsStore } from "@/store/watchlists"
 import commonEn from "@/assets/locale/en/common.json"
@@ -232,7 +233,7 @@ describe("ItemsTab accessibility baseline", () => {
     expect(screen.getByTestId("watchlists-item-row-review-state-101")).toHaveTextContent("Unread")
     expect(screen.getByTestId("watchlists-item-row-review-state-102")).toHaveTextContent("Unread")
 
-    fireEvent.click(screen.getByTestId("watchlists-item-row-101"))
+    fireEvent.click(screen.getByRole("button", { name: "Open update: BBC title" }))
     fireEvent.click(screen.getByRole("button", { name: "Mark as reviewed" }))
 
     await waitFor(() => {
@@ -281,5 +282,40 @@ describe("ItemsTab accessibility baseline", () => {
       expect(screen.getByRole("button", { name: `Open update: ${title}` })).toBeVisible()
       expect(screen.getByRole("checkbox", { name: `Select update: ${title}` })).toBeInTheDocument()
     }
+  }, 15_000)
+
+  it("separates multi-record selection from native click and keyboard open actions", async () => {
+    const user = userEvent.setup()
+    render(<ItemsTab />)
+
+    await screen.findByTestId("watchlists-item-row-103")
+
+    for (const title of ["BBC title", "NPR title", "Guardian title"]) {
+      const row = screen.getByTestId(
+        `watchlists-item-row-${title === "BBC title" ? 101 : title === "NPR title" ? 102 : 103}`
+      )
+      const checkbox = screen.getByRole("checkbox", { name: `Select update: ${title}` })
+      const openButton = screen.getByRole("button", { name: `Open update: ${title}` })
+
+      expect(row.tagName).toBe("DIV")
+      expect(checkbox.closest("button")).toBeNull()
+      expect(openButton).toHaveAttribute("type", "button")
+    }
+
+    await user.click(screen.getByRole("button", { name: "Open update: BBC title" }))
+    expect(screen.getByRole("button", { name: "Open update: BBC title" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
+
+    const nprOpen = screen.getByRole("button", { name: "Open update: NPR title" })
+    nprOpen.focus()
+    await user.keyboard("{Enter}")
+    await waitFor(() => expect(nprOpen).toHaveAttribute("aria-pressed", "true"))
+
+    const guardianOpen = screen.getByRole("button", { name: "Open update: Guardian title" })
+    expect(guardianOpen.tagName).toBe("BUTTON")
+    expect(guardianOpen).not.toHaveAttribute("role")
+    expect(guardianOpen).not.toHaveAttribute("tabindex")
   }, 15_000)
 })

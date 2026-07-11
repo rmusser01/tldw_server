@@ -1546,6 +1546,7 @@ export const SourcesTab: React.FC = () => {
                 <Button
                   type="text"
                   size="small"
+                  className="min-h-11 min-w-11"
                   aria-label={t("watchlists:accessibilityHardening.source.checkNow", "Check now: {{name}}", { name: source.name })}
                   icon={<RefreshCw className="h-4 w-4" aria-hidden />}
                   loading={checkNowLoading}
@@ -1554,6 +1555,7 @@ export const SourcesTab: React.FC = () => {
                 <Button
                   type="text"
                   size="small"
+                  className="min-h-11 min-w-11"
                   aria-label={t("watchlists:accessibilityHardening.source.openHealth", "Open source health: {{name}}", { name: source.name })}
                   icon={<Eye className="h-4 w-4" aria-hidden />}
                   onClick={() => setSeenDrawerSourceId(source.id)}
@@ -1561,6 +1563,7 @@ export const SourcesTab: React.FC = () => {
                 <Button
                   type="text"
                   size="small"
+                  className="min-h-11 min-w-11"
                   aria-label={t("watchlists:sources.cloneFeedAria", "Clone {{name}}", { name: source.name })}
                   icon={<Copy className="h-4 w-4" />}
                   onClick={() => handleCloneSource(source)}
@@ -1568,6 +1571,7 @@ export const SourcesTab: React.FC = () => {
                 <Button
                   type="text"
                   size="small"
+                  className="min-h-11 min-w-11"
                   aria-label={t("watchlists:accessibilityHardening.source.edit", "Edit source: {{name}}", { name: source.name })}
                   icon={<Edit2 className="h-4 w-4" aria-hidden />}
                   onClick={() => handleOpenExistingSourceForm(source.id)}
@@ -1575,6 +1579,7 @@ export const SourcesTab: React.FC = () => {
                 <Button
                   type="text"
                   size="small"
+                  className="min-h-11 min-w-11"
                   danger
                   aria-label={t("watchlists:accessibilityHardening.source.delete", "Delete source: {{name}}", { name: source.name })}
                   icon={<Trash2 className="h-4 w-4" aria-hidden />}

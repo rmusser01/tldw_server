@@ -434,9 +434,15 @@ describe("SourcesTab advanced details disclosure", () => {
       expect(screen.getAllByRole("checkbox", { name: `Select ${name}` })).toHaveLength(1)
       expect(screen.getAllByRole("link", { name: `Open source website: ${name}` })).toHaveLength(1)
       expect(screen.getAllByRole("button", { name: `Check now: ${name}` })).toHaveLength(1)
-      expect(screen.getByRole("button", { name: `Open source health: ${name}` })).toBeVisible()
-      expect(screen.getByRole("button", { name: `Edit source: ${name}` })).toBeVisible()
-      expect(screen.getByRole("button", { name: `Delete source: ${name}` })).toBeVisible()
+      for (const actionName of [
+        `Check now: ${name}`,
+        `Open source health: ${name}`,
+        `Clone ${name}`,
+        `Edit source: ${name}`,
+        `Delete source: ${name}`
+      ]) {
+        expect(screen.getByRole("button", { name: actionName })).toHaveClass("min-h-11", "min-w-11")
+      }
       expect(website).not.toHaveTextContent("https://")
 
       fireEvent.click(website)

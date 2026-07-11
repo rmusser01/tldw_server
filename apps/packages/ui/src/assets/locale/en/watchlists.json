@@ -2201,16 +2201,6 @@
     "fetchError": "Failed to load settings",
     "unavailable": "Settings unavailable",
     "unavailableDesc": "Could not load server settings. Make sure the server is running.",
-    "onboarding": {
-      "title": "Onboarding",
-      "description": "Choose the default onboarding path shown in Overview.",
-      "modeLabel": "Default onboarding mode",
-      "modeBeginner": "Beginner (guided)",
-      "modeAdvanced": "Advanced (direct forms)",
-      "saved": "Onboarding mode saved.",
-      "beginnerHint": "Beginner keeps setup guided and avoids cron/template details at first.",
-      "advancedHint": "Advanced skips guided setup and prioritizes direct Feed and Monitor forms."
-    },
     "ttl": {
       "title": "Output Retention",
       "defaultOutput": "Default Output TTL",

@@ -66,6 +66,11 @@ const navigationMocks = vi.hoisted(() => ({
   navigate: vi.fn()
 }))
 
+const layoutMocks = vi.hoisted(() => ({
+  isConstrained: false,
+  longCopy: false
+}))
+
 const runA11yBaselineRules = async (context: Element) =>
   axe.run(context, {
     runOnly: {
@@ -104,6 +109,9 @@ vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (_key: string, defaultValue?: unknown, options?: Record<string, unknown>) => {
       if (typeof defaultValue !== "string") return _key
+      if (layoutMocks.longCopy && _key === "watchlists:orientation.sources.description") {
+        return `Extremely long localized guidance ${"unbreakablelocalizedcopy".repeat(18)}`
+      }
       if (!options) return defaultValue
       return defaultValue.replace(/\{\{(\w+)\}\}/g, (_, token) => String(options[token] ?? ""))
     }
@@ -150,7 +158,7 @@ vi.mock("antd", async () => {
     </div>
   )
 
-  const Modal = ({ open, title, children, footer, onCancel, afterOpenChange }: any) => {
+  const Modal = ({ open, title, children, footer, onCancel, afterOpenChange, width, className }: any) => {
     React.useEffect(() => {
       afterOpenChange?.(open)
     }, [afterOpenChange, open])
@@ -159,6 +167,8 @@ vi.mock("antd", async () => {
       <div
         role="dialog"
         aria-label={typeof title === "string" ? title : "dialog"}
+        className={className}
+        data-modal-width={String(width)}
         tabIndex={-1}
         onKeyDown={(event) => {
           if (event.key === "Escape") onCancel?.()
@@ -181,7 +191,7 @@ vi.mock("antd", async () => {
   const Empty = ({ description }: any) => <div>{description}</div>
   const Tooltip = ({ children }: any) => <>{children}</>
   const Button = React.forwardRef<HTMLButtonElement, any>(
-    ({ children, onClick, disabled, ...rest }, ref) => (
+    ({ children, onClick, disabled, block: _block, ...rest }, ref) => (
       <button
         ref={ref}
         type="button"
@@ -243,6 +253,10 @@ vi.mock("@/hooks/useServerOnline", () => ({
 
 vi.mock("@/hooks/useConnectionState", () => ({
   useConnectionUxState: () => connectionMocks.useConnectionUxState()
+}))
+
+vi.mock("../shared/useWatchlistsViewport", () => ({
+  useWatchlistsViewport: () => ({ isConstrained: layoutMocks.isConstrained })
 }))
 
 vi.mock("react-router-dom", async () => {
@@ -331,6 +345,9 @@ describe("WatchlistsPlaygroundPage help surfaces", () => {
       has_more: false
     })
     mocks.state.activeTab = "sources"
+    layoutMocks.isConstrained = false
+    layoutMocks.longCopy = false
+    document.documentElement.removeAttribute("dir")
     mocks.state.overviewHealth = {
       tabBadges: {
         sources: 0,
@@ -347,6 +364,7 @@ describe("WatchlistsPlaygroundPage help surfaces", () => {
     localStorage.removeItem("watchlists:teach-points:v1")
     localStorage.removeItem("watchlists:ia-experiment:v1")
     localStorage.removeItem("watchlists:show-all-views:v1")
+    document.documentElement.removeAttribute("dir")
   })
 
   afterEach(() => {
@@ -475,6 +493,37 @@ describe("WatchlistsPlaygroundPage help surfaces", () => {
       type: "guided_tour_resumed",
       step: 2
     })
+  })
+
+  it("reflows constrained RTL Help with long localized copy and reachable controls", () => {
+    layoutMocks.isConstrained = true
+    layoutMocks.longCopy = true
+    document.documentElement.setAttribute("dir", "rtl")
+
+    render(<WatchlistsPlaygroundPage />)
+    fireEvent.click(screen.getByTestId("watchlists-help-icon"))
+
+    const dialog = screen.getByRole("dialog", { name: "Watchlists help" })
+    const panel = screen.getByTestId("watchlists-help-panel")
+    expect(dialog).toHaveAttribute("data-modal-width", "100%")
+    expect(dialog).toHaveClass("max-w-full")
+    expect(panel).toHaveClass("min-w-0", "max-w-full", "overflow-x-hidden", "break-words")
+    expect(panel).not.toHaveClass("w-[520px]", "min-w-[520px]", "whitespace-nowrap")
+    expect(screen.getByTestId("watchlists-orientation-description")).toHaveClass("break-words")
+
+    const mainDocs = screen.getByTestId("watchlists-main-docs-link")
+    const contextDocs = screen.getByTestId("watchlists-context-docs-link")
+    const reportIssue = screen.getByRole("link", { name: "Report an issue" })
+    expect(mainDocs.compareDocumentPosition(contextDocs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(contextDocs.compareDocumentPosition(reportIssue) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    const controls = panel.querySelectorAll<HTMLElement>(
+      'a[href], button, [role="switch"]'
+    )
+    expect(controls.length).toBeGreaterThan(5)
+    for (const control of controls) {
+      expect(control).toBeVisible()
+    }
   })
 
   it("restores Help trigger focus after escaping the guided tour", async () => {

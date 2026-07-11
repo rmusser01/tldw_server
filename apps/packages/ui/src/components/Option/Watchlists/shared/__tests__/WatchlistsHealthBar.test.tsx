@@ -2,6 +2,7 @@
 
 import React from "react"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { WatchlistsHealthBar } from "../WatchlistsHealthBar"
 import type { WatchlistsOverviewData } from "@/services/watchlists-overview"
@@ -212,5 +213,32 @@ describe("WatchlistsHealthBar", () => {
     fireEvent.click(screen.getByTestId("watchlists-health-open-activity"))
 
     expect(onNavigate).toHaveBeenCalledWith("runs")
+  })
+
+  it("uses native buttons for health cards without nested interactive controls", async () => {
+    const user = userEvent.setup()
+    const onNavigate = vi.fn()
+    render(<WatchlistsHealthBar onNavigate={onNavigate} />)
+
+    await screen.findByText("No watchlist data yet")
+    const disclosure = screen.queryByRole("button", { name: "Show Watchlists health details" })
+    if (disclosure) await user.click(disclosure)
+
+    const feedsCard = screen.getByRole("button", { name: /Feeds\s+0/ })
+    const monitorsCard = screen.getByRole("button", { name: /Monitors\s+0\/0/ })
+    expect(feedsCard).toHaveAttribute("type", "button")
+    expect(feedsCard).not.toHaveAttribute("role")
+    expect(feedsCard.querySelector("button, input, select, textarea, a[href]")).toBeNull()
+
+    await user.click(feedsCard)
+    expect(onNavigate).toHaveBeenCalledWith("sources")
+
+    monitorsCard.focus()
+    await user.keyboard("{Enter}")
+    expect(onNavigate).toHaveBeenCalledWith("jobs")
+
+    const activityCard = screen.getByRole("button", { name: /Activity\s+OK/ })
+    expect(activityCard.tagName).toBe("BUTTON")
+    expect(activityCard).not.toHaveAttribute("tabindex")
   })
 })
