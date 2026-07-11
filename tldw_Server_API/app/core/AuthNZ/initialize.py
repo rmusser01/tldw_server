@@ -42,6 +42,7 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError as AuthNZDa
 from tldw_Server_API.app.core.AuthNZ.migrations import check_migration_status, ensure_authnz_tables
 from tldw_Server_API.app.core.AuthNZ.monitoring import get_authnz_monitor
 from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
+from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 from tldw_Server_API.app.core.AuthNZ.scheduler import start_authnz_scheduler
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
 from tldw_Server_API.app.core.AuthNZ.username_utils import normalize_admin_username
@@ -67,10 +68,31 @@ _AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS = (
     ValueError,
     UnicodeDecodeError,
 )
+_AUTHNZ_ADMIN_CREATION_EXCEPTIONS = (
+    *_AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS,
+    AuthNZDatabaseError,
+)
 _AUTHNZ_SINGLE_USER_OPTIONAL_BACKFILL_EXCEPTIONS = (
     *_AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS,
     AuthNZDatabaseError,
 )
+
+
+async def _ensure_admin_role_membership(user_id: int) -> None:
+    """Assign and verify canonical admin membership during initialization."""
+    repo = await AuthnzUsersRepo.from_pool()
+    await repo.assign_role_if_missing(user_id=user_id, role_name="admin")
+    if not await repo.has_role_assignment(user_id=user_id, role_name="admin"):
+        raise AuthNZDatabaseError("Canonical admin role membership is unavailable")
+
+
+async def _repair_existing_admin_memberships(users_db) -> None:
+    """Repair canonical membership for users already marked as admins."""
+    for admin_user in await users_db.list_users(role="admin"):
+        user_id = admin_user.get("id")
+        if user_id is None:
+            raise AuthNZDatabaseError("Existing admin user has no identifier")
+        await _ensure_admin_role_membership(int(user_id))
 
 #######################################################################################################################
 #
@@ -1016,6 +1038,14 @@ async def create_admin_user():
 
         # Create user
         users_db = await get_users_db()
+        existing = await users_db.get_user_by_username(username)
+        if existing:
+            if str(existing.get("role") or "").lower() != "admin":
+                raise RuntimeError("Existing user is not an admin")
+            await _ensure_admin_role_membership(int(existing["id"]))
+            print("\n✅ Existing admin canonical membership verified")
+            return True
+
         admin_user = await users_db.create_user(
             username=username,
             email=email,
@@ -1023,6 +1053,7 @@ async def create_admin_user():
             role="admin",
             is_superuser=True
         )
+        await _ensure_admin_role_membership(int(admin_user["id"]))
 
         # Create initial API key for admin
         api_manager = await get_api_key_manager()
@@ -1045,7 +1076,7 @@ async def create_admin_user():
 
         return True
 
-    except _AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS as e:
+    except _AUTHNZ_ADMIN_CREATION_EXCEPTIONS as e:
         print(f"❌ Failed to create admin user: {e}")
         return False
 
@@ -1345,6 +1376,7 @@ async def main(*, non_interactive: bool = False, test_setup: bool = False):
                     if should_create and not await create_admin_user():
                         print("\n⚠️  Admin user creation failed")
             else:
+                await _repair_existing_admin_memberships(users_db)
                 print(f"\n✅ Found {len(existing_users)} existing user(s)")
         except _AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS as e:
             logger.warning(f"Could not check existing users: {e}")

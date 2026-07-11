@@ -39,6 +39,8 @@ class _FakeUserDb:
 
     async def execute(self, query: str, params=None):
         self.queries.append((query, params))
+        if "SELECT id, is_system FROM roles" in query:
+            return _FakeCursor((2, 1))
         if "SELECT metadata FROM users" in query:
             return _FakeCursor((self.metadata,))
         return _FakeCursor()
