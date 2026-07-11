@@ -10,6 +10,7 @@ import {
 } from "lucide-react"
 import { Button, Dropdown, Input, Modal, Tooltip } from "antd"
 import type { MenuProps } from "antd"
+import type { MenuItemType } from "antd/es/menu/interface"
 import type { WorkspaceSourceSavedViewResponse } from "@/services/tldw/domains/workspace-api"
 import type { SourceListViewState } from "./source-list-view"
 import {
@@ -132,84 +133,22 @@ const issueFieldLabel = (field: string): string =>
     .replaceAll("_", " ")
     .replace(/^./, (character) => character.toUpperCase())
 
-const SavedViewActions: React.FC<{
-  view: WorkspaceSourceSavedViewResponse
-  controller: SourceSavedViewsController
-  openOverlay: (
-    kind: Exclude<SourceViewOverlayKind, "save">,
-    invoker: HTMLElement,
-    view: WorkspaceSourceSavedViewResponse
-  ) => void
-}> = ({ view, controller, openOverlay }) => (
-  <span className="ml-auto inline-flex shrink-0 items-center gap-0.5">
-    {view.valid ? (
-      <Tooltip title={`Replace saved view ${view.name}`}>
-        <button
-          type="button"
-          data-source-view-action
-          aria-label={`Replace saved view ${view.name}`}
-          disabled={!controller.available || controller.busy}
-          onClick={(event) => {
-            event.preventDefault()
-            event.stopPropagation()
-            openOverlay("replace", event.currentTarget, view)
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.stopPropagation()
-            }
-          }}
-          className="inline-flex h-7 w-7 items-center justify-center rounded text-text-muted hover:bg-surface2 hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <Save className="h-3.5 w-3.5" aria-hidden="true" />
-        </button>
-      </Tooltip>
-    ) : (
-      <Tooltip title={`Reset saved view ${view.name}`}>
-        <button
-          type="button"
-          data-source-view-action
-          aria-label={`Reset saved view ${view.name}`}
-          disabled={!controller.available || controller.busy}
-          onClick={(event) => {
-            event.preventDefault()
-            event.stopPropagation()
-            openOverlay("reset", event.currentTarget, view)
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.stopPropagation()
-            }
-          }}
-          className="inline-flex h-7 w-7 items-center justify-center rounded text-text-muted hover:bg-surface2 hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
-        </button>
-      </Tooltip>
-    )}
-    <Tooltip title={`Delete saved view ${view.name}`}>
-      <button
-        type="button"
-        data-source-view-action
-        aria-label={`Delete saved view ${view.name}`}
-        disabled={!controller.available || controller.busy}
-        onClick={(event) => {
-          event.preventDefault()
-          event.stopPropagation()
-          openOverlay("delete", event.currentTarget, view)
-        }}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === " ") {
-            event.stopPropagation()
-          }
-        }}
-        className="inline-flex h-7 w-7 items-center justify-center rounded text-text-muted hover:bg-error/10 hover:text-error focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-error disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-      </button>
-    </Tooltip>
-  </span>
-)
+type SpaceActivatableMenuItem = MenuItemType &
+  Pick<React.LiHTMLAttributes<HTMLLIElement>, "onKeyUp">
+
+const menuCommand = (item: MenuItemType): SpaceActivatableMenuItem => ({
+  ...item,
+  onKeyUp: (event) => {
+    if (
+      event.key !== " " ||
+      event.currentTarget.getAttribute("aria-disabled") === "true"
+    ) {
+      return
+    }
+    event.preventDefault()
+    event.currentTarget.click()
+  }
+})
 
 export const SourceViewControls: React.FC<SourceViewControlsProps> = ({
   controller,
@@ -256,10 +195,12 @@ export const SourceViewControls: React.FC<SourceViewControlsProps> = ({
         key: "built-in",
         type: "group",
         label: "Built-in views",
-        children: SOURCE_VIEW_PRESET_ORDER.map((key) => ({
-          key: `preset:${key}`,
-          label: SOURCE_VIEW_PRESETS[key].label
-        }))
+        children: SOURCE_VIEW_PRESET_ORDER.map((key) =>
+          menuCommand({
+            key: `preset:${key}`,
+            label: SOURCE_VIEW_PRESETS[key].label
+          })
+        )
       },
       {
         key: "saved",
@@ -268,8 +209,7 @@ export const SourceViewControls: React.FC<SourceViewControlsProps> = ({
         children:
           controller.views.length > 0
             ? controller.views.map((view) => ({
-                key: `saved:${view.id}`,
-                disabled: !view.valid,
+                key: `saved-view:${view.id}`,
                 label: (
                   <span className="flex min-w-[15rem] items-center gap-2">
                     {!view.valid && (
@@ -294,13 +234,44 @@ export const SourceViewControls: React.FC<SourceViewControlsProps> = ({
                         Modified
                       </span>
                     )}
-                    <SavedViewActions
-                      view={view}
-                      controller={controller}
-                      openOverlay={openOverlay}
-                    />
                   </span>
-                )
+                ),
+                children: [
+                  ...(view.valid
+                    ? [
+                        menuCommand({
+                          key: `saved:${view.id}:apply`,
+                          label: `Apply saved view ${view.name}`,
+                          disabled: controller.busy
+                        }),
+                        menuCommand({
+                          key: `saved:${view.id}:replace`,
+                          label: `Replace saved view ${view.name}`,
+                          icon: <Save className="h-3.5 w-3.5" aria-hidden="true" />,
+                          disabled: !controller.available || controller.busy
+                        })
+                      ]
+                    : [
+                        menuCommand({
+                          key: `saved:${view.id}:reset`,
+                          label: `Reset saved view ${view.name}`,
+                          icon: (
+                            <RotateCcw
+                              className="h-3.5 w-3.5"
+                              aria-hidden="true"
+                            />
+                          ),
+                          disabled: !controller.available || controller.busy
+                        })
+                      ]),
+                  menuCommand({
+                    key: `saved:${view.id}:delete`,
+                    label: `Delete saved view ${view.name}`,
+                    icon: <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />,
+                    danger: true,
+                    disabled: !controller.available || controller.busy
+                  })
+                ]
               }))
             : [
                 {
@@ -311,10 +282,10 @@ export const SourceViewControls: React.FC<SourceViewControlsProps> = ({
               ]
       }
     ],
-    [controller, openOverlay]
+    [controller]
   )
 
-  const handleMenuClick: MenuProps["onClick"] = ({ key }) => {
+  const handleMenuClick: MenuProps["onClick"] = ({ key, domEvent }) => {
     if (key.startsWith("preset:")) {
       const presetKey = key.slice("preset:".length) as keyof typeof SOURCE_VIEW_PRESETS
       const preset = SOURCE_VIEW_PRESETS[presetKey]
@@ -326,44 +297,27 @@ export const SourceViewControls: React.FC<SourceViewControlsProps> = ({
           )
         }
       }
-    } else if (key.startsWith("saved:")) {
-      const view = controller.views.find(
-        (candidate) => candidate.id === key.slice("saved:".length)
+    } else {
+      const view = controller.views.find((candidate) =>
+        (["apply", "replace", "reset", "delete"] as const).some(
+          (command) => key === `saved:${candidate.id}:${command}`
+        )
       )
-      if (view?.valid) controller.applyView(view)
+      if (!view) return
+      if (key.endsWith(":apply") && view.valid) {
+        controller.applyView(view)
+      } else if (key.endsWith(":replace") && view.valid) {
+        openOverlay("replace", domEvent.currentTarget as HTMLElement, view)
+        return
+      } else if (key.endsWith(":reset") && !view.valid) {
+        openOverlay("reset", domEvent.currentTarget as HTMLElement, view)
+        return
+      } else if (key.endsWith(":delete")) {
+        openOverlay("delete", domEvent.currentTarget as HTMLElement, view)
+        return
+      }
     }
     setMenuOpen(false)
-  }
-
-  const handleMenuKeyDown: React.KeyboardEventHandler<HTMLElement> = (event) => {
-    const items = Array.from(
-      event.currentTarget.querySelectorAll<HTMLElement>(
-        "[role='menuitem']:not([aria-disabled='true']), [data-source-view-action]:not(:disabled)"
-      )
-    )
-    const activeElement = document.activeElement as HTMLElement | null
-    const activeItem = activeElement?.matches("[data-source-view-action]")
-      ? activeElement
-      : (activeElement?.closest("[role='menuitem']") as HTMLElement | null)
-    const activeIndex = activeItem ? items.indexOf(activeItem) : -1
-
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault()
-      const delta = event.key === "ArrowDown" ? 1 : -1
-      const nextIndex =
-        activeIndex < 0
-          ? event.key === "ArrowDown"
-            ? 0
-            : items.length - 1
-          : (activeIndex + delta + items.length) % items.length
-      items[nextIndex]?.focus()
-      return
-    }
-
-    if ((event.key === "Enter" || event.key === " ") && activeIndex >= 0) {
-      event.preventDefault()
-      activeItem?.click()
-    }
   }
 
   const unavailableDescriptionId = React.useId()
@@ -377,7 +331,6 @@ export const SourceViewControls: React.FC<SourceViewControlsProps> = ({
         menu={{
           items: menuItems,
           onClick: handleMenuClick,
-          onKeyDown: handleMenuKeyDown,
           selectable: false
         }}
       >
@@ -388,12 +341,6 @@ export const SourceViewControls: React.FC<SourceViewControlsProps> = ({
           aria-haspopup="menu"
           aria-expanded={menuOpen}
           icon={<Bookmark className="h-3.5 w-3.5" aria-hidden="true" />}
-          onKeyDown={(event) => {
-            if (["Enter", " ", "ArrowDown"].includes(event.key)) {
-              event.preventDefault()
-              setMenuOpen(true)
-            }
-          }}
         >
           Views
           <ChevronDown className="ml-1 h-3 w-3" aria-hidden="true" />
@@ -443,15 +390,45 @@ export const SourceViewOverlayHost: React.FC<SourceViewOverlayHostProps> = ({
   const handledRequestIdRef = React.useRef<number | null>(null)
   const announcementAtOpenRef = React.useRef<string | null>(null)
   const mutationCycleObservedRef = React.useRef(false)
+  const pendingFocusRestoreRef = React.useRef<{
+    token: number
+    invoker: HTMLElement | null
+  } | null>(null)
+  const focusRestoreSequenceRef = React.useRef(0)
+  const lastRestoredFocusTokenRef = React.useRef(0)
+  const [focusRestoreToken, setFocusRestoreToken] = React.useState(0)
 
-  const close = React.useCallback((restoreFocus = true) => {
-    setActiveRequest((current) => {
-      if (restoreFocus) restoreOverlayFocus(current?.invoker ?? null)
-      return null
-    })
-    setName("")
-    setNameTouched(false)
-  }, [])
+  const close = React.useCallback(
+    (restoreFocus = true) => {
+      if (!activeRequest) return
+      if (restoreFocus) {
+        focusRestoreSequenceRef.current += 1
+        const token = focusRestoreSequenceRef.current
+        pendingFocusRestoreRef.current = {
+          token,
+          invoker: activeRequest.invoker
+        }
+        setFocusRestoreToken(token)
+      }
+      setActiveRequest(null)
+      setName("")
+      setNameTouched(false)
+    },
+    [activeRequest]
+  )
+
+  React.useEffect(() => {
+    const pending = pendingFocusRestoreRef.current
+    if (
+      !pending ||
+      pending.token !== focusRestoreToken ||
+      pending.token <= lastRestoredFocusTokenRef.current
+    ) {
+      return
+    }
+    lastRestoredFocusTokenRef.current = pending.token
+    restoreOverlayFocus(pending.invoker)
+  }, [focusRestoreToken])
 
   React.useLayoutEffect(() => {
     if (!request || handledRequestIdRef.current === request.id) return
@@ -662,14 +639,6 @@ export const SourceViewOverlayHost: React.FC<SourceViewOverlayHostProps> = ({
         onCancel={cancel}
         destroyOnHidden
         focusable={{ focusTriggerAfterClose: false }}
-        modalRender={(node) =>
-          activeRequest?.kind !== "save" || duplicate
-            ? React.cloneElement(node as React.ReactElement<Record<string, unknown>>, {
-                role: "alertdialog",
-                "aria-label": title
-              })
-            : node
-        }
         afterOpenChange={(open) => {
           if (open && activeRequest?.kind === "save" && !duplicate) {
             window.setTimeout(() => inputRef.current?.focus(), 0)

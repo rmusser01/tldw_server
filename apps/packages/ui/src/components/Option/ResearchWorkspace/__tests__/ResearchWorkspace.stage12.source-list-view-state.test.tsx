@@ -63,6 +63,19 @@ const validView = (
 const latestController = (): SourceSavedViewsController =>
   savedViewHarness.paneControllers.at(-1)! as SourceSavedViewsController
 
+const openSavedViewCommands = async (
+  user: ReturnType<typeof userEvent.setup>,
+  viewName: string
+) => {
+  const submenu = await screen.findByRole("menuitem", {
+    name: new RegExp(`^${viewName}`)
+  })
+  await user.hover(submenu)
+  await screen.findByRole("menuitem", {
+    name: `Apply saved view ${viewName}`
+  })
+}
+
 const testState = {
   isMobile: false,
   storeHydrated: true,
@@ -585,12 +598,13 @@ describe("ResearchWorkspace source list view state", () => {
       savedViewHarness.rows = [validView("workspace-1")]
       const { rerender } = render(<ResearchWorkspace />)
       await user.click(screen.getByRole("button", { name: "Source views" }))
+      await openSavedViewCommands(user, "Current filters")
       await user.click(
-        await screen.findByRole("button", {
+        screen.getByRole("menuitem", {
           name: "Replace saved view Current filters"
         })
       )
-      await screen.findByRole("alertdialog", {
+      await screen.findByRole("dialog", {
         name: "Replace saved view?"
       })
 
@@ -598,7 +612,7 @@ describe("ResearchWorkspace source list view state", () => {
       rerender(<ResearchWorkspace />)
 
       expect(
-        screen.queryByRole("alertdialog", { name: "Replace saved view?" })
+        screen.queryByRole("dialog", { name: "Replace saved view?" })
       ).not.toBeInTheDocument()
       expect(savedViewHarness.updateWorkspaceSourceView).not.toHaveBeenCalled()
     }
@@ -664,7 +678,10 @@ describe("ResearchWorkspace source list view state", () => {
     expect(
       await screen.findByRole("menuitem", { name: /Current filters/ })
     ).toBeInTheDocument()
-    await user.click(screen.getByRole("menuitem", { name: /Current filters/ }))
+    await openSavedViewCommands(user, "Current filters")
+    await user.click(
+      screen.getByRole("menuitem", { name: "Apply saved view Current filters" })
+    )
     expect(latestController().activeViewId).toBe(savedViewHarness.rows[0]?.id)
     expect(screen.getByTestId("source-list-type-state")).toHaveTextContent("website")
     expect(screen.getByTestId("source-list-sort-state")).toHaveTextContent("name_asc")

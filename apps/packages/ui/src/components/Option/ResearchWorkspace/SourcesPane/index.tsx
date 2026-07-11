@@ -2057,6 +2057,18 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
         className="custom-scrollbar shrink-0 overflow-y-auto border-b border-border"
         style={sources.length > 0 ? { maxHeight: "min(55%, 30rem)" } : undefined}
       >
+        {sourceSavedViewsController &&
+          onApplySourceListViewState &&
+          onOpenSourceViewOverlay && (
+            <div className="px-4 pb-2">
+              <SourceViewControls
+                controller={sourceSavedViewsController}
+                sourceListViewState={sourceListViewState}
+                onApplySourceListViewState={onApplySourceListViewState}
+                onOpenOverlay={onOpenSourceViewOverlay}
+              />
+            </div>
+          )}
         {/* Search and select controls */}
         {sources.length > 0 && (
           <div className="px-4 py-2">
@@ -2069,16 +2081,6 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
               size="small"
               allowClear
             />
-            {sourceSavedViewsController &&
-              onApplySourceListViewState &&
-              onOpenSourceViewOverlay && (
-                <SourceViewControls
-                  controller={sourceSavedViewsController}
-                  sourceListViewState={sourceListViewState}
-                  onApplySourceListViewState={onApplySourceListViewState}
-                  onOpenOverlay={onOpenSourceViewOverlay}
-                />
-              )}
             <SourceAdvancedControls
               viewState={sourceListViewState}
               summary={sourceFilterSummary}

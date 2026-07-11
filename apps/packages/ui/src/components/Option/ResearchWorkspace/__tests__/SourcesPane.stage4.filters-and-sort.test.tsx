@@ -1,6 +1,8 @@
 import React from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import type { WorkspaceSourceSavedViewResponse } from "@/services/tldw/domains/workspace-api"
 import { SourcesPane } from "../SourcesPane"
 import {
   DEFAULT_SOURCE_LIST_VIEW_STATE,
@@ -161,7 +163,9 @@ const ControlledSourcesPane = ({
   )
 }
 
-const savedViewsController = (): SourceSavedViewsController =>
+const savedViewsController = (
+  overrides: Partial<SourceSavedViewsController> = {}
+): SourceSavedViewsController =>
   ({
     available: true,
     generation: 4,
@@ -221,9 +225,11 @@ const savedViewsController = (): SourceSavedViewsController =>
     applyView: vi.fn(),
     createView: vi.fn(),
     confirmReplace: vi.fn(),
+    dismissDuplicateConflict: vi.fn(),
     replaceView: vi.fn(),
     resetView: vi.fn(),
-    deleteView: vi.fn()
+    deleteView: vi.fn(),
+    ...overrides
   }) as SourceSavedViewsController
 
 const getRenderedSourceTitles = (): string[] =>
@@ -278,6 +284,7 @@ describe("SourcesPane stage 4 filters and sort", () => {
   })
 
   it("renders portal-free saved-view controls and preserves search, folder, selection, and expanded state", async () => {
+    const user = userEvent.setup()
     const model = savedViewsController()
     const openOverlay = vi.fn()
     workspaceStoreState.sourceSearchQuery = "Alpha"
@@ -312,9 +319,69 @@ describe("SourcesPane stage 4 filters and sort", () => {
     )
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("button", { name: "Source views" }))
-    fireEvent.click(await screen.findByRole("menuitem", { name: /Saved PDFs/ }))
+    await user.click(screen.getByRole("button", { name: "Source views" }))
+    const savedView = await screen.findByRole("menuitem", { name: /Saved PDFs/ })
+    await user.hover(savedView)
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Apply saved view Saved PDFs" })
+    )
     expect(model.applyView).toHaveBeenCalledWith(model.views[0])
+  })
+
+  it("keeps saved-view recovery controls available when the workspace has no sources", async () => {
+    const user = userEvent.setup()
+    workspaceStoreState.sources = []
+    const valid = savedViewsController().views[0]!
+    const invalid = {
+      ...valid,
+      valid: false,
+      state: null,
+      invalid_reason: "unsupported_schema_version"
+    } as WorkspaceSourceSavedViewResponse
+    const model = savedViewsController({
+      views: [invalid],
+      limitState: {
+        limit: 100,
+        retryable: false,
+        guidance: "Delete an existing saved view before creating another."
+      }
+    })
+    const openOverlay = vi.fn()
+
+    render(
+      <ControlledSourcesPane
+        savedViewsController={model}
+        onOpenSourceViewOverlay={openOverlay}
+      />
+    )
+
+    expect(screen.getByRole("button", { name: "Source views" })).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Source views" }))
+    const invalidView = await screen.findByRole("menuitem", {
+      name: /Saved PDFs.*Unsupported schema version/i
+    })
+    await user.hover(invalidView)
+    expect(
+      await screen.findByRole("menuitem", {
+        name: "Delete saved view Saved PDFs"
+      })
+    ).toBeInTheDocument()
+    const reset = await screen.findByRole("menuitem", {
+      name: "Reset saved view Saved PDFs"
+    })
+    reset.focus()
+    expect(reset).toHaveFocus()
+    fireEvent.keyDown(reset, {
+      key: "Enter",
+      code: "Enter",
+      keyCode: 13,
+      which: 13
+    })
+
+    expect(openOverlay).toHaveBeenCalledTimes(1)
+    expect(openOverlay).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "reset", view: invalid })
+    )
   })
 
   it.each([false, true])(

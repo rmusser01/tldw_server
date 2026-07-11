@@ -122,12 +122,44 @@ const Harness = ({
   )
 }
 
+const openSavedViewCommands = async (
+  user: ReturnType<typeof userEvent.setup>,
+  viewName: string
+) => {
+  const submenu = await screen.findByRole("menuitem", {
+    name: new RegExp(`^${viewName}`)
+  })
+  await user.hover(submenu)
+  await screen.findByRole("menuitem", {
+    name: new RegExp(`^(Apply|Reset) saved view ${viewName}$`)
+  })
+  return submenu
+}
+
+const activateMenuItemByKeyboard = (item: HTMLElement) => {
+  item.focus()
+  expect(item).toHaveFocus()
+  fireEvent.keyDown(item, {
+    key: "Enter",
+    code: "Enter",
+    keyCode: 13,
+    which: 13
+  })
+  fireEvent.keyUp(item, {
+    key: "Enter",
+    code: "Enter",
+    keyCode: 13,
+    which: 13
+  })
+}
+
 describe("SourceViewControls", () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
   it("renders fixed-order grouped built-ins and saved views and applies them by keyboard", async () => {
+    const user = userEvent.setup()
     const model = controller()
     const applyState = vi.fn()
     render(
@@ -140,11 +172,12 @@ describe("SourceViewControls", () => {
     )
 
     const trigger = screen.getByRole("button", { name: "Source views" })
-    fireEvent.keyDown(trigger, { key: "Enter" })
+    trigger.focus()
+    await user.keyboard("{Enter}")
 
     const menu = await screen.findByRole("menu")
     const labels = within(menu)
-      .getAllByRole("menuitem")
+      .getAllByRole("menuitem", { hidden: false })
       .map((item) => item.textContent?.replace(/\s+/g, " ").trim())
     expect(labels).toEqual([
       "Needs review",
@@ -160,13 +193,18 @@ describe("SourceViewControls", () => {
     expect(within(menu).getByText("Built-in views")).toBeInTheDocument()
     expect(within(menu).getByText("Saved views")).toBeInTheDocument()
 
-    menu.focus()
-    fireEvent.keyDown(menu, { key: "ArrowDown", keyCode: 40, which: 40 })
-    fireEvent.keyDown(menu, { key: "Enter", keyCode: 13, which: 13 })
-    await waitFor(() => expect(applyState).toHaveBeenCalled())
+    const needsReview = within(menu).getByRole("menuitem", {
+      name: "Needs review"
+    })
+    activateMenuItemByKeyboard(needsReview)
+    expect(applyState).toHaveBeenCalledTimes(1)
 
-    fireEvent.keyDown(trigger, { key: " " })
+    trigger.focus()
+    await user.keyboard(" ")
     expect(await screen.findByRole("menu")).toBeInTheDocument()
+    const pdfs = screen.getByRole("menuitem", { name: "PDFs" })
+    activateMenuItemByKeyboard(pdfs)
+    expect(applyState).toHaveBeenCalledTimes(2)
     fireEvent.keyDown(document, { key: "Escape" })
     await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument())
   })
@@ -214,9 +252,17 @@ describe("SourceViewControls", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Source views" }))
     const invalid = await screen.findByRole("menuitem", { name: /Old view/ })
-    expect(invalid).toHaveAttribute("aria-disabled", "true")
-    expect(screen.getByRole("button", { name: "Reset saved view Old view" })).toBeEnabled()
-    expect(screen.getByRole("button", { name: "Delete saved view Old view" })).toBeEnabled()
+    expect(invalid).not.toHaveAttribute("aria-disabled", "true")
+    await openSavedViewCommands(userEvent.setup(), "Old view")
+    expect(
+      screen.getByRole("menuitem", { name: "Reset saved view Old view" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("menuitem", { name: "Delete saved view Old view" })
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole("menuitem", { name: "Apply saved view Old view" })
+    ).not.toBeInTheDocument()
   })
 
   it("routes Enter and Space on row actions without applying the saved view", async () => {
@@ -225,25 +271,29 @@ describe("SourceViewControls", () => {
     render(<Harness model={model} />)
 
     await user.click(screen.getByRole("button", { name: "Source views" }))
-    const replace = await screen.findByRole("button", {
+    await openSavedViewCommands(user, "My PDFs")
+    const replace = await screen.findByRole("menuitem", {
       name: "Replace saved view My PDFs"
     })
-    replace.focus()
-    await user.keyboard("{Enter}")
+    activateMenuItemByKeyboard(replace)
     expect(
-      await screen.findByRole("alertdialog", { name: "Replace saved view?" })
+      await screen.findByRole("dialog", { name: "Replace saved view?" })
     ).toBeInTheDocument()
+    expect(screen.getAllByRole("dialog", { name: "Replace saved view?" })).toHaveLength(1)
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
     expect(model.applyView).not.toHaveBeenCalled()
 
     await user.click(screen.getByRole("button", { name: "Cancel" }))
     await user.click(screen.getByRole("button", { name: "Source views" }))
-    const deleteAction = await screen.findByRole("button", {
+    await openSavedViewCommands(user, "My PDFs")
+    const deleteAction = await screen.findByRole("menuitem", {
       name: "Delete saved view My PDFs"
     })
     deleteAction.focus()
+    expect(deleteAction).toHaveFocus()
     await user.keyboard(" ")
     expect(
-      await screen.findByRole("alertdialog", { name: "Delete saved view?" })
+      await screen.findByRole("dialog", { name: "Delete saved view?" })
     ).toBeInTheDocument()
     expect(model.applyView).not.toHaveBeenCalled()
   })
@@ -255,14 +305,14 @@ describe("SourceViewControls", () => {
 
     await user.click(screen.getByRole("button", { name: "Source views" }))
     const invalid = await screen.findByRole("menuitem", { name: /Old view/ })
-    expect(invalid).toHaveAttribute("aria-disabled", "true")
+    expect(invalid).not.toHaveAttribute("aria-disabled", "true")
     expect(within(invalid).getByText(/Unsupported schema version/i)).toBeInTheDocument()
 
-    const reset = screen.getByRole("button", { name: "Reset saved view Old view" })
-    reset.focus()
-    await user.keyboard("{Enter}")
+    await openSavedViewCommands(user, "Old view")
+    const reset = screen.getByRole("menuitem", { name: "Reset saved view Old view" })
+    activateMenuItemByKeyboard(reset)
     expect(
-      await screen.findByRole("alertdialog", { name: "Reset saved view?" })
+      await screen.findByRole("dialog", { name: "Reset saved view?" })
     ).toBeInTheDocument()
     expect(model.applyView).not.toHaveBeenCalled()
   })
@@ -313,7 +363,7 @@ describe("SourceViewControls", () => {
       state: validView().state
     }
     rerender(<Harness model={controller({ duplicateConflict: duplicate, confirmReplace })} />)
-    const replacement = await screen.findByRole("alertdialog", {
+    const replacement = await screen.findByRole("dialog", {
       name: "Replace saved view?"
     })
     fireEvent.click(within(replacement).getByRole("button", { name: "Replace" }))
@@ -364,11 +414,12 @@ describe("SourceViewControls", () => {
     )
 
     await user.click(screen.getByRole("button", { name: "Source views" }))
+    await openSavedViewCommands(user, "My PDFs")
     await user.click(
-      screen.getByRole("button", { name: "Replace saved view My PDFs" })
+      screen.getByRole("menuitem", { name: "Replace saved view My PDFs" })
     )
 
-    const dialog = await screen.findByRole("alertdialog", {
+    const dialog = await screen.findByRole("dialog", {
       name: "Replace saved view?"
     })
     expect(within(dialog).getByRole("alert")).toHaveTextContent(/File size max/i)
@@ -421,12 +472,13 @@ describe("SourceViewControls", () => {
     await user.click(within(reopened).getByRole("button", { name: "Cancel" }))
 
     await user.click(screen.getByRole("button", { name: "Source views" }))
+    await openSavedViewCommands(user, "My PDFs")
     await user.click(
-      screen.getByRole("button", { name: "Replace saved view My PDFs" })
+      screen.getByRole("menuitem", { name: "Replace saved view My PDFs" })
     )
     expect(
       within(
-        await screen.findByRole("alertdialog", { name: "Replace saved view?" })
+        await screen.findByRole("dialog", { name: "Replace saved view?" })
       ).getByRole("button", { name: "Replace" })
     ).toBeEnabled()
   })
@@ -450,7 +502,7 @@ describe("SourceViewControls", () => {
       />
     )
     expect(
-      await screen.findByRole("alertdialog", { name: "Replace saved view?" })
+      await screen.findByRole("dialog", { name: "Replace saved view?" })
     ).toBeInTheDocument()
 
     await user.click(screen.getByRole("button", { name: "Cancel" }))
@@ -461,7 +513,7 @@ describe("SourceViewControls", () => {
     expect(
       await screen.findByRole("dialog", { name: "Save source view" })
     ).toBeInTheDocument()
-    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
+    expect(screen.queryByRole("dialog", { name: "Replace saved view?" })).not.toBeInTheDocument()
   })
 
   it.each([
@@ -504,10 +556,11 @@ describe("SourceViewControls", () => {
     const model = controller({ generation: 1 })
     render(<Harness model={model} />)
     await user.click(screen.getByRole("button", { name: "Source views" }))
+    await openSavedViewCommands(user, "My PDFs")
     await user.click(
-      screen.getByRole("button", { name: "Replace saved view My PDFs" })
+      screen.getByRole("menuitem", { name: "Replace saved view My PDFs" })
     )
-    const dialog = await screen.findByRole("alertdialog", {
+    const dialog = await screen.findByRole("dialog", {
       name: "Replace saved view?"
     })
 
@@ -531,6 +584,31 @@ describe("SourceViewControls", () => {
         screen.getByRole("complementary", { name: "Sources" })
       )
     )
+  })
+
+  it("restores fallback focus exactly once in StrictMode", async () => {
+    const user = userEvent.setup()
+    const model = controller()
+    const { rerender } = render(
+      <React.StrictMode>
+        <Harness model={model} />
+      </React.StrictMode>
+    )
+    await user.click(screen.getByRole("button", { name: "Save source view" }))
+    expect(
+      await screen.findByRole("dialog", { name: "Save source view" })
+    ).toBeInTheDocument()
+    const landmark = screen.getByRole("complementary", { name: "Sources" })
+    const focus = vi.spyOn(landmark, "focus")
+
+    rerender(
+      <React.StrictMode>
+        <Harness model={model} showControls={false} />
+      </React.StrictMode>
+    )
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+
+    await waitFor(() => expect(focus).toHaveBeenCalledTimes(1))
   })
 
   it("closes after a repeated success announcement completes a new mutation cycle", async () => {
@@ -675,30 +753,41 @@ describe("SourceViewControls", () => {
       />
     )
     expect(
-      await screen.findByRole("alertdialog", { name: "Replace saved view?" })
+      await screen.findByRole("dialog", { name: "Replace saved view?" })
     ).toBeInTheDocument()
 
     rerender(<Harness model={controller({ generation: 9, available })} />)
-    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Replace saved view?" })
+      ).not.toBeInTheDocument()
+    )
     expect(confirmReplace).not.toHaveBeenCalled()
   })
 
-  it("routes invalid Reset and Delete actions through the one overlay host", async () => {
+  it("routes invalid Reset and Delete commands through the one overlay host", async () => {
+    const user = userEvent.setup()
     const model = controller()
     render(<Harness model={model} />)
-    fireEvent.click(screen.getByRole("button", { name: "Source views" }))
-    fireEvent.click(await screen.findByRole("button", { name: "Reset saved view Old view" }))
-    const resetDialog = await screen.findByRole("alertdialog", {
+    await user.click(screen.getByRole("button", { name: "Source views" }))
+    await openSavedViewCommands(user, "Old view")
+    await user.click(
+      screen.getByRole("menuitem", { name: "Reset saved view Old view" })
+    )
+    const resetDialog = await screen.findByRole("dialog", {
       name: "Reset saved view?"
     })
     fireEvent.click(within(resetDialog).getByRole("button", { name: "Reset" }))
     await waitFor(() => expect(model.resetView).toHaveBeenCalledWith(model.views[1]))
 
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
-    fireEvent.click(screen.getByRole("button", { name: "Source views" }))
-    fireEvent.click(await screen.findByRole("button", { name: "Delete saved view Old view" }))
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    await user.click(screen.getByRole("button", { name: "Source views" }))
+    await openSavedViewCommands(user, "Old view")
+    await user.click(
+      screen.getByRole("menuitem", { name: "Delete saved view Old view" })
+    )
     expect(
-      await screen.findByRole("alertdialog", { name: "Delete saved view?" })
+      await screen.findByRole("dialog", { name: "Delete saved view?" })
     ).toBeInTheDocument()
   })
 })
