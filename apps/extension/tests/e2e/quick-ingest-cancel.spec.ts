@@ -89,7 +89,8 @@ test.describe("Quick ingest cancel flow", () => {
                     ]
                   }
                 })
-              }, 500)
+                ;(window as any).__quickIngestLateCompletionEmitted = true
+              }, 0)
               return { ok: true }
             }
             return originalSendMessage(message)
@@ -161,7 +162,9 @@ test.describe("Quick ingest cancel flow", () => {
       })
       await expect(dialog.getByRole("region", { name: /error items/i })).toBeVisible()
 
-      await page.waitForTimeout(1200)
+      await page.waitForFunction(
+        () => (window as any).__quickIngestLateCompletionEmitted === true
+      )
       await expect(dialog.getByTestId("wizard-results-step")).toBeVisible()
     } finally {
       try {
@@ -172,6 +175,7 @@ test.describe("Quick ingest cancel flow", () => {
               restore()
             }
             delete (window as any).__restoreQuickIngestCancelPatch
+            delete (window as any).__quickIngestLateCompletionEmitted
           } catch {
             // ignore best-effort cleanup failures
           }

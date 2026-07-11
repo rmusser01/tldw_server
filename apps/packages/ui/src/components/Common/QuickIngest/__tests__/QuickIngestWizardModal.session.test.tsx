@@ -462,13 +462,11 @@ describe("QuickIngestWizardModal session runtime", () => {
       true
     )
     expect(new Set(renderedModalProps.map((props) => props.styles)).size).toBe(1)
-    expect(renderedModalProps[0].styles.body).toEqual(
-      expect.objectContaining({
-        padding: "0 16px 16px",
-        maxHeight: "calc(100vh - 180px)",
-        overflowY: "auto",
-      })
-    )
+    expect(renderedModalProps[0].styles.body).toEqual({
+      padding: "0 16px 16px",
+      maxHeight: "calc(100vh - 180px)",
+      overflowY: "auto",
+    })
   })
 
   it("keeps quick defaults on the add step when analysis needs a provider", async () => {
