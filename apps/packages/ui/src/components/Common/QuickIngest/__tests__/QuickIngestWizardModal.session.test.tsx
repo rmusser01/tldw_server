@@ -289,8 +289,10 @@ vi.mock("@/components/Common/QuickIngest/WizardResultsStep", async () => {
   return {
     WizardResultsStep: ({
       onOpenCollection,
+      onIngestMore,
     }: {
       onOpenCollection?: (collectionId: string) => void
+      onIngestMore?: () => void
     }) => {
       const { state, reset } = actual.useIngestWizard()
       return (
@@ -309,7 +311,7 @@ vi.mock("@/components/Common/QuickIngest/WizardResultsStep", async () => {
               Open collection
             </button>
           ) : null}
-          <button type="button" onClick={reset}>
+          <button type="button" onClick={onIngestMore || reset}>
             Start over
           </button>
         </div>
@@ -466,6 +468,43 @@ describe("QuickIngestWizardModal session runtime", () => {
       padding: "0 16px 16px",
       maxHeight: "calc(100vh - 180px)",
       overflowY: "auto",
+    })
+  })
+
+  it("starts Ingest More in a new persisted session", async () => {
+    const user = userEvent.setup()
+    const firstSession = useQuickIngestSessionStore.getState().createDraftSession()
+    mocks.startQuickIngestSession.mockResolvedValue({
+      ok: true,
+      sessionId: "qi-direct-first-run",
+    })
+    mocks.submitQuickIngestBatch.mockResolvedValue({
+      ok: true,
+      results: [
+        {
+          id: "queued-url-1",
+          status: "ok",
+          url: "https://example.com/article",
+          type: "html",
+        },
+      ],
+    })
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    await user.click(screen.getByRole("button", { name: "Queue And Process" }))
+    await screen.findByTestId("wizard-results")
+
+    await user.click(screen.getByRole("button", { name: "Start over" }))
+
+    await waitFor(() => {
+      expect(useQuickIngestSessionStore.getState().session?.id).not.toBe(
+        firstSession.id
+      )
+    })
+    expect(useQuickIngestSessionStore.getState().session).toMatchObject({
+      lifecycle: "draft",
+      currentStep: 1,
+      tracking: undefined,
     })
   })
 

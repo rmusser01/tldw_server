@@ -841,6 +841,7 @@ type WizardModalContentProps = {
   markProcessingTracking: (tracking: PersistedQuickIngestTracking) => void
   markInterrupted: (reason?: string) => void
   showSession: () => void
+  replaceWithNewDraft: () => QuickIngestSessionRecord
   shouldAttemptPersistedReattach: boolean
 }
 
@@ -852,6 +853,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   markProcessingTracking,
   markInterrupted,
   showSession,
+  replaceWithNewDraft,
   shouldAttemptPersistedReattach,
 }) => {
   const { t } = useTranslation(["option"])
@@ -1647,6 +1649,10 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     onClose()
   }, [navigate, onClose])
 
+  const handleIngestMore = useCallback(() => {
+    replaceWithNewDraft()
+  }, [replaceWithNewDraft])
+
   const handleOpenWorkspace = useCallback(
     (item: WizardResultItem) => {
       const mediaId = item.mediaId
@@ -1716,6 +1722,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         return (
           <WizardResultsStep
             onClose={onClose}
+            onIngestMore={handleIngestMore}
             onOpenMedia={handleOpenMedia}
             onSearchKnowledge={handleSearchKnowledge}
             onOpenWorkspace={handleOpenWorkspace}
@@ -1731,6 +1738,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     handleOpenMedia,
     handleOpenCollection,
     handleOpenWorkspace,
+    handleIngestMore,
     handleQuickProcess,
     handleRetryConnection,
     handleSearchKnowledge,
@@ -1783,6 +1791,7 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
     markInterrupted,
     createDraftSession,
     showSession,
+    replaceWithNewDraft,
   } =
     useQuickIngestSessionStore(
       useShallow((store) => ({
@@ -1792,6 +1801,7 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
         markInterrupted: store.markInterrupted,
         createDraftSession: store.createDraftSession,
         showSession: store.showSession,
+        replaceWithNewDraft: store.replaceWithNewDraft,
       }))
     )
 
@@ -1835,6 +1845,7 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
         markProcessingTracking={markProcessingTracking}
         markInterrupted={markInterrupted}
         showSession={showSession}
+        replaceWithNewDraft={replaceWithNewDraft}
         shouldAttemptPersistedReattach={
           session.lifecycle === "processing" &&
           session.tracking?.mode === "webui-direct" &&

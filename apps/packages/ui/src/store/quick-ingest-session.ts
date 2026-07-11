@@ -635,7 +635,9 @@ export const createQuickIngestSessionStore = () =>
                 ...(next.resultSummary || {}),
               },
               tracking:
-                next.tracking === undefined
+                next.lifecycle === "draft"
+                  ? undefined
+                  : next.tracking === undefined
                   ? base.tracking
                   : mergeTracking(base.tracking, next.tracking),
               updatedAt: Date.now(),
