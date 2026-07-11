@@ -350,9 +350,6 @@ export const LatestBriefing: React.FC<LatestBriefingProps> = ({
             <Button type="primary" className={ACTION_CLASS} onClick={() => onTestNow(emptyJobId)}>
               {t("watchlists:overview.latest.actions.testNow", "Test now")}
             </Button>
-            <Button className={ACTION_CLASS} onClick={onViewReports}>
-              {t("watchlists:overview.latest.actions.viewReports", "View all reports")}
-            </Button>
           </div>
         </div>
       </section>

@@ -423,17 +423,17 @@ describe("LatestBriefing", () => {
     expect(section).not.toHaveAttribute("style")
   })
 
-  it("offers Test now for the earliest active monitor and its exact schedule when no occurrence exists", async () => {
+  it("offers one Test now action for the earliest active monitor and its exact schedule when no occurrence exists", async () => {
     const user = userEvent.setup()
     const callbacks = actions()
     render(<LatestBriefing projection={null} emptyJobId={7} nextRunAt="2026-07-12T18:00:00-07:00" timezone="America/Los_Angeles" {...callbacks} />)
 
     expect(screen.getByRole("heading", { name: "Latest briefing" })).toBeVisible()
     await user.click(screen.getByRole("button", { name: "Test now" }))
-    await user.click(screen.getByRole("button", { name: "View all reports" }))
+    expect(screen.queryByRole("button", { name: "View all reports" })).not.toBeInTheDocument()
     expect(screen.getByText(/Sunday, July 12 at 6:00 PM GMT-7/)).toBeVisible()
     expect(callbacks.onTestNow).toHaveBeenCalledWith(7)
-    expect(callbacks.onViewReports).toHaveBeenCalled()
+    expect(callbacks.onViewReports).not.toHaveBeenCalled()
   })
 
   it("routes a failed stage to its exact recovery callback", async () => {

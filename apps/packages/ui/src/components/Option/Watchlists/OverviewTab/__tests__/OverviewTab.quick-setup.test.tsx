@@ -179,23 +179,35 @@ describe("OverviewTab canonical setup", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
   })
 
-  it("routes Quick Setup and Briefing setup into the same canonical wizard", async () => {
+  it("leads with Latest and exposes one canonical setup action", async () => {
     mocks.fetchOverview.mockResolvedValue(overview(0, 0))
     render(<OverviewTab />)
 
-    const quickTrigger = await screen.findByTestId("watchlists-overview-cta-guided-setup")
-    fireEvent.click(quickTrigger)
+    const latestHeading = await screen.findByRole("heading", { name: "Latest briefing" })
+    expect(screen.queryByText("Add initial collection")).not.toBeInTheDocument()
+    expect(screen.queryByText("Onboarding mode")).not.toBeInTheDocument()
+    expect(screen.queryByText("Beginner (guided)")).not.toBeInTheDocument()
+    expect(screen.queryByText("Advanced (direct forms)")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("watchlists-overview-cta-guided-setup")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("watchlists-overview-cta-pipeline-builder")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "View all reports" })).not.toBeInTheDocument()
+    expect(screen.getAllByRole("button", { name: "Test now" })).toHaveLength(1)
+    expect(latestHeading.compareDocumentPosition(screen.getByText("System healthy")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    const setupTrigger = screen.getByRole("button", { name: "Test now" })
+    setupTrigger.focus()
+    fireEvent.click(setupTrigger)
     expect(await screen.findByRole("dialog", { name: "Set up briefing" })).toBeInTheDocument()
-    expect(pipeline().getByLabelText("Add a new source")).toBeChecked()
+    expect(pipeline().getByLabelText("Use existing sources")).toBeChecked()
     expect(screen.queryByRole("dialog", { name: "Add initial collection" })).not.toBeInTheDocument()
 
     fireEvent.click(pipeline().getByRole("button", { name: "Cancel" }))
-    await waitFor(() => expect(quickTrigger).toHaveFocus())
+    await waitFor(() => expect(setupTrigger).toHaveFocus())
   })
 
   it("adapts advanced schedule previews through the authenticated service", async () => {
     render(<OverviewTab />)
-    fireEvent.click(await screen.findByTestId("watchlists-overview-cta-pipeline-builder"))
+    fireEvent.click(await screen.findByRole("button", { name: "Test now" }))
     await waitFor(() => expect(pipeline().getByLabelText("AI Feed")).toBeInTheDocument())
     fireEvent.click(pipeline().getByLabelText("AI Feed"))
     fireEvent.click(pipeline().getByRole("button", { name: "Next: Cadence" }))
@@ -217,7 +229,7 @@ describe("OverviewTab canonical setup", () => {
   it("tests an inactive monitor and activates the same id without creating a duplicate", async () => {
     render(<OverviewTab />)
 
-    const trigger = await screen.findByTestId("watchlists-overview-cta-pipeline-builder")
+    const trigger = await screen.findByRole("button", { name: "Test now" })
     fireEvent.click(trigger)
     await waitFor(() => expect(pipeline().getByLabelText("AI Feed")).toBeInTheDocument())
     fireEvent.click(pipeline().getByLabelText("AI Feed"))
@@ -248,7 +260,7 @@ describe("OverviewTab canonical setup", () => {
 
   it("applies a safe test contract and restores full delivery on activation", async () => {
     render(<OverviewTab />)
-    fireEvent.click(await screen.findByTestId("watchlists-overview-cta-pipeline-builder"))
+    fireEvent.click(await screen.findByRole("button", { name: "Test now" }))
     await waitFor(() => expect(pipeline().getByLabelText("AI Feed")).toBeInTheDocument())
     await reachTestStep()
     fireEvent.click(pipeline().getByRole("button", { name: "Delivery" }))
@@ -288,7 +300,7 @@ describe("OverviewTab canonical setup", () => {
 
   it("updates the inactive job with the current existing source selection", async () => {
     render(<OverviewTab />)
-    fireEvent.click(await screen.findByTestId("watchlists-overview-cta-pipeline-builder"))
+    fireEvent.click(await screen.findByRole("button", { name: "Test now" }))
     await waitFor(() => expect(pipeline().getByLabelText("AI Feed")).toBeInTheDocument())
     await reachTestStep()
 
@@ -314,7 +326,8 @@ describe("OverviewTab canonical setup", () => {
   it("updates a persisted new source when its draft identity changes", async () => {
     mocks.fetchOverview.mockResolvedValue(overview(0, 0))
     render(<OverviewTab />)
-    fireEvent.click(await screen.findByTestId("watchlists-overview-cta-guided-setup"))
+    fireEvent.click(await screen.findByRole("button", { name: "Test now" }))
+    fireEvent.click(pipeline().getByLabelText("Add a new source"))
 
     fireEvent.change(pipeline().getByLabelText("Source name"), { target: { value: "Policy feed" } })
     fireEvent.change(pipeline().getByLabelText("Source URL"), { target: { value: "https://example.com/one.xml" } })
@@ -348,7 +361,7 @@ describe("OverviewTab canonical setup", () => {
 
   it("never updates a pre-existing source when switching from existing to new", async () => {
     render(<OverviewTab />)
-    fireEvent.click(await screen.findByTestId("watchlists-overview-cta-pipeline-builder"))
+    fireEvent.click(await screen.findByRole("button", { name: "Test now" }))
     await waitFor(() => expect(pipeline().getByLabelText("AI Feed")).toBeInTheDocument())
     await reachTestStep()
     fireEvent.click(pipeline().getByRole("button", { name: "Generate 60-second sample" }))
@@ -375,7 +388,8 @@ describe("OverviewTab canonical setup", () => {
   it("rebinds a wizard-created source job to the current existing selection", async () => {
     mocks.fetchOverview.mockResolvedValue(overview(0, 0))
     render(<OverviewTab />)
-    fireEvent.click(await screen.findByTestId("watchlists-overview-cta-guided-setup"))
+    fireEvent.click(await screen.findByRole("button", { name: "Test now" }))
+    fireEvent.click(pipeline().getByLabelText("Add a new source"))
     fireEvent.change(pipeline().getByLabelText("Source name"), { target: { value: "New feed" } })
     fireEvent.change(pipeline().getByLabelText("Source URL"), { target: { value: "https://example.com/new.xml" } })
     fireEvent.click(pipeline().getByRole("button", { name: "Next: Cadence" }))

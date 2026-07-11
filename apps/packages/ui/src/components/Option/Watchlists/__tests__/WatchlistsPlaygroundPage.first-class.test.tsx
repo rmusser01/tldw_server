@@ -233,7 +233,7 @@ vi.mock("@/store/watchlists", () => ({
 }))
 
 vi.mock("../OverviewTab/OverviewTab", () => ({
-  OverviewTab: () => <div>Overview tab</div>
+  OverviewTab: () => <div data-testid="watchlists-overview-latest">Latest briefing · Next run tomorrow at 8:00 AM</div>
 }))
 vi.mock("../SourcesTab/SourcesTab", () => ({
   SourcesTab: () => <div>Sources tab</div>
@@ -325,6 +325,29 @@ describe("WatchlistsPlaygroundPage first-class Watchlist shell", () => {
     expect(screen.getByTestId("watchlists-tab-alerts")).toBeInTheDocument()
   })
 
+  it("leads Overview with identity and Latest while keeping project and health controls in Help or below", async () => {
+    mocks.state.activeTab = "overview"
+    mocks.state.watchlists = [container]
+    mocks.state.selectedWatchlistId = container.id
+    render(<WatchlistsPlaygroundPage />)
+
+    const identity = await screen.findByTestId("watchlists-container-shell")
+    const latest = await screen.findByTestId("watchlists-overview-latest")
+    const health = screen.getByTestId("watchlists-health-bar")
+
+    expect(identity.compareDocumentPosition(latest) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(latest.compareDocumentPosition(health) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.queryByTestId("watchlists-orientation-alert")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("watchlists-create-container")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("watchlists-edit-container")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("watchlists-help-icon"))
+    expect(screen.getByTestId("watchlists-create-container")).toBeInTheDocument()
+    expect(screen.getByTestId("watchlists-edit-container")).toBeInTheDocument()
+    expect(screen.getByText("Overview: watchlist health at a glance")).toBeInTheDocument()
+    expect(screen.getByText(/Review current health and attention signals/)).toBeInTheDocument()
+  })
+
   it("loads Watchlists with the preferred active selection in one store update", async () => {
     const importedPlaceholder = {
       ...container,
@@ -392,9 +415,12 @@ describe("WatchlistsPlaygroundPage first-class Watchlist shell", () => {
     }
     mocks.createWatchlistMock.mockResolvedValue(created)
     mocks.state.activeTab = "overview"
+    mocks.state.watchlists = [container]
+    mocks.state.selectedWatchlistId = container.id
 
     render(<WatchlistsPlaygroundPage />)
 
+    fireEvent.click(screen.getByTestId("watchlists-help-icon"))
     fireEvent.click(await screen.findByTestId("watchlists-create-container"))
     const wizard = within(screen.getByRole("dialog", { name: "Create Watchlist" }))
     fireEvent.change(wizard.getByLabelText("Domain preset"), { target: { value: "news" } })
@@ -433,9 +459,12 @@ describe("WatchlistsPlaygroundPage first-class Watchlist shell", () => {
     }
     mocks.createWatchlistMock.mockResolvedValue(created)
     mocks.state.activeTab = "overview"
+    mocks.state.watchlists = [container]
+    mocks.state.selectedWatchlistId = container.id
 
     render(<WatchlistsPlaygroundPage />)
 
+    fireEvent.click(screen.getByTestId("watchlists-help-icon"))
     fireEvent.click(await screen.findByTestId("watchlists-create-container"))
     const wizard = within(screen.getByRole("dialog", { name: "Create Watchlist" }))
     fireEvent.change(wizard.getByLabelText("Domain preset"), { target: { value: "cti_osint" } })

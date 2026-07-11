@@ -245,8 +245,9 @@ const renderPage = () =>
   )
 
 const showTabGuidance = () => {
-  fireEvent.click(screen.getByTestId("watchlists-help-icon"))
-  fireEvent.click(screen.getByTestId("watchlists-orientation-restore"))
+  if (!screen.queryByTestId("watchlists-help-panel")) {
+    fireEvent.click(screen.getByTestId("watchlists-help-icon"))
+  }
 }
 
 describe("WatchlistsPlaygroundPage orientation guidance", () => {
@@ -268,7 +269,6 @@ describe("WatchlistsPlaygroundPage orientation guidance", () => {
     ;(window as { __TLDW_WATCHLISTS_IA_EXPERIMENT__?: unknown }).__TLDW_WATCHLISTS_IA_EXPERIMENT__ = false
     localStorage.removeItem("watchlists:guided-tour:v1")
     localStorage.removeItem("watchlists:ia-experiment:v1")
-    localStorage.removeItem("watchlists:orientation-dismissed:v1")
     localStorage.removeItem("watchlists:secondary-expanded:v1")
     localStorage.removeItem("watchlists:teach-points:v1")
   })
@@ -278,7 +278,6 @@ describe("WatchlistsPlaygroundPage orientation guidance", () => {
     delete (window as { __TLDW_WATCHLISTS_IA_EXPERIMENT__?: unknown }).__TLDW_WATCHLISTS_IA_EXPERIMENT__
     localStorage.removeItem("watchlists:guided-tour:v1")
     localStorage.removeItem("watchlists:ia-experiment:v1")
-    localStorage.removeItem("watchlists:orientation-dismissed:v1")
     localStorage.removeItem("watchlists:secondary-expanded:v1")
     localStorage.removeItem("watchlists:teach-points:v1")
   })
@@ -289,11 +288,9 @@ describe("WatchlistsPlaygroundPage orientation guidance", () => {
     showTabGuidance()
 
     expect(screen.getByTestId("watchlists-orientation-title")).toHaveTextContent("Activity")
-    expect(
-      screen
-        .getByTestId("watchlists-orientation-title")
-        .closest('[data-ds-component="Alert"]')
-    ).toBeInTheDocument()
+    expect(screen.getByTestId("watchlists-help-panel")).toContainElement(
+      screen.getByTestId("watchlists-orientation-title")
+    )
     expect(screen.getByTestId("watchlists-orientation-description")).toHaveTextContent("Reports")
 
     fireEvent.click(screen.getByTestId("watchlists-orientation-action-open-reports"))
@@ -361,21 +358,18 @@ describe("WatchlistsPlaygroundPage orientation guidance", () => {
     expect(screen.getByTestId("watchlists-command-palette-input")).toBeInTheDocument()
   })
 
-  it("persists orientation dismissal per tab and restores on demand", () => {
+  it("keeps orientation guidance in Help instead of the viewport", () => {
     mocks.state.activeTab = "runs"
     renderPage()
-    showTabGuidance()
 
-    expect(screen.getByTestId("watchlists-orientation-title")).toHaveTextContent("Activity")
-    fireEvent.click(screen.getAllByRole("button", { name: "Dismiss" })[0])
-
+    expect(screen.queryByTestId("watchlists-orientation-alert")).not.toBeInTheDocument()
     expect(screen.queryByTestId("watchlists-orientation-title")).not.toBeInTheDocument()
-    expect(localStorage.getItem("watchlists:orientation-dismissed:v1")).toContain("\"runs\":true")
 
-    fireEvent.click(screen.getByTestId("watchlists-help-icon"))
-    expect(screen.getByTestId("watchlists-orientation-restore")).toHaveTextContent("Show tab guidance")
-    fireEvent.click(screen.getByTestId("watchlists-orientation-restore"))
+    showTabGuidance()
     expect(screen.getByTestId("watchlists-orientation-title")).toHaveTextContent("Activity")
+    expect(screen.getByTestId("watchlists-help-panel")).toContainElement(
+      screen.getByTestId("watchlists-orientation-title")
+    )
   })
 
   it("exposes an accessible label on the Watchlists help button", () => {

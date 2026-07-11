@@ -6,18 +6,15 @@ import {
   List,
   message,
   Space,
-  Steps,
   Spin,
   Statistic,
-  Tag,
-  Tooltip
+  Tag
 } from "antd"
 import {
   AlertTriangle,
   BellRing,
   CheckCircle2,
   Newspaper,
-  RefreshCw,
   Rss,
   Workflow
 } from "lucide-react"
@@ -63,11 +60,6 @@ import {
   type PipelineWizardDraft,
   waitForPipelineWizardBriefing
 } from "./pipeline-wizard-state"
-import {
-  type WatchlistsOnboardingPath,
-  readWatchlistsOnboardingPath,
-  writeWatchlistsOnboardingPath
-} from "../shared/onboarding-path"
 import {
   getFocusableActiveElement,
   restoreFocusToElement
@@ -145,7 +137,6 @@ export const OverviewTab: React.FC = () => {
   const { t } = useTranslation(["watchlists", "common"])
   const [data, setData] = useState<WatchlistsOverviewData | null>(null)
   const [loading, setLoading] = useState(false)
-  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [politeAnnouncement, setPoliteAnnouncement] = useState("")
   const [assertiveAnnouncement, setAssertiveAnnouncement] = useState("")
@@ -161,9 +152,6 @@ export const OverviewTab: React.FC = () => {
   const [pipelineSetupError, setPipelineSetupError] = useState<string | null>(null)
   const [pipelineInitialDraft, setPipelineInitialDraft] = useState<Partial<PipelineWizardDraft>>()
   const [pipelineSessionKey, setPipelineSessionKey] = useState(0)
-  const [onboardingPath, setOnboardingPath] = useState<WatchlistsOnboardingPath>(() =>
-    readWatchlistsOnboardingPath()
-  )
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const overviewRequestRef = useRef(0)
   const previousBriefingRef = useRef<WatchlistBriefingProjection | null>(null)
@@ -171,7 +159,6 @@ export const OverviewTab: React.FC = () => {
   const briefingActionGenerationRef = useRef(0)
   const briefingActionControllerRef = useRef<AbortController | null>(null)
   const briefingActionKeyRef = useRef<BriefingActionKey | null>(null)
-  const quickSetupTriggerRef = useRef<HTMLButtonElement | null>(null)
   const pipelineSetupRestoreFocusTargetRef = useRef<HTMLElement | null>(null)
   const pipelineSetupWasOpenRef = useRef(false)
   const pipelinePersistedJobIdRef = useRef<number | null>(null)
@@ -181,7 +168,6 @@ export const OverviewTab: React.FC = () => {
   const setRunsStatusFilter = useWatchlistsStore((s) => s.setRunsStatusFilter)
   const setOverviewHealth = useWatchlistsStore((s) => s.setOverviewHealth)
   const openRunDetail = useWatchlistsStore((s) => s.openRunDetail)
-  const openSourceForm = useWatchlistsStore((s) => s.openSourceForm)
   const openJobForm = useWatchlistsStore((s) => s.openJobForm)
   const openOutputPreview = useWatchlistsStore((s) => s.openOutputPreview)
   const selectedWatchlistId = useWatchlistsStore((s) => s.selectedWatchlistId)
@@ -254,14 +240,11 @@ export const OverviewTab: React.FC = () => {
         setOverviewHealth(null, null)
       }
       setLoading(false)
-      setRefreshing(false)
       return
     }
 
     if (showLoading) {
       setLoading(true)
-    } else {
-      setRefreshing(true)
     }
     try {
       const result = await fetchWatchlistsOverviewData({
@@ -292,7 +275,6 @@ export const OverviewTab: React.FC = () => {
     } finally {
       if (requestId === overviewRequestRef.current) {
         setLoading(false)
-        setRefreshing(false)
       }
     }
   }, [announceBriefingTransition, selectedWatchlistId, setOverviewHealth, t])
@@ -309,7 +291,6 @@ export const OverviewTab: React.FC = () => {
     }
   }, [loadOverview])
 
-  const quickSetupAutoShownWatchlistRef = useRef<number | null>(null)
 
   useLayoutEffect(() => {
     if (pipelineSetupOpen) {
@@ -344,16 +325,6 @@ export const OverviewTab: React.FC = () => {
   const handleOpenSources = useCallback(() => {
     setActiveTab("sources")
   }, [setActiveTab])
-
-  const handleStartSourceQuickCreate = useCallback(() => {
-    setActiveTab("sources")
-    openSourceForm()
-  }, [openSourceForm, setActiveTab])
-
-  const handleStartJobQuickCreate = useCallback(() => {
-    setActiveTab("jobs")
-    openJobForm()
-  }, [openJobForm, setActiveTab])
 
   const handleOpenRuns = useCallback(() => {
     setActiveTab("runs")
@@ -472,66 +443,6 @@ export const OverviewTab: React.FC = () => {
   const handleOpenAttentionSources = useCallback(() => {
     setActiveTab("sources")
   }, [setActiveTab])
-
-  const handleOnboardingPathChange = useCallback((path: WatchlistsOnboardingPath) => {
-    setOnboardingPath(path)
-    writeWatchlistsOnboardingPath(path)
-  }, [])
-
-  const markQuickSetupAutoShown = useCallback(() => {
-    if (selectedWatchlistId == null) return
-    quickSetupAutoShownWatchlistRef.current = selectedWatchlistId
-    try {
-      localStorage.setItem(`watchlists:quickSetup:autoshown:v1:${selectedWatchlistId}`, "1")
-    } catch {
-      // Keep setup usable when storage is unavailable.
-    }
-  }, [selectedWatchlistId])
-
-  const openQuickSetup = useCallback((restoreTarget?: HTMLElement | null) => {
-    pipelineSetupRestoreFocusTargetRef.current =
-      restoreTarget || quickSetupTriggerRef.current || getFocusableActiveElement()
-    markQuickSetupAutoShown()
-    setPipelineInitialDraft({
-      sourceMode: "new",
-      audioEnabled: true,
-      createScheduledOutput: true,
-      templateName: "briefing_markdown"
-    })
-    pipelinePersistedJobIdRef.current = null
-    pipelineSourceBindingRef.current = null
-    setPipelineSessionKey((value) => value + 1)
-    setPipelineSetupOpen(true)
-    void trackWatchlistsOnboardingTelemetry({ type: "quick_setup_opened" })
-  }, [markQuickSetupAutoShown])
-
-  // Auto-open Quick Setup for first-time users with no sources
-  useEffect(() => {
-    if (selectedWatchlistId == null) return
-    const autoShownKey = `watchlists:quickSetup:autoshown:v1:${selectedWatchlistId}`
-
-    if (
-      !data ||
-      data.sources.total !== 0 ||
-      quickSetupAutoShownWatchlistRef.current === selectedWatchlistId ||
-      onboardingPath !== "beginner"
-    ) {
-      return
-    }
-
-    try {
-      if (localStorage.getItem(autoShownKey)) {
-        quickSetupAutoShownWatchlistRef.current = selectedWatchlistId
-        return
-      }
-      localStorage.setItem(autoShownKey, "1")
-      quickSetupAutoShownWatchlistRef.current = selectedWatchlistId
-      openQuickSetup()
-    } catch {
-      quickSetupAutoShownWatchlistRef.current = selectedWatchlistId
-      openQuickSetup()
-    }
-  }, [data, onboardingPath, openQuickSetup, selectedWatchlistId])
 
   const loadPipelineSources = useCallback(async () => {
     setPipelineSourcesLoading(true)
@@ -974,171 +885,12 @@ export const OverviewTab: React.FC = () => {
         />
       )}
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-text-muted">
-          {t(
-            "watchlists:overview.description",
-            "At-a-glance watchlist health, activity, and failure signals."
-          )}
-        </p>
-        <Space size="small">
-          {data?.fetchedAt && (
-            <Tooltip title={new Date(data.fetchedAt).toLocaleString()}>
-              <span className="text-xs text-text-muted">
-                {t("watchlists:overview.lastUpdated", "Updated {{time}}", {
-                  time: formatRelativeTime(data.fetchedAt, t, { compact: true })
-                })}
-              </span>
-            </Tooltip>
-          )}
-          <Button
-            icon={<RefreshCw className="h-4 w-4" />}
-            onClick={() => void loadOverview(false)}
-            loading={refreshing}
-          >
-            {t("common:refresh", "Refresh")}
-          </Button>
-          <Button
-            type="default"
-            onClick={openPipelineSetup}
-            data-testid="watchlists-overview-cta-pipeline-builder"
-            disabled={(data?.sources.total || 0) === 0}
-          >
-            {t("watchlists:overview.pipelineSetup.open", "Briefing pipeline builder")}
-          </Button>
-        </Space>
-      </div>
-
       {error && (
         <DesignSystemAlert variant="error" title={error} />
       )}
 
       {data && (
         <>
-          {(data.sources.total === 0 || data.jobs.total === 0) && (
-            <Card
-              size="small"
-              title={
-                <span className="flex items-center gap-2">
-                  {t("watchlists:overview.onboarding.title", "Add initial collection")}
-                  <Tag color="green">{t("watchlists:overview.onboarding.recommended", "Recommended")}</Tag>
-                </span>
-              }
-            >
-              <p className="mb-3 text-sm text-text-muted">
-                {t(
-                  "watchlists:overview.onboarding.pipeline",
-                  "Add feeds -> Configure monitor -> Check Activity -> Review Updates -> Generate Reports"
-                )}
-              </p>
-              <div className="mb-3 flex flex-wrap items-center gap-2">
-                <span className="text-xs font-medium uppercase tracking-wide text-text-muted">
-                  {t("watchlists:overview.onboarding.path.label", "Onboarding mode")}
-                </span>
-                <Button
-                  size="small"
-                  type={onboardingPath === "beginner" ? "primary" : "default"}
-                  onClick={() => handleOnboardingPathChange("beginner")}
-                  data-testid="watchlists-overview-onboarding-path-beginner"
-                  aria-pressed={onboardingPath === "beginner"}
-                >
-                  {t("watchlists:overview.onboarding.path.beginner", "Beginner (guided)")}
-                </Button>
-                <Button
-                  size="small"
-                  type={onboardingPath === "advanced" ? "primary" : "default"}
-                  onClick={() => handleOnboardingPathChange("advanced")}
-                  data-testid="watchlists-overview-onboarding-path-advanced"
-                  aria-pressed={onboardingPath === "advanced"}
-                >
-                  {t("watchlists:overview.onboarding.path.advanced", "Advanced (direct forms)")}
-                </Button>
-              </div>
-              <p className="mb-3 text-xs text-text-muted">
-                {onboardingPath === "beginner"
-                  ? t(
-                      "watchlists:overview.onboarding.path.beginnerHint",
-                      "Guided collection setup keeps this Watchlist scoped before advanced schedules and templates."
-                    )
-                  : t(
-                      "watchlists:overview.onboarding.path.advancedHint",
-                      "Advanced mode opens direct feed and monitor forms for this Watchlist."
-                    )}
-              </p>
-              <Steps
-                size="small"
-                current={data.sources.total === 0 ? 0 : data.jobs.total === 0 ? 1 : 2}
-                items={[
-                  {
-                    title: t("watchlists:overview.onboarding.steps.addFeed.title", "Add feeds to this Watchlist"),
-                    content: t(
-                      "watchlists:overview.onboarding.steps.addFeed.description",
-                      "Add RSS/site feeds inside the selected Watchlist."
-                    )
-                  },
-                  {
-                    title: t("watchlists:overview.onboarding.steps.createMonitor.title", "Create a monitor"),
-                    content: t(
-                      "watchlists:overview.onboarding.steps.createMonitor.description",
-                      "Pick Watchlist feeds, then set a schedule with presets."
-                    )
-                  },
-                  {
-                    title: t("watchlists:overview.onboarding.steps.reviewResults.title", "Review results"),
-                    content: t(
-                      "watchlists:overview.onboarding.steps.reviewResults.description",
-                      "Open Updates for content and Activity for run diagnostics."
-                    )
-                  }
-                ]}
-              />
-              <Space className="mt-4" wrap>
-                <Button
-                  type={onboardingPath === "beginner" ? "primary" : "default"}
-                  ref={quickSetupTriggerRef}
-                  onClick={(event) => openQuickSetup(event.currentTarget)}
-                  data-testid="watchlists-overview-cta-guided-setup"
-                >
-                  {t("watchlists:overview.onboarding.cta.guidedSetup", "Add initial collection")}
-                </Button>
-                {onboardingPath === "advanced" && (
-                  <Button
-                    type="primary"
-                    onClick={
-                      data.sources.total === 0 ? handleStartSourceQuickCreate : handleStartJobQuickCreate
-                    }
-                    data-testid="watchlists-overview-cta-advanced-direct"
-                  >
-                    {data.sources.total === 0
-                      ? t("watchlists:overview.onboarding.cta.addFeed", "Add first feed")
-                      : t("watchlists:overview.onboarding.cta.createMonitor", "Create first monitor")}
-                  </Button>
-                )}
-                {data.sources.total === 0 && (
-                  <Button
-                    type="default"
-                    onClick={handleStartSourceQuickCreate}
-                    data-testid="watchlists-overview-cta-add-feed"
-                  >
-                    {t("watchlists:overview.onboarding.cta.addFeed", "Add first feed")}
-                  </Button>
-                )}
-                {data.sources.total > 0 && data.jobs.total === 0 && (
-                  <Button
-                    type="default"
-                    onClick={handleStartJobQuickCreate}
-                    data-testid="watchlists-overview-cta-create-monitor"
-                  >
-                    {t("watchlists:overview.onboarding.cta.createMonitor", "Create first monitor")}
-                  </Button>
-                )}
-                <Button onClick={handleOpenItems}>
-                  {t("watchlists:overview.onboarding.cta.reviewArticles", "Open Updates")}
-                </Button>
-              </Space>
-            </Card>
-          )}
-
           <DesignSystemAlert
             variant={data.systemHealth === "degraded" ? "warning" : "success"}
             title={

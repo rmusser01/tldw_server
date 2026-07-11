@@ -164,6 +164,52 @@ describe("OutputPreviewDrawer focus management", () => {
     expect(screen.getByTestId("output-preview-drawer")).toHaveAttribute("data-size", "100%")
   })
 
+  it("rebinds every preview action name when the selected report changes", async () => {
+    serviceMocks.downloadWatchlistOutput.mockResolvedValue("<p>Report</p>")
+    serviceMocks.downloadWatchlistOutputBinary.mockResolvedValue(new ArrayBuffer(0))
+    serviceMocks.getWatchlistOutputEvidence.mockResolvedValue({
+      output_id: 77,
+      immutable_snapshot: false,
+      snapshot: null,
+      readiness: { state: "legacy_live_only", score: 0, warnings: [] }
+    })
+
+    const { rerender } = render(
+      <OutputPreviewDrawer
+        open
+        output={buildOutput({ id: 77, format: "html", title: "Morning Brief" })}
+        onClose={vi.fn()}
+      />
+    )
+
+    for (const name of [
+      "Open Morning Brief in new tab",
+      "Chat about Morning Brief",
+      "Download Morning Brief",
+      "Close preview: Morning Brief"
+    ]) {
+      expect(await screen.findByRole("button", { name })).toBeVisible()
+    }
+
+    rerender(
+      <OutputPreviewDrawer
+        open
+        output={buildOutput({ id: 78, format: "html", title: "Incident Digest" })}
+        onClose={vi.fn()}
+      />
+    )
+
+    for (const name of [
+      "Open Incident Digest in new tab",
+      "Chat about Incident Digest",
+      "Download Incident Digest",
+      "Close preview: Incident Digest"
+    ]) {
+      expect(await screen.findByRole("button", { name })).toBeVisible()
+    }
+    expect(screen.queryByRole("button", { name: "Close preview: Morning Brief" })).not.toBeInTheDocument()
+  })
+
   it("restores focus to the launch control after the drawer closes", async () => {
     viewportMocks.isConstrained = false
     serviceMocks.downloadWatchlistOutput.mockResolvedValue("# Morning brief")

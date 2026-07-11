@@ -379,6 +379,8 @@ describe("SourcesTab advanced details disclosure", () => {
 
     for (const name of ["BBC", "NPR", "The Guardian"]) {
       expect(await screen.findByRole("switch", { name: `Toggle active: ${name}` })).toBeVisible()
+      expect(screen.getByRole("button", { name: `Check now: ${name}` })).toBeVisible()
+      expect(screen.getByRole("link", { name: `Open source website: ${name}` })).toBeVisible()
       expect(screen.getByRole("button", { name: `Edit source: ${name}` })).toBeVisible()
       expect(screen.getByRole("button", { name: `Open source health: ${name}` })).toBeVisible()
       expect(screen.getByRole("button", { name: `Delete source: ${name}` })).toBeVisible()
