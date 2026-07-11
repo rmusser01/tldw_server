@@ -71,8 +71,10 @@ active or persisted session ID is available, it will also insert that ID into
 clear any pending persisted-reattach timer, immediately finalize unresolved
 items as cancelled, and move to results instead of waiting for a passive effect.
 
-`startRun` will clear the cancellation intent when a new run begins and inspect
-it after each awaited setup boundary and immediately after
+The cancellation intent is initialized once for each keyed wizard session and
+is never cleared by `startRun`; choosing Ingest More creates a new keyed session
+and therefore a fresh intent ref. `startRun` will inspect the intent after each
+awaited setup boundary and immediately after
 `startQuickIngestSession` resolves. Cancellation during payload preparation
 returns before a session is started. Cancellation while awaiting the start
 acknowledgement fences the returned ID, cancels extension-runtime work, and

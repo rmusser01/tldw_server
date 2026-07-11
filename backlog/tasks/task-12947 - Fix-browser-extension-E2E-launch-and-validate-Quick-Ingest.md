@@ -4,11 +4,12 @@ title: Fix browser extension E2E launch and validate Quick Ingest
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-11 16:54'
+updated_date: '2026-07-11 17:56'
 labels: []
 dependencies: []
 documentation:
   - Docs/superpowers/specs/2026-07-11-extension-e2e-launch-cancel-race-design.md
+  - Docs/superpowers/plans/2026-07-11-extension-quick-ingest-cancellation.md
 ---
 
 ## Description
@@ -26,6 +27,12 @@ Investigate why the local Playwright extension harness fails to expose or comple
 - [ ] #5 Changes are rebased on current dev and published in a separate reviewed PR against dev.
 <!-- AC:END -->
 
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Execute Docs/superpowers/plans/2026-07-11-extension-quick-ingest-cancellation.md using host-side TDD and UAT. Order: terminal runtime fence; async setup/start guards; persisted reattach guard; installed-extension PDF/link/YouTube UAT; packaged regression/static verification; review/rebase/PR.
+<!-- SECTION:PLAN:END -->
+
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
@@ -41,6 +48,8 @@ Investigate why the local Playwright extension harness fails to expose or comple
 - Ignore every post-cancel runtime message, including progress.
 - Stop persisted direct-job reattachment from overwriting cancelled results or scheduling another poll.
 - Keep current launcher behavior unless a missing-target failure is reproduced with retained diagnostics.
+
+2026-07-11 plan review: cancellation intent must be initialized once per keyed wizard-session mount and never reset inside startRun, otherwise a delayed start effect could erase an already-recorded cancellation. The implementation plan now includes idempotent cancellation and distinct late-processing/late-completed reattachment cases.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
