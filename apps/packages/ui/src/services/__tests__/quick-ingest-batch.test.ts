@@ -1131,6 +1131,45 @@ describe("submitQuickIngestBatch", () => {
     })
   })
 
+  it.each([true, false])(
+    "maps perform_analysis=%s to summarize_checkbox without extraction-order fields",
+    async (performAnalysis) => {
+      mocks.bgRequest.mockResolvedValue({
+        status: "persist-ok",
+        media_ids: [123],
+        total_articles: 1
+      })
+
+      await submitQuickIngestBatch({
+        entries: [
+          {
+            id: `entry-analysis-${performAnalysis}`,
+            url: "https://example.com/article",
+            type: "html"
+          }
+        ],
+        files: [],
+        storeRemote: true,
+        processOnly: false,
+        common: {
+          perform_analysis: performAnalysis,
+          perform_chunking: true,
+          overwrite_existing: false
+        },
+        advancedValues: {}
+      })
+
+      const scrapeCall = mocks.bgRequest.mock.calls.find(
+        ([request]) => request?.path === "/api/v1/media/process-web-scraping"
+      )
+      const body = scrapeCall?.[0]?.body
+
+      expect(body).toMatchObject({ summarize_checkbox: performAnalysis })
+      expect(body).not.toHaveProperty("strategy_order")
+      expect(body).not.toHaveProperty("extraction_strategy_order")
+    }
+  )
+
   it("keeps direct Markdown URLs on the document ingest job route", async () => {
     mocks.bgUpload.mockResolvedValue({
       batch_id: "batch-markdown-url",

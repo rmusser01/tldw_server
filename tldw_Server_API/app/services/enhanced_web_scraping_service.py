@@ -428,6 +428,7 @@ class WebScrapingService:
             user_agent=user_agent,
             custom_headers=custom_headers,
             user_id=str(user_id) if user_id is not None else None,
+            allow_llm_extraction=summarize,
         )
 
         logger.info(f"Scraping completed, got {len(results)} results")
@@ -480,6 +481,7 @@ class WebScrapingService:
             custom_headers=custom_headers,
             user_id=str(user_id) if user_id is not None else None,
             task_id=task_id,
+            allow_llm_extraction=summarize,
         )
 
         # Add summarization if requested
@@ -545,6 +547,7 @@ class WebScrapingService:
             score_threshold_override=score_threshold,
             crawl_strategy=crawl_strategy,
             task_id=task_id,
+            allow_llm_extraction=summarize,
         )
 
         # Add summarization if requested
@@ -607,6 +610,7 @@ class WebScrapingService:
                 score_threshold_override=score_threshold,
                 crawl_strategy=crawl_strategy,
                 task_id=task_id,
+                allow_llm_extraction=summarize,
             )
 
             # Add summarization if requested
