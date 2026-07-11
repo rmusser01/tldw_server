@@ -2,26 +2,41 @@
 
 ## Problem
 
-Browser-extension validation after PR #2709 exposed two independent failures.
+Browser-extension validation after PR #2709 initially reported missing MV3
+targets, but that launch failure is not reproducible in a clean worktree with
+the apps workspace dependencies installed. The packaged launch-health probe
+passes headed with minimal locales, headless with minimal locales, and headless
+with the full locale catalog. No launch-helper behavior change is justified by
+the current evidence.
 
-First, extension helpers default to headless Chromium even for local Playwright
-runs. Current Chromium does not expose the packaged MV3 service-worker target in
-that mode, so extension ID discovery fails with `no extension targets`. The
-headed launch path is healthy: the existing packaged-extension health probe
-loads the options application in under five seconds when the helper is given
-the repository's CI launch settings.
-
-Second, the Quick Ingest cancellation regression reaches the real extension UI
-but loses a cancellation/completion race. `ProcessingStep` dispatches the
+The reproducible failure is in the Quick Ingest cancellation workflow. The
+test reaches the real extension UI but loses a cancellation/completion race.
+`ProcessingStep` dispatches the
 wizard cancellation state, while `QuickIngestWizardModal` records the active
 session in `cancelledSessionIdsRef` later in a passive effect. A completion
 message received before that effect runs is accepted and replaces the cancelled
 result with success.
 
+There is a second form of the same race: Cancel All is visible before
+`startQuickIngestSession` returns. If cancellation occurs during that await,
+there is no session ID to fence or cancel. A later extension acknowledgement can
+leave background work running, and a later direct acknowledgement can still
+submit the backend batch.
+
+Persisted direct-job reattachment has the same terminal-state risk. Its polling
+effect can resolve after cancellation and write running or completed state over
+the cancelled results unless the poll also observes the run-level cancellation
+intent.
+
 ## Goals
 
-- Make supported local extension launches explicit and deterministic.
+- Record a repeatable extension launch command and retain current helper
+  behavior unless a launch failure can be reproduced.
 - Make user cancellation terminal before any asynchronous cancellation work.
+- Prevent extension work or direct submission from continuing when cancellation
+  precedes the session acknowledgement.
+- Prevent payload preparation, error handling, or persisted-job reattachment
+  from reviving a cancelled run.
 - Preserve current background-runtime cancellation behavior and direct-job
   cancellation metadata.
 - Prove the product flow through the installed extension with PDF, web-link,
@@ -36,50 +51,59 @@ result with success.
 
 ## Design
 
-### Explicit extension launch mode
+### Launch validation without speculative changes
 
-`resolveExtensionHeadlessMode` will remain the single launch-mode resolver, but
-its default will match the repository's Playwright configuration: headed for
-local runs and headless when `CI` is set. `TLDW_E2E_EXTENSION_HEADLESS` remains
-authoritative in either environment. Existing headed CI jobs already set `0`
-and run under `xvfb`, while the nightly workflow can retain its unspecified,
-headless CI behavior.
-
-The built-extension launcher will stage a deterministic manifest key when it
-creates a minimal-locale launch tree. This gives extension ID discovery a
-stable fallback even if the background target is delayed. Unit tests will cover
-both the launch-mode default/override contract and deterministic staging.
+The PR will not change extension launch defaults or manifest staging. The
+existing launch-health spec and the final live UAT will use explicit environment
+settings and report whether a run is headed, headless, minimal-locale, or full.
+If a missing-target failure recurs, diagnostics and the generated profile will
+be retained for a separate evidence-driven launcher change.
 
 ### Synchronous cancellation fence
 
-`ProcessingStep` will accept an optional `onCancelAll` callback. Its Cancel All
-handler will invoke that callback synchronously before dispatching
-`cancelProcessing()`.
+`ProcessingStep` will accept an optional `onCancelAll` callback. The modal will
+use one cancellation handler for the Processing step and the close-confirmation
+Cancel All action.
 
-`QuickIngestWizardModal` will provide a callback that resolves the current
-active or persisted session ID and inserts it into
-`cancelledSessionIdsRef`. This is the cancellation fence. The existing passive
-effect remains responsible for sending the background cancellation request and
-finalizing unresolved items as cancelled, but it must not return merely because
-the session has already been fenced. It will distinguish "already fenced" from
-"cancellation side effects already issued" with a separate ref so side effects
-remain exactly once.
+The handler will synchronously set a run-level `cancelRequestedRef`. If an
+active or persisted session ID is available, it will also insert that ID into
+`cancelledSessionIdsRef` and send the background cancellation request. It will
+clear any pending persisted-reattach timer, immediately finalize unresolved
+items as cancelled, and move to results instead of waiting for a passive effect.
+
+`startRun` will clear the cancellation intent when a new run begins and inspect
+it after each awaited setup boundary and immediately after
+`startQuickIngestSession` resolves. Cancellation during payload preparation
+returns before a session is started. Cancellation while awaiting the start
+acknowledgement fences the returned ID, cancels extension-runtime work, and
+returns. For a direct session, it returns without calling
+`submitQuickIngestBatch`. The error path also returns without replacing an
+already-cancelled outcome.
+
+Persisted-job reattachment will check the same intent after every awaited poll
+and before scheduling another poll. Cancellation therefore stops both state
+writes and future polling even when an in-flight request cannot itself be
+aborted.
 
 Runtime completion and failure messages continue to pass through the existing
-message handler. Once fenced, all non-progress terminal messages for that
-session are ignored. A user cancellation therefore wins regardless of whether
-the background acknowledgement, a stale completion, or React's passive effect
-runs next.
+message handler. Once fenced, every subsequent message for that session,
+including progress, is ignored. A user cancellation therefore wins regardless
+of whether the background acknowledgement, a stale completion, or the next
+state update runs first.
 
 ## Data Flow
 
 1. User clicks `Cancel All` in `ProcessingStep`.
-2. `onCancelAll` synchronously fences the active session ID.
-3. `cancelProcessing()` changes wizard status to `cancelled`.
-4. The modal cancellation effect issues the background cancellation request
-   once and finalizes unresolved items as cancelled.
-5. Any completion or failure for the fenced session is ignored.
-6. The results step remains cancelled even if a stale completion arrives
+2. The modal handler synchronously records cancellation intent and fences an
+   available session ID.
+3. The handler issues an available-session cancellation request, finalizes
+   unresolved items, and moves immediately to cancelled results.
+4. Any later message for a fenced session is ignored.
+5. If the start acknowledgement arrives later, `startRun` fences and cancels
+   extension work or suppresses direct batch submission.
+6. If payload setup or persisted reattachment resumes later, it observes the
+   cancellation intent and returns without updating state.
+7. The results step remains cancelled even if a stale completion arrives
    immediately.
 
 ## Testing
@@ -89,9 +113,15 @@ runs next.
 - A modal session test starts an extension-runtime run, invokes Cancel All, and
   emits completion immediately. Before the fix it resolves as success; after
   the fix it remains cancelled.
-- Launch-mode tests prove the local default is headed and explicit true/false
-  values remain honored.
-- Built-launcher tests prove deterministic manifest staging is requested.
+- A deferred extension-runtime acknowledgement test cancels first, resolves the
+  acknowledgement second, and proves the returned session is cancelled.
+- A deferred direct acknowledgement test proves cancellation prevents
+  `submitQuickIngestBatch` from being called.
+- A cancelled-session test proves later progress cannot mutate terminal state.
+- A deferred persisted-reattachment poll test proves a late running or completed
+  snapshot cannot replace cancelled results or schedule another poll.
+- A cancellation-during-setup test proves no session starts and no later setup
+  failure replaces the cancelled outcome.
 
 ### Browser regression
 
@@ -117,6 +147,5 @@ unique stored media records.
 
 ## Rollout and Compatibility
 
-The production change is confined to internal React callbacks and refs. No API
-or persisted-session schema changes. The launch helper change affects test
-processes only. Environment overrides remain available for every CI workflow.
+The production change is confined to internal React callbacks and refs. No API,
+background message, persisted-session, or extension-launch contract changes.
