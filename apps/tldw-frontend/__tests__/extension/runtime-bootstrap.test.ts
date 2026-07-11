@@ -70,7 +70,10 @@ const stubCookieRuntimeFetch = ({
   bootstrapOk?: boolean
   probeOk?: boolean
 } = {}) => {
-  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+  const fetchMock = vi.fn(async (
+    input: RequestInfo | URL,
+    _init?: RequestInit
+  ) => {
     const url = String(input)
     if (url === "/api/_tldw-webui/runtime-config") {
       return {
@@ -108,6 +111,7 @@ describe("runtime-bootstrap chrome shim", () => {
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     vi.restoreAllMocks()
     restoreGlobal("chrome", chromeDescriptor)
     restoreGlobal("browser", browserDescriptor)
@@ -227,7 +231,7 @@ describe("runtime-bootstrap chrome shim", () => {
       })
     )
 
-    await import("@web/extension/shims/runtime-bootstrap")
+    await importAndAwaitBootstrap()
 
     expect(localStorage.getItem("tldw-api-host")).toBe("http://127.0.0.1:8000")
     await vi.waitFor(() => {
@@ -351,7 +355,87 @@ describe("runtime-bootstrap chrome shim", () => {
     }))).not.toContain("stale-public-key")
     const { getApiKey } = await import("@web/lib/authStorage")
     expect(getApiKey()).toBeNull()
+
+    const signals = fetchMock.mock.calls.map(([, init]) => init?.signal)
+    expect(signals).toHaveLength(3)
+    expect(signals.every((signal) => signal instanceof AbortSignal)).toBe(true)
+    expect(new Set(signals)).toHaveLength(3)
   })
+
+  it.each([
+    ["runtime config", "/api/_tldw-webui/runtime-config"],
+    ["session bootstrap", "/api/_tldw-webui/session"],
+    ["profile probe", "/api/v1/users/me/profile"]
+  ])(
+    "bounds a never-settling %s request and preserves manual configuration",
+    async (_label, stalledUrl) => {
+      vi.useFakeTimers()
+      process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+      const existing = {
+        authMode: "single-user",
+        apiKey: "manual-key",
+        credentialSource: "manual",
+        apiKeyPersistence: "device",
+        apiKeyServerOrigin: "https://remote.example.test",
+        serverUrl: "https://remote.example.test"
+      }
+      localStorage.setItem("tldwConfig", JSON.stringify(existing))
+      localStorage.setItem("apiKey", "legacy-key")
+      localStorage.setItem(
+        "tldwCookieSessionConfig",
+        JSON.stringify({
+          authMode: "single-user",
+          authSource: "cookie-session",
+          serverUrl: window.location.origin
+        })
+      )
+
+      const fetchMock = vi.fn(
+        async (input: RequestInfo | URL, _init?: RequestInit) => {
+          const url = String(input)
+          if (url === stalledUrl) {
+            return await new Promise<Response>(() => undefined)
+          }
+          if (url === "/api/_tldw-webui/runtime-config") {
+            return {
+              ok: true,
+              json: async () => ({
+                runtimeAuth: {
+                  available: true,
+                  authMode: "single-user",
+                  transport: "cookie-session"
+                }
+              })
+            } as Response
+          }
+          return { ok: true } as Response
+        }
+      )
+      vi.stubGlobal("fetch", fetchMock)
+
+      const mod = await import("@web/extension/shims/runtime-bootstrap")
+      await vi.advanceTimersByTimeAsync(0)
+      expect(fetchMock).toHaveBeenCalledWith(
+        stalledUrl,
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      )
+
+      let settled = false
+      void mod.runtimeBootstrapReady.then(() => {
+        settled = true
+      })
+      await vi.advanceTimersByTimeAsync(7_999)
+      await Promise.resolve()
+      expect(settled).toBe(false)
+
+      await vi.advanceTimersByTimeAsync(1)
+      await mod.runtimeBootstrapReady
+
+      expect(readStoredValue("tldwConfig")).toEqual(existing)
+      expect(localStorage.getItem("apiKey")).toBe("legacy-key")
+      expect(readStoredValue("tldwCookieSessionConfig")).toBeNull()
+    }
+  )
 
   it("preserves manual config and legacy slots when session bootstrap fails", async () => {
     process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"

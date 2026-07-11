@@ -118,3 +118,30 @@ git diff --check: passed.
 Bandit remains not applicable because this follow-up changes only TypeScript/TSX, tests, Backlog metadata, and this report. The temporary worktree dependency links used for test/type resolution were restored to their original tracked targets before final status checks.
 
 Remaining follow-up commit message: `fix(web): serialize cookie-session startup`.
+
+## Availability timeout follow-up
+
+The final Task 5 availability issue was reproduced from base `fbdf675ed7`: runtime-config GET, session POST, and profile probe fetches had no deadline. Because `_app` waits for `runtimeBootstrapReady` before auth resolution or mounting configuration consumers, any one never-settling request left the startup loader visible indefinitely.
+
+Runtime bootstrap now uses one 8-second `withRuntimeRequestTimeout` helper for each operation. Every call creates a fresh `AbortController`, passes its signal to fetch, and races the complete operation against a clearing timer. The explicit race bounds fetch doubles that ignore abort, while avoiding any requirement for `AbortSignal.timeout`; signal-aware runtimes may reject with `AbortError`, and the helper's fallback rejects with `TimeoutError`. Existing bootstrap catches handle both as ordinary failure: the active cookie marker stays invalidated, manual configuration remains untouched, and `_app` proceeds to fail-closed auth resolution.
+
+TDD and integration coverage:
+
+- RED: the successful path had no signals, and one fake-timer case for each never-settling hop failed at the missing signal assertion (4 failures, 37 passing across the startup pair). No wall-clock timeout was used.
+- GREEN: the three hops settle at 8,000 ms, stay pending at 7,999 ms, preserve the complete manual config and legacy slots, and remove the stale cookie marker. The success case verifies three distinct signals and unchanged cookie activation.
+- `_app` integration keeps `PageAssistLoader` mounted through 7,999 ms, then mounts `AppProviders` and the preserved manual-config tree at 8,000 ms with navigation hidden fail closed.
+
+Fresh verification:
+
+```text
+Startup/bootstrap suites: 2 files passed; 41 tests passed.
+Task 5 focused aggregate: 18 files passed; 175 tests passed.
+Background transport regression: 1 file passed; 45 tests passed.
+Focused ESLint: 0 errors; one pre-existing no-explicit-any warning at runtime-bootstrap.ts:70.
+Frontend TypeScript: existing workspace/dependency diagnostics only; zero diagnostics in touched files.
+git diff --check: passed.
+```
+
+The focused aggregate used a temporary worktree-local target for the tracked, otherwise dangling UI `antd` dependency link. The exact original relative link target was restored before status/staging checks and `node_modules` is absent from the final diff. Bandit is not applicable because this follow-up changes only TypeScript/TSX, tests, Backlog metadata, and this report.
+
+Availability follow-up commit message: `fix(web): bound cookie-session bootstrap`.

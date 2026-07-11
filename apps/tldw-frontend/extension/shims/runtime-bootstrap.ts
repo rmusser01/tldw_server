@@ -207,6 +207,7 @@ const DEFAULT_TLDW_SERVER_URL = "http://127.0.0.1:8000"
 const RUNTIME_CONFIG_ENDPOINT = "/api/_tldw-webui/runtime-config"
 const RUNTIME_SESSION_ENDPOINT = "/api/_tldw-webui/session"
 const RUNTIME_PROFILE_PROBE_ENDPOINT = "/api/v1/users/me/profile"
+const RUNTIME_REQUEST_TIMEOUT_MS = 8_000
 const RUNTIME_AUTH_METADATA_KEY = "tldwRuntimeAuthMetadata"
 const MANUAL_SESSION_API_KEY = "tldwManualSessionApiKey"
 const LEGACY_RUNTIME_KEYS = [
@@ -227,6 +228,27 @@ type RuntimeConfigPayload = {
   }
 }
 
+const withRuntimeRequestTimeout = async <T>(
+  request: (signal: AbortSignal) => Promise<T>
+): Promise<T> => {
+  const controller = new AbortController()
+  let timeoutId: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timeoutId = setTimeout(() => {
+      controller.abort()
+      const error = new Error("Runtime bootstrap request timed out")
+      error.name = "TimeoutError"
+      reject(error)
+    }, RUNTIME_REQUEST_TIMEOUT_MS)
+  })
+
+  try {
+    return await Promise.race([request(controller.signal), timeout])
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId)
+  }
+}
+
 const isRuntimeConfigFetchAllowed = (): boolean => {
   if (typeof window === "undefined" || typeof fetch !== "function") {
     return false
@@ -244,17 +266,20 @@ const fetchRuntimeConfig = async (): Promise<RuntimeConfigPayload | null> => {
   if (!isRuntimeConfigFetchAllowed()) return null
 
   try {
-    const response = await fetch(RUNTIME_CONFIG_ENDPOINT, {
-      credentials: "same-origin",
-      cache: "no-store",
-      headers: {
-        "Cache-Control": "no-cache",
-        Pragma: "no-cache"
-      }
+    return await withRuntimeRequestTimeout(async (signal) => {
+      const response = await fetch(RUNTIME_CONFIG_ENDPOINT, {
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: {
+          "Cache-Control": "no-cache",
+          Pragma: "no-cache"
+        },
+        signal
+      })
+      if (!response.ok) return null
+      const payload = await response.json()
+      return isRecord(payload) ? (payload as RuntimeConfigPayload) : null
     })
-    if (!response.ok) return null
-    const payload = await response.json()
-    return isRecord(payload) ? (payload as RuntimeConfigPayload) : null
   } catch {
     return null
   }
@@ -262,18 +287,24 @@ const fetchRuntimeConfig = async (): Promise<RuntimeConfigPayload | null> => {
 
 const bootstrapCookieSession = async (): Promise<boolean> => {
   try {
-    const response = await fetch(RUNTIME_SESSION_ENDPOINT, {
-      method: "POST",
-      credentials: "include",
-      cache: "no-store"
-    })
+    const response = await withRuntimeRequestTimeout((signal) =>
+      fetch(RUNTIME_SESSION_ENDPOINT, {
+        method: "POST",
+        credentials: "include",
+        cache: "no-store",
+        signal
+      })
+    )
     if (!response.ok) return false
 
-    const probe = await fetch(RUNTIME_PROFILE_PROBE_ENDPOINT, {
-      method: "GET",
-      credentials: "same-origin",
-      cache: "no-store"
-    })
+    const probe = await withRuntimeRequestTimeout((signal) =>
+      fetch(RUNTIME_PROFILE_PROBE_ENDPOINT, {
+        method: "GET",
+        credentials: "same-origin",
+        cache: "no-store",
+        signal
+      })
+    )
     return probe.ok
   } catch {
     return false

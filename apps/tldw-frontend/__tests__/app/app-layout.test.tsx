@@ -467,6 +467,49 @@ describe("App layout routing", () => {
     )
   })
 
+  it("exits startup loading within the bootstrap bound and mounts preserved manual configuration fail closed", async () => {
+    vi.useFakeTimers()
+    try {
+      const manualConfig = {
+        serverUrl: "https://remote.example.test",
+        authMode: "single-user",
+        credentialSource: "manual"
+      }
+      currentConfig = manualConfig
+      localStorage.setItem("tldwConfig", JSON.stringify(manualConfig))
+      runtimeBootstrapReady = new Promise<void>((resolve) => {
+        setTimeout(resolve, 8_000)
+      })
+
+      renderApp("/media")
+
+      expect(screen.getByRole("status")).toHaveTextContent("Loading")
+      expect(screen.queryByTestId("app-providers")).toBeNull()
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(7_999)
+      })
+      expect(screen.getByRole("status")).toHaveTextContent("Loading")
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1)
+      })
+      vi.useRealTimers()
+
+      expect(await screen.findByTestId("app-providers")).toBeInTheDocument()
+      expect(screen.getByTestId("option-layout")).toHaveAttribute(
+        "data-hide-header",
+        "true"
+      )
+      expect(mockGetConfig).toHaveBeenCalled()
+      expect(JSON.parse(String(localStorage.getItem("tldwConfig")))).toEqual(
+        manualConfig
+      )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("treats a probed quickstart cookie session as authenticated without an api key", async () => {
     process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
     process.env.NEXT_PUBLIC_X_API_KEY = "stale-public-key"
