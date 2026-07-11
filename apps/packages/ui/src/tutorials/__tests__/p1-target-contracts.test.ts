@@ -19,16 +19,19 @@ describe("P0/P1 tutorial selector contracts", () => {
 
     expect(tutorial?.steps.map((step) => step.target)).toEqual([
       '[data-testid="watchlists-outcome-first-region"]',
-      '[data-testid="watchlists-help-icon"]',
-      '[data-testid="watchlists-canonical-controls"]',
-      '[data-testid="watchlists-canonical-controls"]'
+      '[data-tour="watchlists-add-feeds"]',
+      '[data-tour="watchlists-create-monitors"]',
+      '[data-tour="watchlists-review-updates"]'
     ])
 
     for (const step of tutorial?.steps ?? []) {
-      const match = step.target.match(/^\[data-testid="([^"]+)"\]$/)
+      const match = step.target.match(/^\[(data-testid|data-tour)="([^"]+)"\]$/)
       expect(match, `unstable Watchlists target: ${step.target}`).not.toBeNull()
-      expect(pageContent).toContain(`data-testid="${match?.[1]}"`)
+      expect(pageContent).toContain(`${match?.[1]}="${match?.[2]}"`)
     }
+
+    const workflowTargets = tutorial?.steps.slice(1).map((step) => step.target) ?? []
+    expect(new Set(workflowTargets).size).toBe(3)
   })
 
   it("uses stable selector formats for all P0/P1 tutorial steps", () => {

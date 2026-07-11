@@ -41,6 +41,7 @@ import {
   updateWatchlistSource
 } from "@/services/watchlists"
 import { useWatchlistsStore } from "@/store/watchlists"
+import { useTutorialStore } from "@/store/tutorials"
 import type {
   WatchlistContainer,
   WatchlistDomain,
@@ -450,6 +451,8 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
   const addWatchlist = useWatchlistsStore((s) => s.addWatchlist)
   const updateWatchlistInList = useWatchlistsStore((s) => s.updateWatchlistInList)
   const resetStore = useWatchlistsStore((s) => s.resetStore)
+  const activeTutorialId = useTutorialStore((s) => s.activeTutorialId)
+  const watchlistsBasicsTutorialActive = activeTutorialId === "watchlists-basics"
   const runStatusRef = useRef<Map<number, string>>(new Map())
   const notifiedRunStatesRef = useRef<Set<string>>(new Set())
   const initializedRunPollingRef = useRef(false)
@@ -695,7 +698,11 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
 
   // Navigate to a tab, auto-expanding inline secondary sections in progressive mode
   const navigateToTab = useCallback((key: string) => {
-    const isProgressive = !isConstrained && !showAllViews && !iaExperimentEnabled
+    const isProgressive =
+      !isConstrained &&
+      !showAllViews &&
+      !iaExperimentEnabled &&
+      !watchlistsBasicsTutorialActive
     if (isProgressive && SECONDARY_IN_PRIMARY[key]) {
       const primaryTab = SECONDARY_IN_PRIMARY[key]
       setActiveTab(primaryTab as typeof activeTab)
@@ -708,7 +715,13 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
       return
     }
     setActiveTab(key as typeof activeTab)
-  }, [isConstrained, setActiveTab, showAllViews, iaExperimentEnabled])
+  }, [
+    iaExperimentEnabled,
+    isConstrained,
+    setActiveTab,
+    showAllViews,
+    watchlistsBasicsTutorialActive
+  ])
 
   const navigateFromHelp = useCallback((key: string) => {
     closeHelpThen(() => {
@@ -1610,7 +1623,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
       key: "sources",
       label: (
         <Tooltip title={t("watchlists:tabs.sourcesTooltip", "RSS feeds, websites, or forums you want to monitor")}>
-          <span className="flex items-center gap-2">
+          <span className="flex items-center gap-2" data-tour="watchlists-add-feeds">
             <Rss className="h-4 w-4" />
             {t("watchlists:tabs.sources", "Feeds")}
             {tabAttentionBadge(overviewBadges.sources)}
@@ -1623,7 +1636,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
       key: "jobs",
       label: (
         <Tooltip title={t("watchlists:tabs.jobsTooltip", "Scheduled tasks that check your sources for new content")}>
-          <span className="flex items-center gap-2">
+          <span className="flex items-center gap-2" data-tour="watchlists-create-monitors">
             <CalendarClock className="h-4 w-4" />
             {t("watchlists:tabs.jobs", "Monitors")}
           </span>
@@ -1648,7 +1661,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
       key: "items",
       label: (
         <Tooltip title={t("watchlists:tabs.itemsTooltip", "Updates collected from your sources")}>
-          <span className="flex items-center gap-2">
+          <span className="flex items-center gap-2" data-tour="watchlists-review-updates">
             <Newspaper className="h-4 w-4" />
             {t("watchlists:tabs.items", "Updates")}
           </span>
@@ -1803,7 +1816,8 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
   ]
 
   // Resolve which tab set to render based on mode
-  const useProgressiveLayout = !showAllViews && !iaExperimentEnabled
+  const useProgressiveLayout =
+    !showAllViews && !iaExperimentEnabled && !watchlistsBasicsTutorialActive
   const renderedTabItems: TabsProps["items"] = useProgressiveLayout
     ? progressiveTabItems
     : iaExperimentEnabled
@@ -2132,7 +2146,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
       )}
 
       {watchlistViewsAvailable && (
-        isConstrained ? (
+        isConstrained && !watchlistsBasicsTutorialActive ? (
           <>
             <WatchlistsMobileNavigation
               activeKey={activeTab}

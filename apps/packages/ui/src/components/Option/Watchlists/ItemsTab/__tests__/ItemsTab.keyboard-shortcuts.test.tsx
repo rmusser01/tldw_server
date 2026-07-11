@@ -292,7 +292,9 @@ describe("ItemsTab keyboard shortcuts", () => {
       "aria-describedby",
       "watchlists-item-row-description-101"
     )
-    expect(screen.getByText("Unread. Source: Tech Daily.")).toHaveClass("sr-only")
+    expect(document.getElementById("watchlists-item-row-description-101")).toHaveTextContent(
+      "Unread. Source: Tech Daily."
+    )
   })
 
   it("opens shortcut help panel from keyboard", async () => {

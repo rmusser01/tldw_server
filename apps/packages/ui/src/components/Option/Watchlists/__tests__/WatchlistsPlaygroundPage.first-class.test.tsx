@@ -4,6 +4,9 @@ import React from "react"
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { WatchlistsPlaygroundPage } from "../WatchlistsPlaygroundPage"
+import { useTutorialStore } from "@/store/tutorials"
+import { getTutorialById } from "@/tutorials"
+import { setViewport } from "./test-utils/viewport"
 
 const container = {
   id: 42,
@@ -273,6 +276,7 @@ vi.mock("../shared/WatchlistsHealthBar", () => ({
 describe("WatchlistsPlaygroundPage first-class Watchlist shell", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    setViewport(1024)
     connectionMocks.useConnectionUxState.mockReturnValue({
       uxState: "connected_ok",
       hasCompletedFirstRun: true
@@ -310,11 +314,45 @@ describe("WatchlistsPlaygroundPage first-class Watchlist shell", () => {
     mocks.state.watchlistsLoading = false
     mocks.state.watchlistsError = null
     mocks.state.selectedWatchlistId = null
+    useTutorialStore.getState().endTutorial()
     delete (window as { __TLDW_WATCHLISTS_IA_EXPERIMENT__?: unknown }).__TLDW_WATCHLISTS_IA_EXPERIMENT__
   })
 
   afterEach(() => {
+    useTutorialStore.getState().endTutorial()
     cleanup()
+  })
+
+  it("exposes distinct canonical workflow controls while Watchlists Basics is active", async () => {
+    setViewport(420)
+    mocks.state.activeTab = "overview"
+    mocks.state.watchlists = [container]
+    mocks.state.selectedWatchlistId = container.id
+    useTutorialStore.getState().startTutorial("watchlists-basics")
+
+    const view = render(<WatchlistsPlaygroundPage />)
+    const tutorial = getTutorialById("watchlists-basics")
+    const expectations = [
+      { step: 1, label: "Feeds" },
+      { step: 2, label: "Monitors" },
+      { step: 3, label: "Updates" }
+    ]
+
+    const targets: Element[] = []
+    for (const expectation of expectations) {
+      const selector = tutorial?.steps[expectation.step]?.target ?? ""
+      const target = await waitFor(() => {
+        const match = view.container.querySelector(selector)
+        expect(match).not.toBeNull()
+        return match as Element
+      })
+      const control = target.closest("button, [role='tab']")
+      expect(control).not.toBeNull()
+      expect(control).toHaveTextContent(expectation.label)
+      targets.push(target)
+    }
+
+    expect(new Set(targets).size).toBe(3)
   })
 
   it("loads Watchlists, selects the first container, and shows project metadata", async () => {

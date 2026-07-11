@@ -27,7 +27,7 @@ const watchlistsBasics: TutorialDefinition = {
       disableBeacon: true
     },
     {
-      target: '[data-testid="watchlists-help-icon"]',
+      target: '[data-tour="watchlists-add-feeds"]',
       titleKey: "tutorials:watchlists.basics.feedsTitle",
       titleFallback: "Add Feeds",
       contentKey: "tutorials:watchlists.basics.feedsContent",
@@ -36,7 +36,7 @@ const watchlistsBasics: TutorialDefinition = {
       placement: "bottom"
     },
     {
-      target: '[data-testid="watchlists-canonical-controls"]',
+      target: '[data-tour="watchlists-create-monitors"]',
       titleKey: "tutorials:watchlists.basics.monitorsTitle",
       titleFallback: "Create Monitors",
       contentKey: "tutorials:watchlists.basics.monitorsContent",
@@ -45,7 +45,7 @@ const watchlistsBasics: TutorialDefinition = {
       placement: "bottom"
     },
     {
-      target: '[data-testid="watchlists-canonical-controls"]',
+      target: '[data-tour="watchlists-review-updates"]',
       titleKey: "tutorials:watchlists.basics.articlesTitle",
       titleFallback: "Review Articles",
       contentKey: "tutorials:watchlists.basics.articlesContent",
