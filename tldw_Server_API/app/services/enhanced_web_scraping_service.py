@@ -24,6 +24,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import
     async_resolve_chunking_options_and_plan,
     attach_chunking_plan_to_result,
 )
+from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import redact_url_for_log
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.Metrics import get_metrics_registry
 from tldw_Server_API.app.core.testing import is_truthy
@@ -744,18 +745,25 @@ class WebScrapingService:
             _batch_t0 = time.perf_counter()
             for article in result.get("articles", []):
                 logger.debug(
-                    f"Processing article: url={article.get('url')}, "
+                    f"Processing article: url={redact_url_for_log(article.get('url'))}, "
                     f"extraction_successful={article.get('extraction_successful')}"
                 )
                 if not article.get("extraction_successful"):
-                    error_text = str(article.get("error") or "").strip().lower()
-                    if article.get("is_duplicate") is True or "duplicate" in error_text:
+                    if (
+                        article.get("is_duplicate") is True
+                        or article.get("error_code") == "duplicate_content"
+                    ):
                         skipped_articles += 1
                         duplicate_articles += 1
-                        logger.info(f"Skipping duplicate article: {article.get('url', 'Unknown URL')}")
+                        logger.info(
+                            f"Skipping duplicate article: "
+                            f"{redact_url_for_log(article.get('url', 'Unknown URL'))}"
+                        )
                         continue
                     error_msg = f"Failed to extract: {article.get('url', 'Unknown URL')}"
-                    logger.warning(error_msg)
+                    logger.warning(
+                        f"Failed to extract: {redact_url_for_log(article.get('url', 'Unknown URL'))}"
+                    )
                     errors.append(error_msg)
                     continue
 
@@ -933,6 +941,19 @@ class WebScrapingService:
                     except _WEB_SCRAPE_NONCRITICAL_EXCEPTIONS as me:
                         logger.debug(f"webscraping.persist: metric observe failed: {me}")
 
+                    title = article.get("title", "Untitled")
+                    if media_id and message in {
+                        f"Media '{title}' already exists. Overwrite not enabled.",
+                        f"Media '{title}' already exists (concurrent insert). Overwrite not enabled.",
+                    }:
+                        skipped_articles += 1
+                        duplicate_articles += 1
+                        logger.info(
+                            f"Skipping duplicate article: "
+                            f"{redact_url_for_log(article.get('url', 'Unknown URL'))}"
+                        )
+                        continue
+
                     if media_id:
                         media_ids.append(media_id)
                         logger.info(f"Stored article with media_id: {media_id}, uuid: {media_uuid}")
@@ -946,7 +967,11 @@ class WebScrapingService:
                         except _WEB_SCRAPE_NONCRITICAL_EXCEPTIONS as me:
                             logger.debug(f"webscraping.persist: metric increment failed: {me}")
                     else:
-                        logger.warning(f"Failed to get media_id for article: {article.get('url')}")
+                        logger.warning(
+                            f"Failed to get media_id for article: "
+                            f"{redact_url_for_log(article.get('url'))}"
+                        )
+                        errors.append("Storage failed for article")
                         try:
                             if reg:
                                 reg.increment(
@@ -957,8 +982,8 @@ class WebScrapingService:
                         except _WEB_SCRAPE_NONCRITICAL_EXCEPTIONS as me:
                             logger.debug(f"webscraping.persist: metric increment failed: {me}")
 
-                except _WEB_SCRAPE_NONCRITICAL_EXCEPTIONS as e:
-                    logger.error(f"Failed to store article: {e}")
+                except _WEB_SCRAPE_NONCRITICAL_EXCEPTIONS:
+                    logger.error("Failed to store article")
                     errors.append("Storage failed for article")
                     try:
                         if reg:

@@ -1571,6 +1571,134 @@ describe("submitQuickIngestBatch", () => {
     )
   })
 
+  it.each([
+    {
+      label: "duplicate",
+      terminalData: {
+        status: "duplicate",
+        media_ids: [],
+        stored_articles: 0,
+        duplicate_articles: 1,
+        errors: null
+      },
+      expectedStatus: "skipped_existing"
+    },
+    {
+      label: "result error",
+      terminalData: {
+        status: "persist-ok",
+        media_ids: [],
+        stored_articles: 0,
+        errors: ["Storage failed for article"]
+      },
+      expectedStatus: "failed"
+    },
+    {
+      label: "duplicate with result error",
+      terminalData: {
+        status: "duplicate",
+        media_ids: [],
+        stored_articles: 0,
+        duplicate_articles: 1,
+        errors: ["Storage failed for article"]
+      },
+      expectedStatus: "skipped_existing"
+    },
+    {
+      label: "ordinary success",
+      terminalData: {
+        status: "persist-ok",
+        media_ids: [901],
+        stored_articles: 1,
+        errors: null
+      },
+      expectedStatus: "completed"
+    }
+  ])("patches a conference item to $expectedStatus for $label", async ({
+    terminalData,
+    expectedStatus
+  }) => {
+    mocks.bgRequest.mockImplementation(async (request: { path?: string; body?: any }) => {
+      const path = String(request?.path || "")
+      if (path === "/api/v1/media/collections") {
+        return {
+          id: 13,
+          name: "Conference Batch",
+          kind: "conference",
+          metadata: {},
+          default_tags: [],
+          items: []
+        }
+      }
+      if (path === "/api/v1/media/collections/13/items") {
+        return {
+          id: 131,
+          collection_id: 13,
+          ordinal: 1,
+          source_url: request.body?.source_url,
+          duplicate_status: "new",
+          status: "planned",
+          retry_count: 0,
+          warnings: [],
+          metadata: {},
+          tags: []
+        }
+      }
+      if (path === "/api/v1/media/process-web-scraping") {
+        return terminalData
+      }
+      if (path === "/api/v1/media/collections/13/items/131") {
+        return {
+          id: 131,
+          collection_id: 13,
+          source_url: "https://example.com/talk",
+          status: request.body?.status
+        }
+      }
+      throw new Error(`Unexpected bgRequest path: ${path}`)
+    })
+
+    await submitQuickIngestBatch({
+      entries: [
+        {
+          id: "conference-html",
+          url: "https://example.com/talk",
+          type: "html",
+          conferenceOverride: { selected: true, title: "Conference Talk" }
+        }
+      ],
+      files: [],
+      storeRemote: true,
+      processOnly: false,
+      conferenceBatchMetadata: {
+        collectionName: "Conference Batch",
+        sharedTags: []
+      },
+      common: {
+        perform_analysis: false,
+        perform_chunking: false,
+        overwrite_existing: false
+      },
+      advancedValues: {}
+    } as any)
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/media/collections/13/items/131",
+        method: "PATCH",
+        body: expect.objectContaining({ status: expectedStatus })
+      })
+    )
+    const terminalPatchStatuses = mocks.bgRequest.mock.calls
+      .filter(
+        ([request]) =>
+          request?.path === "/api/v1/media/collections/13/items/131" &&
+          request?.method === "PATCH"
+      )
+      .map(([request]) => request.body?.status)
+    expect(terminalPatchStatuses).toEqual([expectedStatus])
+  })
+
   it("skips direct ingest submission for existing conference items when policy includes existing", async () => {
     mocks.bgRequest.mockImplementation(async (request: { path?: string; body?: any }) => {
       const path = String(request?.path || "")

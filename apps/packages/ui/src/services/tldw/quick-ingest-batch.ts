@@ -46,6 +46,7 @@ import {
   resolveConferenceDuplicatePolicy,
   type ApiMediaCollection,
   type ApiMediaCollectionItem,
+  type MediaCollectionItemStatus,
 } from "@/services/tldw/conference-collections";
 
 type TypeDefaults = {
@@ -714,6 +715,12 @@ const patchConferenceCollectionItem = async (
   });
 };
 
+const getConferenceTerminalStatus = (
+  duplicate: boolean,
+  failed: boolean,
+): MediaCollectionItemStatus =>
+  duplicate ? "skipped_existing" : failed ? "failed" : "completed";
+
 const applyPlannedConferenceFields = (
   fields: Record<string, any>,
   planned: PlannedConferenceCollectionItem | undefined,
@@ -877,11 +884,7 @@ const runDirectQuickIngestBatch = async (
             !resultError &&
             webScrapeResponseIndicatesPersisted(data, resultMediaId);
           await patchConferenceCollectionItem(plannedConferenceItem, {
-            status: htmlDuplicate
-              ? "skipped_existing"
-              : resultError
-                ? "failed"
-                : "completed",
+            status: getConferenceTerminalStatus(htmlDuplicate, Boolean(resultError)),
             media_id: resultMediaId,
             error_summary: resultError,
           });
@@ -963,11 +966,10 @@ const runDirectQuickIngestBatch = async (
                 extractCompletedIngestJobError(pollResult.data) || "Ingest failed";
             }
             await patchConferenceCollectionItem(plannedConferenceItem, {
-              status: completedDuplicate
-                ? "skipped_existing"
-                : resultError
-                  ? "failed"
-                  : "completed",
+              status: getConferenceTerminalStatus(
+                completedDuplicate,
+                Boolean(resultError),
+              ),
               latest_job_id: String(latestJobId),
               media_id: resultMediaId,
               error_summary: resultError,
@@ -998,11 +1000,10 @@ const runDirectQuickIngestBatch = async (
                 extractCompletedIngestJobError(data) || "Ingest failed";
             }
             await patchConferenceCollectionItem(plannedConferenceItem, {
-              status: fallbackDuplicate
-                ? "skipped_existing"
-                : resultError
-                  ? "failed"
-                  : "completed",
+              status: getConferenceTerminalStatus(
+                fallbackDuplicate,
+                Boolean(resultError),
+              ),
               latest_job_id:
                 typeof latestJobId === "number" ? String(latestJobId) : undefined,
               media_id: resultMediaId,
