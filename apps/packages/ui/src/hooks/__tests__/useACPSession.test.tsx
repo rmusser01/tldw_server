@@ -121,6 +121,7 @@ describe("useACPSession", () => {
   })
 
   it("uses the page origin without query credentials for cookie sessions", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
     getConfigMock.mockResolvedValue({
       serverUrl: "https://remote.example.test",
       authMode: "single-user",
@@ -144,6 +145,7 @@ describe("useACPSession", () => {
     expect(MockWebSocket.instances[0].url).toBe(
       `${window.location.origin.replace(/^http/i, "ws")}/api/v1/acp/sessions/session-1/stream`
     )
+    delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
   })
 
   it("sends denied permission responses and clears the pending request", async () => {

@@ -1,5 +1,6 @@
 import {
   buildBrowserWebSocketBase,
+  isCookieSessionBrowserTransport,
   resolveBrowserTransport,
   type BrowserSurface
 } from "@/services/tldw/browser-networking"
@@ -60,16 +61,35 @@ export const resolveBrowserWebSocketBase = (serverUrl: string): string => {
   }
 }
 
-export const resolveCurrentPageWebSocketBase = (): string => {
-  const origin = getCurrentPageOrigin()
-  if (!origin) return ""
+export const resolveCookieSessionWebSocketBase = (config: {
+  serverUrl?: string | null
+  authMode?: unknown
+  authSource?: unknown
+}): string | null => {
+  const pageOrigin = getCurrentPageOrigin()
+  const surface = getCurrentBrowserSurface()
+  if (!pageOrigin) return null
 
   try {
-    const parsed = new URL(origin)
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return ""
-    parsed.protocol = parsed.protocol === "https:" ? "wss:" : "ws:"
-    return parsed.origin
+    const transport = resolveBrowserTransport({
+      surface,
+      deploymentMode: process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE,
+      pageOrigin,
+      apiOrigin: String(config.serverUrl || "").trim()
+    })
+    if (
+      !isCookieSessionBrowserTransport({
+        authMode: config.authMode,
+        authSource: config.authSource,
+        transportMode: transport.mode,
+        transportKind: transport.mode === "quickstart" ? "same-origin" : "absolute",
+        pageOrigin
+      })
+    ) {
+      return null
+    }
+    return buildBrowserWebSocketBase(transport) || null
   } catch {
-    return ""
+    return null
   }
 }

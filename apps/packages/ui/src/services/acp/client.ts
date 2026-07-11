@@ -22,9 +22,10 @@ import {
   readBrowserCookie,
   resolveBrowserRequestTransport
 } from "@/services/tldw/request-core"
+import { isCookieSessionBrowserTransport } from "@/services/tldw/browser-networking"
 import {
+  resolveCookieSessionWebSocketBase,
   resolveBrowserWebSocketBase,
-  resolveCurrentPageWebSocketBase
 } from "@/services/tldw/browser-websocket"
 
 // -----------------------------------------------------------------------------
@@ -33,9 +34,61 @@ import {
 
 export interface ACPClientConfig {
   serverUrl: string
+  authMode?: "single-user" | "multi-user"
   authSource?: "manual" | "cookie-session"
   getAuthHeaders: () => Promise<Record<string, string>>
   getAuthParams: () => Promise<{ token?: string; api_key?: string }>
+}
+
+export const fetchACPRequest = async (
+  config: ACPClientConfig,
+  path: string,
+  options: RequestInit = {}
+): Promise<Response> => {
+  const transport = resolveBrowserRequestTransport({
+    config: {
+      serverUrl: config.serverUrl,
+      authMode: config.authMode,
+      authSource: config.authSource
+    },
+    path
+  })
+  const cookieSession = isCookieSessionBrowserTransport({
+    authMode: config.authMode,
+    authSource: config.authSource,
+    transportMode: transport.mode,
+    transportKind: transport.kind,
+    pageOrigin:
+      typeof window === "undefined" ? null : String(window.location?.origin || "")
+  })
+  const authHeaders =
+    transport.mode === "hosted" || cookieSession
+      ? {}
+      : await config.getAuthHeaders()
+  const baseHeaders = {
+    "Content-Type": "application/json",
+    ...authHeaders,
+    ...options.headers
+  }
+  const requestHeaders: HeadersInit = cookieSession
+    ? new Headers(baseHeaders)
+    : baseHeaders
+  if (cookieSession) {
+    const cookieHeaders = requestHeaders as Headers
+    cookieHeaders.delete("Authorization")
+    cookieHeaders.delete("X-API-KEY")
+    cookieHeaders.delete("X-CSRF-Token")
+    if (isUnsafeMethod(options.method || "GET")) {
+      const csrfToken = readBrowserCookie("csrf_token")
+      if (csrfToken) cookieHeaders.set("X-CSRF-Token", csrfToken)
+    }
+  }
+
+  return fetch(transport.url, {
+    ...options,
+    headers: requestHeaders,
+    ...(cookieSession ? { credentials: "same-origin" as const } : {})
+  })
 }
 
 // -----------------------------------------------------------------------------
@@ -66,44 +119,7 @@ export class ACPRestClient {
     path: string,
     options: RequestInit = {}
   ): Promise<T> {
-    const transport = resolveBrowserRequestTransport({
-      config: {
-        serverUrl: this.config.serverUrl,
-        authSource: this.config.authSource
-      },
-      path
-    })
-    const cookieSession =
-      this.config.authSource === "cookie-session" &&
-      transport.kind === "same-origin"
-    const headers =
-      transport.mode === "hosted" || cookieSession
-        ? {}
-        : await this.config.getAuthHeaders()
-    const baseHeaders = {
-      "Content-Type": "application/json",
-      ...headers,
-      ...options.headers
-    }
-    const requestHeaders: HeadersInit = cookieSession
-      ? new Headers(baseHeaders)
-      : baseHeaders
-    if (cookieSession) {
-      const cookieHeaders = requestHeaders as Headers
-      cookieHeaders.delete("Authorization")
-      cookieHeaders.delete("X-API-KEY")
-      cookieHeaders.delete("X-CSRF-Token")
-      if (isUnsafeMethod(options.method || "GET")) {
-        const csrfToken = readBrowserCookie("csrf_token")
-        if (csrfToken) cookieHeaders.set("X-CSRF-Token", csrfToken)
-      }
-    }
-
-    const response = await fetch(transport.url, {
-      ...options,
-      headers: requestHeaders,
-      ...(cookieSession ? { credentials: "same-origin" as const } : {})
-    })
+    const response = await fetchACPRequest(this.config, path, options)
 
     if (!response.ok) {
       const errorBody = await response.json().catch(() => ({ detail: response.statusText }))
@@ -276,11 +292,10 @@ export class ACPWebSocketClient {
     }
 
     this.isClosedManually = false
-    const cookieSession = this.config.authSource === "cookie-session"
+    const cookieBase = resolveCookieSessionWebSocketBase(this.config)
+    const cookieSession = Boolean(cookieBase)
     const authParams = cookieSession ? {} : await this.config.getAuthParams()
-    const wsUrl = cookieSession
-      ? resolveCurrentPageWebSocketBase()
-      : resolveBrowserWebSocketBase(this.config.serverUrl)
+    const wsUrl = cookieBase || resolveBrowserWebSocketBase(this.config.serverUrl)
     const params = new URLSearchParams()
     if (authParams.token) params.set("token", authParams.token)
     if (authParams.api_key) params.set("api_key", authParams.api_key)

@@ -1,6 +1,6 @@
 import {
+  resolveCookieSessionWebSocketBase,
   resolveBrowserWebSocketBase,
-  resolveCurrentPageWebSocketBase
 } from "@/services/tldw/browser-websocket"
 import { normalizeTldwTtsResponseFormat } from "@/services/tts"
 import { inferTldwProviderFromModel } from "@/services/tts-provider"
@@ -45,6 +45,14 @@ type VoiceConversationAvailabilityInput = {
   ttsConfigReady: boolean
 }
 
+type VoiceConversationAuthConfig = {
+  serverUrl?: string | null
+  authMode?: "single-user" | "multi-user" | null
+  authSource?: "manual" | "cookie-session" | null
+  apiKey?: string | null
+  accessToken?: string | null
+}
+
 type VoiceConversationAudioHealthProbeInput = {
   isConnectionReady: boolean
   hasServerVoiceChat: boolean
@@ -56,6 +64,7 @@ type VoiceConversationPreflightInput = VoiceConversationTtsConfigInput & {
   serverUrl: string
   token: string
   authSource?: "manual" | "cookie-session"
+  authMode?: "single-user" | "multi-user"
   requestedModel?: string | null
   resolveProvider: ({ modelId }: { modelId: string }) => Promise<string | undefined> | string | undefined
 }
@@ -64,17 +73,22 @@ export const buildAuthenticatedAudioWebSocketUrl = ({
   serverUrl,
   token,
   authSource,
+  authMode,
   path
 }: {
   serverUrl: string
   token?: string | null
   authSource?: "manual" | "cookie-session"
+  authMode?: "single-user" | "multi-user"
   path: string
 }): string => {
-  const cookieSession = authSource === "cookie-session"
-  const base = cookieSession
-    ? resolveCurrentPageWebSocketBase()
-    : resolveBrowserWebSocketBase(serverUrl)
+  const cookieBase = resolveCookieSessionWebSocketBase({
+    serverUrl,
+    authMode,
+    authSource
+  })
+  const cookieSession = Boolean(cookieBase)
+  const base = cookieBase || resolveBrowserWebSocketBase(serverUrl)
   if (!base) throw new Error("WebUI origin is not available")
   if (cookieSession) return `${base}${path}`
 
@@ -137,6 +151,18 @@ type VoiceConversationRuntimeError = {
 }
 
 const trimString = (value?: string | null): string => String(value || "").trim()
+
+export const isVoiceConversationAuthReady = (
+  config?: VoiceConversationAuthConfig | null
+): boolean => {
+  if (!trimString(config?.serverUrl)) return false
+  if (config?.authMode === "multi-user") {
+    return Boolean(trimString(config.accessToken))
+  }
+  return Boolean(
+    resolveCookieSessionWebSocketBase(config || {}) || trimString(config?.apiKey)
+  )
+}
 
 const resolveVoiceConversationFormat = (
   requestedFormat?: string | null,
@@ -390,6 +416,7 @@ export const buildVoiceConversationPreflight = async (
     websocketUrl: buildAuthenticatedAudioWebSocketUrl({
       serverUrl,
       token: input.token,
+      authMode: input.authMode,
       authSource: input.authSource,
       path: "/api/v1/audio/chat/stream"
     }),

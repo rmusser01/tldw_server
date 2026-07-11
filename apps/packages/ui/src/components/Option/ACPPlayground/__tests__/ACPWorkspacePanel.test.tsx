@@ -2,7 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 
 import { useACPSessionsStore } from "@/store/acp-sessions"
-import { ACPWorkspacePanel } from "../ACPWorkspacePanel"
+import {
+  ACPWorkspacePanel,
+  resolveACPWorkspaceWebSocketRequest
+} from "../ACPWorkspacePanel"
 
 const workspaceStoreMock = vi.hoisted(() => ({
   workspaceId: "workspace-alpha"
@@ -63,6 +66,33 @@ describe("ACPWorkspacePanel canonical Workspace handoff", () => {
     useACPSessionsStore.getState().reset()
     workspaceStoreMock.workspaceId = "workspace-alpha"
     workspaceContextMock.compareOverride = null
+  })
+
+  it("uses a page-origin SSH socket without auth protocols for quickstart cookie sessions", () => {
+    const originalDeploymentMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    try {
+      expect(
+        resolveACPWorkspaceWebSocketRequest(
+          {
+            serverUrl: "https://remote.example.test",
+            authMode: "single-user",
+            authSource: "cookie-session"
+          },
+          "/api/v1/acp/sessions/alpha/ssh"
+        )
+      ).toEqual({
+        url: `${window.location.origin.replace(/^http/i, "ws")}/api/v1/acp/sessions/alpha/ssh`,
+        headers: {},
+        protocols: undefined
+      })
+    } finally {
+      if (originalDeploymentMode === undefined) {
+        delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+      } else {
+        process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = originalDeploymentMode
+      }
+    }
   })
 
   it("links no-session users to the canonical Workspaces manager", () => {

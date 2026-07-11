@@ -1,7 +1,7 @@
 import type { TldwConfig } from "@/services/tldw/TldwApiClient"
 import {
+  resolveCookieSessionWebSocketBase,
   resolveBrowserWebSocketBase,
-  resolveCurrentPageWebSocketBase
 } from "@/services/tldw/browser-websocket"
 
 export type PersonaWebSocketConnection = {
@@ -49,10 +49,9 @@ export const buildPersonaWebSocketUrl = (
     throw new Error("tldw server is not configured")
   }
 
-  const cookieSession = config.authSource === "cookie-session"
-  const base = cookieSession
-    ? resolveCurrentPageWebSocketBase()
-    : resolveBrowserWebSocketBase(serverUrl)
+  const cookieBase = resolveCookieSessionWebSocketBase(config)
+  const cookieSession = Boolean(cookieBase)
+  const base = cookieBase || resolveBrowserWebSocketBase(serverUrl)
   if (!base) throw new Error("WebUI origin is not available")
   if (cookieSession) {
     return { url: `${base}/api/v1/persona/stream`, protocols: [] }

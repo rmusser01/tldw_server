@@ -107,6 +107,37 @@ describe("TldwApiClient quickstart auth bootstrap", () => {
     expect(mocks.storage.get("tldwConfig")).not.toHaveProperty("apiKey")
   })
 
+  it("hydrates the active cookie connection without mutating the stored manual record", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    const manualConfig = {
+      authMode: "single-user" as const,
+      serverUrl: "https://remote.example.test",
+      apiKey: "manual-key",
+      credentialSource: "manual",
+      apiKeyPersistence: "device",
+      apiKeyServerOrigin: "https://remote.example.test"
+    }
+    mocks.storage.set("tldwConfig", manualConfig)
+    mocks.storage.set("tldwCookieSessionConfig", {
+      authMode: "single-user",
+      authSource: "cookie-session",
+      serverUrl: window.location.origin
+    })
+    const client = new TldwApiClient()
+
+    await client.initialize()
+    await expect(client.getConfig()).resolves.toEqual({
+      authMode: "single-user",
+      authSource: "cookie-session",
+      serverUrl: window.location.origin
+    })
+    expect(mocks.storage.get("tldwConfig")).toEqual(manualConfig)
+
+    await client.initialize()
+    await client.getConfig()
+    expect(mocks.storage.get("tldwConfig")).toEqual(manualConfig)
+  })
+
   it("keeps the explicit missing-key error when quickstart config has no key", async () => {
     process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
     delete process.env.NEXT_PUBLIC_X_API_KEY

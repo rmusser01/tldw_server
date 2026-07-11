@@ -15,6 +15,7 @@ import {
   UI_MODE_SETTING
 } from "@/services/settings/ui-settings"
 import {
+  COOKIE_SESSION_CONFIG_KEY,
   resolveWebUiQuickstartServerUrl,
   type BrowserSurface
 } from "@/services/tldw/browser-networking"
@@ -296,18 +297,14 @@ const normalizeHttpOrigin = (value: unknown): string | null => {
   }
 }
 
-const hasCompleteManualDeviceKey = (
-  config: TldwConfig | null
-): boolean => {
-  const record = config as unknown as Record<string, unknown> | null
-  return Boolean(
-    record?.credentialSource === "manual" &&
-      record.apiKeyPersistence === "device" &&
-      typeof record.apiKey === "string" &&
-      record.apiKey.trim() &&
-      normalizeHttpOrigin(record.serverUrl) === record.apiKeyServerOrigin
+const hasCompleteManualDeviceKey = (config: TldwConfig | null): boolean =>
+  Boolean(
+    config?.credentialSource === "manual" &&
+      config.apiKeyPersistence === "device" &&
+      typeof config.apiKey === "string" &&
+      config.apiKey.trim() &&
+      normalizeHttpOrigin(config.serverUrl) === config.apiKeyServerOrigin
   )
-}
 
 const scrubAmbiguousManualSessionKey = (serverUrl: string | null): void => {
   try {
@@ -333,6 +330,9 @@ const scrubAmbiguousManualSessionKey = (serverUrl: string | null): void => {
 const seedTldwConfigFromRuntime = async (): Promise<void> => {
   if (typeof window === "undefined") return
 
+  const storage = createSafeStorage()
+  await storage.remove(COOKIE_SESSION_CONFIG_KEY).catch(() => undefined)
+
   const payload = await fetchRuntimeConfig()
   if (
     payload?.runtimeAuth?.available !== true ||
@@ -345,31 +345,26 @@ const seedTldwConfigFromRuntime = async (): Promise<void> => {
   if (!(await bootstrapCookieSession())) return
 
   try {
-    const storage = createSafeStorage()
     const existing =
       (await storage.get<TldwConfig>("tldwConfig").catch(() => null)) || null
     const quickstartWebUiServerUrl = getQuickstartWebUiServerUrl()
     if (!quickstartWebUiServerUrl) return
 
     const next: TldwConfig = {
-      ...(existing || {}),
       authMode: "single-user",
       authSource: "cookie-session",
       serverUrl: quickstartWebUiServerUrl
     }
-    if (!hasCompleteManualDeviceKey(existing)) delete next.apiKey
 
-    await storage.set("tldwConfig", next)
+    if (existing?.apiKey && !hasCompleteManualDeviceKey(existing)) {
+      const { apiKey: _ambiguousSecret, ...safeExisting } = existing
+      await storage.set("tldwConfig", safeExisting)
+    }
+    await storage.set(COOKIE_SESSION_CONFIG_KEY, next)
     clearRuntimeAuth()
     clearRuntimeAuthOverride()
     removeLegacyRuntimeSecrets()
     scrubAmbiguousManualSessionKey(existing?.serverUrl || null)
-    await storage.set("tldwServerUrl", next.serverUrl).catch(() => undefined)
-    try {
-      window.localStorage.setItem("tldw-api-host", next.serverUrl)
-    } catch {
-      // Best-effort compatibility mirror.
-    }
   } catch {
     // Leave existing manual configuration intact if client storage is unavailable.
   }

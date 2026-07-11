@@ -512,6 +512,7 @@ export const useVoiceChatStream = ({
       const preflight = await buildVoiceConversationPreflight({
         serverUrl: String(config?.serverUrl || ""),
         token,
+        authMode: config?.authMode,
         authSource: config?.authSource,
         requestedModel,
         ttsProvider,

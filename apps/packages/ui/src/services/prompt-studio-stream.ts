@@ -1,7 +1,7 @@
 import type { TldwConfig } from "@/services/tldw/TldwApiClient"
 import {
+  resolveCookieSessionWebSocketBase,
   resolveBrowserWebSocketBase,
-  resolveCurrentPageWebSocketBase
 } from "@/services/tldw/browser-websocket"
 
 export const buildPromptStudioWebSocketUrl = (
@@ -16,10 +16,9 @@ export const buildPromptStudioWebSocketUrl = (
     throw new Error("tldw server is not configured")
   }
 
-  const cookieSession = config.authSource === "cookie-session"
-  const base = cookieSession
-    ? resolveCurrentPageWebSocketBase()
-    : resolveBrowserWebSocketBase(serverUrl)
+  const cookieBase = resolveCookieSessionWebSocketBase(config)
+  const cookieSession = Boolean(cookieBase)
+  const base = cookieBase || resolveBrowserWebSocketBase(serverUrl)
   if (!base) throw new Error("WebUI origin is not available")
   const params = new URLSearchParams()
 

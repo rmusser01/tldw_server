@@ -43,6 +43,8 @@ import {
 } from "@/utils/default-character-preference"
 import type { PersonaBuddySummary } from "@/types/persona-buddy"
 import {
+  COOKIE_SESSION_CONFIG_KEY,
+  isCookieSessionBrowserTransport,
   resolveWebUiQuickstartServerUrl,
   type BrowserSurface
 } from "@/services/tldw/browser-networking"
@@ -176,6 +178,9 @@ export interface TldwConfig {
   orgId?: number
   authMode: 'single-user' | 'multi-user'
   authSource?: "manual" | "cookie-session"
+  credentialSource?: "manual"
+  apiKeyPersistence?: "device" | "session"
+  apiKeyServerOrigin?: string
 }
 
 export type ExplainerMode = "goal" | "sources"
@@ -400,6 +405,22 @@ const isQuickstartWebUiSameOriginServerUrl = (serverUrl: string): boolean => {
     return false
   }
 }
+
+const isActiveCookieSessionConfig = (
+  config: TldwConfig | null | undefined,
+  quickstartWebUiServerUrl = getQuickstartWebUiServerUrl()
+): boolean =>
+  Boolean(
+    quickstartWebUiServerUrl &&
+      config?.serverUrl === quickstartWebUiServerUrl &&
+      isCookieSessionBrowserTransport({
+        authMode: config?.authMode,
+        authSource: config?.authSource,
+        transportMode: "quickstart",
+        transportKind: "same-origin",
+        pageOrigin: quickstartWebUiServerUrl
+      })
+  )
 
 export type PresentationStudioSlide = {
   order: number
@@ -1531,8 +1552,7 @@ export class TldwApiClientBase {
     const runtimeApiKey = !hostedMode
       ? getRuntimeSingleUserApiKeyOverride()
       : null
-    const cookieSession =
-      cfg?.authSource === "cookie-session" && Boolean(getQuickstartWebUiServerUrl())
+    const cookieSession = isActiveCookieSessionConfig(cfg)
     if ((!cfg || !cfg.serverUrl) && !hostedMode && !runtimeApiKey) {
       const msg =
         "tldw server is not configured. Open Settings → tldw server in the extension and set the server URL and API key."
@@ -1696,8 +1716,8 @@ export class TldwApiClientBase {
   }
 
   async initialize(): Promise<void> {
-    let stored = await this.storage.get<TldwConfig>("tldwConfig")
-    if (!stored) {
+    let storedManual = await this.storage.get<TldwConfig>("tldwConfig")
+    if (!storedManual) {
       try {
         const localStore = createSafeStorage({
           area: "local",
@@ -1705,7 +1725,7 @@ export class TldwApiClientBase {
         })
         const localConfig = await localStore.get<TldwConfig>("tldwConfig")
         if (localConfig) {
-          stored = localConfig
+          storedManual = localConfig
           await this.storage.set("tldwConfig", localConfig)
         }
       } catch {
@@ -1714,44 +1734,52 @@ export class TldwApiClientBase {
     }
     const quickstartWebUiServerUrl = getQuickstartWebUiServerUrl()
     const envApiKey = quickstartWebUiServerUrl ? null : this.getEnvApiKey()
+    const storedCookieSession = quickstartWebUiServerUrl
+      ? await this.storage
+          .get<TldwConfig>(COOKIE_SESSION_CONFIG_KEY)
+          .catch(() => null)
+      : null
+    const activeCookieSession = isActiveCookieSessionConfig(
+      storedCookieSession,
+      quickstartWebUiServerUrl
+    )
+      ? storedCookieSession
+      : null
+    const stored = activeCookieSession || storedManual
 
     if (!stored) {
-      if (quickstartWebUiServerUrl && envApiKey) {
-        const hydrated: TldwConfig = {
-          authMode: "single-user",
-          serverUrl: quickstartWebUiServerUrl,
-          apiKey: envApiKey
-        }
-        this.config = hydrated
-        await this.storage.set("tldwConfig", hydrated)
-        await this.syncConnectionServerUrl(hydrated.serverUrl)
-      } else {
-        // True first-run without quickstart auth material: leave config null so
-        // callers can distinguish unconfigured from misconfigured/unreachable.
-        this.config = null
-      }
+      // True first-run without quickstart auth material: leave config null so
+      // callers can distinguish unconfigured from misconfigured/unreachable.
+      this.config = null
     } else {
       const hydrated: TldwConfig = {
         ...stored,
         // Default authMode but do not silently inject a server URL if none
         // has been configured yet.
         authMode: stored.authMode || "single-user",
-        serverUrl: quickstartWebUiServerUrl || stored.serverUrl || ""
+        serverUrl: activeCookieSession
+          ? quickstartWebUiServerUrl || ""
+          : stored.serverUrl || ""
       }
-      if (hydrated.authSource === "cookie-session") {
+      if (activeCookieSession) {
         delete hydrated.apiKey
       } else if (!hydrated.apiKey && envApiKey) {
         hydrated.apiKey = envApiKey
       }
       this.config = hydrated
-      await this.storage.set("tldwConfig", hydrated)
+      if (!activeCookieSession) {
+        await this.storage.set("tldwConfig", hydrated)
+      }
     }
 
     const config = this.config
     const hostedMode = isHostedTldwDeployment()
     const nextBaseUrl = hostedMode
       ? String(config?.serverUrl || "").replace(/\/$/, "")
-      : (quickstartWebUiServerUrl || config?.serverUrl || DEFAULT_SERVER_URL).replace(/\/$/, "")
+      : (isActiveCookieSessionConfig(config, quickstartWebUiServerUrl)
+          ? quickstartWebUiServerUrl
+          : config?.serverUrl || DEFAULT_SERVER_URL
+        ).replace(/\/$/, "")
     if (this.baseUrl && this.baseUrl !== nextBaseUrl) {
       this.openApiPathSet = null
       this.openApiPathSetPromise = null
@@ -1767,8 +1795,10 @@ export class TldwApiClientBase {
     const runtimeApiKey = !hostedMode
       ? getRuntimeSingleUserApiKeyOverride()
       : null
-    const cookieSession =
-      config?.authSource === "cookie-session" && Boolean(quickstartWebUiServerUrl)
+    const cookieSession = isActiveCookieSessionConfig(
+      config,
+      quickstartWebUiServerUrl
+    )
     if (!cookieSession) {
       if (runtimeApiKey) {
         this.headers["X-API-KEY"] = runtimeApiKey

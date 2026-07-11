@@ -4,6 +4,7 @@ import {
   buildBrowserHttpBase,
   buildBrowserWebSocketBase,
   detectBrowserNetworkingIssue,
+  isCookieSessionBrowserTransport,
   isLoopbackHost,
   resolveBrowserTransport,
   resolveWebUiQuickstartServerUrl
@@ -92,5 +93,29 @@ describe("browser-networking", () => {
         apiOrigin: "http://127.0.0.1:8000"
       })
     ).toBeUndefined()
+  })
+
+  it("activates cookie sessions only for quickstart same-origin http pages", () => {
+    const base = {
+      authMode: "single-user",
+      authSource: "cookie-session",
+      transportKind: "same-origin",
+      transportMode: "quickstart",
+      pageOrigin: "https://webui.example.test"
+    } as const
+
+    expect(isCookieSessionBrowserTransport(base)).toBe(true)
+    expect(
+      isCookieSessionBrowserTransport({ ...base, transportMode: "advanced" })
+    ).toBe(false)
+    expect(
+      isCookieSessionBrowserTransport({ ...base, transportMode: "hosted" })
+    ).toBe(false)
+    expect(
+      isCookieSessionBrowserTransport({
+        ...base,
+        pageOrigin: "chrome-extension://extension-id"
+      })
+    ).toBe(false)
   })
 })

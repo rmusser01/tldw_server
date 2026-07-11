@@ -332,10 +332,14 @@ describe("runtime-bootstrap chrome shim", () => {
       "/api/v1/users/me/profile",
       expect.objectContaining({ method: "GET", credentials: "same-origin" })
     )
-    expect(readStoredValue("tldwConfig")).toEqual({
+    expect(readStoredValue("tldwCookieSessionConfig")).toEqual({
       authMode: "single-user",
       authSource: "cookie-session",
       serverUrl: window.location.origin
+    })
+    expect(readStoredValue("tldwConfig")).toEqual({
+      authMode: "single-user",
+      serverUrl: "http://127.0.0.1:8000"
     })
     expect(localStorage.getItem("apiKey")).toBeNull()
     expect(localStorage.getItem("tldwRuntimeAuthMetadata")).toBeNull()
@@ -372,7 +376,7 @@ describe("runtime-bootstrap chrome shim", () => {
     )
   })
 
-  it("preserves complete origin-bound manual credentials after a successful probe", async () => {
+  it("preserves a complete manual connection atomically beside the active cookie session", async () => {
     process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
     localStorage.setItem(
       "tldwConfig",
@@ -398,16 +402,31 @@ describe("runtime-bootstrap chrome shim", () => {
 
     await importAndAwaitBootstrap()
 
-    expect(readStoredValue("tldwConfig")).toMatchObject({
-      authSource: "cookie-session",
+    const manualConfig = {
       apiKey: "manual-device-key",
+      authMode: "single-user",
       credentialSource: "manual",
       apiKeyPersistence: "device",
-      apiKeyServerOrigin: "https://remote.example.test"
+      apiKeyServerOrigin: "https://remote.example.test",
+      serverUrl: "https://remote.example.test"
+    }
+    expect(readStoredValue("tldwConfig")).toEqual(manualConfig)
+    expect(readStoredValue("tldwCookieSessionConfig")).toEqual({
+      authMode: "single-user",
+      authSource: "cookie-session",
+      serverUrl: window.location.origin
     })
     expect(sessionStorage.getItem("tldwManualSessionApiKey")).toContain(
       "manual-session-key"
     )
+    const { getApiKey } = await import("@web/lib/authStorage")
+    expect(getApiKey()).toBeNull()
+
+    vi.resetModules()
+    stubCookieRuntimeFetch()
+    await importAndAwaitBootstrap()
+
+    expect(readStoredValue("tldwConfig")).toEqual(manualConfig)
   })
 
   it("preserves manual config and legacy slots when the cookie probe fails", async () => {

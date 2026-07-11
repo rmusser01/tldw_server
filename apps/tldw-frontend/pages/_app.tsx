@@ -16,6 +16,7 @@ import { ServerReadinessGate } from "@web/components/networking/ServerReadinessG
 import {
   getRuntimeApiBearer,
   getRuntimeApiKey,
+  hasActiveCookieSessionAuth,
   hasEnvApiAuth
 } from "@web/lib/authStorage"
 import { loadTldwAuth, loadTldwClient } from "@web/lib/configured-auth-state"
@@ -190,7 +191,8 @@ const getConfiguredAuthState = async (): Promise<ConfiguredAuthState> => {
       hasConfig: true,
       authMode: "single-user",
       isAuthenticated:
-        typeof config.apiKey === "string" && config.apiKey.trim().length > 0
+        hasActiveCookieSessionAuth(config) ||
+        (typeof config.apiKey === "string" && config.apiKey.trim().length > 0)
     }
   } catch {
     return {

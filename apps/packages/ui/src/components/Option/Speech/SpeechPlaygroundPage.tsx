@@ -1497,6 +1497,7 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
     const wsUrl = buildAuthenticatedAudioWebSocketUrl({
       serverUrl,
       token,
+      authMode: config?.authMode,
       authSource: config?.authSource,
       path: "/api/v1/audio/stream/tts"
     })

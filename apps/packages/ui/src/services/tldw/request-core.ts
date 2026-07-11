@@ -5,6 +5,7 @@ import type { ApiSendResponse } from "@/services/api-send"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import {
   buildBrowserHttpBase,
+  isCookieSessionBrowserTransport,
   resolveAdvancedRequestTransportGuard,
   resolveBrowserTransport,
   type BrowserSurface
@@ -306,8 +307,14 @@ export const tldwRequest = async (
     hasConfiguredServerUrl: Boolean(cfg?.serverUrl),
     isAbsolute
   })
-  const cookieSession =
-    cfg?.authSource === "cookie-session" && transport?.kind === "same-origin"
+  const cookieSession = isCookieSessionBrowserTransport({
+    authMode: cfg?.authMode,
+    authSource: cfg?.authSource,
+    transportMode: transport?.mode,
+    transportKind: transport?.kind,
+    pageOrigin:
+      typeof window === "undefined" ? null : String(window.location?.origin || "")
+  })
   const sameOriginAbsoluteUrl =
     isAbsolute && isSameOriginAbsoluteUrlForConfiguredServer(absolutePath, cfg)
   if (

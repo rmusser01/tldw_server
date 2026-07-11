@@ -162,28 +162,32 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 
-vi.mock("@/services/acp/client", () => ({
-  ACPRestClient: class {
-    private config: {
-      serverUrl: string
-      getAuthHeaders: () => Promise<Record<string, string>>
-      getAuthParams: () => Promise<{ token?: string; api_key?: string }>
-    }
+vi.mock("@/services/acp/client", async (importActual) => {
+  const actual = await importActual<typeof import("@/services/acp/client")>()
+  return {
+    ...actual,
+    ACPRestClient: class {
+      private config: {
+        serverUrl: string
+        getAuthHeaders: () => Promise<Record<string, string>>
+        getAuthParams: () => Promise<{ token?: string; api_key?: string }>
+      }
 
-    constructor(config: {
-      serverUrl: string
-      getAuthHeaders: () => Promise<Record<string, string>>
-      getAuthParams: () => Promise<{ token?: string; api_key?: string }>
-    }) {
-      this.config = config
-      acpMocks.constructedConfigs.push(config)
-    }
+      constructor(config: {
+        serverUrl: string
+        getAuthHeaders: () => Promise<Record<string, string>>
+        getAuthParams: () => Promise<{ token?: string; api_key?: string }>
+      }) {
+        this.config = config
+        acpMocks.constructedConfigs.push(config)
+      }
 
-    async getAvailableAgents() {
-      return acpMocks.getAvailableAgents(this.config)
+      async getAvailableAgents() {
+        return acpMocks.getAvailableAgents(this.config)
+      }
     }
   }
-}))
+})
 
 vi.mock("antd", () => ({
   Alert: ({
@@ -332,6 +336,28 @@ describe("AgentRegistryPage connection config", () => {
             "X-API-KEY": "real-key"
           })
         })
+      )
+    })
+  })
+
+  it("routes health calls through the shared cookie-aware ACP transport", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    configMocks.getConfig.mockResolvedValue({
+      serverUrl: window.location.origin,
+      authMode: "single-user",
+      authSource: "cookie-session"
+    })
+
+    render(<AgentRegistryPage />)
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith(
+        "/api/v1/acp/health",
+        expect.objectContaining({ credentials: "same-origin" })
+      )
+      expect(global.fetch).toHaveBeenCalledWith(
+        "/api/v1/admin/acp/execution-health/summary?range_days=30",
+        expect.objectContaining({ credentials: "same-origin" })
       )
     })
   })

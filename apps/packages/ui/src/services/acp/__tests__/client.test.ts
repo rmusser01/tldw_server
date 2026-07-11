@@ -159,6 +159,7 @@ describe("ACPRestClient", () => {
     vi.stubGlobal("fetch", fetchMock)
     const client = new ACPRestClient({
       serverUrl: "https://remote.example.test",
+      authMode: "single-user",
       authSource: "cookie-session",
       getAuthHeaders: async () => ({
         Authorization: "Bearer stale-token",
@@ -179,6 +180,32 @@ describe("ACPRestClient", () => {
     expect(headers.get("X-CSRF-Token")).toBe("csrf-acp")
     expect(headers.get("X-API-KEY")).toBeNull()
     expect(headers.get("Authorization")).toBeNull()
+  })
+
+  it("ignores a stale cookie marker in hosted mode", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "hosted"
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ sessions: [], total: 0 })
+    })
+    vi.stubGlobal("fetch", fetchMock)
+    const client = new ACPRestClient({
+      serverUrl: "https://remote.example.test",
+      authMode: "multi-user",
+      authSource: "cookie-session",
+      getAuthHeaders: async () => ({
+        Authorization: "Bearer hosted-token",
+        "X-TLDW-Org-Id": "17"
+      }),
+      getAuthParams: async () => ({ token: "hosted-token" })
+    })
+
+    await client.listSessions({ limit: 10 })
+
+    const [, init] = fetchMock.mock.calls[0]
+    expect(init.credentials).toBeUndefined()
+    expect(new Headers(init.headers).get("X-TLDW-Org-Id")).toBeNull()
+    expect(new Headers(init.headers).get("Authorization")).toBeNull()
   })
 
   it("keeps tier while exposing permission policy metadata", () => {
@@ -321,8 +348,10 @@ describe("ACPWebSocketClient", () => {
   })
 
   it("uses a secret-free page-origin websocket for cookie sessions", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
     const client = new ACPWebSocketClient({
       serverUrl: "https://remote.example.test",
+      authMode: "single-user",
       authSource: "cookie-session",
       getAuthHeaders: async () => ({
         Authorization: "Bearer stale-token",
@@ -338,6 +367,32 @@ describe("ACPWebSocketClient", () => {
 
     expect(MockWebSocket.instances[0].url).toBe(
       "ws://127.0.0.1:8080/api/v1/acp/sessions/sess-1/stream"
+    )
+  })
+
+  it("ignores a stale cookie marker on a non-http page origin", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    Object.defineProperty(globalThis, "window", {
+      value: {
+        location: {
+          origin: "chrome-extension://extension-id",
+          protocol: "chrome-extension:"
+        }
+      },
+      configurable: true
+    })
+    const client = new ACPWebSocketClient({
+      serverUrl: "https://remote.example.test",
+      authMode: "single-user",
+      authSource: "cookie-session",
+      getAuthHeaders: async () => ({ "X-API-KEY": "manual-key" }),
+      getAuthParams: async () => ({ api_key: "manual-key" })
+    })
+
+    await client.connect("sess-1")
+
+    expect(MockWebSocket.instances[0].url).toBe(
+      "wss://remote.example.test/api/v1/acp/sessions/sess-1/stream?api_key=manual-key"
     )
   })
 

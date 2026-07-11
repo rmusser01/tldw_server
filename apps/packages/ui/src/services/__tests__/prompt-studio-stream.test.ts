@@ -46,6 +46,7 @@ describe("buildPromptStudioWebSocketUrl", () => {
   })
 
   it("uses a secret-free page-origin url for cookie sessions", () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
     const url = buildPromptStudioWebSocketUrl(
       {
         serverUrl: "https://remote.example.test",

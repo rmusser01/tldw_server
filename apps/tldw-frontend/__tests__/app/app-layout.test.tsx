@@ -365,6 +365,41 @@ describe("App layout routing", () => {
     })
   })
 
+  it("treats a probed quickstart cookie session as authenticated without an api key", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    process.env.NEXT_PUBLIC_X_API_KEY = "stale-public-key"
+    currentConfig = {
+      serverUrl: window.location.origin,
+      authMode: "single-user",
+      authSource: "cookie-session"
+    }
+
+    renderApp("/media")
+    const layout = await screen.findByTestId("option-layout")
+
+    await waitFor(() => {
+      expect(layout).toHaveAttribute("data-hide-header", "false")
+    })
+    expect(layout).toHaveAttribute("data-hide-sidebar", "false")
+  })
+
+  it.each(["capability", "bootstrap", "probe"])(
+    "does not authenticate a failed quickstart %s path with a stale public key",
+    async () => {
+      process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+      process.env.NEXT_PUBLIC_X_API_KEY = "stale-public-key"
+      currentConfig = null
+
+      renderApp("/media")
+      const layout = await screen.findByTestId("option-layout")
+
+      await waitFor(() => {
+        expect(layout).toHaveAttribute("data-hide-header", "true")
+      })
+      expect(layout).toHaveAttribute("data-hide-sidebar", "true")
+    }
+  )
+
   it("keeps sidebar hidden on settings routes even when authenticated", async () => {
     process.env.NEXT_PUBLIC_X_API_KEY = "env-api-key"
 

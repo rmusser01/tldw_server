@@ -48,4 +48,38 @@ describe("tldwRequest hosted mode", () => {
     expect((init.headers as Record<string, string>).Authorization).toBeUndefined()
     expect((init.headers as Record<string, string>)["X-TLDW-Org-Id"]).toBe("17")
   })
+
+  it("ignores a stale cookie marker in hosted mode", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: 1 }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    )
+
+    const { tldwRequest } = await import("@/services/tldw/request-core")
+    await tldwRequest(
+      {
+        path: "/api/v1/users/me/profile",
+        method: "GET",
+        headers: { "X-CSRF-Token": "hosted-csrf" }
+      },
+      {
+        getConfig: async () => ({
+          authMode: "single-user",
+          authSource: "cookie-session",
+          apiKey: "stale-key",
+          orgId: 17
+        }),
+        fetchFn: fetchMock
+      }
+    )
+
+    const [url, init] = fetchMock.mock.calls[0]
+    const headers = new Headers(init.headers)
+    expect(url).toBe("/api/proxy/users/me/profile")
+    expect(init.credentials).toBeUndefined()
+    expect(headers.get("X-CSRF-Token")).toBe("hosted-csrf")
+    expect(headers.get("X-TLDW-Org-Id")).toBe("17")
+  })
 })

@@ -78,6 +78,7 @@ import {
 } from "@/services/tldw/media-chat-handoff";
 import {
   normalizeVoiceConversationRuntimeError,
+  isVoiceConversationAuthReady,
   resolveVoiceConversationAvailability,
   resolveVoiceConversationTtsConfig,
   shouldProbeVoiceConversationAudioHealth,
@@ -895,12 +896,13 @@ export const PlaygroundForm = ({
       resolveVoiceConversationAvailability({
         isConnectionReady: isConnectionReady && !canonicalConnectionLoading,
         hasVoiceConversationTransport,
-        authReady: Boolean(
-          canonicalConnectionConfig?.serverUrl &&
-          (canonicalConnectionConfig?.authMode === "multi-user"
-            ? canonicalConnectionConfig.accessToken
-            : canonicalConnectionConfig.apiKey),
-        ),
+        authReady: isVoiceConversationAuthReady({
+          serverUrl: canonicalConnectionConfig?.serverUrl,
+          authMode: canonicalConnectionConfig?.authMode,
+          authSource: canonicalConnectionConfig?.authSource,
+          apiKey: canonicalConnectionConfig?.apiKey,
+          accessToken: canonicalConnectionConfig?.accessToken,
+        }),
         sttHealthState,
         ttsHealthState: audioHealthState,
         selectedModel,
@@ -911,6 +913,7 @@ export const PlaygroundForm = ({
       audioHealthState,
       canonicalConnectionConfig?.apiKey,
       canonicalConnectionConfig?.authMode,
+      canonicalConnectionConfig?.authSource,
       canonicalConnectionConfig?.accessToken,
       canonicalConnectionConfig?.serverUrl,
       canonicalConnectionLoading,

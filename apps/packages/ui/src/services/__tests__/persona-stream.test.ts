@@ -60,6 +60,7 @@ describe("buildPersonaWebSocketUrl", () => {
   })
 
   it("uses a secret-free page-origin url for cookie sessions", () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
     const { url, protocols } = buildPersonaWebSocketUrl({
       serverUrl: "https://remote.example.test",
       authMode: "single-user",
@@ -70,6 +71,20 @@ describe("buildPersonaWebSocketUrl", () => {
 
     expect(url).toBe("ws://127.0.0.1:8080/api/v1/persona/stream")
     expect(protocols).toEqual([])
+  })
+
+  it("ignores a stale cookie marker in advanced mode", () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
+    const { url, protocols } = buildPersonaWebSocketUrl({
+      serverUrl: "https://remote.example.test",
+      authMode: "single-user",
+      authSource: "cookie-session",
+      apiKey: "manual-key",
+      accessToken: ""
+    })
+
+    expect(url).toBe("wss://remote.example.test/api/v1/persona/stream")
+    expect(protocols).toEqual(["bearer", "manual-key"])
   })
 
   it("carries the jwt in the subprotocol for multi-user mode (not the url)", () => {

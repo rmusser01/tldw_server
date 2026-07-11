@@ -5,6 +5,8 @@ import { useTranslation } from "react-i18next"
 
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
 import { buildACPAuthHeaders, resolveACPServerUrl } from "@/services/acp/connection"
+import { resolveCookieSessionWebSocketBase } from "@/services/tldw/browser-websocket"
+import type { TldwConfig } from "@/services/tldw/TldwApiClient"
 import { compareACPWorkspaceContext } from "@/services/workspace-context"
 import { useACPSessionsStore } from "@/store/acp-sessions"
 import { useWorkspaceStore } from "@/store/workspace"
@@ -32,6 +34,23 @@ const buildAuthProtocols = (headers: Record<string, string>): string[] | undefin
     return ["x-api-key", apiKey]
   }
   return undefined
+}
+
+export const resolveACPWorkspaceWebSocketRequest = (
+  connectionConfig: TldwConfig,
+  path: string
+): {
+  url: string
+  headers: Record<string, string>
+  protocols?: string[]
+} => {
+  const cookieBase = resolveCookieSessionWebSocketBase(connectionConfig)
+  const headers = cookieBase ? {} : buildACPAuthHeaders(connectionConfig)
+  return {
+    url: buildWsUrl(cookieBase || resolveACPServerUrl(connectionConfig), path),
+    headers,
+    protocols: cookieBase ? undefined : buildAuthProtocols(headers)
+  }
 }
 
 const loadTerminalRuntime = () =>
@@ -140,10 +159,9 @@ export const ACPWorkspacePanel: React.FC = () => {
         term.open(container)
         fitAddon.fit()
 
-        const headers = buildACPAuthHeaders(connectionConfig)
-        const protocols = buildAuthProtocols(headers)
-        const wsUrl = buildWsUrl(resolveACPServerUrl(connectionConfig), sshPath)
-        const ws = createWebSocket(wsUrl, headers, protocols)
+        const { url, headers, protocols } =
+          resolveACPWorkspaceWebSocketRequest(connectionConfig, sshPath)
+        const ws = createWebSocket(url, headers, protocols)
         ws.binaryType = "arraybuffer"
 
         ws.onopen = () => {
