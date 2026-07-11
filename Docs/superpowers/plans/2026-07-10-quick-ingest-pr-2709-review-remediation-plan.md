@@ -189,11 +189,11 @@ git commit -m "fix: classify persisted web duplicates exactly"
 - Modify: `tldw_Server_API/app/services/web_scraping_service.py`
 - Modify: `apps/packages/ui/src/services/__tests__/quick-ingest-batch.test.ts`
 
-- [ ] **Step 1: Write failing extraction permission tests**
+- [x] **Step 1: Write failing extraction permission tests**
 
 Assert the global `DEFAULT_EXTRACTION_STRATEGY_ORDER` includes `llm`. For both the default order and a custom router order containing `llm`, assert `allow_llm_extraction=False` removes only `llm` while preserving relative order; assert `True` leaves the order intact.
 
-- [ ] **Step 2: Write failing API/service propagation tests**
+- [x] **Step 2: Write failing API/service propagation tests**
 
 Patch the scraper boundary and verify:
 
@@ -202,7 +202,7 @@ Patch the scraper boundary and verify:
 - `/ingest-web-content` maps `perform_analysis` identically;
 - Quick Ingest still sends only its existing `summarize_checkbox` declaration and no `strategy_order`/`extraction_strategy_order` property.
 
-- [ ] **Step 3: Run the focused backend/frontend tests outside the sandbox and verify RED**
+- [x] **Step 3: Run the focused backend/frontend tests outside the sandbox and verify RED**
 
 Run:
 
@@ -215,7 +215,7 @@ bunx vitest run apps/packages/ui/src/services/__tests__/quick-ingest-batch.test.
 
 Expected: default-order assertion and propagation assertions fail.
 
-- [ ] **Step 4: Implement the internal permission gate**
+- [x] **Step 4: Implement the internal permission gate**
 
 Restore `"llm"` in `DEFAULT_EXTRACTION_STRATEGY_ORDER`. Add an internal optional `allow_llm_extraction: bool = True` argument at scraper functions only, never to Pydantic request schemas. Resolve the effective order once per article:
 
@@ -227,7 +227,7 @@ if not allow_llm_extraction:
 
 Carry the existing `summarize_checkbox`/`perform_analysis` boolean through individual, sitemap, URL-level, recursive, and queued-job metadata paths. Keep direct non-API scraper consumers backward compatible with the default `True`.
 
-- [ ] **Step 5: Run focused and adjacent web-scraping tests outside the sandbox**
+- [x] **Step 5: Run focused and adjacent web-scraping tests outside the sandbox**
 
 Run the Step 3 commands plus:
 
@@ -240,7 +240,7 @@ source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && py
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit the declaration wiring fix**
+- [x] **Step 6: Commit the declaration wiring fix**
 
 ```bash
 git add tldw_Server_API/app/core/Web_Scraping/Article_Extractor_Lib.py tldw_Server_API/app/core/Web_Scraping/enhanced_web_scraping.py tldw_Server_API/app/services/enhanced_web_scraping_service.py tldw_Server_API/app/services/web_scraping_service.py tldw_Server_API/tests/WebScraping/test_extraction_pipeline_router.py tldw_Server_API/tests/Web_Scraping/test_crawl_config_precedence.py apps/packages/ui/src/services/__tests__/quick-ingest-batch.test.ts
