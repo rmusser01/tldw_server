@@ -1150,5 +1150,11 @@
   },
   "accessibilityHardening_help_title": {
     "message": "Довідка списків спостереження"
+  },
+  "overview_pipelineSetup_test_scheduledReceipt": {
+    "message": "{{schedule}}: зібрати оновлення з {{sources}}, створити {{artifacts}} як {{program}}{{duration}}, а потім зберегти й доставити їх до {{destinations}}."
+  },
+  "overview_pipelineSetup_test_audioTestRequired": {
+    "message": "Перед активацією успішно створіть аудіозразок або повний тест."
   }
 }

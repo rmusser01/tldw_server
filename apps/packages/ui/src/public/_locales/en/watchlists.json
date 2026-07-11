@@ -5545,5 +5545,11 @@
   },
   "templates_preview_liveEmpty": {
     "message": "No preview content yet. The template will render after a short delay."
+  },
+  "overview_pipelineSetup_test_scheduledReceipt": {
+    "message": "{{schedule}}, collect updates from {{sources}}, generate {{artifacts}} as a {{program}}{{duration}}, then save and deliver them to {{destinations}}."
+  },
+  "overview_pipelineSetup_test_audioTestRequired": {
+    "message": "Generate a successful audio sample or full test before activation."
   }
 }

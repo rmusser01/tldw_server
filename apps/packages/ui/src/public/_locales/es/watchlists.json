@@ -1141,5 +1141,11 @@
   },
   "accessibilityHardening_help_title": {
     "message": "Ayuda de listas de seguimiento"
+  },
+  "overview_pipelineSetup_test_scheduledReceipt": {
+    "message": "{{schedule}}, recopila actualizaciones de {{sources}}, genera {{artifacts}} como {{program}}{{duration}} y después guárdalos y entrégalos en {{destinations}}."
+  },
+  "overview_pipelineSetup_test_audioTestRequired": {
+    "message": "Genera correctamente una muestra de audio o una prueba completa antes de activar."
   }
 }

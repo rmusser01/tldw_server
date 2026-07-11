@@ -1132,5 +1132,11 @@
   },
   "accessibilityHardening_help_title": {
     "message": "ウォッチリストのヘルプ"
+  },
+  "overview_pipelineSetup_test_scheduledReceipt": {
+    "message": "{{schedule}}に{{sources}}から更新を収集し、{{artifacts}}を{{program}}{{duration}}として生成して、{{destinations}}に保存・配信します。"
+  },
+  "overview_pipelineSetup_test_audioTestRequired": {
+    "message": "有効化する前に、音声サンプルまたは完全テストを正常に生成してください。"
   }
 }

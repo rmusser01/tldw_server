@@ -1141,5 +1141,11 @@
   },
   "accessibilityHardening_help_title": {
     "message": "Aide des listes de suivi"
+  },
+  "overview_pipelineSetup_test_scheduledReceipt": {
+    "message": "{{schedule}}, collectez les mises à jour de {{sources}}, générez {{artifacts}} sous forme de {{program}}{{duration}}, puis enregistrez-les et livrez-les à {{destinations}}."
+  },
+  "overview_pipelineSetup_test_audioTestRequired": {
+    "message": "Générez avec succès un échantillon audio ou un test complet avant l’activation."
   }
 }

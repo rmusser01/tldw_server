@@ -1141,5 +1141,11 @@
   },
   "accessibilityHardening_help_title": {
     "message": "Guida delle liste di controllo"
+  },
+  "overview_pipelineSetup_test_scheduledReceipt": {
+    "message": "{{schedule}}, raccogli gli aggiornamenti da {{sources}}, genera {{artifacts}} come {{program}}{{duration}}, quindi salvali e consegnali a {{destinations}}."
+  },
+  "overview_pipelineSetup_test_audioTestRequired": {
+    "message": "Genera correttamente un campione audio o un test completo prima dell’attivazione."
   }
 }

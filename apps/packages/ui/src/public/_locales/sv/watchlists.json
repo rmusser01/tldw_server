@@ -1132,5 +1132,11 @@
   },
   "accessibilityHardening_help_title": {
     "message": "Hjälp för bevakningslistor"
+  },
+  "overview_pipelineSetup_test_scheduledReceipt": {
+    "message": "{{schedule}}: samla uppdateringar från {{sources}}, skapa {{artifacts}} som {{program}}{{duration}} och spara och leverera dem sedan till {{destinations}}."
+  },
+  "overview_pipelineSetup_test_audioTestRequired": {
+    "message": "Skapa ett lyckat ljudprov eller fullständigt test före aktivering."
   }
 }

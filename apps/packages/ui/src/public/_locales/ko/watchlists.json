@@ -1132,5 +1132,11 @@
   },
   "accessibilityHardening_help_title": {
     "message": "관심 목록 도움말"
+  },
+  "overview_pipelineSetup_test_scheduledReceipt": {
+    "message": "{{schedule}}에 {{sources}}에서 업데이트를 수집하고, {{artifacts}}을(를) {{program}}{{duration}} 형식으로 생성한 다음 {{destinations}}에 저장하고 전달합니다."
+  },
+  "overview_pipelineSetup_test_audioTestRequired": {
+    "message": "활성화하기 전에 오디오 샘플이나 전체 테스트를 성공적으로 생성하세요."
   }
 }

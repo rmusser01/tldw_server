@@ -1132,5 +1132,11 @@
   },
   "accessibilityHardening_help_title": {
     "message": "راهنمای فهرست‌های پایش"
+  },
+  "overview_pipelineSetup_test_scheduledReceipt": {
+    "message": "{{schedule}}، به‌روزرسانی‌ها را از {{sources}} گردآوری کن، {{artifacts}} را به‌صورت {{program}}{{duration}} تولید کن، سپس آن‌ها را در {{destinations}} ذخیره و تحویل بده."
+  },
+  "overview_pipelineSetup_test_audioTestRequired": {
+    "message": "پیش از فعال‌سازی، یک نمونه صوتی یا آزمون کامل موفق تولید کنید."
   }
 }

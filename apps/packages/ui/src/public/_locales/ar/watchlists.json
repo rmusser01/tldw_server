@@ -1168,5 +1168,11 @@
   },
   "accessibilityHardening_help_title": {
     "message": "مساعدة قوائم المراقبة"
+  },
+  "overview_pipelineSetup_test_scheduledReceipt": {
+    "message": "{{schedule}}، اجمع التحديثات من {{sources}}، وأنشئ {{artifacts}} بصيغة {{program}}{{duration}}، ثم احفظها وسلّمها إلى {{destinations}}."
+  },
+  "overview_pipelineSetup_test_audioTestRequired": {
+    "message": "أنشئ عينة صوتية أو اختباراً كاملاً بنجاح قبل التفعيل."
   }
 }

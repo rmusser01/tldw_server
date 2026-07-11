@@ -1132,5 +1132,11 @@
   },
   "accessibilityHardening_help_title": {
     "message": "监视列表帮助"
+  },
+  "overview_pipelineSetup_test_scheduledReceipt": {
+    "message": "{{schedule}}：从 {{sources}} 收集更新，以 {{program}}{{duration}} 形式生成 {{artifacts}}，然后保存并发送到 {{destinations}}。"
+  },
+  "overview_pipelineSetup_test_audioTestRequired": {
+    "message": "激活前，请成功生成音频样本或完整测试。"
   }
 }

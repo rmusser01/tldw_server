@@ -1132,5 +1132,11 @@
   },
   "accessibilityHardening_help_title": {
     "message": "വാച്ച്‌ലിസ്റ്റ് സഹായം"
+  },
+  "overview_pipelineSetup_test_scheduledReceipt": {
+    "message": "{{schedule}}-ന് {{sources}}-ൽ നിന്ന് പുതുക്കലുകൾ ശേഖരിച്ച്, {{artifacts}} {{program}}{{duration}} ആയി സൃഷ്ടിച്ച്, തുടർന്ന് {{destinations}}-ൽ സംരക്ഷിച്ച് എത്തിക്കുക."
+  },
+  "overview_pipelineSetup_test_audioTestRequired": {
+    "message": "സജീവമാക്കുന്നതിന് മുമ്പ് വിജയകരമായ ശബ്ദ സാമ്പിൾ അല്ലെങ്കിൽ പൂർണ്ണ പരിശോധന സൃഷ്ടിക്കുക."
   }
 }

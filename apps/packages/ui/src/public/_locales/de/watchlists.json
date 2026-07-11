@@ -1132,5 +1132,11 @@
   },
   "accessibilityHardening_help_title": {
     "message": "Watchlists-Hilfe"
+  },
+  "overview_pipelineSetup_test_scheduledReceipt": {
+    "message": "{{schedule}}: Aktualisierungen aus {{sources}} sammeln, {{artifacts}} als {{program}}{{duration}} erzeugen und anschließend unter {{destinations}} speichern und zustellen."
+  },
+  "overview_pipelineSetup_test_audioTestRequired": {
+    "message": "Erzeugen Sie vor der Aktivierung erfolgreich eine Audioprobe oder einen vollständigen Test."
   }
 }

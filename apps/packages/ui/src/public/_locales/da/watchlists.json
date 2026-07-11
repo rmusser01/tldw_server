@@ -1132,5 +1132,11 @@
   },
   "accessibilityHardening_help_title": {
     "message": "Hjælp til overvågningslister"
+  },
+  "overview_pipelineSetup_test_scheduledReceipt": {
+    "message": "{{schedule}}: indsaml opdateringer fra {{sources}}, opret {{artifacts}} som {{program}}{{duration}}, og gem og lever dem derefter til {{destinations}}."
+  },
+  "overview_pipelineSetup_test_audioTestRequired": {
+    "message": "Opret en vellykket lydprøve eller fuld test før aktivering."
   }
 }
