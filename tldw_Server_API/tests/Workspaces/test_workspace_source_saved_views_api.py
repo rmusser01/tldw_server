@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 from collections.abc import Iterator
 from pathlib import Path
@@ -327,16 +328,16 @@ def test_response_model_enforces_validity_invariants() -> None:
         "updated_at": "2026-01-01T00:00:00+00:00",
     }
     with pytest.raises(ValidationError):
-        workspace_schemas.WorkspaceSourceSavedViewResponse(
-            **common, state=None, valid=True, invalid_reason=None
+        workspace_schemas.WorkspaceSourceSavedViewResponse.model_validate(
+            {**common, "state": None, "valid": True, "invalid_reason": None}
         )
     with pytest.raises(ValidationError):
-        workspace_schemas.WorkspaceSourceSavedViewResponse(
-            **common, state={}, valid=False, invalid_reason="invalid_state"
+        workspace_schemas.WorkspaceSourceSavedViewResponse.model_validate(
+            {**common, "state": {}, "valid": False, "invalid_reason": "invalid_state"}
         )
     with pytest.raises(ValidationError):
-        workspace_schemas.WorkspaceSourceSavedViewResponse(
-            **common, state=None, valid=False, invalid_reason=None
+        workspace_schemas.WorkspaceSourceSavedViewResponse.model_validate(
+            {**common, "state": None, "valid": False, "invalid_reason": None}
         )
 
 
@@ -381,7 +382,9 @@ def test_missing_workspace_view_and_client_id_mismatch_are_404(
     app: FastAPI,
     db: CharactersRAGDB,
 ) -> None:
-    assert client.get("/api/v1/workspaces/missing/source-views").status_code == 404
+    missing_workspace = client.get("/api/v1/workspaces/missing/source-views")
+    assert missing_workspace.status_code == 404
+    assert missing_workspace.json() == {"detail": "Source view not found"}
     assert client.patch(
         "/api/v1/workspaces/ws-1/source-views/missing", json={"version": 1, "name": "x"}
     ).status_code == 404
@@ -390,6 +393,29 @@ def test_missing_workspace_view_and_client_id_mismatch_are_404(
     app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=2)
     assert client.get("/api/v1/workspaces/ws-1/source-views").status_code == 404
     assert _post(client, _create_payload(), workspace_id="ws-1").status_code == 404
+
+
+def test_cross_owner_patch_and_delete_are_404_and_leave_view_unchanged(
+    client: TestClient,
+    app: FastAPI,
+    db: CharactersRAGDB,
+) -> None:
+    created = _post(client, _create_payload(name="Owner one")).json()
+    original = db.get_workspace_source_saved_view("1", "ws-1", created["id"])
+    app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=2)
+
+    patched = client.patch(
+        f"/api/v1/workspaces/ws-1/source-views/{created['id']}",
+        json={"version": 1, "name": "Owner two"},
+    )
+    deleted = client.delete(f"/api/v1/workspaces/ws-1/source-views/{created['id']}")
+
+    assert patched.status_code == 404
+    assert patched.json() == {"detail": "Source view not found"}
+    assert deleted.status_code == 404
+    assert deleted.json() == {"detail": "Source view not found"}
+    unchanged = db.get_workspace_source_saved_view("1", "ws-1", created["id"])
+    assert unchanged == original
 
 
 def test_views_are_isolated_by_workspace(client: TestClient) -> None:
@@ -468,6 +494,120 @@ def test_invalid_rows_are_recoverable_and_unsupported_version_precedes_json_pars
         assert set(item) == RESPONSE_KEYS
         assert item["state"] is None
         assert item["valid"] is False
+
+
+def test_huge_integer_json_is_invalid_without_failing_other_list_rows(
+    client: TestClient,
+    db: CharactersRAGDB,
+) -> None:
+    valid = db.create_workspace_source_saved_view(
+        "1", "ws-1", name="Valid", schema_version=1, state_json="{}"
+    )
+    huge_integer = db.create_workspace_source_saved_view(
+        "1",
+        "ws-1",
+        name="Huge integer",
+        schema_version=1,
+        state_json='{"file_size_min":' + ("9" * 5_000) + "}",
+    )
+
+    response = client.get("/api/v1/workspaces/ws-1/source-views")
+
+    assert response.status_code == 200, response.text
+    by_id = {item["id"]: item for item in response.json()["items"]}
+    assert by_id[valid["id"]]["valid"] is True
+    assert by_id[huge_integer["id"]]["valid"] is False
+    assert by_id[huge_integer["id"]]["invalid_reason"] == "invalid_json"
+
+
+def test_saved_view_handlers_are_sync_for_threadpool_offload() -> None:
+    handlers = (
+        workspaces_endpoint.list_source_saved_views,
+        workspaces_endpoint.create_source_saved_view,
+        workspaces_endpoint.update_source_saved_view,
+        workspaces_endpoint.delete_source_saved_view,
+    )
+
+    assert all(not inspect.iscoroutinefunction(handler) for handler in handlers)
+
+
+def test_saved_view_openapi_matches_patch_response_and_error_contracts(app: FastAPI) -> None:
+    schema = app.openapi()
+    components = schema["components"]["schemas"]
+
+    patch_schema = components["WorkspaceSourceSavedViewPatchRequest"]
+    patch_refs = {branch["$ref"].rsplit("/", 1)[-1] for branch in patch_schema["anyOf"]}
+    assert patch_refs == {
+        "WorkspaceSourceSavedViewRenamePatch",
+        "WorkspaceSourceSavedViewStatePatch",
+        "WorkspaceSourceSavedViewCombinedPatch",
+    }
+    for component_name in patch_refs:
+        branch = components[component_name]
+        required = set(branch["required"])
+        assert "version" in required
+        assert required & {"name", "state"}
+        if "state" in required:
+            assert "schema_version" in required
+        for operation in {"name", "state", "schema_version"} & set(branch["properties"]):
+            assert {"type": "null"} not in branch["properties"][operation].get("anyOf", [])
+
+    response_schema = components["WorkspaceSourceSavedViewResponse"]
+    response_refs = {branch["$ref"].rsplit("/", 1)[-1] for branch in response_schema["anyOf"]}
+    assert response_refs == {
+        "WorkspaceSourceSavedViewValidResponse",
+        "WorkspaceSourceSavedViewInvalidResponse",
+    }
+    valid_response = components["WorkspaceSourceSavedViewValidResponse"]
+    invalid_response = components["WorkspaceSourceSavedViewInvalidResponse"]
+    assert valid_response["properties"]["valid"]["const"] is True
+    assert valid_response["properties"]["state"]["$ref"].endswith(
+        "/WorkspaceSourceSavedViewStateV1"
+    )
+    assert valid_response["properties"]["invalid_reason"]["type"] == "null"
+    assert invalid_response["properties"]["valid"]["const"] is False
+    assert invalid_response["properties"]["state"]["type"] == "null"
+    assert invalid_response["properties"]["invalid_reason"]["enum"] == [
+        "invalid_json",
+        "invalid_state",
+        "unsupported_schema_version",
+    ]
+
+    conflict = components["WorkspaceSourceSavedViewConflictResponse"]["properties"]["detail"]
+    assert set(conflict["discriminator"]["mapping"]) == {
+        "source_view_name_exists",
+        "source_view_limit_reached",
+        "source_view_version_conflict",
+    }
+    conflict_refs = {branch["$ref"].rsplit("/", 1)[-1] for branch in conflict["oneOf"]}
+    assert conflict_refs == {
+        "WorkspaceSourceSavedViewNameExistsDetail",
+        "WorkspaceSourceSavedViewLimitReachedDetail",
+        "WorkspaceSourceSavedViewVersionConflictDetail",
+    }
+
+    paths = schema["paths"]
+    collection_responses = paths["/api/v1/workspaces/{workspace_id}/source-views"]
+    item_responses = paths["/api/v1/workspaces/{workspace_id}/source-views/{view_id}"]
+    assert set(collection_responses["get"]["responses"]) >= {"200", "404"}
+    assert set(collection_responses["post"]["responses"]) >= {"201", "404", "409"}
+    assert set(item_responses["patch"]["responses"]) >= {"200", "404", "409"}
+    assert set(item_responses["delete"]["responses"]) >= {"204", "404"}
+    not_found_ref = "#/components/schemas/WorkspaceSourceSavedViewNotFoundResponse"
+    conflict_ref = "#/components/schemas/WorkspaceSourceSavedViewConflictResponse"
+    for operation in (
+        collection_responses["get"],
+        collection_responses["post"],
+        item_responses["patch"],
+        item_responses["delete"],
+    ):
+        assert operation["responses"]["404"]["content"]["application/json"]["schema"] == {
+            "$ref": not_found_ref
+        }
+    for operation in (collection_responses["post"], item_responses["patch"]):
+        assert operation["responses"]["409"]["content"]["application/json"]["schema"] == {
+            "$ref": conflict_ref
+        }
 
 
 def test_invalid_view_reset_is_an_atomic_ordinary_patch(

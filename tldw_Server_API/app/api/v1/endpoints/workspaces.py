@@ -64,7 +64,9 @@ from tldw_Server_API.app.api.v1.schemas.workspace_schemas import (
     WorkspaceSourceResponse,
     WorkspaceSourceReviewStateBatchRequest,
     WorkspaceSourceSavedViewCreateRequest,
+    WorkspaceSourceSavedViewConflictResponse,
     WorkspaceSourceSavedViewListResponse,
+    WorkspaceSourceSavedViewNotFoundResponse,
     WorkspaceSourceSavedViewPatchRequest,
     WorkspaceSourceSavedViewResponse,
     WorkspaceSourceSavedViewStateV1,
@@ -755,7 +757,7 @@ def _source_saved_view_response(
     else:
         try:
             parsed_state = json.loads(row["state_json"])
-        except (json.JSONDecodeError, RecursionError, TypeError):
+        except (RecursionError, TypeError, ValueError):
             invalid_reason = "invalid_json"
         else:
             try:
@@ -763,17 +765,19 @@ def _source_saved_view_response(
             except ValueError:
                 invalid_reason = "invalid_state"
 
-    return WorkspaceSourceSavedViewResponse(
-        id=str(row["id"]),
-        workspace_id=str(row["workspace_id"]),
-        name=str(row["name"]),
-        schema_version=schema_version,
-        state=state_model,
-        valid=invalid_reason is None,
-        invalid_reason=invalid_reason,
-        version=int(row["version"]),
-        created_at=str(row["created_at"]),
-        updated_at=str(row["updated_at"]),
+    return WorkspaceSourceSavedViewResponse.model_validate(
+        {
+            "id": str(row["id"]),
+            "workspace_id": str(row["workspace_id"]),
+            "name": str(row["name"]),
+            "schema_version": schema_version,
+            "state": state_model,
+            "valid": invalid_reason is None,
+            "invalid_reason": invalid_reason,
+            "version": int(row["version"]),
+            "created_at": str(row["created_at"]),
+            "updated_at": str(row["updated_at"]),
+        }
     )
 
 
@@ -1865,10 +1869,11 @@ async def archive_workspace_runtime_binding(
 @router.get(
     "/{workspace_id}/source-views",
     response_model=WorkspaceSourceSavedViewListResponse,
+    responses={404: {"model": WorkspaceSourceSavedViewNotFoundResponse}},
     dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT)],
     summary="List workspace source saved views",
 )
-async def list_source_saved_views(
+def list_source_saved_views(
     workspace_id: str,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     current_user: User = Depends(get_request_user),
@@ -1893,10 +1898,14 @@ async def list_source_saved_views(
     "/{workspace_id}/source-views",
     response_model=WorkspaceSourceSavedViewResponse,
     status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"model": WorkspaceSourceSavedViewNotFoundResponse},
+        409: {"model": WorkspaceSourceSavedViewConflictResponse},
+    },
     dependencies=[Depends(WORKSPACES_WRITE_RATE_LIMIT)],
     summary="Create a workspace source saved view",
 )
-async def create_source_saved_view(
+def create_source_saved_view(
     workspace_id: str,
     body: WorkspaceSourceSavedViewCreateRequest,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
@@ -1925,10 +1934,14 @@ async def create_source_saved_view(
 @router.patch(
     "/{workspace_id}/source-views/{view_id}",
     response_model=WorkspaceSourceSavedViewResponse,
+    responses={
+        404: {"model": WorkspaceSourceSavedViewNotFoundResponse},
+        409: {"model": WorkspaceSourceSavedViewConflictResponse},
+    },
     dependencies=[Depends(WORKSPACES_WRITE_RATE_LIMIT)],
     summary="Update a workspace source saved view",
 )
-async def update_source_saved_view(
+def update_source_saved_view(
     workspace_id: str,
     view_id: str,
     body: WorkspaceSourceSavedViewPatchRequest,
@@ -1937,20 +1950,19 @@ async def update_source_saved_view(
 ) -> WorkspaceSourceSavedViewResponse:
     """Replace a saved view name and/or state with optimistic locking."""
     owner_user_id = _request_user_id(current_user)
-    fields_set = body.model_fields_set
+    patch = body.root
+    state_model = getattr(patch, "state", None)
     try:
         _require_source_saved_view_workspace(db, workspace_id, owner_user_id)
         row = db.update_workspace_source_saved_view(
             owner_user_id,
             workspace_id,
             view_id,
-            expected_version=body.version,
-            name=body.name if "name" in fields_set else None,
-            schema_version=body.schema_version if "state" in fields_set else None,
+            expected_version=patch.version,
+            name=getattr(patch, "name", None),
+            schema_version=getattr(patch, "schema_version", None),
             state_json=(
-                _serialize_source_saved_view_state(body.state)
-                if "state" in fields_set and body.state is not None
-                else None
+                _serialize_source_saved_view_state(state_model) if state_model is not None else None
             ),
         )
     except HTTPException:
@@ -1965,10 +1977,11 @@ async def update_source_saved_view(
 @router.delete(
     "/{workspace_id}/source-views/{view_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    responses={404: {"model": WorkspaceSourceSavedViewNotFoundResponse}},
     dependencies=[Depends(WORKSPACES_DELETE_RATE_LIMIT)],
     summary="Delete a workspace source saved view",
 )
-async def delete_source_saved_view(
+def delete_source_saved_view(
     workspace_id: str,
     view_id: str,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),

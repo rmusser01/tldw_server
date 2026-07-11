@@ -12,6 +12,7 @@ from pydantic import (
     ConfigDict,
     Field,
     PrivateAttr,
+    RootModel,
     StrictBool,
     StrictInt,
     StrictStr,
@@ -282,38 +283,57 @@ class WorkspaceSourceSavedViewCreateRequest(BaseModel):
         return value.strip() if isinstance(value, str) else value
 
 
-class WorkspaceSourceSavedViewPatchRequest(BaseModel):
-    """Versioned replacement of a saved view name and/or V1 state."""
+class _WorkspaceSourceSavedViewPatchBase(BaseModel):
+    """Strict common fields for every valid saved-view patch shape."""
 
     model_config = ConfigDict(extra="forbid")
 
     version: SourceViewOptimisticVersion
-    name: StrictStr | None = Field(default=None, min_length=1, max_length=120)
-    schema_version: SourceViewSchemaVersionV1 | None = None
-    state: WorkspaceSourceSavedViewStateV1 | None = None
+
+
+class WorkspaceSourceSavedViewRenamePatch(_WorkspaceSourceSavedViewPatchBase):
+    """Rename-only saved-view patch."""
+
+    name: StrictStr = Field(min_length=1, max_length=120)
 
     @field_validator("name", mode="before")
     @classmethod
     def _trim_name(cls, value: Any) -> Any:
         return value.strip() if isinstance(value, str) else value
 
-    @model_validator(mode="after")
-    def _validate_patch_operations(self) -> "WorkspaceSourceSavedViewPatchRequest":
-        operations = {"name", "schema_version", "state"} & self.model_fields_set
-        explicit_nulls = [field for field in operations if getattr(self, field) is None]
-        if explicit_nulls:
-            raise ValueError("PATCH operations must not be null")
-        if not ({"name", "state"} & operations):
-            raise ValueError("PATCH requires name and/or state")
-        if "state" in operations and "schema_version" not in operations:
-            raise ValueError("schema_version is required when state is present")
-        if "schema_version" in operations and "state" not in operations:
-            raise ValueError("schema_version is forbidden without state")
-        return self
+
+class WorkspaceSourceSavedViewStatePatch(_WorkspaceSourceSavedViewPatchBase):
+    """State-only saved-view patch with its required schema version."""
+
+    schema_version: SourceViewSchemaVersionV1
+    state: WorkspaceSourceSavedViewStateV1
 
 
-class WorkspaceSourceSavedViewResponse(BaseModel):
-    """Valid or recoverable-invalid saved source view."""
+class WorkspaceSourceSavedViewCombinedPatch(_WorkspaceSourceSavedViewPatchBase):
+    """Atomic saved-view rename and state replacement."""
+
+    name: StrictStr = Field(min_length=1, max_length=120)
+    schema_version: SourceViewSchemaVersionV1
+    state: WorkspaceSourceSavedViewStateV1
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _trim_name(cls, value: Any) -> Any:
+        return value.strip() if isinstance(value, str) else value
+
+
+class WorkspaceSourceSavedViewPatchRequest(
+    RootModel[
+        WorkspaceSourceSavedViewRenamePatch
+        | WorkspaceSourceSavedViewStatePatch
+        | WorkspaceSourceSavedViewCombinedPatch
+    ]
+):
+    """Every structurally valid saved-view PATCH body."""
+
+
+class _WorkspaceSourceSavedViewResponseBase(BaseModel):
+    """Metadata shared by valid and recoverable-invalid responses."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -321,21 +341,84 @@ class WorkspaceSourceSavedViewResponse(BaseModel):
     workspace_id: str
     name: str
     schema_version: SourceViewStoredSchemaVersion
-    state: WorkspaceSourceSavedViewStateV1 | None
-    valid: StrictBool
-    invalid_reason: WorkspaceSourceSavedViewInvalidReason | None
     version: SourceViewOptimisticVersion
     created_at: str
     updated_at: str
 
-    @model_validator(mode="after")
-    def _validate_response_invariant(self) -> "WorkspaceSourceSavedViewResponse":
-        if self.valid:
-            if self.state is None or self.invalid_reason is not None:
-                raise ValueError("valid saved views require state and forbid invalid_reason")
-        elif self.state is not None or self.invalid_reason is None:
-            raise ValueError("invalid saved views require invalid_reason and null state")
-        return self
+
+class WorkspaceSourceSavedViewValidResponse(_WorkspaceSourceSavedViewResponseBase):
+    """Saved view with a canonical applicable state."""
+
+    state: WorkspaceSourceSavedViewStateV1
+    valid: Literal[True]
+    invalid_reason: None
+
+
+class WorkspaceSourceSavedViewInvalidResponse(_WorkspaceSourceSavedViewResponseBase):
+    """Saved view retained for reset or deletion after state recovery failed."""
+
+    state: None
+    valid: Literal[False]
+    invalid_reason: WorkspaceSourceSavedViewInvalidReason
+
+
+class WorkspaceSourceSavedViewResponse(
+    RootModel[WorkspaceSourceSavedViewValidResponse | WorkspaceSourceSavedViewInvalidResponse]
+):
+    """Structurally valid saved-view response union."""
+
+
+class WorkspaceSourceSavedViewNotFoundResponse(BaseModel):
+    """No-leak response for inaccessible workspaces or views."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    detail: Literal["Source view not found"]
+
+
+class WorkspaceSourceSavedViewNameExistsDetail(BaseModel):
+    """Owned duplicate-name metadata."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    code: Literal["source_view_name_exists"]
+    view_id: str
+    version: SourceViewOptimisticVersion
+
+
+class WorkspaceSourceSavedViewLimitReachedDetail(BaseModel):
+    """Per-workspace saved-view limit metadata."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    code: Literal["source_view_limit_reached"]
+    limit: Literal[100]
+
+
+class WorkspaceSourceSavedViewVersionConflictDetail(BaseModel):
+    """Optimistic-lock conflict metadata."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    code: Literal["source_view_version_conflict"]
+    view_id: str
+    current_version: SourceViewOptimisticVersion
+
+
+WorkspaceSourceSavedViewConflictDetail = Annotated[
+    WorkspaceSourceSavedViewNameExistsDetail
+    | WorkspaceSourceSavedViewLimitReachedDetail
+    | WorkspaceSourceSavedViewVersionConflictDetail,
+    Field(discriminator="code"),
+]
+
+
+class WorkspaceSourceSavedViewConflictResponse(BaseModel):
+    """Typed conflict envelope returned by create and patch."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    detail: WorkspaceSourceSavedViewConflictDetail
 
 
 class WorkspaceSourceSavedViewListResponse(BaseModel):
