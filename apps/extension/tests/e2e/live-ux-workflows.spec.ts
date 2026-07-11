@@ -7,6 +7,7 @@ import {
   waitForConnectionStore,
   logConnectionSnapshot
 } from './utils/connection'
+import { setQuickIngestSwitch } from './utils/quick-ingest-options'
 
 const SERVER_URL =
   process.env.TLDW_SERVER_URL ?? 'http://127.0.0.1:8000'
@@ -166,8 +167,8 @@ describeLive('Live server UX workflows (no mocks)', () => {
     }
   })
 
-  test('Quick ingest reaches terminal results and reopens them in the installed extension', async () => {
-    test.setTimeout(180_000)
+  test('Quick ingest repeats a persisted URL in one installed extension session', async () => {
+    test.setTimeout(300_000)
 
     const fixtureId = `extension-live-${Date.now()}`
     const ingestUrl = `${SERVER_URL.replace(/\/$/, '')}/docs?quick_ingest_fixture=${fixtureId}`
@@ -180,6 +181,17 @@ describeLive('Live server UX workflows (no mocks)', () => {
           apiKey: API_KEY
         }
       })
+
+    const pageErrors: string[] = []
+    const consoleErrors: string[] = []
+    page.on('pageerror', (error) => {
+      pageErrors.push(error.stack || error.message)
+    })
+    page.on('console', (message) => {
+      if (message.type() === 'error') {
+        consoleErrors.push(message.text())
+      }
+    })
 
     try {
       await page.goto(optionsUrl + '#/media', {
@@ -197,96 +209,93 @@ describeLive('Live server UX workflows (no mocks)', () => {
       const dialog = page.getByRole('dialog', { name: /quick ingest/i }).first()
       await expect(dialog).toBeVisible({ timeout: 15_000 })
 
-      const urlInput = dialog
-        .getByLabel(/Paste URLs input/i)
-        .or(dialog.getByPlaceholder(/https:\/\/example\.com/i))
-        .first()
-      await expect(urlInput).toBeEnabled({ timeout: 20_000 })
-      await urlInput.fill(ingestUrl)
-      await dialog.getByRole('button', { name: /add url|add urls/i }).first().click()
-      await expect(dialog.getByText(ingestUrl, { exact: false }).first()).toBeVisible({
-        timeout: 20_000
-      })
+      const submitIngest = async () => {
+        const urlInput = dialog
+          .getByLabel(/Paste URLs input/i)
+          .or(dialog.getByPlaceholder(/https:\/\/example\.com/i))
+          .first()
+        await expect(urlInput).toBeEnabled({ timeout: 20_000 })
+        await urlInput.fill(ingestUrl)
+        await dialog.getByRole('button', { name: /add url|add urls/i }).first().click()
+        await expect(dialog.getByText(ingestUrl, { exact: false }).first()).toBeVisible({
+          timeout: 20_000
+        })
 
-      const configureButton = dialog
-        .getByRole('button', { name: /configure \d+ items/i })
-        .first()
-      if (await configureButton.isVisible({ timeout: 5_000 }).catch(() => false)) {
+        const configureButton = dialog
+          .getByRole('button', { name: /configure \d+ items/i })
+          .first()
+        await expect(configureButton).toBeVisible({ timeout: 20_000 })
         await expect(configureButton).toBeEnabled({ timeout: 20_000 })
         await configureButton.click()
-      }
 
-      const analysisSwitch = dialog
-        .getByRole('switch', { name: /^Ingestion options\s*[–-]\s*analysis$/i })
-        .first()
-      if (await analysisSwitch.isVisible({ timeout: 5_000 }).catch(() => false)) {
-        if ((await analysisSwitch.getAttribute('aria-checked')) === 'true') {
-          await analysisSwitch.click()
-          await expect(analysisSwitch).toHaveAttribute('aria-checked', 'false')
-        }
-      }
-      const chunkingSwitch = dialog
-        .getByRole('switch', { name: /^Ingestion options\s*[–-]\s*chunking$/i })
-        .first()
-      if (await chunkingSwitch.isVisible({ timeout: 5_000 }).catch(() => false)) {
-        if ((await chunkingSwitch.getAttribute('aria-checked')) === 'true') {
-          await chunkingSwitch.click()
-          await expect(chunkingSwitch).toHaveAttribute('aria-checked', 'false')
-        }
-      }
+        await setQuickIngestSwitch(dialog, 'analysis', false)
+        await setQuickIngestSwitch(dialog, 'chunking', false)
 
-      const nextButton = dialog.getByRole('button', { name: /^next$/i }).first()
-      if (await nextButton.isVisible({ timeout: 5_000 }).catch(() => false)) {
+        const nextButton = dialog.getByRole('button', { name: /^next$/i }).first()
+        await expect(nextButton).toBeVisible({ timeout: 20_000 })
         await expect(nextButton).toBeEnabled({ timeout: 20_000 })
         await nextButton.click()
         await expect(dialog.getByText(/ready to process/i)).toBeVisible({
           timeout: 20_000
         })
-      }
 
-      const runButton = dialog.getByTestId('quick-ingest-run').first()
-      await expect(runButton).toBeEnabled({ timeout: 20_000 })
-      await runButton.click()
+        const runButton = dialog.getByTestId('quick-ingest-run').first()
+        await expect(runButton).toBeEnabled({ timeout: 20_000 })
+        await runButton.click()
+      }
 
       const resultsStep = dialog.getByTestId('wizard-results-step')
       const completedRegion = dialog.getByRole('region', { name: /completed items/i }).first()
       const skippedRegion = dialog.getByRole('region', { name: /skipped items/i }).first()
-      const errorRegion = dialog.getByRole('region', { name: /error items/i }).first()
+      const summary = dialog.getByText(/Total:\s*\d+\s+succeeded.*\d+\s+failed/i).first()
 
+      await submitIngest()
       await expect(resultsStep).toBeVisible({ timeout: 120_000 })
+      await expect(completedRegion).toBeVisible({ timeout: 120_000 })
+      await expect(dialog.getByText(new RegExp(fixtureId, 'i')).first()).toBeVisible({
+        timeout: 30_000
+      })
+      await expect(summary).toBeVisible({ timeout: 30_000 })
+
+      const ingestMoreButton = dialog
+        .getByRole('button', { name: /start a new ingest|ingest more/i })
+        .first()
+      await expect(ingestMoreButton).toBeVisible({ timeout: 15_000 })
+      await ingestMoreButton.click()
+      await expect(resultsStep).toBeHidden({ timeout: 20_000 })
+
+      await submitIngest()
+      await expect(resultsStep).toBeVisible({ timeout: 120_000 })
+      await expect(dialog.getByText(new RegExp(fixtureId, 'i')).first()).toBeVisible({
+        timeout: 30_000
+      })
       await expect
         .poll(
-          async () =>
-            (await completedRegion.isVisible().catch(() => false)) ||
-            (await skippedRegion.isVisible().catch(() => false)) ||
-            (await errorRegion.isVisible().catch(() => false)),
+          async () => {
+            if (await skippedRegion.isVisible().catch(() => false)) return true
+            const summaryText = await summary.textContent().catch(() => '')
+            if (/\b[1-9]\d*\s+skipped\b/i.test(summaryText || '')) return true
+            return dialog
+              .getByText(/skipped existing|already exists|already ingested|existing item/i)
+              .first()
+              .isVisible()
+              .catch(() => false)
+          },
           {
             timeout: 120_000,
-            message: 'Timed out waiting for the extension quick ingest run to reach terminal results'
+            message: 'Second ingest did not report a skipped or existing result'
           }
         )
         .toBe(true)
 
-      await expect(dialog.getByText(new RegExp(fixtureId, 'i')).first()).toBeVisible({
-        timeout: 30_000
-      })
-      await expect(
-        dialog.getByText(/Total:\s*\d+\s+succeeded(?:,\s*\d+\s+skipped)?,\s*\d+\s+failed/i)
-      ).toBeVisible({
-        timeout: 30_000
-      })
-
-      const doneButton = dialog.getByRole('button', { name: /done|close the ingest wizard/i }).first()
-      await expect(doneButton).toBeVisible({ timeout: 15_000 })
-      await doneButton.click()
-      await expect(dialog).toBeHidden({ timeout: 20_000 })
-
-      await openQuickIngestButton.click()
-      await expect(dialog).toBeVisible({ timeout: 15_000 })
-      await expect(resultsStep).toBeVisible({ timeout: 30_000 })
-      await expect(dialog.getByText(new RegExp(fixtureId, 'i')).first()).toBeVisible({
-        timeout: 30_000
-      })
+      const capturedErrors = [
+        ...pageErrors.map((message) => `pageerror: ${message}`),
+        ...consoleErrors.map((message) => `console.error: ${message}`)
+      ]
+      expect(
+        capturedErrors.filter((message) => /maximum update depth exceeded/i.test(message)),
+        `Captured browser errors:\n${capturedErrors.join('\n') || '(none)'}`
+      ).toEqual([])
     } finally {
       await context.close()
     }

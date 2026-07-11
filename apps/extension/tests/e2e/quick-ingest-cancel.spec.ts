@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test"
 import { launchWithBuiltExtension } from "./utils/extension-build"
 import { forceConnected, waitForConnectionStore } from "./utils/connection"
+import { setQuickIngestSwitch } from "./utils/quick-ingest-options"
 
 const API_KEY = "THIS-IS-A-SECURE-KEY-123-FAKE-KEY"
 
@@ -139,22 +140,8 @@ test.describe("Quick ingest cancel flow", () => {
       await expect(configureButton).toBeVisible()
       await configureButton.click()
 
-      const analysisSwitch = dialog
-        .getByRole("switch", { name: /^Ingestion options\s*[–-]\s*analysis$/i })
-        .first()
-      await expect(analysisSwitch).toBeVisible()
-      if ((await analysisSwitch.getAttribute("aria-checked")) === "true") {
-        await analysisSwitch.click()
-        await expect(analysisSwitch).toHaveAttribute("aria-checked", "false")
-      }
-      const chunkingSwitch = dialog
-        .getByRole("switch", { name: /^Ingestion options\s*[–-]\s*chunking$/i })
-        .first()
-      await expect(chunkingSwitch).toBeVisible()
-      if ((await chunkingSwitch.getAttribute("aria-checked")) === "true") {
-        await chunkingSwitch.click()
-        await expect(chunkingSwitch).toHaveAttribute("aria-checked", "false")
-      }
+      await setQuickIngestSwitch(dialog, "analysis", false)
+      await setQuickIngestSwitch(dialog, "chunking", false)
 
       const nextButton = dialog.getByRole("button", { name: /^next$/i }).first()
       await expect(nextButton).toBeVisible()
