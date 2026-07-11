@@ -18,8 +18,13 @@ import {
 } from "../SourcesPane/source-saved-views"
 import { useSourceListViewState } from "../use-source-list-view-state"
 import {
+  WORKSPACE_SOURCE_SAVED_VIEW_DATE_FIELDS,
   WORKSPACE_SOURCE_SAVED_VIEW_INVALID_REASONS,
+  WORKSPACE_SOURCE_SAVED_VIEW_LIFECYCLE_STATE_FILTERS,
+  WORKSPACE_SOURCE_SAVED_VIEW_REVIEW_STATE_FILTERS,
   WORKSPACE_SOURCE_SAVED_VIEW_SORTS,
+  WORKSPACE_SOURCE_SAVED_VIEW_STATUS_FILTERS,
+  WORKSPACE_SOURCE_SAVED_VIEW_TYPE_FILTERS,
   type WorkspaceSourceSavedViewStateV1
 } from "@/types/workspace-source-saved-view"
 
@@ -66,6 +71,45 @@ describe("source saved view V1 contract", () => {
       "duration_asc",
       "page_count_desc",
       "page_count_asc"
+    ])
+  })
+
+  it("pins the exact V1 filter and date-field tuples", () => {
+    expect(WORKSPACE_SOURCE_SAVED_VIEW_TYPE_FILTERS).toEqual([
+      "pdf",
+      "video",
+      "audio",
+      "website",
+      "document",
+      "text"
+    ])
+    expect(WORKSPACE_SOURCE_SAVED_VIEW_STATUS_FILTERS).toEqual([
+      "processing",
+      "ready",
+      "error"
+    ])
+    expect(WORKSPACE_SOURCE_SAVED_VIEW_REVIEW_STATE_FILTERS).toEqual([
+      "unset",
+      "needs_review",
+      "reviewed"
+    ])
+    expect(WORKSPACE_SOURCE_SAVED_VIEW_LIFECYCLE_STATE_FILTERS).toEqual([
+      "queued",
+      "ingesting",
+      "extracting",
+      "chunking",
+      "indexing",
+      "queryable",
+      "partially_queryable",
+      "failed",
+      "retrying",
+      "missing_media",
+      "blocked_by_permissions",
+      "unknown"
+    ])
+    expect(WORKSPACE_SOURCE_SAVED_VIEW_DATE_FIELDS).toEqual([
+      "added_at",
+      "source_created_at"
     ])
   })
 
@@ -144,10 +188,13 @@ describe("source saved view V1 contract", () => {
   })
 
   it.each([
+    ["0000-01-01", false],
+    ["0001-01-01", true],
     ["2024-02-29", true],
     ["2023-02-29", false],
     ["2026-04-31", false],
     ["2026-1-01", false],
+    ["9999-12-31", true],
     ["not-a-date", false]
   ])("validates %s as a real YYYY-MM-DD date", (date, valid) => {
     const value = deserializeSourceViewState({ date_from: date })
@@ -240,6 +287,30 @@ describe("source saved view V1 contract", () => {
     }
   )
 
+  it("accepts only plain JSON objects at the wire boundary", () => {
+    class SavedViewLike {
+      require_url = true
+    }
+
+    for (const payload of [
+      new Date(),
+      new Map(),
+      new Set(),
+      new SavedViewLike(),
+      []
+    ]) {
+      expect(deserializeSourceViewState(payload)).toBeNull()
+    }
+
+    const nullPrototypePayload = Object.assign(Object.create(null), {
+      require_url: true
+    })
+    expect(deserializeSourceViewState(nullPrototypePayload)).toEqual({
+      ...defaultV1,
+      require_url: true
+    })
+  })
+
   it("fully applies saved fields while preserving only expanded", () => {
     const current: SourceListViewState = {
       ...DEFAULT_SOURCE_LIST_VIEW_STATE,
@@ -293,6 +364,44 @@ describe("source saved view V1 contract", () => {
     expect(
       getSourceListViewStateSignature({ ...local, dateFrom: "not-a-date" })
     ).toBeNull()
+  })
+
+  it("canonicalizes duplicate and declaration-order-permuted arrays in signatures", () => {
+    const duplicateAndPermuted: WorkspaceSourceSavedViewStateV1 = {
+      ...defaultV1,
+      type_filters: ["website", "pdf", "website"],
+      status_filters: ["error", "processing", "error"]
+    }
+    const canonical: WorkspaceSourceSavedViewStateV1 = {
+      ...defaultV1,
+      type_filters: ["pdf", "website"],
+      status_filters: ["processing", "error"]
+    }
+
+    const signature = getSourceViewStateSignature(canonical)
+    expect(signature).not.toBeNull()
+    expect(getSourceViewStateSignature(duplicateAndPermuted)).toBe(signature)
+    expect(areSourceViewStatesEqual(duplicateAndPermuted, canonical)).toBe(true)
+  })
+
+  it("rejects nonfinite signature input without colliding with canonical null", () => {
+    const canonicalNull: WorkspaceSourceSavedViewStateV1 = {
+      ...defaultV1,
+      file_size_min: null
+    }
+    const invalidNaN = {
+      ...defaultV1,
+      file_size_min: Number.NaN
+    } as WorkspaceSourceSavedViewStateV1
+    const invalidInfinity = {
+      ...defaultV1,
+      file_size_min: Number.POSITIVE_INFINITY
+    } as WorkspaceSourceSavedViewStateV1
+
+    expect(getSourceViewStateSignature(invalidNaN)).toBeNull()
+    expect(getSourceViewStateSignature(invalidInfinity)).toBeNull()
+    expect(areSourceViewStatesEqual(invalidNaN, canonicalNull)).toBe(false)
+    expect(areSourceViewStatesEqual(invalidNaN, invalidNaN)).toBe(false)
   })
 })
 

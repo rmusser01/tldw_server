@@ -5,6 +5,62 @@ import type {
   WorkspaceSourceType
 } from "./workspace"
 
+export const WORKSPACE_SOURCE_SAVED_VIEW_TYPE_FILTERS = [
+  "pdf",
+  "video",
+  "audio",
+  "website",
+  "document",
+  "text"
+] as const satisfies readonly WorkspaceSourceType[]
+
+export type WorkspaceSourceSavedViewTypeFilter =
+  (typeof WORKSPACE_SOURCE_SAVED_VIEW_TYPE_FILTERS)[number]
+
+export const WORKSPACE_SOURCE_SAVED_VIEW_STATUS_FILTERS = [
+  "processing",
+  "ready",
+  "error"
+] as const satisfies readonly WorkspaceSourceStatus[]
+
+export type WorkspaceSourceSavedViewStatusFilter =
+  (typeof WORKSPACE_SOURCE_SAVED_VIEW_STATUS_FILTERS)[number]
+
+export const WORKSPACE_SOURCE_SAVED_VIEW_REVIEW_STATE_FILTERS = [
+  "unset",
+  "needs_review",
+  "reviewed"
+] as const satisfies readonly WorkspaceSourceReviewState[]
+
+export type WorkspaceSourceSavedViewReviewStateFilter =
+  (typeof WORKSPACE_SOURCE_SAVED_VIEW_REVIEW_STATE_FILTERS)[number]
+
+export const WORKSPACE_SOURCE_SAVED_VIEW_LIFECYCLE_STATE_FILTERS = [
+  "queued",
+  "ingesting",
+  "extracting",
+  "chunking",
+  "indexing",
+  "queryable",
+  "partially_queryable",
+  "failed",
+  "retrying",
+  "missing_media",
+  "blocked_by_permissions",
+  "unknown"
+] as const satisfies readonly WorkspaceSourceLifecycleState[]
+
+export type WorkspaceSourceSavedViewLifecycleStateFilter =
+  (typeof WORKSPACE_SOURCE_SAVED_VIEW_LIFECYCLE_STATE_FILTERS)[number]
+
+export const WORKSPACE_SOURCE_SAVED_VIEW_DATE_FIELDS = [
+  "added_at",
+  "source_created_at"
+] as const
+
+export type WorkspaceSourceSavedViewDateField =
+  (typeof WORKSPACE_SOURCE_SAVED_VIEW_DATE_FIELDS)[number]
+
 export const WORKSPACE_SOURCE_SAVED_VIEW_SORTS = [
   "manual",
   "name_asc",
@@ -34,11 +90,11 @@ export type WorkspaceSourceSavedViewInvalidReason =
   (typeof WORKSPACE_SOURCE_SAVED_VIEW_INVALID_REASONS)[number]
 
 export interface WorkspaceSourceSavedViewStateV1 {
-  type_filters: WorkspaceSourceType[]
-  status_filters: WorkspaceSourceStatus[]
-  review_state_filters: WorkspaceSourceReviewState[]
-  lifecycle_state_filters: WorkspaceSourceLifecycleState[]
-  date_field: "added_at" | "source_created_at"
+  type_filters: WorkspaceSourceSavedViewTypeFilter[]
+  status_filters: WorkspaceSourceSavedViewStatusFilter[]
+  review_state_filters: WorkspaceSourceSavedViewReviewStateFilter[]
+  lifecycle_state_filters: WorkspaceSourceSavedViewLifecycleStateFilter[]
+  date_field: WorkspaceSourceSavedViewDateField
   date_from: string | null
   date_to: string | null
   require_url: boolean

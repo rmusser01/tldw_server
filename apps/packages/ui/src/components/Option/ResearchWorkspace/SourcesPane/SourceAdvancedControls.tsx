@@ -1,4 +1,5 @@
 import React from "react"
+import { WORKSPACE_SOURCE_SAVED_VIEW_SORTS } from "@/types/workspace-source-saved-view"
 import {
   SOURCE_LIST_SORT_LABELS,
   hasActiveSourceFilters,
@@ -32,22 +33,6 @@ const humanizeLifecycleState = (value: string): string => {
   const label = value.replaceAll("_", " ")
   return label[0].toUpperCase() + label.slice(1)
 }
-
-const SORT_OPTIONS: SourceListSortOption[] = [
-  "manual",
-  "name_asc",
-  "name_desc",
-  "added_desc",
-  "added_asc",
-  "source_created_desc",
-  "source_created_asc",
-  "file_size_desc",
-  "file_size_asc",
-  "duration_desc",
-  "duration_asc",
-  "page_count_desc",
-  "page_count_asc"
-]
 
 export const SourceAdvancedControls: React.FC<SourceAdvancedControlsProps> = ({
   viewState,
@@ -207,7 +192,7 @@ export const SourceAdvancedControls: React.FC<SourceAdvancedControlsProps> = ({
                 }
                 className="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-text"
               >
-                {SORT_OPTIONS.map((option) => (
+                {WORKSPACE_SOURCE_SAVED_VIEW_SORTS.map((option) => (
                   <option key={option} value={option}>
                     {option === "manual" ? "Manual order" : SOURCE_LIST_SORT_LABELS[option]}
                   </option>

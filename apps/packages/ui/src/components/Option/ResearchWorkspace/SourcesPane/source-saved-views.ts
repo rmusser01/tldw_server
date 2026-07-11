@@ -1,11 +1,10 @@
-import type {
-  WorkspaceSourceLifecycleState,
-  WorkspaceSourceReviewState,
-  WorkspaceSourceStatus,
-  WorkspaceSourceType
-} from "@/types/workspace"
 import {
+  WORKSPACE_SOURCE_SAVED_VIEW_DATE_FIELDS,
+  WORKSPACE_SOURCE_SAVED_VIEW_LIFECYCLE_STATE_FILTERS,
+  WORKSPACE_SOURCE_SAVED_VIEW_REVIEW_STATE_FILTERS,
   WORKSPACE_SOURCE_SAVED_VIEW_SORTS,
+  WORKSPACE_SOURCE_SAVED_VIEW_STATUS_FILTERS,
+  WORKSPACE_SOURCE_SAVED_VIEW_TYPE_FILTERS,
   type WorkspaceSourceSavedViewStateV1
 } from "@/types/workspace-source-saved-view"
 import {
@@ -15,39 +14,6 @@ import {
 
 export const SOURCE_SAVED_VIEW_SCHEMA_VERSION = 1
 export const LARGE_SOURCE_FILE_BYTES = 50 * 1024 * 1024
-
-const TYPE_FILTER_ORDER: WorkspaceSourceType[] = [
-  "pdf",
-  "video",
-  "audio",
-  "website",
-  "document",
-  "text"
-]
-const STATUS_FILTER_ORDER: WorkspaceSourceStatus[] = [
-  "processing",
-  "ready",
-  "error"
-]
-const REVIEW_STATE_FILTER_ORDER: WorkspaceSourceReviewState[] = [
-  "unset",
-  "needs_review",
-  "reviewed"
-]
-const LIFECYCLE_STATE_FILTER_ORDER: WorkspaceSourceLifecycleState[] = [
-  "queued",
-  "ingesting",
-  "extracting",
-  "chunking",
-  "indexing",
-  "queryable",
-  "partially_queryable",
-  "failed",
-  "retrying",
-  "missing_media",
-  "blocked_by_permissions",
-  "unknown"
-]
 
 const WIRE_FIELDS = [
   "type_filters",
@@ -83,8 +49,13 @@ export type SourceViewStateValidationResult =
 
 type WireValidationResult = SourceViewStateValidationResult
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === "object" && !Array.isArray(value)
+const isPlainObject = (value: unknown): value is Record<string, unknown> => {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false
+  }
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
+}
 
 const hasOwn = (value: Record<string, unknown>, field: string): boolean =>
   Object.prototype.hasOwnProperty.call(value, field)
@@ -130,7 +101,9 @@ const readEnum = <T extends string>(
 }
 
 const isCalendarDate = (value: string): boolean => {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || value.startsWith("0000-")) {
+    return false
+  }
   const timestamp = Date.parse(`${value}T00:00:00.000Z`)
   return (
     Number.isFinite(timestamp) &&
@@ -187,7 +160,7 @@ const readNumber = (
 }
 
 const validateWireState = (input: unknown): WireValidationResult => {
-  if (!isRecord(input)) {
+  if (!isPlainObject(input)) {
     return {
       ok: false,
       issues: [{ field: "state", message: "Must be an object." }]
@@ -205,31 +178,31 @@ const validateWireState = (input: unknown): WireValidationResult => {
     type_filters: readEnumArray(
       input,
       "type_filters",
-      TYPE_FILTER_ORDER,
+      WORKSPACE_SOURCE_SAVED_VIEW_TYPE_FILTERS,
       issues
     ),
     status_filters: readEnumArray(
       input,
       "status_filters",
-      STATUS_FILTER_ORDER,
+      WORKSPACE_SOURCE_SAVED_VIEW_STATUS_FILTERS,
       issues
     ),
     review_state_filters: readEnumArray(
       input,
       "review_state_filters",
-      REVIEW_STATE_FILTER_ORDER,
+      WORKSPACE_SOURCE_SAVED_VIEW_REVIEW_STATE_FILTERS,
       issues
     ),
     lifecycle_state_filters: readEnumArray(
       input,
       "lifecycle_state_filters",
-      LIFECYCLE_STATE_FILTER_ORDER,
+      WORKSPACE_SOURCE_SAVED_VIEW_LIFECYCLE_STATE_FILTERS,
       issues
     ),
     date_field: readEnum(
       input,
       "date_field",
-      ["added_at", "source_created_at"],
+      WORKSPACE_SOURCE_SAVED_VIEW_DATE_FIELDS,
       "added_at",
       issues
     ),
@@ -308,7 +281,7 @@ const WIRE_TO_LOCAL_FIELDS: Record<WireField, keyof SourceListViewState> = {
 export const serializeSourceListViewState = (
   state: SourceListViewState
 ): SourceViewStateValidationResult => {
-  if (!isRecord(state)) {
+  if (!isPlainObject(state)) {
     return {
       ok: false,
       issues: [{ field: "state", message: "Must be an object." }]
@@ -407,14 +380,24 @@ const orderedWireState = (
 })
 
 export const getSourceViewStateSignature = (
-  state: WorkspaceSourceSavedViewStateV1
-): string => JSON.stringify(orderedWireState(state))
+  state: unknown
+): string | null => {
+  const result = validateWireState(state)
+  return result.ok ? JSON.stringify(orderedWireState(result.state)) : null
+}
 
 export const areSourceViewStatesEqual = (
-  left: WorkspaceSourceSavedViewStateV1,
-  right: WorkspaceSourceSavedViewStateV1
-): boolean =>
-  getSourceViewStateSignature(left) === getSourceViewStateSignature(right)
+  left: unknown,
+  right: unknown
+): boolean => {
+  const leftSignature = getSourceViewStateSignature(left)
+  const rightSignature = getSourceViewStateSignature(right)
+  return (
+    leftSignature !== null &&
+    rightSignature !== null &&
+    leftSignature === rightSignature
+  )
+}
 
 export const getSourceListViewStateSignature = (
   state: SourceListViewState
