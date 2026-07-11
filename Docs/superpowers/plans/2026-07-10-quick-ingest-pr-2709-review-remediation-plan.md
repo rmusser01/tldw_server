@@ -91,21 +91,21 @@ git commit -m "fix: preserve webui dev watch ignores"
 - Modify: `apps/packages/ui/src/services/__tests__/quick-ingest-session-reattach.test.ts`
 - Modify: `apps/packages/ui/src/services/tldw/quick-ingest-session-reattach.ts`
 
-- [ ] **Step 1: Write failing transient and permanent tests**
+- [x] **Step 1: Write failing transient and permanent tests**
 
 Add one test where `bgRequest` rejects once and then returns `processing`, one where it returns HTTP 503 then `completed`, and retain a 404 test that must interrupt immediately. Use fake timers or inject a zero-delay test seam so retries are deterministic.
 
-- [ ] **Step 2: Run the focused test outside the sandbox and verify RED**
+- [x] **Step 2: Run the focused test outside the sandbox and verify RED**
 
 Run: `bunx vitest run apps/packages/ui/src/services/__tests__/quick-ingest-session-reattach.test.ts`
 
 Expected: transient cases return `interrupted` before the fix.
 
-- [ ] **Step 3: Add one bounded status-read helper**
+- [x] **Step 3: Add one bounded status-read helper**
 
 Retry network exceptions, 408, 429, and 5xx responses at most three attempts using the existing fixed-delay style. Return permanent 401/403/404 and malformed successful responses without retry. Keep `preferDirect: true` on every attempt.
 
-- [ ] **Step 4: Run focused reattachment and session tests outside the sandbox**
+- [x] **Step 4: Run focused reattachment and session tests outside the sandbox**
 
 Run:
 
@@ -118,7 +118,7 @@ bunx vitest run \
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the reattachment fix**
+- [x] **Step 5: Commit the reattachment fix**
 
 ```bash
 git add apps/packages/ui/src/services/tldw/quick-ingest-session-reattach.ts apps/packages/ui/src/services/__tests__/quick-ingest-session-reattach.test.ts

@@ -4,7 +4,7 @@ title: Fix Quick Ingest repeat ingestion and queued job recovery
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-11 07:06'
+updated_date: '2026-07-11 07:29'
 labels: []
 dependencies: []
 documentation:
@@ -49,6 +49,8 @@ Draft PR: https://github.com/rmusser01/tldw_server/pull/2709
 2026-07-10: Corrected the remediation design after tracing both public web ingestion contracts. No new strategy request field will be added; existing perform_analysis/summarize_checkbox intent will be propagated to the internal extraction pipeline.
 
 Task 1 complete at 7be983885e: Webpack watch ignores now preserve valid existing semantics in schema-valid shapes and append absolute normalized backend runtime roots. Outside-sandbox focused Vitest passed 7/7; spec and quality reviews approved.
+
+Task 2 complete at 853f6a5a77: restored direct-job reads retry status-less/network/status-0, 408, 429, and 5xx failures up to three attempts while permanent/malformed responses interrupt immediately. Outside-sandbox focused Vitest passed 17/17 and adjacent session/store suites passed 45/45; spec and quality reviews approved.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
