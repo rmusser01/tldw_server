@@ -2,7 +2,7 @@
 
 import React from "react"
 import axe from "axe-core"
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { WatchlistsPlaygroundPage } from "../WatchlistsPlaygroundPage"
 import {
@@ -66,6 +66,11 @@ const navigationMocks = vi.hoisted(() => ({
   navigate: vi.fn()
 }))
 
+const layoutMocks = vi.hoisted(() => ({
+  isConstrained: false,
+  longCopy: false
+}))
+
 const runA11yBaselineRules = async (context: Element) =>
   axe.run(context, {
     runOnly: {
@@ -104,6 +109,9 @@ vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (_key: string, defaultValue?: unknown, options?: Record<string, unknown>) => {
       if (typeof defaultValue !== "string") return _key
+      if (layoutMocks.longCopy && _key === "watchlists:orientation.sources.description") {
+        return `Extremely long localized guidance ${"unbreakablelocalizedcopy".repeat(18)}`
+      }
       if (!options) return defaultValue
       return defaultValue.replace(/\{\{(\w+)\}\}/g, (_, token) => String(options[token] ?? ""))
     }
@@ -150,14 +158,28 @@ vi.mock("antd", async () => {
     </div>
   )
 
-  const Modal = ({ open, title, children, footer }: any) =>
-    open ? (
-      <div>
+  const Modal = ({ open, title, children, footer, onCancel, afterOpenChange, width, className }: any) => {
+    React.useEffect(() => {
+      afterOpenChange?.(open)
+    }, [afterOpenChange, open])
+
+    return open ? (
+      <div
+        role="dialog"
+        aria-label={typeof title === "string" ? title : "dialog"}
+        className={className}
+        data-modal-width={String(width)}
+        tabIndex={-1}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") onCancel?.()
+        }}
+      >
         <h3>{title}</h3>
         {children}
         <div>{footer}</div>
       </div>
     ) : null
+  }
   const Drawer = ({ open, title, children }: any) =>
     open ? (
       <div>
@@ -168,15 +190,18 @@ vi.mock("antd", async () => {
 
   const Empty = ({ description }: any) => <div>{description}</div>
   const Tooltip = ({ children }: any) => <>{children}</>
-  const Button = ({ children, onClick, disabled, ...rest }: any) => (
-    <button
-      type="button"
-      onClick={() => onClick?.()}
-      disabled={Boolean(disabled)}
-      {...rest}
-    >
-      {children}
-    </button>
+  const Button = React.forwardRef<HTMLButtonElement, any>(
+    ({ children, onClick, disabled, block: _block, ...rest }, ref) => (
+      <button
+        ref={ref}
+        type="button"
+        onClick={() => onClick?.()}
+        disabled={Boolean(disabled)}
+        {...rest}
+      >
+        {children}
+      </button>
+    )
   )
   const Switch = ({ checked, onChange, ...rest }: any) => (
     <button
@@ -228,6 +253,10 @@ vi.mock("@/hooks/useServerOnline", () => ({
 
 vi.mock("@/hooks/useConnectionState", () => ({
   useConnectionUxState: () => connectionMocks.useConnectionUxState()
+}))
+
+vi.mock("../shared/useWatchlistsViewport", () => ({
+  useWatchlistsViewport: () => ({ isConstrained: layoutMocks.isConstrained })
 }))
 
 vi.mock("react-router-dom", async () => {
@@ -316,6 +345,9 @@ describe("WatchlistsPlaygroundPage help surfaces", () => {
       has_more: false
     })
     mocks.state.activeTab = "sources"
+    layoutMocks.isConstrained = false
+    layoutMocks.longCopy = false
+    document.documentElement.removeAttribute("dir")
     mocks.state.overviewHealth = {
       tabBadges: {
         sources: 0,
@@ -332,6 +364,7 @@ describe("WatchlistsPlaygroundPage help surfaces", () => {
     localStorage.removeItem("watchlists:teach-points:v1")
     localStorage.removeItem("watchlists:ia-experiment:v1")
     localStorage.removeItem("watchlists:show-all-views:v1")
+    document.documentElement.removeAttribute("dir")
   })
 
   afterEach(() => {
@@ -346,14 +379,17 @@ describe("WatchlistsPlaygroundPage help surfaces", () => {
 
   it("shows persistent docs links and tab-context help link", () => {
     render(<WatchlistsPlaygroundPage />)
+    fireEvent.click(screen.getByTestId("watchlists-help-icon"))
 
     expect(screen.getByTestId("watchlists-main-docs-link")).toHaveAttribute("href", WATCHLISTS_MAIN_DOCS_URL)
     expect(screen.getByTestId("watchlists-context-docs-link")).toHaveAttribute(
       "href",
       WATCHLISTS_TAB_HELP_DOCS.sources
     )
-    expect(screen.getByTestId("watchlists-beta-docs-link")).toHaveAttribute("href", WATCHLISTS_MAIN_DOCS_URL)
-    expect(screen.getByTestId("watchlists-beta-report-link")).toHaveAttribute("href", WATCHLISTS_ISSUE_REPORT_URL)
+    expect(screen.getByRole("link", { name: "Report an issue" })).toHaveAttribute(
+      "href",
+      WATCHLISTS_ISSUE_REPORT_URL
+    )
   })
 
   it("keeps context docs routing aligned with each canonical tab help label", () => {
@@ -373,6 +409,7 @@ describe("WatchlistsPlaygroundPage help surfaces", () => {
     ]
 
     const { rerender } = render(<WatchlistsPlaygroundPage />)
+    fireEvent.click(screen.getByTestId("watchlists-help-icon"))
     const link = () => screen.getByTestId("watchlists-context-docs-link")
 
     for (const expectation of expectations) {
@@ -393,34 +430,33 @@ describe("WatchlistsPlaygroundPage help surfaces", () => {
     expect(screen.getByTestId("watchlists-tab-items")).toHaveTextContent("Updates")
     expect(screen.getByTestId("watchlists-tab-outputs")).toHaveTextContent("Reports")
 
-    expect(screen.getByTestId("watchlists-task-open-sources")).toHaveTextContent("Set up feeds")
-    expect(screen.getByTestId("watchlists-task-open-jobs")).toHaveTextContent("Configure monitors")
-    expect(screen.getByTestId("watchlists-task-open-runs")).toHaveTextContent("Check activity")
-    expect(screen.getByTestId("watchlists-task-open-items")).toHaveTextContent("Review updates")
-    expect(screen.getByTestId("watchlists-task-open-outputs")).toHaveTextContent("View reports")
+    expect(screen.queryByTestId("watchlists-task-open-sources")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("watchlists-repeat-actions")).not.toBeInTheDocument()
   })
 
-  it("keeps beta banner dismissible and persisted by storage key", () => {
-    const { rerender } = render(<WatchlistsPlaygroundPage />)
-
-    expect(screen.getByText("Beta Feature")).toBeInTheDocument()
-    const betaBanner = screen.getByText("Beta Feature").parentElement
-    expect(betaBanner).not.toBeNull()
-    if (!betaBanner) throw new Error("Expected beta banner container to exist")
-    fireEvent.click(within(betaBanner).getByRole("button", { name: "Dismiss" }))
+  it("keeps beta guidance out of the first viewport and available through Help", () => {
+    render(<WatchlistsPlaygroundPage />)
 
     expect(screen.queryByText("Beta Feature")).not.toBeInTheDocument()
-    expect(localStorage.getItem("beta-dismissed:watchlists")).toBe("1")
-
-    rerender(<WatchlistsPlaygroundPage />)
-    expect(screen.queryByText("Beta Feature")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("watchlists-help-icon"))
+    expect(screen.getByTestId("watchlists-main-docs-link")).toHaveAttribute(
+      "href",
+      WATCHLISTS_MAIN_DOCS_URL
+    )
+    expect(screen.getByRole("link", { name: "Report an issue" })).toHaveAttribute(
+      "href",
+      WATCHLISTS_ISSUE_REPORT_URL
+    )
   })
 
   it("supports guided-tour start and resume with persisted progress", () => {
     const { unmount } = render(<WatchlistsPlaygroundPage />)
 
+    fireEvent.click(screen.getByTestId("watchlists-help-icon"))
     fireEvent.click(screen.getByTestId("watchlists-start-guide"))
-    expect(screen.getByText("Watchlists guided tour")).toBeInTheDocument()
+    expect(screen.queryByRole("dialog", { name: "Watchlists help" })).not.toBeInTheDocument()
+    expect(screen.getAllByRole("dialog")).toHaveLength(1)
+    expect(screen.getByRole("dialog", { name: "Watchlists guided tour" })).toBeInTheDocument()
     expect(screen.getByText("Step 1 of 5")).toBeInTheDocument()
     expect(
       screen.getByText("Feeds are inputs for monitors. Add RSS/site feeds before scheduling Activity checks.")
@@ -446,9 +482,12 @@ describe("WatchlistsPlaygroundPage help surfaces", () => {
     unmount()
     render(<WatchlistsPlaygroundPage />)
 
+    fireEvent.click(screen.getByTestId("watchlists-help-icon"))
     expect(screen.getByTestId("watchlists-resume-guide")).toBeInTheDocument()
     fireEvent.click(screen.getByTestId("watchlists-resume-guide"))
-    expect(screen.getByText("Watchlists guided tour")).toBeInTheDocument()
+    expect(screen.queryByRole("dialog", { name: "Watchlists help" })).not.toBeInTheDocument()
+    expect(screen.getAllByRole("dialog")).toHaveLength(1)
+    expect(screen.getByRole("dialog", { name: "Watchlists guided tour" })).toBeInTheDocument()
     expect(screen.getByText("Step 2 of 5")).toBeInTheDocument()
     expect(mocks.trackWatchlistsOnboardingTelemetryMock).toHaveBeenCalledWith({
       type: "guided_tour_resumed",
@@ -456,29 +495,79 @@ describe("WatchlistsPlaygroundPage help surfaces", () => {
     })
   })
 
+  it("reflows constrained RTL Help with long localized copy and reachable controls", () => {
+    layoutMocks.isConstrained = true
+    layoutMocks.longCopy = true
+    document.documentElement.setAttribute("dir", "rtl")
+
+    render(<WatchlistsPlaygroundPage />)
+    fireEvent.click(screen.getByTestId("watchlists-help-icon"))
+
+    const dialog = screen.getByRole("dialog", { name: "Watchlists help" })
+    const panel = screen.getByTestId("watchlists-help-panel")
+    expect(dialog).toHaveAttribute("data-modal-width", "100%")
+    expect(dialog).toHaveClass("max-w-full")
+    expect(panel).toHaveClass("min-w-0", "max-w-full", "overflow-x-hidden", "break-words")
+    expect(panel).not.toHaveClass("w-[520px]", "min-w-[520px]", "whitespace-nowrap")
+    expect(screen.getByTestId("watchlists-orientation-description")).toHaveClass("break-words")
+
+    const mainDocs = screen.getByTestId("watchlists-main-docs-link")
+    const contextDocs = screen.getByTestId("watchlists-context-docs-link")
+    const reportIssue = screen.getByRole("link", { name: "Report an issue" })
+    expect(mainDocs.compareDocumentPosition(contextDocs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(contextDocs.compareDocumentPosition(reportIssue) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    const controls = panel.querySelectorAll<HTMLElement>(
+      'a[href], button, [role="switch"]'
+    )
+    expect(controls.length).toBeGreaterThan(5)
+    for (const control of controls) {
+      expect(control).toBeVisible()
+    }
+  })
+
+  it("restores Help trigger focus after escaping the guided tour", async () => {
+    render(<WatchlistsPlaygroundPage />)
+
+    const helpTrigger = screen.getByRole("button", { name: "Open Watchlists help" })
+    helpTrigger.focus()
+    fireEvent.click(helpTrigger)
+    fireEvent.click(screen.getByTestId("watchlists-start-guide"))
+
+    const tour = await screen.findByRole("dialog", { name: "Watchlists guided tour" })
+    expect(screen.getAllByRole("dialog")).toHaveLength(1)
+    fireEvent.keyDown(tour, { key: "Escape" })
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Watchlists guided tour" })).not.toBeInTheDocument()
+      expect(helpTrigger).toHaveFocus()
+    })
+  })
+
   it("shows first-time teach points for jobs/templates and persists dismissal", () => {
     mocks.state.activeTab = "jobs"
     const { rerender } = render(<WatchlistsPlaygroundPage />)
+    fireEvent.click(screen.getByTestId("watchlists-help-icon"))
 
-    expect(screen.getByTestId("watchlists-teach-point-title")).toHaveTextContent("Monitor setup tip")
-    expect(screen.getByTestId("watchlists-teach-point-description")).toHaveTextContent(
+    expect(screen.getByText("Monitor setup tip")).toBeInTheDocument()
+    expect(screen.getByText(
       "Start with schedule presets first. Use cron and advanced filters only after your first successful Activity check."
-    )
+    )).toBeInTheDocument()
     fireEvent.click(
-      within(screen.getByTestId("watchlists-teach-point-alert")).getByRole("button", { name: "Dismiss" })
+      within(screen.getByTestId("watchlists-help-panel")).getByRole("button", { name: "Dismiss" })
     )
 
     const persisted = JSON.parse(localStorage.getItem("watchlists:teach-points:v1") || "{}")
     expect(persisted.jobsCronFilters).toBe(true)
 
     rerender(<WatchlistsPlaygroundPage />)
-    expect(screen.queryByTestId("watchlists-teach-point-title")).not.toBeInTheDocument()
+    expect(screen.queryByText("Monitor setup tip")).not.toBeInTheDocument()
 
     mocks.state.activeTab = "templates"
     rerender(<WatchlistsPlaygroundPage />)
-    expect(screen.getByTestId("watchlists-teach-point-title")).toHaveTextContent("Template setup tip")
+    expect(screen.getByText("Template setup tip")).toBeInTheDocument()
     fireEvent.click(
-      within(screen.getByTestId("watchlists-teach-point-alert")).getByRole("button", { name: "Dismiss" })
+      within(screen.getByTestId("watchlists-help-panel")).getByRole("button", { name: "Dismiss" })
     )
     const nextPersisted = JSON.parse(localStorage.getItem("watchlists:teach-points:v1") || "{}")
     expect(nextPersisted.templatesAuthoring).toBe(true)
@@ -487,6 +576,7 @@ describe("WatchlistsPlaygroundPage help surfaces", () => {
   it("marks guided tour complete and shows completion notice", () => {
     render(<WatchlistsPlaygroundPage />)
 
+    fireEvent.click(screen.getByTestId("watchlists-help-icon"))
     fireEvent.click(screen.getByTestId("watchlists-start-guide"))
     fireEvent.click(screen.getByRole("button", { name: "Next" }))
     fireEvent.click(screen.getByRole("button", { name: "Next" }))

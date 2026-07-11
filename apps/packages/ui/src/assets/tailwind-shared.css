@@ -940,6 +940,34 @@ body {
   }
 }
 
+@media (pointer: coarse) {
+  .watchlists-pipeline-wizard .ant-input,
+  .watchlists-pipeline-wizard .ant-input-number,
+  .watchlists-pipeline-wizard .ant-input-number-input-wrap,
+  .watchlists-pipeline-wizard .ant-input-number-input,
+  .watchlists-pipeline-wizard .ant-select-selector,
+  .watchlists-pipeline-wizard .ant-select-selection-search-input,
+  .watchlists-pipeline-wizard .ant-radio-wrapper,
+  .watchlists-pipeline-wizard .ant-checkbox-wrapper,
+  .watchlists-pipeline-wizard .ant-switch,
+  .watchlists-pipeline-wizard .ant-btn {
+    min-height: 44px !important;
+  }
+
+  .watchlists-pipeline-wizard .ant-radio-wrapper,
+  .watchlists-pipeline-wizard .ant-checkbox-wrapper,
+  .watchlists-pipeline-wizard .ant-switch,
+  .watchlists-pipeline-wizard .ant-btn {
+    min-width: 44px !important;
+  }
+
+  .watchlists-pipeline-wizard .ant-radio-wrapper,
+  .watchlists-pipeline-wizard .ant-checkbox-wrapper {
+    display: inline-flex;
+    align-items: center;
+  }
+}
+
 /* Icon defaults (lucide/react) */
 .icon {
   width: 20px;
@@ -1161,46 +1189,6 @@ body {
 .dark .pdf-search-match-active {
   background-color: rgba(255, 180, 50, 0.5) !important;
   outline: 2px solid rgba(255, 160, 0, 0.7);
-}
-
-/* Onboarding path selection radio cards - hide default radio circle */
-.onboarding-path-radio .ant-radio {
-  position: absolute;
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-
-.onboarding-path-radio .ant-radio-wrapper {
-  margin: 0;
-  padding: 0;
-}
-
-.onboarding-path-radio .ant-radio-wrapper::after {
-  display: none;
-}
-
-.onboarding-path-radio .ant-radio + span {
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-/* Keyboard focus indicator for onboarding path selection cards */
-.onboarding-path-radio .ant-radio-wrapper:focus-within {
-  outline: 2px solid rgb(var(--color-focus));
-  outline-offset: 2px;
-}
-
-@supports selector(.onboarding-path-radio .ant-radio-wrapper:has(.ant-radio-input:focus-visible)) {
-  .onboarding-path-radio .ant-radio-wrapper:focus-within {
-    outline: none;
-  }
-
-  .onboarding-path-radio .ant-radio-wrapper:has(.ant-radio-input:focus-visible) {
-    outline: 2px solid rgb(var(--color-focus));
-    outline-offset: 2px;
-  }
 }
 
 @media (max-width: 640px) {

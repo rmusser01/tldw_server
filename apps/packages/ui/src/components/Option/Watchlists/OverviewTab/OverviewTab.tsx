@@ -1,47 +1,39 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import {
   Button,
   Card,
   Empty,
-  Form,
-  Input,
-  InputNumber,
   List,
-  Modal,
   message,
-  Select,
   Space,
-  Steps,
   Spin,
   Statistic,
-  Switch,
-  Tag,
-  Tooltip
+  Tag
 } from "antd"
 import {
   AlertTriangle,
   BellRing,
   CheckCircle2,
   Newspaper,
-  RefreshCw,
   Rss,
   Workflow
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { useWatchlistsStore } from "@/store/watchlists"
 import {
-  bulkCreateSources,
-  createWatchlistOutput,
   createWatchlistJob,
   createWatchlistSource,
-  deleteWatchlistJob,
-  deleteWatchlistSource,
   fetchWatchlistRuns,
   fetchWatchlistSources,
   getWatchlistTemplate,
+  getWatchlistRunBriefing,
+  previewWatchlistSchedule,
   previewWatchlistTemplate,
+  retryWatchlistBriefingStage,
   testWatchlistSourceDraft,
-  triggerWatchlistRun
+  triggerWatchlistRun,
+  updateWatchlistJob,
+  updateWatchlistSource
 } from "@/services/watchlists"
 import {
   fetchWatchlistsOverviewData,
@@ -49,60 +41,63 @@ import {
   type WatchlistsOverviewData
 } from "@/services/watchlists-overview"
 import { formatRelativeTime } from "@/utils/dateFormatters"
-import {
-  cadenceDraftToLegacyPreset,
-  createDefaultQuickSetupCadenceDraft,
-  formatQuickSetupCadenceLabel,
-  legacyPresetToQuickSetupCadenceDraft,
-  normalizeQuickSetupIntervalCadence,
-  parseQuickSetupExtraSourceUrls,
-  QUICK_SETUP_DEFAULT_VALUES,
-  type WatchlistCadenceIntervalUnit,
-  type QuickSetupScheduleMode,
-  type QuickSetupValues,
-  toQuickSetupJobPayload,
-  toQuickSetupSourcePayload
-} from "./quick-setup"
-import type { JobPreviewResult } from "@/types/watchlists"
 import { Alert as DesignSystemAlert } from "@/components/ui"
 import {
   toPipelineJobCreatePayload,
-  toPipelineOutputCreatePayload
+  toPipelineTestJobCreatePayload
 } from "./pipeline-contract"
-import { PipelineWizard } from "./PipelineWizard"
 import {
+  PipelineWizard,
+  type PipelineWizardTestOptions
+} from "./PipelineWizard"
+import {
+  buildPipelineWizardSchedule,
   toBriefingPipelineDraft,
+  getPipelineWizardBriefingOutcome,
+  getPipelineWizardSourceSignature,
   toPipelineWizardSourcePayload,
-  type PipelineWizardDraft
+  type PipelineWizardSourceBinding,
+  type PipelineWizardDraft,
+  waitForPipelineWizardBriefing
 } from "./pipeline-wizard-state"
-import {
-  type WatchlistsOnboardingPath,
-  readWatchlistsOnboardingPath,
-  writeWatchlistsOnboardingPath
-} from "../shared/onboarding-path"
 import {
   getFocusableActiveElement,
   restoreFocusToElement
 } from "../shared/focus-management"
 import { isWatchlistRunSuccessful } from "../shared/runStatus"
 import { normalizeWatchlistTemplateName } from "../shared/templateNames"
-import {
-  trackWatchlistsOnboardingTelemetry,
-  type WatchlistsQuickSetupStep
-} from "@/utils/watchlists-onboarding-telemetry"
+import { trackWatchlistsOnboardingTelemetry } from "@/utils/watchlists-onboarding-telemetry"
 import type { WatchlistSource } from "@/types/watchlists"
+import type {
+  WatchlistBriefingProjection,
+  WatchlistBriefingRetryStage
+} from "@/types/watchlists"
+import { LatestBriefing } from "./LatestBriefing"
+import {
+  blockingFailureAnnouncement,
+  transitionAnnouncement
+} from "../shared/watchlists-announcements"
 
 const OVERVIEW_REFRESH_INTERVAL_MS = 30_000
-const QUICK_SETUP_MAX_STEP = 2
-const QUICK_SETUP_STEP_KEYS: WatchlistsQuickSetupStep[] = ["feed", "monitor", "review"]
-const QUICK_SETUP_STEP_FIELDS: Array<Array<keyof QuickSetupValues>> = [
-  ["sourceName", "sourceUrl", "sourceType", "extraSourceUrls"],
-  ["monitorName", "schedulePreset", "setupGoal", "runNow", "includeAudioBriefing"],
-  []
-]
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value)
+
+interface BriefingActionKey {
+  watchlistId: number
+  occurrenceId: number
+  runId: number
+  jobId: number
+}
+
+const sameBriefingActionKey = (
+  left: BriefingActionKey,
+  right: BriefingActionKey
+): boolean =>
+  left.watchlistId === right.watchlistId &&
+  left.occurrenceId === right.occurrenceId &&
+  left.runId === right.runId &&
+  left.jobId === right.jobId
 
 export const extractPipelineErrorMessage = (error: unknown): string => {
   if (typeof error === "string") return error.trim()
@@ -142,14 +137,9 @@ export const OverviewTab: React.FC = () => {
   const { t } = useTranslation(["watchlists", "common"])
   const [data, setData] = useState<WatchlistsOverviewData | null>(null)
   const [loading, setLoading] = useState(false)
-  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [quickSetupOpen, setQuickSetupOpen] = useState(false)
-  const [quickSetupStep, setQuickSetupStep] = useState(0)
-  const [quickSetupSubmitting, setQuickSetupSubmitting] = useState(false)
-  const [quickSetupCandidatePreview, setQuickSetupCandidatePreview] = useState<JobPreviewResult | null>(null)
-  const [quickSetupCandidatePreviewLoading, setQuickSetupCandidatePreviewLoading] = useState(false)
-  const [quickSetupCandidatePreviewError, setQuickSetupCandidatePreviewError] = useState<string | null>(null)
+  const [politeAnnouncement, setPoliteAnnouncement] = useState("")
+  const [assertiveAnnouncement, setAssertiveAnnouncement] = useState("")
   const [pipelineSetupOpen, setPipelineSetupOpen] = useState(false)
   const [pipelineSetupSubmitting, setPipelineSetupSubmitting] = useState(false)
   const [pipelineSourcesLoading, setPipelineSourcesLoading] = useState(false)
@@ -160,51 +150,109 @@ export const OverviewTab: React.FC = () => {
   const [pipelinePreviewRunId, setPipelinePreviewRunId] = useState<number | null>(null)
   const [pipelinePreviewWarnings, setPipelinePreviewWarnings] = useState<string[]>([])
   const [pipelineSetupError, setPipelineSetupError] = useState<string | null>(null)
-  const [onboardingPath, setOnboardingPath] = useState<WatchlistsOnboardingPath>(() =>
-    readWatchlistsOnboardingPath()
-  )
+  const [pipelineInitialDraft, setPipelineInitialDraft] = useState<Partial<PipelineWizardDraft>>()
+  const [pipelineSessionKey, setPipelineSessionKey] = useState(0)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const quickSetupTriggerRef = useRef<HTMLButtonElement | null>(null)
-  const quickSetupRestoreFocusTargetRef = useRef<HTMLElement | null>(null)
-  const quickSetupFocusRestoreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pipelineSourcesLoadingRef = useRef(false)
+  const overviewRequestRef = useRef(0)
+  const previousBriefingRef = useRef<WatchlistBriefingProjection | null>(null)
+  const explicitPoliteAnnouncementRef = useRef(false)
+  const briefingActionGenerationRef = useRef(0)
+  const briefingActionControllerRef = useRef<AbortController | null>(null)
+  const briefingActionKeyRef = useRef<BriefingActionKey | null>(null)
   const pipelineSetupRestoreFocusTargetRef = useRef<HTMLElement | null>(null)
-  const quickSetupWasOpenRef = useRef(false)
   const pipelineSetupWasOpenRef = useRef(false)
-  const quickSetupPreviewRequestRef = useRef(0)
-  const [quickSetupForm] = Form.useForm<QuickSetupValues>()
+  const pipelinePersistedJobIdRef = useRef<number | null>(null)
+  const pipelineSourceBindingRef = useRef<PipelineWizardSourceBinding | null>(null)
 
   const setActiveTab = useWatchlistsStore((s) => s.setActiveTab)
-  const setOutputsRunFilter = useWatchlistsStore((s) => s.setOutputsRunFilter)
   const setRunsStatusFilter = useWatchlistsStore((s) => s.setRunsStatusFilter)
   const setOverviewHealth = useWatchlistsStore((s) => s.setOverviewHealth)
   const openRunDetail = useWatchlistsStore((s) => s.openRunDetail)
-  const openOutputPreview = useWatchlistsStore((s) => s.openOutputPreview)
-  const openSourceForm = useWatchlistsStore((s) => s.openSourceForm)
   const openJobForm = useWatchlistsStore((s) => s.openJobForm)
+  const openOutputPreview = useWatchlistsStore((s) => s.openOutputPreview)
   const selectedWatchlistId = useWatchlistsStore((s) => s.selectedWatchlistId)
   const hasSelectedWatchlist = selectedWatchlistId != null
 
+  useEffect(() => {
+    briefingActionGenerationRef.current += 1
+    briefingActionControllerRef.current?.abort()
+    briefingActionControllerRef.current = null
+    briefingActionKeyRef.current = null
+    previousBriefingRef.current = null
+    explicitPoliteAnnouncementRef.current = false
+    setPoliteAnnouncement("")
+    setAssertiveAnnouncement("")
+  }, [selectedWatchlistId])
+
+  const announceBriefingTransition = useCallback((next: WatchlistBriefingProjection | null) => {
+    const previous = previousBriefingRef.current
+    if (!next) {
+      if (!explicitPoliteAnnouncementRef.current) {
+        previousBriefingRef.current = null
+        setPoliteAnnouncement("")
+      }
+      setAssertiveAnnouncement("")
+      return
+    }
+    const pendingAction = briefingActionKeyRef.current
+    if (pendingAction && selectedWatchlistId != null && !sameBriefingActionKey(pendingAction, {
+      watchlistId: selectedWatchlistId,
+      occurrenceId: next.occurrence_id,
+      runId: next.run_id,
+      jobId: next.job_id
+    })) {
+      briefingActionGenerationRef.current += 1
+      briefingActionControllerRef.current?.abort()
+      briefingActionControllerRef.current = null
+      briefingActionKeyRef.current = null
+    }
+    const polite = transitionAnnouncement(previous, next, t)
+    const assertive = blockingFailureAnnouncement(previous, next, t)
+    if (polite || assertive) {
+      explicitPoliteAnnouncementRef.current = false
+      setPoliteAnnouncement(polite || "")
+    } else if (!explicitPoliteAnnouncementRef.current) {
+      setPoliteAnnouncement("")
+    }
+    setAssertiveAnnouncement(assertive || "")
+    previousBriefingRef.current = next
+  }, [selectedWatchlistId, t])
+
+  const applyBriefingProjection = useCallback((next: WatchlistBriefingProjection) => {
+    announceBriefingTransition(next)
+    setData((current) => current ? {
+      ...current,
+      fetchedAt: new Date().toISOString(),
+      latestBriefing: next
+    } : current)
+  }, [announceBriefingTransition])
+
   const loadOverview = useCallback(async (showLoading: boolean) => {
+    const requestId = ++overviewRequestRef.current
     if (selectedWatchlistId == null) {
       setData(null)
       setError(null)
+      previousBriefingRef.current = null
+      explicitPoliteAnnouncementRef.current = false
+      setPoliteAnnouncement("")
+      setAssertiveAnnouncement("")
       if (typeof setOverviewHealth === "function") {
         setOverviewHealth(null, null)
       }
       setLoading(false)
-      setRefreshing(false)
       return
     }
 
     if (showLoading) {
       setLoading(true)
-    } else {
-      setRefreshing(true)
     }
     try {
       const result = await fetchWatchlistsOverviewData({
         watchlist_id: selectedWatchlistId ?? undefined
       })
+      if (requestId !== overviewRequestRef.current) return
+      announceBriefingTransition(result.latestBriefing)
       setData(result)
       if (typeof setOverviewHealth === "function") {
         setOverviewHealth(result.health, result.fetchedAt)
@@ -221,13 +269,16 @@ export const OverviewTab: React.FC = () => {
       }
       setError(null)
     } catch (err) {
+      if ((err as { name?: string } | null)?.name === "AbortError") return
+      if (requestId !== overviewRequestRef.current) return
       console.error("Failed to load watchlists overview:", err)
       setError(t("watchlists:overview.fetchError", "Failed to load overview"))
     } finally {
-      setLoading(false)
-      setRefreshing(false)
+      if (requestId === overviewRequestRef.current) {
+        setLoading(false)
+      }
     }
-  }, [selectedWatchlistId, setOverviewHealth, t])
+  }, [announceBriefingTransition, selectedWatchlistId, setOverviewHealth, t])
 
   useEffect(() => {
     void loadOverview(true)
@@ -241,47 +292,12 @@ export const OverviewTab: React.FC = () => {
     }
   }, [loadOverview])
 
-  const quickSetupAutoShownWatchlistRef = useRef<number | null>(null)
-
-  const restoreQuickSetupFocus = useCallback(() => {
-    if (quickSetupFocusRestoreTimerRef.current) {
-      clearTimeout(quickSetupFocusRestoreTimerRef.current)
-      quickSetupFocusRestoreTimerRef.current = null
-    }
-    const target = quickSetupRestoreFocusTargetRef.current
-    quickSetupRestoreFocusTargetRef.current = null
-    restoreFocusToElement(target)
-  }, [])
-
-  useLayoutEffect(() => {
-    if (quickSetupOpen) {
-      if (!quickSetupWasOpenRef.current) {
-        quickSetupRestoreFocusTargetRef.current =
-          quickSetupRestoreFocusTargetRef.current || getFocusableActiveElement()
-      }
-      quickSetupWasOpenRef.current = true
-      return
-    }
-
-    if (quickSetupWasOpenRef.current) {
-      quickSetupWasOpenRef.current = false
-      quickSetupFocusRestoreTimerRef.current = setTimeout(restoreQuickSetupFocus, 0)
-    }
-  }, [quickSetupOpen, restoreQuickSetupFocus])
-
-  useEffect(() => {
-    return () => {
-      if (quickSetupFocusRestoreTimerRef.current) {
-        clearTimeout(quickSetupFocusRestoreTimerRef.current)
-        quickSetupFocusRestoreTimerRef.current = null
-      }
-    }
-  }, [])
 
   useLayoutEffect(() => {
     if (pipelineSetupOpen) {
       if (!pipelineSetupWasOpenRef.current) {
-        pipelineSetupRestoreFocusTargetRef.current = getFocusableActiveElement()
+        pipelineSetupRestoreFocusTargetRef.current =
+          pipelineSetupRestoreFocusTargetRef.current || getFocusableActiveElement()
       }
       pipelineSetupWasOpenRef.current = true
       return
@@ -290,6 +306,7 @@ export const OverviewTab: React.FC = () => {
     if (pipelineSetupWasOpenRef.current) {
       pipelineSetupWasOpenRef.current = false
       restoreFocusToElement(pipelineSetupRestoreFocusTargetRef.current)
+      pipelineSetupRestoreFocusTargetRef.current = null
     }
   }, [pipelineSetupOpen])
 
@@ -310,19 +327,104 @@ export const OverviewTab: React.FC = () => {
     setActiveTab("sources")
   }, [setActiveTab])
 
-  const handleStartSourceQuickCreate = useCallback(() => {
-    setActiveTab("sources")
-    openSourceForm()
-  }, [openSourceForm, setActiveTab])
-
-  const handleStartJobQuickCreate = useCallback(() => {
-    setActiveTab("jobs")
-    openJobForm()
-  }, [openJobForm, setActiveTab])
-
   const handleOpenRuns = useCallback(() => {
     setActiveTab("runs")
   }, [setActiveTab])
+
+  const handleOpenBriefingReport = useCallback((outputId: number) => {
+    setActiveTab("outputs")
+    openOutputPreview(outputId)
+  }, [openOutputPreview, setActiveTab])
+
+  const handleReviewDeliverySettings = useCallback((jobId: number) => {
+    setActiveTab("jobs")
+    openJobForm(jobId)
+  }, [openJobForm, setActiveTab])
+
+  const runBriefingRecovery = useCallback(async (
+    runId: number,
+    stage: WatchlistBriefingRetryStage,
+    options: {
+      regenerate?: boolean
+      confirm_unknown_delivery_retry?: boolean
+    },
+    errorKey: string,
+    errorFallback: string
+  ) => {
+    const target = previousBriefingRef.current
+    if (selectedWatchlistId == null || !target || target.run_id !== runId) return
+
+    briefingActionControllerRef.current?.abort()
+    const controller = new AbortController()
+    const generation = ++briefingActionGenerationRef.current
+    const actionKey: BriefingActionKey = {
+      watchlistId: selectedWatchlistId,
+      occurrenceId: target.occurrence_id,
+      runId: target.run_id,
+      jobId: target.job_id
+    }
+    briefingActionControllerRef.current = controller
+    briefingActionKeyRef.current = actionKey
+
+    try {
+      const next = await retryWatchlistBriefingStage(runId, stage, {
+        ...options,
+        signal: controller.signal
+      })
+      const current = previousBriefingRef.current
+      if (
+        controller.signal.aborted ||
+        generation !== briefingActionGenerationRef.current ||
+        !current ||
+        !sameBriefingActionKey(actionKey, {
+          watchlistId: selectedWatchlistId,
+          occurrenceId: current.occurrence_id,
+          runId: current.run_id,
+          jobId: current.job_id
+        }) ||
+        next.occurrence_id !== actionKey.occurrenceId ||
+        next.run_id !== actionKey.runId ||
+        next.job_id !== actionKey.jobId
+      ) return
+      applyBriefingProjection(next)
+    } catch (err) {
+      if (controller.signal.aborted || generation !== briefingActionGenerationRef.current) return
+      console.error("Failed to recover watchlists briefing stage:", err)
+      message.error(t(errorKey, errorFallback))
+    } finally {
+      if (generation === briefingActionGenerationRef.current) {
+        briefingActionControllerRef.current = null
+        briefingActionKeyRef.current = null
+      }
+    }
+  }, [applyBriefingProjection, selectedWatchlistId, t])
+
+  const handleRetryBriefingStage = useCallback(async (
+    runId: number,
+    stage: WatchlistBriefingRetryStage,
+    options?: { confirm_unknown_delivery_retry?: boolean }
+  ) => {
+    await runBriefingRecovery(
+      runId,
+      stage,
+      options || {},
+      "watchlists:overview.latest.retryError",
+      "Could not retry this briefing stage. Inspect the run for details."
+    )
+  }, [runBriefingRecovery])
+
+  const handleRegenerateBriefing = useCallback(async (
+    runId: number,
+    stage: WatchlistBriefingRetryStage
+  ) => {
+    await runBriefingRecovery(
+      runId,
+      stage,
+      { regenerate: true },
+      "watchlists:overview.latest.regenerateError",
+      "Could not regenerate audio. Inspect the run for details."
+    )
+  }, [runBriefingRecovery])
 
   const handleOpenAlerts = useCallback(() => {
     setActiveTab("alerts")
@@ -343,343 +445,9 @@ export const OverviewTab: React.FC = () => {
     setActiveTab("sources")
   }, [setActiveTab])
 
-  const handleOnboardingPathChange = useCallback((path: WatchlistsOnboardingPath) => {
-    setOnboardingPath(path)
-    writeWatchlistsOnboardingPath(path)
-  }, [])
-
-  const markQuickSetupAutoShown = useCallback(() => {
-    if (selectedWatchlistId == null) return
-    quickSetupAutoShownWatchlistRef.current = selectedWatchlistId
-    try {
-      localStorage.setItem(`watchlists:quickSetup:autoshown:v1:${selectedWatchlistId}`, "1")
-    } catch {
-      // Keep setup usable when storage is unavailable.
-    }
-  }, [selectedWatchlistId])
-
-  const openQuickSetup = useCallback((restoreTarget?: HTMLElement | null) => {
-    quickSetupRestoreFocusTargetRef.current =
-      restoreTarget || quickSetupTriggerRef.current || getFocusableActiveElement()
-    markQuickSetupAutoShown()
-    quickSetupForm.setFieldsValue(QUICK_SETUP_DEFAULT_VALUES)
-    setQuickSetupStep(0)
-    setQuickSetupOpen(true)
-    void trackWatchlistsOnboardingTelemetry({ type: "quick_setup_opened" })
-  }, [markQuickSetupAutoShown, quickSetupForm])
-
-  // Auto-open Quick Setup for first-time users with no sources
-  useEffect(() => {
-    if (selectedWatchlistId == null) return
-    const autoShownKey = `watchlists:quickSetup:autoshown:v1:${selectedWatchlistId}`
-
-    // If the wizard is already open, mark as shown to prevent re-opening after close
-    if (quickSetupOpen) {
-      quickSetupAutoShownWatchlistRef.current = selectedWatchlistId
-      try {
-        localStorage.setItem(autoShownKey, "1")
-      } catch {
-        // ignore
-      }
-      return
-    }
-
-    if (
-      !data ||
-      data.sources.total !== 0 ||
-      quickSetupAutoShownWatchlistRef.current === selectedWatchlistId ||
-      onboardingPath !== "beginner"
-    ) {
-      return
-    }
-
-    try {
-      if (localStorage.getItem(autoShownKey)) {
-        quickSetupAutoShownWatchlistRef.current = selectedWatchlistId
-        return
-      }
-      localStorage.setItem(autoShownKey, "1")
-      quickSetupAutoShownWatchlistRef.current = selectedWatchlistId
-      openQuickSetup()
-    } catch {
-      quickSetupAutoShownWatchlistRef.current = selectedWatchlistId
-      openQuickSetup()
-    }
-  }, [data, quickSetupOpen, onboardingPath, openQuickSetup, selectedWatchlistId])
-
-  const closeQuickSetup = useCallback(() => {
-    markQuickSetupAutoShown()
-    quickSetupPreviewRequestRef.current += 1
-    setQuickSetupOpen(false)
-    setQuickSetupStep(0)
-    setQuickSetupCandidatePreview(null)
-    setQuickSetupCandidatePreviewLoading(false)
-    setQuickSetupCandidatePreviewError(null)
-    quickSetupForm.resetFields()
-  }, [markQuickSetupAutoShown, quickSetupForm])
-
-  const loadQuickSetupCandidatePreview = useCallback(async (draftValues?: Partial<QuickSetupValues>) => {
-    const mergedValues = {
-      ...QUICK_SETUP_DEFAULT_VALUES,
-      ...quickSetupForm.getFieldsValue(true),
-      ...(draftValues || {})
-    } as QuickSetupValues
-    const sourceUrl = String(mergedValues.sourceUrl || "").trim()
-    if (!sourceUrl) {
-      setQuickSetupCandidatePreview(null)
-      setQuickSetupCandidatePreviewError(null)
-      setQuickSetupCandidatePreviewLoading(false)
-      return
-    }
-
-    const requestId = quickSetupPreviewRequestRef.current + 1
-    quickSetupPreviewRequestRef.current = requestId
-    setQuickSetupCandidatePreviewLoading(true)
-    setQuickSetupCandidatePreviewError(null)
-
-    try {
-      const preview = await testWatchlistSourceDraft(
-        {
-          url: sourceUrl,
-          source_type: mergedValues.sourceType || "rss"
-        },
-        { limit: 6 }
-      )
-      if (quickSetupPreviewRequestRef.current !== requestId) return
-      setQuickSetupCandidatePreview(preview)
-      setQuickSetupCandidatePreviewError(null)
-      void trackWatchlistsOnboardingTelemetry({
-        type: "quick_setup_preview_loaded",
-        preview: "candidate",
-        total: preview.total || 0,
-        ingestable: preview.ingestable || 0,
-        filtered: preview.filtered || 0
-      })
-    } catch (err) {
-      console.error("Failed to load quick setup source preview:", err)
-      if (quickSetupPreviewRequestRef.current !== requestId) return
-      setQuickSetupCandidatePreview(null)
-      setQuickSetupCandidatePreviewError(
-        t(
-          "watchlists:overview.onboarding.quickSetup.candidatePreview.error",
-          "Could not load feed sample preview right now. You can still add the collection and use a test run to verify results."
-        )
-      )
-      void trackWatchlistsOnboardingTelemetry({
-        type: "quick_setup_preview_failed",
-        preview: "candidate",
-        reason: "load_failed"
-      })
-    } finally {
-      if (quickSetupPreviewRequestRef.current === requestId) {
-        setQuickSetupCandidatePreviewLoading(false)
-      }
-    }
-  }, [quickSetupForm, t])
-
-  const getQuickSetupStepKey = useCallback(
-    (step: number): WatchlistsQuickSetupStep => {
-      const clamped = Math.max(0, Math.min(step, QUICK_SETUP_MAX_STEP))
-      return QUICK_SETUP_STEP_KEYS[clamped]
-    },
-    []
-  )
-
-  const cancelQuickSetup = useCallback(() => {
-    void trackWatchlistsOnboardingTelemetry({
-      type: "quick_setup_cancelled",
-      step: getQuickSetupStepKey(quickSetupStep)
-    })
-    closeQuickSetup()
-  }, [closeQuickSetup, getQuickSetupStepKey, quickSetupStep])
-
-  const handleQuickSetupNext = useCallback(async () => {
-    const fields = QUICK_SETUP_STEP_FIELDS[quickSetupStep] || []
-    if (fields.length > 0) {
-      await quickSetupForm.validateFields(fields)
-    }
-    void trackWatchlistsOnboardingTelemetry({
-      type: "quick_setup_step_completed",
-      step: getQuickSetupStepKey(quickSetupStep)
-    })
-    if (quickSetupStep === 0) {
-      const sourceName = String(quickSetupForm.getFieldValue("sourceName") || "").trim()
-      const monitorName = String(quickSetupForm.getFieldValue("monitorName") || "").trim()
-      if (sourceName.length > 0 && monitorName.length === 0) {
-        quickSetupForm.setFieldsValue({
-          monitorName: `${sourceName} Monitor`
-        })
-      }
-    }
-    if (quickSetupStep === 1) {
-      const values = {
-        ...QUICK_SETUP_DEFAULT_VALUES,
-        ...quickSetupForm.getFieldsValue(true)
-      } as QuickSetupValues
-      void trackWatchlistsOnboardingTelemetry({
-        type: "quick_setup_preview_loaded",
-        preview: "template",
-        goal: values.setupGoal,
-        audioEnabled: values.includeAudioBriefing
-      })
-    }
-    setQuickSetupStep((prev) => Math.min(prev + 1, QUICK_SETUP_MAX_STEP))
-  }, [getQuickSetupStepKey, quickSetupForm, quickSetupStep, t])
-
-  const handleQuickSetupBack = useCallback(() => {
-    setQuickSetupStep((prev) => Math.max(prev - 1, 0))
-  }, [])
-
-  const completeQuickSetup = useCallback(async () => {
-    const currentStep = getQuickSetupStepKey(quickSetupStep)
-    void trackWatchlistsOnboardingTelemetry({
-      type: "quick_setup_step_completed",
-      step: currentStep
-    })
-    try {
-      const values = {
-        ...QUICK_SETUP_DEFAULT_VALUES,
-        ...quickSetupForm.getFieldsValue(true)
-      } as QuickSetupValues
-      setQuickSetupSubmitting(true)
-
-      const source = await createWatchlistSource(
-        toQuickSetupSourcePayload(values, selectedWatchlistId)
-      )
-      const sourceIds: number[] = [source.id]
-      const rawExtraSourceUrls = String(values.extraSourceUrls || "").trim()
-      const extraSourceUrls = parseQuickSetupExtraSourceUrls(rawExtraSourceUrls)
-
-      if (rawExtraSourceUrls.length > 0 && extraSourceUrls.length === 0) {
-        throw new Error("quick_setup_invalid_extra_source_urls")
-      }
-
-      if (extraSourceUrls.length > 0) {
-        const bulkResult = await bulkCreateSources(
-          extraSourceUrls.map((url, index) => {
-            const host = (() => {
-              try {
-                return new URL(url).hostname || `Feed ${index + 2}`
-              } catch {
-                return `Feed ${index + 2}`
-              }
-            })()
-            return {
-              name: host,
-              url,
-              source_type: values.sourceType,
-              active: true,
-              watchlist_id: selectedWatchlistId ?? undefined
-            }
-          })
-        )
-
-        const createdExtraSourceIds = (bulkResult.items || [])
-          .filter((entry) => entry.status === "created" && Number.isFinite(Number(entry.id)))
-          .map((entry) => Number(entry.id))
-
-        if (createdExtraSourceIds.length !== extraSourceUrls.length) {
-          throw new Error("quick_setup_bulk_source_creation_failed")
-        }
-
-        sourceIds.push(...createdExtraSourceIds)
-      }
-
-      const job = await createWatchlistJob(
-        toQuickSetupJobPayload(values, sourceIds, selectedWatchlistId)
-      )
-
-      let runId: number | null = null
-      if (values.runNow) {
-        try {
-          const run = await triggerWatchlistRun(job.id)
-          runId = run.id
-          void trackWatchlistsOnboardingTelemetry({
-            type: "quick_setup_test_run_triggered",
-            runId: run.id
-          })
-        } catch (runError) {
-          void trackWatchlistsOnboardingTelemetry({
-            type: "quick_setup_test_run_failed"
-          })
-          throw runError
-        }
-      }
-
-      message.success(
-        values.runNow
-          ? t(
-              "watchlists:overview.onboarding.quickSetup.testRunPending",
-              "Initial collection added. Test run started. Open Activity for progress and Reports for generated briefings."
-            )
-          : values.setupGoal === "briefing"
-            ? t(
-                "watchlists:overview.onboarding.quickSetup.createdBriefing",
-                "Initial collection added. Feeds and monitor are ready for briefing reports."
-              )
-          : t(
-              "watchlists:overview.onboarding.quickSetup.created",
-              "Initial collection added. Feeds and monitor are ready."
-            )
-      )
-
-      closeQuickSetup()
-      void loadOverview(false)
-
-      if (runId != null) {
-        setActiveTab("runs")
-        openRunDetail(runId)
-        void trackWatchlistsOnboardingTelemetry({
-          type: "quick_setup_completed",
-          goal: values.setupGoal,
-          runNow: true,
-          destination: "runs"
-        })
-      } else if (values.setupGoal === "briefing") {
-        setActiveTab("outputs")
-        void trackWatchlistsOnboardingTelemetry({
-          type: "quick_setup_completed",
-          goal: values.setupGoal,
-          runNow: false,
-          destination: "outputs"
-        })
-      } else {
-        setActiveTab("jobs")
-        void trackWatchlistsOnboardingTelemetry({
-          type: "quick_setup_completed",
-          goal: values.setupGoal,
-          runNow: false,
-          destination: "jobs"
-        })
-      }
-    } catch (err) {
-      console.error("Failed to add initial Watchlist collection:", err)
-      void trackWatchlistsOnboardingTelemetry({
-        type: "quick_setup_failed",
-        step: currentStep
-      })
-      message.error(
-        t(
-          "watchlists:overview.onboarding.quickSetup.error",
-          "Failed to add initial collection."
-        )
-      )
-    } finally {
-      setQuickSetupSubmitting(false)
-    }
-  }, [
-    closeQuickSetup,
-    getQuickSetupStepKey,
-    loadOverview,
-    openRunDetail,
-    quickSetupForm,
-    quickSetupStep,
-    selectedWatchlistId,
-    setActiveTab,
-    t
-  ])
-
   const loadPipelineSources = useCallback(async () => {
+    if (pipelineSourcesLoadingRef.current) return
+    pipelineSourcesLoadingRef.current = true
     setPipelineSourcesLoading(true)
     try {
       const result = await fetchWatchlistSources({
@@ -699,20 +467,51 @@ export const OverviewTab: React.FC = () => {
         )
       )
     } finally {
+      pipelineSourcesLoadingRef.current = false
       setPipelineSourcesLoading(false)
     }
   }, [selectedWatchlistId, t])
 
+  useEffect(() => {
+    if (pipelineSetupOpen && pipelineSources.length === 0) {
+      void loadPipelineSources()
+    }
+  }, [loadPipelineSources, pipelineSetupOpen, pipelineSources.length])
+
   const openPipelineSetup = useCallback(() => {
+    pipelineSetupRestoreFocusTargetRef.current = getFocusableActiveElement()
     setPipelinePreviewError(null)
     setPipelinePreviewRendered(null)
     setPipelinePreviewRunId(null)
     setPipelinePreviewWarnings([])
     setPipelineSetupError(null)
+    setPipelineInitialDraft(undefined)
+    pipelinePersistedJobIdRef.current = null
+    pipelineSourceBindingRef.current = null
+    setPipelineSessionKey((value) => value + 1)
     setPipelineSetupOpen(true)
     void trackWatchlistsOnboardingTelemetry({ type: "pipeline_setup_opened" })
-    void loadPipelineSources()
-  }, [loadPipelineSources])
+  }, [])
+
+  const handleTestLatest = useCallback(async (jobId?: number) => {
+    if (!jobId) {
+      openPipelineSetup()
+      return
+    }
+    try {
+      await triggerWatchlistRun(jobId)
+      explicitPoliteAnnouncementRef.current = true
+      setPoliteAnnouncement(t(
+        "watchlists:overview.latest.announcements.testQueued",
+        "Test run queued. Progress will appear in the latest briefing."
+      ))
+      void loadOverview(false)
+    } catch (err) {
+      if ((err as { name?: string } | null)?.name === "AbortError") return
+      console.error("Failed to start watchlists briefing test:", err)
+      message.error(t("watchlists:overview.latest.testError", "Could not start the test run."))
+    }
+  }, [loadOverview, openPipelineSetup, t])
 
   const closePipelineSetup = useCallback(() => {
     if (pipelineSetupSubmitting) return
@@ -723,6 +522,7 @@ export const OverviewTab: React.FC = () => {
     setPipelinePreviewRunId(null)
     setPipelinePreviewWarnings([])
     setPipelineSetupError(null)
+    setPipelineInitialDraft(undefined)
   }, [pipelineSetupSubmitting])
 
   const generatePipelineTemplatePreview = useCallback(async (wizardDraft: PipelineWizardDraft) => {
@@ -847,397 +647,173 @@ export const OverviewTab: React.FC = () => {
     }
   }, [selectedWatchlistId, t])
 
-  const completePipelineSetup = useCallback(async (
+  const persistInactivePipeline = useCallback(async (
     wizardDraft: PipelineWizardDraft,
-    options: { mode?: "create" | "test" } = {}
+    requestedJobId?: number,
+    testOptions?: PipelineWizardTestOptions
   ) => {
-    let createdSourceId: number | null = null
-    let createdJobId: number | null = null
-    let createdRunId: number | null = null
-    const mode = options?.mode || "create"
-    let shouldRunNowForTelemetry = false
-    let pipelineFailureStage: "source_create" | "job_create" | "run_trigger" | "output_create" | "rollback" =
-      wizardDraft.sourceMode === "new" ? "source_create" : "job_create"
-
-    try {
-      setPipelineSetupSubmitting(true)
-      setPipelineSetupError(null)
-      const shouldRunNow = Boolean(wizardDraft.runNow || mode === "test")
-      shouldRunNowForTelemetry = shouldRunNow
-
-      let sourceIds = wizardDraft.sourceIds
-      if (wizardDraft.sourceMode === "new") {
-        const sourcePayload = toPipelineWizardSourcePayload(
-          wizardDraft,
-          selectedWatchlistId ?? undefined
-        )
-        if (!sourcePayload) {
-          throw new Error("source_payload_missing")
+    const signature = getPipelineWizardSourceSignature(wizardDraft)
+    const sourcePayload = toPipelineWizardSourcePayload(
+      wizardDraft,
+      selectedWatchlistId ?? undefined
+    )
+    let sourceIds = wizardDraft.sourceIds
+    if (wizardDraft.sourceMode === "new" && sourcePayload) {
+      const binding = pipelineSourceBindingRef.current
+      const ownsBoundSource = binding?.mode === "new" &&
+        binding.createdByWizard &&
+        binding.sessionKey === pipelineSessionKey &&
+        binding.ids.length === 1
+      if (ownsBoundSource && binding.signature !== signature) {
+        const updatePayload = { ...sourcePayload }
+        delete updatePayload.watchlist_id
+        await updateWatchlistSource(binding.ids[0], updatePayload)
+        sourceIds = binding.ids
+        pipelineSourceBindingRef.current = {
+          mode: "new",
+          signature,
+          ids: sourceIds,
+          createdByWizard: true,
+          sessionKey: pipelineSessionKey
         }
-        const source = await createWatchlistSource(sourcePayload)
-        createdSourceId = source.id
-        sourceIds = [source.id]
-      }
-
-      void trackWatchlistsOnboardingTelemetry({
-        type: "pipeline_setup_step_completed",
-        step: "review"
-      })
-      void trackWatchlistsOnboardingTelemetry({
-        type: "pipeline_setup_submitted",
-        mode,
-        runNow: shouldRunNow
-      })
-
-      pipelineFailureStage = "job_create"
-      const draft = toBriefingPipelineDraft(wizardDraft, sourceIds)
-      const job = await createWatchlistJob({
-        ...toPipelineJobCreatePayload(draft),
-        watchlist_id: selectedWatchlistId ?? undefined
-      })
-      createdJobId = job.id
-
-      if (!shouldRunNow) {
-        closePipelineSetup()
-        void loadOverview(false)
-        setActiveTab("jobs")
-        void trackWatchlistsOnboardingTelemetry({
-          type: "pipeline_setup_completed",
-          mode,
-          runNow: false,
-          destination: "jobs"
-        })
-        message.success(
-          t(
-            "watchlists:overview.pipelineSetup.created",
-            "Pipeline created. Open Monitors to review schedule and trigger runs."
-          )
-        )
-        return
-      }
-
-      pipelineFailureStage = "run_trigger"
-      const run = await triggerWatchlistRun(job.id)
-      createdRunId = run.id
-      pipelineFailureStage = "output_create"
-      const output = await createWatchlistOutput(
-        toPipelineOutputCreatePayload(run.id, draft)
-      )
-
-      closePipelineSetup()
-      void loadOverview(false)
-      void trackWatchlistsOnboardingTelemetry({
-        type: "pipeline_setup_completed",
-        mode,
-        runNow: true,
-        destination: "outputs"
-      })
-      if (typeof setOutputsRunFilter === "function") {
-        setOutputsRunFilter(run.id)
-      }
-      setActiveTab("outputs")
-      openOutputPreview(output.id)
-      message.success(
-        mode === "test"
-          ? t(
-              "watchlists:overview.pipelineSetup.testGenerationReady",
-              "Test generation complete. Monitor, run, and sample report are ready for review."
-            )
-          : t(
-              "watchlists:overview.pipelineSetup.createdAndRunning",
-              "Pipeline created. First run started and report is ready for review."
-            )
-      )
-    } catch (err) {
-      console.error("Failed to complete pipeline setup:", err)
-      if (pipelineFailureStage === "output_create") {
-        const fallbackMessage = t(
-          "watchlists:overview.pipelineSetup.outputCreateError",
-          "Could not create the digest output"
-        )
-        const detail = extractPipelineErrorMessage(err)
-        setPipelineSetupError(detail ? `${fallbackMessage}: ${detail}` : fallbackMessage)
-        void trackWatchlistsOnboardingTelemetry({
-          type: "pipeline_setup_failed",
-          stage: pipelineFailureStage,
-          mode,
-          runNow: shouldRunNowForTelemetry
-        })
-        return
-      }
-      void trackWatchlistsOnboardingTelemetry({
-        type: "pipeline_setup_failed",
-        stage: pipelineFailureStage,
-        mode,
-        runNow: shouldRunNowForTelemetry
-      })
-      if (createdRunId != null) {
-        setActiveTab("runs")
-        openRunDetail(createdRunId)
-        message.error(
-          t(
-            "watchlists:overview.pipelineSetup.error",
-            "Pipeline setup failed. Open Activity or Reports to inspect recovery options."
-          )
-        )
-        return
-      }
-
-      let rollbackFailed = false
-      if (createdJobId != null) {
-        try {
-          await deleteWatchlistJob(createdJobId)
-        } catch (rollbackError) {
-          rollbackFailed = true
-          console.error("Failed to rollback pipeline monitor creation:", rollbackError)
-          void trackWatchlistsOnboardingTelemetry({
-            type: "pipeline_setup_failed",
-            stage: "rollback",
-            mode,
-            runNow: shouldRunNowForTelemetry
-          })
-        }
-      }
-      if (createdSourceId != null) {
-        try {
-          await deleteWatchlistSource(createdSourceId)
-        } catch (rollbackError) {
-          rollbackFailed = true
-          console.error("Failed to rollback pipeline source creation:", rollbackError)
-          void trackWatchlistsOnboardingTelemetry({
-            type: "pipeline_setup_failed",
-            stage: "rollback",
-            mode,
-            runNow: shouldRunNowForTelemetry
-          })
-        }
-      }
-
-      if (createdJobId != null || createdSourceId != null) {
-        if (rollbackFailed) {
-          message.error(
-            t(
-              "watchlists:overview.pipelineSetup.rollbackFailed",
-              "Pipeline setup failed and rollback was incomplete. Review Monitors for cleanup."
-            )
-          )
-        } else {
-          message.warning(
-            t(
-              "watchlists:overview.pipelineSetup.rollbackSuccess",
-              "Pipeline setup failed before run start. Created resources were rolled back."
-            )
-          )
-        }
+      } else if (ownsBoundSource && binding.signature === signature) {
+        sourceIds = binding.ids
       } else {
-        message.error(
-          t(
-            "watchlists:overview.pipelineSetup.error",
-            "Pipeline setup failed. Open Activity or Reports to inspect recovery options."
-          )
-        )
+        const source = await createWatchlistSource(sourcePayload)
+        sourceIds = [source.id]
+        pipelineSourceBindingRef.current = {
+          mode: "new",
+          signature,
+          ids: sourceIds,
+          createdByWizard: true,
+          sessionKey: pipelineSessionKey
+        }
+      }
+    } else if (wizardDraft.sourceMode === "new") {
+      if (!sourcePayload) throw new Error("Source details are incomplete.")
+    } else {
+      pipelineSourceBindingRef.current = {
+        mode: "existing",
+        signature,
+        ids: sourceIds,
+        createdByWizard: false,
+        sessionKey: pipelineSessionKey
+      }
+    }
+
+    const draft = toBriefingPipelineDraft(wizardDraft, sourceIds)
+    const jobPayload = testOptions
+      ? toPipelineTestJobCreatePayload(draft, testOptions)
+      : toPipelineJobCreatePayload({ ...draft, active: false })
+    const payload = {
+      ...jobPayload,
+      active: false,
+      watchlist_id: selectedWatchlistId ?? undefined
+    }
+    const jobId = requestedJobId || pipelinePersistedJobIdRef.current
+    if (jobId) {
+      await updateWatchlistJob(jobId, payload)
+      pipelinePersistedJobIdRef.current = jobId
+      return { jobId, draft }
+    }
+
+    const job = await createWatchlistJob(payload)
+    pipelinePersistedJobIdRef.current = job.id
+    return { jobId: job.id, draft }
+  }, [pipelineSessionKey, selectedWatchlistId])
+
+  const testPipeline = useCallback(async (
+    wizardDraft: PipelineWizardDraft,
+    options: PipelineWizardTestOptions,
+    onProgress: Parameters<typeof waitForPipelineWizardBriefing>[2]
+  ) => {
+    setPipelineSetupSubmitting(true)
+    try {
+      const persisted = await persistInactivePipeline(wizardDraft, options.jobId, options)
+      const run = await triggerWatchlistRun(persisted.jobId)
+      const briefing = await waitForPipelineWizardBriefing(
+        run.id,
+        getWatchlistRunBriefing,
+        onProgress,
+        { waitForDelivery: options.externalDelivery, signal: options.signal }
+      )
+      const outcome = getPipelineWizardBriefingOutcome(briefing, options.externalDelivery)
+      void loadOverview(false)
+      return {
+        jobId: persisted.jobId,
+        runId: run.id,
+        status: outcome.status,
+        briefing
       }
     } finally {
       setPipelineSetupSubmitting(false)
     }
-  }, [
-    closePipelineSetup,
-    deleteWatchlistSource,
-    loadOverview,
-    openOutputPreview,
-    openRunDetail,
-    selectedWatchlistId,
-    setActiveTab,
-    setOutputsRunFilter,
-    t
-  ])
+  }, [loadOverview, persistInactivePipeline])
 
-  const quickSetupValues = Form.useWatch([], quickSetupForm) as Partial<QuickSetupValues> | undefined
-  const quickSetupSnapshot = useMemo(
-    () =>
-      ({
-        ...QUICK_SETUP_DEFAULT_VALUES,
-        ...quickSetupForm.getFieldsValue(true),
-        ...(quickSetupValues || {})
-      }) as QuickSetupValues,
-    [quickSetupForm, quickSetupValues]
-  )
-  const quickSetupScheduleDraft =
-    quickSetupSnapshot.scheduleCadence ||
-    legacyPresetToQuickSetupCadenceDraft(quickSetupSnapshot.schedulePreset)
-  const quickSetupScheduleOptions = useMemo<Array<{ value: QuickSetupScheduleMode; label: string }>>(
-    () => [
-      {
-        value: "manual",
-        label: t("watchlists:overview.onboarding.quickSetup.schedule.none", "Manual only")
-      },
-      {
-        value: "interval",
-        label: t(
-          "watchlists:overview.onboarding.quickSetup.schedule.interval",
-          "Every N hours/minutes"
-        )
-      },
-      {
-        value: "daily",
-        label: t("watchlists:overview.onboarding.quickSetup.schedule.dailySimple", "Daily")
-      },
-      {
-        value: "weekdays",
-        label: t("watchlists:overview.onboarding.quickSetup.schedule.weekdaysSimple", "Weekdays")
-      },
-      {
-        value: "weekly",
-        label: t("watchlists:overview.onboarding.quickSetup.schedule.weekly", "Weekly")
-      },
-      {
-        value: "advanced",
-        label: t("watchlists:overview.onboarding.quickSetup.schedule.advanced", "Advanced cron")
-      }
-    ],
-    [t]
-  )
-  const quickSetupIntervalUnitOptions = useMemo(
-    () => [
-      {
-        value: "hours",
-        label: t("watchlists:overview.onboarding.quickSetup.intervalUnits.hours", "Hours")
-      },
-      {
-        value: "minutes",
-        label: t("watchlists:overview.onboarding.quickSetup.intervalUnits.minutes", "Minutes")
-      }
-    ],
-    [t]
-  )
-  const quickSetupWeekdayOptions = useMemo(
-    () => [
-      { value: "SUN", label: t("watchlists:overview.onboarding.quickSetup.weekdays.sun", "Sunday") },
-      { value: "MON", label: t("watchlists:overview.onboarding.quickSetup.weekdays.mon", "Monday") },
-      { value: "TUE", label: t("watchlists:overview.onboarding.quickSetup.weekdays.tue", "Tuesday") },
-      { value: "WED", label: t("watchlists:overview.onboarding.quickSetup.weekdays.wed", "Wednesday") },
-      { value: "THU", label: t("watchlists:overview.onboarding.quickSetup.weekdays.thu", "Thursday") },
-      { value: "FRI", label: t("watchlists:overview.onboarding.quickSetup.weekdays.fri", "Friday") },
-      { value: "SAT", label: t("watchlists:overview.onboarding.quickSetup.weekdays.sat", "Saturday") }
-    ],
-    [t]
-  )
-
-  useEffect(() => {
-    if (!quickSetupOpen || quickSetupStep !== QUICK_SETUP_MAX_STEP) return
-    void loadQuickSetupCandidatePreview(quickSetupSnapshot)
-  }, [
-    loadQuickSetupCandidatePreview,
-    quickSetupOpen,
-    quickSetupStep,
-    quickSetupSnapshot.sourceType,
-    quickSetupSnapshot.sourceUrl
-  ])
-
-  const quickSetupCandidateSummary = useMemo(() => {
-    if (quickSetupCandidatePreviewLoading) {
-      return t(
-        "watchlists:overview.onboarding.quickSetup.candidatePreview.loading",
-        "Loading sample candidates..."
-      )
+  const previewPipelineSchedule = useCallback(async (
+    wizardDraft: PipelineWizardDraft,
+    options: { signal: AbortSignal }
+  ) => {
+    const schedule = buildPipelineWizardSchedule(wizardDraft)
+    if (!schedule.schedule_expr) return {}
+    const preview = await previewWatchlistSchedule({
+      schedule_expr: schedule.schedule_expr,
+      timezone: schedule.timezone || "UTC"
+    }, options.signal)
+    return {
+      ...(preview.next_run_at ? { nextRunAt: preview.next_run_at } : {}),
+      ...(preview.following_run_at ? { followingRunAt: preview.following_run_at } : {})
     }
-    if (quickSetupCandidatePreviewError) return quickSetupCandidatePreviewError
-    if (!quickSetupCandidatePreview) {
-      return t(
-        "watchlists:overview.onboarding.quickSetup.candidatePreview.empty",
-        "No sample candidates returned yet. You can still add the collection and validate with a test run."
-      )
+  }, [])
+
+  const activatePipeline = useCallback(async (
+    wizardDraft: PipelineWizardDraft,
+    options: { jobId?: number }
+  ) => {
+    setPipelineSetupSubmitting(true)
+    try {
+      const persisted = await persistInactivePipeline(wizardDraft, options.jobId)
+      await updateWatchlistJob(persisted.jobId, { active: true })
+      closePipelineSetup()
+      void loadOverview(false)
+      setActiveTab("overview")
+      return { jobId: persisted.jobId, status: "active" as const }
+    } finally {
+      setPipelineSetupSubmitting(false)
     }
-    return t(
-      "watchlists:overview.onboarding.quickSetup.candidatePreview.summary",
-      "{{ingestable}} ingestable, {{filtered}} filtered from {{total}} sample items.",
-      {
-        ingestable: quickSetupCandidatePreview.ingestable,
-        filtered: quickSetupCandidatePreview.filtered,
-        total: quickSetupCandidatePreview.total
-      }
-    )
-  }, [
-    quickSetupCandidatePreview,
-    quickSetupCandidatePreviewError,
-    quickSetupCandidatePreviewLoading,
-    t
-  ])
+  }, [closePipelineSetup, loadOverview, persistInactivePipeline, setActiveTab])
 
-  const quickSetupTemplatePreview = useMemo(() => {
-    if (quickSetupSnapshot.setupGoal === "triage") {
-      return t(
-        "watchlists:overview.onboarding.quickSetup.templatePreview.none",
-        "No briefing output will be generated for feed-review-only setup."
+  const testPipelineSource = useCallback(async (wizardDraft: PipelineWizardDraft) => {
+    if (wizardDraft.sourceMode === "new") {
+      const result = await testWatchlistSourceDraft({
+        url: wizardDraft.sourceUrl,
+        source_type: wizardDraft.sourceType
+      }, { limit: 6 })
+      return { status: "ready" as const, sourceTest: result }
+    } else {
+      const selectedSources = pipelineSources.filter((source) =>
+        wizardDraft.sourceIds.includes(source.id)
       )
-    }
-
-    const monitorName = String(quickSetupSnapshot.monitorName || "").trim() || "Briefing"
-    const sourceName = String(quickSetupSnapshot.sourceName || "").trim() || "Selected feed"
-    const topItems = (quickSetupCandidatePreview?.items || [])
-      .slice(0, 3)
-      .map((item) => item.title || item.url || `Source #${item.source_id}`)
-
-    return [
-      `# ${monitorName}`,
-      "",
-      `Source: ${sourceName}`,
-      "",
-      "Top candidate headlines:",
-      ...(topItems.length > 0
-        ? topItems.map((item, index) => `${index + 1}. ${item}`)
-        : ["1. Headlines will appear after the first run completes."]),
-      "",
-      `Audio briefing: ${quickSetupSnapshot.includeAudioBriefing ? "Enabled" : "Disabled"}`
-    ].join("\n")
-  }, [
-    quickSetupCandidatePreview,
-    quickSetupSnapshot.includeAudioBriefing,
-    quickSetupSnapshot.monitorName,
-    quickSetupSnapshot.setupGoal,
-    quickSetupSnapshot.sourceName,
-    t
-  ])
-
-  const quickSetupIsLastStep = quickSetupStep >= QUICK_SETUP_MAX_STEP
-  const quickSetupFinishLabel = quickSetupSnapshot.runNow
-    ? t(
-        "watchlists:overview.onboarding.quickSetup.actions.finishWithTest",
-        "Create collection + run test"
-      )
-    : t("watchlists:overview.onboarding.quickSetup.actions.finish", "Create collection")
-  const quickSetupStepHelp =
-    quickSetupStep === 0
-      ? t(
-          "watchlists:overview.onboarding.quickSetup.help.feed",
-          "Add one or more feed URLs to this Watchlist. You can adjust feed settings later."
-        )
-      : quickSetupStep === 1
-        ? t(
-            "watchlists:overview.onboarding.quickSetup.help.monitor",
-            "Choose how this Watchlist monitor runs; presets avoid cron setup first."
+      const results = await Promise.all(
+        selectedSources.map((source) =>
+          testWatchlistSourceDraft(
+            { url: source.url, source_type: source.source_type },
+            { limit: 6 }
           )
-        : t(
-            "watchlists:overview.onboarding.quickSetup.help.review",
-            "Review the scoped feeds and monitor before adding them to this Watchlist."
-          )
-  const quickSetupExtraSourceUrls = parseQuickSetupExtraSourceUrls(
-    String(quickSetupValues?.extraSourceUrls || "")
-  )
-  const quickSetupDestinationHint = quickSetupValues?.runNow
-    ? t(
-        "watchlists:overview.onboarding.quickSetup.destination.runs",
-        "After setup, you will land in Activity to monitor the active run."
+        )
       )
-    : quickSetupValues?.setupGoal === "briefing"
-      ? t(
-          "watchlists:overview.onboarding.quickSetup.destination.outputs",
-          "After setup, you will land in Reports to review generated briefings."
-        )
-      : t(
-          "watchlists:overview.onboarding.quickSetup.destination.jobs",
-          "After setup, you will land in Monitors to schedule and tune your workflow."
-        )
+      return {
+        status: "ready" as const,
+        sourceTest: {
+          total: results.reduce((total, result) => total + result.total, 0),
+          ingestable: results.reduce((total, result) => total + result.ingestable, 0),
+          filtered: results.reduce((total, result) => total + result.filtered, 0),
+          items: results.flatMap((result) => result.items).slice(0, 6)
+        }
+      }
+    }
+  }, [pipelineSources])
+
   const overviewBadges = getOverviewTabBadges(data?.health)
 
   if (!hasSelectedWatchlist) {
@@ -1275,40 +851,58 @@ export const OverviewTab: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-text-muted">
-          {t(
-            "watchlists:overview.description",
-            "At-a-glance watchlist health, activity, and failure signals."
-          )}
-        </p>
-        <Space size="small">
-          {data?.fetchedAt && (
-            <Tooltip title={new Date(data.fetchedAt).toLocaleString()}>
-              <span className="text-xs text-text-muted">
-                {t("watchlists:overview.lastUpdated", "Updated {{time}}", {
-                  time: formatRelativeTime(data.fetchedAt, t, { compact: true })
-                })}
-              </span>
-            </Tooltip>
-          )}
-          <Button
-            icon={<RefreshCw className="h-4 w-4" />}
-            onClick={() => void loadOverview(false)}
-            loading={refreshing}
-          >
-            {t("common:refresh", "Refresh")}
-          </Button>
-          <Button
-            type="default"
-            onClick={openPipelineSetup}
-            data-testid="watchlists-overview-cta-pipeline-builder"
-            disabled={(data?.sources.total || 0) === 0}
-          >
-            {t("watchlists:overview.pipelineSetup.open", "Briefing pipeline builder")}
-          </Button>
-        </Space>
+      <div
+        className="sr-only"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        data-testid="watchlists-overview-live-polite"
+      >
+        {politeAnnouncement}
       </div>
+      <div
+        className="sr-only"
+        role="alert"
+        aria-live="assertive"
+        aria-atomic="true"
+        data-testid="watchlists-overview-live-assertive"
+      >
+        {assertiveAnnouncement}
+      </div>
+
+      {data && (
+        <LatestBriefing
+          projection={data.latestBriefing}
+          emptyJobId={data.jobs.nextActiveJob?.id}
+          nextRunAt={data.jobs.nextActiveJob?.nextRunAt}
+          timezone={data.jobs.nextActiveJob?.timezone}
+          unreadCount={data.items.unread}
+          onPlay={() => undefined}
+          onOpenReport={handleOpenBriefingReport}
+          onInspectRun={handleOpenRun}
+          onRetryStage={handleRetryBriefingStage}
+          onRegenerate={handleRegenerateBriefing}
+          onTestNow={handleTestLatest}
+          onViewReports={handleOpenAttentionOutputs}
+          onReviewDeliverySettings={handleReviewDeliverySettings}
+        />
+      )}
+
+      {data && data.sources.total > 0 && data.jobs.total === 0 && (
+        <DesignSystemAlert
+          variant="info"
+          title={t("watchlists:overview.noBriefing.title", "Ready for a briefing schedule")}
+          action={{
+            label: t("watchlists:overview.noBriefing.setup", "Set up briefing"),
+            onClick: openPipelineSetup
+          }}
+        >
+          {t(
+            "watchlists:overview.noBriefing.description",
+            "Your feeds are ready. Choose cadence, format, audio, and delivery in the same setup flow."
+          )}
+        </DesignSystemAlert>
+      )}
 
       {error && (
         <DesignSystemAlert variant="error" title={error} />
@@ -1316,130 +910,6 @@ export const OverviewTab: React.FC = () => {
 
       {data && (
         <>
-          {(data.sources.total === 0 || data.jobs.total === 0) && (
-            <Card
-              size="small"
-              title={
-                <span className="flex items-center gap-2">
-                  {t("watchlists:overview.onboarding.title", "Add initial collection")}
-                  <Tag color="green">{t("watchlists:overview.onboarding.recommended", "Recommended")}</Tag>
-                </span>
-              }
-            >
-              <p className="mb-3 text-sm text-text-muted">
-                {t(
-                  "watchlists:overview.onboarding.pipeline",
-                  "Add feeds -> Configure monitor -> Check Activity -> Review Updates -> Generate Reports"
-                )}
-              </p>
-              <div className="mb-3 flex flex-wrap items-center gap-2">
-                <span className="text-xs font-medium uppercase tracking-wide text-text-muted">
-                  {t("watchlists:overview.onboarding.path.label", "Onboarding mode")}
-                </span>
-                <Button
-                  size="small"
-                  type={onboardingPath === "beginner" ? "primary" : "default"}
-                  onClick={() => handleOnboardingPathChange("beginner")}
-                  data-testid="watchlists-overview-onboarding-path-beginner"
-                  aria-pressed={onboardingPath === "beginner"}
-                >
-                  {t("watchlists:overview.onboarding.path.beginner", "Beginner (guided)")}
-                </Button>
-                <Button
-                  size="small"
-                  type={onboardingPath === "advanced" ? "primary" : "default"}
-                  onClick={() => handleOnboardingPathChange("advanced")}
-                  data-testid="watchlists-overview-onboarding-path-advanced"
-                  aria-pressed={onboardingPath === "advanced"}
-                >
-                  {t("watchlists:overview.onboarding.path.advanced", "Advanced (direct forms)")}
-                </Button>
-              </div>
-              <p className="mb-3 text-xs text-text-muted">
-                {onboardingPath === "beginner"
-                  ? t(
-                      "watchlists:overview.onboarding.path.beginnerHint",
-                      "Guided collection setup keeps this Watchlist scoped before advanced schedules and templates."
-                    )
-                  : t(
-                      "watchlists:overview.onboarding.path.advancedHint",
-                      "Advanced mode opens direct feed and monitor forms for this Watchlist."
-                    )}
-              </p>
-              <Steps
-                size="small"
-                current={data.sources.total === 0 ? 0 : data.jobs.total === 0 ? 1 : 2}
-                items={[
-                  {
-                    title: t("watchlists:overview.onboarding.steps.addFeed.title", "Add feeds to this Watchlist"),
-                    content: t(
-                      "watchlists:overview.onboarding.steps.addFeed.description",
-                      "Add RSS/site feeds inside the selected Watchlist."
-                    )
-                  },
-                  {
-                    title: t("watchlists:overview.onboarding.steps.createMonitor.title", "Create a monitor"),
-                    content: t(
-                      "watchlists:overview.onboarding.steps.createMonitor.description",
-                      "Pick Watchlist feeds, then set a schedule with presets."
-                    )
-                  },
-                  {
-                    title: t("watchlists:overview.onboarding.steps.reviewResults.title", "Review results"),
-                    content: t(
-                      "watchlists:overview.onboarding.steps.reviewResults.description",
-                      "Open Updates for content and Activity for run diagnostics."
-                    )
-                  }
-                ]}
-              />
-              <Space className="mt-4" wrap>
-                <Button
-                  type={onboardingPath === "beginner" ? "primary" : "default"}
-                  ref={quickSetupTriggerRef}
-                  onClick={(event) => openQuickSetup(event.currentTarget)}
-                  data-testid="watchlists-overview-cta-guided-setup"
-                >
-                  {t("watchlists:overview.onboarding.cta.guidedSetup", "Add initial collection")}
-                </Button>
-                {onboardingPath === "advanced" && (
-                  <Button
-                    type="primary"
-                    onClick={
-                      data.sources.total === 0 ? handleStartSourceQuickCreate : handleStartJobQuickCreate
-                    }
-                    data-testid="watchlists-overview-cta-advanced-direct"
-                  >
-                    {data.sources.total === 0
-                      ? t("watchlists:overview.onboarding.cta.addFeed", "Add first feed")
-                      : t("watchlists:overview.onboarding.cta.createMonitor", "Create first monitor")}
-                  </Button>
-                )}
-                {data.sources.total === 0 && (
-                  <Button
-                    type="default"
-                    onClick={handleStartSourceQuickCreate}
-                    data-testid="watchlists-overview-cta-add-feed"
-                  >
-                    {t("watchlists:overview.onboarding.cta.addFeed", "Add first feed")}
-                  </Button>
-                )}
-                {data.sources.total > 0 && data.jobs.total === 0 && (
-                  <Button
-                    type="default"
-                    onClick={handleStartJobQuickCreate}
-                    data-testid="watchlists-overview-cta-create-monitor"
-                  >
-                    {t("watchlists:overview.onboarding.cta.createMonitor", "Create first monitor")}
-                  </Button>
-                )}
-                <Button onClick={handleOpenItems}>
-                  {t("watchlists:overview.onboarding.cta.reviewArticles", "Open Updates")}
-                </Button>
-              </Space>
-            </Card>
-          )}
-
           <DesignSystemAlert
             variant={data.systemHealth === "degraded" ? "warning" : "success"}
             title={
@@ -1778,573 +1248,10 @@ export const OverviewTab: React.FC = () => {
         </>
       )}
 
-      <Modal
-        open={quickSetupOpen}
-        title={t("watchlists:overview.onboarding.quickSetup.title", "Add initial collection")}
-        onCancel={quickSetupSubmitting ? undefined : cancelQuickSetup}
-        afterClose={restoreQuickSetupFocus}
-        destroyOnHidden
-        maskClosable={!quickSetupSubmitting}
-        footer={[
-          <Button
-            key="cancel"
-            onClick={cancelQuickSetup}
-            disabled={quickSetupSubmitting}
-          >
-            {t("common:cancel", "Cancel")}
-          </Button>,
-          <Button
-            key="back"
-            onClick={handleQuickSetupBack}
-            disabled={quickSetupSubmitting || quickSetupStep === 0}
-          >
-            {t("common:back", "Back")}
-          </Button>,
-          <Button
-            key="next"
-            type="primary"
-            loading={quickSetupSubmitting}
-            onClick={() => {
-              if (quickSetupIsLastStep) {
-                void completeQuickSetup()
-              } else {
-                void handleQuickSetupNext()
-              }
-            }}
-          >
-            {quickSetupIsLastStep
-              ? quickSetupFinishLabel
-              : t("common:next", "Next")}
-          </Button>
-        ]}
-      >
-        <div className="space-y-4">
-          <Steps
-            size="small"
-            current={quickSetupStep}
-            items={[
-              { title: t("watchlists:overview.onboarding.quickSetup.steps.feed", "Feed") },
-              { title: t("watchlists:overview.onboarding.quickSetup.steps.monitor", "Monitor") },
-              { title: t("watchlists:overview.onboarding.quickSetup.steps.review", "Review") }
-            ]}
-          />
-          <div className="rounded-md border border-border bg-surface px-3 py-2 text-xs text-text-muted">
-            {quickSetupStepHelp}
-          </div>
-
-          <Form
-            form={quickSetupForm}
-            layout="vertical"
-            initialValues={QUICK_SETUP_DEFAULT_VALUES}
-          >
-            {quickSetupStep === 0 && (
-              <div className="space-y-1">
-                <Form.Item
-                  label={t("watchlists:overview.onboarding.quickSetup.fields.sourceName", "Feed name")}
-                  name="sourceName"
-                  rules={[
-                    {
-                      required: true,
-                      message: t(
-                        "watchlists:overview.onboarding.quickSetup.validation.sourceNameRequired",
-                        "Enter a feed name"
-                      )
-                    }
-                  ]}
-                >
-                  <Input
-                    placeholder={t(
-                      "watchlists:overview.onboarding.quickSetup.placeholders.sourceName",
-                      "e.g., Daily Tech Feed"
-                    )}
-                    autoFocus
-                  />
-                </Form.Item>
-
-                <Form.Item
-                  label={t("watchlists:overview.onboarding.quickSetup.fields.sourceUrl", "Feed URL")}
-                  name="sourceUrl"
-                  rules={[
-                    {
-                      required: true,
-                      message: t(
-                        "watchlists:overview.onboarding.quickSetup.validation.sourceUrlRequired",
-                        "Enter a feed URL"
-                      )
-                    },
-                    {
-                      validator: (_rule, value) => {
-                        const raw = String(value || "").trim()
-                        if (!raw) return Promise.resolve()
-                        try {
-                          const parsed = new URL(raw)
-                          if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-                            throw new Error("invalid_protocol")
-                          }
-                          return Promise.resolve()
-                        } catch {
-                          return Promise.reject(
-                            new Error(
-                              t(
-                                "watchlists:overview.onboarding.quickSetup.validation.sourceUrlInvalid",
-                                "Enter a valid http(s) URL"
-                              )
-                            )
-                          )
-                        }
-                      }
-                    }
-                  ]}
-                >
-                  <Input
-                    placeholder={t(
-                      "watchlists:overview.onboarding.quickSetup.placeholders.sourceUrl",
-                      "https://example.com/feed.xml"
-                    )}
-                  />
-                </Form.Item>
-
-                <Form.Item
-                  label={t(
-                    "watchlists:overview.onboarding.quickSetup.fields.extraSourceUrls",
-                    "Additional feed URLs (optional)"
-                  )}
-                  name="extraSourceUrls"
-                  rules={[
-                    {
-                      validator: (_rule, value) => {
-                        const raw = String(value || "").trim()
-                        if (!raw) return Promise.resolve()
-                        const entries = raw
-                          .split(/\r?\n|,/)
-                          .map((entry) => entry.trim())
-                          .filter((entry) => entry.length > 0)
-                        const validEntries = parseQuickSetupExtraSourceUrls(raw)
-                        if (entries.length === validEntries.length) {
-                          return Promise.resolve()
-                        }
-                        return Promise.reject(
-                          new Error(
-                            t(
-                              "watchlists:overview.onboarding.quickSetup.validation.extraSourceUrlsInvalid",
-                              "Enter valid http(s) URLs separated by commas or new lines"
-                            )
-                          )
-                        )
-                      }
-                    }
-                  ]}
-                >
-                  <Input.TextArea
-                    autoSize={{ minRows: 2, maxRows: 5 }}
-                    placeholder={t(
-                      "watchlists:overview.onboarding.quickSetup.placeholders.extraSourceUrls",
-                      "https://example.com/feed-a.xml\nhttps://example.com/feed-b.xml"
-                    )}
-                  />
-                </Form.Item>
-
-                <Form.Item
-                  label={t("watchlists:overview.onboarding.quickSetup.fields.sourceType", "Feed type")}
-                  name="sourceType"
-                >
-                  <Select
-                    options={[
-                      {
-                        value: "rss",
-                        label: t("watchlists:sources.types.rss", "RSS Feed")
-                      },
-                      {
-                        value: "site",
-                        label: t("watchlists:sources.types.site", "Website")
-                      },
-                      {
-                        value: "forum",
-                        label: t("watchlists:sources.types.forumComingSoon", "Forum (coming soon)"),
-                        disabled: true
-                      }
-                    ]}
-                  />
-                </Form.Item>
-              </div>
-            )}
-
-            {quickSetupStep === 1 && (
-              <div className="space-y-1">
-                <Form.Item
-                  label={t("watchlists:overview.onboarding.quickSetup.fields.monitorName", "Monitor name")}
-                  name="monitorName"
-                  rules={[
-                    {
-                      required: true,
-                      message: t(
-                        "watchlists:overview.onboarding.quickSetup.validation.monitorNameRequired",
-                        "Enter a monitor name"
-                      )
-                    }
-                  ]}
-                >
-                  <Input
-                    placeholder={t(
-                      "watchlists:overview.onboarding.quickSetup.placeholders.monitorName",
-                      "e.g., Morning Brief"
-                    )}
-                    autoFocus
-                  />
-                </Form.Item>
-
-                <Form.Item
-                  label={t("watchlists:overview.onboarding.quickSetup.fields.schedule", "Schedule")}
-                  name={["scheduleCadence", "kind"]}
-                >
-                  <Select
-                    aria-label={t("watchlists:overview.onboarding.quickSetup.fields.schedule", "Schedule")}
-                    options={quickSetupScheduleOptions}
-                    onChange={(value) => {
-                      const cadence = createDefaultQuickSetupCadenceDraft(
-                        value as QuickSetupScheduleMode,
-                        quickSetupScheduleDraft
-                      )
-                      quickSetupForm.setFieldsValue({
-                        scheduleCadence: cadence,
-                        schedulePreset: cadenceDraftToLegacyPreset(cadence)
-                      })
-                    }}
-                  />
-                </Form.Item>
-
-                {quickSetupScheduleDraft.kind === "interval" && (
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Form.Item
-                      label={t("watchlists:overview.onboarding.quickSetup.fields.intervalEvery", "Every")}
-                      name={["scheduleCadence", "every"]}
-                    >
-                      <InputNumber
-                        aria-label={t("watchlists:overview.onboarding.quickSetup.fields.intervalEvery", "Every")}
-                        min={quickSetupScheduleDraft.unit === "minutes" ? 5 : 1}
-                        max={quickSetupScheduleDraft.unit === "minutes" ? 59 : 23}
-                        className="w-full"
-                      />
-                    </Form.Item>
-                    <Form.Item
-                      label={t("watchlists:overview.onboarding.quickSetup.fields.intervalUnit", "Interval unit")}
-                      name={["scheduleCadence", "unit"]}
-                    >
-                      <Select
-                        aria-label={t("watchlists:overview.onboarding.quickSetup.fields.intervalUnit", "Interval unit")}
-                        options={quickSetupIntervalUnitOptions}
-                        onChange={(value) => {
-                          const cadence = normalizeQuickSetupIntervalCadence(
-                            quickSetupForm.getFieldValue(["scheduleCadence", "every"]),
-                            value as WatchlistCadenceIntervalUnit
-                          )
-                          quickSetupForm.setFieldsValue({
-                            scheduleCadence: cadence,
-                            schedulePreset: cadenceDraftToLegacyPreset(cadence)
-                          })
-                        }}
-                      />
-                    </Form.Item>
-                  </div>
-                )}
-
-                {(quickSetupScheduleDraft.kind === "daily" ||
-                  quickSetupScheduleDraft.kind === "weekdays" ||
-                  quickSetupScheduleDraft.kind === "weekly") && (
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    {quickSetupScheduleDraft.kind === "weekly" && (
-                      <Form.Item
-                        label={t("watchlists:overview.onboarding.quickSetup.fields.weekday", "Weekday")}
-                        name={["scheduleCadence", "weekday"]}
-                      >
-                        <Select
-                          aria-label={t("watchlists:overview.onboarding.quickSetup.fields.weekday", "Weekday")}
-                          options={quickSetupWeekdayOptions}
-                        />
-                      </Form.Item>
-                    )}
-                    <Form.Item
-                      label={t("watchlists:overview.onboarding.quickSetup.fields.time", "Time")}
-                      name={["scheduleCadence", "time"]}
-                    >
-                      <Input
-                        aria-label={t("watchlists:overview.onboarding.quickSetup.fields.time", "Time")}
-                        type="time"
-                      />
-                    </Form.Item>
-                  </div>
-                )}
-
-                {quickSetupScheduleDraft.kind === "advanced" && (
-                  <Form.Item
-                    label={t("watchlists:overview.onboarding.quickSetup.fields.cronExpression", "Cron expression")}
-                    name={["scheduleCadence", "cron"]}
-                  >
-                    <Input
-                      aria-label={t("watchlists:overview.onboarding.quickSetup.fields.cronExpression", "Cron expression")}
-                      placeholder={t(
-                        "watchlists:overview.onboarding.quickSetup.placeholders.cronExpression",
-                        "0 8 * * MON-FRI"
-                      )}
-                    />
-                  </Form.Item>
-                )}
-
-                <Form.Item
-                  label={t("watchlists:overview.onboarding.quickSetup.fields.setupGoal", "Setup goal")}
-                  name="setupGoal"
-                >
-                  <Select
-                    options={[
-                      {
-                        value: "briefing",
-                        label: t(
-                          "watchlists:overview.onboarding.quickSetup.goal.briefing",
-                          "Generate briefing reports"
-                        )
-                      },
-                      {
-                        value: "triage",
-                        label: t(
-                          "watchlists:overview.onboarding.quickSetup.goal.triage",
-                          "Feed review only"
-                        )
-                      }
-                    ]}
-                  />
-                </Form.Item>
-
-                {(quickSetupValues?.setupGoal || "briefing") === "briefing" && (
-                  <Form.Item
-                    label={t(
-                      "watchlists:overview.onboarding.quickSetup.fields.includeAudioBriefing",
-                      "Include audio briefing"
-                    )}
-                    name="includeAudioBriefing"
-                    valuePropName="checked"
-                  >
-                    <Switch
-                      aria-label={t(
-                        "watchlists:overview.onboarding.quickSetup.fields.includeAudioBriefing",
-                        "Include audio briefing"
-                      )}
-                    />
-                  </Form.Item>
-                )}
-
-                <Form.Item
-                  label={t(
-                    "watchlists:overview.onboarding.quickSetup.fields.runNow",
-                    "Run test generation immediately"
-                  )}
-                  name="runNow"
-                  valuePropName="checked"
-                >
-                  <Switch
-                    aria-label={t("watchlists:overview.onboarding.quickSetup.fields.runNow", "Run immediately")}
-                  />
-                </Form.Item>
-                <div className="-mt-3 text-xs text-text-muted">
-                  {t(
-                    "watchlists:overview.onboarding.quickSetup.hints.runNow",
-                    "Runs one test generation after setup so you can verify results before waiting for the next schedule."
-                  )}
-                </div>
-              </div>
-            )}
-
-            {quickSetupStep === 2 && (
-              <div className="space-y-3 text-sm">
-                <p className="text-text-muted">
-                  {t(
-                    "watchlists:overview.onboarding.quickSetup.reviewDescription",
-                    "Preview sample candidates and expected briefing, then add feeds and monitor to this Watchlist."
-                  )}
-                </p>
-                <div className="rounded-md border border-border bg-surface p-3">
-                  <p>
-                    <span className="font-medium">
-                      {t("watchlists:overview.onboarding.quickSetup.review.feed", "Feed")}:
-                    </span>{" "}
-                    {quickSetupSnapshot.sourceName || "—"}
-                  </p>
-                  <p className="text-text-muted">
-                    {quickSetupSnapshot.sourceUrl || "—"}
-                  </p>
-                  <p className="mt-1 text-text-muted">
-                    {t("watchlists:overview.onboarding.quickSetup.review.feedCount", "Total feeds: {{count}}", {
-                      count: (quickSetupValues?.sourceUrl ? 1 : 0) + quickSetupExtraSourceUrls.length
-                    })}
-                  </p>
-                  <p className="mt-2">
-                    <span className="font-medium">
-                      {t("watchlists:overview.onboarding.quickSetup.review.monitor", "Monitor")}:
-                    </span>{" "}
-                    {quickSetupSnapshot.monitorName || "—"}
-                  </p>
-                  <p>
-                    <span className="font-medium">
-                      {t("watchlists:overview.onboarding.quickSetup.review.schedule", "Schedule")}:
-                    </span>{" "}
-                    {formatQuickSetupCadenceLabel(quickSetupScheduleDraft, {
-                      manual: t("watchlists:overview.onboarding.quickSetup.schedule.none", "Manual only"),
-                      hourly: t("watchlists:overview.onboarding.quickSetup.schedule.hourly", "Hourly"),
-                      daily: (time) =>
-                        t("watchlists:overview.onboarding.quickSetup.schedule.dailyAt", "Daily at {{time}}", {
-                          time
-                        }),
-                      weekdays: (time) =>
-                        t("watchlists:overview.onboarding.quickSetup.schedule.weekdaysAt", "Weekdays at {{time}}", {
-                          time
-                        }),
-                      weekly: (weekday, time) => {
-                        const weekdayLabel =
-                          quickSetupWeekdayOptions.find((option) => option.value === weekday)?.label || weekday
-                        return t(
-                          "watchlists:overview.onboarding.quickSetup.schedule.weeklyAt",
-                          "{{weekday}} at {{time}}",
-                          { weekday: weekdayLabel, time }
-                        )
-                      },
-                      interval: (value, unit) =>
-                        unit === "minutes"
-                          ? t(
-                              "watchlists:overview.onboarding.quickSetup.schedule.everyMinutes",
-                              "Every {{value}} minute{{plural}}",
-                              { value, plural: value === 1 ? "" : "s" }
-                            )
-                          : t(
-                              "watchlists:overview.onboarding.quickSetup.schedule.everyHours",
-                              "Every {{value}} hour{{plural}}",
-                              { value, plural: value === 1 ? "" : "s" }
-                            ),
-                      advanced: (cron) =>
-                        cron
-                          ? t(
-                              "watchlists:overview.onboarding.quickSetup.schedule.customCron",
-                              "Custom cron: {{cron}}",
-                              { cron }
-                            )
-                          : t("watchlists:overview.onboarding.quickSetup.schedule.advanced", "Advanced cron")
-                    })}
-                  </p>
-                  <p>
-                    <span className="font-medium">
-                      {t("watchlists:overview.onboarding.quickSetup.review.goal", "Goal")}:
-                    </span>{" "}
-                    {quickSetupSnapshot.setupGoal === "triage"
-                      ? t("watchlists:overview.onboarding.quickSetup.goal.triage", "Feed review only")
-                      : t(
-                          "watchlists:overview.onboarding.quickSetup.goal.briefing",
-                          "Generate briefing reports"
-                        )}
-                  </p>
-                  {(quickSetupValues?.setupGoal || "briefing") === "briefing" && (
-                    <p>
-                      <span className="font-medium">
-                        {t("watchlists:overview.onboarding.quickSetup.review.audio", "Audio briefing")}:
-                      </span>{" "}
-                      {quickSetupValues?.includeAudioBriefing
-                        ? t("common:enabled", "Enabled")
-                        : t("common:disabled", "Disabled")}
-                    </p>
-                  )}
-                  <p>
-                    <span className="font-medium">
-                      {t("watchlists:overview.onboarding.quickSetup.review.audio", "Audio")}:
-                    </span>{" "}
-                    {quickSetupSnapshot.setupGoal === "triage"
-                      ? t("watchlists:overview.onboarding.quickSetup.outcome.triage", "Update triage only")
-                      : quickSetupSnapshot.includeAudioBriefing
-                        ? t("watchlists:overview.onboarding.quickSetup.outcome.textAndAudio", "Text + audio briefing")
-                        : t("watchlists:overview.onboarding.quickSetup.outcome.textOnly", "Text briefing")}
-                  </p>
-                  <p>
-                    <span className="font-medium">
-                      {t("watchlists:overview.onboarding.quickSetup.review.runNow", "Run test now")}:
-                    </span>{" "}
-                    {quickSetupSnapshot.runNow
-                      ? t("common:yes", "Yes")
-                      : t("common:no", "No")}
-                  </p>
-                  <p>
-                    <span className="font-medium">
-                      {t("watchlists:overview.onboarding.quickSetup.review.destination", "After create")}:
-                    </span>{" "}
-                    {quickSetupDestinationHint}
-                  </p>
-                </div>
-
-                <div className="rounded-md border border-border bg-surface p-3">
-                  <div className="mb-1 flex items-center justify-between gap-2">
-                    <span className="font-medium">
-                      {t("watchlists:overview.onboarding.quickSetup.candidatePreview.title", "Feed sample preview")}
-                    </span>
-                    <Button
-                      type="link"
-                      size="small"
-                      onClick={() => void loadQuickSetupCandidatePreview(quickSetupSnapshot)}
-                    >
-                      {t("watchlists:overview.onboarding.quickSetup.actions.retryPreview", "Retry preview")}
-                    </Button>
-                  </div>
-                  <p
-                    className={quickSetupCandidatePreviewError ? "text-danger" : "text-text-muted"}
-                    data-testid={
-                      quickSetupCandidatePreviewError
-                        ? "watchlists-overview-quick-setup-candidate-error"
-                        : "watchlists-overview-quick-setup-candidate-summary"
-                    }
-                  >
-                    {quickSetupCandidateSummary}
-                  </p>
-                  {quickSetupCandidatePreviewLoading && (
-                    <div className="mt-2">
-                      <Spin size="small" />
-                    </div>
-                  )}
-                  {!quickSetupCandidatePreviewLoading &&
-                    !quickSetupCandidatePreviewError &&
-                    (quickSetupCandidatePreview?.items?.length || 0) > 0 && (
-                      <ul className="mt-2 space-y-1">
-                        {quickSetupCandidatePreview?.items.slice(0, 4).map((item, index) => (
-                          <li key={`${item.url || item.title || "candidate"}-${index}`} className="flex gap-2">
-                            <Tag className="m-0" color={item.decision === "ingest" ? "green" : "red"}>
-                              {item.decision}
-                            </Tag>
-                            <span className="text-text-muted">
-                              {item.title || item.url || t("watchlists:common.unknown", "Unknown")}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                </div>
-
-                <div className="rounded-md border border-border bg-surface p-3">
-                  <p className="mb-2 font-medium">
-                    {t(
-                      "watchlists:overview.onboarding.quickSetup.templatePreview.title",
-                      "Briefing preview (template: {{template}})",
-                      { template: "briefing_md" }
-                    )}
-                  </p>
-                  <pre
-                    className="max-h-52 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-bg p-3 text-xs leading-5 text-text"
-                    data-testid="watchlists-overview-quick-setup-template-preview"
-                  >
-                    {quickSetupTemplatePreview}
-                  </pre>
-                </div>
-                <p className="text-xs text-text-muted">{quickSetupDestinationHint}</p>
-              </div>
-            )}
-          </Form>
-        </div>
-      </Modal>
-
       <PipelineWizard
         open={pipelineSetupOpen}
+        sessionKey={pipelineSessionKey}
+        initialDraft={pipelineInitialDraft}
         sources={pipelineSources}
         sourcesLoading={pipelineSourcesLoading}
         submitting={pipelineSetupSubmitting}
@@ -2355,9 +1262,11 @@ export const OverviewTab: React.FC = () => {
         previewWarnings={pipelinePreviewWarnings}
         submitError={pipelineSetupError}
         onCancel={closePipelineSetup}
-        onSubmit={(draft, options) => {
-          void completePipelineSetup(draft, options)
-        }}
+        onSaveDraft={(draft) => setPipelineInitialDraft(draft)}
+        onTest={testPipeline}
+        onActivate={activatePipeline}
+        onTestSource={testPipelineSource}
+        onPreviewSchedule={previewPipelineSchedule}
         onPreview={(draft) => {
           void generatePipelineTemplatePreview(draft)
         }}

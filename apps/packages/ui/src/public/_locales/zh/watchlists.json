@@ -43,5 +43,1100 @@
   },
   "items_queue_generateReport": {
     "message": "从队列生成报告"
+  },
+  "setupWizard_title": {
+    "message": "创建监视列表"
+  },
+  "setupWizard_containerTitle": {
+    "message": "创建监视列表"
+  },
+  "setupWizard_containerHelp": {
+    "message": "请先创建项目容器。随后在同一设置流程中配置来源、频率、简报、投递和测试。"
+  },
+  "setupWizard_actions_continue": {
+    "message": "继续前往来源"
+  },
+  "setupWizard_sections_preset": {
+    "message": "领域预设"
+  },
+  "setupWizard_fields_name": {
+    "message": "监视列表名称"
+  },
+  "setupWizard_fields_objective": {
+    "message": "目标"
+  },
+  "setupWizard_validation_nameRequired": {
+    "message": "请输入监视列表名称。"
+  },
+  "setupWizard_errors_createFailed": {
+    "message": "无法创建监视列表。"
+  },
+  "setupWizard_presets_cti_osint_label": {
+    "message": "CTI / OSINT"
+  },
+  "setupWizard_presets_cti_osint_description": {
+    "message": "跟踪漏洞、恶意软件、威胁主体、安全公告和来源变化。"
+  },
+  "setupWizard_presets_news_label": {
+    "message": "新闻"
+  },
+  "setupWizard_presets_news_description": {
+    "message": "跟踪持续发展的事件、人物、组织和来源多样性。"
+  },
+  "setupWizard_presets_general_label": {
+    "message": "常规"
+  },
+  "setupWizard_presets_general_description": {
+    "message": "跟踪一个主题并收集更新以供审阅。"
+  },
+  "setupWizard_presets_blank_label": {
+    "message": "空白"
+  },
+  "setupWizard_presets_blank_description": {
+    "message": "从空白监视列表开始并自行配置详细信息。"
+  },
+  "setupWizard_startModes_sources_label": {
+    "message": "从来源开始"
+  },
+  "setupWizard_startModes_sources_description": {
+    "message": "使用初始订阅源和可选监视器创建监视列表。"
+  },
+  "setupWizard_startModes_topic_label": {
+    "message": "从主题开始"
+  },
+  "setupWizard_startModes_topic_description": {
+    "message": "先创建监视列表目标，再在收集开始前添加订阅源。"
+  },
+  "setupWizard_startModes_report_goal_label": {
+    "message": "从报告目标开始"
+  },
+  "setupWizard_startModes_report_goal_description": {
+    "message": "先定义简报目标，再连接来源和模板。"
+  },
+  "setupWizard_boundaries_alerts": {
+    "message": "内容匹配提醒将在之后配置。此设置定义监视列表及其初始收集范围。"
+  },
+  "overview_pipelineSetup_title": {
+    "message": "设置简报"
+  },
+  "overview_pipelineSetup_open": {
+    "message": "设置简报"
+  },
+  "overview_pipelineSetup_progress": {
+    "message": "简报设置步骤"
+  },
+  "overview_pipelineSetup_steps_sources": {
+    "message": "来源"
+  },
+  "overview_pipelineSetup_steps_cadence": {
+    "message": "频率"
+  },
+  "overview_pipelineSetup_steps_briefing": {
+    "message": "简报"
+  },
+  "overview_pipelineSetup_steps_delivery": {
+    "message": "投递"
+  },
+  "overview_pipelineSetup_steps_test": {
+    "message": "测试"
+  },
+  "overview_pipelineSetup_actions_next": {
+    "message": "继续前往{{step}}"
+  },
+  "overview_pipelineSetup_source_existing": {
+    "message": "使用现有来源"
+  },
+  "overview_pipelineSetup_source_new": {
+    "message": "添加新来源"
+  },
+  "overview_pipelineSetup_source_fallback": {
+    "message": "来源 {{id}}"
+  },
+  "overview_pipelineSetup_sources_help": {
+    "message": "选择现有来源或添加一个新来源，然后测试连接。"
+  },
+  "overview_pipelineSetup_sourcesLoading": {
+    "message": "正在加载来源..."
+  },
+  "overview_pipelineSetup_sourcesError": {
+    "message": "无法为设置工具加载订阅源。"
+  },
+  "overview_pipelineSetup_sourceTest_action": {
+    "message": "测试来源"
+  },
+  "overview_pipelineSetup_sourceTest_ready": {
+    "message": "来源已就绪。"
+  },
+  "overview_pipelineSetup_sourceTest_cancelled": {
+    "message": "来源测试已取消。"
+  },
+  "overview_pipelineSetup_sourceTest_failed": {
+    "message": "来源测试失败。{{message}}"
+  },
+  "overview_pipelineSetup_sourceTest_summary": {
+    "message": "已就绪 {{ready}} 个，已筛选 {{filtered}} 个"
+  },
+  "overview_pipelineSetup_sourceTest_sample": {
+    "message": "示例项目"
+  },
+  "overview_pipelineSetup_sourceTest_readyItem": {
+    "message": "已就绪"
+  },
+  "overview_pipelineSetup_sourceTest_filteredItem": {
+    "message": "已筛选"
+  },
+  "overview_pipelineSetup_sourceTest_untitled": {
+    "message": "无标题项目"
+  },
+  "overview_pipelineSetup_fields_sources": {
+    "message": "来源"
+  },
+  "overview_pipelineSetup_fields_sourceName": {
+    "message": "来源名称"
+  },
+  "overview_pipelineSetup_fields_sourceUrl": {
+    "message": "来源 URL"
+  },
+  "overview_pipelineSetup_fields_monitorName": {
+    "message": "监视器名称"
+  },
+  "overview_pipelineSetup_fields_schedule": {
+    "message": "计划"
+  },
+  "overview_pipelineSetup_fields_timezone": {
+    "message": "时区"
+  },
+  "overview_pipelineSetup_fields_intervalEvery": {
+    "message": "每"
+  },
+  "overview_pipelineSetup_fields_intervalUnit": {
+    "message": "间隔单位"
+  },
+  "overview_pipelineSetup_fields_weekday": {
+    "message": "星期"
+  },
+  "overview_pipelineSetup_fields_hour": {
+    "message": "小时"
+  },
+  "overview_pipelineSetup_fields_minute": {
+    "message": "分钟"
+  },
+  "overview_pipelineSetup_fields_cronExpression": {
+    "message": "Cron 表达式"
+  },
+  "overview_pipelineSetup_fields_showName": {
+    "message": "节目名称"
+  },
+  "overview_pipelineSetup_fields_premise": {
+    "message": "节目构想"
+  },
+  "overview_pipelineSetup_fields_includeAudio": {
+    "message": "音频"
+  },
+  "overview_pipelineSetup_fields_audioHelp": {
+    "message": "添加可播放的语音版本。"
+  },
+  "overview_pipelineSetup_fields_audioMinutes": {
+    "message": "目标时长（分钟）"
+  },
+  "overview_pipelineSetup_fields_speakerCount": {
+    "message": "嘉宾人数"
+  },
+  "overview_pipelineSetup_fields_template": {
+    "message": "报告模板"
+  },
+  "overview_pipelineSetup_fields_audioProvider": {
+    "message": "替代音频提供商"
+  },
+  "overview_pipelineSetup_fields_audioModel": {
+    "message": "替代音频模型"
+  },
+  "overview_pipelineSetup_fields_customInstructions": {
+    "message": "自定义编辑说明"
+  },
+  "overview_pipelineSetup_fields_emailDelivery": {
+    "message": "电子邮件"
+  },
+  "overview_pipelineSetup_fields_emailRecipients": {
+    "message": "邮件收件人"
+  },
+  "overview_pipelineSetup_fields_chatbookDelivery": {
+    "message": "Chatbook"
+  },
+  "overview_pipelineSetup_fields_chatbookTitle": {
+    "message": "Chatbook 标题"
+  },
+  "overview_pipelineSetup_schedule_manual": {
+    "message": "仅手动"
+  },
+  "overview_pipelineSetup_schedule_interval": {
+    "message": "每 N 小时或分钟"
+  },
+  "overview_pipelineSetup_schedule_daily": {
+    "message": "每天"
+  },
+  "overview_pipelineSetup_schedule_weekdays": {
+    "message": "工作日"
+  },
+  "overview_pipelineSetup_schedule_weekly": {
+    "message": "每周"
+  },
+  "overview_pipelineSetup_schedule_advanced": {
+    "message": "高级 Cron"
+  },
+  "overview_pipelineSetup_intervalUnits_hours": {
+    "message": "小时"
+  },
+  "overview_pipelineSetup_intervalUnits_minutes": {
+    "message": "分钟"
+  },
+  "overview_pipelineSetup_weekdays_monday": {
+    "message": "星期一"
+  },
+  "overview_pipelineSetup_weekdays_tuesday": {
+    "message": "星期二"
+  },
+  "overview_pipelineSetup_weekdays_wednesday": {
+    "message": "星期三"
+  },
+  "overview_pipelineSetup_weekdays_thursday": {
+    "message": "星期四"
+  },
+  "overview_pipelineSetup_weekdays_friday": {
+    "message": "星期五"
+  },
+  "overview_pipelineSetup_weekdays_saturday": {
+    "message": "星期六"
+  },
+  "overview_pipelineSetup_weekdays_sunday": {
+    "message": "星期日"
+  },
+  "overview_pipelineSetup_advancedCron": {
+    "message": "高级 Cron"
+  },
+  "overview_pipelineSetup_nextOccurrence": {
+    "message": "下次运行"
+  },
+  "overview_pipelineSetup_manualOccurrence": {
+    "message": "仅手动"
+  },
+  "overview_pipelineSetup_nextOccurrencePending": {
+    "message": "保存有效计划以计算准确时间。"
+  },
+  "overview_pipelineSetup_briefing_question": {
+    "message": "您要制作什么？"
+  },
+  "overview_pipelineSetup_briefing_help": {
+    "message": "请选择编辑形式。每个选项都以您选择的来源为依据。"
+  },
+  "overview_pipelineSetup_briefing_advanced": {
+    "message": "高级简报设置"
+  },
+  "overview_pipelineSetup_formats_concise_briefing": {
+    "message": "精简简报"
+  },
+  "overview_pipelineSetup_formats_solo_update": {
+    "message": "单人更新"
+  },
+  "overview_pipelineSetup_formats_host_discussion": {
+    "message": "主持人讨论"
+  },
+  "overview_pipelineSetup_formats_sportscast": {
+    "message": "体育播报"
+  },
+  "overview_pipelineSetup_formats_culture_roundtable": {
+    "message": "文化圆桌"
+  },
+  "overview_pipelineSetup_formats_custom": {
+    "message": "自定义"
+  },
+  "overview_pipelineSetup_speaker_defaultLabel": {
+    "message": "参与者 {{index}}"
+  },
+  "overview_pipelineSetup_speaker_defaultRole": {
+    "message": "主持人"
+  },
+  "overview_pipelineSetup_speaker_labelField": {
+    "message": "参与者 {{index}} 标签"
+  },
+  "overview_pipelineSetup_speaker_roleField": {
+    "message": "参与者 {{index}} 角色"
+  },
+  "overview_pipelineSetup_speaker_voiceField": {
+    "message": "参与者 {{index}} 声音"
+  },
+  "overview_pipelineSetup_speaker_personaField": {
+    "message": "参与者 {{index}} 人设"
+  },
+  "overview_pipelineSetup_preview_generate": {
+    "message": "预览报告"
+  },
+  "overview_pipelineSetup_preview_diagnostics": {
+    "message": "预览诊断"
+  },
+  "overview_pipelineSetup_preview_context": {
+    "message": "预览运行：{{runId}}"
+  },
+  "overview_pipelineSetup_preview_noRunContext": {
+    "message": "请先成功运行监视器，再预览此报告。"
+  },
+  "overview_pipelineSetup_preview_templateRequired": {
+    "message": "生成预览前请选择模板。"
+  },
+  "overview_pipelineSetup_preview_templateEmpty": {
+    "message": "所选模板为空。"
+  },
+  "overview_pipelineSetup_preview_emptyResult": {
+    "message": "预览未返回渲染内容。"
+  },
+  "overview_pipelineSetup_preview_error": {
+    "message": "无法生成预览。"
+  },
+  "overview_pipelineSetup_delivery_help": {
+    "message": "始终包含报告。外部投递会等待所选成果准备就绪。"
+  },
+  "overview_pipelineSetup_delivery_reports": {
+    "message": "报告"
+  },
+  "overview_pipelineSetup_delivery_required": {
+    "message": "必需存储"
+  },
+  "overview_pipelineSetup_delivery_alwaysOn": {
+    "message": "始终开启"
+  },
+  "overview_pipelineSetup_receipt_labels_schedule": {
+    "message": "计划"
+  },
+  "overview_pipelineSetup_receipt_labels_sources": {
+    "message": "来源"
+  },
+  "overview_pipelineSetup_receipt_labels_artifacts": {
+    "message": "成果"
+  },
+  "overview_pipelineSetup_receipt_labels_format": {
+    "message": "格式"
+  },
+  "overview_pipelineSetup_receipt_labels_showName": {
+    "message": "节目名称"
+  },
+  "overview_pipelineSetup_receipt_labels_cast": {
+    "message": "嘉宾"
+  },
+  "overview_pipelineSetup_receipt_labels_duration": {
+    "message": "目标时长"
+  },
+  "overview_pipelineSetup_receipt_labels_destinations": {
+    "message": "目的地"
+  },
+  "overview_pipelineSetup_receipt_schedule_manual": {
+    "message": "仅手动"
+  },
+  "overview_pipelineSetup_receipt_schedule_scheduled": {
+    "message": "{{date}}（{{timezone}}）"
+  },
+  "overview_pipelineSetup_receipt_sources": {
+    "message": "{{count}} 个来源"
+  },
+  "overview_pipelineSetup_receipt_artifacts_textReport": {
+    "message": "文本报告"
+  },
+  "overview_pipelineSetup_receipt_artifacts_showNotes": {
+    "message": "节目说明"
+  },
+  "overview_pipelineSetup_receipt_artifacts_audio": {
+    "message": "音频"
+  },
+  "overview_pipelineSetup_receipt_formats_concise_briefing": {
+    "message": "精简简报"
+  },
+  "overview_pipelineSetup_receipt_formats_solo_update": {
+    "message": "单人更新"
+  },
+  "overview_pipelineSetup_receipt_formats_host_discussion": {
+    "message": "主持人讨论"
+  },
+  "overview_pipelineSetup_receipt_formats_sportscast": {
+    "message": "体育播报"
+  },
+  "overview_pipelineSetup_receipt_formats_culture_roundtable": {
+    "message": "文化圆桌"
+  },
+  "overview_pipelineSetup_receipt_formats_custom": {
+    "message": "自定义节目"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_1": {
+    "message": "单人"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_2": {
+    "message": "双主持人"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_3": {
+    "message": "三位主持人"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_4": {
+    "message": "四位主持人"
+  },
+  "overview_pipelineSetup_receipt_programWithSpeakers": {
+    "message": "{{speakers}}{{format}}"
+  },
+  "overview_pipelineSetup_receipt_cast": {
+    "message": "{{count}} 位参与者"
+  },
+  "overview_pipelineSetup_receipt_duration": {
+    "message": "目标 {{count}} 分钟"
+  },
+  "overview_pipelineSetup_receipt_destinations_email": {
+    "message": "电子邮件：{{recipients}}"
+  },
+  "overview_pipelineSetup_receipt_destinations_chatbook": {
+    "message": "Chatbook：{{title}}"
+  },
+  "overview_pipelineSetup_receipt_untitledChatbook": {
+    "message": "无标题"
+  },
+  "overview_pipelineSetup_receipt_dstChange": {
+    "message": "夏令时偏移变化后，下一次运行使用 {{timezoneName}}：{{date}}。"
+  },
+  "overview_pipelineSetup_test_providerDisclosure": {
+    "message": "测试使用您配置的 LLM 和文本转语音提供商。样本限制为 60 秒；完整测试使用目标时长。"
+  },
+  "overview_pipelineSetup_test_textProviderDisclosure": {
+    "message": "测试使用您配置的 LLM 提供商。纯文本测试不使用文本转语音。"
+  },
+  "overview_pipelineSetup_test_receipt": {
+    "message": "启用摘要"
+  },
+  "overview_pipelineSetup_test_manualReceipt": {
+    "message": "此简报手动运行，将所选成果保存在“报告”中；除非您选择“发送测试”，否则不会联系外部目的地。"
+  },
+  "overview_pipelineSetup_test_progress": {
+    "message": "测试进度"
+  },
+  "overview_pipelineSetup_test_stages_collection": {
+    "message": "收集来源"
+  },
+  "overview_pipelineSetup_test_stages_selection": {
+    "message": "选择更新"
+  },
+  "overview_pipelineSetup_test_stages_text": {
+    "message": "创建报告"
+  },
+  "overview_pipelineSetup_test_stages_audio": {
+    "message": "创建音频"
+  },
+  "overview_pipelineSetup_test_stages_persistence": {
+    "message": "保存到报告"
+  },
+  "overview_pipelineSetup_test_stages_audioScript": {
+    "message": "编写音频脚本"
+  },
+  "overview_pipelineSetup_test_stages_audioScriptPersistence": {
+    "message": "保存音频脚本"
+  },
+  "overview_pipelineSetup_test_stages_audioPersistence": {
+    "message": "将音频保存到报告"
+  },
+  "overview_pipelineSetup_test_stages_delivery": {
+    "message": "检查测试投递"
+  },
+  "overview_pipelineSetup_test_stages_deliveryAdapter": {
+    "message": "投递到 {{adapter}}"
+  },
+  "overview_pipelineSetup_test_stages_unknown": {
+    "message": "阶段 {{stage}}"
+  },
+  "overview_pipelineSetup_test_sample": {
+    "message": "生成 60 秒样本"
+  },
+  "overview_pipelineSetup_test_full": {
+    "message": "生成完整测试节目"
+  },
+  "overview_pipelineSetup_test_text": {
+    "message": "生成测试报告"
+  },
+  "overview_pipelineSetup_test_send": {
+    "message": "发送测试"
+  },
+  "overview_pipelineSetup_test_activate": {
+    "message": "启用计划"
+  },
+  "overview_pipelineSetup_test_ready": {
+    "message": "测试已完成。简报已准备就绪。在启用计划之前，此草稿保持未启用状态。"
+  },
+  "overview_pipelineSetup_test_cancelled": {
+    "message": "测试已取消。草稿已保存。"
+  },
+  "overview_pipelineSetup_test_failed": {
+    "message": "测试失败。草稿已保存。{{message}}"
+  },
+  "overview_pipelineSetup_test_status_not_started": {
+    "message": "未开始"
+  },
+  "overview_pipelineSetup_test_status_queued": {
+    "message": "已排队"
+  },
+  "overview_pipelineSetup_test_status_running": {
+    "message": "运行中"
+  },
+  "overview_pipelineSetup_test_status_ready": {
+    "message": "已就绪"
+  },
+  "overview_pipelineSetup_test_status_failed": {
+    "message": "失败"
+  },
+  "overview_pipelineSetup_test_status_skipped": {
+    "message": "已跳过"
+  },
+  "overview_pipelineSetup_test_status_cancelled": {
+    "message": "已取消"
+  },
+  "overview_pipelineSetup_activate_ready": {
+    "message": "计划已启用。"
+  },
+  "overview_pipelineSetup_activate_failed": {
+    "message": "无法启用计划。草稿已保存。{{message}}"
+  },
+  "overview_pipelineSetup_validation_sourcesRequired": {
+    "message": "请至少选择一个来源再继续。"
+  },
+  "overview_pipelineSetup_validation_sourceNameRequired": {
+    "message": "请输入来源名称。"
+  },
+  "overview_pipelineSetup_validation_sourceUrlInvalid": {
+    "message": "请输入有效的 HTTP 或 HTTPS 来源 URL。"
+  },
+  "overview_pipelineSetup_validation_monitorNameRequired": {
+    "message": "请输入监视器名称。"
+  },
+  "overview_pipelineSetup_validation_timezoneInvalid": {
+    "message": "请输入有效的 IANA 时区。"
+  },
+  "overview_pipelineSetup_validation_intervalInvalid": {
+    "message": "请输入支持的计划间隔。"
+  },
+  "overview_pipelineSetup_validation_hourInvalid": {
+    "message": "请输入 0 到 23 之间的小时。"
+  },
+  "overview_pipelineSetup_validation_minuteInvalid": {
+    "message": "请输入 0 到 59 之间的分钟。"
+  },
+  "overview_pipelineSetup_validation_cronInvalid": {
+    "message": "请输入有效的五字段 Cron 表达式。"
+  },
+  "overview_pipelineSetup_validation_cronTooFrequent": {
+    "message": "请选择间隔至少五分钟的计划。"
+  },
+  "overview_pipelineSetup_validation_templateRequired": {
+    "message": "请输入报告模板。"
+  },
+  "overview_pipelineSetup_validation_castSizeInvalid": {
+    "message": "请选择一到四位参与者。"
+  },
+  "overview_pipelineSetup_validation_castIdsInvalid": {
+    "message": "每位参与者都需要唯一身份。"
+  },
+  "overview_pipelineSetup_validation_castVoicesRequired": {
+    "message": "请为每位参与者选择声音。"
+  },
+  "overview_pipelineSetup_validation_audioMinutesInvalid": {
+    "message": "请输入 1 到 60 分钟的时长。"
+  },
+  "overview_pipelineSetup_validation_emailInvalid": {
+    "message": "请输入至少一个有效的电子邮件地址。"
+  },
+  "overview_pipelineSetup_validationError": {
+    "message": "请检查突出显示的字段再继续。"
+  },
+  "overview_pipelineSetup_receipt_sources_one": {
+    "message": "{{count}} 个来源"
+  },
+  "overview_pipelineSetup_receipt_sources_other": {
+    "message": "{{count}} 个来源"
+  },
+  "overview_pipelineSetup_receipt_cast_one": {
+    "message": "{{count}} 位参与者"
+  },
+  "overview_pipelineSetup_receipt_cast_other": {
+    "message": "{{count}} 位参与者"
+  },
+  "overview_pipelineSetup_receipt_duration_one": {
+    "message": "目标 {{count}} 分钟"
+  },
+  "overview_pipelineSetup_receipt_duration_other": {
+    "message": "目标 {{count}} 分钟"
+  },
+  "overview_pipelineSetup_schedulePreview_loading": {
+    "message": "正在计算准确计划…"
+  },
+  "overview_pipelineSetup_schedulePreview_error": {
+    "message": "无法计算准确计划。请检查 cron 表达式和时区。"
+  },
+  "overview_pipelineSetup_test_running": {
+    "message": "运行 {{runId}} 仍在进行：{{stage}}。你可以关闭设置并在概览中监控。"
+  },
+  "overview_pipelineSetup_test_failedStage": {
+    "message": "{{stage}} 失败。请打开运行 {{runId}} 并重试此阶段。"
+  },
+  "overview_pipelineSetup_test_failedWithCode": {
+    "message": "{{stage}} 失败（{{code}}）。请打开运行 {{runId}} 并重试此阶段。"
+  },
+  "overview_pipelineSetup_test_cancelledStage": {
+    "message": "{{stage}} 已取消。草稿已保存。"
+  },
+  "overview_pipelineSetup_test_cancelledWithCode": {
+    "message": "{{stage}} 已取消（{{code}}）。草稿已保存。"
+  },
+  "overview_latest_heading_briefing": {
+    "message": "最新简报"
+  },
+  "overview_latest_heading_episode": {
+    "message": "最新节目"
+  },
+  "overview_latest_empty_scheduled": {
+    "message": "首份简报计划于{{date}}生成。"
+  },
+  "overview_latest_empty_manual": {
+    "message": "尚未开始。立即测试。"
+  },
+  "overview_latest_generatedAt": {
+    "message": "生成于 {{date}}"
+  },
+  "overview_latest_untitled": {
+    "message": "简报 {{runId}}"
+  },
+  "overview_latest_artifacts": {
+    "message": "报告／音频"
+  },
+  "overview_latest_audio": {
+    "message": "音频"
+  },
+  "overview_latest_audioFailed": {
+    "message": "音频生成失败"
+  },
+  "overview_latest_ready": {
+    "message": "就绪"
+  },
+  "overview_latest_saved": {
+    "message": "已保存"
+  },
+  "overview_latest_waiting": {
+    "message": "等待中"
+  },
+  "overview_latest_script": {
+    "message": "音频脚本"
+  },
+  "overview_latest_stageWithStatus": {
+    "message": "{{stage}}：{{status}}"
+  },
+  "overview_latest_noUpdates": {
+    "message": "未找到符合条件的更新。已保存状态{{noun}}。"
+  },
+  "overview_latest_nextRun": {
+    "message": "下次运行：{{date}}"
+  },
+  "overview_latest_nextRunRelative": {
+    "message": "下次运行：{{relative}}"
+  },
+  "overview_latest_counts": {
+    "message": "简报：已包含、未读、新增"
+  },
+  "overview_latest_count_included": {
+    "message": "已包含 {{count}}"
+  },
+  "overview_latest_count_unread": {
+    "message": "未读 {{count}}"
+  },
+  "overview_latest_count_new": {
+    "message": "新增 {{count}}"
+  },
+  "overview_latest_provenance_sources": {
+    "message": "{{count}} 个跟踪来源"
+  },
+  "overview_latest_provenance_sources_zero": {
+    "message": "{{count}} 个跟踪来源"
+  },
+  "overview_latest_provenance_sources_one": {
+    "message": "{{count}} 个跟踪来源"
+  },
+  "overview_latest_provenance_sources_two": {
+    "message": "{{count}} 个跟踪来源"
+  },
+  "overview_latest_provenance_sources_few": {
+    "message": "{{count}} 个跟踪来源"
+  },
+  "overview_latest_provenance_sources_many": {
+    "message": "{{count}} 个跟踪来源"
+  },
+  "overview_latest_provenance_sources_other": {
+    "message": "{{count}} 个跟踪来源"
+  },
+  "overview_latest_delivery_reports": {
+    "message": "查看所有报告"
+  },
+  "overview_latest_delivery_retryAria": {
+    "message": "重试 {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_retryUnknownAria": {
+    "message": "结果未知. 重试 {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_reviewRetry": {
+    "message": "检查后重试"
+  },
+  "overview_latest_delivery_unknownConfirmation": {
+    "message": "提供商未确认通过 {{adapter}} 送达。重试可能会发送重复内容。请检查目标，仅在可以接受该风险时继续。 ({{destination}})"
+  },
+  "overview_latest_playback_region": {
+    "message": "音频: {{name}}"
+  },
+  "overview_latest_playback_playAria": {
+    "message": "播放 {{name}}"
+  },
+  "overview_latest_playback_pauseAria": {
+    "message": "暂停 {{name}}"
+  },
+  "overview_latest_playback_resumeAria": {
+    "message": "继续播放 {{name}}"
+  },
+  "overview_latest_playback_seekAria": {
+    "message": "音频: {{name}}"
+  },
+  "overview_latest_playback_loading": {
+    "message": "正在加载音频"
+  },
+  "overview_latest_playback_error": {
+    "message": "音频生成失败。请打开报告或重新生成音频。"
+  },
+  "overview_latest_playback_play": {
+    "message": "播放"
+  },
+  "overview_latest_playback_pause": {
+    "message": "暂停"
+  },
+  "overview_latest_playback_resume": {
+    "message": "继续"
+  },
+  "overview_latest_actions_label": {
+    "message": "最新简报"
+  },
+  "overview_latest_actions_openReport": {
+    "message": "打开 {{report}}"
+  },
+  "overview_latest_actions_openReportAria": {
+    "message": "打开{{report}}：{{name}}"
+  },
+  "overview_latest_actions_regenerateAudio": {
+    "message": "重新生成音频"
+  },
+  "overview_latest_actions_regenerateAudioAria": {
+    "message": "重新生成{{style}}{{noun}}音频：{{name}}"
+  },
+  "overview_latest_actions_retry": {
+    "message": "重试"
+  },
+  "overview_latest_actions_retrySaveAria": {
+    "message": "重试 已保存 报告: {{name}}"
+  },
+  "overview_latest_actions_retryTextAria": {
+    "message": "重试 报告: {{name}}"
+  },
+  "overview_latest_actions_retryStage": {
+    "message": "重试: {{stage}}"
+  },
+  "overview_latest_actions_inspect": {
+    "message": "检查运行"
+  },
+  "overview_latest_actions_inspectAria": {
+    "message": "检查运行 {{runId}}: {{name}}"
+  },
+  "overview_latest_actions_viewReports": {
+    "message": "查看所有报告"
+  },
+  "overview_latest_actions_testNow": {
+    "message": "立即测试"
+  },
+  "overview_latest_announcements_blockingFailure": {
+    "message": "{{name}}失败。请检查运行{{runId}}。"
+  },
+  "overview_latest_announcements_delivered": {
+    "message": "{{name}}：已送达。"
+  },
+  "overview_latest_announcements_nextRunUpdated": {
+    "message": "{{name}}：已更新下次运行时间。"
+  },
+  "overview_latest_announcements_partialAudioFailure": {
+    "message": "{{name}}：节目说明已就绪，音频生成失败。"
+  },
+  "overview_latest_announcements_readyText": {
+    "message": "{{name}}：报告已就绪。"
+  },
+  "overview_latest_announcements_readyWithAudio": {
+    "message": "{{name}}：音频和节目说明已就绪。"
+  },
+  "overview_latest_announcements_stageProgress": {
+    "message": "{{name}}：{{stage}}{{status}}。"
+  },
+  "overview_latest_announcements_testQueued": {
+    "message": "测试已排队。"
+  },
+  "overview_latest_retryError": {
+    "message": "重试 失败. 检查运行."
+  },
+  "overview_latest_regenerateError": {
+    "message": "重新生成 音频: 失败."
+  },
+  "overview_latest_testError": {
+    "message": "立即测试: 失败."
+  },
+  "overview_latest_status_ready": {
+    "message": "就绪"
+  },
+  "overview_latest_status_failed": {
+    "message": "失败"
+  },
+  "overview_latest_status_saved": {
+    "message": "已保存"
+  },
+  "overview_latest_status_waiting": {
+    "message": "等待中"
+  },
+  "overview_latest_status_running": {
+    "message": "运行中"
+  },
+  "overview_latest_status_queued": {
+    "message": "已排队"
+  },
+  "overview_latest_status_notStarted": {
+    "message": "未开始"
+  },
+  "overview_latest_status_notSelected": {
+    "message": "未选择"
+  },
+  "overview_latest_status_cancelled": {
+    "message": "已取消"
+  },
+  "overview_latest_status_delivered": {
+    "message": "已送达"
+  },
+  "overview_latest_status_unknown": {
+    "message": "结果未知"
+  },
+  "overview_latest_status_sending": {
+    "message": "发送中"
+  },
+  "overview_latest_stages_renderText": {
+    "message": "报告"
+  },
+  "overview_latest_stages_persistText": {
+    "message": "已保存 报告"
+  },
+  "overview_latest_stages_composeScript": {
+    "message": "音频脚本"
+  },
+  "overview_latest_stages_persistScript": {
+    "message": "已保存音频脚本"
+  },
+  "overview_latest_stages_generateAudio": {
+    "message": "音频"
+  },
+  "overview_latest_stages_persistAudio": {
+    "message": "已保存 音频"
+  },
+  "overview_latest_nouns_briefing": {
+    "message": "简报"
+  },
+  "overview_latest_nouns_episode": {
+    "message": "节目"
+  },
+  "overview_latest_nouns_report": {
+    "message": "报告"
+  },
+  "overview_latest_nouns_showNotes": {
+    "message": "节目说明"
+  },
+  "outputs_openInNewTabAria": {
+    "message": "在新标签页中打开: {{title}}"
+  },
+  "outputs_chatAboutAria": {
+    "message": "讨论此内容: {{title}}"
+  },
+  "outputs_downloadAria": {
+    "message": "下载: {{title}}"
+  },
+  "overview_latest_delivery_chatbookDestination": {
+    "message": "Chatbook"
+  },
+  "overview_latest_delivery_confirmRetry": {
+    "message": "重试 送达"
+  },
+  "overview_latest_delivery_confirmRetryAria": {
+    "message": "重试 {{adapter}} 送达"
+  },
+  "overview_latest_delivery_recipientCount": {
+    "message": "{{count}} 收件人"
+  },
+  "overview_latest_delivery_recipientCount_zero": {
+    "message": "{{count}} 收件人"
+  },
+  "overview_latest_delivery_recipientCount_one": {
+    "message": "{{count}} 收件人"
+  },
+  "overview_latest_delivery_recipientCount_two": {
+    "message": "{{count}} 收件人"
+  },
+  "overview_latest_delivery_recipientCount_few": {
+    "message": "{{count}} 收件人"
+  },
+  "overview_latest_delivery_recipientCount_many": {
+    "message": "{{count}} 收件人"
+  },
+  "overview_latest_delivery_recipientCount_other": {
+    "message": "{{count}} 收件人"
+  },
+  "overview_latest_delivery_reviewAcknowledgement": {
+    "message": "我已检查目标，并接受重复送达的风险。"
+  },
+  "overview_latest_delivery_reviewSettings": {
+    "message": "检查 设置"
+  },
+  "overview_latest_delivery_reviewTitle": {
+    "message": "检查 {{adapter}} 送达"
+  },
+  "overview_latest_playback_accessError": {
+    "message": "音频: 访问失败. 请检查登录状态和服务器连接。"
+  },
+  "overview_latest_playback_missing": {
+    "message": "音频已不可用。"
+  },
+  "overview_latest_actions_downloadAudio": {
+    "message": "下载音频"
+  },
+  "overview_latest_actions_downloadAudioAria": {
+    "message": "下载音频：{{name}}"
+  },
+  "overview_latest_actions_retryExactAria": {
+    "message": "重试 {{stage}}: {{name}}"
+  },
+  "overview_latest_actions_reviewScript": {
+    "message": "检查音频脚本"
+  },
+  "overview_latest_actions_reviewScriptAria": {
+    "message": "检查音频脚本：{{name}}"
+  },
+  "overview_latest_scriptAccessError": {
+    "message": "音频脚本访问失败。请检查登录状态和服务器连接。"
+  },
+  "overview_latest_scriptLoading": {
+    "message": "正在加载音频脚本"
+  },
+  "overview_latest_scriptMissing": {
+    "message": "音频脚本已不可用。"
+  },
+  "overview_latest_recovery_renderText": {
+    "message": "正在生成 报告"
+  },
+  "overview_latest_recovery_persistText": {
+    "message": "正在保存 报告"
+  },
+  "overview_latest_recovery_composeScript": {
+    "message": "正在编写音频脚本"
+  },
+  "overview_latest_recovery_persistScript": {
+    "message": "正在保存音频脚本"
+  },
+  "overview_latest_recovery_generateAudio": {
+    "message": "正在生成 音频"
+  },
+  "overview_latest_recovery_persistAudio": {
+    "message": "正在保存 音频"
+  },
+  "outputs_artifactMissing": {
+    "message": "已不可用."
+  },
+  "outputs_artifactAuthError": {
+    "message": "访问被拒绝。请检查登录状态。"
+  },
+  "outputs_artifactAccessError": {
+    "message": "访问失败. 请检查登录状态和服务器连接。"
+  },
+  "overview_latest_status_stale": {
+    "message": "已过期"
+  },
+  "overview_latest_status_superseded": {
+    "message": "已被取代"
+  },
+  "overview_latest_status_unavailable": {
+    "message": "不可用"
+  },
+  "overview_latest_status_partial": {
+    "message": "部分完成"
+  },
+  "accessibilityHardening_source_toggleActive": {
+    "message": "切换启用状态：{{name}}"
+  },
+  "accessibilityHardening_source_checkNow": {
+    "message": "立即检查：{{name}}"
+  },
+  "accessibilityHardening_source_openWebsite": {
+    "message": "打开来源网站：{{name}}"
+  },
+  "accessibilityHardening_source_openHealth": {
+    "message": "打开来源状态：{{name}}"
+  },
+  "accessibilityHardening_source_edit": {
+    "message": "编辑来源：{{name}}"
+  },
+  "accessibilityHardening_source_delete": {
+    "message": "删除来源：{{name}}"
+  },
+  "accessibilityHardening_item_open": {
+    "message": "打开更新：{{title}}"
+  },
+  "accessibilityHardening_item_select": {
+    "message": "选择更新：{{title}}"
+  },
+  "accessibilityHardening_item_description": {
+    "message": "{{state}}。来源：{{source}}。"
+  },
+  "accessibilityHardening_output_openNewTab": {
+    "message": "在新标签页中打开 {{title}}"
+  },
+  "accessibilityHardening_output_chat": {
+    "message": "讨论 {{title}}"
+  },
+  "accessibilityHardening_output_download": {
+    "message": "下载 {{title}}"
+  },
+  "accessibilityHardening_output_close": {
+    "message": "关闭预览：{{title}}"
+  },
+  "accessibilityHardening_health_show": {
+    "message": "显示监视列表状态详情"
+  },
+  "accessibilityHardening_health_hide": {
+    "message": "隐藏监视列表状态详情"
+  },
+  "accessibilityHardening_health_refresh": {
+    "message": "刷新监视列表状态"
+  },
+  "accessibilityHardening_health_settings": {
+    "message": "打开监视列表设置"
+  },
+  "accessibilityHardening_delivery_email": {
+    "message": "启用后，将每份报告发送给已配置的收件人。"
+  },
+  "accessibilityHardening_delivery_chatbook": {
+    "message": "启用后，将每份报告发布到 Chatbook。"
+  },
+  "accessibilityHardening_help_open": {
+    "message": "打开监视列表帮助"
+  },
+  "accessibilityHardening_help_title": {
+    "message": "监视列表帮助"
+  },
+  "overview_pipelineSetup_test_scheduledReceipt": {
+    "message": "{{schedule}}：从 {{sources}} 收集更新，以 {{program}}{{duration}} 形式生成 {{artifacts}}，然后保存并发送到 {{destinations}}。"
+  },
+  "overview_pipelineSetup_test_audioTestRequired": {
+    "message": "激活前，请成功生成音频样本或完整测试。"
   }
 }

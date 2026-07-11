@@ -119,12 +119,11 @@ def test_chatbook_import_docs_match_multipart_contract() -> None:
         assert '"selected_openwebui_user_id": "user_abc123"' in api_text  # nosec B101
 
     for guide_text in (source_guide, published_guide):
-        assert "**Import Media**: Not supported yet" in guide_text  # nosec B101
-        assert "**Import Embeddings**: Not supported yet" in guide_text  # nosec B101
-        assert "Keep this set to false" in guide_text  # nosec B101
+        assert "Chatbook archives: omit this option to restore" in guide_text  # nosec B101
+        assert "OpenWebUI JSON and database imports: attachment references are preserved first" in guide_text  # nosec B101
+        assert "Chatbook archives: omit this option to restore embeddings" in guide_text  # nosec B101
         assert "Default: true" not in guide_text  # nosec B101
-        assert "OpenWebUI JSON and database imports preserve attachment references first" in guide_text  # nosec B101
-        assert "Run OpenWebUI attachment hydration after import" in guide_text  # nosec B101
+        assert "run OpenWebUI attachment hydration after import" in guide_text  # nosec B101
 
 
 def test_chatbook_openapi_documents_openwebui_multipart_fields() -> None:

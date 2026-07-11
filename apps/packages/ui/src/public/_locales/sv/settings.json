@@ -3373,5 +3373,74 @@
   },
   "dataManagement_navTitle": {
     "message": "Datahantering"
+  },
+  "navigation_setupRecovery": {
+    "message": "Konfiguration och återställning"
+  },
+  "navigation_preferencesWorkflow": {
+    "message": "Inställningar och arbetsflöde"
+  },
+  "navigation_dataAdmin": {
+    "message": "Data och administration"
+  },
+  "preferencesSettings_navTitle": {
+    "message": "Inställningar"
+  },
+  "preferencesSettings_title": {
+    "message": "Allmänna inställningar"
+  },
+  "setupRecovery_title": {
+    "message": "Konfiguration och återställning"
+  },
+  "quickIngestSettings_ocrDefaults_title": {
+    "message": "OCR-standarder"
+  },
+  "quickIngestSettings_ocrDefaults_description": {
+    "message": "Används av importflöden som extraherar text från bilder eller skannade dokument."
+  },
+  "sidepanelSettings_shortcuts_title": {
+    "message": "Inställningsgenvägar"
+  },
+  "sidepanelSettings_shortcuts_description": {
+    "message": "Gå till hela inställningssidan som hanterar ändringen."
+  },
+  "sidepanelSettings_shortcuts_setupRecovery_label": {
+    "message": "Konfiguration och återställning"
+  },
+  "sidepanelSettings_shortcuts_setupRecovery_description": {
+    "message": "Anslutning, autentisering, leverantörsnycklar, modeller och diagnostik."
+  },
+  "sidepanelSettings_shortcuts_preferences_label": {
+    "message": "Inställningar"
+  },
+  "sidepanelSettings_shortcuts_preferences_description": {
+    "message": "Språk, aviseringar, persona, handledningar och webbsökning."
+  },
+  "sidepanelSettings_shortcuts_ui_label": {
+    "message": "UI-anpassning"
+  },
+  "sidepanelSettings_shortcuts_ui_description": {
+    "message": "Tema, genvägar, visningsstandarder och visuellt beteende."
+  },
+  "sidepanelSettings_shortcuts_dataAdmin_label": {
+    "message": "Data och administration"
+  },
+  "sidepanelSettings_shortcuts_dataAdmin_description": {
+    "message": "Datahantering, moderering, utvärderingar och adminverktyg."
+  },
+  "sidepanelSettings_shortcuts_serverAuth_label": {
+    "message": "Server och autentisering"
+  },
+  "sidepanelSettings_shortcuts_serverAuth_description": {
+    "message": "Ändra server-URL eller API-nyckel."
+  },
+  "sidepanelSettings_shortcuts_health_label": {
+    "message": "Full diagnostik"
+  },
+  "sidepanelSettings_shortcuts_health_description": {
+    "message": "Öppna detaljerade server- och undersystemkontroller."
+  },
+  "sidepanelSettings_local_title": {
+    "message": "Sidopanelbeteende"
   }
 }

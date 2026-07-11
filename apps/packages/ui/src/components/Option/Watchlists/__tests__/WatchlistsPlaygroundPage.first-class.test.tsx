@@ -4,6 +4,9 @@ import React from "react"
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { WatchlistsPlaygroundPage } from "../WatchlistsPlaygroundPage"
+import { useTutorialStore } from "@/store/tutorials"
+import { getTutorialById } from "@/tutorials"
+import { setViewport } from "./test-utils/viewport"
 
 const container = {
   id: 42,
@@ -111,11 +114,13 @@ vi.mock("antd", async () => {
       {children}
     </div>
   )
-  const Button = ({ children, icon, onClick, disabled, ...rest }: any) => (
-    <button type="button" onClick={() => onClick?.({ preventDefault: vi.fn(), stopPropagation: vi.fn() })} disabled={Boolean(disabled)} {...rest}>
-      {icon}
-      {children}
-    </button>
+  const Button = React.forwardRef<HTMLButtonElement, any>(
+    ({ children, icon, onClick, disabled, loading: _loading, ...rest }, ref) => (
+      <button ref={ref} type="button" onClick={() => onClick?.({ preventDefault: vi.fn(), stopPropagation: vi.fn() })} disabled={Boolean(disabled)} {...rest}>
+        {icon}
+        {children}
+      </button>
+    )
   )
   const Drawer = ({ open, title, children }: any) =>
     open ? (
@@ -130,8 +135,12 @@ vi.mock("antd", async () => {
   Input.TextArea = ({ value, onChange, ...rest }: any) => (
     <textarea value={value ?? ""} onChange={(event) => onChange?.(event)} {...rest} />
   )
-  const Modal = ({ open, title, children, footer, onOk, onCancel, okText, cancelText }: any) =>
-    open ? (
+  const Modal = ({ open, title, children, footer, onOk, onCancel, okText, cancelText, afterOpenChange }: any) => {
+    React.useEffect(() => {
+      afterOpenChange?.(open)
+    }, [afterOpenChange, open])
+
+    return open ? (
       <div role="dialog" aria-label={typeof title === "string" ? title : "dialog"}>
         <h3>{title}</h3>
         {children}
@@ -140,6 +149,7 @@ vi.mock("antd", async () => {
         {onCancel ? <button type="button" onClick={() => onCancel()}>{cancelText || "Cancel"}</button> : null}
       </div>
     ) : null
+  }
   const Select = ({ value, options = [], onChange, "aria-label": ariaLabel, ...rest }: any) => (
     <select
       aria-label={ariaLabel}
@@ -233,7 +243,7 @@ vi.mock("@/store/watchlists", () => ({
 }))
 
 vi.mock("../OverviewTab/OverviewTab", () => ({
-  OverviewTab: () => <div>Overview tab</div>
+  OverviewTab: () => <div data-testid="watchlists-overview-latest">Latest briefing · Next run tomorrow at 8:00 AM</div>
 }))
 vi.mock("../SourcesTab/SourcesTab", () => ({
   SourcesTab: () => <div>Sources tab</div>
@@ -266,6 +276,7 @@ vi.mock("../shared/WatchlistsHealthBar", () => ({
 describe("WatchlistsPlaygroundPage first-class Watchlist shell", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    setViewport(1024)
     connectionMocks.useConnectionUxState.mockReturnValue({
       uxState: "connected_ok",
       hasCompletedFirstRun: true
@@ -303,11 +314,45 @@ describe("WatchlistsPlaygroundPage first-class Watchlist shell", () => {
     mocks.state.watchlistsLoading = false
     mocks.state.watchlistsError = null
     mocks.state.selectedWatchlistId = null
+    useTutorialStore.getState().endTutorial()
     delete (window as { __TLDW_WATCHLISTS_IA_EXPERIMENT__?: unknown }).__TLDW_WATCHLISTS_IA_EXPERIMENT__
   })
 
   afterEach(() => {
+    useTutorialStore.getState().endTutorial()
     cleanup()
+  })
+
+  it("exposes distinct canonical workflow controls while Watchlists Basics is active", async () => {
+    setViewport(420)
+    mocks.state.activeTab = "overview"
+    mocks.state.watchlists = [container]
+    mocks.state.selectedWatchlistId = container.id
+    useTutorialStore.getState().startTutorial("watchlists-basics")
+
+    const view = render(<WatchlistsPlaygroundPage />)
+    const tutorial = getTutorialById("watchlists-basics")
+    const expectations = [
+      { step: 1, label: "Feeds" },
+      { step: 2, label: "Monitors" },
+      { step: 3, label: "Updates" }
+    ]
+
+    const targets: Element[] = []
+    for (const expectation of expectations) {
+      const selector = tutorial?.steps[expectation.step]?.target ?? ""
+      const target = await waitFor(() => {
+        const match = view.container.querySelector(selector)
+        expect(match).not.toBeNull()
+        return match as Element
+      })
+      const control = target.closest("button, [role='tab']")
+      expect(control).not.toBeNull()
+      expect(control).toHaveTextContent(expectation.label)
+      targets.push(target)
+    }
+
+    expect(new Set(targets).size).toBe(3)
   })
 
   it("loads Watchlists, selects the first container, and shows project metadata", async () => {
@@ -323,6 +368,29 @@ describe("WatchlistsPlaygroundPage first-class Watchlist shell", () => {
     expect(screen.getByText("CTI / OSINT")).toBeInTheDocument()
     expect(screen.getByText("High")).toBeInTheDocument()
     expect(screen.getByTestId("watchlists-tab-alerts")).toBeInTheDocument()
+  })
+
+  it("leads Overview with identity and Latest while keeping project and health controls in Help or below", async () => {
+    mocks.state.activeTab = "overview"
+    mocks.state.watchlists = [container]
+    mocks.state.selectedWatchlistId = container.id
+    render(<WatchlistsPlaygroundPage />)
+
+    const identity = await screen.findByTestId("watchlists-container-shell")
+    const latest = await screen.findByTestId("watchlists-overview-latest")
+    const health = screen.getByTestId("watchlists-health-bar")
+
+    expect(identity.compareDocumentPosition(latest) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(latest.compareDocumentPosition(health) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.queryByTestId("watchlists-orientation-alert")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("watchlists-create-container")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("watchlists-edit-container")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("watchlists-help-icon"))
+    expect(screen.getByTestId("watchlists-create-container")).toBeInTheDocument()
+    expect(screen.getByTestId("watchlists-edit-container")).toBeInTheDocument()
+    expect(screen.getByText("Overview: watchlist health at a glance")).toBeInTheDocument()
+    expect(screen.getByText(/Review current health and attention signals/)).toBeInTheDocument()
   })
 
   it("loads Watchlists with the preferred active selection in one store update", async () => {
@@ -381,7 +449,7 @@ describe("WatchlistsPlaygroundPage first-class Watchlist shell", () => {
     expect(screen.getByText("Backend is offline")).toBeInTheDocument()
   })
 
-  it("creates a topic-only Watchlist from the shell wizard, selects it, and opens Feeds", async () => {
+  it("creates a News Watchlist through the canonical container-first flow and opens Feeds", async () => {
     const created = {
       ...container,
       id: 77,
@@ -392,24 +460,20 @@ describe("WatchlistsPlaygroundPage first-class Watchlist shell", () => {
     }
     mocks.createWatchlistMock.mockResolvedValue(created)
     mocks.state.activeTab = "overview"
+    mocks.state.watchlists = [container]
+    mocks.state.selectedWatchlistId = container.id
 
     render(<WatchlistsPlaygroundPage />)
 
+    fireEvent.click(screen.getByTestId("watchlists-help-icon"))
     fireEvent.click(await screen.findByTestId("watchlists-create-container"))
     const wizard = within(screen.getByRole("dialog", { name: "Create Watchlist" }))
-    fireEvent.click(wizard.getByRole("button", { name: "News" }))
-    fireEvent.click(wizard.getByRole("button", { name: "Start from topic" }))
-    fireEvent.click(wizard.getByRole("button", { name: "Next" }))
+    fireEvent.change(wizard.getByLabelText("Domain preset"), { target: { value: "news" } })
     fireEvent.change(wizard.getByLabelText("Watchlist name"), { target: { value: "Election integrity" } })
     fireEvent.change(wizard.getByLabelText("Objective"), {
       target: { value: "Track source diversity and recency" }
     })
-    fireEvent.change(wizard.getByLabelText("Tracked scope"), {
-      target: { value: "election officials, state courts" }
-    })
-    fireEvent.click(wizard.getByRole("button", { name: "Next" }))
-    fireEvent.click(wizard.getByRole("button", { name: "Next" }))
-    fireEvent.click(wizard.getByRole("button", { name: "Create Watchlist" }))
+    fireEvent.click(wizard.getByRole("button", { name: "Continue to Sources" }))
 
     await waitFor(() =>
       expect(mocks.createWatchlistMock).toHaveBeenCalledWith(
@@ -419,90 +483,60 @@ describe("WatchlistsPlaygroundPage first-class Watchlist shell", () => {
           domain: "news",
           priority: "medium",
           status: "active",
-          tags: expect.arrayContaining(["news", "election officials", "state courts"])
+          tags: ["news"]
         })
       )
     )
+    const pipeline = within(await screen.findByRole("dialog", { name: "Set up briefing" }))
+    fireEvent.click(pipeline.getAllByRole("button", { name: "Cancel" }).at(-1)!)
+
+    await waitFor(() => expect(mocks.state.addWatchlist).toHaveBeenCalledWith(created))
     expect(mocks.state.addWatchlist).toHaveBeenCalledWith(created)
     expect(mocks.state.setSelectedWatchlistId).toHaveBeenCalledWith(77)
     expect(mocks.state.setActiveTab).toHaveBeenCalledWith("sources")
   })
 
-  it("creates source-backed setup payloads with watchlist_id and opens Monitors", async () => {
+  it("creates a CTI Watchlist through the canonical container-first flow", async () => {
     const created = {
       ...container,
       id: 88,
       name: "Healthcare ransomware"
     }
     mocks.createWatchlistMock.mockResolvedValue(created)
-    mocks.bulkCreateSourcesMock.mockResolvedValue({
-      items: [
-        { url: "https://example.com/feed.xml", id: 901, status: "created" },
-        { url: "https://advisories.example.org/rss", id: 902, status: "created" }
-      ],
-      total: 2,
-      created: 2,
-      errors: 0
-    })
-    mocks.createWatchlistJobMock.mockResolvedValue({
-      id: 990,
-      name: "Healthcare ransomware monitor",
-      watchlist_id: 88,
-      scope: { sources: [901, 902] },
-      active: true,
-      created_at: "2026-05-15T00:00:00Z",
-      updated_at: "2026-05-15T00:00:00Z"
-    })
     mocks.state.activeTab = "overview"
+    mocks.state.watchlists = [container]
+    mocks.state.selectedWatchlistId = container.id
 
     render(<WatchlistsPlaygroundPage />)
 
+    fireEvent.click(screen.getByTestId("watchlists-help-icon"))
     fireEvent.click(await screen.findByTestId("watchlists-create-container"))
     const wizard = within(screen.getByRole("dialog", { name: "Create Watchlist" }))
-    fireEvent.click(wizard.getByRole("button", { name: "CTI / OSINT" }))
-    fireEvent.click(wizard.getByRole("button", { name: "Start from sources" }))
-    fireEvent.click(wizard.getByRole("button", { name: "Next" }))
+    fireEvent.change(wizard.getByLabelText("Domain preset"), { target: { value: "cti_osint" } })
     fireEvent.change(wizard.getByLabelText("Watchlist name"), {
       target: { value: "Healthcare ransomware" }
     })
     fireEvent.change(wizard.getByLabelText("Objective"), {
       target: { value: "Find ransomware reports affecting hospitals" }
     })
-    fireEvent.change(wizard.getByLabelText("Tracked scope"), {
-      target: { value: "hospitals, Germany" }
-    })
-    fireEvent.click(wizard.getByRole("button", { name: "Next" }))
-    fireEvent.change(wizard.getByLabelText("Source URLs"), {
-      target: { value: "https://example.com/feed.xml\nhttps://advisories.example.org/rss" }
-    })
-    fireEvent.change(wizard.getByLabelText("Monitor name"), {
-      target: { value: "Healthcare ransomware monitor" }
-    })
-    fireEvent.click(wizard.getByRole("button", { name: "Next" }))
-    fireEvent.click(wizard.getByRole("button", { name: "Create Watchlist" }))
+    fireEvent.click(wizard.getByRole("button", { name: "Continue to Sources" }))
 
     await waitFor(() =>
-      expect(mocks.bulkCreateSourcesMock).toHaveBeenCalledWith(
-        expect.arrayContaining([
-          expect.objectContaining({
-            url: "https://example.com/feed.xml",
-            watchlist_id: 88
-          }),
-          expect.objectContaining({
-            url: "https://advisories.example.org/rss",
-            watchlist_id: 88
-          })
-        ])
+      expect(mocks.createWatchlistMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "Healthcare ransomware",
+          objective: "Find ransomware reports affecting hospitals",
+          domain: "cti_osint",
+          priority: "high",
+          tags: ["cti", "osint"]
+        })
       )
     )
-    expect(mocks.createWatchlistJobMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: "Healthcare ransomware monitor",
-        watchlist_id: 88,
-        scope: { sources: [901, 902] }
-      })
-    )
+    const pipeline = within(await screen.findByRole("dialog", { name: "Set up briefing" }))
+    fireEvent.click(pipeline.getAllByRole("button", { name: "Cancel" }).at(-1)!)
+
+    await waitFor(() => expect(mocks.state.addWatchlist).toHaveBeenCalledWith(created))
     expect(mocks.state.setSelectedWatchlistId).toHaveBeenCalledWith(88)
-    expect(mocks.state.setActiveTab).toHaveBeenCalledWith("jobs")
+    expect(mocks.state.setActiveTab).toHaveBeenCalledWith("sources")
   })
 })

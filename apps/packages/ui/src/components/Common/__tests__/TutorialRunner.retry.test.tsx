@@ -144,4 +144,31 @@ describe("TutorialRunner retry behavior", () => {
     expect(tutorialState.markComplete).not.toHaveBeenCalled()
     expect(tutorialState.endTutorial).toHaveBeenCalledTimes(1)
   })
+
+  it("starts on mounted targets and advances without the missing-target fallback", () => {
+    tutorialRegistry["test-tutorial"].steps[0].target = '[data-testid="ready-a"]'
+    tutorialRegistry["test-tutorial"].steps[1].target = '[data-testid="ready-b"]'
+    document.body.insertAdjacentHTML(
+      "beforeend",
+      '<div data-testid="ready-a">A</div><div data-testid="ready-b">B</div>'
+    )
+
+    render(<TutorialRunner />)
+
+    expect(latestJoyrideProps.run).toBe(true)
+    expect(latestJoyrideProps.stepIndex).toBe(0)
+    for (const step of latestJoyrideProps.steps) {
+      expect(document.querySelector(step.target)).toBeInstanceOf(HTMLElement)
+    }
+
+    latestJoyrideProps.callback({
+      status: "running",
+      index: 0,
+      type: "step:after",
+      action: "next"
+    })
+
+    expect(tutorialState.setStepIndex).toHaveBeenCalledWith(1)
+    expect(tutorialState.endTutorial).not.toHaveBeenCalled()
+  })
 })

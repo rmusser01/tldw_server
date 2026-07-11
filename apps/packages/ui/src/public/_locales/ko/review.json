@@ -1324,5 +1324,8 @@
   },
   "mediaPage_presetBulletedNotes": {
     "message": "Bulleted Notes"
+  },
+  "mediaPage_analysisProviderRequired": {
+    "message": "분석 제공자를 선택한 후 분석을 다시 시도하세요."
   }
 }

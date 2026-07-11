@@ -1324,5 +1324,8 @@
   },
   "mediaPage_presetBulletedNotes": {
     "message": "Bulleted Notes"
+  },
+  "mediaPage_analysisProviderRequired": {
+    "message": "分析プロバイダーを選択してから、分析を再試行してください。"
   }
 }

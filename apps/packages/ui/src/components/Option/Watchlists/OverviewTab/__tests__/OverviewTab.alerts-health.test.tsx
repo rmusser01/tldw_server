@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { OverviewTab } from "../OverviewTab"
 
@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   deleteWatchlistJobMock: vi.fn(),
   deleteWatchlistSourceMock: vi.fn(),
   triggerWatchlistRunMock: vi.fn(),
+  retryWatchlistBriefingStageMock: vi.fn(),
   createWatchlistOutputMock: vi.fn(),
   getWatchlistTemplateMock: vi.fn(),
   previewWatchlistTemplateMock: vi.fn(),
@@ -31,9 +32,8 @@ const mocks = vi.hoisted(() => ({
   selectedWatchlistId: 42 as number | null
 }))
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (
+vi.mock("react-i18next", () => {
+  const t = (
       key: string,
       fallbackOrOptions?: string | { defaultValue?: string },
       maybeOptions?: Record<string, unknown>
@@ -50,8 +50,13 @@ vi.mock("react-i18next", () => ({
       }
       return key
     }
-  })
-}))
+  return {
+    useTranslation: () => ({
+      i18n: { resolvedLanguage: "en-US", language: "en-US", dir: () => "ltr" },
+      t
+    })
+  }
+})
 
 vi.mock("@/services/watchlists-overview", () => ({
   fetchWatchlistsOverviewData: (...args: unknown[]) => mocks.fetchOverviewMock(...args),
@@ -71,6 +76,8 @@ vi.mock("@/services/watchlists", () => ({
   deleteWatchlistJob: (...args: unknown[]) => mocks.deleteWatchlistJobMock(...args),
   deleteWatchlistSource: (...args: unknown[]) => mocks.deleteWatchlistSourceMock(...args),
   triggerWatchlistRun: (...args: unknown[]) => mocks.triggerWatchlistRunMock(...args),
+  retryWatchlistBriefingStage: (...args: unknown[]) =>
+    mocks.retryWatchlistBriefingStageMock(...args),
   createWatchlistOutput: (...args: unknown[]) => mocks.createWatchlistOutputMock(...args),
   getWatchlistTemplate: (...args: unknown[]) => mocks.getWatchlistTemplateMock(...args),
   previewWatchlistTemplate: (...args: unknown[]) => mocks.previewWatchlistTemplateMock(...args),
@@ -103,6 +110,7 @@ vi.mock("@/utils/dateFormatters", () => ({
 
 const createOverviewPayload = (overrides?: Partial<Record<string, unknown>>) => ({
   fetchedAt: "2026-05-15T12:00:00Z",
+  latestBriefing: null,
   sources: {
     total: 1,
     healthy: 1,
@@ -168,6 +176,7 @@ const createOverviewPayload = (overrides?: Partial<Record<string, unknown>>) => 
 describe("OverviewTab alert and health summary", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.fetchOverviewMock.mockReset()
     mocks.selectedWatchlistId = 42
     mocks.trackWatchlistsOnboardingTelemetryMock.mockResolvedValue(undefined)
     mocks.fetchWatchlistSourcesMock.mockResolvedValue({ items: [], total: 0 })
@@ -252,5 +261,293 @@ describe("OverviewTab alert and health summary", () => {
     } finally {
       consoleErrorSpy.mockRestore()
     }
+  })
+
+  it("mounts one polite and one assertive briefing region and deduplicates poll refreshes", async () => {
+    const running = {
+      occurrence_id: 31,
+      run_id: 123,
+      job_id: 7,
+      artifact_status: "running",
+      delivery_status: "waiting_for_artifacts",
+      stages: {
+        persist_text: { status: "ready" },
+        generate_audio: { status: "running" }
+      },
+      output: { id: 71, title: "Signal Check", created_at: "2026-07-10T19:20:00Z" },
+      audio: null,
+      editorial: { outcome_noun: "briefing", show_name: "Signal Check" },
+      selection: { candidate_count: 5, included_count: 3, omitted_count: 2 },
+      next_run_at: "2026-07-12T18:00:00-07:00",
+      timezone: "America/Los_Angeles",
+      recovery: { can_open_report: true }
+    }
+    const ready = {
+      ...running,
+      artifact_status: "ready",
+      delivery_status: "delivered",
+      stages: {
+        persist_text: { status: "ready" },
+        generate_audio: { status: "ready" },
+        persist_audio: { status: "ready" }
+      },
+      audio: { run_id: 123, status: "completed", download_url: "/audio/123" }
+    }
+    mocks.fetchOverviewMock
+      .mockResolvedValueOnce(createOverviewPayload({ latestBriefing: running }))
+      .mockResolvedValueOnce(createOverviewPayload({ latestBriefing: ready }))
+      .mockResolvedValueOnce(createOverviewPayload({ latestBriefing: ready }))
+
+    render(<OverviewTab />)
+    await screen.findByRole("heading", { name: "Latest briefing" })
+    expect(screen.getAllByTestId("watchlists-overview-live-polite")).toHaveLength(1)
+    expect(screen.getAllByTestId("watchlists-overview-live-assertive")).toHaveLength(1)
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
+    await waitFor(() => {
+      expect(screen.getByTestId("watchlists-overview-live-polite")).toHaveTextContent(
+        "Signal Check is ready. Audio and show notes are available."
+      )
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
+    await waitFor(() => expect(mocks.fetchOverviewMock).toHaveBeenCalledTimes(3))
+    expect(screen.getByTestId("watchlists-overview-live-assertive")).toHaveTextContent("")
+  })
+
+  it("opens the exact briefing report and suppresses AbortError refresh noise", async () => {
+    const projection = {
+      occurrence_id: 31,
+      run_id: 123,
+      job_id: 7,
+      artifact_status: "ready",
+      delivery_status: "delivered",
+      stages: { persist_text: { status: "ready" } },
+      output: { id: 71, title: "Signal Check", created_at: "2026-07-10T19:20:00Z" },
+      audio: null,
+      editorial: { outcome_noun: "briefing", show_name: "Signal Check" },
+      selection: { candidate_count: 5, included_count: 3, omitted_count: 2 },
+      next_run_at: null,
+      timezone: "UTC",
+      recovery: { can_open_report: true }
+    }
+    mocks.fetchOverviewMock
+      .mockResolvedValueOnce(createOverviewPayload({ latestBriefing: projection }))
+      .mockRejectedValueOnce(Object.assign(new Error("superseded"), { name: "AbortError" }))
+
+    render(<OverviewTab />)
+    fireEvent.click(await screen.findByRole("button", { name: "Open report for Signal Check" }))
+    expect(mocks.setActiveTabMock).toHaveBeenCalledWith("outputs")
+    expect(mocks.openOutputPreviewMock).toHaveBeenCalledWith(71)
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
+    await waitFor(() => expect(mocks.fetchOverviewMock).toHaveBeenCalledTimes(2))
+    expect(screen.queryByText("Failed to load overview")).not.toBeInTheDocument()
+    expect(screen.getByTestId("watchlists-overview-live-polite")).toHaveTextContent("")
+    expect(screen.getByTestId("watchlists-overview-live-assertive")).toHaveTextContent("")
+  })
+
+  it("leads with Latest and tests the earliest active monitor before any occurrence exists", async () => {
+    mocks.fetchOverviewMock.mockResolvedValue(createOverviewPayload({
+      jobs: {
+        total: 2,
+        active: 2,
+        nextRunAt: "2026-07-12T18:00:00-07:00",
+        nextActiveJob: {
+          id: 19,
+          nextRunAt: "2026-07-12T18:00:00-07:00",
+          timezone: "America/Los_Angeles"
+        },
+        attention: 0
+      }
+    }))
+    mocks.triggerWatchlistRunMock.mockResolvedValue({ id: 99 })
+
+    const { container } = render(<OverviewTab />)
+    const heading = await screen.findByRole("heading", { name: "Latest briefing" })
+    const latest = heading.closest("section") as HTMLElement
+    const description = screen.getByText("At-a-glance watchlist health, activity, and failure signals.")
+    expect(latest.compareDocumentPosition(description) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getByText(/Sunday, July 12 at 6:00 PM GMT-7/)).toBeVisible()
+
+    fireEvent.click(within(latest).getByRole("button", { name: "Test now" }))
+    await waitFor(() => expect(mocks.triggerWatchlistRunMock).toHaveBeenCalledWith(19))
+    expect(container).toBeInTheDocument()
+  })
+
+  it("preserves the queued Test announcement through an unchanged poll until a real transition", async () => {
+    const running = {
+      occurrence_id: 31,
+      run_id: 123,
+      job_id: 7,
+      artifact_status: "running",
+      delivery_status: "waiting_for_artifacts",
+      stages: { persist_text: { status: "ready" }, generate_audio: { status: "running" } },
+      output: { id: 71, title: "Signal Check" },
+      audio: null,
+      editorial: { outcome_noun: "briefing", show_name: "Signal Check" },
+      selection: { candidate_count: 5, included_count: 3, omitted_count: 2 },
+      next_run_at: null,
+      timezone: "UTC",
+      recovery: { can_open_report: true }
+    }
+    const ready = {
+      ...running,
+      artifact_status: "ready",
+      stages: { ...running.stages, generate_audio: { status: "ready" } }
+    }
+    mocks.fetchOverviewMock
+      .mockResolvedValueOnce(createOverviewPayload({ latestBriefing: running }))
+      .mockResolvedValueOnce(createOverviewPayload({ latestBriefing: running }))
+      .mockResolvedValueOnce(createOverviewPayload({ latestBriefing: ready }))
+    mocks.triggerWatchlistRunMock.mockResolvedValue({ id: 99 })
+
+    vi.useFakeTimers()
+    try {
+      render(<OverviewTab />)
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      expect(screen.getByRole("heading", { name: "Latest briefing" })).toBeVisible()
+      fireEvent.click(screen.getByRole("button", { name: "Test now: Signal Check" }))
+      await act(async () => { await Promise.resolve(); await Promise.resolve() })
+      expect(screen.getByTestId("watchlists-overview-live-polite")).toHaveTextContent(
+        "Test run queued. Progress will appear in the latest briefing."
+      )
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+      expect(screen.getByTestId("watchlists-overview-live-polite")).toHaveTextContent(
+        "Signal Check is ready. The report is available."
+      )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("opens the exact monitor when unknown delivery asks to review settings", async () => {
+    mocks.fetchOverviewMock.mockResolvedValue(createOverviewPayload({
+      latestBriefing: {
+        occurrence_id: 31,
+        run_id: 123,
+        job_id: 7,
+        artifact_status: "ready",
+        delivery_status: "unknown",
+        stages: {
+          persist_text: { status: "ready" },
+          "deliver:email": { status: "failed", outcome: "unknown" }
+        },
+        output: { id: 71, title: "Signal Check" },
+        audio: null,
+        editorial: { outcome_noun: "briefing", show_name: "Signal Check" },
+        delivery: { email: { adapter: "email", recipient_count: 2, masked_label: "2 recipients" } },
+        selection: { candidate_count: 5, included_count: 3, omitted_count: 2 },
+        next_run_at: null,
+        timezone: "UTC",
+        recovery: { can_open_report: true, requires_unknown_delivery_confirmation: true }
+      }
+    }))
+
+    render(<OverviewTab />)
+    fireEvent.click(await screen.findByRole("button", {
+      name: "Review and retry email delivery for Signal Check"
+    }))
+    fireEvent.click(await screen.findByRole("button", { name: "Review delivery settings" }))
+
+    expect(mocks.setActiveTabMock).toHaveBeenCalledWith("jobs")
+    expect(mocks.openJobFormMock).toHaveBeenCalledWith(7)
+  })
+
+  it("aborts and ignores a retry response when a newer occurrence becomes latest", async () => {
+    const failed = {
+      occurrence_id: 31,
+      run_id: 123,
+      job_id: 7,
+      artifact_status: "failed",
+      delivery_status: "waiting_for_artifacts",
+      stages: { persist_text: { status: "failed", retryable: true } },
+      output: null,
+      audio: null,
+      editorial: { outcome_noun: "briefing", show_name: "Old occurrence" },
+      selection: { candidate_count: 5, included_count: 3, omitted_count: 2 },
+      next_run_at: null,
+      timezone: "UTC",
+      recovery: { can_retry_text: true }
+    }
+    const newer = {
+      ...failed,
+      occurrence_id: 32,
+      run_id: 124,
+      artifact_status: "ready",
+      stages: { persist_text: { status: "ready" } },
+      output: { id: 72, title: "New occurrence" },
+      editorial: { outcome_noun: "briefing", show_name: "New occurrence" }
+    }
+    let resolveRetry!: (value: typeof failed) => void
+    mocks.retryWatchlistBriefingStageMock.mockImplementation(() =>
+      new Promise((resolve) => { resolveRetry = resolve })
+    )
+    mocks.fetchOverviewMock
+      .mockResolvedValueOnce(createOverviewPayload({ latestBriefing: failed }))
+      .mockResolvedValueOnce(createOverviewPayload({ latestBriefing: newer }))
+
+    render(<OverviewTab />)
+    fireEvent.click(await screen.findByRole("button", { name: "Retry saving report for Old occurrence" }))
+    await waitFor(() => expect(mocks.retryWatchlistBriefingStageMock).toHaveBeenCalledTimes(1))
+    const retryOptions = mocks.retryWatchlistBriefingStageMock.mock.calls[0][2]
+    expect(retryOptions.signal).toBeInstanceOf(AbortSignal)
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
+    expect(await screen.findByText("New occurrence")).toBeVisible()
+    expect(retryOptions.signal.aborted).toBe(true)
+
+    await act(async () => resolveRetry(failed))
+    expect(screen.queryByText("Old occurrence")).not.toBeInTheDocument()
+    expect(screen.getByText("New occurrence")).toBeVisible()
+  })
+
+  it("resets announcement identity when the selected Watchlist changes", async () => {
+    const running = {
+      occurrence_id: 31,
+      run_id: 123,
+      job_id: 7,
+      artifact_status: "running",
+      delivery_status: "waiting_for_artifacts",
+      stages: { generate_audio: { status: "running" } },
+      output: { id: 71, title: "First Watchlist" },
+      audio: null,
+      editorial: { outcome_noun: "briefing", show_name: "First Watchlist" },
+      selection: { candidate_count: 1, included_count: 1, omitted_count: 0 },
+      next_run_at: null,
+      timezone: "UTC",
+      recovery: { can_open_report: true }
+    }
+    const ready = {
+      ...running,
+      artifact_status: "ready",
+      stages: { generate_audio: { status: "ready" }, persist_audio: { status: "ready" } },
+      audio: { run_id: 123, status: "completed", download_url: null }
+    }
+    const otherWatchlist = {
+      ...ready,
+      occurrence_id: 91,
+      run_id: 223,
+      job_id: 17,
+      output: { id: 81, title: "Second Watchlist" },
+      editorial: { outcome_noun: "briefing", show_name: "Second Watchlist" }
+    }
+    mocks.fetchOverviewMock
+      .mockResolvedValueOnce(createOverviewPayload({ latestBriefing: running }))
+      .mockResolvedValueOnce(createOverviewPayload({ latestBriefing: ready }))
+      .mockResolvedValueOnce(createOverviewPayload({ latestBriefing: otherWatchlist }))
+
+    const { rerender } = render(<OverviewTab />)
+    await screen.findByText("First Watchlist")
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
+    await waitFor(() => expect(screen.getByTestId("watchlists-overview-live-polite"))
+      .toHaveTextContent("First Watchlist is ready"))
+
+    mocks.selectedWatchlistId = 99
+    rerender(<OverviewTab />)
+    await screen.findByText("Second Watchlist")
+    expect(screen.getByTestId("watchlists-overview-live-polite")).toHaveTextContent("")
+    expect(screen.getByTestId("watchlists-overview-live-assertive")).toHaveTextContent("")
   })
 })

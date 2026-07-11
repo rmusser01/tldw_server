@@ -3379,5 +3379,74 @@
   },
   "dataManagement_navTitle": {
     "message": "数据管理"
+  },
+  "navigation_setupRecovery": {
+    "message": "设置与恢复"
+  },
+  "navigation_preferencesWorkflow": {
+    "message": "偏好与工作流"
+  },
+  "navigation_dataAdmin": {
+    "message": "数据与管理"
+  },
+  "preferencesSettings_navTitle": {
+    "message": "偏好"
+  },
+  "preferencesSettings_title": {
+    "message": "常规偏好"
+  },
+  "setupRecovery_title": {
+    "message": "设置与恢复"
+  },
+  "quickIngestSettings_ocrDefaults_title": {
+    "message": "OCR 默认设置"
+  },
+  "quickIngestSettings_ocrDefaults_description": {
+    "message": "供从图片或扫描文档提取文本的导入流程使用。"
+  },
+  "sidepanelSettings_shortcuts_title": {
+    "message": "设置快捷方式"
+  },
+  "sidepanelSettings_shortcuts_description": {
+    "message": "跳转到负责此更改的完整设置页面。"
+  },
+  "sidepanelSettings_shortcuts_setupRecovery_label": {
+    "message": "设置与恢复"
+  },
+  "sidepanelSettings_shortcuts_setupRecovery_description": {
+    "message": "连接、认证、提供商密钥、模型和诊断。"
+  },
+  "sidepanelSettings_shortcuts_preferences_label": {
+    "message": "偏好"
+  },
+  "sidepanelSettings_shortcuts_preferences_description": {
+    "message": "语言、通知、角色、教程和网页搜索。"
+  },
+  "sidepanelSettings_shortcuts_ui_label": {
+    "message": "界面自定义"
+  },
+  "sidepanelSettings_shortcuts_ui_description": {
+    "message": "主题、快捷方式、显示默认值和视觉行为。"
+  },
+  "sidepanelSettings_shortcuts_dataAdmin_label": {
+    "message": "数据与管理"
+  },
+  "sidepanelSettings_shortcuts_dataAdmin_description": {
+    "message": "数据管理、审核、评估和管理工具。"
+  },
+  "sidepanelSettings_shortcuts_serverAuth_label": {
+    "message": "服务器与认证"
+  },
+  "sidepanelSettings_shortcuts_serverAuth_description": {
+    "message": "更改服务器 URL 或 API 密钥。"
+  },
+  "sidepanelSettings_shortcuts_health_label": {
+    "message": "完整诊断"
+  },
+  "sidepanelSettings_shortcuts_health_description": {
+    "message": "打开详细的服务器和子系统检查。"
+  },
+  "sidepanelSettings_local_title": {
+    "message": "侧边栏行为"
   }
 }

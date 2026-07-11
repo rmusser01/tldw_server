@@ -5,8 +5,6 @@ import { SettingsTab } from "../SettingsTab"
 import { WATCHLISTS_HELP_DOCS } from "../../shared/help-docs"
 import { setViewport } from "../../__tests__/test-utils/viewport"
 
-const ONBOARDING_PATH_STORAGE_KEY = "watchlists:onboarding-path:v1"
-
 const createLocalStorageMock = (): Storage => {
   const values = new Map<string, string>()
 
@@ -50,22 +48,17 @@ const mocks = vi.hoisted(() => ({
   messageErrorMock: vi.fn()
 }))
 
-const interpolate = (template: string, values?: Record<string, unknown>) => {
-  if (!values) return template
-  return template.replace(/\{\{(\w+)\}\}/g, (_match, token) => {
-    const value = values[token]
-    return value == null ? "" : String(value)
-  })
-}
+vi.mock("react-i18next", () => {
+  const t = (_key: string, defaultValue?: unknown, values?: Record<string, unknown>) =>
+    typeof defaultValue === "string"
+      ? defaultValue.replace(/\{\{(\w+)\}\}/g, (_match, token) => {
+          const value = values?.[token]
+          return value == null ? "" : String(value)
+        })
+      : _key
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (_key: string, defaultValue?: unknown, values?: Record<string, unknown>) =>
-      typeof defaultValue === "string"
-        ? interpolate(defaultValue, values)
-        : _key
-  })
-}))
+  return { useTranslation: () => ({ t }) }
+})
 
 vi.mock("antd", () => {
   const Button = ({ children, onClick, loading: _loading, ...rest }: any) => (
@@ -301,20 +294,17 @@ describe("SettingsTab contextual help", () => {
     })
   })
 
-  it("persists onboarding path selection from settings", async () => {
+  it("does not expose the retired onboarding mode preference", async () => {
     render(<SettingsTab />)
 
     await waitFor(() => {
-      expect(screen.getByText("Onboarding")).toBeInTheDocument()
+      expect(screen.getByText("Output Retention")).toBeInTheDocument()
     })
 
-    const select = screen.getByTestId("watchlists-settings-onboarding-path-select")
-    expect(select).toBeInTheDocument()
-
-    ;(select as HTMLSelectElement).value = "advanced"
-    select.dispatchEvent(new Event("change", { bubbles: true }))
-
-    expect(localStorage.getItem(ONBOARDING_PATH_STORAGE_KEY)).toBe("advanced")
+    expect(screen.queryByText("Onboarding")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("watchlists-settings-onboarding-path-select")).not.toBeInTheDocument()
+    expect(screen.queryByText("Beginner (guided)")).not.toBeInTheDocument()
+    expect(screen.queryByText("Advanced (direct forms)")).not.toBeInTheDocument()
   })
 
   it("renders related-topic subscriptions as constrained cards instead of a table", async () => {

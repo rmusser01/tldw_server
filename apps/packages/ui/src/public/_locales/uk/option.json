@@ -239,9 +239,6 @@
   "header_omniSearchStartChat": {
     "message": "Почати новий чат \"{{query}}\""
   },
-  "header_connectionCard.connectedCaption": {
-    "message": "Чат та інструменти тепер доступні в Налаштуваннях і бічній панелі."
-  },
   "header_quickIngestQueuedAria": {
     "message": "{{label}} — {{count}} елементів у черзі — натисніть, щоб переглянути та обробити"
   },
@@ -2734,5 +2731,8 @@
   },
   "repo2txt_status_generated": {
     "message": "Generated output for {{count}} files ({{tokenCount}} tokens)."
+  },
+  "header_connectionCard_connectedCaption": {
+    "message": "Чат та інструменти тепер доступні в Налаштуваннях і бічній панелі."
   }
 }

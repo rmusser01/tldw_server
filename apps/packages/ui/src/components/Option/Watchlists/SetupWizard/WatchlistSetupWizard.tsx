@@ -1,22 +1,45 @@
-import React, { useEffect, useMemo, useState } from "react"
-import { Button, Input, Modal, Switch, Tag } from "antd"
+import React, { useCallback, useEffect, useRef, useState } from "react"
+import { Button, Input, Modal, Select } from "antd"
 import { useTranslation } from "react-i18next"
 import { Alert } from "@/components/ui/primitives"
+import {
+  getWatchlistRunBriefing,
+  previewWatchlistSchedule,
+  testWatchlistSourceDraft,
+  triggerWatchlistRun
+} from "@/services/watchlists"
 import type {
   WatchlistContainer,
   WatchlistCreate,
   WatchlistJob,
   WatchlistJobCreate,
-  WatchlistSourceCreate
+  WatchlistSource,
+  WatchlistSourceCreate,
+  WatchlistSourceUpdate
 } from "@/types/watchlists"
 import {
+  PipelineWizard,
+  type PipelineWizardTestOptions
+} from "../OverviewTab/PipelineWizard"
+import {
+  buildPipelineWizardSchedule,
+  toBriefingPipelineDraft,
+  getPipelineWizardBriefingOutcome,
+  getPipelineWizardSourceSignature,
+  toPipelineWizardSourcePayload,
+  waitForPipelineWizardBriefing,
+  type PipelineWizardSourceBinding,
+  type PipelineWizardDraft
+} from "../OverviewTab/pipeline-wizard-state"
+import {
+  toPipelineJobCreatePayload,
+  toPipelineTestJobCreatePayload
+} from "../OverviewTab/pipeline-contract"
+import {
   applyWatchlistSetupPreset,
-  buildWatchlistSetupJobPayload,
   buildWatchlistSetupPlan,
   type WatchlistSetupDestination,
   type WatchlistSetupPreset,
-  type WatchlistSetupSchedulePreset,
-  type WatchlistSetupStartMode,
   type WatchlistSetupValues
 } from "./watchlist-setup-model"
 
@@ -30,14 +53,17 @@ export interface WatchlistSetupCompleteResult {
 export interface WatchlistSetupWizardProps {
   open: boolean
   submitting?: boolean
+  sources?: WatchlistSource[]
   onCancel: () => void
   onCreateWatchlist: (payload: WatchlistCreate) => Promise<WatchlistContainer>
   onCreateSources: (watchlistId: number, sources: WatchlistSourceCreate[]) => Promise<number[]>
+  onUpdateSource: (sourceId: number, source: WatchlistSourceUpdate) => Promise<WatchlistSource>
   onCreateJob: (watchlistId: number, job: WatchlistJobCreate) => Promise<WatchlistJob>
+  onUpdateJob: (jobId: number, job: WatchlistJobCreate | { active: true }) => Promise<WatchlistJob>
   onComplete: (result: WatchlistSetupCompleteResult) => void
 }
 
-const createInitialValues = (): WatchlistSetupValues => ({
+const initialValues = (): WatchlistSetupValues => ({
   preset: "general",
   startMode: "sources",
   name: "",
@@ -48,431 +74,304 @@ const createInitialValues = (): WatchlistSetupValues => ({
   sourceType: "rss",
   monitorName: "",
   reportGoal: "",
-  includeAudioBriefing: false,
+  includeAudioBriefing: true,
   schedulePreset: "daily"
 })
-
-const presetOptions: Array<{ key: WatchlistSetupPreset; label: string; description: string }> = [
-  {
-    key: "cti_osint",
-    label: "CTI / OSINT",
-    description: "Track vulnerabilities, malware, actors, advisories, and source changes."
-  },
-  {
-    key: "news",
-    label: "News",
-    description: "Track developing events, people, organizations, and source diversity."
-  },
-  {
-    key: "general",
-    label: "General",
-    description: "Track a topic and collect updates for review."
-  },
-  {
-    key: "blank",
-    label: "Blank",
-    description: "Start with an empty Watchlist and configure details yourself."
-  }
-]
-
-const startModeOptions: Array<{ key: WatchlistSetupStartMode; label: string; description: string }> = [
-  {
-    key: "sources",
-    label: "Start from sources",
-    description: "Create a Watchlist with initial feeds and an optional monitor."
-  },
-  {
-    key: "topic",
-    label: "Start from topic",
-    description: "Create the Watchlist objective first, then add sources before collection starts."
-  },
-  {
-    key: "report_goal",
-    label: "Start from report goal",
-    description: "Define the briefing goal first, then connect sources and templates."
-  }
-]
-
-const scheduleOptions: Array<{ key: WatchlistSetupSchedulePreset; label: string }> = [
-  { key: "none", label: "Manual" },
-  { key: "daily", label: "Daily" },
-  { key: "weekdays", label: "Weekdays" },
-  { key: "hourly", label: "Hourly" }
-]
-
-const stepLabels = ["Start", "Scope", "Collection", "Review"]
-
-const getDestinationLabel = (destination: WatchlistSetupDestination): string => {
-  switch (destination) {
-    case "jobs":
-      return "Monitors"
-    case "outputs":
-      return "Reports"
-    case "sources":
-    default:
-      return "Feeds"
-  }
-}
-
-const fieldValue = (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>): string =>
-  event.target.value
 
 export const WatchlistSetupWizard: React.FC<WatchlistSetupWizardProps> = ({
   open,
   submitting = false,
+  sources = [],
   onCancel,
   onCreateWatchlist,
   onCreateSources,
+  onUpdateSource,
   onCreateJob,
+  onUpdateJob,
   onComplete
 }) => {
   const { t } = useTranslation("watchlists")
-  const [step, setStep] = useState(0)
-  const [values, setValues] = useState<WatchlistSetupValues>(() => createInitialValues())
-  const [validationError, setValidationError] = useState<string | null>(null)
-  const [internalSubmitting, setInternalSubmitting] = useState(false)
+  const [values, setValues] = useState<WatchlistSetupValues>(() => initialValues())
+  const [watchlist, setWatchlist] = useState<WatchlistContainer | null>(null)
+  const [pipelineDraft, setPipelineDraft] = useState<Partial<PipelineWizardDraft>>()
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const sourceBindingRef = useRef<PipelineWizardSourceBinding | null>(null)
+  const jobRef = useRef<WatchlistJob | null>(null)
 
   useEffect(() => {
     if (!open) return
-    setStep(0)
-    setValues(createInitialValues())
-    setValidationError(null)
-    setInternalSubmitting(false)
+    setValues(initialValues())
+    setWatchlist(null)
+    setPipelineDraft(undefined)
+    setBusy(false)
+    setError(null)
+    sourceBindingRef.current = null
+    jobRef.current = null
   }, [open])
-
-  const busy = submitting || internalSubmitting
-  const presetDefaults = useMemo(() => applyWatchlistSetupPreset(values.preset), [values.preset])
-  const setupPlan = useMemo(() => buildWatchlistSetupPlan(values), [values])
 
   const updateValue = <Key extends keyof WatchlistSetupValues>(
     key: Key,
     value: WatchlistSetupValues[Key]
   ) => {
     setValues((current) => ({ ...current, [key]: value }))
-    setValidationError(null)
+    setError(null)
   }
 
-  const validateName = (): boolean => {
-    if (values.name.trim()) return true
-    setValidationError(t("watchlists:setupWizard.validation.nameRequired", "Add a Watchlist name."))
-    return false
-  }
-
-  const handleNext = () => {
-    if (step === 1 && !validateName()) return
-    setStep((current) => Math.min(current + 1, stepLabels.length - 1))
-  }
-
-  const handleBack = () => {
-    setValidationError(null)
-    setStep((current) => Math.max(current - 1, 0))
-  }
-
-  const handleSubmit = async () => {
-    if (!validateName()) return
-    setInternalSubmitting(true)
+  const continueToSources = async () => {
+    if (!values.name.trim()) {
+      setError(t("watchlists:setupWizard.validation.nameRequired", "Add a Watchlist name."))
+      return
+    }
+    setBusy(true)
+    setError(null)
     try {
-      const latestPlan = buildWatchlistSetupPlan(values)
-      const watchlist = await onCreateWatchlist(latestPlan.watchlist)
-      let sourceIds: number[] = []
-      let job: WatchlistJob | undefined
-
-      if (latestPlan.sources.length > 0) {
-        sourceIds = await onCreateSources(watchlist.id, latestPlan.sources)
-      }
-
-      if (latestPlan.canCreateMonitor && sourceIds.length > 0) {
-        const jobPayload = {
-          ...buildWatchlistSetupJobPayload(values, sourceIds),
-          watchlist_id: watchlist.id
-        }
-        job = await onCreateJob(watchlist.id, jobPayload)
-      }
-
-      onComplete({
-        destination: latestPlan.destination,
-        watchlist,
-        sourceIds,
-        job
+      const created = await onCreateWatchlist(buildWatchlistSetupPlan(values).watchlist)
+      setWatchlist(created)
+      setPipelineDraft({
+        sourceMode: "new",
+        monitorName: `${created.name} monitor`,
+        templateName: "briefing_markdown",
+        audioEnabled: Boolean(values.includeAudioBriefing),
+        createScheduledOutput: true
       })
-    } catch (error) {
-      console.error("Failed to create Watchlist setup:", error)
-      setValidationError(
-        error instanceof Error && error.message
-          ? error.message
-          : t("watchlists:setupWizard.errors.createFailed", "Failed to create Watchlist setup.")
+    } catch (cause) {
+      setError(
+        cause instanceof Error && cause.message
+          ? cause.message
+          : t("watchlists:setupWizard.errors.createFailed", "Could not create the Watchlist.")
       )
     } finally {
-      setInternalSubmitting(false)
+      setBusy(false)
     }
   }
 
-  const renderChoiceButton = <Key extends string>({
-    key,
-    label,
-    description,
-    selected,
-    onSelect
-  }: {
-    key: Key
-    label: string
-    description: string
-    selected: boolean
-    onSelect: (key: Key) => void
-  }) => (
-    <button
-      key={key}
-      type="button"
-      aria-label={label}
-      className={`rounded-md border px-3 py-2 text-left transition ${
-        selected ? "border-primary bg-primary/10 text-text-primary" : "border-border bg-surface text-text-secondary"
-      }`}
-      aria-pressed={selected}
-      onClick={() => onSelect(key)}
-    >
-      <span className="block text-sm font-semibold">{label}</span>
-      <span className="mt-1 block text-xs text-text-muted">{description}</span>
-    </button>
-  )
+  const persistInactive = async (
+    draft: PipelineWizardDraft,
+    requestedJobId?: number,
+    testOptions?: PipelineWizardTestOptions
+  ) => {
+    if (!watchlist) throw new Error("Watchlist container is missing.")
+    const signature = getPipelineWizardSourceSignature(draft)
+    const sessionKey = watchlist.id
+    let sourceIds = draft.sourceIds
+    if (draft.sourceMode === "new") {
+      const source = toPipelineWizardSourcePayload(draft, watchlist.id)
+      if (!source) throw new Error("Source details are incomplete.")
+      const binding = sourceBindingRef.current
+      const ownsBoundSource = binding?.mode === "new" &&
+        binding.createdByWizard &&
+        binding.sessionKey === sessionKey &&
+        binding.ids.length === 1
+      if (ownsBoundSource && binding.signature !== signature) {
+        const updatePayload = { ...source }
+        delete updatePayload.watchlist_id
+        await onUpdateSource(binding.ids[0], updatePayload)
+        sourceIds = binding.ids
+      } else if (ownsBoundSource && binding.signature === signature) {
+        sourceIds = binding.ids
+      } else {
+        sourceIds = await onCreateSources(watchlist.id, [source])
+      }
+      sourceBindingRef.current = {
+        mode: "new",
+        signature,
+        ids: sourceIds,
+        createdByWizard: true,
+        sessionKey
+      }
+    } else {
+      sourceBindingRef.current = {
+        mode: "existing",
+        signature,
+        ids: sourceIds,
+        createdByWizard: false,
+        sessionKey
+      }
+    }
+    const pipeline = toBriefingPipelineDraft(draft, sourceIds)
+    const jobPayload = testOptions
+      ? toPipelineTestJobCreatePayload(pipeline, testOptions)
+      : toPipelineJobCreatePayload({ ...pipeline, active: false })
+    const payload: WatchlistJobCreate = {
+      ...jobPayload,
+      active: false,
+      watchlist_id: watchlist.id
+    }
+    const existingJobId = requestedJobId || jobRef.current?.id
+    if (existingJobId) {
+      const updated = await onUpdateJob(existingJobId, payload)
+      jobRef.current = updated
+      return { job: updated, pipeline }
+    }
+    const created = await onCreateJob(watchlist.id, payload)
+    jobRef.current = created
+    return { job: created, pipeline }
+  }
 
-  const renderStartStep = () => (
-    <div className="space-y-4">
-      <section>
-        <h3 className="mb-2 text-sm font-semibold">
-          {t("watchlists:setupWizard.sections.preset", "Domain preset")}
-        </h3>
-        <div className="grid gap-2 sm:grid-cols-2">
-          {presetOptions.map((option) =>
-            renderChoiceButton({
-              ...option,
-              selected: values.preset === option.key,
-              onSelect: (key) => updateValue("preset", key)
-            })
-          )}
-        </div>
-      </section>
-      <section>
-        <h3 className="mb-2 text-sm font-semibold">
-          {t("watchlists:setupWizard.sections.startMode", "Starting point")}
-        </h3>
-        <div className="grid gap-2">
-          {startModeOptions.map((option) =>
-            renderChoiceButton({
-              ...option,
-              selected: values.startMode === option.key,
-              onSelect: (key) => updateValue("startMode", key)
-            })
-          )}
-        </div>
-      </section>
-    </div>
-  )
-
-  const renderScopeStep = () => (
-    <div className="space-y-4">
-      <label className="block text-sm font-medium" htmlFor="watchlist-setup-name">
-        {t("watchlists:setupWizard.fields.name", "Watchlist name")}
-      </label>
-      <Input
-        id="watchlist-setup-name"
-        value={values.name}
-        onChange={(event) => updateValue("name", fieldValue(event))}
-        placeholder={t("watchlists:setupWizard.fields.namePlaceholder", "e.g., Healthcare ransomware")}
-      />
-
-      <label className="block text-sm font-medium" htmlFor="watchlist-setup-objective">
-        {t("watchlists:setupWizard.fields.objective", "Objective")}
-      </label>
-      <Input.TextArea
-        id="watchlist-setup-objective"
-        value={values.objective}
-        onChange={(event) => updateValue("objective", fieldValue(event))}
-        placeholder={presetDefaults.objectivePlaceholder}
-        rows={3}
-      />
-
-      <label className="block text-sm font-medium" htmlFor="watchlist-setup-scope">
-        {t("watchlists:setupWizard.fields.trackedScope", "Tracked scope")}
-      </label>
-      <Input.TextArea
-        id="watchlist-setup-scope"
-        value={values.trackedScopeText}
-        onChange={(event) => updateValue("trackedScopeText", fieldValue(event))}
-        placeholder={presetDefaults.trackedScopePlaceholder}
-        rows={3}
-      />
-    </div>
-  )
-
-  const renderCollectionStep = () => (
-    <div className="space-y-4">
-      <Alert
-        variant="info"
-        title={t("watchlists:setupWizard.boundaries.title", "Collection scope first")}
-      >
-        {t(
-          "watchlists:setupWizard.boundaries.alerts",
-          "Content-match alerts come later. This setup defines the Watchlist and its initial collection scope."
-        )}
-      </Alert>
-
-      <label className="block text-sm font-medium" htmlFor="watchlist-setup-source-name">
-        {t("watchlists:setupWizard.fields.sourceName", "Source name")}
-      </label>
-      <Input
-        id="watchlist-setup-source-name"
-        value={values.sourceName}
-        onChange={(event) => updateValue("sourceName", fieldValue(event))}
-        placeholder={t("watchlists:setupWizard.fields.sourceNamePlaceholder", "Optional label for the first feed")}
-      />
-
-      <label className="block text-sm font-medium" htmlFor="watchlist-setup-source-urls">
-        {t("watchlists:setupWizard.fields.sourceUrls", "Source URLs")}
-      </label>
-      <Input.TextArea
-        id="watchlist-setup-source-urls"
-        value={values.sourceUrlsText}
-        onChange={(event) => updateValue("sourceUrlsText", fieldValue(event))}
-        placeholder={t(
-          "watchlists:setupWizard.fields.sourceUrlsPlaceholder",
-          "One RSS feed, site, or source URL per line"
-        )}
-        rows={4}
-      />
-
-      <label className="block text-sm font-medium" htmlFor="watchlist-setup-monitor-name">
-        {t("watchlists:setupWizard.fields.monitorName", "Monitor name")}
-      </label>
-      <Input
-        id="watchlist-setup-monitor-name"
-        value={values.monitorName}
-        onChange={(event) => updateValue("monitorName", fieldValue(event))}
-        placeholder={t("watchlists:setupWizard.fields.monitorNamePlaceholder", "Defaults to Watchlist monitor")}
-      />
-
-      <label className="block text-sm font-medium" htmlFor="watchlist-setup-report-goal">
-        {t("watchlists:setupWizard.fields.reportGoal", "Report goal")}
-      </label>
-      <Input.TextArea
-        id="watchlist-setup-report-goal"
-        value={values.reportGoal}
-        onChange={(event) => updateValue("reportGoal", fieldValue(event))}
-        placeholder={presetDefaults.reportGoalPlaceholder}
-        rows={3}
-      />
-
-      <div className="flex flex-wrap gap-2" aria-label={t("watchlists:setupWizard.fields.schedule", "Schedule")}>
-        {scheduleOptions.map((option) => (
-          <Button
-            key={option.key}
-            aria-pressed={values.schedulePreset === option.key}
-            onClick={() => updateValue("schedulePreset", option.key)}
-          >
-            {option.label}
-          </Button>
-        ))}
-      </div>
-
-      <div className="flex items-center gap-3">
-        <Switch
-          aria-label={t("watchlists:setupWizard.fields.audioBriefing", "Audio briefing")}
-          checked={Boolean(values.includeAudioBriefing)}
-          onChange={(checked) => updateValue("includeAudioBriefing", checked)}
-        />
-        <span className="text-sm text-text-secondary">
-          {t("watchlists:setupWizard.fields.audioBriefing", "Audio briefing")}
-        </span>
-      </div>
-    </div>
-  )
-
-  const renderReviewStep = () => (
-    <div className="space-y-4">
-      <h3 className="text-base font-semibold">
-        {t("watchlists:setupWizard.review.title", "Review Watchlist setup")}
-      </h3>
-      <dl className="grid gap-3 text-sm sm:grid-cols-2">
-        <div>
-          <dt className="text-text-muted">{t("watchlists:setupWizard.review.name", "Name")}</dt>
-          <dd className="font-medium">{setupPlan.watchlist.name || "Untitled Watchlist"}</dd>
-        </div>
-        <div>
-          <dt className="text-text-muted">{t("watchlists:setupWizard.review.destination", "Next opens")}</dt>
-          <dd className="font-medium">{getDestinationLabel(setupPlan.destination)}</dd>
-        </div>
-        <div>
-          <dt className="text-text-muted">{t("watchlists:setupWizard.review.domain", "Domain")}</dt>
-          <dd className="font-medium">{setupPlan.watchlist.domain}</dd>
-        </div>
-        <div>
-          <dt className="text-text-muted">{t("watchlists:setupWizard.review.sources", "Sources")}</dt>
-          <dd className="font-medium">{setupPlan.sources.length}</dd>
-        </div>
-      </dl>
-      <div className="flex flex-wrap gap-1">
-        {(setupPlan.watchlist.tags || []).map((tag) => (
-          <Tag key={tag}>{tag}</Tag>
-        ))}
-      </div>
-    </div>
-  )
-
-  const renderStep = () => {
-    switch (step) {
-      case 0:
-        return renderStartStep()
-      case 1:
-        return renderScopeStep()
-      case 2:
-        return renderCollectionStep()
-      case 3:
-      default:
-        return renderReviewStep()
+  const testPipeline = async (
+    draft: PipelineWizardDraft,
+    options: PipelineWizardTestOptions,
+    onProgress: Parameters<typeof waitForPipelineWizardBriefing>[2]
+  ) => {
+    const persisted = await persistInactive(draft, options.jobId, options)
+    const run = await triggerWatchlistRun(persisted.job.id)
+    const briefing = await waitForPipelineWizardBriefing(
+      run.id,
+      getWatchlistRunBriefing,
+      onProgress,
+      { waitForDelivery: options.externalDelivery, signal: options.signal }
+    )
+    const outcome = getPipelineWizardBriefingOutcome(briefing, options.externalDelivery)
+    return {
+      jobId: persisted.job.id,
+      runId: run.id,
+      status: outcome.status,
+      briefing
     }
   }
 
-  const footer = (
-    <div className="flex flex-wrap items-center justify-between gap-2">
-      <div className="flex flex-wrap gap-1 text-xs text-text-muted" aria-label="Setup steps">
-        {stepLabels.map((label, index) => (
-          <span key={label} className={index === step ? "font-semibold text-text-primary" : ""}>
-            {label}
-          </span>
-        ))}
-      </div>
-      <div className="flex gap-2">
-        {step > 0 ? (
-          <Button onClick={handleBack} disabled={busy}>
-            {t("watchlists:setupWizard.actions.back", "Back")}
-          </Button>
-        ) : null}
-        {step < stepLabels.length - 1 ? (
-          <Button type="primary" onClick={handleNext} disabled={busy}>
-            {t("watchlists:setupWizard.actions.next", "Next")}
-          </Button>
-        ) : (
-          <Button type="primary" onClick={handleSubmit} disabled={busy}>
-            {t("watchlists:setupWizard.actions.create", "Create Watchlist")}
-          </Button>
-        )}
-      </div>
-    </div>
-  )
+  const previewPipelineSchedule = useCallback(async (
+    draft: PipelineWizardDraft,
+    options: { signal: AbortSignal }
+  ) => {
+    const schedule = buildPipelineWizardSchedule(draft)
+    if (!schedule.schedule_expr) return {}
+    const preview = await previewWatchlistSchedule({
+      schedule_expr: schedule.schedule_expr,
+      timezone: schedule.timezone || "UTC"
+    }, options.signal)
+    return {
+      ...(preview.next_run_at ? { nextRunAt: preview.next_run_at } : {}),
+      ...(preview.following_run_at ? { followingRunAt: preview.following_run_at } : {})
+    }
+  }, [])
 
+  const activatePipeline = async (draft: PipelineWizardDraft, options: { jobId?: number }) => {
+    if (!watchlist) throw new Error("Watchlist container is missing.")
+    const persisted = await persistInactive(draft, options.jobId)
+    const activeJob = await onUpdateJob(persisted.job.id, { active: true })
+    jobRef.current = activeJob
+    onComplete({
+      destination: "jobs",
+      watchlist,
+      sourceIds: sourceBindingRef.current?.ids || [],
+      job: activeJob
+    })
+    return { jobId: activeJob.id, status: "active" as const }
+  }
+
+  const testSource = async (draft: PipelineWizardDraft) => {
+    if (draft.sourceMode === "new") {
+      const result = await testWatchlistSourceDraft({
+        url: draft.sourceUrl,
+        source_type: draft.sourceType
+      }, { limit: 6 })
+      return { status: "ready" as const, sourceTest: result }
+    } else {
+      const selectedSources = sources.filter((source) => draft.sourceIds.includes(source.id))
+      const results = await Promise.all(
+        selectedSources.map((source) =>
+          testWatchlistSourceDraft(
+            { url: source.url, source_type: source.source_type },
+            { limit: 6 }
+          )
+        )
+      )
+      return {
+        status: "ready" as const,
+        sourceTest: {
+          total: results.reduce((total, result) => total + result.total, 0),
+          ingestable: results.reduce((total, result) => total + result.ingestable, 0),
+          filtered: results.reduce((total, result) => total + result.filtered, 0),
+          items: results.flatMap((result) => result.items).slice(0, 6)
+        }
+      }
+    }
+  }
+
+  if (watchlist) {
+    return (
+      <PipelineWizard
+        open={open}
+        sessionKey={watchlist.id}
+        initialStep="sources"
+        initialDraft={pipelineDraft}
+        sources={sources}
+        sourcesLoading={false}
+        submitting={submitting || busy}
+        submitError={error}
+        onCancel={() => {
+          onComplete({ destination: "sources", watchlist, sourceIds: sourceBindingRef.current?.ids || [] })
+          onCancel()
+        }}
+        onSaveDraft={setPipelineDraft}
+        onTest={testPipeline}
+        onActivate={activatePipeline}
+        onTestSource={testSource}
+        onPreviewSchedule={previewPipelineSchedule}
+      />
+    )
+  }
+
+  const preset = applyWatchlistSetupPreset(values.preset)
   return (
     <Modal
       open={open}
-      title={t("watchlists:setupWizard.title", "Create Watchlist")}
-      onCancel={onCancel}
-      footer={footer}
-      width={720}
+      title={t("watchlists:setupWizard.containerTitle", "Create Watchlist")}
+      onCancel={busy ? undefined : onCancel}
       destroyOnHidden
+      width={640}
+      footer={[
+        <Button key="cancel" className="min-h-11" onClick={onCancel} disabled={busy}>
+          {t("common:cancel", "Cancel")}
+        </Button>,
+        <Button key="continue" type="primary" className="min-h-11" onClick={() => void continueToSources()} loading={busy}>
+          {t("watchlists:setupWizard.actions.continue", "Continue to Sources")}
+        </Button>
+      ]}
     >
       <div className="space-y-4">
-        {validationError ? (
-          <Alert title={validationError} variant="error" />
-        ) : null}
-        {renderStep()}
+        {error && <Alert title={error} variant="error" />}
+        <p className="text-sm text-text-muted">
+          {t("watchlists:setupWizard.containerHelp", "Create the project container first. Sources, cadence, briefing, delivery, and Test follow in one setup flow.")}
+        </p>
+        <label className="block text-sm font-medium" htmlFor="watchlist-setup-name">
+          {t("watchlists:setupWizard.fields.name", "Watchlist name")}
+        </label>
+        <Input
+          id="watchlist-setup-name"
+          aria-label={t("watchlists:setupWizard.fields.name", "Watchlist name")}
+          value={values.name}
+          onChange={(event) => updateValue("name", event.target.value)}
+        />
+        <label className="block text-sm font-medium" htmlFor="watchlist-setup-preset">
+          {t("watchlists:setupWizard.sections.preset", "Domain preset")}
+        </label>
+        <Select
+          id="watchlist-setup-preset"
+          aria-label={t("watchlists:setupWizard.sections.preset", "Domain preset")}
+          className="w-full"
+          value={values.preset}
+          options={[
+            { value: "general", label: t("watchlists:setupWizard.presets.general.label", "General") },
+            { value: "news", label: t("watchlists:setupWizard.presets.news.label", "News") },
+            { value: "cti_osint", label: t("watchlists:setupWizard.presets.cti_osint.label", "CTI / OSINT") },
+            { value: "blank", label: t("watchlists:setupWizard.presets.blank.label", "Blank") }
+          ]}
+          onChange={(value) => updateValue("preset", value as WatchlistSetupPreset)}
+        />
+        <label className="block text-sm font-medium" htmlFor="watchlist-setup-objective">
+          {t("watchlists:setupWizard.fields.objective", "Objective")}
+        </label>
+        <Input.TextArea
+          id="watchlist-setup-objective"
+          aria-label={t("watchlists:setupWizard.fields.objective", "Objective")}
+          value={values.objective}
+          placeholder={preset.objectivePlaceholder}
+          rows={3}
+          onChange={(event) => updateValue("objective", event.target.value)}
+        />
       </div>
     </Modal>
   )

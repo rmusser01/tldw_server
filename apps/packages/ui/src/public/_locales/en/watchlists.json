@@ -285,7 +285,7 @@
     "message": "Delete this feed?"
   },
   "sources_deleteConfirmDescription": {
-    "message": "This action cannot be undone."
+    "message": "You can undo this deletion for {{seconds}} seconds."
   },
   "sources_deleteConfirmForce": {
     "message": "Delete anyway"
@@ -1533,7 +1533,7 @@
     "message": "Delete {{count}} selected feeds?"
   },
   "sources_bulkDeleteConfirmDescription": {
-    "message": "This will delete {{count}} feeds ({{active}} active, {{inactive}} inactive)."
+    "message": "This will delete {{count}} feeds ({{active}} active, {{inactive}} inactive). Undo is available for {{seconds}} seconds."
   },
   "sources_bulkDeleteConfirmInUseSummary": {
     "message": "{{sources}} selected feed{{sourcesPlural}} are referenced by {{jobs}} active monitor{{jobsPlural}}."
@@ -2208,7 +2208,7 @@
     "message": "Review results"
   },
   "overview_onboarding_steps_reviewResults_description": {
-    "message": "Open Activity for run health, Updates for captured content, and Reports for generated briefings."
+    "message": "Open Activity for monitor health, Updates for captured content, and Reports for generated briefings."
   },
   "overview_onboarding_cta_addFeed": {
     "message": "Add first feed"
@@ -2490,7 +2490,7 @@
     "message": "Guided tour complete"
   },
   "guide_completedDescription": {
-    "message": "Next: monitor Activity for run health, review Updates for captured content, and open Reports for generated briefings."
+    "message": "Next: monitor Activity for monitor health, review Updates for captured content, and open Reports for generated briefings."
   },
   "guide_openActivity": {
     "message": "Open Activity"
@@ -2502,31 +2502,31 @@
     "message": "1. Add feeds"
   },
   "guide_steps_sources_description": {
-    "message": "Feeds are inputs for monitors. Add RSS/site feeds before scheduling checks."
+    "message": "Feeds are inputs for monitors. Add RSS/site feeds before scheduling Activity checks."
   },
   "guide_steps_jobs_title": {
     "message": "2. Create monitors"
   },
   "guide_steps_jobs_description": {
-    "message": "Monitors connect feeds to schedule, briefing format, and optional audio briefing delivery."
+    "message": "Monitors define schedule, filters, and template-driven reports, including optional audio."
   },
   "guide_steps_runs_title": {
     "message": "3. Check activity"
   },
   "guide_steps_runs_description": {
-    "message": "Activity shows run status, logs, and failures for each monitor."
+    "message": "Activity shows monitor status, logs, and failures."
   },
   "guide_steps_items_title": {
     "message": "4. Review updates"
   },
   "guide_steps_items_description": {
-    "message": "Updates are captured content from successful runs, ready for triage."
+    "message": "Updates are captured content from successful monitor checks, ready for triage."
   },
   "guide_steps_outputs_title": {
     "message": "5. Deliver reports"
   },
   "guide_steps_outputs_description": {
-    "message": "Reports show text and audio briefings generated from monitor runs and template choices."
+    "message": "Reports contain generated briefings from monitor templates; regenerate with different template or audio settings."
   },
   "notifications_viewRun": {
     "message": "View run"
@@ -2649,13 +2649,13 @@
     "message": "Use OPML when moving feed lists from another reader so setup takes minutes instead of manual entry."
   },
   "help_topics_cron_label": {
-    "message": "advanced schedule timing"
+    "message": "cron scheduling"
   },
   "help_topics_cron_title": {
-    "message": "Choose preset schedules first"
+    "message": "Set a reliable monitor schedule"
   },
   "help_topics_cron_description": {
-    "message": "Use preset timing for most monitors. Switch to custom cron only for uncommon timing windows."
+    "message": "Start with presets for daily or weekday runs. Use cron only when you need exact custom timing."
   },
   "help_topics_ttl_label": {
     "message": "retention window"
@@ -2667,13 +2667,13 @@
     "message": "Set retention to keep briefings only as long as your review workflow needs before automatic cleanup."
   },
   "help_topics_jinja2_label": {
-    "message": "briefing templates"
+    "message": "Jinja2 templates"
   },
   "help_topics_jinja2_title": {
-    "message": "Shape briefing format with templates"
+    "message": "Customize briefing format"
   },
   "help_topics_jinja2_description": {
-    "message": "Start with a preset template to control sections and tone, then customize only if you need advanced formatting."
+    "message": "Start from a preset report template, then edit sections to shape briefing tone, structure, and audio script text."
   },
   "help_topics_claimClusters_label": {
     "message": "claim tracking"
@@ -3039,10 +3039,10 @@
     "message": "Add include/exclude filters when monitors collect too much or irrelevant content."
   },
   "teachPoints_templates_title": {
-    "message": "Start from a briefing template preset"
+    "message": "Template setup tip"
   },
   "teachPoints_templates_description": {
-    "message": "Pick a preset template first, then edit only the sections you need to customize."
+    "message": "Start from a preset template, preview changes, then regenerate reports to compare text and audio results."
   },
   "notifications_openActivity": {
     "message": "Open Activity"
@@ -3387,7 +3387,7 @@
     "message": "Monitor #{{jobId}} produced {{count}} report{{plural}} for this run."
   },
   "runs_detail_openMonitor": {
-    "message": "Open monitor"
+    "message": "Open monitor settings"
   },
   "runs_detail_openRunOutputs": {
     "message": "Open reports for this run"
@@ -3697,5 +3697,1859 @@
   },
   "items_alertSummary_openAlerts": {
     "message": "Open Alerts"
+  },
+  "overview_pipelineSetup_title": {
+    "message": "Set up briefing"
+  },
+  "overview_pipelineSetup_open": {
+    "message": "Set up briefing"
+  },
+  "overview_pipelineSetup_progress": {
+    "message": "Briefing setup steps"
+  },
+  "overview_pipelineSetup_steps_sources": {
+    "message": "Sources"
+  },
+  "overview_pipelineSetup_steps_cadence": {
+    "message": "Cadence"
+  },
+  "overview_pipelineSetup_steps_briefing": {
+    "message": "Briefing"
+  },
+  "overview_pipelineSetup_steps_delivery": {
+    "message": "Delivery"
+  },
+  "overview_pipelineSetup_steps_test": {
+    "message": "Test"
+  },
+  "overview_pipelineSetup_actions_next": {
+    "message": "Continue to {{step}}"
+  },
+  "overview_pipelineSetup_source_existing": {
+    "message": "Use existing sources"
+  },
+  "overview_pipelineSetup_source_new": {
+    "message": "Add a new source"
+  },
+  "overview_pipelineSetup_sources_help": {
+    "message": "Choose existing sources or add one, then test the connection."
+  },
+  "overview_pipelineSetup_sourcesLoading": {
+    "message": "Loading sources..."
+  },
+  "overview_pipelineSetup_sourcesError": {
+    "message": "Failed to load feeds for the pipeline builder."
+  },
+  "overview_pipelineSetup_sourceTest_action": {
+    "message": "Test source"
+  },
+  "overview_pipelineSetup_sourceTest_ready": {
+    "message": "Source is ready."
+  },
+  "overview_pipelineSetup_sourceTest_cancelled": {
+    "message": "Source test cancelled."
+  },
+  "overview_pipelineSetup_sourceTest_failed": {
+    "message": "Source test failed. {{message}}"
+  },
+  "overview_pipelineSetup_fields_sources": {
+    "message": "Sources"
+  },
+  "overview_pipelineSetup_fields_sourceName": {
+    "message": "Source name"
+  },
+  "overview_pipelineSetup_fields_sourceUrl": {
+    "message": "Source URL"
+  },
+  "overview_pipelineSetup_fields_monitorName": {
+    "message": "Monitor name"
+  },
+  "overview_pipelineSetup_fields_schedule": {
+    "message": "Schedule"
+  },
+  "overview_pipelineSetup_fields_timezone": {
+    "message": "Timezone"
+  },
+  "overview_pipelineSetup_fields_intervalEvery": {
+    "message": "Every"
+  },
+  "overview_pipelineSetup_fields_intervalUnit": {
+    "message": "Interval unit"
+  },
+  "overview_pipelineSetup_fields_weekday": {
+    "message": "Weekday"
+  },
+  "overview_pipelineSetup_fields_hour": {
+    "message": "Hour"
+  },
+  "overview_pipelineSetup_fields_minute": {
+    "message": "Minute"
+  },
+  "overview_pipelineSetup_fields_cronExpression": {
+    "message": "Cron expression"
+  },
+  "overview_pipelineSetup_fields_showName": {
+    "message": "Show name"
+  },
+  "overview_pipelineSetup_fields_premise": {
+    "message": "Show premise"
+  },
+  "overview_pipelineSetup_fields_includeAudio": {
+    "message": "Audio"
+  },
+  "overview_pipelineSetup_fields_audioHelp": {
+    "message": "Add a playable spoken version."
+  },
+  "overview_pipelineSetup_fields_audioMinutes": {
+    "message": "Target duration in minutes"
+  },
+  "overview_pipelineSetup_fields_speakerCount": {
+    "message": "Cast size"
+  },
+  "overview_pipelineSetup_fields_template": {
+    "message": "Report template"
+  },
+  "overview_pipelineSetup_fields_audioProvider": {
+    "message": "Audio provider override"
+  },
+  "overview_pipelineSetup_fields_audioModel": {
+    "message": "Audio model override"
+  },
+  "overview_pipelineSetup_fields_customInstructions": {
+    "message": "Custom editorial instructions"
+  },
+  "overview_pipelineSetup_fields_emailDelivery": {
+    "message": "Email"
+  },
+  "overview_pipelineSetup_fields_emailRecipients": {
+    "message": "Email recipients"
+  },
+  "overview_pipelineSetup_fields_chatbookDelivery": {
+    "message": "Chatbook"
+  },
+  "overview_pipelineSetup_fields_chatbookTitle": {
+    "message": "Chatbook title"
+  },
+  "overview_pipelineSetup_schedule_manual": {
+    "message": "Manual only"
+  },
+  "overview_pipelineSetup_schedule_interval": {
+    "message": "Every N hours or minutes"
+  },
+  "overview_pipelineSetup_schedule_daily": {
+    "message": "Daily"
+  },
+  "overview_pipelineSetup_schedule_weekdays": {
+    "message": "Weekdays"
+  },
+  "overview_pipelineSetup_schedule_weekly": {
+    "message": "Weekly"
+  },
+  "overview_pipelineSetup_schedule_advanced": {
+    "message": "Advanced cron"
+  },
+  "overview_pipelineSetup_intervalUnits_hours": {
+    "message": "Hours"
+  },
+  "overview_pipelineSetup_intervalUnits_minutes": {
+    "message": "Minutes"
+  },
+  "overview_pipelineSetup_weekdays_monday": {
+    "message": "Monday"
+  },
+  "overview_pipelineSetup_weekdays_tuesday": {
+    "message": "Tuesday"
+  },
+  "overview_pipelineSetup_weekdays_wednesday": {
+    "message": "Wednesday"
+  },
+  "overview_pipelineSetup_weekdays_thursday": {
+    "message": "Thursday"
+  },
+  "overview_pipelineSetup_weekdays_friday": {
+    "message": "Friday"
+  },
+  "overview_pipelineSetup_weekdays_saturday": {
+    "message": "Saturday"
+  },
+  "overview_pipelineSetup_weekdays_sunday": {
+    "message": "Sunday"
+  },
+  "overview_pipelineSetup_advancedCron": {
+    "message": "Advanced cron"
+  },
+  "overview_pipelineSetup_nextOccurrence": {
+    "message": "Next occurrence"
+  },
+  "overview_pipelineSetup_manualOccurrence": {
+    "message": "Manual only"
+  },
+  "overview_pipelineSetup_nextOccurrencePending": {
+    "message": "Save a valid schedule to calculate the exact time."
+  },
+  "overview_pipelineSetup_briefing_question": {
+    "message": "What are you making?"
+  },
+  "overview_pipelineSetup_briefing_help": {
+    "message": "Choose the editorial shape. Every option stays grounded in your selected sources."
+  },
+  "overview_pipelineSetup_briefing_advanced": {
+    "message": "Advanced briefing settings"
+  },
+  "overview_pipelineSetup_formats_concise_briefing": {
+    "message": "Concise briefing"
+  },
+  "overview_pipelineSetup_formats_solo_update": {
+    "message": "Solo update"
+  },
+  "overview_pipelineSetup_formats_host_discussion": {
+    "message": "Host discussion"
+  },
+  "overview_pipelineSetup_formats_sportscast": {
+    "message": "Sportscast"
+  },
+  "overview_pipelineSetup_formats_culture_roundtable": {
+    "message": "Culture roundtable"
+  },
+  "overview_pipelineSetup_formats_custom": {
+    "message": "Custom"
+  },
+  "overview_pipelineSetup_speaker_defaultLabel": {
+    "message": "Speaker {{index}}"
+  },
+  "overview_pipelineSetup_speaker_labelField": {
+    "message": "Speaker {{index}} label"
+  },
+  "overview_pipelineSetup_speaker_roleField": {
+    "message": "Speaker {{index}} role"
+  },
+  "overview_pipelineSetup_speaker_voiceField": {
+    "message": "Speaker {{index}} voice"
+  },
+  "overview_pipelineSetup_speaker_personaField": {
+    "message": "Speaker {{index}} persona"
+  },
+  "overview_pipelineSetup_preview_generate": {
+    "message": "Preview report"
+  },
+  "overview_pipelineSetup_preview_diagnostics": {
+    "message": "Preview diagnostics"
+  },
+  "overview_pipelineSetup_preview_context": {
+    "message": "Preview run: {{runId}}"
+  },
+  "overview_pipelineSetup_preview_noRunContext": {
+    "message": "Run a successful monitor before previewing this report."
+  },
+  "overview_pipelineSetup_preview_templateRequired": {
+    "message": "Select a template before generating preview."
+  },
+  "overview_pipelineSetup_preview_templateEmpty": {
+    "message": "The selected template is empty."
+  },
+  "overview_pipelineSetup_preview_emptyResult": {
+    "message": "Preview returned no rendered content."
+  },
+  "overview_pipelineSetup_preview_error": {
+    "message": "Failed to generate preview."
+  },
+  "overview_pipelineSetup_delivery_help": {
+    "message": "The Reports destination is always included. External delivery waits until selected artifacts are ready."
+  },
+  "overview_pipelineSetup_delivery_reports": {
+    "message": "Reports"
+  },
+  "overview_pipelineSetup_delivery_required": {
+    "message": "Required storage"
+  },
+  "overview_pipelineSetup_delivery_alwaysOn": {
+    "message": "Always on"
+  },
+  "overview_pipelineSetup_test_providerDisclosure": {
+    "message": "Tests use your configured LLM and text-to-speech providers. A sample is limited to 60 seconds; a full test uses the target duration."
+  },
+  "overview_pipelineSetup_test_receipt": {
+    "message": "Activation receipt"
+  },
+  "overview_pipelineSetup_test_manualReceipt": {
+    "message": "This briefing runs manually, saves selected artifacts in Reports, and contacts no external destination unless you choose Send test."
+  },
+  "overview_pipelineSetup_test_progress": {
+    "message": "Test progress"
+  },
+  "overview_pipelineSetup_test_stages_collection": {
+    "message": "Collect sources"
+  },
+  "overview_pipelineSetup_test_stages_selection": {
+    "message": "Select updates"
+  },
+  "overview_pipelineSetup_test_stages_text": {
+    "message": "Create report"
+  },
+  "overview_pipelineSetup_test_stages_audio": {
+    "message": "Create audio"
+  },
+  "overview_pipelineSetup_test_stages_persistence": {
+    "message": "Save in Reports"
+  },
+  "overview_pipelineSetup_test_stages_delivery": {
+    "message": "Check test delivery"
+  },
+  "overview_pipelineSetup_test_sample": {
+    "message": "Generate 60-second sample"
+  },
+  "overview_pipelineSetup_test_full": {
+    "message": "Generate full test episode"
+  },
+  "overview_pipelineSetup_test_send": {
+    "message": "Send test"
+  },
+  "overview_pipelineSetup_test_activate": {
+    "message": "Activate schedule"
+  },
+  "overview_pipelineSetup_test_ready": {
+    "message": "Test completed. Your briefing is ready. This draft stays inactive until you activate its schedule."
+  },
+  "overview_pipelineSetup_test_running": {
+    "message": "Run {{runId}} is still running: {{stage}}. You can close setup and monitor it from Overview."
+  },
+  "overview_pipelineSetup_test_failedStage": {
+    "message": "{{stage}} failed. Open run {{runId}} and retry this stage."
+  },
+  "overview_pipelineSetup_test_failedWithCode": {
+    "message": "{{stage}} failed ({{code}}). Open run {{runId}} and retry this stage."
+  },
+  "overview_pipelineSetup_test_cancelledStage": {
+    "message": "{{stage}} was cancelled. Your draft is saved."
+  },
+  "overview_pipelineSetup_test_cancelledWithCode": {
+    "message": "{{stage}} was cancelled ({{code}}). Your draft is saved."
+  },
+  "overview_pipelineSetup_test_cancelled": {
+    "message": "Test cancelled. Your draft is saved."
+  },
+  "overview_pipelineSetup_test_failed": {
+    "message": "Test failed. Your draft is saved. {{message}}"
+  },
+  "overview_pipelineSetup_activate_ready": {
+    "message": "Schedule activated."
+  },
+  "overview_pipelineSetup_activate_failed": {
+    "message": "Schedule could not be activated. Your draft is saved. {{message}}"
+  },
+  "overview_pipelineSetup_validation_sourcesRequired": {
+    "message": "Choose at least one source before continuing."
+  },
+  "overview_pipelineSetup_validationError": {
+    "message": "Review the highlighted fields before continuing."
+  },
+  "setupWizard_containerTitle": {
+    "message": "Create Watchlist"
+  },
+  "setupWizard_containerHelp": {
+    "message": "Create the project container first. Sources, cadence, briefing, delivery, and Test follow in one setup flow."
+  },
+  "setupWizard_actions_continue": {
+    "message": "Continue to Sources"
+  },
+  "setupWizard_sections_preset": {
+    "message": "Domain preset"
+  },
+  "setupWizard_fields_name": {
+    "message": "Watchlist name"
+  },
+  "setupWizard_fields_objective": {
+    "message": "Objective"
+  },
+  "setupWizard_validation_nameRequired": {
+    "message": "Add a Watchlist name."
+  },
+  "setupWizard_errors_createFailed": {
+    "message": "Could not create the Watchlist."
+  },
+  "overview_pipelineSetup_source_fallback": {
+    "message": "Source {{id}}"
+  },
+  "overview_pipelineSetup_sourceTest_summary": {
+    "message": "{{ready}} ready, {{filtered}} filtered"
+  },
+  "overview_pipelineSetup_sourceTest_sample": {
+    "message": "Sample items"
+  },
+  "overview_pipelineSetup_sourceTest_readyItem": {
+    "message": "Ready"
+  },
+  "overview_pipelineSetup_sourceTest_filteredItem": {
+    "message": "Filtered"
+  },
+  "overview_pipelineSetup_sourceTest_untitled": {
+    "message": "Untitled item"
+  },
+  "overview_pipelineSetup_speaker_defaultRole": {
+    "message": "Host"
+  },
+  "overview_pipelineSetup_receipt_labels_schedule": {
+    "message": "Schedule"
+  },
+  "overview_pipelineSetup_receipt_labels_sources": {
+    "message": "Sources"
+  },
+  "overview_pipelineSetup_receipt_labels_artifacts": {
+    "message": "Artifacts"
+  },
+  "overview_pipelineSetup_receipt_labels_format": {
+    "message": "Format"
+  },
+  "overview_pipelineSetup_receipt_labels_showName": {
+    "message": "Show name"
+  },
+  "overview_pipelineSetup_receipt_labels_cast": {
+    "message": "Cast"
+  },
+  "overview_pipelineSetup_receipt_labels_duration": {
+    "message": "Target duration"
+  },
+  "overview_pipelineSetup_receipt_labels_destinations": {
+    "message": "Destinations"
+  },
+  "overview_pipelineSetup_receipt_schedule_manual": {
+    "message": "Manual only"
+  },
+  "overview_pipelineSetup_receipt_schedule_scheduled": {
+    "message": "{{date}} ({{timezone}})"
+  },
+  "overview_pipelineSetup_receipt_sources": {
+    "message": "{{count}} sources"
+  },
+  "overview_pipelineSetup_receipt_artifacts_textReport": {
+    "message": "text report"
+  },
+  "overview_pipelineSetup_receipt_artifacts_showNotes": {
+    "message": "text show notes"
+  },
+  "overview_pipelineSetup_receipt_artifacts_audio": {
+    "message": "audio"
+  },
+  "overview_pipelineSetup_receipt_formats_concise_briefing": {
+    "message": "concise briefing"
+  },
+  "overview_pipelineSetup_receipt_formats_solo_update": {
+    "message": "solo update"
+  },
+  "overview_pipelineSetup_receipt_formats_host_discussion": {
+    "message": "host discussion"
+  },
+  "overview_pipelineSetup_receipt_formats_sportscast": {
+    "message": "sportscast"
+  },
+  "overview_pipelineSetup_receipt_formats_culture_roundtable": {
+    "message": "culture roundtable"
+  },
+  "overview_pipelineSetup_receipt_formats_custom": {
+    "message": "custom program"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_1": {
+    "message": "solo"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_2": {
+    "message": "two-host"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_3": {
+    "message": "three-host"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_4": {
+    "message": "four-host"
+  },
+  "overview_pipelineSetup_receipt_programWithSpeakers": {
+    "message": "{{speakers}} {{format}}"
+  },
+  "overview_pipelineSetup_receipt_cast": {
+    "message": "{{count}} speakers"
+  },
+  "overview_pipelineSetup_receipt_duration": {
+    "message": "targeting {{count}} minutes"
+  },
+  "overview_pipelineSetup_receipt_destinations_email": {
+    "message": "Email: {{recipients}}"
+  },
+  "overview_pipelineSetup_receipt_destinations_chatbook": {
+    "message": "Chatbook: {{title}}"
+  },
+  "overview_pipelineSetup_receipt_untitledChatbook": {
+    "message": "Untitled"
+  },
+  "overview_pipelineSetup_receipt_dstChange": {
+    "message": "The following run uses {{timezoneName}} after the daylight-saving offset change: {{date}}."
+  },
+  "overview_pipelineSetup_test_textProviderDisclosure": {
+    "message": "Tests use your configured LLM provider. Text-only tests do not use text-to-speech."
+  },
+  "overview_pipelineSetup_test_stages_audioScript": {
+    "message": "Compose audio script"
+  },
+  "overview_pipelineSetup_test_stages_audioScriptPersistence": {
+    "message": "Save audio script"
+  },
+  "overview_pipelineSetup_test_stages_audioPersistence": {
+    "message": "Save audio in Reports"
+  },
+  "overview_pipelineSetup_test_stages_deliveryAdapter": {
+    "message": "Deliver to {{adapter}}"
+  },
+  "overview_pipelineSetup_test_stages_unknown": {
+    "message": "Stage {{stage}}"
+  },
+  "overview_pipelineSetup_test_text": {
+    "message": "Generate test report"
+  },
+  "overview_pipelineSetup_test_status_not_started": {
+    "message": "Not started"
+  },
+  "overview_pipelineSetup_test_status_queued": {
+    "message": "Queued"
+  },
+  "overview_pipelineSetup_test_status_running": {
+    "message": "Running"
+  },
+  "overview_pipelineSetup_test_status_ready": {
+    "message": "Ready"
+  },
+  "overview_pipelineSetup_test_status_failed": {
+    "message": "Failed"
+  },
+  "overview_pipelineSetup_test_status_skipped": {
+    "message": "Skipped"
+  },
+  "overview_pipelineSetup_test_status_cancelled": {
+    "message": "Cancelled"
+  },
+  "overview_pipelineSetup_validation_sourceNameRequired": {
+    "message": "Enter a source name."
+  },
+  "overview_pipelineSetup_validation_sourceUrlInvalid": {
+    "message": "Enter a valid HTTP or HTTPS source URL."
+  },
+  "overview_pipelineSetup_validation_monitorNameRequired": {
+    "message": "Enter a monitor name."
+  },
+  "overview_pipelineSetup_validation_timezoneInvalid": {
+    "message": "Enter a valid IANA timezone."
+  },
+  "overview_pipelineSetup_validation_intervalInvalid": {
+    "message": "Enter a supported schedule interval."
+  },
+  "overview_pipelineSetup_validation_hourInvalid": {
+    "message": "Enter an hour from 0 through 23."
+  },
+  "overview_pipelineSetup_validation_minuteInvalid": {
+    "message": "Enter a minute from 0 through 59."
+  },
+  "overview_pipelineSetup_validation_cronInvalid": {
+    "message": "Enter a valid five-field cron expression."
+  },
+  "overview_pipelineSetup_validation_cronTooFrequent": {
+    "message": "Choose a schedule at least five minutes apart."
+  },
+  "overview_pipelineSetup_validation_templateRequired": {
+    "message": "Enter a report template."
+  },
+  "overview_pipelineSetup_validation_castSizeInvalid": {
+    "message": "Choose one to four speakers."
+  },
+  "overview_pipelineSetup_validation_castIdsInvalid": {
+    "message": "Each speaker needs a unique identity."
+  },
+  "overview_pipelineSetup_validation_castVoicesRequired": {
+    "message": "Choose a voice for every speaker."
+  },
+  "overview_pipelineSetup_validation_audioMinutesInvalid": {
+    "message": "Enter a duration from 1 through 60 minutes."
+  },
+  "overview_pipelineSetup_validation_emailInvalid": {
+    "message": "Enter at least one valid email address."
+  },
+  "overview_pipelineSetup_receipt_sources_one": {
+    "message": "{{count}} source"
+  },
+  "overview_pipelineSetup_receipt_sources_other": {
+    "message": "{{count}} sources"
+  },
+  "overview_pipelineSetup_receipt_cast_one": {
+    "message": "{{count}} speaker"
+  },
+  "overview_pipelineSetup_receipt_cast_other": {
+    "message": "{{count}} speakers"
+  },
+  "overview_pipelineSetup_receipt_duration_one": {
+    "message": "targeting {{count}} minute"
+  },
+  "overview_pipelineSetup_receipt_duration_other": {
+    "message": "targeting {{count}} minutes"
+  },
+  "overview_pipelineSetup_schedulePreview_loading": {
+    "message": "Calculating the exact schedule…"
+  },
+  "overview_pipelineSetup_schedulePreview_error": {
+    "message": "Could not calculate the exact schedule. Review the cron expression and timezone."
+  },
+  "overview_latest_heading_briefing": {
+    "message": "Latest briefing"
+  },
+  "overview_latest_heading_episode": {
+    "message": "Latest episode"
+  },
+  "overview_latest_empty_scheduled": {
+    "message": "Your first briefing is scheduled for {{date}}."
+  },
+  "overview_latest_empty_manual": {
+    "message": "Not started. Test now."
+  },
+  "overview_latest_generatedAt": {
+    "message": "Generated {{date}}"
+  },
+  "overview_latest_untitled": {
+    "message": "briefing {{runId}}"
+  },
+  "overview_latest_artifacts": {
+    "message": "report / audio"
+  },
+  "overview_latest_audio": {
+    "message": "audio"
+  },
+  "overview_latest_audioFailed": {
+    "message": "audio failed"
+  },
+  "overview_latest_ready": {
+    "message": "Ready"
+  },
+  "overview_latest_saved": {
+    "message": "Saved"
+  },
+  "overview_latest_waiting": {
+    "message": "Waiting"
+  },
+  "overview_latest_script": {
+    "message": "audio report"
+  },
+  "overview_latest_stageWithStatus": {
+    "message": "{{stage}}: {{status}}"
+  },
+  "overview_latest_noUpdates": {
+    "message": "No qualifying updates were found. A status {{noun}} was saved."
+  },
+  "overview_latest_nextRun": {
+    "message": "Next run: {{date}}"
+  },
+  "overview_latest_nextRunRelative": {
+    "message": "Next run: {{relative}}"
+  },
+  "overview_latest_counts": {
+    "message": "briefing: Included, Unread, New"
+  },
+  "overview_latest_count_included": {
+    "message": "Included {{count}}"
+  },
+  "overview_latest_count_unread": {
+    "message": "Unread {{count}}"
+  },
+  "overview_latest_count_new": {
+    "message": "New {{count}}"
+  },
+  "overview_latest_provenance_sources": {
+    "message": "{{count}} tracked sources"
+  },
+  "overview_latest_provenance_sources_zero": {
+    "message": "{{count}} tracked sources"
+  },
+  "overview_latest_provenance_sources_one": {
+    "message": "{{count}} tracked source"
+  },
+  "overview_latest_provenance_sources_two": {
+    "message": "{{count}} tracked sources"
+  },
+  "overview_latest_provenance_sources_few": {
+    "message": "{{count}} tracked sources"
+  },
+  "overview_latest_provenance_sources_many": {
+    "message": "{{count}} tracked sources"
+  },
+  "overview_latest_provenance_sources_other": {
+    "message": "{{count}} tracked sources"
+  },
+  "overview_latest_delivery_reports": {
+    "message": "View all reports"
+  },
+  "overview_latest_delivery_retryAria": {
+    "message": "Retry {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_retryUnknownAria": {
+    "message": "Outcome unknown. Retry {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_reviewRetry": {
+    "message": "Review and retry"
+  },
+  "overview_latest_delivery_unknownConfirmation": {
+    "message": "The provider did not confirm {{adapter}} delivery to {{destination}}. Retrying may send a duplicate."
+  },
+  "overview_latest_playback_region": {
+    "message": "audio: {{name}}"
+  },
+  "overview_latest_playback_playAria": {
+    "message": "Play {{name}}"
+  },
+  "overview_latest_playback_pauseAria": {
+    "message": "Pause {{name}}"
+  },
+  "overview_latest_playback_resumeAria": {
+    "message": "Resume {{name}}"
+  },
+  "overview_latest_playback_seekAria": {
+    "message": "audio: {{name}}"
+  },
+  "overview_latest_playback_loading": {
+    "message": "Loading audio"
+  },
+  "overview_latest_playback_error": {
+    "message": "audio failed. Open report / Regenerate audio."
+  },
+  "overview_latest_playback_play": {
+    "message": "Play"
+  },
+  "overview_latest_playback_pause": {
+    "message": "Pause"
+  },
+  "overview_latest_playback_resume": {
+    "message": "Resume"
+  },
+  "overview_latest_actions_label": {
+    "message": "Latest briefing"
+  },
+  "overview_latest_actions_openReport": {
+    "message": "Open {{report}}"
+  },
+  "overview_latest_actions_openReportAria": {
+    "message": "Open {{report}}: {{name}}"
+  },
+  "overview_latest_actions_regenerateAudio": {
+    "message": "Regenerate audio"
+  },
+  "overview_latest_actions_regenerateAudioAria": {
+    "message": "Regenerate {{style}} {{noun}} audio: {{name}}"
+  },
+  "overview_latest_actions_retry": {
+    "message": "Retry"
+  },
+  "overview_latest_actions_retrySaveAria": {
+    "message": "Retry saved report: {{name}}"
+  },
+  "overview_latest_actions_retryTextAria": {
+    "message": "Retry report: {{name}}"
+  },
+  "overview_latest_actions_retryStage": {
+    "message": "Retry: {{stage}}"
+  },
+  "overview_latest_actions_inspect": {
+    "message": "Inspect run"
+  },
+  "overview_latest_actions_inspectAria": {
+    "message": "Inspect run {{runId}}: {{name}}"
+  },
+  "overview_latest_actions_viewReports": {
+    "message": "View all reports"
+  },
+  "overview_latest_actions_testNow": {
+    "message": "Test now"
+  },
+  "overview_latest_announcements_blockingFailure": {
+    "message": "{{name}} failed. Inspect run {{runId}}."
+  },
+  "overview_latest_announcements_delivered": {
+    "message": "{{name}}: delivered."
+  },
+  "overview_latest_announcements_nextRunUpdated": {
+    "message": "{{name}}: next run."
+  },
+  "overview_latest_announcements_partialAudioFailure": {
+    "message": "{{name}}: show notes ready, audio failed."
+  },
+  "overview_latest_announcements_readyText": {
+    "message": "{{name}}: report ready."
+  },
+  "overview_latest_announcements_readyWithAudio": {
+    "message": "{{name}}: Ready. audio / show notes."
+  },
+  "overview_latest_announcements_stageProgress": {
+    "message": "{{name}}: {{stage}} {{status}}."
+  },
+  "overview_latest_announcements_testQueued": {
+    "message": "Test now: queued."
+  },
+  "overview_latest_retryError": {
+    "message": "Retry failed. Inspect run."
+  },
+  "overview_latest_regenerateError": {
+    "message": "Regenerate audio: failed."
+  },
+  "overview_latest_testError": {
+    "message": "Test now: failed."
+  },
+  "overview_latest_status_ready": {
+    "message": "Ready"
+  },
+  "overview_latest_status_failed": {
+    "message": "Failed"
+  },
+  "overview_latest_status_saved": {
+    "message": "Saved"
+  },
+  "overview_latest_status_waiting": {
+    "message": "Waiting"
+  },
+  "overview_latest_status_running": {
+    "message": "Running"
+  },
+  "overview_latest_status_queued": {
+    "message": "Queued"
+  },
+  "overview_latest_status_notStarted": {
+    "message": "Not started"
+  },
+  "overview_latest_status_notSelected": {
+    "message": "Not selected"
+  },
+  "overview_latest_status_cancelled": {
+    "message": "Cancelled"
+  },
+  "overview_latest_status_delivered": {
+    "message": "Delivered"
+  },
+  "overview_latest_status_unknown": {
+    "message": "Outcome unknown"
+  },
+  "overview_latest_status_sending": {
+    "message": "Sending"
+  },
+  "overview_latest_stages_renderText": {
+    "message": "report"
+  },
+  "overview_latest_stages_persistText": {
+    "message": "Saved report"
+  },
+  "overview_latest_stages_composeScript": {
+    "message": "audio report"
+  },
+  "overview_latest_stages_persistScript": {
+    "message": "Saved audio report"
+  },
+  "overview_latest_stages_generateAudio": {
+    "message": "audio"
+  },
+  "overview_latest_stages_persistAudio": {
+    "message": "Saved audio"
+  },
+  "overview_latest_nouns_briefing": {
+    "message": "briefing"
+  },
+  "overview_latest_nouns_episode": {
+    "message": "episode"
+  },
+  "overview_latest_nouns_report": {
+    "message": "report"
+  },
+  "overview_latest_nouns_showNotes": {
+    "message": "show notes"
+  },
+  "outputs_openInNewTabAria": {
+    "message": "Open in new tab: {{title}}"
+  },
+  "outputs_chatAboutAria": {
+    "message": "Chat about this: {{title}}"
+  },
+  "outputs_downloadAria": {
+    "message": "Download: {{title}}"
+  },
+  "overview_latest_actions_downloadAudio": {
+    "message": "Download audio"
+  },
+  "overview_latest_actions_downloadAudioAria": {
+    "message": "Download audio for {{name}}"
+  },
+  "overview_latest_actions_retryExactAria": {
+    "message": "Retry {{stage}} for {{name}}"
+  },
+  "overview_latest_actions_reviewScript": {
+    "message": "Review script"
+  },
+  "overview_latest_actions_reviewScriptAria": {
+    "message": "Review script for {{name}}"
+  },
+  "overview_latest_delivery_chatbookDestination": {
+    "message": "Chatbook"
+  },
+  "overview_latest_delivery_confirmRetry": {
+    "message": "Retry delivery"
+  },
+  "overview_latest_delivery_confirmRetryAria": {
+    "message": "Retry {{adapter}} delivery"
+  },
+  "overview_latest_delivery_recipientCount": {
+    "message": "{{count}} recipients"
+  },
+  "overview_latest_delivery_recipientCount_zero": {
+    "message": "{{count}} recipients"
+  },
+  "overview_latest_delivery_recipientCount_one": {
+    "message": "{{count}} recipient"
+  },
+  "overview_latest_delivery_recipientCount_two": {
+    "message": "{{count}} recipients"
+  },
+  "overview_latest_delivery_recipientCount_few": {
+    "message": "{{count}} recipients"
+  },
+  "overview_latest_delivery_recipientCount_many": {
+    "message": "{{count}} recipients"
+  },
+  "overview_latest_delivery_recipientCount_other": {
+    "message": "{{count}} recipients"
+  },
+  "overview_latest_delivery_reviewAcknowledgement": {
+    "message": "I reviewed the destination and accept the duplicate-delivery risk."
+  },
+  "overview_latest_delivery_reviewSettings": {
+    "message": "Review delivery settings"
+  },
+  "overview_latest_delivery_reviewTitle": {
+    "message": "Review {{adapter}} delivery retry"
+  },
+  "overview_latest_playback_accessError": {
+    "message": "Audio access failed. Check your sign-in and server connection."
+  },
+  "overview_latest_playback_missing": {
+    "message": "This audio artifact is no longer available."
+  },
+  "overview_latest_scriptAccessError": {
+    "message": "Script access failed. Check your sign-in and server connection."
+  },
+  "overview_latest_scriptLoading": {
+    "message": "Loading script"
+  },
+  "overview_latest_scriptMissing": {
+    "message": "This script artifact is no longer available."
+  },
+  "overview_latest_recovery_renderText": {
+    "message": "generating report"
+  },
+  "overview_latest_recovery_persistText": {
+    "message": "saving report"
+  },
+  "overview_latest_recovery_composeScript": {
+    "message": "composing audio script"
+  },
+  "overview_latest_recovery_persistScript": {
+    "message": "saving audio script"
+  },
+  "overview_latest_recovery_generateAudio": {
+    "message": "generating audio"
+  },
+  "overview_latest_recovery_persistAudio": {
+    "message": "saving audio"
+  },
+  "outputs_artifactMissing": {
+    "message": "This artifact is no longer available"
+  },
+  "outputs_artifactAuthError": {
+    "message": "Artifact access was denied. Check your sign-in."
+  },
+  "outputs_artifactAccessError": {
+    "message": "Artifact access failed. Check your sign-in and server connection."
+  },
+  "overview_latest_status_stale": {
+    "message": "Stale"
+  },
+  "overview_latest_status_superseded": {
+    "message": "Superseded"
+  },
+  "overview_latest_status_unavailable": {
+    "message": "Unavailable"
+  },
+  "overview_latest_status_partial": {
+    "message": "Partial"
+  },
+  "accessibilityHardening_source_toggleActive": {
+    "message": "Toggle active: {{name}}"
+  },
+  "accessibilityHardening_source_checkNow": {
+    "message": "Check now: {{name}}"
+  },
+  "accessibilityHardening_source_openWebsite": {
+    "message": "Open source website: {{name}}"
+  },
+  "accessibilityHardening_source_openHealth": {
+    "message": "Open source health: {{name}}"
+  },
+  "accessibilityHardening_source_edit": {
+    "message": "Edit source: {{name}}"
+  },
+  "accessibilityHardening_source_delete": {
+    "message": "Delete source: {{name}}"
+  },
+  "accessibilityHardening_item_open": {
+    "message": "Open update: {{title}}"
+  },
+  "accessibilityHardening_item_select": {
+    "message": "Select update: {{title}}"
+  },
+  "accessibilityHardening_item_description": {
+    "message": "{{state}}. Source: {{source}}."
+  },
+  "accessibilityHardening_output_openNewTab": {
+    "message": "Open {{title}} in new tab"
+  },
+  "accessibilityHardening_output_chat": {
+    "message": "Chat about {{title}}"
+  },
+  "accessibilityHardening_output_download": {
+    "message": "Download {{title}}"
+  },
+  "accessibilityHardening_output_close": {
+    "message": "Close preview: {{title}}"
+  },
+  "accessibilityHardening_health_show": {
+    "message": "Show Watchlists health details"
+  },
+  "accessibilityHardening_health_hide": {
+    "message": "Hide Watchlists health details"
+  },
+  "accessibilityHardening_health_refresh": {
+    "message": "Refresh Watchlists health"
+  },
+  "accessibilityHardening_health_settings": {
+    "message": "Open Watchlists settings"
+  },
+  "accessibilityHardening_delivery_email": {
+    "message": "Send each report to the configured recipients when enabled."
+  },
+  "accessibilityHardening_delivery_chatbook": {
+    "message": "Publish each report to Chatbook when enabled."
+  },
+  "accessibilityHardening_help_open": {
+    "message": "Open Watchlists help"
+  },
+  "accessibilityHardening_help_title": {
+    "message": "Watchlists help"
+  },
+  "terminology_canonical_feed": {
+    "message": "Feed"
+  },
+  "terminology_canonical_feeds": {
+    "message": "Feeds"
+  },
+  "terminology_canonical_monitor": {
+    "message": "Monitor"
+  },
+  "terminology_canonical_monitors": {
+    "message": "Monitors"
+  },
+  "terminology_canonical_activity": {
+    "message": "Activity"
+  },
+  "terminology_canonical_article": {
+    "message": "Update"
+  },
+  "terminology_canonical_articles": {
+    "message": "Updates"
+  },
+  "terminology_canonical_report": {
+    "message": "Report"
+  },
+  "terminology_canonical_reports": {
+    "message": "Reports"
+  },
+  "terminology_aliases_sources": {
+    "message": "Feeds"
+  },
+  "terminology_aliases_jobs": {
+    "message": "Monitors"
+  },
+  "terminology_aliases_runs": {
+    "message": "Activity"
+  },
+  "terminology_aliases_items": {
+    "message": "Updates"
+  },
+  "terminology_aliases_alerts": {
+    "message": "Alerts"
+  },
+  "terminology_aliases_outputs": {
+    "message": "Reports"
+  },
+  "tabs_itemsTooltip": {
+    "message": "Updates collected from your sources"
+  },
+  "quickActions_repeatLabel": {
+    "message": "Jump to"
+  },
+  "taskViews_label": {
+    "message": "Task views"
+  },
+  "taskViews_collect": {
+    "message": "Collect"
+  },
+  "taskViews_collectHint": {
+    "message": "Feeds and monitors"
+  },
+  "taskViews_review": {
+    "message": "Review"
+  },
+  "taskViews_reviewHint": {
+    "message": "Alerts, activity, and updates"
+  },
+  "taskViews_briefings": {
+    "message": "Briefings"
+  },
+  "taskViews_briefingsHint": {
+    "message": "Reports and templates"
+  },
+  "orientation_showTabGuidance": {
+    "message": "Show tab guidance"
+  },
+  "orientation_actions_openOverview": {
+    "message": "Open Overview"
+  },
+  "orientation_actions_openFeeds": {
+    "message": "Open Feeds"
+  },
+  "orientation_actions_openMonitors": {
+    "message": "Open Monitors"
+  },
+  "orientation_actions_openActivity": {
+    "message": "Open Activity"
+  },
+  "orientation_actions_openArticles": {
+    "message": "Open Updates"
+  },
+  "orientation_actions_openReports": {
+    "message": "Open Reports"
+  },
+  "orientation_overview_title": {
+    "message": "Overview: watchlist health at a glance"
+  },
+  "orientation_overview_description": {
+    "message": "Review current health and attention signals, then start by adding or refining feeds."
+  },
+  "orientation_sources_title": {
+    "message": "Feeds: define what to collect"
+  },
+  "orientation_sources_description": {
+    "message": "Add or clean feed inputs here. Next, configure monitors to schedule collection."
+  },
+  "orientation_jobs_title": {
+    "message": "Monitors: control schedule and processing"
+  },
+  "orientation_jobs_description": {
+    "message": "Monitors run your feed pipeline. Next, check Activity to confirm runs are healthy."
+  },
+  "orientation_runs_title": {
+    "message": "Activity: run health and history"
+  },
+  "orientation_runs_description": {
+    "message": "Inspect failures and logs here. Next, open Reports to view generated briefings."
+  },
+  "orientation_items_title": {
+    "message": "Updates: triage captured content"
+  },
+  "orientation_items_description": {
+    "message": "Review and prioritize captured updates. Next, tune monitor scope or open reports."
+  },
+  "orientation_outputs_title": {
+    "message": "Reports: generated briefing outputs"
+  },
+  "orientation_outputs_description": {
+    "message": "Download, review, or regenerate briefings. Next, edit templates when format needs change."
+  },
+  "orientation_templates_title": {
+    "message": "Templates: define briefing format"
+  },
+  "orientation_templates_description": {
+    "message": "Template changes apply to future output generation. Next, run monitors or open reports."
+  },
+  "orientation_settings_title": {
+    "message": "Settings: workspace-level watchlists defaults"
+  },
+  "orientation_settings_description": {
+    "message": "Adjust watchlists defaults and integration settings. Return to overview to validate health."
+  },
+  "overview_onboarding_path_label": {
+    "message": "Onboarding mode"
+  },
+  "overview_onboarding_path_beginner": {
+    "message": "Beginner (guided)"
+  },
+  "overview_onboarding_path_advanced": {
+    "message": "Advanced (direct forms)"
+  },
+  "overview_onboarding_path_beginnerHint": {
+    "message": "Guided collection setup keeps this Watchlist scoped before advanced schedules and templates."
+  },
+  "overview_onboarding_path_advancedHint": {
+    "message": "Advanced mode opens direct feed and monitor forms for this Watchlist."
+  },
+  "teachPoints_jobs_title": {
+    "message": "Monitor setup tip"
+  },
+  "teachPoints_jobs_description": {
+    "message": "Start with schedule presets first. Use cron and advanced filters only after your first successful Activity check."
+  },
+  "teachPoints_jobs_action": {
+    "message": "Open Templates"
+  },
+  "teachPoints_templates_action": {
+    "message": "Open Reports"
+  },
+  "notifications_retryTriggered": {
+    "message": "Retry started"
+  },
+  "notifications_retryFailed": {
+    "message": "Failed to retry run"
+  },
+  "errors_next_validation": {
+    "message": "Review highlighted values for {{context}}, then retry."
+  },
+  "commandPalette_open": {
+    "message": "Command palette"
+  },
+  "commandPalette_placeholder": {
+    "message": "Type a command or search..."
+  },
+  "commandPalette_noResults": {
+    "message": "No matching commands"
+  },
+  "commandPalette_hint": {
+    "message": "Tip: Use Cmd+K to open this palette anytime"
+  },
+  "commandPalette_commands_openFeeds": {
+    "message": "Open Feeds"
+  },
+  "commandPalette_commands_openArticles": {
+    "message": "Open Updates"
+  },
+  "commandPalette_commands_openReports": {
+    "message": "Open Reports"
+  },
+  "commandPalette_commands_openMonitors": {
+    "message": "Open Monitors"
+  },
+  "commandPalette_commands_openActivity": {
+    "message": "Open Activity"
+  },
+  "commandPalette_commands_openTemplates": {
+    "message": "Open Templates"
+  },
+  "commandPalette_commands_createFeed": {
+    "message": "Create feed"
+  },
+  "commandPalette_commands_createMonitor": {
+    "message": "Create monitor"
+  },
+  "commandPalette_commands_refresh": {
+    "message": "Refresh current view"
+  },
+  "commandPalette_commands_openSettings": {
+    "message": "Open settings"
+  },
+  "commandPalette_commands_startTour": {
+    "message": "Start guided tour"
+  },
+  "keyboardShortcuts_title": {
+    "message": "Keyboard Shortcuts"
+  },
+  "keyboardShortcuts_commandPalette": {
+    "message": "Command palette"
+  },
+  "keyboardShortcuts_switchTab": {
+    "message": "Switch tab (1-3)"
+  },
+  "keyboardShortcuts_newEntity": {
+    "message": "New entity"
+  },
+  "keyboardShortcuts_refresh": {
+    "message": "Refresh"
+  },
+  "keyboardShortcuts_focusSearch": {
+    "message": "Focus search"
+  },
+  "keyboardShortcuts_showHelp": {
+    "message": "Show shortcuts"
+  },
+  "emptyState_feeds_description": {
+    "message": "Feeds are the sources your monitors check for new content."
+  },
+  "emptyState_feeds_primaryCta": {
+    "message": "Add your first feed"
+  },
+  "emptyState_feeds_secondaryCta": {
+    "message": "Import from OPML"
+  },
+  "emptyState_monitors_description": {
+    "message": "Monitors run on a schedule to fetch and process content from your feeds."
+  },
+  "emptyState_monitors_primaryCta": {
+    "message": "Create your first monitor"
+  },
+  "emptyState_activity_description": {
+    "message": "Activity shows the history of monitor runs. Set up a monitor to start seeing activity here."
+  },
+  "emptyState_activity_primaryCta": {
+    "message": "Set up a monitor"
+  },
+  "emptyState_articles_title": {
+    "message": "No updates yet"
+  },
+  "emptyState_articles_description": {
+    "message": "Updates are captured content from successful monitor runs, ready for review."
+  },
+  "emptyState_articles_primaryCta": {
+    "message": "Set up a monitor to start capturing updates"
+  },
+  "emptyState_reports_description": {
+    "message": "Reports are generated briefings from monitor runs using your templates."
+  },
+  "emptyState_reports_primaryCta": {
+    "message": "Run a monitor to generate your first report"
+  },
+  "emptyState_templates_description": {
+    "message": "Templates define the format and structure of your generated reports."
+  },
+  "emptyState_templates_primaryCta": {
+    "message": "Create a template"
+  },
+  "alerts_disabled": {
+    "message": "Disabled"
+  },
+  "alerts_enabledTooltip": {
+    "message": "Enable or pause this content alert rule"
+  },
+  "alerts_sourceLink": {
+    "message": "Source"
+  },
+  "alerts_itemLink": {
+    "message": "Item"
+  },
+  "alerts_untitled": {
+    "message": "Untitled alert"
+  },
+  "alerts_noWatchlist": {
+    "message": "Select a Watchlist to manage content alert rules and review matching items."
+  },
+  "alerts_loadRulesError": {
+    "message": "Failed to load content alert rules"
+  },
+  "alerts_loadAlertsError": {
+    "message": "Failed to load content alerts"
+  },
+  "alerts_validation_saveFailed": {
+    "message": "Failed to save content alert rule"
+  },
+  "alerts_form_name": {
+    "message": "Rule name"
+  },
+  "alerts_form_kind": {
+    "message": "Rule kind"
+  },
+  "alerts_form_matchMode": {
+    "message": "Match mode"
+  },
+  "alerts_form_severity": {
+    "message": "Severity"
+  },
+  "alerts_form_pattern": {
+    "message": "Pattern"
+  },
+  "alerts_form_sourceTags": {
+    "message": "Source tags"
+  },
+  "alerts_form_sourceTagsPlaceholder": {
+    "message": "advisory, cti"
+  },
+  "alerts_filters_status": {
+    "message": "Alert status"
+  },
+  "alerts_filters_severity": {
+    "message": "Severity"
+  },
+  "alerts_filters_rule": {
+    "message": "Rule"
+  },
+  "alerts_filters_sourceId": {
+    "message": "Source ID"
+  },
+  "alerts_filters_allRules": {
+    "message": "All rules"
+  },
+  "alerts_filters_allSeverity": {
+    "message": "All severity"
+  },
+  "alerts_actions_markRead": {
+    "message": "Mark read"
+  },
+  "alerts_actions_markUnread": {
+    "message": "Mark unread"
+  },
+  "alerts_actions_dismiss": {
+    "message": "Dismiss"
+  },
+  "alerts_ids_item": {
+    "message": "Item #{{id}}"
+  },
+  "alerts_ids_run": {
+    "message": "Run #{{id}}"
+  },
+  "healthBar_toggleLabel": {
+    "message": "Toggle health bar"
+  },
+  "healthBar_refresh": {
+    "message": "Refresh"
+  },
+  "healthBar_noData": {
+    "message": "No watchlist data yet"
+  },
+  "healthBar_feedsSummary": {
+    "message": "{{count}} feeds"
+  },
+  "healthBar_monitorsActive": {
+    "message": "{{count}} monitors active"
+  },
+  "healthBar_lastRun": {
+    "message": "Last run {{time}}"
+  },
+  "healthBar_nextRun": {
+    "message": "Next run {{time}}"
+  },
+  "healthBar_lastChecked": {
+    "message": "Checked {{time}}"
+  },
+  "healthBar_runningNow": {
+    "message": "running now"
+  },
+  "healthBar_articlesPending": {
+    "message": "{{count}} updates pending"
+  },
+  "healthBar_attentionTooltip": {
+    "message": "{{count}} items need attention"
+  },
+  "healthBar_feedsDegraded": {
+    "message": "{{count}} need review"
+  },
+  "healthBar_monitorsAttention": {
+    "message": "{{count}} need fixes"
+  },
+  "healthBar_runsRunning": {
+    "message": "{{count}} running"
+  },
+  "healthBar_runsFailed": {
+    "message": "{{count}} failed"
+  },
+  "healthBar_runsOk": {
+    "message": "OK"
+  },
+  "healthBar_runsFailedDetail": {
+    "message": "{{count}} recent failures"
+  },
+  "healthBar_openActivityFailures": {
+    "message": "Open Activity ({{count}} failed)"
+  },
+  "healthBar_articlesUnread": {
+    "message": "unread"
+  },
+  "healthBar_showAllViews": {
+    "message": "Show all views"
+  },
+  "healthBar_showAllViewsTooltip": {
+    "message": "Switch to the full 8-tab layout"
+  },
+  "jobs_deleteConfirmDescription": {
+    "message": "You can undo this deletion for {{seconds}} seconds."
+  },
+  "jobs_deleteConfirmActiveRunsWarning": {
+    "message": "This monitor has {{count}} active or pending run{{plural}}. Deleting it will not cancel in-progress runs."
+  },
+  "jobs_deleteConfirmDeliveryWarning": {
+    "message": "This monitor has configured delivery settings (email, chatbook). Deleting it removes scheduled deliveries."
+  },
+  "jobs_form_audioPracticalHint": {
+    "message": "Practical default: Alloy voice at 1.0 speed and 8-minute target, then tune after your first run."
+  },
+  "jobs_form_audioBackgroundTrackInvalid": {
+    "message": "Background track must start with https://, http://, or file://."
+  },
+  "jobs_form_audioTestButton": {
+    "message": "Test audio settings"
+  },
+  "jobs_form_audioTestHint": {
+    "message": "Generate a short sample so you can confirm voice and speed before saving."
+  },
+  "jobs_form_audioTestLoading": {
+    "message": "Generating sample audio..."
+  },
+  "jobs_form_audioTestReady": {
+    "message": "Sample ready. Listen before saving."
+  },
+  "jobs_form_audioTestError": {
+    "message": "Could not generate audio sample. Check voice/speed settings and try again."
+  },
+  "jobs_form_audioTestSampleText": {
+    "message": "Top stories briefing sample. This is a quick audio check before saving your monitor."
+  },
+  "jobs_form_audioTestContext": {
+    "message": "audio sample"
+  },
+  "runs_openReports": {
+    "message": "Open Reports"
+  },
+  "runs_includedInBriefing": {
+    "message": "Included in briefing"
+  },
+  "runs_detail_statsLabels_monitor": {
+    "message": "Monitor"
+  },
+  "runs_detail_statsLabels_outputs": {
+    "message": "Reports"
+  },
+  "runs_detail_openOutputs": {
+    "message": "Open reports for this run"
+  },
+  "runs_detail_commonCausesTitle": {
+    "message": "Common causes"
+  },
+  "runs_detail_commonCauses_auth1": {
+    "message": "Source requires authentication or API key"
+  },
+  "runs_detail_commonCauses_auth2": {
+    "message": "Credentials expired or permissions changed"
+  },
+  "runs_detail_commonCauses_rateLimit1": {
+    "message": "Monitor schedule is too frequent for this source"
+  },
+  "runs_detail_commonCauses_rateLimit2": {
+    "message": "Source has per-IP rate limits"
+  },
+  "runs_detail_commonCauses_timeout1": {
+    "message": "Source is slow to respond or temporarily unavailable"
+  },
+  "runs_detail_commonCauses_timeout2": {
+    "message": "Too many concurrent requests — reduce concurrency"
+  },
+  "runs_detail_commonCauses_network1": {
+    "message": "Source host is unreachable or has changed"
+  },
+  "runs_detail_commonCauses_network2": {
+    "message": "Local network or DNS configuration issue"
+  },
+  "runs_detail_commonCauses_tls1": {
+    "message": "SSL certificate expired or self-signed"
+  },
+  "runs_detail_commonCauses_tls2": {
+    "message": "Certificate chain is incomplete"
+  },
+  "items_queuedForBriefing": {
+    "message": "Queued for briefing"
+  },
+  "items_sort_newest": {
+    "message": "Newest first"
+  },
+  "items_sort_oldest": {
+    "message": "Oldest first"
+  },
+  "items_sort_unreadFirst": {
+    "message": "Unread first"
+  },
+  "items_removeFromBriefingQueue": {
+    "message": "Remove from briefing queue"
+  },
+  "items_briefingRemoved": {
+    "message": "Removed from the briefing queue."
+  },
+  "items_queuedTag": {
+    "message": "Queued"
+  },
+  "items_queue_runPlaceholder": {
+    "message": "Select run"
+  },
+  "items_queue_runOption": {
+    "message": "Run #{{id}}"
+  },
+  "items_queue_runRequired": {
+    "message": "Select a run to generate a queued report."
+  },
+  "items_queue_empty": {
+    "message": "No queued items found for this run."
+  },
+  "items_queue_generated": {
+    "message": "Created report from {{count}} queued item{{plural}}."
+  },
+  "items_queue_generateError": {
+    "message": "Failed to generate report from queued items."
+  },
+  "items_queue_generateReport": {
+    "message": "Generate report from queue"
+  },
+  "items_batch_progressLabel": {
+    "message": "Batch review progress"
+  },
+  "items_batch_progressRunning": {
+    "message": "Processing {{processed}} of {{total}} items ({{succeeded}} succeeded, {{failed}} failed)."
+  },
+  "items_batch_progressComplete": {
+    "message": "Batch review complete: {{succeeded}} succeeded, {{failed}} failed."
+  },
+  "items_batch_progressIncomplete": {
+    "message": "Batch review partial: {{succeeded}} succeeded; more matching updates may remain."
+  },
+  "items_batch_progressPartial": {
+    "message": "Batch review complete: {{succeeded}} succeeded, {{failed}} failed."
+  },
+  "items_batch_progressFailed": {
+    "message": "Batch review failed: {{failed}} failed."
+  },
+  "items_batch_retryFailed": {
+    "message": "Retry {{count}} failed"
+  },
+  "items_batch_dismissProgress": {
+    "message": "Dismiss"
+  },
+  "reports_builder_preset": {
+    "message": "Report preset"
+  },
+  "reports_builder_run": {
+    "message": "Run"
+  },
+  "reports_builder_reportTitle": {
+    "message": "Report title"
+  },
+  "reports_builder_titlePlaceholder": {
+    "message": "Optional title"
+  },
+  "reports_builder_format": {
+    "message": "Format"
+  },
+  "reports_builder_template": {
+    "message": "Template"
+  },
+  "reports_builder_includeEvidence": {
+    "message": "Include evidence table"
+  },
+  "reports_builder_includeExcluded": {
+    "message": "Include excluded trail"
+  },
+  "reports_builder_includedUpdates": {
+    "message": "Included updates"
+  },
+  "reports_builder_queuedCount": {
+    "message": "{{count}} queued update{{plural}}"
+  },
+  "reports_builder_sourceCount": {
+    "message": "{{count}} source{{plural}}"
+  },
+  "reports_builder_created": {
+    "message": "Generated defensible report."
+  },
+  "reports_builder_createError": {
+    "message": "Failed to generate report."
+  },
+  "reports_builder_excludedTrail": {
+    "message": "Excluded trail"
+  },
+  "reports_builder_excludedCount": {
+    "message": "{{count}} update{{plural}} not queued"
+  },
+  "reports_builder_noExcluded": {
+    "message": "No excluded updates in this run."
+  },
+  "reports_builder_ready": {
+    "message": "Ready"
+  },
+  "reports_presets_cti": {
+    "message": "CTI / OSINT"
+  },
+  "reports_presets_news": {
+    "message": "News briefing"
+  },
+  "reports_presets_general": {
+    "message": "General research"
+  },
+  "reports_readiness_ready": {
+    "message": "Ready"
+  },
+  "reports_readiness_needsReview": {
+    "message": "Needs review"
+  },
+  "reports_readiness_blocked": {
+    "message": "Blocked"
+  },
+  "reports_readiness_legacyLiveOnly": {
+    "message": "Live provenance only"
+  },
+  "reports_table_sourceCount": {
+    "message": "{{count}} sources"
+  },
+  "reports_table_alertCount": {
+    "message": "{{count}} alerts"
+  },
+  "reports_table_weakWarningCount": {
+    "message": "{{count}} weak evidence warnings"
+  },
+  "reports_evidence_snapshotAvailable": {
+    "message": "Immutable evidence snapshot is available"
+  },
+  "reports_evidence_snapshotShort": {
+    "message": "Evidence"
+  },
+  "reports_evidence_capturedAt": {
+    "message": "Immutable snapshot captured at {{time}}"
+  },
+  "reports_evidence_uniqueSources": {
+    "message": "Unique sources: {{count}}"
+  },
+  "reports_evidence_alertCount": {
+    "message": "Alerts: {{count}}"
+  },
+  "reports_evidence_missingSources": {
+    "message": "Missing provenance: {{count}}"
+  },
+  "reports_evidence_empty": {
+    "message": "No report evidence available"
+  },
+  "reports_evidence_reviewed": {
+    "message": "Reviewed"
+  },
+  "reports_evidence_needsReview": {
+    "message": "Needs review"
+  },
+  "reports_evidence_queued": {
+    "message": "Queued"
+  },
+  "reports_evidence_excludedTrail": {
+    "message": "Excluded trail"
+  },
+  "reports_evidence_noExcluded": {
+    "message": "No excluded updates captured."
+  },
+  "reports_evidence_openSource": {
+    "message": "Open source"
+  },
+  "reports_evidence_columns_update": {
+    "message": "Update"
+  },
+  "reports_evidence_columns_source": {
+    "message": "Source"
+  },
+  "reports_evidence_columns_published": {
+    "message": "Published"
+  },
+  "reports_evidence_columns_alerts": {
+    "message": "Alert evidence"
+  },
+  "reports_evidence_columns_state": {
+    "message": "Review/queue state"
+  },
+  "reports_evidence_columns_link": {
+    "message": "Link"
+  },
+  "outputs_filterByDelivery": {
+    "message": "Filter by delivery status"
+  },
+  "outputs_activeFiltersDelivery": {
+    "message": "Delivery: {{status}}"
+  },
+  "outputs_deliveryIssuesBannerTitle": {
+    "message": "Delivery issues detected in {{count}} report{{plural}}."
+  },
+  "outputs_deliveryIssuesBannerDescription": {
+    "message": "Review failed or partial deliveries and open Activity to investigate monitor/run failures."
+  },
+  "outputs_deliveryIssuesShowFailed": {
+    "message": "Show failed only"
+  },
+  "outputs_deliveryIssuesOpenRuns": {
+    "message": "Open failed runs"
+  },
+  "outputs_deliveryStatus_failed": {
+    "message": "Failed"
+  },
+  "outputs_deliveryStatus_partial": {
+    "message": "Partial"
+  },
+  "outputs_deliveryStatus_pending": {
+    "message": "Pending"
+  },
+  "outputs_deliveryStatus_sent": {
+    "message": "Sent"
+  },
+  "outputs_deliveryStatus_stored": {
+    "message": "Stored"
+  },
+  "outputs_templateVersionLabel": {
+    "message": "Template version"
+  },
+  "outputs_templateVersionPlaceholder": {
+    "message": "Latest/default"
+  },
+  "outputs_templateUnknown": {
+    "message": "Unknown"
+  },
+  "outputs_deliveryStatusLabel": {
+    "message": "Delivery status"
+  },
+  "outputs_provenanceLabel": {
+    "message": "Provenance"
+  },
+  "outputs_provenanceDescription": {
+    "message": "Monitor #{{job}} • Run #{{run}} • Artifact: {{artifact}}"
+  },
+  "outputs_regenerateAudioTemplateHint": {
+    "message": "Audio outputs regenerate using run audio settings. Template overrides are unavailable."
+  },
+  "templates_preview_mode_static": {
+    "message": "Static markup"
+  },
+  "templates_preview_mode_live": {
+    "message": "Live (render with run data)"
+  },
+  "templates_preview_runPlaceholder": {
+    "message": "Select a run…"
+  },
+  "templates_preview_staticNote": {
+    "message": "Static preview renders markdown/html locally and does not evaluate Jinja2 control flow."
+  },
+  "templates_preview_liveNote": {
+    "message": "Live preview renders with data from a completed run to validate loops, variables, and conditionals."
+  },
+  "templates_preview_noRunsTitle": {
+    "message": "No completed runs available for live preview."
+  },
+  "templates_preview_noRunsDescription": {
+    "message": "Run a monitor once from Activity, then return here to preview templates with real data."
+  },
+  "templates_preview_selectRunTitle": {
+    "message": "Select a run to preview the template with real data."
+  },
+  "templates_preview_renderWarningsTitle": {
+    "message": "Render warnings"
+  },
+  "templates_preview_renderErrorTitle": {
+    "message": "Live preview failed"
+  },
+  "templates_preview_renderErrorHint": {
+    "message": "Check template syntax or choose another run, then try live preview again."
+  },
+  "templates_preview_liveEmpty": {
+    "message": "No preview content yet. The template will render after a short delay."
+  },
+  "overview_pipelineSetup_test_scheduledReceipt": {
+    "message": "{{schedule}}, collect updates from {{sources}}, generate {{artifacts}} as a {{program}}{{duration}}, then save and deliver them to {{destinations}}."
+  },
+  "overview_pipelineSetup_test_audioTestRequired": {
+    "message": "Generate a successful audio sample or full test before activation."
   }
 }

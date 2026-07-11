@@ -58,6 +58,10 @@ from tldw_Server_API.app.core.DB_Management.content_backend import (
     get_content_backend,
     load_content_db_settings,
 )
+from tldw_Server_API.app.core.Watchlists.briefing_delivery_state import (
+    aggregate_delivery_stage,
+    aggregate_delivery_status,
+)
 
 from .backends.base import BackendType, DatabaseBackend, DatabaseConfig, DatabaseError as _DatabaseError
 from .backends.factory import DatabaseBackendFactory
@@ -78,7 +82,7 @@ _WATCHLISTS_DB_NONCRITICAL_EXCEPTIONS = (
 )
 
 _DEFAULT_WATCHLIST_NAME = "Imported Watchlist"
-_VALID_WATCHLIST_DOMAINS = {"cti_osint", "news", "general"}
+_VALID_WATCHLIST_DOMAINS = {"cti_osint", "news", "sports", "culture", "creator", "general"}
 _VALID_WATCHLIST_STATUSES = {"active", "paused", "archived"}
 _VALID_WATCHLIST_PRIORITIES = {"low", "medium", "high", "critical"}
 _VALID_CONTENT_ALERT_RULE_KINDS = {"keyword", "regex", "descriptor", "classification", "entity", "ioc", "cve"}
@@ -229,6 +233,72 @@ class RunRow:
     stats_json: str | None
     error_msg: str | None
     log_path: str | None
+
+
+_VALID_BRIEFING_ARTIFACT_STATUSES = {"running", "ready", "failed", "cancelled"}
+_VALID_BRIEFING_DELIVERY_STATUSES = {
+    "not_configured",
+    "waiting_for_artifacts",
+    "delivering",
+    "delivered",
+    "partially_delivered",
+    "failed",
+    "unknown",
+}
+_BRIEFING_OCCURRENCE_FIELD_OMITTED = object()
+_VALID_BRIEFING_ATTEMPT_ADAPTERS = {"audio", "email", "chatbook"}
+_VALID_BRIEFING_ATTEMPT_STATES = {
+    "intent",
+    "queued",
+    "sending",
+    "successful",
+    "partial",
+    "failed",
+    "unknown",
+    "cancelled",
+}
+_ACTIVE_BRIEFING_ATTEMPT_STATES = {"intent", "queued", "sending"}
+
+
+@dataclass
+class BriefingOccurrenceRow:
+    id: int
+    user_id: str
+    job_id: int
+    run_id: int
+    occurrence_key: str
+    contract_json: str
+    stages_json: str
+    artifact_status: str
+    delivery_status: str
+    output_id: int | None
+    audio_task_id: str | None
+    delivery_task_id: str | None
+    selected_count: int
+    omitted_count: int
+    created_at: str
+    updated_at: str
+
+
+@dataclass
+class BriefingAttemptRow:
+    """One atomic adapter attempt for a logical briefing artifact version."""
+
+    id: int
+    user_id: str
+    occurrence_id: int
+    artifact_version: int
+    adapter: str
+    attempt: int
+    state: str
+    requested_stage: str | None
+    scheduler_task_id: str | None
+    request_id: str | None
+    workflow_run_id: str | None
+    artifact_id: str | None
+    code: str | None
+    created_at: str
+    updated_at: str
 
 
 @dataclass
@@ -676,6 +746,51 @@ class WatchlistsDatabase:
             );
             CREATE INDEX IF NOT EXISTS idx_runs_job ON scrape_runs(job_id);
 
+            CREATE TABLE IF NOT EXISTS watchlist_briefing_occurrences (
+                id BIGSERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                job_id BIGINT NOT NULL,
+                run_id BIGINT NOT NULL,
+                occurrence_key TEXT NOT NULL,
+                contract_json TEXT NOT NULL,
+                stages_json TEXT NOT NULL,
+                artifact_status TEXT NOT NULL,
+                delivery_status TEXT NOT NULL,
+                output_id BIGINT,
+                audio_task_id TEXT,
+                delivery_task_id TEXT,
+                selected_count INTEGER NOT NULL DEFAULT 0,
+                omitted_count INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE (user_id, occurrence_key)
+            );
+            CREATE INDEX IF NOT EXISTS idx_briefing_occurrences_user_job
+                ON watchlist_briefing_occurrences(user_id, job_id);
+            CREATE INDEX IF NOT EXISTS idx_briefing_occurrences_run
+                ON watchlist_briefing_occurrences(run_id);
+
+            CREATE TABLE IF NOT EXISTS watchlist_briefing_attempts (
+                id BIGSERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                occurrence_id BIGINT NOT NULL,
+                artifact_version INTEGER NOT NULL,
+                adapter TEXT NOT NULL,
+                attempt INTEGER NOT NULL,
+                state TEXT NOT NULL,
+                requested_stage TEXT,
+                scheduler_task_id TEXT,
+                request_id TEXT,
+                workflow_run_id TEXT,
+                artifact_id TEXT,
+                code TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE (user_id, occurrence_id, artifact_version, adapter, attempt)
+            );
+            CREATE INDEX IF NOT EXISTS idx_briefing_attempts_latest
+                ON watchlist_briefing_attempts(user_id, occurrence_id, artifact_version, adapter, attempt);
+
             CREATE TABLE IF NOT EXISTS scrape_run_items (
                 run_id BIGINT NOT NULL,
                 media_id BIGINT NOT NULL,
@@ -992,6 +1107,51 @@ class WatchlistsDatabase:
                 log_path TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_runs_job ON scrape_runs(job_id);
+
+            CREATE TABLE IF NOT EXISTS watchlist_briefing_occurrences (
+                id INTEGER PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                job_id INTEGER NOT NULL,
+                run_id INTEGER NOT NULL,
+                occurrence_key TEXT NOT NULL,
+                contract_json TEXT NOT NULL,
+                stages_json TEXT NOT NULL,
+                artifact_status TEXT NOT NULL,
+                delivery_status TEXT NOT NULL,
+                output_id INTEGER,
+                audio_task_id TEXT,
+                delivery_task_id TEXT,
+                selected_count INTEGER NOT NULL DEFAULT 0,
+                omitted_count INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE (user_id, occurrence_key)
+            );
+            CREATE INDEX IF NOT EXISTS idx_briefing_occurrences_user_job
+                ON watchlist_briefing_occurrences(user_id, job_id);
+            CREATE INDEX IF NOT EXISTS idx_briefing_occurrences_run
+                ON watchlist_briefing_occurrences(run_id);
+
+            CREATE TABLE IF NOT EXISTS watchlist_briefing_attempts (
+                id INTEGER PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                occurrence_id INTEGER NOT NULL,
+                artifact_version INTEGER NOT NULL,
+                adapter TEXT NOT NULL,
+                attempt INTEGER NOT NULL,
+                state TEXT NOT NULL,
+                requested_stage TEXT,
+                scheduler_task_id TEXT,
+                request_id TEXT,
+                workflow_run_id TEXT,
+                artifact_id TEXT,
+                code TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE (user_id, occurrence_id, artifact_version, adapter, attempt)
+            );
+            CREATE INDEX IF NOT EXISTS idx_briefing_attempts_latest
+                ON watchlist_briefing_attempts(user_id, occurrence_id, artifact_version, adapter, attempt);
 
             CREATE TABLE IF NOT EXISTS scrape_run_items (
                 run_id INTEGER NOT NULL,
@@ -2950,6 +3110,622 @@ class WatchlistsDatabase:
             tuple(params + [limit, offset]),
         ).rows
         return [RunRow(**r) for r in rows], total
+
+    # ------------------------
+    # Briefing occurrences
+    # ------------------------
+    def create_or_get_briefing_occurrence(
+        self,
+        *,
+        run_id: int,
+        occurrence_key: str,
+        contract_json: str,
+    ) -> BriefingOccurrenceRow:
+        """Create one logical occurrence for an owned run or return its existing row."""
+        run = self.get_run(run_id)
+        now = _utcnow_iso()
+        self.backend.execute(
+            """
+            INSERT INTO watchlist_briefing_occurrences (
+                user_id, job_id, run_id, occurrence_key, contract_json, stages_json,
+                artifact_status, delivery_status, selected_count, omitted_count,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id, occurrence_key) DO NOTHING
+            """,
+            (
+                self.user_id,
+                run.job_id,
+                run.id,
+                occurrence_key,
+                contract_json,
+                "{}",
+                "running",
+                "waiting_for_artifacts",
+                0,
+                0,
+                now,
+                now,
+            ),
+        )
+        row = self.backend.execute(
+            "SELECT * FROM watchlist_briefing_occurrences WHERE user_id = ? AND occurrence_key = ?",
+            (self.user_id, occurrence_key),
+        ).first
+        if not row:
+            raise RuntimeError("failed_to_create_briefing_occurrence")
+        return BriefingOccurrenceRow(**row)
+
+    def get_briefing_occurrence(self, occurrence_id: int) -> BriefingOccurrenceRow:
+        """Return an occurrence owned by the current user."""
+        row = self.backend.execute(
+            "SELECT * FROM watchlist_briefing_occurrences WHERE id = ? AND user_id = ?",
+            (occurrence_id, self.user_id),
+        ).first
+        if not row:
+            raise KeyError("briefing_occurrence_not_found")
+        return BriefingOccurrenceRow(**row)
+
+    def get_latest_briefing_occurrence(self, job_id: int) -> BriefingOccurrenceRow:
+        """Return the newest occurrence for an owned job."""
+        row = self.backend.execute(
+            """
+            SELECT * FROM watchlist_briefing_occurrences
+            WHERE user_id = ? AND job_id = ?
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+            """,
+            (self.user_id, job_id),
+        ).first
+        if not row:
+            raise KeyError("briefing_occurrence_not_found")
+        return BriefingOccurrenceRow(**row)
+
+    def get_briefing_occurrence_for_run(self, run_id: int) -> BriefingOccurrenceRow:
+        """Return the exact occurrence for an owned run."""
+        row = self.backend.execute(
+            """
+            SELECT * FROM watchlist_briefing_occurrences
+            WHERE user_id = ? AND run_id = ?
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+            """,
+            (self.user_id, run_id),
+        ).first
+        if not row:
+            raise KeyError("briefing_occurrence_not_found")
+        return BriefingOccurrenceRow(**row)
+
+    def get_latest_briefing_occurrence_for_watchlist(
+        self,
+        watchlist_id: int | None = None,
+    ) -> BriefingOccurrenceRow:
+        """Return the newest owned occurrence, optionally scoped to one watchlist."""
+        if watchlist_id is None:
+            row = self.backend.execute(
+                """
+                SELECT occurrence.* FROM watchlist_briefing_occurrences AS occurrence
+                JOIN scrape_jobs AS job ON job.id = occurrence.job_id AND job.user_id = occurrence.user_id
+                WHERE occurrence.user_id = ?
+                ORDER BY occurrence.created_at DESC, occurrence.id DESC
+                LIMIT 1
+                """,
+                (self.user_id,),
+            ).first
+        else:
+            self.get_watchlist(int(watchlist_id))
+            row = self.backend.execute(
+                """
+                SELECT occurrence.* FROM watchlist_briefing_occurrences AS occurrence
+                JOIN scrape_jobs AS job ON job.id = occurrence.job_id AND job.user_id = occurrence.user_id
+                WHERE occurrence.user_id = ? AND job.watchlist_id = ?
+                ORDER BY occurrence.created_at DESC, occurrence.id DESC
+                LIMIT 1
+                """,
+                (self.user_id, int(watchlist_id)),
+            ).first
+        if not row:
+            raise KeyError("briefing_occurrence_not_found")
+        return BriefingOccurrenceRow(**row)
+
+    def update_briefing_occurrence(
+        self,
+        occurrence_id: int,
+        *,
+        stages: dict[str, Any] | None = None,
+        artifact_status: str | None = None,
+        delivery_status: str | None = None,
+        output_id: int | None | object = _BRIEFING_OCCURRENCE_FIELD_OMITTED,
+        audio_task_id: str | None | object = _BRIEFING_OCCURRENCE_FIELD_OMITTED,
+        delivery_task_id: str | None | object = _BRIEFING_OCCURRENCE_FIELD_OMITTED,
+        selected_count: int | None = None,
+        omitted_count: int | None = None,
+    ) -> BriefingOccurrenceRow:
+        """Update the explicitly supported mutable fields on an owned occurrence."""
+        if artifact_status is not None and artifact_status not in _VALID_BRIEFING_ARTIFACT_STATUSES:
+            raise ValueError("invalid_briefing_artifact_status")
+        if delivery_status is not None and delivery_status not in _VALID_BRIEFING_DELIVERY_STATUSES:
+            raise ValueError("invalid_briefing_delivery_status")
+        if selected_count is not None and selected_count < 0:
+            raise ValueError("selected_count_must_be_non_negative")
+        if omitted_count is not None and omitted_count < 0:
+            raise ValueError("omitted_count_must_be_non_negative")
+        fields: list[str] = []
+        params: list[Any] = []
+        updates = (
+            ("stages_json", json.dumps(stages) if stages is not None else None),
+            ("artifact_status", artifact_status),
+            ("delivery_status", delivery_status),
+            ("selected_count", selected_count),
+            ("omitted_count", omitted_count),
+        )
+        for column, value in updates:
+            if value is not None:
+                fields.append(f"{column} = ?")
+                params.append(value)
+        nullable_updates = (
+            ("output_id", output_id),
+            ("audio_task_id", audio_task_id),
+            ("delivery_task_id", delivery_task_id),
+        )
+        for column, value in nullable_updates:
+            if value is not _BRIEFING_OCCURRENCE_FIELD_OMITTED:
+                fields.append(f"{column} = ?")
+                params.append(value)
+        if not fields:
+            return self.get_briefing_occurrence(occurrence_id)
+        fields.append("updated_at = ?")
+        params.extend((_utcnow_iso(), occurrence_id, self.user_id))
+        self.backend.execute(
+            f"UPDATE watchlist_briefing_occurrences SET {', '.join(fields)} "  # nosec B608
+            "WHERE id = ? AND user_id = ?",
+            tuple(params),
+        )
+        return self.get_briefing_occurrence(occurrence_id)
+
+    def claim_briefing_attempt(
+        self,
+        *,
+        occurrence_id: int,
+        artifact_version: int,
+        adapter: str,
+        requested_stage: str | None = None,
+        allow_retry: bool = False,
+    ) -> BriefingAttemptRow:
+        """Atomically create or reuse the current adapter attempt intent."""
+        normalized_adapter = str(adapter).strip().lower()
+        if normalized_adapter not in _VALID_BRIEFING_ATTEMPT_ADAPTERS:
+            raise ValueError("invalid_briefing_attempt_adapter")
+        version = int(artifact_version)
+        if version < 1:
+            raise ValueError("invalid_briefing_artifact_version")
+        now = _utcnow_iso()
+        with self.transaction() as conn:
+            occurrence_query = (
+                "SELECT id FROM watchlist_briefing_occurrences WHERE id = ? AND user_id = ?"
+            )
+            if self.backend.backend_type == BackendType.POSTGRESQL:
+                occurrence_query += " FOR UPDATE"
+            owned = self.backend.execute(
+                occurrence_query,
+                (int(occurrence_id), self.user_id),
+                connection=conn,
+            ).first
+            if not owned:
+                raise KeyError("briefing_occurrence_not_found")
+            latest_query = """
+                SELECT * FROM watchlist_briefing_attempts
+                WHERE user_id = ? AND occurrence_id = ? AND artifact_version = ? AND adapter = ?
+                ORDER BY attempt DESC
+                LIMIT 1
+            """
+            if self.backend.backend_type == BackendType.POSTGRESQL:
+                latest_query += " FOR UPDATE"
+            latest = self.backend.execute(
+                latest_query,
+                (self.user_id, int(occurrence_id), version, normalized_adapter),
+                connection=conn,
+            ).first
+            if latest and (
+                str(latest["state"]) == "successful"
+                or str(latest["state"]) in _ACTIVE_BRIEFING_ATTEMPT_STATES
+                or not allow_retry
+            ):
+                return BriefingAttemptRow(**latest)
+            attempt = int(latest["attempt"]) + 1 if latest else 1
+            self.backend.execute(
+                """
+                INSERT INTO watchlist_briefing_attempts (
+                    user_id, occurrence_id, artifact_version, adapter, attempt, state,
+                    requested_stage, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    self.user_id,
+                    int(occurrence_id),
+                    version,
+                    normalized_adapter,
+                    attempt,
+                    "intent",
+                    requested_stage,
+                    now,
+                    now,
+                ),
+                connection=conn,
+            )
+            row = self.backend.execute(
+                """
+                SELECT * FROM watchlist_briefing_attempts
+                WHERE user_id = ? AND occurrence_id = ? AND artifact_version = ?
+                    AND adapter = ? AND attempt = ?
+                """,
+                (self.user_id, int(occurrence_id), version, normalized_adapter, attempt),
+                connection=conn,
+            ).first
+            if not row:
+                raise RuntimeError("failed_to_claim_briefing_attempt")
+            return BriefingAttemptRow(**row)
+
+    def get_latest_briefing_attempt(
+        self,
+        *,
+        occurrence_id: int,
+        artifact_version: int,
+        adapter: str,
+    ) -> BriefingAttemptRow | None:
+        """Return the newest owned attempt for one logical adapter artifact."""
+        row = self.backend.execute(
+            """
+            SELECT * FROM watchlist_briefing_attempts
+            WHERE user_id = ? AND occurrence_id = ? AND artifact_version = ? AND adapter = ?
+            ORDER BY attempt DESC
+            LIMIT 1
+            """,
+            (self.user_id, int(occurrence_id), int(artifact_version), str(adapter).strip().lower()),
+        ).first
+        return BriefingAttemptRow(**row) if row else None
+
+    def get_briefing_attempt(self, attempt_id: int) -> BriefingAttemptRow:
+        """Return one owned durable adapter attempt."""
+        row = self.backend.execute(
+            "SELECT * FROM watchlist_briefing_attempts WHERE id = ? AND user_id = ?",
+            (int(attempt_id), self.user_id),
+        ).first
+        if not row:
+            raise KeyError("briefing_attempt_not_found")
+        return BriefingAttemptRow(**row)
+
+    def bind_briefing_attempt_scheduler_task(
+        self,
+        attempt_id: int,
+        *,
+        scheduler_task_id: str,
+        request_id: str,
+    ) -> BriefingAttemptRow:
+        """Bind submission identifiers without changing a concurrently terminal state."""
+        self.backend.execute(
+            """
+            UPDATE watchlist_briefing_attempts
+            SET scheduler_task_id = COALESCE(scheduler_task_id, ?),
+                request_id = COALESCE(request_id, ?), updated_at = ?
+            WHERE id = ? AND user_id = ?
+            """,
+            (str(scheduler_task_id), str(request_id), _utcnow_iso(), int(attempt_id), self.user_id),
+        )
+        return self.get_briefing_attempt(int(attempt_id))
+
+    def transition_briefing_attempt(
+        self,
+        attempt_id: int,
+        *,
+        expected_states: set[str],
+        state: str,
+        scheduler_task_id: str | None = None,
+        request_id: str | None = None,
+        workflow_run_id: str | None = None,
+        artifact_id: str | None = None,
+        code: str | None = None,
+    ) -> BriefingAttemptRow | None:
+        """CAS one attempt transition; return ``None`` when another worker won."""
+        normalized_state = str(state).strip().lower()
+        normalized_expected = {str(value).strip().lower() for value in expected_states}
+        if normalized_state not in _VALID_BRIEFING_ATTEMPT_STATES:
+            raise ValueError("invalid_briefing_attempt_state")
+        if not normalized_expected or not normalized_expected.issubset(_VALID_BRIEFING_ATTEMPT_STATES):
+            raise ValueError("invalid_briefing_attempt_expected_states")
+        optional_values = {
+            "scheduler_task_id": scheduler_task_id,
+            "request_id": request_id,
+            "workflow_run_id": workflow_run_id,
+            "artifact_id": artifact_id,
+            "code": code,
+        }
+        fields = ["state = ?", "updated_at = ?"]
+        params: list[Any] = [normalized_state, _utcnow_iso()]
+        for column, value in optional_values.items():
+            if value is not None:
+                fields.append(f"{column} = ?")
+                params.append(str(value))
+        placeholders = ", ".join("?" for _ in normalized_expected)
+        params.extend((int(attempt_id), self.user_id, *sorted(normalized_expected)))
+        result = self.backend.execute(
+            f"UPDATE watchlist_briefing_attempts SET {', '.join(fields)} "  # nosec B608
+            f"WHERE id = ? AND user_id = ? AND state IN ({placeholders})",  # nosec B608
+            tuple(params),
+        )
+        if int(result.rowcount or 0) != 1:
+            return None
+        row = self.backend.execute(
+            "SELECT * FROM watchlist_briefing_attempts WHERE id = ? AND user_id = ?",
+            (int(attempt_id), self.user_id),
+        ).first
+        return BriefingAttemptRow(**row) if row else None
+
+    def finalize_briefing_attempt(
+        self,
+        attempt_id: int,
+        *,
+        expected_states: set[str],
+        state: str,
+        stage_updates: dict[str, Any],
+        artifact_status: str | None = None,
+        delivery_status: str | None = None,
+        configured_delivery_adapters: set[str] | None = None,
+        workflow_run_id: str | None = None,
+        artifact_id: str | None = None,
+        code: str | None = None,
+    ) -> BriefingOccurrenceRow | None:
+        """Atomically finalize the latest attempt and merge its occurrence stages."""
+        normalized_state = str(state).strip().lower()
+        normalized_expected = {str(value).strip().lower() for value in expected_states}
+        if normalized_state not in _VALID_BRIEFING_ATTEMPT_STATES:
+            raise ValueError("invalid_briefing_attempt_state")
+        if not normalized_expected or not normalized_expected.issubset(_VALID_BRIEFING_ATTEMPT_STATES):
+            raise ValueError("invalid_briefing_attempt_expected_states")
+        if artifact_status is not None and artifact_status not in _VALID_BRIEFING_ARTIFACT_STATUSES:
+            raise ValueError("invalid_briefing_artifact_status")
+        if delivery_status is not None and delivery_status not in _VALID_BRIEFING_DELIVERY_STATUSES:
+            raise ValueError("invalid_briefing_delivery_status")
+        identity = self.backend.execute(
+            "SELECT * FROM watchlist_briefing_attempts WHERE id = ? AND user_id = ?",
+            (int(attempt_id), self.user_id),
+        ).first
+        if not identity:
+            raise KeyError("briefing_attempt_not_found")
+        occurrence_id = int(identity["occurrence_id"])
+        artifact_version = int(identity["artifact_version"])
+        adapter = str(identity["adapter"])
+        now = _utcnow_iso()
+        with self.transaction() as conn:
+            occurrence_query = (
+                "SELECT * FROM watchlist_briefing_occurrences WHERE id = ? AND user_id = ?"
+            )
+            latest_query = """
+                SELECT * FROM watchlist_briefing_attempts
+                WHERE user_id = ? AND occurrence_id = ? AND artifact_version = ? AND adapter = ?
+                ORDER BY attempt DESC
+                LIMIT 1
+            """
+            if self.backend.backend_type == BackendType.POSTGRESQL:
+                occurrence_query += " FOR UPDATE"
+                latest_query += " FOR UPDATE"
+            occurrence_row = self.backend.execute(
+                occurrence_query,
+                (occurrence_id, self.user_id),
+                connection=conn,
+            ).first
+            latest = self.backend.execute(
+                latest_query,
+                (self.user_id, occurrence_id, artifact_version, adapter),
+                connection=conn,
+            ).first
+            if not occurrence_row:
+                raise KeyError("briefing_occurrence_not_found")
+            if not latest or int(latest["id"]) != int(attempt_id):
+                return None
+            current_state = str(latest["state"])
+            if current_state not in normalized_expected and current_state != normalized_state:
+                return None
+
+            attempt_fields = ["state = ?", "updated_at = ?"]
+            attempt_params: list[Any] = [normalized_state, now]
+            for column, value in (
+                ("workflow_run_id", workflow_run_id),
+                ("artifact_id", artifact_id),
+                ("code", code),
+            ):
+                if value is not None:
+                    attempt_fields.append(f"{column} = ?")
+                    attempt_params.append(str(value))
+            attempt_params.extend((int(attempt_id), self.user_id))
+            self.backend.execute(
+                f"UPDATE watchlist_briefing_attempts SET {', '.join(attempt_fields)} "  # nosec B608
+                "WHERE id = ? AND user_id = ?",
+                tuple(attempt_params),
+                connection=conn,
+            )
+
+            try:
+                stages = json.loads(occurrence_row.get("stages_json") or "{}")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                stages = {}
+            if not isinstance(stages, dict):
+                stages = {}
+            for name, stage in stage_updates.items():
+                if isinstance(stage, dict):
+                    stages[str(name)] = stage
+            if configured_delivery_adapters is not None:
+                delivery_status = aggregate_delivery_status(
+                    configured_delivery_adapters,
+                    stages,
+                )
+                stages["deliver"] = aggregate_delivery_stage(
+                    delivery_status,
+                    finished_at=now,
+                )
+            occurrence_fields = ["stages_json = ?", "updated_at = ?"]
+            occurrence_params: list[Any] = [json.dumps(stages), now]
+            if artifact_status is not None:
+                occurrence_fields.append("artifact_status = ?")
+                occurrence_params.append(artifact_status)
+            if delivery_status is not None:
+                occurrence_fields.append("delivery_status = ?")
+                occurrence_params.append(delivery_status)
+            occurrence_params.extend((occurrence_id, self.user_id))
+            self.backend.execute(
+                f"UPDATE watchlist_briefing_occurrences SET {', '.join(occurrence_fields)} "  # nosec B608
+                "WHERE id = ? AND user_id = ?",
+                tuple(occurrence_params),
+                connection=conn,
+            )
+            refreshed = self.backend.execute(
+                "SELECT * FROM watchlist_briefing_occurrences WHERE id = ? AND user_id = ?",
+                (occurrence_id, self.user_id),
+                connection=conn,
+            ).first
+            return BriefingOccurrenceRow(**refreshed) if refreshed else None
+
+    def update_briefing_occurrence_for_attempt(
+        self,
+        occurrence_id: int,
+        attempt_id: int,
+        *,
+        expected_attempt_states: set[str],
+        stages: dict[str, Any],
+        artifact_status: str,
+        audio_task_id: str | None,
+    ) -> BriefingOccurrenceRow | None:
+        """Atomically persist an audio projection only while its attempt remains active."""
+        expected = {str(value).strip().lower() for value in expected_attempt_states}
+        if not expected or not expected.issubset(_VALID_BRIEFING_ATTEMPT_STATES):
+            raise ValueError("invalid_briefing_attempt_expected_states")
+        if artifact_status not in _VALID_BRIEFING_ARTIFACT_STATUSES:
+            raise ValueError("invalid_briefing_artifact_status")
+        with self.transaction() as conn:
+            occurrence_query = (
+                "SELECT * FROM watchlist_briefing_occurrences WHERE id = ? AND user_id = ?"
+            )
+            attempt_query = (
+                "SELECT * FROM watchlist_briefing_attempts "
+                "WHERE id = ? AND occurrence_id = ? AND user_id = ?"
+            )
+            if self.backend.backend_type == BackendType.POSTGRESQL:
+                occurrence_query += " FOR UPDATE"
+                attempt_query += " FOR UPDATE"
+            occurrence_row = self.backend.execute(
+                occurrence_query,
+                (int(occurrence_id), self.user_id),
+                connection=conn,
+            ).first
+            attempt_row = self.backend.execute(
+                attempt_query,
+                (int(attempt_id), int(occurrence_id), self.user_id),
+                connection=conn,
+            ).first
+            if not occurrence_row:
+                raise KeyError("briefing_occurrence_not_found")
+            if not attempt_row or str(attempt_row["state"]) not in expected:
+                return None
+            try:
+                latest_stages = json.loads(occurrence_row.get("stages_json") or "{}")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                latest_stages = {}
+            if not isinstance(latest_stages, dict):
+                latest_stages = {}
+            merged_stages = dict(latest_stages)
+            for name, incoming in stages.items():
+                if not isinstance(incoming, dict):
+                    continue
+                existing = latest_stages.get(name)
+                if isinstance(existing, dict):
+                    existing_attempt = int(existing.get("attempt_count") or 0)
+                    incoming_attempt = int(incoming.get("attempt_count") or 0)
+                    if (
+                        existing.get("status") == "ready"
+                        and incoming.get("status") in {"queued", "running"}
+                        and existing_attempt >= incoming_attempt
+                    ):
+                        continue
+                    if (
+                        str(name).startswith("deliver:")
+                        and existing.get("outcome") in {"successful", "unknown"}
+                        and existing_attempt >= incoming_attempt
+                    ):
+                        continue
+                merged_stages[name] = incoming
+            self.backend.execute(
+                """
+                UPDATE watchlist_briefing_occurrences
+                SET stages_json = ?, artifact_status = ?, audio_task_id = ?, updated_at = ?
+                WHERE id = ? AND user_id = ?
+                """,
+                (
+                    json.dumps(merged_stages),
+                    artifact_status,
+                    audio_task_id,
+                    _utcnow_iso(),
+                    int(occurrence_id),
+                    self.user_id,
+                ),
+                connection=conn,
+            )
+            refreshed = self.backend.execute(
+                "SELECT * FROM watchlist_briefing_occurrences WHERE id = ? AND user_id = ?",
+                (int(occurrence_id), self.user_id),
+                connection=conn,
+            ).first
+            return BriefingOccurrenceRow(**refreshed) if refreshed else None
+
+    def merge_briefing_occurrence_stages(
+        self,
+        occurrence_id: int,
+        *,
+        stage_updates: dict[str, Any],
+        delivery_status: str | None = None,
+    ) -> BriefingOccurrenceRow:
+        """Atomically merge named stage records without replacing sibling adapters."""
+        if delivery_status is not None and delivery_status not in _VALID_BRIEFING_DELIVERY_STATUSES:
+            raise ValueError("invalid_briefing_delivery_status")
+        with self.transaction() as conn:
+            query = "SELECT * FROM watchlist_briefing_occurrences WHERE id = ? AND user_id = ?"
+            if self.backend.backend_type == BackendType.POSTGRESQL:
+                query += " FOR UPDATE"
+            row = self.backend.execute(
+                query,
+                (int(occurrence_id), self.user_id),
+                connection=conn,
+            ).first
+            if not row:
+                raise KeyError("briefing_occurrence_not_found")
+            try:
+                merged = json.loads(row.get("stages_json") or "{}")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                merged = {}
+            if not isinstance(merged, dict):
+                merged = {}
+            for name, stage in stage_updates.items():
+                if isinstance(stage, dict):
+                    merged[str(name)] = stage
+            fields = ["stages_json = ?", "updated_at = ?"]
+            params: list[Any] = [json.dumps(merged), _utcnow_iso()]
+            if delivery_status is not None:
+                fields.append("delivery_status = ?")
+                params.append(delivery_status)
+            params.extend((int(occurrence_id), self.user_id))
+            self.backend.execute(
+                f"UPDATE watchlist_briefing_occurrences SET {', '.join(fields)} "  # nosec B608
+                "WHERE id = ? AND user_id = ?",
+                tuple(params),
+                connection=conn,
+            )
+            refreshed = self.backend.execute(
+                "SELECT * FROM watchlist_briefing_occurrences WHERE id = ? AND user_id = ?",
+                (int(occurrence_id), self.user_id),
+                connection=conn,
+            ).first
+            if not refreshed:
+                raise KeyError("briefing_occurrence_not_found")
+            return BriefingOccurrenceRow(**refreshed)
 
     def append_run_item(self, run_id: int, media_id: int, source_id: int | None = None) -> None:
         # Ensure the run belongs to this user in shared-backend deployments.

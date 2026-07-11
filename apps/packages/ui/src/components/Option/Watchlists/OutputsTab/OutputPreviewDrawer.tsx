@@ -9,7 +9,7 @@ import {
   Tooltip,
   message
 } from "antd"
-import { Download, ExternalLink, MessageSquare } from "lucide-react"
+import { Download, ExternalLink, MessageSquare, X } from "lucide-react"
 import DOMPurify from "dompurify"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router-dom"
@@ -18,15 +18,20 @@ import { DISCUSS_WATCHLIST_PROMPT_SETTING } from "@/services/settings/ui-setting
 import type { WatchlistChatHandoffPayload } from "@/services/tldw/watchlist-chat-handoff"
 import {
   downloadWatchlistOutput,
-  downloadWatchlistOutputBinary,
   getWatchlistRunAudio
 } from "@/services/watchlists"
+import {
+  createWatchlistArtifactObjectUrl,
+  fetchWatchlistArtifactBlob,
+  revokeWatchlistArtifactObjectUrl
+} from "@/services/watchlists-artifacts"
 import type { WatchlistOutput, WatchlistRunAudioStatus } from "@/types/watchlists"
 import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 import {
   getFocusableActiveElement,
   restoreFocusToElement
 } from "../shared/focus-management"
+import { useWatchlistsViewport } from "../shared/useWatchlistsViewport"
 import {
   type AudioArtifactSummary,
   getDeliveryStatusColor,
@@ -73,7 +78,10 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
   onClose
 }) => {
   const { t } = useTranslation(["watchlists", "common"])
+  const tRef = useRef(t)
+  tRef.current = t
   const navigate = useSafeNavigate()
+  const { isConstrained } = useWatchlistsViewport()
 
   const [loading, setLoading] = useState(false)
   const [content, setContent] = useState<string | null>(null)
@@ -84,6 +92,7 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
   const [liveAudioStatus, setLiveAudioStatus] = useState<WatchlistRunAudioStatus | null>(null)
   const outputIsAudio = useMemo(() => isAudioOutput(output), [output])
   const restoreFocusTargetRef = useRef<HTMLElement | null>(null)
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null)
   const wasOpenRef = useRef(false)
 
   const navigateHome = useCallback(() => {
@@ -133,31 +142,52 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
 
   const updateAudioObjectUrl = useCallback((nextUrl: string | null) => {
     if (audioObjectUrlRef.current && audioObjectUrlRef.current !== nextUrl) {
-      URL.revokeObjectURL(audioObjectUrlRef.current)
+      revokeWatchlistArtifactObjectUrl(audioObjectUrlRef.current)
     }
     audioObjectUrlRef.current = nextUrl
     setAudioObjectUrl(nextUrl)
   }, [])
 
+  const artifactErrorMessage = useCallback((artifactError: unknown) => {
+    const translate = tRef.current
+    const kind = (artifactError as { kind?: string } | null)?.kind
+    if (kind === "missing") {
+      return translate("watchlists:outputs.artifactMissing", "This artifact is no longer available")
+    }
+    if (kind === "auth") {
+      return translate("watchlists:outputs.artifactAuthError", "Artifact access was denied. Check your sign-in.")
+    }
+    return translate(
+      "watchlists:outputs.artifactAccessError",
+      "Artifact access failed. Check your sign-in and server connection."
+    )
+  }, [])
+
   // Fetch content when drawer opens
   useEffect(() => {
+    const controller = new AbortController()
     if (open && output) {
       setLoading(true)
       setError(null)
       if (outputIsAudio) {
         setContent(null)
-        downloadWatchlistOutputBinary(output.id)
-          .then((result) => {
-            const blob = new Blob([result], { type: getOutputMimeType(output.format) })
-            const nextUrl = URL.createObjectURL(blob)
+        updateAudioObjectUrl(null)
+        fetchWatchlistArtifactBlob(`/api/v1/watchlists/outputs/${output.id}/download`, {
+          mimeType: getOutputMimeType(output.format),
+          signal: controller.signal
+        })
+          .then((blob) => {
+            if (controller.signal.aborted) return
+            const nextUrl = createWatchlistArtifactObjectUrl(blob)
             updateAudioObjectUrl(nextUrl)
           })
           .catch((err) => {
+            if (controller.signal.aborted || err?.name === "AbortError") return
             console.error("Failed to fetch audio output content:", err)
-            setError(err.message || "Failed to load content")
+            setError(artifactErrorMessage(err))
           })
           .finally(() => {
-            setLoading(false)
+            if (!controller.signal.aborted) setLoading(false)
           })
       } else {
         updateAudioObjectUrl(null)
@@ -177,12 +207,13 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
       updateAudioObjectUrl(null)
       setViewMode("rendered")
     }
-  }, [open, output, outputIsAudio, updateAudioObjectUrl])
+    return () => controller.abort()
+  }, [artifactErrorMessage, open, output, outputIsAudio, updateAudioObjectUrl])
 
   useEffect(() => {
     return () => {
       if (audioObjectUrlRef.current) {
-        URL.revokeObjectURL(audioObjectUrlRef.current)
+        revokeWatchlistArtifactObjectUrl(audioObjectUrlRef.current)
       }
       audioObjectUrlRef.current = null
     }
@@ -194,20 +225,24 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
     try {
       const mimeType = getOutputMimeType(output.format)
       const blob = outputIsAudio
-        ? new Blob([await downloadWatchlistOutputBinary(output.id)], { type: mimeType })
+        ? await fetchWatchlistArtifactBlob(`/api/v1/watchlists/outputs/${output.id}/download`, {
+            mimeType
+          })
         : new Blob([await downloadWatchlistOutput(output.id)], { type: mimeType })
-      const url = URL.createObjectURL(blob)
+      const url = createWatchlistArtifactObjectUrl(blob)
       const a = document.createElement("a")
       a.href = url
       a.download = `${output.title || `output-${output.id}`}.${getOutputFileExtension(output)}`
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
-      URL.revokeObjectURL(url)
+      revokeWatchlistArtifactObjectUrl(url)
       message.success(t("watchlists:outputs.downloaded", "Output downloaded"))
     } catch (err) {
       console.error("Failed to download output:", err)
-      message.error(t("watchlists:outputs.downloadError", "Failed to download output"))
+      message.error(outputIsAudio
+        ? artifactErrorMessage(err)
+        : t("watchlists:outputs.downloadError", "Failed to download output"))
     }
   }
 
@@ -336,22 +371,48 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
   const renderAudioArtifactGraph = () => {
     if (!audioSummary.requested) return null
 
-    const renderArtifact = (artifact: AudioArtifactSummary, key: string) => (
+    const downloadArtifact = async (
+      artifact: AudioArtifactSummary,
+      fallbackExtension: "md" | "mp3"
+    ) => {
+      if (!artifact.downloadUrl) return
+      try {
+        const blob = await fetchWatchlistArtifactBlob(artifact.downloadUrl, {})
+        const url = createWatchlistArtifactObjectUrl(blob)
+        const anchor = document.createElement("a")
+        anchor.href = url
+        const baseName = artifact.displayName || artifact.label
+        anchor.download = /\.[^./\\]+$/.test(baseName)
+          ? baseName
+          : `${baseName}.${fallbackExtension}`
+        document.body.appendChild(anchor)
+        anchor.click()
+        anchor.remove()
+        revokeWatchlistArtifactObjectUrl(url)
+      } catch (artifactError) {
+        message.error(artifactErrorMessage(artifactError))
+      }
+    }
+
+    const renderArtifact = (
+      artifact: AudioArtifactSummary,
+      key: string,
+      fallbackExtension: "md" | "mp3"
+    ) => (
       <div key={key}>
         <div className="font-medium text-text">{artifact.label}</div>
         {artifact.displayName ? <div>{artifact.displayName}</div> : null}
         {artifact.downloadUrl ? (
-          <a
-            href={artifact.downloadUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="text-primary hover:underline"
-            aria-label={t("watchlists:outputs.openAudioArtifactAria", "Open {{label}}", {
-              label: artifact.label
+          <Button
+            type="link"
+            className="min-h-11 p-0"
+            aria-label={t("watchlists:accessibilityHardening.output.download", "Download {{title}}", {
+              title: artifact.label
             })}
+            onClick={() => void downloadArtifact(artifact, fallbackExtension)}
           >
-            {t("watchlists:outputs.openAudioArtifact", "Open")}
-          </a>
+            {t("watchlists:outputs.download", "Download")}
+          </Button>
         ) : null}
       </div>
     )
@@ -402,15 +463,15 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
             })}
           </div>
         )}
-        <div className="grid gap-2 text-xs text-text-muted sm:grid-cols-2">
+        <div className={`grid grid-cols-1 gap-2 text-xs text-text-muted ${isConstrained ? "" : "sm:grid-cols-2"}`}>
           {audioSummary.scriptArtifact && (
-            renderArtifact(audioSummary.scriptArtifact, "script")
+            renderArtifact(audioSummary.scriptArtifact, "script", "md")
           )}
           {audioSummary.speakerArtifacts.map((artifact, index) => (
-            renderArtifact(artifact, `${artifact.speakerId || artifact.label}-${index}`)
+            renderArtifact(artifact, `${artifact.speakerId || artifact.label}-${index}`, "mp3")
           ))}
           {audioSummary.finalArtifact && (
-            renderArtifact(audioSummary.finalArtifact, "final")
+            renderArtifact(audioSummary.finalArtifact, "final", "mp3")
           )}
         </div>
       </div>
@@ -423,33 +484,61 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
       placement="right"
       onClose={onClose}
       open={open}
-      styles={{ wrapper: { width: 700 } }}
+      closable={false}
+      size={isConstrained ? "100%" : "min(100vw, 48rem)"}
+      afterOpenChange={(isOpen) => {
+        if (isOpen) closeButtonRef.current?.focus()
+      }}
       extra={
         <div className="flex items-center gap-2">
           {output?.format === "html" && (
             <Tooltip title={t("watchlists:outputs.openInNewTab", "Open in new tab")}>
               <Button
                 type="text"
-                icon={<ExternalLink className="h-4 w-4" />}
+                icon={<ExternalLink className="h-4 w-4" aria-hidden />}
                 onClick={handleOpenInNewTab}
                 disabled={!content}
+                className="min-h-11 min-w-11"
+                aria-label={t("watchlists:accessibilityHardening.output.openNewTab", "Open {{title}} in new tab", {
+                  title: output?.title || t("watchlists:outputs.preview", "Output Preview")
+                })}
               />
             </Tooltip>
           )}
           <Tooltip title={t("watchlists:outputs.chatAbout", "Chat about this")}>
             <Button
               type="text"
-              icon={<MessageSquare className="h-4 w-4" />}
+              icon={<MessageSquare className="h-4 w-4" aria-hidden />}
               onClick={handleChatAboutOutput}
               disabled={!content}
               data-testid="watchlists-output-chat-about"
+              className="min-h-11 min-w-11"
+              aria-label={t("watchlists:accessibilityHardening.output.chat", "Chat about {{title}}", {
+                title: output?.title || t("watchlists:outputs.preview", "Output Preview")
+              })}
             />
           </Tooltip>
           <Tooltip title={t("watchlists:outputs.download", "Download")}>
             <Button
               type="text"
-              icon={<Download className="h-4 w-4" />}
+              icon={<Download className="h-4 w-4" aria-hidden />}
               onClick={handleDownload}
+              className="min-h-11 min-w-11"
+              aria-label={t("watchlists:accessibilityHardening.output.download", "Download {{title}}", {
+                title: output?.title || t("watchlists:outputs.preview", "Output Preview")
+              })}
+            />
+          </Tooltip>
+          <Tooltip title={t("common:close", "Close")}>
+            <Button
+              ref={closeButtonRef}
+              type="text"
+              icon={<X className="h-4 w-4" aria-hidden />}
+              onClick={onClose}
+              className="min-h-11 min-w-11"
+              aria-label={t("watchlists:accessibilityHardening.output.close", "Close preview: {{title}}", {
+                title: output?.title || t("watchlists:outputs.preview", "Output Preview")
+              })}
             />
           </Tooltip>
         </div>

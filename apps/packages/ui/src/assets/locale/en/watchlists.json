@@ -1,4 +1,12 @@
 {
+  "accessibilityHardening": {
+    "source": { "toggleActive": "Toggle active: {{name}}", "checkNow": "Check now: {{name}}", "openWebsite": "Open source website: {{name}}", "openHealth": "Open source health: {{name}}", "edit": "Edit source: {{name}}", "delete": "Delete source: {{name}}" },
+    "item": { "open": "Open update: {{title}}", "select": "Select update: {{title}}", "description": "{{state}}. Source: {{source}}." },
+    "output": { "openNewTab": "Open {{title}} in new tab", "chat": "Chat about {{title}}", "download": "Download {{title}}", "close": "Close preview: {{title}}" },
+    "health": { "show": "Show Watchlists health details", "hide": "Hide Watchlists health details", "refresh": "Refresh Watchlists health", "settings": "Open Watchlists settings" },
+    "delivery": { "email": "Send each report to the configured recipients when enabled.", "chatbook": "Publish each report to Chatbook when enabled." },
+    "help": { "open": "Open Watchlists help", "title": "Watchlists help" }
+  },
   "title": "Watchlists",
   "description": "Monitor RSS feeds, websites, and forums. Create scheduled monitors to automatically scrape and process content.",
   "offline": "Server is offline. Please connect to use Watchlists.",
@@ -81,6 +89,24 @@
   },
   "setupWizard": {
     "title": "Create Watchlist",
+    "containerTitle": "Create Watchlist",
+    "containerHelp": "Create the project container first. Sources, cadence, briefing, delivery, and Test follow in one setup flow.",
+    "actions": {
+      "continue": "Continue to Sources"
+    },
+    "sections": {
+      "preset": "Domain preset"
+    },
+    "fields": {
+      "name": "Watchlist name",
+      "objective": "Objective"
+    },
+    "validation": {
+      "nameRequired": "Add a Watchlist name."
+    },
+    "errors": {
+      "createFailed": "Could not create the Watchlist."
+    },
     "presets": {
       "cti_osint": {
         "label": "CTI / OSINT",
@@ -356,6 +382,254 @@
         "error": "Failed to add initial collection."
       }
     },
+    "pipelineSetup": {
+      "title": "Set up briefing",
+      "open": "Set up briefing",
+      "progress": "Briefing setup steps",
+      "steps": {
+        "sources": "Sources",
+        "cadence": "Cadence",
+        "briefing": "Briefing",
+        "delivery": "Delivery",
+        "test": "Test"
+      },
+      "actions": {
+        "next": "Continue to {{step}}"
+      },
+      "source": {
+        "existing": "Use existing sources",
+        "new": "Add a new source",
+        "fallback": "Source {{id}}"
+      },
+      "sources": {
+        "help": "Choose existing sources or add one, then test the connection."
+      },
+      "sourcesLoading": "Loading sources...",
+      "sourcesError": "Failed to load feeds for the pipeline builder.",
+      "sourceTest": {
+        "action": "Test source",
+        "ready": "Source is ready.",
+        "cancelled": "Source test cancelled.",
+        "failed": "Source test failed. {{message}}",
+        "summary": "{{ready}} ready, {{filtered}} filtered",
+        "sample": "Sample items",
+        "readyItem": "Ready",
+        "filteredItem": "Filtered",
+        "untitled": "Untitled item"
+      },
+      "fields": {
+        "sources": "Sources",
+        "sourceName": "Source name",
+        "sourceUrl": "Source URL",
+        "monitorName": "Monitor name",
+        "schedule": "Schedule",
+        "timezone": "Timezone",
+        "intervalEvery": "Every",
+        "intervalUnit": "Interval unit",
+        "weekday": "Weekday",
+        "hour": "Hour",
+        "minute": "Minute",
+        "cronExpression": "Cron expression",
+        "showName": "Show name",
+        "premise": "Show premise",
+        "includeAudio": "Audio",
+        "audioHelp": "Add a playable spoken version.",
+        "audioMinutes": "Target duration in minutes",
+        "speakerCount": "Cast size",
+        "template": "Report template",
+        "audioProvider": "Audio provider override",
+        "audioModel": "Audio model override",
+        "customInstructions": "Custom editorial instructions",
+        "emailDelivery": "Email",
+        "emailRecipients": "Email recipients",
+        "chatbookDelivery": "Chatbook",
+        "chatbookTitle": "Chatbook title"
+      },
+      "schedule": {
+        "manual": "Manual only",
+        "interval": "Every N hours or minutes",
+        "daily": "Daily",
+        "weekdays": "Weekdays",
+        "weekly": "Weekly",
+        "advanced": "Advanced cron"
+      },
+      "intervalUnits": {
+        "hours": "Hours",
+        "minutes": "Minutes"
+      },
+      "weekdays": {
+        "monday": "Monday",
+        "tuesday": "Tuesday",
+        "wednesday": "Wednesday",
+        "thursday": "Thursday",
+        "friday": "Friday",
+        "saturday": "Saturday",
+        "sunday": "Sunday"
+      },
+      "advancedCron": "Advanced cron",
+      "nextOccurrence": "Next occurrence",
+      "manualOccurrence": "Manual only",
+      "nextOccurrencePending": "Save a valid schedule to calculate the exact time.",
+      "schedulePreview": {
+        "loading": "Calculating the exact schedule…",
+        "error": "Could not calculate the exact schedule. Review the cron expression and timezone."
+      },
+      "briefing": {
+        "question": "What are you making?",
+        "help": "Choose the editorial shape. Every option stays grounded in your selected sources.",
+        "advanced": "Advanced briefing settings"
+      },
+      "formats": {
+        "concise_briefing": "Concise briefing",
+        "solo_update": "Solo update",
+        "host_discussion": "Host discussion",
+        "sportscast": "Sportscast",
+        "culture_roundtable": "Culture roundtable",
+        "custom": "Custom"
+      },
+      "speaker": {
+        "defaultLabel": "Speaker {{index}}",
+        "defaultRole": "Host",
+        "labelField": "Speaker {{index}} label",
+        "roleField": "Speaker {{index}} role",
+        "voiceField": "Speaker {{index}} voice",
+        "personaField": "Speaker {{index}} persona"
+      },
+      "preview": {
+        "generate": "Preview report",
+        "diagnostics": "Preview diagnostics",
+        "context": "Preview run: {{runId}}",
+        "noRunContext": "Run a successful monitor before previewing this report.",
+        "templateRequired": "Select a template before generating preview.",
+        "templateEmpty": "The selected template is empty.",
+        "emptyResult": "Preview returned no rendered content.",
+        "error": "Failed to generate preview."
+      },
+      "delivery": {
+        "help": "The Reports destination is always included. External delivery waits until selected artifacts are ready.",
+        "reports": "Reports",
+        "required": "Required storage",
+        "alwaysOn": "Always on"
+      },
+      "receipt": {
+        "labels": {
+          "schedule": "Schedule",
+          "sources": "Sources",
+          "artifacts": "Artifacts",
+          "format": "Format",
+          "showName": "Show name",
+          "cast": "Cast",
+          "duration": "Target duration",
+          "destinations": "Destinations"
+        },
+        "schedule": {
+          "manual": "Manual only",
+          "scheduled": "{{date}} ({{timezone}})"
+        },
+        "sources": "{{count}} sources",
+        "sources_one": "{{count}} source",
+        "sources_other": "{{count}} sources",
+        "artifacts": {
+          "textReport": "text report",
+          "showNotes": "text show notes",
+          "audio": "audio"
+        },
+        "formats": {
+          "concise_briefing": "concise briefing",
+          "solo_update": "solo update",
+          "host_discussion": "host discussion",
+          "sportscast": "sportscast",
+          "culture_roundtable": "culture roundtable",
+          "custom": "custom program"
+        },
+        "speakerStyle": {
+          "1": "solo",
+          "2": "two-host",
+          "3": "three-host",
+          "4": "four-host"
+        },
+        "programWithSpeakers": "{{speakers}} {{format}}",
+        "cast": "{{count}} speakers",
+        "cast_one": "{{count}} speaker",
+        "cast_other": "{{count}} speakers",
+        "duration": "targeting {{count}} minutes",
+        "duration_one": "targeting {{count}} minute",
+        "duration_other": "targeting {{count}} minutes",
+        "destinations": {
+          "email": "Email: {{recipients}}",
+          "chatbook": "Chatbook: {{title}}"
+        },
+        "untitledChatbook": "Untitled",
+        "dstChange": "The following run uses {{timezoneName}} after the daylight-saving offset change: {{date}}."
+      },
+      "test": {
+        "providerDisclosure": "Tests use your configured LLM and text-to-speech providers. A sample is limited to 60 seconds; a full test uses the target duration.",
+        "textProviderDisclosure": "Tests use your configured LLM provider. Text-only tests do not use text-to-speech.",
+        "receipt": "Activation receipt",
+        "manualReceipt": "This briefing runs manually, saves selected artifacts in Reports, and contacts no external destination unless you choose Send test.",
+        "scheduledReceipt": "{{schedule}}, collect updates from {{sources}}, generate {{artifacts}} as a {{program}}{{duration}}, then save and deliver them to {{destinations}}.",
+        "audioTestRequired": "Generate a successful audio sample or full test before activation.",
+        "progress": "Test progress",
+        "stages": {
+          "collection": "Collect sources",
+          "selection": "Select updates",
+          "text": "Create report",
+          "audio": "Create audio",
+          "persistence": "Save in Reports",
+          "audioScript": "Compose audio script",
+          "audioScriptPersistence": "Save audio script",
+          "audioPersistence": "Save audio in Reports",
+          "delivery": "Check test delivery",
+          "deliveryAdapter": "Deliver to {{adapter}}",
+          "unknown": "Stage {{stage}}"
+        },
+        "sample": "Generate 60-second sample",
+        "full": "Generate full test episode",
+        "text": "Generate test report",
+        "send": "Send test",
+        "activate": "Activate schedule",
+        "ready": "Test completed. Your briefing is ready. This draft stays inactive until you activate its schedule.",
+        "running": "Run {{runId}} is still running: {{stage}}. You can close setup and monitor it from Overview.",
+        "failedStage": "{{stage}} failed. Open run {{runId}} and retry this stage.",
+        "failedWithCode": "{{stage}} failed ({{code}}). Open run {{runId}} and retry this stage.",
+        "cancelledStage": "{{stage}} was cancelled. Your draft is saved.",
+        "cancelledWithCode": "{{stage}} was cancelled ({{code}}). Your draft is saved.",
+        "cancelled": "Test cancelled. Your draft is saved.",
+        "failed": "Test failed. Your draft is saved. {{message}}",
+        "status": {
+          "not_started": "Not started",
+          "queued": "Queued",
+          "running": "Running",
+          "ready": "Ready",
+          "failed": "Failed",
+          "skipped": "Skipped",
+          "cancelled": "Cancelled"
+        }
+      },
+      "activate": {
+        "ready": "Schedule activated.",
+        "failed": "Schedule could not be activated. Your draft is saved. {{message}}"
+      },
+      "validation": {
+        "sourcesRequired": "Choose at least one source before continuing.",
+        "sourceNameRequired": "Enter a source name.",
+        "sourceUrlInvalid": "Enter a valid HTTP or HTTPS source URL.",
+        "monitorNameRequired": "Enter a monitor name.",
+        "timezoneInvalid": "Enter a valid IANA timezone.",
+        "intervalInvalid": "Enter a supported schedule interval.",
+        "hourInvalid": "Enter an hour from 0 through 23.",
+        "minuteInvalid": "Enter a minute from 0 through 59.",
+        "cronInvalid": "Enter a valid five-field cron expression.",
+        "cronTooFrequent": "Choose a schedule at least five minutes apart.",
+        "templateRequired": "Enter a report template.",
+        "castSizeInvalid": "Choose one to four speakers.",
+        "castIdsInvalid": "Each speaker needs a unique identity.",
+        "castVoicesRequired": "Choose a voice for every speaker.",
+        "audioMinutesInvalid": "Enter a duration from 1 through 60 minutes.",
+        "emailInvalid": "Enter at least one valid email address."
+      },
+      "validationError": "Review the highlighted fields before continuing."
+    },
     "setupComplete": {
       "title": "Setup complete",
       "nextRunDescription": "Your next monitor run is {{time}}. New content will appear in Updates and Activity.",
@@ -393,6 +667,154 @@
       "jobFallback": "Monitor #{{id}}",
       "failed": "Failed",
       "noError": "No error details available"
+    },
+    "latest": {
+      "heading": {
+        "briefing": "Latest briefing",
+        "episode": "Latest episode"
+      },
+      "empty": {
+        "scheduled": "Your first briefing is scheduled for {{date}}.",
+        "manual": "Not started. Test now."
+      },
+      "generatedAt": "Generated {{date}}",
+      "untitled": "briefing {{runId}}",
+      "artifacts": "report / audio",
+      "audio": "audio",
+      "audioFailed": "audio failed",
+      "ready": "Ready",
+      "saved": "Saved",
+      "waiting": "Waiting",
+      "script": "audio report",
+      "stageWithStatus": "{{stage}}: {{status}}",
+      "noUpdates": "No qualifying updates were found. A status {{noun}} was saved.",
+      "nextRun": "Next run: {{date}}",
+      "nextRunRelative": "Next run: {{relative}}",
+      "counts": "briefing: Included, Unread, New",
+      "count": {
+        "included": "Included {{count}}",
+        "unread": "Unread {{count}}",
+        "new": "New {{count}}"
+      },
+      "provenance": {
+        "sources": "{{count}} tracked sources",
+        "sources_zero": "{{count}} tracked sources",
+        "sources_one": "{{count}} tracked source",
+        "sources_two": "{{count}} tracked sources",
+        "sources_few": "{{count}} tracked sources",
+        "sources_many": "{{count}} tracked sources",
+        "sources_other": "{{count}} tracked sources"
+      },
+      "delivery": {
+        "reports": "View all reports",
+        "retryAria": "Retry {{adapter}}: {{name}}",
+        "retryUnknownAria": "Outcome unknown. Retry {{adapter}}: {{name}}",
+        "reviewRetry": "Review and retry",
+        "unknownConfirmation": "The provider did not confirm {{adapter}} delivery to {{destination}}. Retrying may send a duplicate.",
+        "chatbookDestination": "Chatbook",
+        "confirmRetry": "Retry delivery",
+        "confirmRetryAria": "Retry {{adapter}} delivery",
+        "recipientCount": "{{count}} recipients",
+        "recipientCount_zero": "{{count}} recipients",
+        "recipientCount_one": "{{count}} recipient",
+        "recipientCount_two": "{{count}} recipients",
+        "recipientCount_few": "{{count}} recipients",
+        "recipientCount_many": "{{count}} recipients",
+        "recipientCount_other": "{{count}} recipients",
+        "reviewAcknowledgement": "I reviewed the destination and accept the duplicate-delivery risk.",
+        "reviewSettings": "Review delivery settings",
+        "reviewTitle": "Review {{adapter}} delivery retry"
+      },
+      "playback": {
+        "region": "audio: {{name}}",
+        "playAria": "Play {{name}}",
+        "pauseAria": "Pause {{name}}",
+        "resumeAria": "Resume {{name}}",
+        "seekAria": "audio: {{name}}",
+        "loading": "Loading audio",
+        "error": "audio failed. Open report / Regenerate audio.",
+        "play": "Play",
+        "pause": "Pause",
+        "resume": "Resume",
+        "accessError": "Audio access failed. Check your sign-in and server connection.",
+        "missing": "This audio artifact is no longer available."
+      },
+      "actions": {
+        "label": "Latest briefing",
+        "openReport": "Open {{report}}",
+        "openReportAria": "Open {{report}}: {{name}}",
+        "regenerateAudio": "Regenerate audio",
+        "regenerateAudioAria": "Regenerate {{style}} {{noun}} audio: {{name}}",
+        "retry": "Retry",
+        "retrySaveAria": "Retry saved report: {{name}}",
+        "retryTextAria": "Retry report: {{name}}",
+        "retryStage": "Retry: {{stage}}",
+        "inspect": "Inspect run",
+        "inspectAria": "Inspect run {{runId}}: {{name}}",
+        "viewReports": "View all reports",
+        "testNow": "Test now",
+        "downloadAudio": "Download audio",
+        "downloadAudioAria": "Download audio for {{name}}",
+        "retryExactAria": "Retry {{stage}} for {{name}}",
+        "reviewScript": "Review script",
+        "reviewScriptAria": "Review script for {{name}}"
+      },
+      "announcements": {
+        "blockingFailure": "{{name}} failed. Inspect run {{runId}}.",
+        "delivered": "{{name}}: delivered.",
+        "nextRunUpdated": "{{name}}: next run.",
+        "partialAudioFailure": "{{name}}: show notes ready, audio failed.",
+        "readyText": "{{name}}: report ready.",
+        "readyWithAudio": "{{name}}: Ready. audio / show notes.",
+        "stageProgress": "{{name}}: {{stage}} {{status}}.",
+        "testQueued": "Test now: queued."
+      },
+      "retryError": "Retry failed. Inspect run.",
+      "regenerateError": "Regenerate audio: failed.",
+      "testError": "Test now: failed.",
+      "status": {
+        "ready": "Ready",
+        "failed": "Failed",
+        "saved": "Saved",
+        "waiting": "Waiting",
+        "running": "Running",
+        "queued": "Queued",
+        "notStarted": "Not started",
+        "notSelected": "Not selected",
+        "cancelled": "Cancelled",
+        "delivered": "Delivered",
+        "unknown": "Outcome unknown",
+        "sending": "Sending",
+        "stale": "Stale",
+        "superseded": "Superseded",
+        "unavailable": "Unavailable",
+        "partial": "Partial"
+      },
+      "stages": {
+        "renderText": "report",
+        "persistText": "Saved report",
+        "composeScript": "audio report",
+        "persistScript": "Saved audio report",
+        "generateAudio": "audio",
+        "persistAudio": "Saved audio"
+      },
+      "nouns": {
+        "briefing": "briefing",
+        "episode": "episode",
+        "report": "report",
+        "showNotes": "show notes"
+      },
+      "scriptAccessError": "Script access failed. Check your sign-in and server connection.",
+      "scriptLoading": "Loading script",
+      "scriptMissing": "This script artifact is no longer available.",
+      "recovery": {
+        "renderText": "generating report",
+        "persistText": "saving report",
+        "composeScript": "composing audio script",
+        "persistScript": "saving audio script",
+        "generateAudio": "generating audio",
+        "persistAudio": "saving audio"
+      }
     }
   },
   "guide": {
@@ -1199,7 +1621,7 @@
       "loadError": "Failed to load details",
       "linkageTitle": "Run linkage",
       "linkageDescription": "Monitor #{{jobId}} produced {{count}} report{{plural}} for this run.",
-      "openMonitor": "Open monitor",
+      "openMonitor": "Open monitor settings",
       "openRunOutputs": "Open reports for this run",
       "stats": "Statistics",
       "statsLabels": {
@@ -1232,7 +1654,6 @@
       "remediationFallback": "Open logs and adjust source or monitor settings, then retry.",
       "retryRun": "Retry run",
       "editMonitor": "Edit monitor schedule",
-      "openMonitor": "Open monitor settings",
       "openOutputs": "Open reports for this run",
       "openSources": "Review source settings",
       "commonCausesTitle": "Common causes",
@@ -1325,7 +1746,6 @@
     "allFeeds": "All Feeds",
     "allFeedsHint": "Browse items from every source",
     "noFeeds": "No feeds found",
-    "sourceWindowHint": "Showing {{visible}} of {{total}} feeds. Scroll to load more.",
     "searchPlaceholder": "Search updates...",
     "filters": {
       "all": "All",
@@ -1334,12 +1754,9 @@
     },
     "sort": {
       "label": "Sort",
-      "options": {
-        "newest": "Newest first",
-        "oldest": "Oldest first",
-        "unreadFirst": "Unread first",
-        "reviewedFirst": "Reviewed first"
-      }
+      "newest": "Newest first",
+      "oldest": "Oldest first",
+      "unreadFirst": "Unread first"
     },
     "empty": "No updates found",
     "unknownSource": "Unknown source",
@@ -1380,12 +1797,6 @@
     "updateError": "Failed to update item",
     "noUrlHint": "This item does not include an original URL.",
     "pageSizeLabel": "Items per page",
-    "sort": {
-      "label": "Sort",
-      "newest": "Newest first",
-      "oldest": "Oldest first",
-      "unreadFirst": "Unread first"
-    },
     "batch": {
       "selectPage": "Select page",
       "selectedCount": "{{count}} selected",
@@ -1664,7 +2075,13 @@
       "readiness": "Readiness",
       "expires": "Expires",
       "actions": "Actions"
-    }
+    },
+    "openInNewTabAria": "Open in new tab: {{title}}",
+    "chatAboutAria": "Chat about this: {{title}}",
+    "downloadAria": "Download: {{title}}",
+    "artifactMissing": "This artifact is no longer available",
+    "artifactAuthError": "Artifact access was denied. Check your sign-in.",
+    "artifactAccessError": "Artifact access failed. Check your sign-in and server connection."
   },
   "templates": {
     "title": "Templates",
@@ -1786,16 +2203,6 @@
     "fetchError": "Failed to load settings",
     "unavailable": "Settings unavailable",
     "unavailableDesc": "Could not load server settings. Make sure the server is running.",
-    "onboarding": {
-      "title": "Onboarding",
-      "description": "Choose the default onboarding path shown in Overview.",
-      "modeLabel": "Default onboarding mode",
-      "modeBeginner": "Beginner (guided)",
-      "modeAdvanced": "Advanced (direct forms)",
-      "saved": "Onboarding mode saved.",
-      "beginnerHint": "Beginner keeps setup guided and avoids cron/template details at first.",
-      "advancedHint": "Advanced skips guided setup and prioritizes direct Feed and Monitor forms."
-    },
     "ttl": {
       "title": "Output Retention",
       "defaultOutput": "Default Output TTL",

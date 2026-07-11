@@ -239,9 +239,6 @@
   "header_omniSearchStartChat": {
     "message": "새 채팅 \"{{query}}\" 시작"
   },
-  "header_connectionCard.connectedCaption": {
-    "message": "이제 옵션과 사이드패널에서 채팅과 도구를 사용할 수 있습니다."
-  },
   "header_quickIngestQueuedAria": {
     "message": "{{label}} — {{count}}개 항목이 대기 중 — 검토 및 처리하려면 클릭하세요"
   },
@@ -2613,7 +2610,7 @@
     "message": "가족 안전 제어와 서버 가드레일을 한곳에서."
   },
   "header_researchWorkspace": {
-    "message": "Research Workspace"
+    "message": "리서치 워크스페이스"
   },
   "omniSearch_searchError": {
     "message": "검색에 실패했습니다. 다시 시도해 주세요."
@@ -2667,7 +2664,7 @@
     "message": "Document Workspace"
   },
   "header_modelPlayground": {
-    "message": "Model Playground"
+    "message": "모델 플레이그라운드"
   },
   "header_workflowEditor": {
     "message": "Workflow Editor"
@@ -2755,5 +2752,8 @@
   },
   "repo2txt_status_generated": {
     "message": "Generated output for {{count}} files ({{tokenCount}} tokens)."
+  },
+  "header_connectionCard_connectedCaption": {
+    "message": "이제 옵션과 사이드패널에서 채팅과 도구를 사용할 수 있습니다."
   }
 }

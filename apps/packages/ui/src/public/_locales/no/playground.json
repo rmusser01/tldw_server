@@ -1001,18 +1001,6 @@
   "actor_presetPlaceholder": {
     "message": "Velg en forhåndsinnstilling"
   },
-  "actor_preset.sliceOfLife": {
-    "message": "Hverdagsliv"
-  },
-  "actor_preset.dungeonCrawl": {
-    "message": "Fangehullskryp"
-  },
-  "actor_preset.romance": {
-    "message": "Romantikk"
-  },
-  "actor_preset.workSession": {
-    "message": "Arbeidsøkt"
-  },
   "actor_applyPreset": {
     "message": "Bruk"
   },
@@ -1033,15 +1021,6 @@
   },
   "actor_templateModeHelp": {
     "message": "Styrer hvordan Actor samhandler med aktive scenemaler. Slå sammen beholder begge; Overstyr lar Actor erstatte overlappende felt; Ignorer hopper over Actor når maler er aktive."
-  },
-  "actor_templateMode.merge": {
-    "message": "Slå sammen med maler"
-  },
-  "actor_templateMode.override": {
-    "message": "Overstyr maler"
-  },
-  "actor_templateMode.ignore": {
-    "message": "Ignorer når maler er aktive"
   },
   "actor_bladeAspectsTitle": {
     "message": "Aspekter"
@@ -1465,5 +1444,29 @@
   },
   "acp_workspace_title": {
     "message": "Terminal for arbeidsområdet"
+  },
+  "tts_routeTitle": {
+    "message": "Tekst til tale"
+  },
+  "actor_preset_sliceOfLife": {
+    "message": "Hverdagsliv"
+  },
+  "actor_preset_dungeonCrawl": {
+    "message": "Fangehullskryp"
+  },
+  "actor_preset_romance": {
+    "message": "Romantikk"
+  },
+  "actor_preset_workSession": {
+    "message": "Arbeidsøkt"
+  },
+  "actor_templateMode_merge": {
+    "message": "Slå sammen med maler"
+  },
+  "actor_templateMode_override": {
+    "message": "Overstyr maler"
+  },
+  "actor_templateMode_ignore": {
+    "message": "Ignorer når maler er aktive"
   }
 }

@@ -2783,53 +2783,67 @@ export const ItemsTab: React.FC = () => {
                   const alertSummary = item.alert_summary
                   const alertSeverity = getHighestSeverity(alertSummary)
                   const rowAriaLabel = t(
-                    "watchlists:items.rowAriaLabel",
-                    "{{title}} from {{source}}. {{state}}.",
+                    "watchlists:accessibilityHardening.item.open",
+                    "Open update: {{title}}",
+                    { title: rowTitle }
+                  )
+                  const rowDescription = t(
+                    "watchlists:accessibilityHardening.item.description",
+                    "{{state}}. Source: {{source}}.",
                     {
-                      title: rowTitle,
                       source: sourceLabel,
                       state: reviewStateLabel
                     }
                   )
+                  const rowDescriptionId = `watchlists-item-row-description-${item.id}`
 
                   return (
-                    <button
+                    <div
                       key={item.id}
-                      type="button"
                       data-testid={`watchlists-item-row-${item.id}`}
-                      aria-label={rowAriaLabel}
                       className={`flex w-full items-start gap-3 rounded-xl border px-3 py-3 text-left transition ${
                         selected
                           ? "border-primary bg-primary/15"
                           : "border-transparent hover:border-border hover:bg-surface-hover"
                       }`}
-                      onClick={() => setSelectedItemId(item.id)}
                     >
                       <div className="pt-0.5">
                         <Checkbox
                           checked={selectedItemIdSet.has(item.id)}
+                          aria-label={t(
+                            "watchlists:accessibilityHardening.item.select",
+                            "Select update: {{title}}",
+                            { title: rowTitle }
+                          )}
                           onChange={(event) =>
                             handleToggleItemSelected(item.id, event.target.checked)
                           }
-                          onClick={(event) => event.stopPropagation()}
                           data-testid={`watchlists-item-select-${item.id}`}
                         />
                       </div>
 
-                      <div className="mt-1 shrink-0" aria-hidden="true">
-                        {item.reviewed ? (
-                          <CheckCircle2
-                            className="h-3.5 w-3.5 text-text-subtle"
-                            aria-label={t("watchlists:items.rowStatusReviewed", "Reviewed")}
-                          />
-                        ) : (
-                          <span
-                            className="block h-2.5 w-2.5 rounded-full bg-primary"
-                            role="img"
-                            aria-label={t("watchlists:items.rowStatusUnread", "Unread")}
-                          />
-                        )}
-                      </div>
+                      <button
+                        type="button"
+                        aria-label={rowAriaLabel}
+                        aria-describedby={rowDescriptionId}
+                        aria-pressed={selected}
+                        className="flex min-w-0 flex-1 items-start gap-3 rounded-lg text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                        onClick={() => setSelectedItemId(item.id)}
+                      >
+                        <div className="mt-1 shrink-0" aria-hidden="true">
+                          {item.reviewed ? (
+                            <CheckCircle2
+                              className="h-3.5 w-3.5 text-text-subtle"
+                              aria-label={t("watchlists:items.rowStatusReviewed", "Reviewed")}
+                            />
+                          ) : (
+                            <span
+                              className="block h-2.5 w-2.5 rounded-full bg-primary"
+                              role="img"
+                              aria-label={t("watchlists:items.rowStatusUnread", "Unread")}
+                            />
+                          )}
+                        </div>
 
                       {imageUrl ? (
                         <img
@@ -2844,6 +2858,9 @@ export const ItemsTab: React.FC = () => {
                       )}
 
                       <div className="min-w-0 flex-1 space-y-1">
+                        <span id={rowDescriptionId} className="sr-only">
+                          {rowDescription}
+                        </span>
                         <div className="flex items-start justify-between gap-2">
                           <h4 className="line-clamp-2 text-base font-semibold text-text">
                             {rowTitle}
@@ -2887,7 +2904,8 @@ export const ItemsTab: React.FC = () => {
                           {sourceLabel}
                         </p>
                       </div>
-                    </button>
+                      </button>
+                    </div>
                   )
                 })
               )}

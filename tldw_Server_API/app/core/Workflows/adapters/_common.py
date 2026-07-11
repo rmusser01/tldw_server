@@ -9,8 +9,11 @@ from __future__ import annotations
 import os
 import re
 import time
+import unicodedata
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qsl, unquote, urlsplit
 
 from loguru import logger
 
@@ -132,9 +135,325 @@ def watchlist_artifact_metadata(context: dict[str, Any]) -> dict[str, Any]:
         return {}
     return {
         key: metadata[key]
-        for key in ("source", "watchlist_job_id", "watchlist_run_id", "audio_request_id")
+        for key in (
+            "source",
+            "watchlist_job_id",
+            "watchlist_run_id",
+            "briefing_occurrence_id",
+            "briefing_attempt_id",
+            "watchlist_output_id",
+            "audio_request_id",
+        )
         if metadata.get(key) is not None
     }
+
+
+_SENSITIVE_URL_QUERY_KEYS = {
+    "access_token",
+    "api_key",
+    "apikey",
+    "auth",
+    "authorization",
+    "client_secret",
+    "code",
+    "credential",
+    "id_token",
+    "jwt",
+    "key_pair_id",
+    "password",
+    "policy",
+    "refresh_token",
+    "secret",
+    "signature",
+    "sig",
+    "session_token",
+    "token",
+    "x_amz_credential",
+    "x_amz_security_token",
+    "x_amz_signature",
+}
+_SENSITIVE_URL_QUERY_KEY_TERMS = {"auth", "credential", "password", "secret", "signature", "token"}
+_URL_VALUE_QUERY_KEYS = {
+    "callback",
+    "continue",
+    "destination",
+    "next",
+    "redirect",
+    "redirect_uri",
+    "redirect_url",
+    "return",
+    "return_to",
+    "return_url",
+    "target",
+    "url",
+}
+_URL_INSPECTION_MAX_CHARS = 2048
+_URL_INSPECTION_MAX_DEPTH = 3
+_URL_INSPECTION_MAX_QUERY_FIELDS = 100
+_PRIVATE_LOCATION_RE = re.compile(
+    r"(?i)(?:file:/{0,2}|(?:^|\s)[a-z]:[\\/]|\\\\|(?:^|\s)/(?:[^\s]+)|(?:^|\s)~[\\/])"
+)
+_TRAVERSAL_RE = re.compile(r"(?:^|[\\/])\.\.(?:[\\/]|$)")
+_PROGRAM_FORMATS = {
+    "concise_briefing",
+    "solo_update",
+    "host_discussion",
+    "sportscast",
+    "culture_roundtable",
+    "custom",
+}
+_PROGRAM_OUTCOME_NOUNS = {"briefing", "episode"}
+_SPEAKER_MARKER_MAX_CHARS = 64
+
+
+def canonical_speaker_markers(values: list[Any]) -> list[str]:
+    """Return unique parser-safe ASCII speaker markers in input order."""
+    markers: list[str] = []
+    seen: set[str] = set()
+    for position, value in enumerate(values, 1):
+        ascii_value = unicodedata.normalize("NFKD", str(value or "")).encode("ascii", "ignore").decode("ascii")
+        base = re.sub(r"[^A-Za-z0-9]+", "_", ascii_value).strip("_").upper()
+        base = base[:_SPEAKER_MARKER_MAX_CHARS] or f"SPEAKER_{position}"
+        marker = base
+        suffix = 2
+        while marker in seen:
+            suffix_text = f"_{suffix}"
+            marker = f"{base[: _SPEAKER_MARKER_MAX_CHARS - len(suffix_text)]}{suffix_text}"
+            suffix += 1
+        seen.add(marker)
+        markers.append(marker)
+    return markers
+
+
+def _normalized_query_key(value: Any) -> tuple[str, bool]:
+    decoded, stabilized = _bounded_unquote(str(value or ""))
+    snake_case = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", decoded)
+    snake_case = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", snake_case)
+    normalized = re.sub(r"[^a-z0-9]+", "_", snake_case.casefold()).strip("_")
+    return normalized, stabilized
+
+
+def _is_sensitive_query_key(key: str) -> bool:
+    if key in _SENSITIVE_URL_QUERY_KEYS or key.startswith("x_amz_") or key.startswith("x_goog_"):
+        return True
+    padded = f"_{key}_"
+    return any(
+        key == term or key.endswith(f"_{term}") or key.startswith(f"{term}_") or f"_{term}_" in padded
+        for term in _SENSITIVE_URL_QUERY_KEY_TERMS
+    )
+
+
+def _bounded_unquote(value: str) -> tuple[str, bool]:
+    """Decode a bounded number of times and report whether decoding stabilized."""
+    decoded = value
+    for _ in range(_URL_INSPECTION_MAX_DEPTH):
+        next_value = unquote(decoded)
+        if next_value == decoded:
+            return decoded, True
+        decoded = next_value
+    return decoded, unquote(decoded) == decoded
+
+
+def _url_contains_sensitive_data(value: str, *, depth: int = 0) -> bool:
+    """Inspect nested URL-valued query parameters for credentials and signatures."""
+    if depth > _URL_INSPECTION_MAX_DEPTH or len(value) > _URL_INSPECTION_MAX_CHARS:
+        return True
+    if depth == 0:
+        decoded = value.strip()
+    else:
+        decoded, stabilized = _bounded_unquote(value.strip())
+        if not stabilized:
+            return True
+    if any(ord(char) < 32 for char in decoded):
+        return True
+    parse_value = f"https:{decoded}" if decoded.startswith("//") else decoded
+    try:
+        parsed = urlsplit(parse_value)
+        _ = parsed.port
+        query = parse_qsl(
+            parsed.query.replace(";", "&"),
+            keep_blank_values=True,
+            max_num_fields=_URL_INSPECTION_MAX_QUERY_FIELDS,
+        )
+    except (ValueError, UnicodeError):
+        return True
+    if parsed.username or parsed.password or parsed.fragment:
+        return True
+    for raw_key, raw_value in query:
+        key, key_stabilized = _normalized_query_key(raw_key)
+        if not key_stabilized:
+            return True
+        if _is_sensitive_query_key(key):
+            return True
+        nested, nested_stabilized = _bounded_unquote(raw_value.strip())
+        if not nested_stabilized:
+            return True
+        looks_url_like = nested.casefold().startswith(("http://", "https://", "//", "/"))
+        if (key in _URL_VALUE_QUERY_KEYS or looks_url_like) and nested:
+            if depth >= _URL_INSPECTION_MAX_DEPTH or _url_contains_sensitive_data(nested, depth=depth + 1):
+                return True
+    return False
+
+
+def safe_public_source_url(value: Any) -> str:
+    """Return a bounded public HTTP(S) URL with no credentials or signatures."""
+    raw = str(value or "").strip()
+    if not raw or len(raw) > _URL_INSPECTION_MAX_CHARS or any(ord(char) < 32 for char in raw):
+        return ""
+    try:
+        parsed = urlsplit(raw)
+        _ = parsed.port
+    except ValueError:
+        return ""
+    if (
+        parsed.scheme.lower() not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.fragment
+    ):
+        return ""
+    if _url_contains_sensitive_data(raw):
+        return ""
+    return raw
+
+
+def _safe_public_text(value: Any, *, max_chars: int = 500) -> str:
+    """Return compact public text while rejecting path and URI-shaped values."""
+    text = " ".join(str(value or "").split()).strip()
+    if not text or _PRIVATE_LOCATION_RE.search(text) or _TRAVERSAL_RE.search(text):
+        return ""
+    return text[:max_chars]
+
+
+def _public_non_negative_int(value: Any) -> int | None:
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _public_non_negative_float(value: Any) -> float | None:
+    try:
+        return max(0.0, float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def public_program_artifact_metadata(value: Any, *, speech_ready: bool) -> dict[str, Any]:
+    """Project program metadata through an explicit public allowlist."""
+    if not isinstance(value, Mapping) or not value:
+        return {}
+    if not any(
+        key in value
+        for key in (
+            "program_format",
+            "outcome_noun",
+            "show_name",
+            "premise",
+            "audience",
+            "tone",
+            "episode_title",
+            "show_notes",
+            "source_ids",
+            "source_urls",
+            "cast",
+            "is_no_material_update",
+        )
+    ):
+        return {}
+    metadata: dict[str, Any] = {}
+
+    program_format = str(value.get("program_format") or "")
+    if program_format in _PROGRAM_FORMATS:
+        metadata["program_format"] = program_format
+    outcome_noun = str(value.get("outcome_noun") or "")
+    if outcome_noun in _PROGRAM_OUTCOME_NOUNS:
+        metadata["outcome_noun"] = outcome_noun
+
+    for key in ("show_name", "premise", "audience", "tone", "episode_title"):
+        text = _safe_public_text(value.get(key))
+        if text:
+            metadata[key] = text
+    for key in ("analysis_allowed", "target_duration_guaranteed", "is_no_material_update"):
+        if key in value:
+            metadata[key] = bool(value.get(key))
+    for key in ("source_count", "candidate_count", "included_count", "omitted_count"):
+        number = _public_non_negative_int(value.get(key))
+        if number is not None:
+            metadata[key] = number
+    for key in ("target_duration_minutes", "estimated_duration_minutes"):
+        number = _public_non_negative_float(value.get(key))
+        if number is not None:
+            metadata[key] = number
+
+    raw_source_ids = value.get("source_ids")
+    if isinstance(raw_source_ids, list):
+        source_ids: list[Any] = []
+        for source_id in raw_source_ids[:5000]:
+            safe_id = source_id if isinstance(source_id, (int, float)) else _safe_public_text(source_id, max_chars=100)
+            if safe_id not in (None, "") and safe_id not in source_ids:
+                source_ids.append(safe_id)
+        metadata["source_ids"] = source_ids
+
+    raw_source_urls = value.get("source_urls")
+    if isinstance(raw_source_urls, list):
+        source_urls: list[str] = []
+        for raw_url in raw_source_urls[:5000]:
+            url = safe_public_source_url(raw_url)
+            if url and url not in source_urls:
+                source_urls.append(url)
+        metadata["source_urls"] = source_urls
+
+    raw_show_notes = value.get("show_notes")
+    raw_sources = raw_show_notes.get("sources") if isinstance(raw_show_notes, Mapping) else []
+    sources: list[dict[str, Any]] = []
+    if isinstance(raw_sources, list):
+        for raw_source in raw_sources[:5000]:
+            if not isinstance(raw_source, Mapping):
+                continue
+            source: dict[str, Any] = {}
+            for key in ("item_id", "source_id"):
+                raw_id = raw_source.get(key)
+                safe_id = raw_id if isinstance(raw_id, (int, float)) else _safe_public_text(raw_id, max_chars=100)
+                if safe_id not in (None, ""):
+                    source[key] = safe_id
+            for key in ("title", "published_at"):
+                text = _safe_public_text(raw_source.get(key))
+                if text:
+                    source[key] = text
+            url = safe_public_source_url(raw_source.get("url"))
+            if url:
+                source["url"] = url
+            if source:
+                sources.append(source)
+    metadata["show_notes"] = {
+        "sources": sources,
+        "source_count": len(sources),
+        "speech_disclosure": (
+            "Synthetic AI-generated speech" if speech_ready else "Synthetic speech generation pending"
+        ),
+    }
+
+    raw_cast = value.get("cast")
+    cast: list[dict[str, str]] = []
+    if isinstance(raw_cast, list):
+        for raw_speaker in raw_cast[:4]:
+            if not isinstance(raw_speaker, Mapping):
+                continue
+            speaker = {
+                key: text
+                for key in ("label", "role", "synthetic_voice")
+                if (text := _safe_public_text(raw_speaker.get(key), max_chars=200))
+            }
+            if speaker:
+                cast.append(speaker)
+    metadata["cast"] = cast
+    metadata["ai_generated_speech"] = speech_ready
+    metadata["speech_disclosure"] = (
+        "Synthetic AI-generated speech" if speech_ready else "Synthetic speech generation pending"
+    )
+    return metadata
 
 
 def artifacts_base_dir() -> Path:

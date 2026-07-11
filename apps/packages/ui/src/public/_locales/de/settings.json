@@ -3391,5 +3391,74 @@
   },
   "dataManagement_navTitle": {
     "message": "Datenverwaltung"
+  },
+  "navigation_setupRecovery": {
+    "message": "Einrichtung & Wiederherstellung"
+  },
+  "navigation_preferencesWorkflow": {
+    "message": "Einstellungen & Arbeitsablauf"
+  },
+  "navigation_dataAdmin": {
+    "message": "Daten & Administration"
+  },
+  "preferencesSettings_navTitle": {
+    "message": "Einstellungen"
+  },
+  "preferencesSettings_title": {
+    "message": "Allgemeine Einstellungen"
+  },
+  "setupRecovery_title": {
+    "message": "Einrichtung & Wiederherstellung"
+  },
+  "quickIngestSettings_ocrDefaults_title": {
+    "message": "OCR-Standards"
+  },
+  "quickIngestSettings_ocrDefaults_description": {
+    "message": "Wird von Aufnahmeabläufen verwendet, die Text aus Bildern oder gescannten Dokumenten extrahieren."
+  },
+  "sidepanelSettings_shortcuts_title": {
+    "message": "Einstellungsverknüpfungen"
+  },
+  "sidepanelSettings_shortcuts_description": {
+    "message": "Springen Sie zur vollständigen Einstellungsseite, die diese Änderung verwaltet."
+  },
+  "sidepanelSettings_shortcuts_setupRecovery_label": {
+    "message": "Einrichtung & Wiederherstellung"
+  },
+  "sidepanelSettings_shortcuts_setupRecovery_description": {
+    "message": "Verbindung, Authentifizierung, Anbieterschlüssel, Modelle und Diagnosen."
+  },
+  "sidepanelSettings_shortcuts_preferences_label": {
+    "message": "Einstellungen"
+  },
+  "sidepanelSettings_shortcuts_preferences_description": {
+    "message": "Sprache, Benachrichtigungen, Persona, Tutorials und Websuche."
+  },
+  "sidepanelSettings_shortcuts_ui_label": {
+    "message": "UI-Anpassung"
+  },
+  "sidepanelSettings_shortcuts_ui_description": {
+    "message": "Design, Verknüpfungen, Anzeigevorgaben und visuelles Verhalten."
+  },
+  "sidepanelSettings_shortcuts_dataAdmin_label": {
+    "message": "Daten & Administration"
+  },
+  "sidepanelSettings_shortcuts_dataAdmin_description": {
+    "message": "Datenverwaltung, Moderation, Evaluationen und Admin-Werkzeuge."
+  },
+  "sidepanelSettings_shortcuts_serverAuth_label": {
+    "message": "Server & Authentifizierung"
+  },
+  "sidepanelSettings_shortcuts_serverAuth_description": {
+    "message": "Server-URL oder API-Schlüssel ändern."
+  },
+  "sidepanelSettings_shortcuts_health_label": {
+    "message": "Vollständige Diagnose"
+  },
+  "sidepanelSettings_shortcuts_health_description": {
+    "message": "Detaillierte Server- und Subsystemprüfungen öffnen."
+  },
+  "sidepanelSettings_local_title": {
+    "message": "Sidepanel-Verhalten"
   }
 }

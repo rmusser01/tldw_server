@@ -243,8 +243,8 @@ Supported multipart fields:
   },
   "conflict_resolution": "skip",
   "prefix_imported": false,
-  "import_media": null,
-  "import_embeddings": null,
+  "import_media": false,
+  "import_embeddings": false,
   "async_mode": false
 }
 ```

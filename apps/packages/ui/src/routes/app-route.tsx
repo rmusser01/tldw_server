@@ -71,11 +71,29 @@ const SIDEPANEL_STARTUP_NAMESPACES: Namespace[] = [
   "option"
 ]
 
+type ExtensionRuntimeMessage = {
+  from?: string
+  type?: string
+  text?: string
+  payload?: unknown
+}
+
+type ExtensionRuntime = {
+  onMessage?: {
+    addListener: (
+      listener: (message: ExtensionRuntimeMessage) => void | Promise<{ handled: true }>
+    ) => void
+    removeListener?: (
+      listener: (message: ExtensionRuntimeMessage) => void | Promise<{ handled: true }>
+    ) => void
+  }
+}
+
 const addNamespaces = (target: Set<Namespace>, namespaces: Namespace[]) => {
   namespaces.forEach((namespace) => target.add(namespace))
 }
 
-const getRouteBootstrapNamespaces = (
+export const getRouteBootstrapNamespaces = (
   kind: RouteKind,
   pathname: string
 ): Namespace[] => {
@@ -107,6 +125,9 @@ const getRouteBootstrapNamespaces = (
     }
     if (pathname === "/evaluations") {
       addNamespaces(namespaces, ["evaluations"])
+    }
+    if (pathname === "/watchlists" || pathname.startsWith("/watchlists/")) {
+      addNamespaces(namespaces, ["watchlists"])
     }
     if (pathname === "/audio-studio" || pathname === "/audiobook-studio") {
       addNamespaces(namespaces, ["audiobook"])
@@ -355,7 +376,10 @@ export const RouteShell = ({
   useAutoButtonTitles()
   const location = useLocation()
   const { i18n } = useTranslation()
-  const routeNamespaces = getRouteBootstrapNamespaces(kind, location.pathname)
+  const routeNamespaces = React.useMemo(
+    () => getRouteBootstrapNamespaces(kind, location.pathname),
+    [kind, location.pathname]
+  )
   const [routeNamespacesReady, setRouteNamespacesReady] = React.useState(false)
   const activeLanguage = i18n.resolvedLanguage || i18n.language || "en"
   const setChatSidebarCollapsed = useLayoutUiStore(
@@ -378,20 +402,18 @@ export const RouteShell = ({
   }, [navigate])
   React.useEffect(() => {
     if (kind !== "sidepanel") return
+    const extensionGlobal = globalThis as typeof globalThis & {
+      browser?: { runtime?: ExtensionRuntime }
+      chrome?: { runtime?: ExtensionRuntime }
+    }
     const runtime =
-      (globalThis as any)?.browser?.runtime ||
-      (globalThis as any)?.chrome?.runtime
+      extensionGlobal.browser?.runtime || extensionGlobal.chrome?.runtime
     const onMessage = runtime?.onMessage
     if (!onMessage || typeof onMessage.addListener !== "function") {
       return
     }
 
-    const listener = (message: {
-      from?: string
-      type?: string
-      text?: string
-      payload?: unknown
-    }) => {
+    const listener = (message: ExtensionRuntimeMessage) => {
       if (message?.from !== "background") return
       if (message?.type === COMPANION_CAPTURE_MESSAGE_TYPE) {
         const payload =
@@ -463,7 +485,7 @@ export const RouteShell = ({
     return () => {
       cancelled = true
     }
-  }, [activeLanguage, kind, location.pathname])
+  }, [activeLanguage, routeNamespaces])
   React.useEffect(() => {
     setChatSidebarCollapsed(true)
     void setSetting(HEADER_SHORTCUTS_EXPANDED_SETTING, false).catch(() => {

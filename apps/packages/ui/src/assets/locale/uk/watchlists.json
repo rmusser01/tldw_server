@@ -1,4 +1,12 @@
 {
+  "accessibilityHardening": {
+    "source": { "toggleActive": "Перемкнути активність: {{name}}", "checkNow": "Перевірити зараз: {{name}}", "openWebsite": "Відкрити сайт джерела: {{name}}", "openHealth": "Відкрити стан джерела: {{name}}", "edit": "Змінити джерело: {{name}}", "delete": "Видалити джерело: {{name}}" },
+    "item": { "open": "Відкрити оновлення: {{title}}", "select": "Вибрати оновлення: {{title}}", "description": "{{state}}. Джерело: {{source}}." },
+    "output": { "openNewTab": "Відкрити {{title}} у новій вкладці", "chat": "Обговорити {{title}}", "download": "Завантажити {{title}}", "close": "Закрити попередній перегляд: {{title}}" },
+    "health": { "show": "Показати відомості про стан списків спостереження", "hide": "Сховати відомості про стан списків спостереження", "refresh": "Оновити стан списків спостереження", "settings": "Відкрити налаштування списків спостереження" },
+    "delivery": { "email": "Коли ввімкнено, надсилати кожен звіт налаштованим одержувачам.", "chatbook": "Коли ввімкнено, публікувати кожен звіт у Chatbook." },
+    "help": { "open": "Відкрити довідку списків спостереження", "title": "Довідка списків спостереження" }
+  },
   "items": {
     "queuedForBriefing": "У черзі на брифінг",
     "includeInNextBriefing": "Додати до наступного брифінгу",
@@ -17,5 +25,473 @@
       "generateError": "Не вдалося створити звіт з елементів у черзі.",
       "generateReport": "Створити звіт із черги"
     }
+  },
+  "setupWizard": {
+    "title": "Створити список спостереження",
+    "containerTitle": "Створити список спостереження",
+    "containerHelp": "Спочатку створіть контейнер проєкту. Джерела, періодичність, зведення, доставка й тест налаштовуються в одному процесі.",
+    "actions": {
+      "continue": "Перейти до джерел"
+    },
+    "sections": {
+      "preset": "Профіль галузі"
+    },
+    "fields": {
+      "name": "Назва списку спостереження",
+      "objective": "Мета"
+    },
+    "validation": {
+      "nameRequired": "Додайте назву списку спостереження."
+    },
+    "errors": {
+      "createFailed": "Не вдалося створити список спостереження."
+    },
+    "presets": {
+      "cti_osint": {
+        "label": "CTI / OSINT",
+        "description": "Відстежуйте вразливості, шкідливі програми, суб’єктів, рекомендації та зміни джерел."
+      },
+      "news": {
+        "label": "Новини",
+        "description": "Відстежуйте події, що розвиваються, людей, організації та різноманітність джерел."
+      },
+      "general": {
+        "label": "Загальний",
+        "description": "Відстежуйте тему та збирайте оновлення для перегляду."
+      },
+      "blank": {
+        "label": "Порожній",
+        "description": "Почніть із порожнього списку спостереження та налаштуйте деталі самостійно."
+      }
+    },
+    "startModes": {
+      "sources": {
+        "label": "Почати з джерел",
+        "description": "Створіть список спостереження з початковими каналами й необов’язковим монітором."
+      },
+      "topic": {
+        "label": "Почати з теми",
+        "description": "Спершу створіть мету списку, а потім додайте канали до початку збирання."
+      },
+      "report_goal": {
+        "label": "Почати з мети звіту",
+        "description": "Спершу визначте мету зведення, а потім під’єднайте джерела й шаблони."
+      }
+    },
+    "boundaries": {
+      "alerts": "Сповіщення про збіг вмісту налаштовуються пізніше. Тут визначаються список спостереження та початкове охоплення збирання."
+    }
+  },
+  "overview": {
+    "pipelineSetup": {
+      "title": "Налаштувати зведення",
+      "open": "Налаштувати зведення",
+      "progress": "Кроки налаштування зведення",
+      "steps": {
+        "sources": "Джерела",
+        "cadence": "Періодичність",
+        "briefing": "Зведення",
+        "delivery": "Доставка",
+        "test": "Тест"
+      },
+      "actions": {
+        "next": "Перейти до кроку «{{step}}»"
+      },
+      "source": {
+        "existing": "Використати наявні джерела",
+        "new": "Додати нове джерело",
+        "fallback": "Джерело {{id}}"
+      },
+      "sources": {
+        "help": "Виберіть наявні джерела або додайте нове, а потім перевірте з’єднання."
+      },
+      "sourcesLoading": "Завантаження джерел...",
+      "sourcesError": "Не вдалося завантажити канали для налаштування.",
+      "sourceTest": {
+        "action": "Перевірити джерело",
+        "ready": "Джерело готове.",
+        "cancelled": "Перевірку джерела скасовано.",
+        "failed": "Не вдалося перевірити джерело. {{message}}",
+        "summary": "готово: {{ready}}, відфільтровано: {{filtered}}",
+        "sample": "Приклади матеріалів",
+        "readyItem": "Готово",
+        "filteredItem": "Відфільтровано",
+        "untitled": "Матеріал без назви"
+      },
+      "fields": {
+        "sources": "Джерела",
+        "sourceName": "Назва джерела",
+        "sourceUrl": "URL джерела",
+        "monitorName": "Назва монітора",
+        "schedule": "Розклад",
+        "timezone": "Часовий пояс",
+        "intervalEvery": "Кожні",
+        "intervalUnit": "Одиниця інтервалу",
+        "weekday": "День тижня",
+        "hour": "Година",
+        "minute": "Хвилина",
+        "cronExpression": "Вираз cron",
+        "showName": "Назва програми",
+        "premise": "Концепція програми",
+        "includeAudio": "Аудіо",
+        "audioHelp": "Додати відтворювану озвучену версію.",
+        "audioMinutes": "Цільова тривалість у хвилинах",
+        "speakerCount": "Кількість учасників",
+        "template": "Шаблон звіту",
+        "audioProvider": "Інший постачальник аудіо",
+        "audioModel": "Інша модель аудіо",
+        "customInstructions": "Власні редакційні вказівки",
+        "emailDelivery": "Електронна пошта",
+        "emailRecipients": "Одержувачі листів",
+        "chatbookDelivery": "Chatbook",
+        "chatbookTitle": "Назва Chatbook"
+      },
+      "schedule": {
+        "manual": "Лише вручну",
+        "interval": "Кожні N годин або хвилин",
+        "daily": "Щодня",
+        "weekdays": "У будні",
+        "weekly": "Щотижня",
+        "advanced": "Розширений cron"
+      },
+      "intervalUnits": {
+        "hours": "Години",
+        "minutes": "Хвилини"
+      },
+      "weekdays": {
+        "monday": "Понеділок",
+        "tuesday": "Вівторок",
+        "wednesday": "Середа",
+        "thursday": "Четвер",
+        "friday": "П’ятниця",
+        "saturday": "Субота",
+        "sunday": "Неділя"
+      },
+      "advancedCron": "Розширений cron",
+      "nextOccurrence": "Наступний запуск",
+      "manualOccurrence": "Лише вручну",
+      "nextOccurrencePending": "Збережіть допустимий розклад, щоб обчислити точний час.",
+      "schedulePreview": {
+        "loading": "Обчислюється точний розклад…",
+        "error": "Не вдалося обчислити точний розклад. Перевірте вираз cron і часовий пояс."
+      },
+      "briefing": {
+        "question": "Що ви створюєте?",
+        "help": "Виберіть редакційний формат. Усі варіанти спираються на вибрані джерела.",
+        "advanced": "Розширені параметри зведення"
+      },
+      "formats": {
+        "concise_briefing": "Стисле зведення",
+        "solo_update": "Одиночне оновлення",
+        "host_discussion": "Обговорення ведучих",
+        "sportscast": "Спортивний випуск",
+        "culture_roundtable": "Культурний круглий стіл",
+        "custom": "Власний формат"
+      },
+      "speaker": {
+        "defaultLabel": "Учасник {{index}}",
+        "defaultRole": "Ведучий",
+        "labelField": "Мітка учасника {{index}}",
+        "roleField": "Роль учасника {{index}}",
+        "voiceField": "Голос учасника {{index}}",
+        "personaField": "Образ учасника {{index}}"
+      },
+      "preview": {
+        "generate": "Попередній перегляд звіту",
+        "diagnostics": "Діагностика перегляду",
+        "context": "Запуск перегляду: {{runId}}",
+        "noRunContext": "Успішно запустіть монітор перед попереднім переглядом цього звіту.",
+        "templateRequired": "Виберіть шаблон перед створенням перегляду.",
+        "templateEmpty": "Вибраний шаблон порожній.",
+        "emptyResult": "Попередній перегляд не повернув готового вмісту.",
+        "error": "Не вдалося створити попередній перегляд."
+      },
+      "delivery": {
+        "help": "Звіти завжди включено. Зовнішня доставка очікує готовності вибраних артефактів.",
+        "reports": "Звіти",
+        "required": "Обов’язкове сховище",
+        "alwaysOn": "Завжди ввімкнено"
+      },
+      "receipt": {
+        "labels": {
+          "schedule": "Розклад",
+          "sources": "Джерела",
+          "artifacts": "Артефакти",
+          "format": "Формат",
+          "showName": "Назва програми",
+          "cast": "Учасники",
+          "duration": "Цільова тривалість",
+          "destinations": "Призначення"
+        },
+        "schedule": {
+          "manual": "Лише вручну",
+          "scheduled": "{{date}} ({{timezone}})"
+        },
+        "sources": "Джерел: {{count}}",
+        "sources_one": "{{count}} джерело",
+        "sources_few": "{{count}} джерела",
+        "sources_many": "{{count}} джерел",
+        "sources_other": "{{count}} джерела",
+        "artifacts": {
+          "textReport": "текстовий звіт",
+          "showNotes": "нотатки програми",
+          "audio": "аудіо"
+        },
+        "formats": {
+          "concise_briefing": "стисле зведення",
+          "solo_update": "одиночне оновлення",
+          "host_discussion": "обговорення ведучих",
+          "sportscast": "спортивний випуск",
+          "culture_roundtable": "культурний круглий стіл",
+          "custom": "власна програма"
+        },
+        "speakerStyle": {
+          "1": "один ведучий",
+          "2": "два ведучі",
+          "3": "три ведучі",
+          "4": "чотири ведучі"
+        },
+        "programWithSpeakers": "{{format}}, {{speakers}}",
+        "cast": "Учасників: {{count}}",
+        "cast_one": "{{count}} учасник",
+        "cast_few": "{{count}} учасники",
+        "cast_many": "{{count}} учасників",
+        "cast_other": "{{count}} учасника",
+        "duration": "ціль — {{count}} хв.",
+        "duration_one": "ціль — {{count}} хвилина",
+        "duration_few": "ціль — {{count}} хвилини",
+        "duration_many": "ціль — {{count}} хвилин",
+        "duration_other": "ціль — {{count}} хвилини",
+        "destinations": {
+          "email": "Пошта: {{recipients}}",
+          "chatbook": "Chatbook: {{title}}"
+        },
+        "untitledChatbook": "Без назви",
+        "dstChange": "Наступний запуск використовує {{timezoneName}} після переходу на літній або зимовий час: {{date}}."
+      },
+      "test": {
+        "providerDisclosure": "Тести використовують налаштованих постачальників LLM і синтезу мовлення. Зразок обмежено 60 секундами, а повний тест використовує цільову тривалість.",
+        "textProviderDisclosure": "Тести використовують налаштованого постачальника LLM. У текстових тестах синтез мовлення не використовується.",
+        "receipt": "Підсумок активації",
+        "manualReceipt": "Це зведення запускається вручну, зберігає вибрані артефакти у Звітах і не звертається до зовнішніх призначень, доки ви не виберете Надіслати тест.",
+        "scheduledReceipt": "{{schedule}}: зібрати оновлення з {{sources}}, створити {{artifacts}} як {{program}}{{duration}}, а потім зберегти й доставити їх до {{destinations}}.",
+        "audioTestRequired": "Перед активацією успішно створіть аудіозразок або повний тест.",
+        "progress": "Перебіг тесту",
+        "stages": {
+          "collection": "Зібрати джерела",
+          "selection": "Вибрати оновлення",
+          "text": "Створити звіт",
+          "audio": "Створити аудіо",
+          "persistence": "Зберегти у Звітах",
+          "audioScript": "Скласти аудіосценарій",
+          "audioScriptPersistence": "Зберегти аудіосценарій",
+          "audioPersistence": "Зберегти аудіо у Звітах",
+          "delivery": "Перевірити тестову доставку",
+          "deliveryAdapter": "Доставити через {{adapter}}",
+          "unknown": "Етап {{stage}}"
+        },
+        "sample": "Створити 60-секундний зразок",
+        "full": "Створити повний тестовий випуск",
+        "text": "Створити тестовий звіт",
+        "send": "Надіслати тест",
+        "activate": "Активувати розклад",
+        "ready": "Тест завершено. Зведення готове. Чернетка залишатиметься неактивною, доки ви не активуєте її розклад.",
+        "running": "Запуск {{runId}} досі виконується: {{stage}}. Можна закрити налаштування й стежити за ним в Огляді.",
+        "failedStage": "Етап «{{stage}}» завершився помилкою. Відкрийте запуск {{runId}} і повторіть цей етап.",
+        "failedWithCode": "Етап «{{stage}}» завершився помилкою ({{code}}). Відкрийте запуск {{runId}} і повторіть цей етап.",
+        "cancelledStage": "Етап «{{stage}}» скасовано. Чернетку збережено.",
+        "cancelledWithCode": "Етап «{{stage}}» скасовано ({{code}}). Чернетку збережено.",
+        "cancelled": "Тест скасовано. Чернетку збережено.",
+        "failed": "Тест завершився помилкою. Чернетку збережено. {{message}}",
+        "status": {
+          "not_started": "Не розпочато",
+          "queued": "У черзі",
+          "running": "Виконується",
+          "ready": "Готово",
+          "failed": "Помилка",
+          "skipped": "Пропущено",
+          "cancelled": "Скасовано"
+        }
+      },
+      "activate": {
+        "ready": "Розклад активовано.",
+        "failed": "Не вдалося активувати розклад. Чернетку збережено. {{message}}"
+      },
+      "validation": {
+        "sourcesRequired": "Виберіть принаймні одне джерело.",
+        "sourceNameRequired": "Введіть назву джерела.",
+        "sourceUrlInvalid": "Введіть допустиму HTTP- або HTTPS-адресу джерела.",
+        "monitorNameRequired": "Введіть назву монітора.",
+        "timezoneInvalid": "Введіть допустимий часовий пояс IANA.",
+        "intervalInvalid": "Введіть підтримуваний інтервал розкладу.",
+        "hourInvalid": "Введіть годину від 0 до 23.",
+        "minuteInvalid": "Введіть хвилину від 0 до 59.",
+        "cronInvalid": "Введіть допустимий вираз cron із п’яти полів.",
+        "cronTooFrequent": "Виберіть розклад з інтервалом щонайменше п’ять хвилин.",
+        "templateRequired": "Введіть шаблон звіту.",
+        "castSizeInvalid": "Виберіть від одного до чотирьох учасників.",
+        "castIdsInvalid": "Кожному учаснику потрібна унікальна ідентичність.",
+        "castVoicesRequired": "Виберіть голос для кожного учасника.",
+        "audioMinutesInvalid": "Введіть тривалість від 1 до 60 хвилин.",
+        "emailInvalid": "Введіть принаймні одну допустиму адресу електронної пошти."
+      },
+      "validationError": "Перевірте виділені поля перед продовженням."
+    },
+    "latest": {
+      "heading": {
+        "briefing": "Останній дайджест",
+        "episode": "Останній епізод"
+      },
+      "empty": {
+        "scheduled": "дайджест: {{date}}.",
+        "manual": "Не розпочато. Перевірити зараз."
+      },
+      "generatedAt": "Створено {{date}}",
+      "untitled": "дайджест {{runId}}",
+      "artifacts": "звіт / аудіо",
+      "audio": "аудіо",
+      "audioFailed": "аудіо помилка",
+      "ready": "Готово",
+      "saved": "Збережено",
+      "waiting": "Очікування",
+      "script": "аудіо звіт",
+      "stageWithStatus": "{{stage}}: {{status}}",
+      "noUpdates": "Відповідних оновлень не знайдено. Збережено статусний матеріал «{{noun}}».",
+      "nextRun": "Наступний запуск: {{date}}",
+      "nextRunRelative": "Наступний запуск: {{relative}}",
+      "counts": "дайджест: Включено, Непрочитано, Нове",
+      "count": {
+        "included": "Включено {{count}}",
+        "unread": "Непрочитано {{count}}",
+        "new": "Нове {{count}}"
+      },
+      "provenance": {
+        "sources": "{{count}} відстежувані джерела",
+        "sources_zero": "{{count}} відстежувані джерела",
+        "sources_one": "{{count}} відстежуване джерело",
+        "sources_two": "{{count}} відстежувані джерела",
+        "sources_few": "{{count}} відстежувані джерела",
+        "sources_many": "{{count}} відстежувані джерела",
+        "sources_other": "{{count}} відстежувані джерела"
+      },
+      "delivery": {
+        "reports": "Усі звіти",
+        "retryAria": "Повторити {{adapter}}: {{name}}",
+        "retryUnknownAria": "Результат невідомий. Повторити {{adapter}}: {{name}}",
+        "reviewRetry": "Перевірити й повторити",
+        "unknownConfirmation": "Провайдер не підтвердив доставку через {{adapter}}. Повторна спроба може надіслати дублікат. Перевірте місце призначення й продовжуйте, лише якщо цей ризик прийнятний. ({{destination}})",
+        "chatbookDestination": "Chatbook",
+        "confirmRetry": "Повторити доставку",
+        "confirmRetryAria": "Повторити {{adapter}} доставку",
+        "recipientCount": "{{count}} одержувачів",
+        "recipientCount_zero": "{{count}} одержувачів",
+        "recipientCount_one": "{{count}} одержувачів",
+        "recipientCount_two": "{{count}} одержувачів",
+        "recipientCount_few": "{{count}} одержувачів",
+        "recipientCount_many": "{{count}} одержувачів",
+        "recipientCount_other": "{{count}} одержувачів",
+        "reviewAcknowledgement": "Я перевірив місце призначення та приймаю ризик повторної доставки.",
+        "reviewSettings": "Перевірити налаштування",
+        "reviewTitle": "Перевірити {{adapter}} доставку"
+      },
+      "playback": {
+        "region": "аудіо: {{name}}",
+        "playAria": "Відтворити {{name}}",
+        "pauseAria": "Призупинити {{name}}",
+        "resumeAria": "Продовжити {{name}}",
+        "seekAria": "аудіо: {{name}}",
+        "loading": "Завантаження аудіо",
+        "error": "аудіо помилка. Відкрити звіт / Створити знову аудіо.",
+        "play": "Відтворити",
+        "pause": "Пауза",
+        "resume": "Продовжити",
+        "accessError": "аудіо: Помилка доступу. Перевірте вхід і з’єднання із сервером.",
+        "missing": "аудіо більше недоступний."
+      },
+      "actions": {
+        "label": "Останній дайджест",
+        "openReport": "Відкрити {{report}}",
+        "openReportAria": "Відкрити {{report}}: {{name}}",
+        "regenerateAudio": "Створити знову аудіо",
+        "regenerateAudioAria": "Створити знову {{style}} {{noun}} аудіо: {{name}}",
+        "retry": "Повторити",
+        "retrySaveAria": "Повторити збережено звіт: {{name}}",
+        "retryTextAria": "Повторити звіт: {{name}}",
+        "retryStage": "Повторити: {{stage}}",
+        "inspect": "Перевірити запуск",
+        "inspectAria": "Перевірити запуск {{runId}}: {{name}}",
+        "viewReports": "Усі звіти",
+        "testNow": "Перевірити зараз",
+        "downloadAudio": "Завантажити аудіо",
+        "downloadAudioAria": "Завантажити аудіо: {{name}}",
+        "retryExactAria": "Повторити {{stage}}: {{name}}",
+        "reviewScript": "Перевірити аудіо звіт",
+        "reviewScriptAria": "Перевірити аудіо звіт: {{name}}"
+      },
+      "announcements": {
+        "blockingFailure": "{{name}} помилка. Перевірити запуск {{runId}}.",
+        "delivered": "{{name}}: доставлено.",
+        "nextRunUpdated": "{{name}}: наступний запуск.",
+        "partialAudioFailure": "{{name}}: нотатки до випуску готово, аудіо помилка.",
+        "readyText": "{{name}}: звіт готово.",
+        "readyWithAudio": "{{name}}: Готово. аудіо / нотатки до випуску.",
+        "stageProgress": "{{name}}: {{stage}} {{status}}.",
+        "testQueued": "Перевірити зараз: у черзі."
+      },
+      "retryError": "Повторити помилка. Перевірити запуск.",
+      "regenerateError": "Створити знову аудіо: помилка.",
+      "testError": "Перевірити зараз: помилка.",
+      "status": {
+        "ready": "Готово",
+        "failed": "Помилка",
+        "saved": "Збережено",
+        "waiting": "Очікування",
+        "running": "Виконується",
+        "queued": "У черзі",
+        "notStarted": "Не розпочато",
+        "notSelected": "Не вибрано",
+        "cancelled": "Скасовано",
+        "delivered": "Доставлено",
+        "unknown": "Результат невідомий",
+        "sending": "Надсилається",
+        "stale": "Застаріло",
+        "superseded": "Замінено",
+        "unavailable": "Недоступно",
+        "partial": "Частково"
+      },
+      "stages": {
+        "renderText": "звіт",
+        "persistText": "Збережено звіт",
+        "composeScript": "аудіо звіт",
+        "persistScript": "Збережено аудіо звіт",
+        "generateAudio": "аудіо",
+        "persistAudio": "Збережено аудіо"
+      },
+      "nouns": {
+        "briefing": "дайджест",
+        "episode": "епізод",
+        "report": "звіт",
+        "showNotes": "нотатки до випуску"
+      },
+      "scriptAccessError": "аудіо звіт: Помилка доступу. Перевірте вхід і з’єднання із сервером.",
+      "scriptLoading": "Завантаження аудіо звіт",
+      "scriptMissing": "аудіо звіт більше недоступний.",
+      "recovery": {
+        "renderText": "Створення звіт",
+        "persistText": "Збереження звіт",
+        "composeScript": "Підготовка аудіо звіт",
+        "persistScript": "Збереження аудіо звіт",
+        "generateAudio": "Створення аудіо",
+        "persistAudio": "Збереження аудіо"
+      }
+    }
+  },
+  "outputs": {
+    "openInNewTabAria": "Відкрити в новій вкладці: {{title}}",
+    "chatAboutAria": "Обговорити: {{title}}",
+    "downloadAria": "Завантажити: {{title}}",
+    "artifactMissing": "більше недоступний.",
+    "artifactAuthError": "Доступ заборонено. Перевірте вхід.",
+    "artifactAccessError": "Помилка доступу. Перевірте вхід і з’єднання із сервером."
   }
 }

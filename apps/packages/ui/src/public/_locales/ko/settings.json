@@ -3376,5 +3376,74 @@
   },
   "dataManagement_navTitle": {
     "message": "데이터 관리"
+  },
+  "navigation_setupRecovery": {
+    "message": "설정 및 복구"
+  },
+  "navigation_preferencesWorkflow": {
+    "message": "기본 설정 및 워크플로"
+  },
+  "navigation_dataAdmin": {
+    "message": "데이터 및 관리"
+  },
+  "preferencesSettings_navTitle": {
+    "message": "기본 설정"
+  },
+  "preferencesSettings_title": {
+    "message": "일반 기본 설정"
+  },
+  "setupRecovery_title": {
+    "message": "설정 및 복구"
+  },
+  "quickIngestSettings_ocrDefaults_title": {
+    "message": "OCR 기본값"
+  },
+  "quickIngestSettings_ocrDefaults_description": {
+    "message": "이미지 또는 스캔 문서에서 텍스트를 추출하는 수집 흐름에 사용됩니다."
+  },
+  "sidepanelSettings_shortcuts_title": {
+    "message": "설정 바로가기"
+  },
+  "sidepanelSettings_shortcuts_description": {
+    "message": "변경을 관리하는 전체 설정 페이지로 이동합니다."
+  },
+  "sidepanelSettings_shortcuts_setupRecovery_label": {
+    "message": "설정 및 복구"
+  },
+  "sidepanelSettings_shortcuts_setupRecovery_description": {
+    "message": "연결, 인증, 공급자 키, 모델 및 진단."
+  },
+  "sidepanelSettings_shortcuts_preferences_label": {
+    "message": "기본 설정"
+  },
+  "sidepanelSettings_shortcuts_preferences_description": {
+    "message": "언어, 알림, 페르소나, 튜토리얼 및 웹 검색."
+  },
+  "sidepanelSettings_shortcuts_ui_label": {
+    "message": "UI 사용자 지정"
+  },
+  "sidepanelSettings_shortcuts_ui_description": {
+    "message": "테마, 바로가기, 표시 기본값 및 시각 동작."
+  },
+  "sidepanelSettings_shortcuts_dataAdmin_label": {
+    "message": "데이터 및 관리"
+  },
+  "sidepanelSettings_shortcuts_dataAdmin_description": {
+    "message": "데이터 관리, 중재, 평가 및 관리자 도구."
+  },
+  "sidepanelSettings_shortcuts_serverAuth_label": {
+    "message": "서버 및 인증"
+  },
+  "sidepanelSettings_shortcuts_serverAuth_description": {
+    "message": "서버 URL 또는 API 키를 변경합니다."
+  },
+  "sidepanelSettings_shortcuts_health_label": {
+    "message": "전체 진단"
+  },
+  "sidepanelSettings_shortcuts_health_description": {
+    "message": "자세한 서버 및 하위 시스템 검사를 엽니다."
+  },
+  "sidepanelSettings_local_title": {
+    "message": "사이드패널 동작"
   }
 }

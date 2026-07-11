@@ -1,4 +1,12 @@
 {
+  "accessibilityHardening": {
+    "source": { "toggleActive": "Переключить активность: {{name}}", "checkNow": "Проверить сейчас: {{name}}", "openWebsite": "Открыть сайт источника: {{name}}", "openHealth": "Открыть состояние источника: {{name}}", "edit": "Изменить источник: {{name}}", "delete": "Удалить источник: {{name}}" },
+    "item": { "open": "Открыть обновление: {{title}}", "select": "Выбрать обновление: {{title}}", "description": "{{state}}. Источник: {{source}}." },
+    "output": { "openNewTab": "Открыть {{title}} в новой вкладке", "chat": "Обсудить {{title}}", "download": "Скачать {{title}}", "close": "Закрыть предпросмотр: {{title}}" },
+    "health": { "show": "Показать сведения о состоянии списков наблюдения", "hide": "Скрыть сведения о состоянии списков наблюдения", "refresh": "Обновить состояние списков наблюдения", "settings": "Открыть настройки списков наблюдения" },
+    "delivery": { "email": "При включении отправлять каждый отчёт настроенным получателям.", "chatbook": "При включении публиковать каждый отчёт в Chatbook." },
+    "help": { "open": "Открыть справку по спискам наблюдения", "title": "Справка по спискам наблюдения" }
+  },
   "items": {
     "queuedForBriefing": "В очереди на брифинг",
     "includeInNextBriefing": "Добавить в следующий брифинг",
@@ -17,5 +25,473 @@
       "generateError": "Не удалось создать отчет из элементов в очереди.",
       "generateReport": "Создать отчет из очереди"
     }
+  },
+  "setupWizard": {
+    "title": "Создать список наблюдения",
+    "containerTitle": "Создать список наблюдения",
+    "containerHelp": "Сначала создайте контейнер проекта. Источники, периодичность, сводка, доставка и тест настраиваются в одном процессе.",
+    "actions": {
+      "continue": "Перейти к источникам"
+    },
+    "sections": {
+      "preset": "Профиль области"
+    },
+    "fields": {
+      "name": "Название списка наблюдения",
+      "objective": "Цель"
+    },
+    "validation": {
+      "nameRequired": "Введите название списка наблюдения."
+    },
+    "errors": {
+      "createFailed": "Не удалось создать список наблюдения."
+    },
+    "presets": {
+      "cti_osint": {
+        "label": "CTI / OSINT",
+        "description": "Отслеживайте уязвимости, вредоносные программы, участников, рекомендации и изменения источников."
+      },
+      "news": {
+        "label": "Новости",
+        "description": "Отслеживайте развивающиеся события, людей, организации и разнообразие источников."
+      },
+      "general": {
+        "label": "Общий",
+        "description": "Отслеживайте тему и собирайте обновления для просмотра."
+      },
+      "blank": {
+        "label": "Пустой",
+        "description": "Начните с пустого списка наблюдения и настройте его самостоятельно."
+      }
+    },
+    "startModes": {
+      "sources": {
+        "label": "Начать с источников",
+        "description": "Создайте список наблюдения с начальными лентами и необязательным монитором."
+      },
+      "topic": {
+        "label": "Начать с темы",
+        "description": "Сначала задайте цель списка, затем добавьте ленты до начала сбора."
+      },
+      "report_goal": {
+        "label": "Начать с цели отчёта",
+        "description": "Сначала задайте цель сводки, затем подключите источники и шаблоны."
+      }
+    },
+    "boundaries": {
+      "alerts": "Оповещения о совпадениях содержимого настраиваются позже. Здесь определяется список наблюдения и начальный охват сбора."
+    }
+  },
+  "overview": {
+    "pipelineSetup": {
+      "title": "Настроить сводку",
+      "open": "Настроить сводку",
+      "progress": "Этапы настройки сводки",
+      "steps": {
+        "sources": "Источники",
+        "cadence": "Периодичность",
+        "briefing": "Сводка",
+        "delivery": "Доставка",
+        "test": "Тест"
+      },
+      "actions": {
+        "next": "Перейти к этапу «{{step}}»"
+      },
+      "source": {
+        "existing": "Использовать существующие источники",
+        "new": "Добавить новый источник",
+        "fallback": "Источник {{id}}"
+      },
+      "sources": {
+        "help": "Выберите существующие источники или добавьте новый, затем проверьте подключение."
+      },
+      "sourcesLoading": "Загрузка источников...",
+      "sourcesError": "Не удалось загрузить ленты для настройки.",
+      "sourceTest": {
+        "action": "Проверить источник",
+        "ready": "Источник готов.",
+        "cancelled": "Проверка источника отменена.",
+        "failed": "Не удалось проверить источник. {{message}}",
+        "summary": "готово: {{ready}}, отфильтровано: {{filtered}}",
+        "sample": "Примеры материалов",
+        "readyItem": "Готово",
+        "filteredItem": "Отфильтровано",
+        "untitled": "Материал без названия"
+      },
+      "fields": {
+        "sources": "Источники",
+        "sourceName": "Название источника",
+        "sourceUrl": "URL источника",
+        "monitorName": "Название монитора",
+        "schedule": "Расписание",
+        "timezone": "Часовой пояс",
+        "intervalEvery": "Каждые",
+        "intervalUnit": "Единица интервала",
+        "weekday": "День недели",
+        "hour": "Час",
+        "minute": "Минута",
+        "cronExpression": "Выражение cron",
+        "showName": "Название программы",
+        "premise": "Концепция программы",
+        "includeAudio": "Аудио",
+        "audioHelp": "Добавить воспроизводимую озвученную версию.",
+        "audioMinutes": "Целевая длительность в минутах",
+        "speakerCount": "Количество участников",
+        "template": "Шаблон отчёта",
+        "audioProvider": "Другой поставщик аудио",
+        "audioModel": "Другая модель аудио",
+        "customInstructions": "Пользовательские редакционные инструкции",
+        "emailDelivery": "Электронная почта",
+        "emailRecipients": "Получатели писем",
+        "chatbookDelivery": "Chatbook",
+        "chatbookTitle": "Название Chatbook"
+      },
+      "schedule": {
+        "manual": "Только вручную",
+        "interval": "Каждые N часов или минут",
+        "daily": "Ежедневно",
+        "weekdays": "По будням",
+        "weekly": "Еженедельно",
+        "advanced": "Расширенный cron"
+      },
+      "intervalUnits": {
+        "hours": "Часы",
+        "minutes": "Минуты"
+      },
+      "weekdays": {
+        "monday": "Понедельник",
+        "tuesday": "Вторник",
+        "wednesday": "Среда",
+        "thursday": "Четверг",
+        "friday": "Пятница",
+        "saturday": "Суббота",
+        "sunday": "Воскресенье"
+      },
+      "advancedCron": "Расширенный cron",
+      "nextOccurrence": "Следующий запуск",
+      "manualOccurrence": "Только вручную",
+      "nextOccurrencePending": "Сохраните допустимое расписание, чтобы вычислить точное время.",
+      "schedulePreview": {
+        "loading": "Вычисляется точное расписание…",
+        "error": "Не удалось вычислить точное расписание. Проверьте выражение cron и часовой пояс."
+      },
+      "briefing": {
+        "question": "Что вы создаёте?",
+        "help": "Выберите редакционный формат. Все варианты основаны на выбранных источниках.",
+        "advanced": "Расширенные настройки сводки"
+      },
+      "formats": {
+        "concise_briefing": "Краткая сводка",
+        "solo_update": "Сольное обновление",
+        "host_discussion": "Обсуждение ведущих",
+        "sportscast": "Спортивный выпуск",
+        "culture_roundtable": "Культурный круглый стол",
+        "custom": "Свой формат"
+      },
+      "speaker": {
+        "defaultLabel": "Участник {{index}}",
+        "defaultRole": "Ведущий",
+        "labelField": "Метка участника {{index}}",
+        "roleField": "Роль участника {{index}}",
+        "voiceField": "Голос участника {{index}}",
+        "personaField": "Образ участника {{index}}"
+      },
+      "preview": {
+        "generate": "Предпросмотр отчёта",
+        "diagnostics": "Диагностика предпросмотра",
+        "context": "Запуск предпросмотра: {{runId}}",
+        "noRunContext": "Успешно запустите монитор перед предпросмотром этого отчёта.",
+        "templateRequired": "Выберите шаблон перед созданием предпросмотра.",
+        "templateEmpty": "Выбранный шаблон пуст.",
+        "emptyResult": "Предпросмотр не вернул готового содержимого.",
+        "error": "Не удалось создать предпросмотр."
+      },
+      "delivery": {
+        "help": "Отчёты включены всегда. Внешняя доставка ждёт готовности выбранных артефактов.",
+        "reports": "Отчёты",
+        "required": "Обязательное хранилище",
+        "alwaysOn": "Всегда включено"
+      },
+      "receipt": {
+        "labels": {
+          "schedule": "Расписание",
+          "sources": "Источники",
+          "artifacts": "Артефакты",
+          "format": "Формат",
+          "showName": "Название программы",
+          "cast": "Участники",
+          "duration": "Целевая длительность",
+          "destinations": "Назначения"
+        },
+        "schedule": {
+          "manual": "Только вручную",
+          "scheduled": "{{date}} ({{timezone}})"
+        },
+        "sources": "Источников: {{count}}",
+        "sources_one": "{{count}} источник",
+        "sources_few": "{{count}} источника",
+        "sources_many": "{{count}} источников",
+        "sources_other": "{{count}} источника",
+        "artifacts": {
+          "textReport": "текстовый отчёт",
+          "showNotes": "заметки программы",
+          "audio": "аудио"
+        },
+        "formats": {
+          "concise_briefing": "краткая сводка",
+          "solo_update": "сольное обновление",
+          "host_discussion": "обсуждение ведущих",
+          "sportscast": "спортивный выпуск",
+          "culture_roundtable": "культурный круглый стол",
+          "custom": "пользовательская программа"
+        },
+        "speakerStyle": {
+          "1": "один ведущий",
+          "2": "два ведущих",
+          "3": "три ведущих",
+          "4": "четыре ведущих"
+        },
+        "programWithSpeakers": "{{format}}, {{speakers}}",
+        "cast": "Участников: {{count}}",
+        "cast_one": "{{count}} участник",
+        "cast_few": "{{count}} участника",
+        "cast_many": "{{count}} участников",
+        "cast_other": "{{count}} участника",
+        "duration": "цель — {{count}} мин.",
+        "duration_one": "цель — {{count}} минута",
+        "duration_few": "цель — {{count}} минуты",
+        "duration_many": "цель — {{count}} минут",
+        "duration_other": "цель — {{count}} минуты",
+        "destinations": {
+          "email": "Почта: {{recipients}}",
+          "chatbook": "Chatbook: {{title}}"
+        },
+        "untitledChatbook": "Без названия",
+        "dstChange": "Следующий запуск использует {{timezoneName}} после перехода на летнее или зимнее время: {{date}}."
+      },
+      "test": {
+        "providerDisclosure": "Тесты используют настроенных поставщиков LLM и синтеза речи. Образец ограничен 60 секундами, а полный тест использует целевую длительность.",
+        "textProviderDisclosure": "Тесты используют настроенного поставщика LLM. В текстовых тестах синтез речи не применяется.",
+        "receipt": "Сводка активации",
+        "manualReceipt": "Эта сводка запускается вручную, сохраняет выбранные артефакты в разделе «Отчёты» и не обращается к внешним назначениям, пока вы не выберете «Отправить тест».",
+        "scheduledReceipt": "{{schedule}}: собрать обновления из {{sources}}, создать {{artifacts}} в формате {{program}}{{duration}}, затем сохранить и доставить их в {{destinations}}.",
+        "audioTestRequired": "Перед активацией успешно создайте аудиообразец или полный тест.",
+        "progress": "Ход теста",
+        "stages": {
+          "collection": "Собрать источники",
+          "selection": "Выбрать обновления",
+          "text": "Создать отчёт",
+          "audio": "Создать аудио",
+          "persistence": "Сохранить в отчётах",
+          "audioScript": "Составить аудиосценарий",
+          "audioScriptPersistence": "Сохранить аудиосценарий",
+          "audioPersistence": "Сохранить аудио в отчётах",
+          "delivery": "Проверить тестовую доставку",
+          "deliveryAdapter": "Доставить через {{adapter}}",
+          "unknown": "Этап {{stage}}"
+        },
+        "sample": "Создать 60-секундный образец",
+        "full": "Создать полный тестовый выпуск",
+        "text": "Создать тестовый отчёт",
+        "send": "Отправить тест",
+        "activate": "Активировать расписание",
+        "ready": "Тест завершён. Сводка готова. Черновик останется неактивным, пока вы не активируете его расписание.",
+        "running": "Запуск {{runId}} всё ещё выполняется: {{stage}}. Можно закрыть настройку и следить за ним в Обзоре.",
+        "failedStage": "Этап «{{stage}}» завершился ошибкой. Откройте запуск {{runId}} и повторите этот этап.",
+        "failedWithCode": "Этап «{{stage}}» завершился ошибкой ({{code}}). Откройте запуск {{runId}} и повторите этот этап.",
+        "cancelledStage": "Этап «{{stage}}» отменён. Черновик сохранён.",
+        "cancelledWithCode": "Этап «{{stage}}» отменён ({{code}}). Черновик сохранён.",
+        "cancelled": "Тест отменён. Черновик сохранён.",
+        "failed": "Тест завершился ошибкой. Черновик сохранён. {{message}}",
+        "status": {
+          "not_started": "Не начато",
+          "queued": "В очереди",
+          "running": "Выполняется",
+          "ready": "Готово",
+          "failed": "Ошибка",
+          "skipped": "Пропущено",
+          "cancelled": "Отменено"
+        }
+      },
+      "activate": {
+        "ready": "Расписание активировано.",
+        "failed": "Не удалось активировать расписание. Черновик сохранён. {{message}}"
+      },
+      "validation": {
+        "sourcesRequired": "Выберите хотя бы один источник.",
+        "sourceNameRequired": "Введите название источника.",
+        "sourceUrlInvalid": "Введите допустимый HTTP- или HTTPS-адрес источника.",
+        "monitorNameRequired": "Введите название монитора.",
+        "timezoneInvalid": "Введите допустимый часовой пояс IANA.",
+        "intervalInvalid": "Введите поддерживаемый интервал расписания.",
+        "hourInvalid": "Введите час от 0 до 23.",
+        "minuteInvalid": "Введите минуту от 0 до 59.",
+        "cronInvalid": "Введите допустимое выражение cron из пяти полей.",
+        "cronTooFrequent": "Выберите расписание с интервалом не менее пяти минут.",
+        "templateRequired": "Введите шаблон отчёта.",
+        "castSizeInvalid": "Выберите от одного до четырёх участников.",
+        "castIdsInvalid": "Каждому участнику нужна уникальная идентичность.",
+        "castVoicesRequired": "Выберите голос для каждого участника.",
+        "audioMinutesInvalid": "Введите длительность от 1 до 60 минут.",
+        "emailInvalid": "Введите хотя бы один допустимый адрес электронной почты."
+      },
+      "validationError": "Проверьте выделенные поля перед продолжением."
+    },
+    "latest": {
+      "heading": {
+        "briefing": "Последний дайджест",
+        "episode": "Последний эпизод"
+      },
+      "empty": {
+        "scheduled": "дайджест: {{date}}.",
+        "manual": "Не начато. Проверить сейчас."
+      },
+      "generatedAt": "Создано {{date}}",
+      "untitled": "дайджест {{runId}}",
+      "artifacts": "отчёт / аудио",
+      "audio": "аудио",
+      "audioFailed": "аудио ошибка",
+      "ready": "Готово",
+      "saved": "Сохранено",
+      "waiting": "Ожидание",
+      "script": "аудио отчёт",
+      "stageWithStatus": "{{stage}}: {{status}}",
+      "noUpdates": "Подходящих обновлений не найдено. Сохранён статусный материал «{{noun}}».",
+      "nextRun": "Следующий запуск: {{date}}",
+      "nextRunRelative": "Следующий запуск: {{relative}}",
+      "counts": "дайджест: Включено, Непрочитано, Новое",
+      "count": {
+        "included": "Включено {{count}}",
+        "unread": "Непрочитано {{count}}",
+        "new": "Новое {{count}}"
+      },
+      "provenance": {
+        "sources": "{{count}} отслеживаемых источника",
+        "sources_zero": "{{count}} отслеживаемых источника",
+        "sources_one": "{{count}} отслеживаемый источник",
+        "sources_two": "{{count}} отслеживаемых источника",
+        "sources_few": "{{count}} отслеживаемых источника",
+        "sources_many": "{{count}} отслеживаемых источника",
+        "sources_other": "{{count}} отслеживаемых источника"
+      },
+      "delivery": {
+        "reports": "Все отчёты",
+        "retryAria": "Повторить {{adapter}}: {{name}}",
+        "retryUnknownAria": "Результат неизвестен. Повторить {{adapter}}: {{name}}",
+        "reviewRetry": "Проверить и повторить",
+        "unknownConfirmation": "Провайдер не подтвердил доставку через {{adapter}}. Повторная попытка может отправить дубликат. Проверьте адрес назначения и продолжайте, только если этот риск приемлем. ({{destination}})",
+        "chatbookDestination": "Chatbook",
+        "confirmRetry": "Повторить доставку",
+        "confirmRetryAria": "Повторить {{adapter}} доставку",
+        "recipientCount": "{{count}} получателей",
+        "recipientCount_zero": "{{count}} получателей",
+        "recipientCount_one": "{{count}} получателей",
+        "recipientCount_two": "{{count}} получателей",
+        "recipientCount_few": "{{count}} получателей",
+        "recipientCount_many": "{{count}} получателей",
+        "recipientCount_other": "{{count}} получателей",
+        "reviewAcknowledgement": "Я проверил адрес назначения и принимаю риск повторной доставки.",
+        "reviewSettings": "Проверить настройки",
+        "reviewTitle": "Проверить {{adapter}} доставку"
+      },
+      "playback": {
+        "region": "аудио: {{name}}",
+        "playAria": "Воспроизвести {{name}}",
+        "pauseAria": "Приостановить {{name}}",
+        "resumeAria": "Продолжить {{name}}",
+        "seekAria": "аудио: {{name}}",
+        "loading": "Загрузка аудио",
+        "error": "аудио ошибка. Открыть отчёт / Создать заново аудио.",
+        "play": "Воспроизвести",
+        "pause": "Пауза",
+        "resume": "Продолжить",
+        "accessError": "аудио: Ошибка доступа. Проверьте вход и подключение к серверу.",
+        "missing": "аудио больше недоступен."
+      },
+      "actions": {
+        "label": "Последний дайджест",
+        "openReport": "Открыть {{report}}",
+        "openReportAria": "Открыть {{report}}: {{name}}",
+        "regenerateAudio": "Создать заново аудио",
+        "regenerateAudioAria": "Создать заново {{style}} {{noun}} аудио: {{name}}",
+        "retry": "Повторить",
+        "retrySaveAria": "Повторить сохранено отчёт: {{name}}",
+        "retryTextAria": "Повторить отчёт: {{name}}",
+        "retryStage": "Повторить: {{stage}}",
+        "inspect": "Проверить запуск",
+        "inspectAria": "Проверить запуск {{runId}}: {{name}}",
+        "viewReports": "Все отчёты",
+        "testNow": "Проверить сейчас",
+        "downloadAudio": "Скачать аудио",
+        "downloadAudioAria": "Скачать аудио: {{name}}",
+        "retryExactAria": "Повторить {{stage}}: {{name}}",
+        "reviewScript": "Проверить аудио отчёт",
+        "reviewScriptAria": "Проверить аудио отчёт: {{name}}"
+      },
+      "announcements": {
+        "blockingFailure": "{{name}} ошибка. Проверить запуск {{runId}}.",
+        "delivered": "{{name}}: доставлено.",
+        "nextRunUpdated": "{{name}}: следующий запуск.",
+        "partialAudioFailure": "{{name}}: заметки к выпуску готово, аудио ошибка.",
+        "readyText": "{{name}}: отчёт готово.",
+        "readyWithAudio": "{{name}}: Готово. аудио / заметки к выпуску.",
+        "stageProgress": "{{name}}: {{stage}} {{status}}.",
+        "testQueued": "Проверить сейчас: в очереди."
+      },
+      "retryError": "Повторить ошибка. Проверить запуск.",
+      "regenerateError": "Создать заново аудио: ошибка.",
+      "testError": "Проверить сейчас: ошибка.",
+      "status": {
+        "ready": "Готово",
+        "failed": "Ошибка",
+        "saved": "Сохранено",
+        "waiting": "Ожидание",
+        "running": "Выполняется",
+        "queued": "В очереди",
+        "notStarted": "Не начато",
+        "notSelected": "Не выбрано",
+        "cancelled": "Отменено",
+        "delivered": "Доставлено",
+        "unknown": "Результат неизвестен",
+        "sending": "Отправляется",
+        "stale": "Устарело",
+        "superseded": "Заменено",
+        "unavailable": "Недоступно",
+        "partial": "Частично"
+      },
+      "stages": {
+        "renderText": "отчёт",
+        "persistText": "Сохранено отчёт",
+        "composeScript": "аудио отчёт",
+        "persistScript": "Сохранено аудио отчёт",
+        "generateAudio": "аудио",
+        "persistAudio": "Сохранено аудио"
+      },
+      "nouns": {
+        "briefing": "дайджест",
+        "episode": "эпизод",
+        "report": "отчёт",
+        "showNotes": "заметки к выпуску"
+      },
+      "scriptAccessError": "аудио отчёт: Ошибка доступа. Проверьте вход и подключение к серверу.",
+      "scriptLoading": "Загрузка аудио отчёт",
+      "scriptMissing": "аудио отчёт больше недоступен.",
+      "recovery": {
+        "renderText": "Создание отчёт",
+        "persistText": "Сохранение отчёт",
+        "composeScript": "Подготовка аудио отчёт",
+        "persistScript": "Сохранение аудио отчёт",
+        "generateAudio": "Создание аудио",
+        "persistAudio": "Сохранение аудио"
+      }
+    }
+  },
+  "outputs": {
+    "openInNewTabAria": "Открыть в новой вкладке: {{title}}",
+    "chatAboutAria": "Обсудить: {{title}}",
+    "downloadAria": "Скачать: {{title}}",
+    "artifactMissing": "больше недоступен.",
+    "artifactAuthError": "Доступ запрещён. Проверьте вход в систему.",
+    "artifactAccessError": "Ошибка доступа. Проверьте вход и подключение к серверу."
   }
 }

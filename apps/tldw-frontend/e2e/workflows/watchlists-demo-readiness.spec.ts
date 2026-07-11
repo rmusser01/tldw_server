@@ -8,11 +8,15 @@ import type { DiagnosticsData } from "../utils/fixtures"
 import { stubNotificationsApi, waitForConnection } from "../utils/helpers"
 
 type WatchlistsRouteOptions = {
+  watchlists?: Array<Record<string, unknown>>
   sources?: Array<Record<string, unknown>>
   jobs?: Array<Record<string, unknown>>
   runs?: Array<Record<string, unknown>>
   outputs?: Array<Record<string, unknown>>
+  latestBriefing?: Record<string, unknown> | null
+  briefingByRun?: Record<string, unknown>
   failOutputCreate?: boolean
+  showAllViews?: boolean
 }
 
 const now = () => "2026-05-20T15:00:00Z"
@@ -45,6 +49,31 @@ const source = {
   updated_at: now()
 }
 
+const deterministicSources = [
+  {
+    ...source,
+    id: 101,
+    name: "Morning Wire",
+    url: "https://example.com/morning.xml",
+    tags: ["demo", "news"]
+  },
+  {
+    ...source,
+    id: 102,
+    name: "City Desk",
+    url: "https://example.com/city.xml",
+    source_type: "site",
+    tags: ["demo", "local"]
+  },
+  {
+    ...source,
+    id: 103,
+    name: "League Notebook",
+    url: "https://example.com/league.xml",
+    tags: ["demo", "sports"]
+  }
+]
+
 const job = {
   id: 303,
   name: "Demo Briefing",
@@ -65,6 +94,70 @@ const job = {
   last_run_at: null,
   next_run_at: now()
 }
+
+const readyBriefingProjection = (
+  overrides: Record<string, unknown> = {}
+): Record<string, unknown> => ({
+  occurrence_id: 8801,
+  run_id: 404,
+  job_id: 303,
+  artifact_status: "ready",
+  delivery_status: "delivered",
+  stages: {
+    collect: { status: "ready" },
+    select: { status: "ready" },
+    render_text: { status: "ready" },
+    persist_text: { status: "ready" },
+    compose_audio_script: { status: "ready" },
+    persist_audio_script: { status: "ready" },
+    generate_audio: { status: "ready" },
+    persist_audio: { status: "ready" },
+    "deliver:email": { status: "ready", outcome: "successful" },
+    "deliver:chatbook": { status: "ready", outcome: "successful" }
+  },
+  output: {
+    id: 901,
+    title: "Demo Sports Desk",
+    created_at: now(),
+    metadata: {
+      provenance: deterministicSources.map((entry) => ({ source_id: entry.id }))
+    }
+  },
+  audio: {
+    run_id: 404,
+    task_id: "task_audio_ready",
+    status: "completed",
+    download_url: "/api/v1/watchlists/runs/404/audio/download",
+    script_artifact: {
+      artifact_id: "script-404",
+      title: "Demo Sports Desk script",
+      download_url: "/api/v1/watchlists/runs/404/audio/script/download"
+    }
+  },
+  editorial: {
+    program_format: "sportscast",
+    outcome_noun: "episode",
+    show_name: "Demo Sports Desk",
+    show_notes: true,
+    target_minutes: 15,
+    cast: {
+      speaker_count: 2,
+      speakers: [
+        { label: "Alex", role: "host", voice: "alloy", synthetic: true },
+        { label: "Riley", role: "analyst", voice: "nova", synthetic: true }
+      ]
+    }
+  },
+  delivery: {
+    email: { adapter: "email", recipient_count: 1, masked_label: "demo@example.com" },
+    chatbook: { adapter: "chatbook", recipient_count: 1, masked_label: "Demo Chatbook" }
+  },
+  selection: { candidate_count: 9, included_count: 6, omitted_count: 3, source_count: 3 },
+  next_run_at: "2026-07-11T08:00:00-07:00",
+  timezone: "America/Los_Angeles",
+  recovery: { can_open_report: true, can_regenerate_audio: true },
+  ...overrides
+})
 
 const completedRun = {
   id: 404,
@@ -218,18 +311,29 @@ const setupWatchlistsReadinessRoutes = async (
   page: Page,
   options: WatchlistsRouteOptions = {}
 ) => {
-  await page.addInitScript(() => {
-    localStorage.setItem("watchlists:show-all-views:v1", "true")
-  })
+  const showAllViews = options.showAllViews !== false
+  await page.addInitScript((enabled) => {
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith("watchlists:")) {
+        localStorage.removeItem(key)
+      }
+    }
+    localStorage.setItem("watchlists:show-all-views:v1", enabled ? "true" : "false")
+  }, showAllViews)
   const state = {
-    watchlists: [watchlist],
+    watchlists: [...(options.watchlists || [watchlist])],
     sources: [...(options.sources || [])],
     jobs: [...(options.jobs || [])],
     runs: [...(options.runs || [])],
     outputs: [...(options.outputs || [])],
+    latestBriefing: options.latestBriefing === undefined ? null : options.latestBriefing,
+    briefingByRun: options.briefingByRun || readyBriefingProjection(),
     sourceTests: [] as Array<Record<string, unknown>>,
     createdSources: [] as Array<Record<string, unknown>>,
     createdJobs: [] as Array<Record<string, unknown>>,
+    updatedJobs: [] as Array<Record<string, unknown>>,
+    runTriggers: [] as Array<number>,
+    briefingRetries: [] as Array<Record<string, unknown>>,
     outputCreates: [] as Array<Record<string, unknown>>,
     unmatchedRequests: [] as Array<{ method: string; path: string }>
   }
@@ -256,6 +360,20 @@ const setupWatchlistsReadinessRoutes = async (
       return
     }
 
+    if (method === "POST" && pathname === "/api/v1/watchlists") {
+      const payload = request.postDataJSON() as Record<string, unknown>
+      const created = {
+        ...watchlist,
+        ...payload,
+        id: 43,
+        created_at: now(),
+        updated_at: now()
+      }
+      state.watchlists = [created, ...state.watchlists]
+      await jsonResponse(route, created)
+      return
+    }
+
     if (method === "GET" && pathname === "/api/v1/watchlists/sources") {
       await jsonResponse(route, {
         items: state.sources,
@@ -272,12 +390,12 @@ const setupWatchlistsReadinessRoutes = async (
       const created = {
         ...source,
         ...payload,
-        id: 501,
+        id: 501 + state.createdSources.length - 1,
         status: "ok",
         created_at: now(),
         updated_at: now()
       }
-      state.sources = [created]
+      state.sources = [...state.sources, created]
       await jsonResponse(route, created)
       return
     }
@@ -288,10 +406,10 @@ const setupWatchlistsReadinessRoutes = async (
       await jsonResponse(route, {
         items: [
           {
-            source_id: 501,
-            source_type: "rss",
-            url: "https://example.com/story",
-            title: "Demo source candidate",
+            source_id: Number(payload.source_id || 501),
+            source_type: payload.source_type || "rss",
+            url: `${payload.url || "https://example.com"}/story`,
+            title: `${payload.name || "Demo"} candidate`,
             summary: "Candidate item",
             decision: "ingest"
           }
@@ -319,7 +437,7 @@ const setupWatchlistsReadinessRoutes = async (
       const created = {
         ...job,
         ...payload,
-        id: 303,
+        id: 303 + state.createdJobs.length - 1,
         created_at: now(),
         updated_at: now()
       }
@@ -328,9 +446,58 @@ const setupWatchlistsReadinessRoutes = async (
       return
     }
 
-    if (method === "POST" && pathname === "/api/v1/watchlists/jobs/303/run") {
+    const jobUpdateMatch = pathname.match(/^\/api\/v1\/watchlists\/jobs\/(\d+)$/)
+    if (method === "PATCH" && jobUpdateMatch) {
+      const payload = request.postDataJSON() as Record<string, unknown>
+      state.updatedJobs.push({ id: Number(jobUpdateMatch[1]), ...payload })
+      state.jobs = state.jobs.map((entry) =>
+        Number(entry.id) === Number(jobUpdateMatch[1])
+          ? { ...entry, ...payload, updated_at: now() }
+          : entry
+      )
+      await jsonResponse(route, state.jobs[0] || { ...job, id: Number(jobUpdateMatch[1]), ...payload })
+      return
+    }
+
+    const jobRunMatch = pathname.match(/^\/api\/v1\/watchlists\/jobs\/(\d+)\/run$/)
+    if (method === "POST" && jobRunMatch) {
+      state.runTriggers.push(Number(jobRunMatch[1]))
       state.runs = [completedRun]
+      state.latestBriefing = state.briefingByRun
       await jsonResponse(route, completedRun)
+      return
+    }
+
+    if (method === "POST" && pathname === "/api/v1/watchlists/schedule/preview") {
+      await jsonResponse(route, {
+        next_run_at: "2026-07-12T18:00:00-07:00",
+        following_run_at: "2026-07-19T18:00:00-07:00"
+      })
+      return
+    }
+
+    if (method === "GET" && pathname === "/api/v1/watchlists/briefings/latest") {
+      if (state.latestBriefing) {
+        await jsonResponse(route, state.latestBriefing)
+      } else {
+        await jsonResponse(route, { detail: "not found" }, 404)
+      }
+      return
+    }
+
+    const runBriefingMatch = pathname.match(/^\/api\/v1\/watchlists\/runs\/(\d+)\/briefing$/)
+    if (method === "GET" && runBriefingMatch) {
+      await jsonResponse(route, state.briefingByRun)
+      return
+    }
+
+    const runBriefingRetryMatch = pathname.match(/^\/api\/v1\/watchlists\/runs\/(\d+)\/briefing\/retry$/)
+    if (method === "POST" && runBriefingRetryMatch) {
+      const payload = request.postDataJSON() as Record<string, unknown>
+      state.briefingRetries.push(payload)
+      state.briefingByRun = readyBriefingProjection()
+      state.latestBriefing = state.briefingByRun
+      await jsonResponse(route, state.briefingByRun)
       return
     }
 
@@ -366,6 +533,24 @@ const setupWatchlistsReadinessRoutes = async (
         run_id: 404,
         status: "pending",
         task_id: "task_audio_pending"
+      })
+      return
+    }
+
+    if (method === "GET" && pathname === "/api/v1/watchlists/runs/404/audio/download") {
+      await route.fulfill({
+        status: 200,
+        contentType: "audio/mpeg",
+        body: "fixture-audio"
+      })
+      return
+    }
+
+    if (method === "GET" && pathname === "/api/v1/watchlists/runs/404/audio/script/download") {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/markdown",
+        body: "# Demo Sports Desk\n\nShow notes text"
       })
       return
     }
@@ -651,6 +836,169 @@ test.describe("Watchlists demo readiness gate", () => {
       allowedConsoleErrorPatterns: [
         EXPECTED_REGENERATE_FAILURE_CONSOLE,
         EXPECTED_OUTPUT_CREATE_400_CONSOLE
+      ]
+    })
+  })
+
+  test("proves canonical briefing flow, latest episode, recovery, and sportscast preset", async ({
+    authedPage: page,
+    diagnostics
+  }) => {
+    const failedAudioProjection = readyBriefingProjection({
+      artifact_status: "failed",
+      delivery_status: "waiting_for_artifacts",
+      audio: { run_id: 404, status: "failed", error: "TTS provider timeout" },
+      stages: {
+        ...(readyBriefingProjection().stages as Record<string, unknown>),
+        generate_audio: { status: "failed", retryable: true, code: "provider_timeout" },
+        persist_audio: { status: "not_started" }
+      },
+      recovery: { can_open_report: true, can_retry_audio: true }
+    })
+    const state = await setupWatchlistsReadinessRoutes(page, {
+      sources: deterministicSources,
+      latestBriefing: null,
+      briefingByRun: failedAudioProjection,
+      showAllViews: false
+    })
+
+    await page.goto("/watchlists?tab=overview", { waitUntil: "domcontentloaded" })
+    await waitForConnection(page)
+
+    await page.getByRole("button", { name: "Set up briefing" }).click()
+    const wizard = page.getByRole("dialog", { name: "Set up briefing" })
+    await expect(wizard).toBeVisible()
+
+    await expect(wizard.getByRole("navigation", { name: "Briefing setup steps" })).toContainText("Sources")
+    for (const fixtureSource of deterministicSources) {
+      await wizard.getByText(fixtureSource.name, { exact: true }).click()
+    }
+    await wizard.getByRole("button", { name: "Test source" }).click()
+    await expect(wizard.getByText(/Ready/).first()).toBeVisible()
+    await page.getByTestId("watchlists-pipeline-next-step").click()
+
+    await wizard.getByLabel("Monitor name").fill("Demo Sportscast")
+    await expect(wizard.getByText(/Saturday, July 11 at 8:00 AM/)).toBeVisible()
+    await expect(wizard.getByText("America/Los_Angeles")).toBeVisible()
+    await page.getByTestId("watchlists-pipeline-next-step").click()
+
+    await wizard.getByRole("radio", { name: "Sportscast" }).check()
+    await wizard.getByLabel("Show name").fill("Demo Sports Desk")
+    await wizard.getByLabel("Target duration in minutes").fill("15")
+    await wizard.getByLabel("Target duration in minutes").blur()
+    await wizard.getByLabel("Cast size").click()
+    await page
+      .locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option-content")
+      .getByText("2", { exact: true })
+      .click()
+    await expect(wizard.getByLabel("Speaker 2 label")).toBeVisible()
+    await wizard.getByLabel("Speaker 1 label").fill("Alex")
+    await wizard.getByLabel("Speaker 2 label").fill("Riley")
+    await page.getByTestId("watchlists-pipeline-next-step").click()
+
+    const emailSwitch = wizard.getByRole("switch", { name: "Email" })
+    await emailSwitch.click()
+    await expect(emailSwitch).toBeChecked()
+    await wizard.getByLabel("Email recipients").fill("demo@example.com")
+    await wizard.getByLabel("Email recipients").blur()
+    const chatbookSwitch = wizard.getByRole("switch", { name: "Chatbook" })
+    await chatbookSwitch.click()
+    await expect(chatbookSwitch).toBeChecked()
+    await wizard.getByLabel("Chatbook title").fill("Demo Chatbook")
+    await wizard.getByLabel("Chatbook title").blur()
+    await page.getByTestId("watchlists-pipeline-next-step").click()
+
+    const receipt = wizard.getByTestId("watchlists-pipeline-receipt")
+    await expect(receipt).toContainText(/Saturday, July 11 at 8:00 AM/)
+    await expect(receipt).toContainText("America/Los_Angeles")
+    await expect(receipt).toContainText("3 sources")
+    await expect(receipt).toContainText("text")
+    await expect(receipt).toContainText("targeting 15 minutes")
+    await expect(receipt).toContainText("Reports")
+    await expect(receipt).toContainText("Email")
+    await expect(receipt).toContainText("Chatbook")
+
+    await wizard.getByRole("button", { name: "Generate 60-second sample" }).click()
+    await expect(wizard.getByText(/Create audio failed/)).toBeVisible()
+    await expect.poll(() => state.createdJobs.length).toBe(1)
+    expect(state.createdJobs[0]).toMatchObject({
+      name: "Demo Sportscast",
+      active: false,
+      scope: { sources: [101, 102, 103] }
+    })
+    expect(state.createdJobs[0].output_prefs).toMatchObject({
+      briefing_pipeline: {
+        version: 1,
+        editorial: {
+          program_format: "sportscast",
+          outcome_noun: "episode",
+          show_name: "Demo Sports Desk"
+        },
+        text: { enabled: true, template_name: "briefing_markdown" },
+        audio: {
+          enabled: true,
+          target_minutes: 1,
+          cast: {
+            speaker_count: 2
+          }
+        },
+        delivery: {
+          reports: { enabled: true },
+          email: { enabled: false, recipients: [] },
+          chatbook: { enabled: false, title: "Demo Chatbook" }
+        },
+        test: { external_delivery: false, audio_sample_seconds: 60 }
+      }
+    })
+    expect(state.createdJobs[0].output_prefs).not.toHaveProperty("generate_audio")
+    expect(state.createdJobs[0].output_prefs).not.toHaveProperty("target_audio_minutes")
+    expect(state.runTriggers).toEqual([303])
+
+    await wizard.getByRole("button", { name: "Activate schedule" }).click()
+    await expect.poll(() => state.updatedJobs.some((entry) => entry.active === true)).toBe(true)
+    const scheduledJobUpdate = state.updatedJobs.find((entry) => entry.output_prefs)
+    expect(scheduledJobUpdate?.output_prefs).toMatchObject({
+      briefing_pipeline: {
+        audio: { enabled: true, target_minutes: 15, cast: { speaker_count: 2 } },
+        delivery: {
+          reports: { enabled: true },
+          email: { enabled: true, recipients: ["demo@example.com"] },
+          chatbook: { enabled: true, title: "Demo Chatbook" }
+        }
+      }
+    })
+    await expect(wizard).toBeHidden()
+
+    const latestBriefing = page.getByRole("region", { name: "Latest episode" })
+    await expect(latestBriefing.getByRole("heading", { name: "Latest episode" })).toBeVisible()
+    await expect(latestBriefing.getByText("Demo Sports Desk")).toBeVisible()
+    await expect(latestBriefing.getByText("audio failed")).toBeVisible()
+    await page.getByRole("button", { name: "Retry generating audio for Demo Sports Desk" }).click()
+    await expect.poll(() => state.briefingRetries).toHaveLength(1)
+    expect(state.briefingRetries[0]).toMatchObject({ stage: "generate_audio" })
+    expect(state.createdSources).toHaveLength(0)
+
+    await expect(latestBriefing.getByRole("button", { name: "Play Demo Sports Desk" })).toBeVisible()
+    await expect(latestBriefing.getByRole("button", { name: "View all reports" })).toBeVisible()
+    await expect(latestBriefing.getByText("Email delivered")).toBeVisible()
+    await expect(latestBriefing.getByText("Chatbook delivered")).toBeVisible()
+    await expect(latestBriefing.getByText("3 tracked sources")).toBeVisible()
+    await expect(latestBriefing.getByText("Included 6")).toBeVisible()
+    await expect(latestBriefing.getByText(/Next run: Saturday, July 11 at 8:00 AM/)).toBeVisible()
+    await page.getByRole("button", { name: "Review script for Demo Sports Desk" }).click()
+    const scriptDialog = page.getByRole("dialog", { name: "Demo Sports Desk script" })
+    await expect(scriptDialog).toContainText("Show notes text")
+    await scriptDialog.getByRole("button", { name: "Close" }).click()
+    await expect(page.getByRole("button", { name: "Open show notes: Demo Sports Desk" })).toBeVisible()
+    await expect(page.getByRole("button", { name: "Inspect run 404: Demo Sports Desk" })).toBeVisible()
+    await page.getByRole("button", { name: "Test now: Demo Sports Desk" }).click()
+    await expect.poll(() => state.runTriggers.length).toBeGreaterThanOrEqual(2)
+
+    assertNoUnmatchedWatchlistsRequests(state)
+    await assertNoRuntimeOverlay(page)
+    await assertNoUnexpectedCriticalErrors(diagnostics, {
+      allowedConsoleErrorPatterns: [
+        /Failed to load resource: the server responded with a status of 404 \(Not Found\)/
       ]
     })
   })

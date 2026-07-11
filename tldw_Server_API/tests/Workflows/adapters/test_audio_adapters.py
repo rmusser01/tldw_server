@@ -15,6 +15,7 @@ This module tests all 9 audio adapters:
 from __future__ import annotations
 
 import asyncio
+import json
 import subprocess
 from pathlib import Path
 from typing import Any, Dict
@@ -301,6 +302,16 @@ async def test_tts_adapter_merges_watchlist_and_config_artifact_metadata(monkeyp
             "single_voice_fallback": True,
             "fallback_reason": "multi_voice_tts_failed",
         },
+        "program_metadata": {
+            "program_format": "solo_update",
+            "show_name": "Tracked Daily",
+            "source_urls": [
+                "https://example.test/story",
+                "https://example.test/private?token=secret",
+            ],
+            "api_key": "must-not-persist",
+            "ai_generated_speech": False,
+        },
     }
 
     with patch(
@@ -323,6 +334,12 @@ async def test_tts_adapter_merges_watchlist_and_config_artifact_metadata(monkeyp
     assert metadata["fallback_artifact"] is True
     assert metadata["single_voice_fallback"] is True
     assert metadata["fallback_reason"] == "multi_voice_tts_failed"
+    assert metadata["program_format"] == "solo_update"
+    assert metadata["show_name"] == "Tracked Daily"
+    assert metadata["source_urls"] == ["https://example.test/story"]
+    assert metadata["ai_generated_speech"] is True
+    assert metadata["speech_disclosure"] == "Synthetic AI-generated speech"
+    assert "must-not-persist" not in json.dumps(metadata)
 
 
 # ============================================================================
@@ -2102,6 +2119,254 @@ class TestMultiVoiceTTSAdapter:
         assert result["sections_generated"] == 1
 
     @pytest.mark.asyncio
+    async def test_multi_voice_tts_system_fallback_generates_audio_when_provider_unavailable(
+        self, base_context, tmp_path, monkeypatch
+    ):
+        """Watchlist defaults should still emit audio when provider-backed TTS cannot initialize."""
+        from tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts import (
+            run_multi_voice_tts_adapter,
+        )
+
+        monkeypatch.setenv("WORKFLOWS_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
+
+        async def provider_unavailable(_text, _model, _voice, _fmt, _speed, _output_path):
+            raise RuntimeError("provider unavailable")
+
+        config = {
+            "sections": [{"voice": "HOST", "text": "Hello from the real briefing."}],
+            "voice_assignments": {"HOST": "af_bella"},
+            "allow_system_tts_fallback": True,
+            "response_format": "wav",
+            "normalize": False,
+        }
+
+        with patch(
+            "tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts._synthesize_section",
+            side_effect=provider_unavailable,
+        ):
+            result = await run_multi_voice_tts_adapter(config, base_context)
+
+        assert "error" not in result
+        assert result["sections_generated"] == 1
+        assert result["system_tts_fallback"] is True
+        assert result["format"] == "wav"
+        audio_path = Path(result["audio_path"])
+        assert audio_path.exists()
+        assert audio_path.stat().st_size > 44
+
+    def test_multi_voice_tts_config_preserves_system_fallback_flag(self):
+        """The adapter contract must not drop the explicit system fallback flag."""
+        from tldw_Server_API.app.core.Workflows.adapters.audio._config import MultiVoiceTTSConfig
+
+        config = MultiVoiceTTSConfig.model_validate(
+            {
+                "sections": [{"voice": "HOST", "text": "Hello"}],
+                "allow_system_tts_fallback": True,
+            }
+        )
+
+        assert config.allow_system_tts_fallback is True
+
+    @pytest.mark.asyncio
+    async def test_multi_voice_tts_system_fallback_handles_provider_initialization_exception(
+        self, base_context, tmp_path, monkeypatch
+    ):
+        """Provider initialization exceptions should not bypass the explicit system TTS fallback."""
+        from tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts import (
+            run_multi_voice_tts_adapter,
+        )
+
+        class ProviderInitializationFailed(Exception):
+            pass
+
+        monkeypatch.setenv("WORKFLOWS_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
+
+        async def provider_initialization_failed(_text, _model, _voice, _fmt, _speed, _output_path):
+            raise ProviderInitializationFailed("provider initialization failed")
+
+        config = {
+            "sections": [{"voice": "HOST", "text": "Fallback handles provider initialization failure."}],
+            "voice_assignments": {"HOST": "af_bella"},
+            "allow_system_tts_fallback": True,
+            "response_format": "wav",
+            "normalize": False,
+        }
+
+        with patch(
+            "tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts._synthesize_section",
+            side_effect=provider_initialization_failed,
+        ):
+            result = await run_multi_voice_tts_adapter(config, base_context)
+
+        assert "error" not in result
+        assert result["sections_generated"] == 1
+        assert result["system_tts_fallback"] is True
+
+    @pytest.mark.asyncio
+    async def test_multi_voice_tts_system_fallback_replaces_empty_provider_file(
+        self, base_context, tmp_path, monkeypatch
+    ):
+        """Provider failures that leave empty files should still fall through to system TTS."""
+        from tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts import (
+            run_multi_voice_tts_adapter,
+        )
+
+        monkeypatch.setenv("WORKFLOWS_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
+
+        async def provider_writes_empty_file(_text, _model, _voice, _fmt, _speed, output_path):
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_bytes(b"")
+            raise RuntimeError("provider produced empty output")
+
+        config = {
+            "sections": [{"voice": "HOST", "text": "Fallback replaces empty provider output."}],
+            "voice_assignments": {"HOST": "af_bella"},
+            "allow_system_tts_fallback": True,
+            "response_format": "wav",
+            "normalize": False,
+        }
+
+        with patch(
+            "tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts._synthesize_section",
+            side_effect=provider_writes_empty_file,
+        ):
+            result = await run_multi_voice_tts_adapter(config, base_context)
+
+        assert "error" not in result
+        assert result["sections_generated"] == 1
+        assert result["system_tts_fallback"] is True
+        assert Path(result["audio_path"]).stat().st_size > 44
+
+    @pytest.mark.asyncio
+    async def test_multi_voice_tts_final_system_fallback_when_section_fallback_yields_zero(
+        self, base_context, tmp_path, monkeypatch
+    ):
+        """A final system TTS pass should guarantee audio when section-level fallback produces no files."""
+        from tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts import (
+            run_multi_voice_tts_adapter,
+        )
+
+        monkeypatch.setenv("WORKFLOWS_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
+
+        async def provider_unavailable(_text, _model, _voice, _fmt, _speed, _output_path):
+            raise RuntimeError("provider unavailable")
+
+        system_attempts = 0
+
+        async def flaky_system_tts(_text, _fmt, _speed, output_path):
+            nonlocal system_attempts
+            system_attempts += 1
+            if system_attempts == 1:
+                return 0
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_bytes(b"final-system-audio")
+            return output_path.stat().st_size
+
+        config = {
+            "sections": [{"voice": "HOST", "text": "Final fallback still emits audio."}],
+            "allow_system_tts_fallback": True,
+            "response_format": "mp3",
+            "normalize": False,
+        }
+
+        with (
+            patch(
+                "tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts._synthesize_section",
+                side_effect=provider_unavailable,
+            ),
+            patch(
+                "tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts._synthesize_section_with_system_tts",
+                side_effect=flaky_system_tts,
+            ),
+        ):
+            result = await run_multi_voice_tts_adapter(config, base_context)
+
+        assert "error" not in result
+        assert result["sections_generated"] == 1
+        assert result["system_tts_fallback"] is True
+        assert system_attempts == 2
+
+    @pytest.mark.asyncio
+    async def test_multi_voice_tts_system_fallback_normalizes_bad_response_format(
+        self, base_context, tmp_path, monkeypatch
+    ):
+        """Workflow config should never create extensionless system fallback artifacts."""
+        from tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts import (
+            run_multi_voice_tts_adapter,
+        )
+
+        monkeypatch.setenv("WORKFLOWS_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
+
+        async def provider_unavailable(_text, _model, _voice, _fmt, _speed, _output_path):
+            raise RuntimeError("provider unavailable")
+
+        config = {
+            "sections": [{"voice": "HOST", "text": "Fallback normalizes malformed format."}],
+            "allow_system_tts_fallback": True,
+            "response_format": " . ",
+            "normalize": False,
+        }
+
+        with patch(
+            "tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts._synthesize_section",
+            side_effect=provider_unavailable,
+        ):
+            result = await run_multi_voice_tts_adapter(config, base_context)
+
+        assert "error" not in result
+        assert result["format"] == "mp3"
+        assert result["system_tts_fallback"] is True
+        assert Path(result["audio_path"]).suffix == ".mp3"
+
+    @pytest.mark.asyncio
+    async def test_multi_voice_tts_system_fallback_recovers_orphaned_system_wav(
+        self, base_context, tmp_path, monkeypatch
+    ):
+        """Workflow fallback should recover valid local TTS files left beside an empty provider file."""
+        from tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts import (
+            run_multi_voice_tts_adapter,
+        )
+
+        monkeypatch.setenv("WORKFLOWS_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
+
+        async def provider_unavailable(_text, _model, _voice, _fmt, _speed, _output_path):
+            raise RuntimeError("provider unavailable")
+
+        async def orphaned_system_wav(_text, _fmt, _speed, output_path):
+            orphan_path = output_path.with_name(f"{output_path.stem}.system.")
+            orphan_path.parent.mkdir(parents=True, exist_ok=True)
+            orphan_path.write_bytes(
+                b"RIFF$\x00\x00\x00WAVEfmt "
+                b"\x10\x00\x00\x00\x01\x00\x01\x00@\x1f\x00\x00\x80>\x00\x00\x02\x00\x10\x00data\x00\x00\x00\x00"
+            )
+            output_path.write_bytes(b"")
+            return 0
+
+        config = {
+            "sections": [{"voice": "HOST", "text": "Fallback recovers orphaned system audio."}],
+            "allow_system_tts_fallback": True,
+            "response_format": "wav",
+            "normalize": False,
+        }
+
+        with (
+            patch(
+                "tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts._synthesize_section",
+                side_effect=provider_unavailable,
+            ),
+            patch(
+                "tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts._synthesize_section_with_system_tts",
+                side_effect=orphaned_system_wav,
+            ),
+        ):
+            result = await run_multi_voice_tts_adapter(config, base_context)
+
+        assert "error" not in result
+        assert result["format"] == "wav"
+        assert result["system_tts_fallback"] is True
+        assert Path(result["audio_path"]).stat().st_size > 44
+
+    @pytest.mark.asyncio
     async def test_multi_voice_tts_sanitizes_section_warning_logs(self, base_context, tmp_path, monkeypatch):
         """Test primary and fallback TTS warning logs hide backend details."""
         from tldw_Server_API.app.core.Workflows.adapters.audio import multi_voice_tts
@@ -2187,6 +2452,13 @@ class TestMultiVoiceTTSAdapter:
             "sections": sample_sections,
             "voice_assignments": sample_voice_assignments,
             "normalize": False,
+            "program_metadata": {
+                "program_format": "host_discussion",
+                "show_name": "Tracked Weekly",
+                "source_urls": ["https://example.test/story"],
+                "recipients": ["private@example.test"],
+                "ai_generated_speech": False,
+            },
         }
 
         with (
@@ -2209,6 +2481,11 @@ class TestMultiVoiceTTSAdapter:
         assert len(final_artifacts) == 1
         assert final_artifacts[0]["type"] == "tts_audio"
         assert final_artifacts[0]["metadata"]["multi_voice"] is True
+        assert final_artifacts[0]["metadata"]["program_format"] == "host_discussion"
+        assert final_artifacts[0]["metadata"]["show_name"] == "Tracked Weekly"
+        assert final_artifacts[0]["metadata"]["source_urls"] == ["https://example.test/story"]
+        assert final_artifacts[0]["metadata"]["ai_generated_speech"] is True
+        assert "private@example.test" not in json.dumps(final_artifacts[0]["metadata"])
         assert result.get("artifact_id") is not None
 
     @pytest.mark.asyncio

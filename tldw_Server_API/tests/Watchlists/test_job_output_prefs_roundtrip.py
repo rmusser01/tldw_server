@@ -3,7 +3,6 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 
-
 pytestmark = pytest.mark.integration
 
 
@@ -18,8 +17,9 @@ def client_with_user(monkeypatch, tmp_path):
     monkeypatch.setenv("TEST_MODE", "1")
 
     from fastapi import FastAPI
-    from tldw_Server_API.app.core.config import API_V1_PREFIX
+
     from tldw_Server_API.app.api.v1.endpoints.watchlists import router as watchlists_router
+    from tldw_Server_API.app.core.config import API_V1_PREFIX
 
     app = FastAPI()
     app.include_router(watchlists_router, prefix=f"{API_V1_PREFIX}")
@@ -70,6 +70,7 @@ def test_job_output_prefs_template_and_delivery_roundtrip(client_with_user: Test
             "ingest": {
                 "persist_to_media_db": True,
             },
+            "custom_future_key": {"keep": True},
         },
     }
 
@@ -79,19 +80,20 @@ def test_job_output_prefs_template_and_delivery_roundtrip(client_with_user: Test
     job_id = created_job["id"]
 
     created_prefs = created_job.get("output_prefs") or {}
-    assert created_prefs.get("template", {}).get("default_name") == "daily_md"
-    assert created_prefs.get("template", {}).get("default_version") == 2
-    assert created_prefs.get("deliveries", {}).get("email", {}).get("recipients") == ["digest@example.com"]
-    assert created_prefs.get("deliveries", {}).get("chatbook", {}).get("conversation_id") == 42
+    assert "template" not in created_prefs
+    assert "deliveries" not in created_prefs
+    created_contract = created_prefs["briefing_pipeline"]
+    assert created_contract["text"]["template_name"] == "daily_md"
+    assert created_contract["text"]["template_version"] == 2
+    assert created_contract["delivery"]["email"]["recipients"] == ["digest@example.com"]
+    assert created_contract["delivery"]["chatbook"]["conversation_id"] == 42
     assert created_prefs.get("ingest", {}).get("persist_to_media_db") is True
+    assert created_prefs["custom_future_key"] == {"keep": True}
 
     fetched = c.get(f"/api/v1/watchlists/jobs/{job_id}")
     assert fetched.status_code == 200, fetched.text
     fetched_prefs = fetched.json().get("output_prefs") or {}
-    assert fetched_prefs.get("template", {}).get("default_name") == "daily_md"
-    assert fetched_prefs.get("template", {}).get("default_version") == 2
-    assert fetched_prefs.get("deliveries", {}).get("email", {}).get("body_format") == "html"
-    assert fetched_prefs.get("deliveries", {}).get("chatbook", {}).get("conversation_id") == 42
+    assert fetched_prefs == created_prefs
 
     update_payload = {
         "output_prefs": {
@@ -100,14 +102,19 @@ def test_job_output_prefs_template_and_delivery_roundtrip(client_with_user: Test
                 "email": {"enabled": False},
                 "chatbook": {"enabled": True, "conversation_id": 99},
             },
+            "custom_future_key": {"updated": True},
         }
     }
     updated = c.patch(f"/api/v1/watchlists/jobs/{job_id}", json=update_payload)
     assert updated.status_code == 200, updated.text
     updated_prefs = updated.json().get("output_prefs") or {}
-    assert updated_prefs.get("template", {}).get("default_version") == 3
-    assert updated_prefs.get("deliveries", {}).get("email", {}).get("enabled") is False
-    assert updated_prefs.get("deliveries", {}).get("chatbook", {}).get("conversation_id") == 99
+    assert "template" not in updated_prefs
+    assert "deliveries" not in updated_prefs
+    updated_contract = updated_prefs["briefing_pipeline"]
+    assert updated_contract["text"]["template_version"] == 3
+    assert updated_contract["delivery"]["email"]["enabled"] is False
+    assert updated_contract["delivery"]["chatbook"]["conversation_id"] == 99
+    assert updated_prefs["custom_future_key"] == {"updated": True}
 
     ingest_merge = c.patch(
         f"/api/v1/watchlists/jobs/{job_id}",
@@ -115,9 +122,11 @@ def test_job_output_prefs_template_and_delivery_roundtrip(client_with_user: Test
     )
     assert ingest_merge.status_code == 200, ingest_merge.text
     merged_prefs = ingest_merge.json().get("output_prefs") or {}
-    assert merged_prefs.get("template", {}).get("default_version") == 3
-    assert merged_prefs.get("deliveries", {}).get("chatbook", {}).get("conversation_id") == 99
+    merged_contract = merged_prefs["briefing_pipeline"]
+    assert merged_contract["text"]["template_version"] == 3
+    assert merged_contract["delivery"]["chatbook"]["conversation_id"] == 99
     assert merged_prefs.get("ingest", {}).get("persist_to_media_db") is False
+    assert merged_prefs["custom_future_key"] == {"updated": True}
 
 
 def test_job_output_prefs_can_be_explicitly_cleared(client_with_user: TestClient):
@@ -152,13 +161,21 @@ def test_job_output_prefs_can_be_explicitly_cleared(client_with_user: TestClient
     assert created.status_code == 200, created.text
     job_id = created.json()["id"]
 
-    # Explicitly clearing output_prefs should replace persisted prefs with empty object.
+    # Explicitly clearing output_prefs should replace persisted prefs with the safe canonical defaults.
     cleared = c.patch(f"/api/v1/watchlists/jobs/{job_id}", json={"output_prefs": {}})
     assert cleared.status_code == 200, cleared.text
-    assert cleared.json().get("output_prefs") == {}
+    cleared_prefs = cleared.json()["output_prefs"]
+    assert set(cleared_prefs) == {"briefing_pipeline"}
+    cleared_contract = cleared_prefs["briefing_pipeline"]
+    assert cleared_contract["text"]["enabled"] is False
+    assert cleared_contract["audio"]["enabled"] is False
+    assert cleared_contract["delivery"]["reports"]["enabled"] is True
+    assert cleared_contract["delivery"]["email"]["enabled"] is False
+    assert cleared_contract["delivery"]["chatbook"]["enabled"] is False
+    assert cleared_contract["test"]["external_delivery"] is False
     assert cleared.json().get("ingest_prefs") is None
 
     fetched = c.get(f"/api/v1/watchlists/jobs/{job_id}")
     assert fetched.status_code == 200, fetched.text
-    assert fetched.json().get("output_prefs") == {}
+    assert fetched.json().get("output_prefs") == cleared_prefs
     assert fetched.json().get("ingest_prefs") is None

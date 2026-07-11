@@ -1,4 +1,12 @@
 {
+  "accessibilityHardening": {
+    "source": { "toggleActive": "تغییر وضعیت فعال: {{name}}", "checkNow": "اکنون بررسی شود: {{name}}", "openWebsite": "باز کردن وب‌سایت منبع: {{name}}", "openHealth": "باز کردن وضعیت منبع: {{name}}", "edit": "ویرایش منبع: {{name}}", "delete": "حذف منبع: {{name}}" },
+    "item": { "open": "باز کردن به‌روزرسانی: {{title}}", "select": "انتخاب به‌روزرسانی: {{title}}", "description": "{{state}}. منبع: {{source}}." },
+    "output": { "openNewTab": "باز کردن {{title}} در زبانه جدید", "chat": "گفتگو درباره {{title}}", "download": "بارگیری {{title}}", "close": "بستن پیش‌نمایش: {{title}}" },
+    "health": { "show": "نمایش جزئیات وضعیت فهرست‌های پایش", "hide": "پنهان کردن جزئیات وضعیت فهرست‌های پایش", "refresh": "تازه‌سازی وضعیت فهرست‌های پایش", "settings": "باز کردن تنظیمات فهرست‌های پایش" },
+    "delivery": { "email": "در صورت فعال بودن، هر گزارش به گیرندگان تنظیم‌شده ارسال شود.", "chatbook": "در صورت فعال بودن، هر گزارش در Chatbook منتشر شود." },
+    "help": { "open": "باز کردن راهنمای فهرست‌های پایش", "title": "راهنمای فهرست‌های پایش" }
+  },
   "items": {
     "queuedForBriefing": "در صف گزارش",
     "includeInNextBriefing": "افزودن به گزارش بعدی",
@@ -17,5 +25,467 @@
       "generateError": "تولید گزارش از موارد صف‌شده ناموفق بود.",
       "generateReport": "تولید گزارش از صف"
     }
+  },
+  "setupWizard": {
+    "title": "ایجاد فهرست پایش",
+    "containerTitle": "ایجاد فهرست پایش",
+    "containerHelp": "ابتدا محفظهٔ پروژه را ایجاد کنید. سپس منابع، تناوب، گزارش، تحویل و آزمون را در یک جریان راه‌اندازی تنظیم کنید.",
+    "actions": {
+      "continue": "ادامه به منابع"
+    },
+    "sections": {
+      "preset": "پیش‌تنظیم حوزه"
+    },
+    "fields": {
+      "name": "نام فهرست پایش",
+      "objective": "هدف"
+    },
+    "validation": {
+      "nameRequired": "نامی برای فهرست پایش وارد کنید."
+    },
+    "errors": {
+      "createFailed": "فهرست پایش ایجاد نشد."
+    },
+    "presets": {
+      "cti_osint": {
+        "label": "CTI / OSINT",
+        "description": "آسیب‌پذیری‌ها، بدافزارها، عاملان، هشدارها و تغییرات منابع را پیگیری کنید."
+      },
+      "news": {
+        "label": "اخبار",
+        "description": "رویدادهای در حال تحول، افراد، سازمان‌ها و تنوع منابع را پیگیری کنید."
+      },
+      "general": {
+        "label": "عمومی",
+        "description": "موضوعی را پیگیری و به‌روزرسانی‌ها را برای بررسی جمع‌آوری کنید."
+      },
+      "blank": {
+        "label": "خالی",
+        "description": "با یک فهرست پایش خالی شروع کنید و جزئیات را خودتان تنظیم کنید."
+      }
+    },
+    "startModes": {
+      "sources": {
+        "label": "شروع از منابع",
+        "description": "فهرستی با خوراک‌های اولیه و یک پایشگر اختیاری ایجاد کنید."
+      },
+      "topic": {
+        "label": "شروع از موضوع",
+        "description": "ابتدا هدف فهرست را ایجاد کنید، سپس پیش از آغاز گردآوری خوراک‌ها را بیفزایید."
+      },
+      "report_goal": {
+        "label": "شروع از هدف گزارش",
+        "description": "ابتدا هدف گزارش را تعریف کنید، سپس منابع و الگوها را متصل کنید."
+      }
+    },
+    "boundaries": {
+      "alerts": "هشدارهای تطبیق محتوا بعداً تنظیم می‌شوند. این راه‌اندازی فهرست پایش و دامنهٔ اولیهٔ گردآوری آن را مشخص می‌کند."
+    }
+  },
+  "overview": {
+    "pipelineSetup": {
+      "title": "راه‌اندازی گزارش",
+      "open": "راه‌اندازی گزارش",
+      "progress": "مراحل راه‌اندازی گزارش",
+      "steps": {
+        "sources": "منابع",
+        "cadence": "تناوب",
+        "briefing": "گزارش",
+        "delivery": "تحویل",
+        "test": "آزمون"
+      },
+      "actions": {
+        "next": "ادامه به {{step}}"
+      },
+      "source": {
+        "existing": "استفاده از منابع موجود",
+        "new": "افزودن منبع جدید",
+        "fallback": "منبع {{id}}"
+      },
+      "sources": {
+        "help": "منابع موجود را انتخاب کنید یا منبعی تازه بیفزایید، سپس اتصال را برای اطمینان از آمادگی آزمایش کنید."
+      },
+      "sourcesLoading": "در حال بارگیری منابع...",
+      "sourcesError": "خوراک‌های مورد نیاز راه‌اندازی بارگیری نشدند.",
+      "sourceTest": {
+        "action": "آزمایش منبع",
+        "ready": "منبع آماده است.",
+        "cancelled": "آزمایش منبع لغو شد.",
+        "failed": "آزمایش منبع ناموفق بود. {{message}}",
+        "summary": "{{ready}} آماده، {{filtered}} پالایش‌شده",
+        "sample": "موارد نمونه",
+        "readyItem": "آماده",
+        "filteredItem": "پالایش‌شده",
+        "untitled": "مورد بدون عنوان"
+      },
+      "fields": {
+        "sources": "منابع",
+        "sourceName": "نام منبع",
+        "sourceUrl": "نشانی منبع",
+        "monitorName": "نام پایشگر",
+        "schedule": "زمان‌بندی",
+        "timezone": "منطقهٔ زمانی",
+        "intervalEvery": "هر",
+        "intervalUnit": "واحد فاصله",
+        "weekday": "روز هفته",
+        "hour": "ساعت",
+        "minute": "دقیقه",
+        "cronExpression": "عبارت cron",
+        "showName": "نام برنامه",
+        "premise": "طرح برنامه",
+        "includeAudio": "صدا",
+        "audioHelp": "نسخهٔ گفتاری قابل پخش اضافه کنید.",
+        "audioMinutes": "مدت هدف به دقیقه",
+        "speakerCount": "تعداد گویندگان",
+        "template": "الگوی گزارش",
+        "audioProvider": "جایگزینی ارائه‌دهندهٔ صدا",
+        "audioModel": "جایگزینی مدل صدا",
+        "customInstructions": "دستورهای ویرایشی سفارشی",
+        "emailDelivery": "ایمیل",
+        "emailRecipients": "گیرندگان ایمیل",
+        "chatbookDelivery": "Chatbook",
+        "chatbookTitle": "عنوان Chatbook"
+      },
+      "schedule": {
+        "manual": "فقط دستی",
+        "interval": "هر N ساعت یا دقیقه",
+        "daily": "روزانه",
+        "weekdays": "روزهای کاری",
+        "weekly": "هفتگی",
+        "advanced": "cron پیشرفته"
+      },
+      "intervalUnits": {
+        "hours": "ساعت",
+        "minutes": "دقیقه"
+      },
+      "weekdays": {
+        "monday": "دوشنبه",
+        "tuesday": "سه‌شنبه",
+        "wednesday": "چهارشنبه",
+        "thursday": "پنج‌شنبه",
+        "friday": "جمعه",
+        "saturday": "شنبه",
+        "sunday": "یکشنبه"
+      },
+      "advancedCron": "cron پیشرفته",
+      "nextOccurrence": "اجرای بعدی",
+      "manualOccurrence": "فقط دستی",
+      "nextOccurrencePending": "برای محاسبهٔ زمان دقیق، یک زمان‌بندی معتبر ذخیره کنید.",
+      "schedulePreview": {
+        "loading": "در حال محاسبهٔ زمان‌بندی دقیق…",
+        "error": "محاسبهٔ زمان‌بندی دقیق ممکن نشد. عبارت cron و منطقهٔ زمانی را بررسی کنید."
+      },
+      "briefing": {
+        "question": "چه چیزی می‌سازید؟",
+        "help": "قالب ویرایشی را انتخاب کنید. همهٔ گزینه‌ها بر منابع منتخب شما استوار می‌مانند.",
+        "advanced": "تنظیمات پیشرفتهٔ گزارش"
+      },
+      "formats": {
+        "concise_briefing": "گزارش کوتاه",
+        "solo_update": "به‌روزرسانی تک‌نفره",
+        "host_discussion": "گفت‌وگوی میزبانان",
+        "sportscast": "گزارش ورزشی",
+        "culture_roundtable": "میزگرد فرهنگی",
+        "custom": "سفارشی"
+      },
+      "speaker": {
+        "defaultLabel": "گویندهٔ {{index}}",
+        "defaultRole": "میزبان",
+        "labelField": "برچسب گویندهٔ {{index}}",
+        "roleField": "نقش گویندهٔ {{index}}",
+        "voiceField": "صدای گویندهٔ {{index}}",
+        "personaField": "شخصیت گویندهٔ {{index}}"
+      },
+      "preview": {
+        "generate": "پیش‌نمایش گزارش",
+        "diagnostics": "عیب‌یابی پیش‌نمایش",
+        "context": "اجرای پیش‌نمایش: {{runId}}",
+        "noRunContext": "پیش از دیدن پیش‌نمایش این گزارش، پایشگر را با موفقیت اجرا کنید.",
+        "templateRequired": "پیش از ایجاد پیش‌نمایش یک الگو انتخاب کنید.",
+        "templateEmpty": "الگوی انتخاب‌شده خالی است.",
+        "emptyResult": "پیش‌نمایش هیچ محتوای آماده‌ای برنگرداند.",
+        "error": "پیش‌نمایش ایجاد نشد."
+      },
+      "delivery": {
+        "help": "گزارش‌ها همیشه ذخیره می‌شوند. تحویل بیرونی تا آماده شدن کامل خروجی‌های منتخب منتظر می‌ماند.",
+        "reports": "گزارش‌ها",
+        "required": "ذخیره‌سازی الزامی",
+        "alwaysOn": "همیشه فعال"
+      },
+      "receipt": {
+        "labels": {
+          "schedule": "زمان‌بندی",
+          "sources": "منابع",
+          "artifacts": "خروجی‌ها",
+          "format": "قالب",
+          "showName": "نام برنامه",
+          "cast": "گویندگان",
+          "duration": "مدت هدف",
+          "destinations": "مقصدها"
+        },
+        "schedule": {
+          "manual": "فقط دستی",
+          "scheduled": "{{date}} ({{timezone}})"
+        },
+        "sources": "{{count}} منبع",
+        "sources_one": "{{count}} منبع",
+        "sources_other": "{{count}} منبع",
+        "artifacts": {
+          "textReport": "گزارش متنی",
+          "showNotes": "یادداشت‌های برنامه",
+          "audio": "صدا"
+        },
+        "formats": {
+          "concise_briefing": "گزارش کوتاه",
+          "solo_update": "به‌روزرسانی تک‌نفره",
+          "host_discussion": "گفت‌وگوی میزبانان",
+          "sportscast": "گزارش ورزشی",
+          "culture_roundtable": "میزگرد فرهنگی",
+          "custom": "برنامهٔ سفارشی"
+        },
+        "speakerStyle": {
+          "1": "تک‌نفره",
+          "2": "با دو میزبان",
+          "3": "با سه میزبان",
+          "4": "با چهار میزبان"
+        },
+        "programWithSpeakers": "{{format}} {{speakers}}",
+        "cast": "{{count}} گوینده",
+        "cast_one": "{{count}} گوینده",
+        "cast_other": "{{count}} گوینده",
+        "duration": "با هدف {{count}} دقیقه",
+        "duration_one": "با هدف {{count}} دقیقه",
+        "duration_other": "با هدف {{count}} دقیقه",
+        "destinations": {
+          "email": "ایمیل: {{recipients}}",
+          "chatbook": "Chatbook: {{title}}"
+        },
+        "untitledChatbook": "بدون عنوان",
+        "dstChange": "اجرای بعدی پس از تغییر ساعت تابستانی از {{timezoneName}} استفاده می‌کند: {{date}}."
+      },
+      "test": {
+        "providerDisclosure": "آزمون‌ها از ارائه‌دهندگان تنظیم‌شدهٔ مدل زبانی و تبدیل متن به گفتار استفاده می‌کنند. نمونه به ۶۰ ثانیه محدود است و آزمون کامل مدت هدف را به کار می‌برد.",
+        "textProviderDisclosure": "آزمون‌ها از ارائه‌دهندهٔ مدل زبانی تنظیم‌شده استفاده می‌کنند. آزمون‌های فقط‌متنی تبدیل متن به گفتار ندارند.",
+        "receipt": "خلاصهٔ فعال‌سازی",
+        "manualReceipt": "این گزارش به‌صورت دستی اجرا می‌شود، خروجی‌های منتخب را در گزارش‌ها ذخیره می‌کند و جز با انتخاب ارسال آزمون با مقصد بیرونی تماس نمی‌گیرد.",
+        "scheduledReceipt": "{{schedule}}، به‌روزرسانی‌ها را از {{sources}} گردآوری کن، {{artifacts}} را به‌صورت {{program}}{{duration}} تولید کن، سپس آن‌ها را در {{destinations}} ذخیره و تحویل بده.",
+        "audioTestRequired": "پیش از فعال‌سازی، یک نمونه صوتی یا آزمون کامل موفق تولید کنید.",
+        "progress": "پیشرفت آزمون",
+        "stages": {
+          "collection": "گردآوری منابع",
+          "selection": "انتخاب به‌روزرسانی‌ها",
+          "text": "ایجاد گزارش",
+          "audio": "ایجاد صدا",
+          "persistence": "ذخیره در گزارش‌ها",
+          "audioScript": "نوشتن متن صوتی",
+          "audioScriptPersistence": "ذخیرهٔ متن صوتی",
+          "audioPersistence": "ذخیرهٔ صدا در گزارش‌ها",
+          "delivery": "بررسی تحویل آزمایشی",
+          "deliveryAdapter": "تحویل به {{adapter}}",
+          "unknown": "مرحلهٔ {{stage}}"
+        },
+        "sample": "ایجاد نمونهٔ ۶۰ ثانیه‌ای",
+        "full": "ایجاد قسمت آزمایشی کامل",
+        "text": "ایجاد گزارش آزمایشی",
+        "send": "ارسال آزمون",
+        "activate": "فعال‌سازی زمان‌بندی",
+        "ready": "آزمون کامل شد. گزارش شما آماده است. این پیش‌نویس تا فعال‌سازی زمان‌بندی غیرفعال می‌ماند.",
+        "running": "اجرای {{runId}} هنوز در حال انجام است: {{stage}}. می‌توانید راه‌اندازی را ببندید و آن را در نمای کلی پیگیری کنید.",
+        "failedStage": "{{stage}} ناموفق بود. اجرای {{runId}} را باز کنید و این مرحله را دوباره امتحان کنید.",
+        "failedWithCode": "{{stage}} ناموفق بود ({{code}}). اجرای {{runId}} را باز کنید و این مرحله را دوباره امتحان کنید.",
+        "cancelledStage": "{{stage}} لغو شد. پیش‌نویس شما ذخیره شد.",
+        "cancelledWithCode": "{{stage}} لغو شد ({{code}}). پیش‌نویس شما ذخیره شد.",
+        "cancelled": "آزمون لغو شد. پیش‌نویس شما ذخیره شد.",
+        "failed": "آزمون ناموفق بود. پیش‌نویس شما ذخیره شد. {{message}}",
+        "status": {
+          "not_started": "آغاز نشده",
+          "queued": "در صف",
+          "running": "در حال اجرا",
+          "ready": "آماده",
+          "failed": "ناموفق",
+          "skipped": "رد شده",
+          "cancelled": "لغوشده"
+        }
+      },
+      "activate": {
+        "ready": "زمان‌بندی فعال شد.",
+        "failed": "زمان‌بندی فعال نشد. پیش‌نویس شما ذخیره شد. {{message}}"
+      },
+      "validation": {
+        "sourcesRequired": "پیش از ادامه دست‌کم یک منبع انتخاب کنید.",
+        "sourceNameRequired": "نام منبع را وارد کنید.",
+        "sourceUrlInvalid": "نشانی معتبر HTTP یا HTTPS برای منبع وارد کنید.",
+        "monitorNameRequired": "نام پایشگر را وارد کنید.",
+        "timezoneInvalid": "منطقهٔ زمانی معتبر IANA وارد کنید.",
+        "intervalInvalid": "فاصلهٔ زمان‌بندی پشتیبانی‌شده وارد کنید.",
+        "hourInvalid": "ساعتی بین ۰ تا ۲۳ وارد کنید.",
+        "minuteInvalid": "دقیقه‌ای بین ۰ تا ۵۹ وارد کنید.",
+        "cronInvalid": "عبارت cron معتبر پنج‌بخشی وارد کنید.",
+        "cronTooFrequent": "زمان‌بندی با فاصلهٔ دست‌کم پنج دقیقه انتخاب کنید.",
+        "templateRequired": "الگوی گزارش را وارد کنید.",
+        "castSizeInvalid": "یک تا چهار گوینده انتخاب کنید.",
+        "castIdsInvalid": "هر گوینده به هویتی یکتا نیاز دارد.",
+        "castVoicesRequired": "برای هر گوینده صدایی انتخاب کنید.",
+        "audioMinutesInvalid": "مدتی بین ۱ تا ۶۰ دقیقه وارد کنید.",
+        "emailInvalid": "دست‌کم یک نشانی ایمیل معتبر وارد کنید."
+      },
+      "validationError": "پیش از ادامه فیلدهای برجسته را بررسی کنید."
+    },
+    "latest": {
+      "heading": {
+        "briefing": "تازه‌ترین خلاصه",
+        "episode": "تازه‌ترین قسمت"
+      },
+      "empty": {
+        "scheduled": "اولین خلاصهٔ شما برای {{date}} برنامه‌ریزی شده است.",
+        "manual": "شروع‌نشده. اکنون آزمایش کن."
+      },
+      "generatedAt": "تولیدشده {{date}}",
+      "untitled": "خلاصه {{runId}}",
+      "artifacts": "گزارش / صدا",
+      "audio": "صدا",
+      "audioFailed": "صدا ناموفق",
+      "ready": "آماده",
+      "saved": "ذخیره‌شده",
+      "waiting": "در انتظار",
+      "script": "صدا گزارش",
+      "stageWithStatus": "{{stage}}: {{status}}",
+      "noUpdates": "هیچ به‌روزرسانی واجد شرایطی یافت نشد. یک {{noun}} وضعیت ذخیره شد.",
+      "nextRun": "اجرای بعدی: {{date}}",
+      "nextRunRelative": "اجرای بعدی: {{relative}}",
+      "counts": "خلاصه: گنجانده‌شده, خوانده‌نشده, جدید",
+      "count": {
+        "included": "گنجانده‌شده {{count}}",
+        "unread": "خوانده‌نشده {{count}}",
+        "new": "جدید {{count}}"
+      },
+      "provenance": {
+        "sources": "{{count}} منابع پیگیری‌شده",
+        "sources_zero": "{{count}} منابع پیگیری‌شده",
+        "sources_one": "{{count}} منبع پیگیری‌شده",
+        "sources_two": "{{count}} منابع پیگیری‌شده",
+        "sources_few": "{{count}} منابع پیگیری‌شده",
+        "sources_many": "{{count}} منابع پیگیری‌شده",
+        "sources_other": "{{count}} منابع پیگیری‌شده"
+      },
+      "delivery": {
+        "reports": "مشاهده همه گزارش‌ها",
+        "retryAria": "تلاش دوباره {{adapter}}: {{name}}",
+        "retryUnknownAria": "نتیجه نامشخص. تلاش دوباره {{adapter}}: {{name}}",
+        "reviewRetry": "بررسی و تلاش دوباره",
+        "unknownConfirmation": "ارائه‌دهنده تحویل {{adapter}} را تأیید نکرد. تلاش دوباره ممکن است یک نسخه تکراری بفرستد. مقصد را بررسی کنید و فقط در صورت پذیرش این خطر ادامه دهید. ({{destination}})",
+        "chatbookDestination": "Chatbook",
+        "confirmRetry": "تلاش دوباره تحویل",
+        "confirmRetryAria": "تلاش دوباره {{adapter}} تحویل",
+        "recipientCount": "{{count}} گیرندگان",
+        "recipientCount_zero": "{{count}} گیرندگان",
+        "recipientCount_one": "{{count}} گیرندگان",
+        "recipientCount_two": "{{count}} گیرندگان",
+        "recipientCount_few": "{{count}} گیرندگان",
+        "recipientCount_many": "{{count}} گیرندگان",
+        "recipientCount_other": "{{count}} گیرندگان",
+        "reviewAcknowledgement": "مقصد را بررسی کردم و خطر تحویل تکراری را می‌پذیرم.",
+        "reviewSettings": "بررسی تنظیمات",
+        "reviewTitle": "بررسی {{adapter}} تحویل"
+      },
+      "playback": {
+        "region": "صدا: {{name}}",
+        "playAria": "پخش {{name}}",
+        "pauseAria": "مکث {{name}}",
+        "resumeAria": "ادامه {{name}}",
+        "seekAria": "صدا: {{name}}",
+        "loading": "در حال بارگیری صدا",
+        "error": "صدا ناموفق. باز کردن گزارش / تولید دوباره صدا.",
+        "play": "پخش",
+        "pause": "مکث",
+        "resume": "ادامه",
+        "accessError": "صدا: دسترسی ناموفق بود. ورود و اتصال سرور را بررسی کنید.",
+        "missing": "صدا دیگر در دسترس نیست."
+      },
+      "actions": {
+        "label": "تازه‌ترین خلاصه",
+        "openReport": "باز کردن {{report}}",
+        "openReportAria": "باز کردن {{report}}: {{name}}",
+        "regenerateAudio": "تولید دوباره صدا",
+        "regenerateAudioAria": "تولید دوباره {{style}} {{noun}} صدا: {{name}}",
+        "retry": "تلاش دوباره",
+        "retrySaveAria": "تلاش دوباره ذخیره‌شده گزارش: {{name}}",
+        "retryTextAria": "تلاش دوباره گزارش: {{name}}",
+        "retryStage": "تلاش دوباره: {{stage}}",
+        "inspect": "بررسی اجرا",
+        "inspectAria": "بررسی اجرا {{runId}}: {{name}}",
+        "viewReports": "مشاهده همه گزارش‌ها",
+        "testNow": "اکنون آزمایش کن",
+        "downloadAudio": "دانلود صدا",
+        "downloadAudioAria": "دانلود صدا: {{name}}",
+        "retryExactAria": "تلاش دوباره {{stage}}: {{name}}",
+        "reviewScript": "بررسی صدا گزارش",
+        "reviewScriptAria": "بررسی صدا گزارش: {{name}}"
+      },
+      "announcements": {
+        "blockingFailure": "{{name}} ناموفق. بررسی اجرا {{runId}}.",
+        "delivered": "{{name}}: تحویل‌شده.",
+        "nextRunUpdated": "{{name}}: اجرای بعدی.",
+        "partialAudioFailure": "{{name}}: یادداشت‌های برنامه آماده, صدا ناموفق.",
+        "readyText": "{{name}}: گزارش آماده.",
+        "readyWithAudio": "{{name}}: آماده. صدا / یادداشت‌های برنامه.",
+        "stageProgress": "{{name}}: {{stage}} {{status}}.",
+        "testQueued": "اکنون آزمایش کن: در صف."
+      },
+      "retryError": "تلاش دوباره ناموفق. بررسی اجرا.",
+      "regenerateError": "تولید دوباره صدا: ناموفق.",
+      "testError": "اکنون آزمایش کن: ناموفق.",
+      "status": {
+        "ready": "آماده",
+        "failed": "ناموفق",
+        "saved": "ذخیره‌شده",
+        "waiting": "در انتظار",
+        "running": "در حال اجرا",
+        "queued": "در صف",
+        "notStarted": "شروع‌نشده",
+        "notSelected": "انتخاب‌نشده",
+        "cancelled": "لغوشده",
+        "delivered": "تحویل‌شده",
+        "unknown": "نتیجه نامشخص",
+        "sending": "در حال ارسال",
+        "stale": "قدیمی",
+        "superseded": "جایگزین‌شده",
+        "unavailable": "در دسترس نیست",
+        "partial": "جزئی"
+      },
+      "stages": {
+        "renderText": "گزارش",
+        "persistText": "ذخیره‌شده گزارش",
+        "composeScript": "صدا گزارش",
+        "persistScript": "ذخیره‌شده صدا گزارش",
+        "generateAudio": "صدا",
+        "persistAudio": "ذخیره‌شده صدا"
+      },
+      "nouns": {
+        "briefing": "خلاصه",
+        "episode": "قسمت",
+        "report": "گزارش",
+        "showNotes": "یادداشت‌های برنامه"
+      },
+      "scriptAccessError": "صدا گزارش: دسترسی ناموفق بود. ورود و اتصال سرور را بررسی کنید.",
+      "scriptLoading": "در حال بارگیری صدا گزارش",
+      "scriptMissing": "صدا گزارش دیگر در دسترس نیست.",
+      "recovery": {
+        "renderText": "در حال ایجاد گزارش",
+        "persistText": "در حال ذخیره گزارش",
+        "composeScript": "در حال نگارش صدا گزارش",
+        "persistScript": "در حال ذخیره صدا گزارش",
+        "generateAudio": "در حال ایجاد صدا",
+        "persistAudio": "در حال ذخیره صدا"
+      }
+    }
+  },
+  "outputs": {
+    "openInNewTabAria": "باز کردن در زبانه جدید: {{title}}",
+    "chatAboutAria": "گفت‌وگو درباره این: {{title}}",
+    "downloadAria": "بارگیری: {{title}}",
+    "artifactMissing": "دیگر در دسترس نیست.",
+    "artifactAuthError": "دسترسی رد شد. ورود خود را بررسی کنید.",
+    "artifactAccessError": "دسترسی ناموفق بود. ورود و اتصال سرور را بررسی کنید."
   }
 }

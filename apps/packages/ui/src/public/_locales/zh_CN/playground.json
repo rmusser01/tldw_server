@@ -1001,18 +1001,6 @@
   "actor_presetPlaceholder": {
     "message": "选择预设"
   },
-  "actor_preset.sliceOfLife": {
-    "message": "日常"
-  },
-  "actor_preset.dungeonCrawl": {
-    "message": "地下城探索"
-  },
-  "actor_preset.romance": {
-    "message": "浪漫"
-  },
-  "actor_preset.workSession": {
-    "message": "工作会话"
-  },
   "actor_applyPreset": {
     "message": "应用"
   },
@@ -1033,15 +1021,6 @@
   },
   "actor_templateModeHelp": {
     "message": "控制 Actor 与活动场景模板的交互方式。合并会保留两者；覆盖允许 Actor 替换重叠字段；忽略会在模板激活时跳过 Actor。"
-  },
-  "actor_templateMode.merge": {
-    "message": "与模板合并"
-  },
-  "actor_templateMode.override": {
-    "message": "覆盖模板"
-  },
-  "actor_templateMode.ignore": {
-    "message": "模板激活时忽略"
   },
   "actor_bladeAspectsTitle": {
     "message": "要素"
@@ -1465,5 +1444,29 @@
   },
   "acp_workspace_title": {
     "message": "工作区终端"
+  },
+  "tts_routeTitle": {
+    "message": "文本转语音"
+  },
+  "actor_preset_sliceOfLife": {
+    "message": "日常"
+  },
+  "actor_preset_dungeonCrawl": {
+    "message": "地下城探索"
+  },
+  "actor_preset_romance": {
+    "message": "浪漫"
+  },
+  "actor_preset_workSession": {
+    "message": "工作会话"
+  },
+  "actor_templateMode_merge": {
+    "message": "与模板合并"
+  },
+  "actor_templateMode_override": {
+    "message": "覆盖模板"
+  },
+  "actor_templateMode_ignore": {
+    "message": "模板激活时忽略"
   }
 }

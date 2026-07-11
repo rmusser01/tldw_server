@@ -32,6 +32,7 @@ except ImportError:
 
 from tldw_Server_API.app.core.Workflows.adapters._common import (
     AsyncFileWriter,
+    public_program_artifact_metadata,
     resolve_artifact_filename,
     resolve_artifacts_dir,
     watchlist_artifact_metadata,
@@ -279,6 +280,22 @@ async def run_tts_adapter(config: dict[str, Any], context: dict[str, Any]) -> di
             artifact_metadata = config.get("artifact_metadata")
             if not isinstance(artifact_metadata, dict):
                 artifact_metadata = {}
+            artifact_metadata = {
+                key: artifact_metadata[key]
+                for key in (
+                    "final_artifact",
+                    "fallback_artifact",
+                    "single_voice_fallback",
+                    "fallback_reason",
+                    "title",
+                    "label",
+                )
+                if key in artifact_metadata
+            }
+            program_metadata = public_program_artifact_metadata(
+                config.get("program_metadata"),
+                speech_ready=True,
+            )
             watchlist_metadata = watchlist_artifact_metadata(context)
             artifact_metadata = {
                 key: value
@@ -292,6 +309,7 @@ async def run_tts_adapter(config: dict[str, Any], context: dict[str, Any]) -> di
                 mime_type=mime or "application/octet-stream",
                 metadata={
                     **artifact_metadata,
+                    **program_metadata,
                     "model": model,
                     "voice": voice,
                     "format": ext,

@@ -239,9 +239,6 @@
   "header_omniSearchStartChat": {
     "message": "开始新聊天 \"{{query}}\""
   },
-  "header_connectionCard.connectedCaption": {
-    "message": "现在可以在选项和侧边栏使用聊天和工具。"
-  },
   "header_quickIngestQueuedAria": {
     "message": "{{label}} — 已排队 {{count}} 个项目 — 单击以查看并处理"
   },
@@ -2722,5 +2719,8 @@
   },
   "repo2txt_status_generated": {
     "message": "Generated output for {{count}} files ({{tokenCount}} tokens)."
+  },
+  "header_connectionCard_connectedCaption": {
+    "message": "现在可以在选项和侧边栏使用聊天和工具。"
   }
 }

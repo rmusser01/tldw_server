@@ -15,8 +15,7 @@ import { useTranslation } from "react-i18next"
 import { useWatchlistsStore } from "@/store/watchlists"
 import {
   fetchWatchlistsOverviewData,
-  type WatchlistsOverviewData,
-  type WatchlistsOverviewHealthModel
+  type WatchlistsOverviewData
 } from "@/services/watchlists-overview"
 import { formatRelativeTime } from "@/utils/dateFormatters"
 import { Badge, type BadgeVariant } from "@/components/ui/primitives"
@@ -184,29 +183,32 @@ export const WatchlistsHealthBar: React.FC<HealthBarProps> = ({ onOpenSettings, 
       data-testid="watchlists-health-bar"
     >
       {/* Collapsed bar */}
-      <div
-        className="flex cursor-pointer items-center gap-3 px-4 py-2"
-        onClick={toggleExpanded}
-        role="button"
-        tabIndex={0}
-        aria-expanded={expanded}
-        aria-label={t("watchlists:healthBar.toggleLabel", "Toggle health bar")}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault()
-            toggleExpanded()
-          }
-        }}
-      >
-        {hasAttention && (
-          <Tooltip title={t("watchlists:healthBar.attentionTooltip", "{{count}} items need attention", { count: attentionTotal })}>
-            <AlertTriangle className="h-4 w-4 text-amber-500" />
-          </Tooltip>
-        )}
-        <span className="flex-1 text-sm text-text-muted" data-testid="watchlists-health-bar-summary">
-          {summaryParts.length > 0 ? summaryParts.join(" \u00B7 ") : t("watchlists:healthBar.noData", "No watchlist data yet")}
-        </span>
-        <div className="flex items-center gap-2">
+      <div className="flex min-h-11 items-center">
+        <button
+          type="button"
+          className="flex min-h-11 min-w-0 flex-1 cursor-pointer items-center gap-3 px-4 py-2 text-left"
+          onClick={toggleExpanded}
+          aria-expanded={expanded}
+          aria-label={expanded
+            ? t("watchlists:accessibilityHardening.health.hide", "Hide Watchlists health details")
+            : t("watchlists:accessibilityHardening.health.show", "Show Watchlists health details")}
+          aria-describedby="watchlists-health-bar-summary"
+        >
+          {hasAttention && (
+            <Tooltip title={t("watchlists:healthBar.attentionTooltip", "{{count}} items need attention", { count: attentionTotal })}>
+              <AlertTriangle className="h-4 w-4 text-amber-500" aria-hidden />
+            </Tooltip>
+          )}
+          <span id="watchlists-health-bar-summary" className="flex-1 text-sm text-text-muted" data-testid="watchlists-health-bar-summary">
+            {summaryParts.length > 0 ? summaryParts.join(" \u00B7 ") : t("watchlists:healthBar.noData", "No watchlist data yet")}
+          </span>
+          {expanded ? (
+            <ChevronUp className="h-4 w-4 shrink-0 text-text-muted" aria-hidden />
+          ) : (
+            <ChevronDown className="h-4 w-4 shrink-0 text-text-muted" aria-hidden />
+          )}
+        </button>
+        <div className="flex items-center gap-2 pr-4">
           {hasNoWatchlistData && (
             <>
               <Button
@@ -220,17 +222,6 @@ export const WatchlistsHealthBar: React.FC<HealthBarProps> = ({ onOpenSettings, 
               >
                 {t("watchlists:quickActions.sources", "Set up feeds")}
               </Button>
-              <Button
-                size="small"
-                type="default"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  goToTab("jobs")
-                }}
-                data-testid="watchlists-health-setup-monitors"
-              >
-                {t("watchlists:quickActions.jobs", "Configure monitors")}
-              </Button>
             </>
           )}
           {refreshing && <Spin size="small" />}
@@ -238,7 +229,9 @@ export const WatchlistsHealthBar: React.FC<HealthBarProps> = ({ onOpenSettings, 
             <Button
               type="text"
               size="small"
-              icon={<RefreshCw className="h-3.5 w-3.5" />}
+              icon={<RefreshCw className="h-3.5 w-3.5" aria-hidden />}
+              className="min-h-11 min-w-11"
+              aria-label={t("watchlists:accessibilityHardening.health.refresh", "Refresh Watchlists health")}
               onClick={(e) => {
                 e.stopPropagation()
                 handleRefresh()
@@ -251,7 +244,9 @@ export const WatchlistsHealthBar: React.FC<HealthBarProps> = ({ onOpenSettings, 
               <Button
                 type="text"
                 size="small"
-                icon={<Settings className="h-3.5 w-3.5" />}
+                icon={<Settings className="h-3.5 w-3.5" aria-hidden />}
+                className="min-h-11 min-w-11"
+                aria-label={t("watchlists:accessibilityHardening.health.settings", "Open Watchlists settings")}
                 onClick={(e) => {
                   e.stopPropagation()
                   onOpenSettings()
@@ -259,11 +254,6 @@ export const WatchlistsHealthBar: React.FC<HealthBarProps> = ({ onOpenSettings, 
                 data-testid="watchlists-health-bar-settings"
               />
             </Tooltip>
-          )}
-          {expanded ? (
-            <ChevronUp className="h-4 w-4 text-text-muted" />
-          ) : (
-            <ChevronDown className="h-4 w-4 text-text-muted" />
           )}
         </div>
       </div>
@@ -455,17 +445,10 @@ const HealthCard: React.FC<HealthCardProps> = ({
   detail,
   onClick
 }) => (
-  <div
+  <button
+    type="button"
     className="flex cursor-pointer items-start gap-2 rounded-md border border-border p-2 transition-colors hover:bg-surface-hover"
     onClick={onClick}
-    role="button"
-    tabIndex={0}
-    onKeyDown={(e) => {
-      if ((e.key === "Enter" || e.key === " ") && onClick) {
-        e.preventDefault()
-        onClick()
-      }
-    }}
   >
     <span className={statusColor(status)}>{icon}</span>
     <div className="min-w-0 flex-1">
@@ -473,5 +456,5 @@ const HealthCard: React.FC<HealthCardProps> = ({
       <div className="text-sm font-semibold">{value}</div>
       {detail && <div className="text-xs text-text-muted">{detail}</div>}
     </div>
-  </div>
+  </button>
 )

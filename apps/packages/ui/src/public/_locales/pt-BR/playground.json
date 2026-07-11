@@ -1001,18 +1001,6 @@
   "actor_presetPlaceholder": {
     "message": "Escolha uma predefinição"
   },
-  "actor_preset.sliceOfLife": {
-    "message": "Cotidiano"
-  },
-  "actor_preset.dungeonCrawl": {
-    "message": "Exploração de masmorras"
-  },
-  "actor_preset.romance": {
-    "message": "Romance"
-  },
-  "actor_preset.workSession": {
-    "message": "Sessão de trabalho"
-  },
   "actor_applyPreset": {
     "message": "Aplicar"
   },
@@ -1033,15 +1021,6 @@
   },
   "actor_templateModeHelp": {
     "message": "Controla como o Actor interage com templates de cena ativos. Mesclar mantém ambos; Substituir permite que Actor substitua campos sobrepostos; Ignorar pula Actor quando templates estão ativos."
-  },
-  "actor_templateMode.merge": {
-    "message": "Mesclar com templates"
-  },
-  "actor_templateMode.override": {
-    "message": "Substituir templates"
-  },
-  "actor_templateMode.ignore": {
-    "message": "Ignorar quando templates estiverem ativos"
   },
   "actor_bladeAspectsTitle": {
     "message": "Aspectos"
@@ -1465,5 +1444,29 @@
   },
   "acp_workspace_title": {
     "message": "Terminal do espaço de trabalho"
+  },
+  "tts_routeTitle": {
+    "message": "Texto para fala"
+  },
+  "actor_preset_sliceOfLife": {
+    "message": "Cotidiano"
+  },
+  "actor_preset_dungeonCrawl": {
+    "message": "Exploração de masmorras"
+  },
+  "actor_preset_romance": {
+    "message": "Romance"
+  },
+  "actor_preset_workSession": {
+    "message": "Sessão de trabalho"
+  },
+  "actor_templateMode_merge": {
+    "message": "Mesclar com templates"
+  },
+  "actor_templateMode_override": {
+    "message": "Substituir templates"
+  },
+  "actor_templateMode_ignore": {
+    "message": "Ignorar quando templates estiverem ativos"
   }
 }

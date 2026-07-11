@@ -43,5 +43,1100 @@
   },
   "items_queue_generateReport": {
     "message": "تولید گزارش از صف"
+  },
+  "setupWizard_title": {
+    "message": "ایجاد فهرست پایش"
+  },
+  "setupWizard_containerTitle": {
+    "message": "ایجاد فهرست پایش"
+  },
+  "setupWizard_containerHelp": {
+    "message": "ابتدا محفظهٔ پروژه را ایجاد کنید. سپس منابع، تناوب، گزارش، تحویل و آزمون را در یک جریان راه‌اندازی تنظیم کنید."
+  },
+  "setupWizard_actions_continue": {
+    "message": "ادامه به منابع"
+  },
+  "setupWizard_sections_preset": {
+    "message": "پیش‌تنظیم حوزه"
+  },
+  "setupWizard_fields_name": {
+    "message": "نام فهرست پایش"
+  },
+  "setupWizard_fields_objective": {
+    "message": "هدف"
+  },
+  "setupWizard_validation_nameRequired": {
+    "message": "نامی برای فهرست پایش وارد کنید."
+  },
+  "setupWizard_errors_createFailed": {
+    "message": "فهرست پایش ایجاد نشد."
+  },
+  "setupWizard_presets_cti_osint_label": {
+    "message": "CTI / OSINT"
+  },
+  "setupWizard_presets_cti_osint_description": {
+    "message": "آسیب‌پذیری‌ها، بدافزارها، عاملان، هشدارها و تغییرات منابع را پیگیری کنید."
+  },
+  "setupWizard_presets_news_label": {
+    "message": "اخبار"
+  },
+  "setupWizard_presets_news_description": {
+    "message": "رویدادهای در حال تحول، افراد، سازمان‌ها و تنوع منابع را پیگیری کنید."
+  },
+  "setupWizard_presets_general_label": {
+    "message": "عمومی"
+  },
+  "setupWizard_presets_general_description": {
+    "message": "موضوعی را پیگیری و به‌روزرسانی‌ها را برای بررسی جمع‌آوری کنید."
+  },
+  "setupWizard_presets_blank_label": {
+    "message": "خالی"
+  },
+  "setupWizard_presets_blank_description": {
+    "message": "با یک فهرست پایش خالی شروع کنید و جزئیات را خودتان تنظیم کنید."
+  },
+  "setupWizard_startModes_sources_label": {
+    "message": "شروع از منابع"
+  },
+  "setupWizard_startModes_sources_description": {
+    "message": "فهرستی با خوراک‌های اولیه و یک پایشگر اختیاری ایجاد کنید."
+  },
+  "setupWizard_startModes_topic_label": {
+    "message": "شروع از موضوع"
+  },
+  "setupWizard_startModes_topic_description": {
+    "message": "ابتدا هدف فهرست را ایجاد کنید، سپس پیش از آغاز گردآوری خوراک‌ها را بیفزایید."
+  },
+  "setupWizard_startModes_report_goal_label": {
+    "message": "شروع از هدف گزارش"
+  },
+  "setupWizard_startModes_report_goal_description": {
+    "message": "ابتدا هدف گزارش را تعریف کنید، سپس منابع و الگوها را متصل کنید."
+  },
+  "setupWizard_boundaries_alerts": {
+    "message": "هشدارهای تطبیق محتوا بعداً تنظیم می‌شوند. این راه‌اندازی فهرست پایش و دامنهٔ اولیهٔ گردآوری آن را مشخص می‌کند."
+  },
+  "overview_pipelineSetup_title": {
+    "message": "راه‌اندازی گزارش"
+  },
+  "overview_pipelineSetup_open": {
+    "message": "راه‌اندازی گزارش"
+  },
+  "overview_pipelineSetup_progress": {
+    "message": "مراحل راه‌اندازی گزارش"
+  },
+  "overview_pipelineSetup_steps_sources": {
+    "message": "منابع"
+  },
+  "overview_pipelineSetup_steps_cadence": {
+    "message": "تناوب"
+  },
+  "overview_pipelineSetup_steps_briefing": {
+    "message": "گزارش"
+  },
+  "overview_pipelineSetup_steps_delivery": {
+    "message": "تحویل"
+  },
+  "overview_pipelineSetup_steps_test": {
+    "message": "آزمون"
+  },
+  "overview_pipelineSetup_actions_next": {
+    "message": "ادامه به {{step}}"
+  },
+  "overview_pipelineSetup_source_existing": {
+    "message": "استفاده از منابع موجود"
+  },
+  "overview_pipelineSetup_source_new": {
+    "message": "افزودن منبع جدید"
+  },
+  "overview_pipelineSetup_source_fallback": {
+    "message": "منبع {{id}}"
+  },
+  "overview_pipelineSetup_sources_help": {
+    "message": "منابع موجود را انتخاب کنید یا منبعی تازه بیفزایید، سپس اتصال را برای اطمینان از آمادگی آزمایش کنید."
+  },
+  "overview_pipelineSetup_sourcesLoading": {
+    "message": "در حال بارگیری منابع..."
+  },
+  "overview_pipelineSetup_sourcesError": {
+    "message": "خوراک‌های مورد نیاز راه‌اندازی بارگیری نشدند."
+  },
+  "overview_pipelineSetup_sourceTest_action": {
+    "message": "آزمایش منبع"
+  },
+  "overview_pipelineSetup_sourceTest_ready": {
+    "message": "منبع آماده است."
+  },
+  "overview_pipelineSetup_sourceTest_cancelled": {
+    "message": "آزمایش منبع لغو شد."
+  },
+  "overview_pipelineSetup_sourceTest_failed": {
+    "message": "آزمایش منبع ناموفق بود. {{message}}"
+  },
+  "overview_pipelineSetup_sourceTest_summary": {
+    "message": "{{ready}} آماده، {{filtered}} پالایش‌شده"
+  },
+  "overview_pipelineSetup_sourceTest_sample": {
+    "message": "موارد نمونه"
+  },
+  "overview_pipelineSetup_sourceTest_readyItem": {
+    "message": "آماده"
+  },
+  "overview_pipelineSetup_sourceTest_filteredItem": {
+    "message": "پالایش‌شده"
+  },
+  "overview_pipelineSetup_sourceTest_untitled": {
+    "message": "مورد بدون عنوان"
+  },
+  "overview_pipelineSetup_fields_sources": {
+    "message": "منابع"
+  },
+  "overview_pipelineSetup_fields_sourceName": {
+    "message": "نام منبع"
+  },
+  "overview_pipelineSetup_fields_sourceUrl": {
+    "message": "نشانی منبع"
+  },
+  "overview_pipelineSetup_fields_monitorName": {
+    "message": "نام پایشگر"
+  },
+  "overview_pipelineSetup_fields_schedule": {
+    "message": "زمان‌بندی"
+  },
+  "overview_pipelineSetup_fields_timezone": {
+    "message": "منطقهٔ زمانی"
+  },
+  "overview_pipelineSetup_fields_intervalEvery": {
+    "message": "هر"
+  },
+  "overview_pipelineSetup_fields_intervalUnit": {
+    "message": "واحد فاصله"
+  },
+  "overview_pipelineSetup_fields_weekday": {
+    "message": "روز هفته"
+  },
+  "overview_pipelineSetup_fields_hour": {
+    "message": "ساعت"
+  },
+  "overview_pipelineSetup_fields_minute": {
+    "message": "دقیقه"
+  },
+  "overview_pipelineSetup_fields_cronExpression": {
+    "message": "عبارت cron"
+  },
+  "overview_pipelineSetup_fields_showName": {
+    "message": "نام برنامه"
+  },
+  "overview_pipelineSetup_fields_premise": {
+    "message": "طرح برنامه"
+  },
+  "overview_pipelineSetup_fields_includeAudio": {
+    "message": "صدا"
+  },
+  "overview_pipelineSetup_fields_audioHelp": {
+    "message": "نسخهٔ گفتاری قابل پخش اضافه کنید."
+  },
+  "overview_pipelineSetup_fields_audioMinutes": {
+    "message": "مدت هدف به دقیقه"
+  },
+  "overview_pipelineSetup_fields_speakerCount": {
+    "message": "تعداد گویندگان"
+  },
+  "overview_pipelineSetup_fields_template": {
+    "message": "الگوی گزارش"
+  },
+  "overview_pipelineSetup_fields_audioProvider": {
+    "message": "جایگزینی ارائه‌دهندهٔ صدا"
+  },
+  "overview_pipelineSetup_fields_audioModel": {
+    "message": "جایگزینی مدل صدا"
+  },
+  "overview_pipelineSetup_fields_customInstructions": {
+    "message": "دستورهای ویرایشی سفارشی"
+  },
+  "overview_pipelineSetup_fields_emailDelivery": {
+    "message": "ایمیل"
+  },
+  "overview_pipelineSetup_fields_emailRecipients": {
+    "message": "گیرندگان ایمیل"
+  },
+  "overview_pipelineSetup_fields_chatbookDelivery": {
+    "message": "Chatbook"
+  },
+  "overview_pipelineSetup_fields_chatbookTitle": {
+    "message": "عنوان Chatbook"
+  },
+  "overview_pipelineSetup_schedule_manual": {
+    "message": "فقط دستی"
+  },
+  "overview_pipelineSetup_schedule_interval": {
+    "message": "هر N ساعت یا دقیقه"
+  },
+  "overview_pipelineSetup_schedule_daily": {
+    "message": "روزانه"
+  },
+  "overview_pipelineSetup_schedule_weekdays": {
+    "message": "روزهای کاری"
+  },
+  "overview_pipelineSetup_schedule_weekly": {
+    "message": "هفتگی"
+  },
+  "overview_pipelineSetup_schedule_advanced": {
+    "message": "cron پیشرفته"
+  },
+  "overview_pipelineSetup_intervalUnits_hours": {
+    "message": "ساعت"
+  },
+  "overview_pipelineSetup_intervalUnits_minutes": {
+    "message": "دقیقه"
+  },
+  "overview_pipelineSetup_weekdays_monday": {
+    "message": "دوشنبه"
+  },
+  "overview_pipelineSetup_weekdays_tuesday": {
+    "message": "سه‌شنبه"
+  },
+  "overview_pipelineSetup_weekdays_wednesday": {
+    "message": "چهارشنبه"
+  },
+  "overview_pipelineSetup_weekdays_thursday": {
+    "message": "پنج‌شنبه"
+  },
+  "overview_pipelineSetup_weekdays_friday": {
+    "message": "جمعه"
+  },
+  "overview_pipelineSetup_weekdays_saturday": {
+    "message": "شنبه"
+  },
+  "overview_pipelineSetup_weekdays_sunday": {
+    "message": "یکشنبه"
+  },
+  "overview_pipelineSetup_advancedCron": {
+    "message": "cron پیشرفته"
+  },
+  "overview_pipelineSetup_nextOccurrence": {
+    "message": "اجرای بعدی"
+  },
+  "overview_pipelineSetup_manualOccurrence": {
+    "message": "فقط دستی"
+  },
+  "overview_pipelineSetup_nextOccurrencePending": {
+    "message": "برای محاسبهٔ زمان دقیق، یک زمان‌بندی معتبر ذخیره کنید."
+  },
+  "overview_pipelineSetup_briefing_question": {
+    "message": "چه چیزی می‌سازید؟"
+  },
+  "overview_pipelineSetup_briefing_help": {
+    "message": "قالب ویرایشی را انتخاب کنید. همهٔ گزینه‌ها بر منابع منتخب شما استوار می‌مانند."
+  },
+  "overview_pipelineSetup_briefing_advanced": {
+    "message": "تنظیمات پیشرفتهٔ گزارش"
+  },
+  "overview_pipelineSetup_formats_concise_briefing": {
+    "message": "گزارش کوتاه"
+  },
+  "overview_pipelineSetup_formats_solo_update": {
+    "message": "به‌روزرسانی تک‌نفره"
+  },
+  "overview_pipelineSetup_formats_host_discussion": {
+    "message": "گفت‌وگوی میزبانان"
+  },
+  "overview_pipelineSetup_formats_sportscast": {
+    "message": "گزارش ورزشی"
+  },
+  "overview_pipelineSetup_formats_culture_roundtable": {
+    "message": "میزگرد فرهنگی"
+  },
+  "overview_pipelineSetup_formats_custom": {
+    "message": "سفارشی"
+  },
+  "overview_pipelineSetup_speaker_defaultLabel": {
+    "message": "گویندهٔ {{index}}"
+  },
+  "overview_pipelineSetup_speaker_defaultRole": {
+    "message": "میزبان"
+  },
+  "overview_pipelineSetup_speaker_labelField": {
+    "message": "برچسب گویندهٔ {{index}}"
+  },
+  "overview_pipelineSetup_speaker_roleField": {
+    "message": "نقش گویندهٔ {{index}}"
+  },
+  "overview_pipelineSetup_speaker_voiceField": {
+    "message": "صدای گویندهٔ {{index}}"
+  },
+  "overview_pipelineSetup_speaker_personaField": {
+    "message": "شخصیت گویندهٔ {{index}}"
+  },
+  "overview_pipelineSetup_preview_generate": {
+    "message": "پیش‌نمایش گزارش"
+  },
+  "overview_pipelineSetup_preview_diagnostics": {
+    "message": "عیب‌یابی پیش‌نمایش"
+  },
+  "overview_pipelineSetup_preview_context": {
+    "message": "اجرای پیش‌نمایش: {{runId}}"
+  },
+  "overview_pipelineSetup_preview_noRunContext": {
+    "message": "پیش از دیدن پیش‌نمایش این گزارش، پایشگر را با موفقیت اجرا کنید."
+  },
+  "overview_pipelineSetup_preview_templateRequired": {
+    "message": "پیش از ایجاد پیش‌نمایش یک الگو انتخاب کنید."
+  },
+  "overview_pipelineSetup_preview_templateEmpty": {
+    "message": "الگوی انتخاب‌شده خالی است."
+  },
+  "overview_pipelineSetup_preview_emptyResult": {
+    "message": "پیش‌نمایش هیچ محتوای آماده‌ای برنگرداند."
+  },
+  "overview_pipelineSetup_preview_error": {
+    "message": "پیش‌نمایش ایجاد نشد."
+  },
+  "overview_pipelineSetup_delivery_help": {
+    "message": "گزارش‌ها همیشه ذخیره می‌شوند. تحویل بیرونی تا آماده شدن کامل خروجی‌های منتخب منتظر می‌ماند."
+  },
+  "overview_pipelineSetup_delivery_reports": {
+    "message": "گزارش‌ها"
+  },
+  "overview_pipelineSetup_delivery_required": {
+    "message": "ذخیره‌سازی الزامی"
+  },
+  "overview_pipelineSetup_delivery_alwaysOn": {
+    "message": "همیشه فعال"
+  },
+  "overview_pipelineSetup_receipt_labels_schedule": {
+    "message": "زمان‌بندی"
+  },
+  "overview_pipelineSetup_receipt_labels_sources": {
+    "message": "منابع"
+  },
+  "overview_pipelineSetup_receipt_labels_artifacts": {
+    "message": "خروجی‌ها"
+  },
+  "overview_pipelineSetup_receipt_labels_format": {
+    "message": "قالب"
+  },
+  "overview_pipelineSetup_receipt_labels_showName": {
+    "message": "نام برنامه"
+  },
+  "overview_pipelineSetup_receipt_labels_cast": {
+    "message": "گویندگان"
+  },
+  "overview_pipelineSetup_receipt_labels_duration": {
+    "message": "مدت هدف"
+  },
+  "overview_pipelineSetup_receipt_labels_destinations": {
+    "message": "مقصدها"
+  },
+  "overview_pipelineSetup_receipt_schedule_manual": {
+    "message": "فقط دستی"
+  },
+  "overview_pipelineSetup_receipt_schedule_scheduled": {
+    "message": "{{date}} ({{timezone}})"
+  },
+  "overview_pipelineSetup_receipt_sources": {
+    "message": "{{count}} منبع"
+  },
+  "overview_pipelineSetup_receipt_artifacts_textReport": {
+    "message": "گزارش متنی"
+  },
+  "overview_pipelineSetup_receipt_artifacts_showNotes": {
+    "message": "یادداشت‌های برنامه"
+  },
+  "overview_pipelineSetup_receipt_artifacts_audio": {
+    "message": "صدا"
+  },
+  "overview_pipelineSetup_receipt_formats_concise_briefing": {
+    "message": "گزارش کوتاه"
+  },
+  "overview_pipelineSetup_receipt_formats_solo_update": {
+    "message": "به‌روزرسانی تک‌نفره"
+  },
+  "overview_pipelineSetup_receipt_formats_host_discussion": {
+    "message": "گفت‌وگوی میزبانان"
+  },
+  "overview_pipelineSetup_receipt_formats_sportscast": {
+    "message": "گزارش ورزشی"
+  },
+  "overview_pipelineSetup_receipt_formats_culture_roundtable": {
+    "message": "میزگرد فرهنگی"
+  },
+  "overview_pipelineSetup_receipt_formats_custom": {
+    "message": "برنامهٔ سفارشی"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_1": {
+    "message": "تک‌نفره"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_2": {
+    "message": "با دو میزبان"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_3": {
+    "message": "با سه میزبان"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_4": {
+    "message": "با چهار میزبان"
+  },
+  "overview_pipelineSetup_receipt_programWithSpeakers": {
+    "message": "{{format}} {{speakers}}"
+  },
+  "overview_pipelineSetup_receipt_cast": {
+    "message": "{{count}} گوینده"
+  },
+  "overview_pipelineSetup_receipt_duration": {
+    "message": "با هدف {{count}} دقیقه"
+  },
+  "overview_pipelineSetup_receipt_destinations_email": {
+    "message": "ایمیل: {{recipients}}"
+  },
+  "overview_pipelineSetup_receipt_destinations_chatbook": {
+    "message": "Chatbook: {{title}}"
+  },
+  "overview_pipelineSetup_receipt_untitledChatbook": {
+    "message": "بدون عنوان"
+  },
+  "overview_pipelineSetup_receipt_dstChange": {
+    "message": "اجرای بعدی پس از تغییر ساعت تابستانی از {{timezoneName}} استفاده می‌کند: {{date}}."
+  },
+  "overview_pipelineSetup_test_providerDisclosure": {
+    "message": "آزمون‌ها از ارائه‌دهندگان تنظیم‌شدهٔ مدل زبانی و تبدیل متن به گفتار استفاده می‌کنند. نمونه به ۶۰ ثانیه محدود است و آزمون کامل مدت هدف را به کار می‌برد."
+  },
+  "overview_pipelineSetup_test_textProviderDisclosure": {
+    "message": "آزمون‌ها از ارائه‌دهندهٔ مدل زبانی تنظیم‌شده استفاده می‌کنند. آزمون‌های فقط‌متنی تبدیل متن به گفتار ندارند."
+  },
+  "overview_pipelineSetup_test_receipt": {
+    "message": "خلاصهٔ فعال‌سازی"
+  },
+  "overview_pipelineSetup_test_manualReceipt": {
+    "message": "این گزارش به‌صورت دستی اجرا می‌شود، خروجی‌های منتخب را در گزارش‌ها ذخیره می‌کند و جز با انتخاب ارسال آزمون با مقصد بیرونی تماس نمی‌گیرد."
+  },
+  "overview_pipelineSetup_test_progress": {
+    "message": "پیشرفت آزمون"
+  },
+  "overview_pipelineSetup_test_stages_collection": {
+    "message": "گردآوری منابع"
+  },
+  "overview_pipelineSetup_test_stages_selection": {
+    "message": "انتخاب به‌روزرسانی‌ها"
+  },
+  "overview_pipelineSetup_test_stages_text": {
+    "message": "ایجاد گزارش"
+  },
+  "overview_pipelineSetup_test_stages_audio": {
+    "message": "ایجاد صدا"
+  },
+  "overview_pipelineSetup_test_stages_persistence": {
+    "message": "ذخیره در گزارش‌ها"
+  },
+  "overview_pipelineSetup_test_stages_audioScript": {
+    "message": "نوشتن متن صوتی"
+  },
+  "overview_pipelineSetup_test_stages_audioScriptPersistence": {
+    "message": "ذخیرهٔ متن صوتی"
+  },
+  "overview_pipelineSetup_test_stages_audioPersistence": {
+    "message": "ذخیرهٔ صدا در گزارش‌ها"
+  },
+  "overview_pipelineSetup_test_stages_delivery": {
+    "message": "بررسی تحویل آزمایشی"
+  },
+  "overview_pipelineSetup_test_stages_deliveryAdapter": {
+    "message": "تحویل به {{adapter}}"
+  },
+  "overview_pipelineSetup_test_stages_unknown": {
+    "message": "مرحلهٔ {{stage}}"
+  },
+  "overview_pipelineSetup_test_sample": {
+    "message": "ایجاد نمونهٔ ۶۰ ثانیه‌ای"
+  },
+  "overview_pipelineSetup_test_full": {
+    "message": "ایجاد قسمت آزمایشی کامل"
+  },
+  "overview_pipelineSetup_test_text": {
+    "message": "ایجاد گزارش آزمایشی"
+  },
+  "overview_pipelineSetup_test_send": {
+    "message": "ارسال آزمون"
+  },
+  "overview_pipelineSetup_test_activate": {
+    "message": "فعال‌سازی زمان‌بندی"
+  },
+  "overview_pipelineSetup_test_ready": {
+    "message": "آزمون کامل شد. گزارش شما آماده است. این پیش‌نویس تا فعال‌سازی زمان‌بندی غیرفعال می‌ماند."
+  },
+  "overview_pipelineSetup_test_cancelled": {
+    "message": "آزمون لغو شد. پیش‌نویس شما ذخیره شد."
+  },
+  "overview_pipelineSetup_test_failed": {
+    "message": "آزمون ناموفق بود. پیش‌نویس شما ذخیره شد. {{message}}"
+  },
+  "overview_pipelineSetup_test_status_not_started": {
+    "message": "آغاز نشده"
+  },
+  "overview_pipelineSetup_test_status_queued": {
+    "message": "در صف"
+  },
+  "overview_pipelineSetup_test_status_running": {
+    "message": "در حال اجرا"
+  },
+  "overview_pipelineSetup_test_status_ready": {
+    "message": "آماده"
+  },
+  "overview_pipelineSetup_test_status_failed": {
+    "message": "ناموفق"
+  },
+  "overview_pipelineSetup_test_status_skipped": {
+    "message": "رد شده"
+  },
+  "overview_pipelineSetup_test_status_cancelled": {
+    "message": "لغوشده"
+  },
+  "overview_pipelineSetup_activate_ready": {
+    "message": "زمان‌بندی فعال شد."
+  },
+  "overview_pipelineSetup_activate_failed": {
+    "message": "زمان‌بندی فعال نشد. پیش‌نویس شما ذخیره شد. {{message}}"
+  },
+  "overview_pipelineSetup_validation_sourcesRequired": {
+    "message": "پیش از ادامه دست‌کم یک منبع انتخاب کنید."
+  },
+  "overview_pipelineSetup_validation_sourceNameRequired": {
+    "message": "نام منبع را وارد کنید."
+  },
+  "overview_pipelineSetup_validation_sourceUrlInvalid": {
+    "message": "نشانی معتبر HTTP یا HTTPS برای منبع وارد کنید."
+  },
+  "overview_pipelineSetup_validation_monitorNameRequired": {
+    "message": "نام پایشگر را وارد کنید."
+  },
+  "overview_pipelineSetup_validation_timezoneInvalid": {
+    "message": "منطقهٔ زمانی معتبر IANA وارد کنید."
+  },
+  "overview_pipelineSetup_validation_intervalInvalid": {
+    "message": "فاصلهٔ زمان‌بندی پشتیبانی‌شده وارد کنید."
+  },
+  "overview_pipelineSetup_validation_hourInvalid": {
+    "message": "ساعتی بین ۰ تا ۲۳ وارد کنید."
+  },
+  "overview_pipelineSetup_validation_minuteInvalid": {
+    "message": "دقیقه‌ای بین ۰ تا ۵۹ وارد کنید."
+  },
+  "overview_pipelineSetup_validation_cronInvalid": {
+    "message": "عبارت cron معتبر پنج‌بخشی وارد کنید."
+  },
+  "overview_pipelineSetup_validation_cronTooFrequent": {
+    "message": "زمان‌بندی با فاصلهٔ دست‌کم پنج دقیقه انتخاب کنید."
+  },
+  "overview_pipelineSetup_validation_templateRequired": {
+    "message": "الگوی گزارش را وارد کنید."
+  },
+  "overview_pipelineSetup_validation_castSizeInvalid": {
+    "message": "یک تا چهار گوینده انتخاب کنید."
+  },
+  "overview_pipelineSetup_validation_castIdsInvalid": {
+    "message": "هر گوینده به هویتی یکتا نیاز دارد."
+  },
+  "overview_pipelineSetup_validation_castVoicesRequired": {
+    "message": "برای هر گوینده صدایی انتخاب کنید."
+  },
+  "overview_pipelineSetup_validation_audioMinutesInvalid": {
+    "message": "مدتی بین ۱ تا ۶۰ دقیقه وارد کنید."
+  },
+  "overview_pipelineSetup_validation_emailInvalid": {
+    "message": "دست‌کم یک نشانی ایمیل معتبر وارد کنید."
+  },
+  "overview_pipelineSetup_validationError": {
+    "message": "پیش از ادامه فیلدهای برجسته را بررسی کنید."
+  },
+  "overview_pipelineSetup_receipt_sources_one": {
+    "message": "{{count}} منبع"
+  },
+  "overview_pipelineSetup_receipt_sources_other": {
+    "message": "{{count}} منبع"
+  },
+  "overview_pipelineSetup_receipt_cast_one": {
+    "message": "{{count}} گوینده"
+  },
+  "overview_pipelineSetup_receipt_cast_other": {
+    "message": "{{count}} گوینده"
+  },
+  "overview_pipelineSetup_receipt_duration_one": {
+    "message": "با هدف {{count}} دقیقه"
+  },
+  "overview_pipelineSetup_receipt_duration_other": {
+    "message": "با هدف {{count}} دقیقه"
+  },
+  "overview_pipelineSetup_schedulePreview_loading": {
+    "message": "در حال محاسبهٔ زمان‌بندی دقیق…"
+  },
+  "overview_pipelineSetup_schedulePreview_error": {
+    "message": "محاسبهٔ زمان‌بندی دقیق ممکن نشد. عبارت cron و منطقهٔ زمانی را بررسی کنید."
+  },
+  "overview_pipelineSetup_test_running": {
+    "message": "اجرای {{runId}} هنوز در حال انجام است: {{stage}}. می‌توانید راه‌اندازی را ببندید و آن را در نمای کلی پیگیری کنید."
+  },
+  "overview_pipelineSetup_test_failedStage": {
+    "message": "{{stage}} ناموفق بود. اجرای {{runId}} را باز کنید و این مرحله را دوباره امتحان کنید."
+  },
+  "overview_pipelineSetup_test_failedWithCode": {
+    "message": "{{stage}} ناموفق بود ({{code}}). اجرای {{runId}} را باز کنید و این مرحله را دوباره امتحان کنید."
+  },
+  "overview_pipelineSetup_test_cancelledStage": {
+    "message": "{{stage}} لغو شد. پیش‌نویس شما ذخیره شد."
+  },
+  "overview_pipelineSetup_test_cancelledWithCode": {
+    "message": "{{stage}} لغو شد ({{code}}). پیش‌نویس شما ذخیره شد."
+  },
+  "overview_latest_heading_briefing": {
+    "message": "تازه‌ترین خلاصه"
+  },
+  "overview_latest_heading_episode": {
+    "message": "تازه‌ترین قسمت"
+  },
+  "overview_latest_empty_scheduled": {
+    "message": "اولین خلاصهٔ شما برای {{date}} برنامه‌ریزی شده است."
+  },
+  "overview_latest_empty_manual": {
+    "message": "شروع‌نشده. اکنون آزمایش کن."
+  },
+  "overview_latest_generatedAt": {
+    "message": "تولیدشده {{date}}"
+  },
+  "overview_latest_untitled": {
+    "message": "خلاصه {{runId}}"
+  },
+  "overview_latest_artifacts": {
+    "message": "گزارش / صدا"
+  },
+  "overview_latest_audio": {
+    "message": "صدا"
+  },
+  "overview_latest_audioFailed": {
+    "message": "صدا ناموفق"
+  },
+  "overview_latest_ready": {
+    "message": "آماده"
+  },
+  "overview_latest_saved": {
+    "message": "ذخیره‌شده"
+  },
+  "overview_latest_waiting": {
+    "message": "در انتظار"
+  },
+  "overview_latest_script": {
+    "message": "صدا گزارش"
+  },
+  "overview_latest_stageWithStatus": {
+    "message": "{{stage}}: {{status}}"
+  },
+  "overview_latest_noUpdates": {
+    "message": "هیچ به‌روزرسانی واجد شرایطی یافت نشد. یک {{noun}} وضعیت ذخیره شد."
+  },
+  "overview_latest_nextRun": {
+    "message": "اجرای بعدی: {{date}}"
+  },
+  "overview_latest_nextRunRelative": {
+    "message": "اجرای بعدی: {{relative}}"
+  },
+  "overview_latest_counts": {
+    "message": "خلاصه: گنجانده‌شده, خوانده‌نشده, جدید"
+  },
+  "overview_latest_count_included": {
+    "message": "گنجانده‌شده {{count}}"
+  },
+  "overview_latest_count_unread": {
+    "message": "خوانده‌نشده {{count}}"
+  },
+  "overview_latest_count_new": {
+    "message": "جدید {{count}}"
+  },
+  "overview_latest_provenance_sources": {
+    "message": "{{count}} منابع پیگیری‌شده"
+  },
+  "overview_latest_provenance_sources_zero": {
+    "message": "{{count}} منابع پیگیری‌شده"
+  },
+  "overview_latest_provenance_sources_one": {
+    "message": "{{count}} منبع پیگیری‌شده"
+  },
+  "overview_latest_provenance_sources_two": {
+    "message": "{{count}} منابع پیگیری‌شده"
+  },
+  "overview_latest_provenance_sources_few": {
+    "message": "{{count}} منابع پیگیری‌شده"
+  },
+  "overview_latest_provenance_sources_many": {
+    "message": "{{count}} منابع پیگیری‌شده"
+  },
+  "overview_latest_provenance_sources_other": {
+    "message": "{{count}} منابع پیگیری‌شده"
+  },
+  "overview_latest_delivery_reports": {
+    "message": "مشاهده همه گزارش‌ها"
+  },
+  "overview_latest_delivery_retryAria": {
+    "message": "تلاش دوباره {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_retryUnknownAria": {
+    "message": "نتیجه نامشخص. تلاش دوباره {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_reviewRetry": {
+    "message": "بررسی و تلاش دوباره"
+  },
+  "overview_latest_delivery_unknownConfirmation": {
+    "message": "ارائه‌دهنده تحویل {{adapter}} را تأیید نکرد. تلاش دوباره ممکن است یک نسخه تکراری بفرستد. مقصد را بررسی کنید و فقط در صورت پذیرش این خطر ادامه دهید. ({{destination}})"
+  },
+  "overview_latest_playback_region": {
+    "message": "صدا: {{name}}"
+  },
+  "overview_latest_playback_playAria": {
+    "message": "پخش {{name}}"
+  },
+  "overview_latest_playback_pauseAria": {
+    "message": "مکث {{name}}"
+  },
+  "overview_latest_playback_resumeAria": {
+    "message": "ادامه {{name}}"
+  },
+  "overview_latest_playback_seekAria": {
+    "message": "صدا: {{name}}"
+  },
+  "overview_latest_playback_loading": {
+    "message": "در حال بارگیری صدا"
+  },
+  "overview_latest_playback_error": {
+    "message": "صدا ناموفق. باز کردن گزارش / تولید دوباره صدا."
+  },
+  "overview_latest_playback_play": {
+    "message": "پخش"
+  },
+  "overview_latest_playback_pause": {
+    "message": "مکث"
+  },
+  "overview_latest_playback_resume": {
+    "message": "ادامه"
+  },
+  "overview_latest_actions_label": {
+    "message": "تازه‌ترین خلاصه"
+  },
+  "overview_latest_actions_openReport": {
+    "message": "باز کردن {{report}}"
+  },
+  "overview_latest_actions_openReportAria": {
+    "message": "باز کردن {{report}}: {{name}}"
+  },
+  "overview_latest_actions_regenerateAudio": {
+    "message": "تولید دوباره صدا"
+  },
+  "overview_latest_actions_regenerateAudioAria": {
+    "message": "تولید دوباره {{style}} {{noun}} صدا: {{name}}"
+  },
+  "overview_latest_actions_retry": {
+    "message": "تلاش دوباره"
+  },
+  "overview_latest_actions_retrySaveAria": {
+    "message": "تلاش دوباره ذخیره‌شده گزارش: {{name}}"
+  },
+  "overview_latest_actions_retryTextAria": {
+    "message": "تلاش دوباره گزارش: {{name}}"
+  },
+  "overview_latest_actions_retryStage": {
+    "message": "تلاش دوباره: {{stage}}"
+  },
+  "overview_latest_actions_inspect": {
+    "message": "بررسی اجرا"
+  },
+  "overview_latest_actions_inspectAria": {
+    "message": "بررسی اجرا {{runId}}: {{name}}"
+  },
+  "overview_latest_actions_viewReports": {
+    "message": "مشاهده همه گزارش‌ها"
+  },
+  "overview_latest_actions_testNow": {
+    "message": "اکنون آزمایش کن"
+  },
+  "overview_latest_announcements_blockingFailure": {
+    "message": "{{name}} ناموفق. بررسی اجرا {{runId}}."
+  },
+  "overview_latest_announcements_delivered": {
+    "message": "{{name}}: تحویل‌شده."
+  },
+  "overview_latest_announcements_nextRunUpdated": {
+    "message": "{{name}}: اجرای بعدی."
+  },
+  "overview_latest_announcements_partialAudioFailure": {
+    "message": "{{name}}: یادداشت‌های برنامه آماده, صدا ناموفق."
+  },
+  "overview_latest_announcements_readyText": {
+    "message": "{{name}}: گزارش آماده."
+  },
+  "overview_latest_announcements_readyWithAudio": {
+    "message": "{{name}}: آماده. صدا / یادداشت‌های برنامه."
+  },
+  "overview_latest_announcements_stageProgress": {
+    "message": "{{name}}: {{stage}} {{status}}."
+  },
+  "overview_latest_announcements_testQueued": {
+    "message": "اکنون آزمایش کن: در صف."
+  },
+  "overview_latest_retryError": {
+    "message": "تلاش دوباره ناموفق. بررسی اجرا."
+  },
+  "overview_latest_regenerateError": {
+    "message": "تولید دوباره صدا: ناموفق."
+  },
+  "overview_latest_testError": {
+    "message": "اکنون آزمایش کن: ناموفق."
+  },
+  "overview_latest_status_ready": {
+    "message": "آماده"
+  },
+  "overview_latest_status_failed": {
+    "message": "ناموفق"
+  },
+  "overview_latest_status_saved": {
+    "message": "ذخیره‌شده"
+  },
+  "overview_latest_status_waiting": {
+    "message": "در انتظار"
+  },
+  "overview_latest_status_running": {
+    "message": "در حال اجرا"
+  },
+  "overview_latest_status_queued": {
+    "message": "در صف"
+  },
+  "overview_latest_status_notStarted": {
+    "message": "شروع‌نشده"
+  },
+  "overview_latest_status_notSelected": {
+    "message": "انتخاب‌نشده"
+  },
+  "overview_latest_status_cancelled": {
+    "message": "لغوشده"
+  },
+  "overview_latest_status_delivered": {
+    "message": "تحویل‌شده"
+  },
+  "overview_latest_status_unknown": {
+    "message": "نتیجه نامشخص"
+  },
+  "overview_latest_status_sending": {
+    "message": "در حال ارسال"
+  },
+  "overview_latest_stages_renderText": {
+    "message": "گزارش"
+  },
+  "overview_latest_stages_persistText": {
+    "message": "ذخیره‌شده گزارش"
+  },
+  "overview_latest_stages_composeScript": {
+    "message": "صدا گزارش"
+  },
+  "overview_latest_stages_persistScript": {
+    "message": "ذخیره‌شده صدا گزارش"
+  },
+  "overview_latest_stages_generateAudio": {
+    "message": "صدا"
+  },
+  "overview_latest_stages_persistAudio": {
+    "message": "ذخیره‌شده صدا"
+  },
+  "overview_latest_nouns_briefing": {
+    "message": "خلاصه"
+  },
+  "overview_latest_nouns_episode": {
+    "message": "قسمت"
+  },
+  "overview_latest_nouns_report": {
+    "message": "گزارش"
+  },
+  "overview_latest_nouns_showNotes": {
+    "message": "یادداشت‌های برنامه"
+  },
+  "outputs_openInNewTabAria": {
+    "message": "باز کردن در زبانه جدید: {{title}}"
+  },
+  "outputs_chatAboutAria": {
+    "message": "گفت‌وگو درباره این: {{title}}"
+  },
+  "outputs_downloadAria": {
+    "message": "بارگیری: {{title}}"
+  },
+  "overview_latest_delivery_chatbookDestination": {
+    "message": "Chatbook"
+  },
+  "overview_latest_delivery_confirmRetry": {
+    "message": "تلاش دوباره تحویل"
+  },
+  "overview_latest_delivery_confirmRetryAria": {
+    "message": "تلاش دوباره {{adapter}} تحویل"
+  },
+  "overview_latest_delivery_recipientCount": {
+    "message": "{{count}} گیرندگان"
+  },
+  "overview_latest_delivery_recipientCount_zero": {
+    "message": "{{count}} گیرندگان"
+  },
+  "overview_latest_delivery_recipientCount_one": {
+    "message": "{{count}} گیرندگان"
+  },
+  "overview_latest_delivery_recipientCount_two": {
+    "message": "{{count}} گیرندگان"
+  },
+  "overview_latest_delivery_recipientCount_few": {
+    "message": "{{count}} گیرندگان"
+  },
+  "overview_latest_delivery_recipientCount_many": {
+    "message": "{{count}} گیرندگان"
+  },
+  "overview_latest_delivery_recipientCount_other": {
+    "message": "{{count}} گیرندگان"
+  },
+  "overview_latest_delivery_reviewAcknowledgement": {
+    "message": "مقصد را بررسی کردم و خطر تحویل تکراری را می‌پذیرم."
+  },
+  "overview_latest_delivery_reviewSettings": {
+    "message": "بررسی تنظیمات"
+  },
+  "overview_latest_delivery_reviewTitle": {
+    "message": "بررسی {{adapter}} تحویل"
+  },
+  "overview_latest_playback_accessError": {
+    "message": "صدا: دسترسی ناموفق بود. ورود و اتصال سرور را بررسی کنید."
+  },
+  "overview_latest_playback_missing": {
+    "message": "صدا دیگر در دسترس نیست."
+  },
+  "overview_latest_actions_downloadAudio": {
+    "message": "دانلود صدا"
+  },
+  "overview_latest_actions_downloadAudioAria": {
+    "message": "دانلود صدا: {{name}}"
+  },
+  "overview_latest_actions_retryExactAria": {
+    "message": "تلاش دوباره {{stage}}: {{name}}"
+  },
+  "overview_latest_actions_reviewScript": {
+    "message": "بررسی صدا گزارش"
+  },
+  "overview_latest_actions_reviewScriptAria": {
+    "message": "بررسی صدا گزارش: {{name}}"
+  },
+  "overview_latest_scriptAccessError": {
+    "message": "صدا گزارش: دسترسی ناموفق بود. ورود و اتصال سرور را بررسی کنید."
+  },
+  "overview_latest_scriptLoading": {
+    "message": "در حال بارگیری صدا گزارش"
+  },
+  "overview_latest_scriptMissing": {
+    "message": "صدا گزارش دیگر در دسترس نیست."
+  },
+  "overview_latest_recovery_renderText": {
+    "message": "در حال ایجاد گزارش"
+  },
+  "overview_latest_recovery_persistText": {
+    "message": "در حال ذخیره گزارش"
+  },
+  "overview_latest_recovery_composeScript": {
+    "message": "در حال نگارش صدا گزارش"
+  },
+  "overview_latest_recovery_persistScript": {
+    "message": "در حال ذخیره صدا گزارش"
+  },
+  "overview_latest_recovery_generateAudio": {
+    "message": "در حال ایجاد صدا"
+  },
+  "overview_latest_recovery_persistAudio": {
+    "message": "در حال ذخیره صدا"
+  },
+  "outputs_artifactMissing": {
+    "message": "دیگر در دسترس نیست."
+  },
+  "outputs_artifactAuthError": {
+    "message": "دسترسی رد شد. ورود خود را بررسی کنید."
+  },
+  "outputs_artifactAccessError": {
+    "message": "دسترسی ناموفق بود. ورود و اتصال سرور را بررسی کنید."
+  },
+  "overview_latest_status_stale": {
+    "message": "قدیمی"
+  },
+  "overview_latest_status_superseded": {
+    "message": "جایگزین‌شده"
+  },
+  "overview_latest_status_unavailable": {
+    "message": "در دسترس نیست"
+  },
+  "overview_latest_status_partial": {
+    "message": "جزئی"
+  },
+  "accessibilityHardening_source_toggleActive": {
+    "message": "تغییر وضعیت فعال: {{name}}"
+  },
+  "accessibilityHardening_source_checkNow": {
+    "message": "اکنون بررسی شود: {{name}}"
+  },
+  "accessibilityHardening_source_openWebsite": {
+    "message": "باز کردن وب‌سایت منبع: {{name}}"
+  },
+  "accessibilityHardening_source_openHealth": {
+    "message": "باز کردن وضعیت منبع: {{name}}"
+  },
+  "accessibilityHardening_source_edit": {
+    "message": "ویرایش منبع: {{name}}"
+  },
+  "accessibilityHardening_source_delete": {
+    "message": "حذف منبع: {{name}}"
+  },
+  "accessibilityHardening_item_open": {
+    "message": "باز کردن به‌روزرسانی: {{title}}"
+  },
+  "accessibilityHardening_item_select": {
+    "message": "انتخاب به‌روزرسانی: {{title}}"
+  },
+  "accessibilityHardening_item_description": {
+    "message": "{{state}}. منبع: {{source}}."
+  },
+  "accessibilityHardening_output_openNewTab": {
+    "message": "باز کردن {{title}} در زبانه جدید"
+  },
+  "accessibilityHardening_output_chat": {
+    "message": "گفتگو درباره {{title}}"
+  },
+  "accessibilityHardening_output_download": {
+    "message": "بارگیری {{title}}"
+  },
+  "accessibilityHardening_output_close": {
+    "message": "بستن پیش‌نمایش: {{title}}"
+  },
+  "accessibilityHardening_health_show": {
+    "message": "نمایش جزئیات وضعیت فهرست‌های پایش"
+  },
+  "accessibilityHardening_health_hide": {
+    "message": "پنهان کردن جزئیات وضعیت فهرست‌های پایش"
+  },
+  "accessibilityHardening_health_refresh": {
+    "message": "تازه‌سازی وضعیت فهرست‌های پایش"
+  },
+  "accessibilityHardening_health_settings": {
+    "message": "باز کردن تنظیمات فهرست‌های پایش"
+  },
+  "accessibilityHardening_delivery_email": {
+    "message": "در صورت فعال بودن، هر گزارش به گیرندگان تنظیم‌شده ارسال شود."
+  },
+  "accessibilityHardening_delivery_chatbook": {
+    "message": "در صورت فعال بودن، هر گزارش در Chatbook منتشر شود."
+  },
+  "accessibilityHardening_help_open": {
+    "message": "باز کردن راهنمای فهرست‌های پایش"
+  },
+  "accessibilityHardening_help_title": {
+    "message": "راهنمای فهرست‌های پایش"
+  },
+  "overview_pipelineSetup_test_scheduledReceipt": {
+    "message": "{{schedule}}، به‌روزرسانی‌ها را از {{sources}} گردآوری کن، {{artifacts}} را به‌صورت {{program}}{{duration}} تولید کن، سپس آن‌ها را در {{destinations}} ذخیره و تحویل بده."
+  },
+  "overview_pipelineSetup_test_audioTestRequired": {
+    "message": "پیش از فعال‌سازی، یک نمونه صوتی یا آزمون کامل موفق تولید کنید."
   }
 }

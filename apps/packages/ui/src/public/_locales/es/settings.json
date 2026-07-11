@@ -3376,5 +3376,74 @@
   },
   "dataManagement_navTitle": {
     "message": "Gestión de datos"
+  },
+  "navigation_setupRecovery": {
+    "message": "Configuración y recuperación"
+  },
+  "navigation_preferencesWorkflow": {
+    "message": "Preferencias y flujo de trabajo"
+  },
+  "navigation_dataAdmin": {
+    "message": "Datos y administración"
+  },
+  "preferencesSettings_navTitle": {
+    "message": "Preferencias"
+  },
+  "preferencesSettings_title": {
+    "message": "Preferencias generales"
+  },
+  "setupRecovery_title": {
+    "message": "Configuración y recuperación"
+  },
+  "quickIngestSettings_ocrDefaults_title": {
+    "message": "Valores predeterminados de OCR"
+  },
+  "quickIngestSettings_ocrDefaults_description": {
+    "message": "Usado por flujos de ingesta que extraen texto de imágenes o documentos escaneados."
+  },
+  "sidepanelSettings_shortcuts_title": {
+    "message": "Atajos de configuración"
+  },
+  "sidepanelSettings_shortcuts_description": {
+    "message": "Ir a la página completa de configuración que controla el cambio."
+  },
+  "sidepanelSettings_shortcuts_setupRecovery_label": {
+    "message": "Configuración y recuperación"
+  },
+  "sidepanelSettings_shortcuts_setupRecovery_description": {
+    "message": "Conexión, autenticación, claves de proveedor, modelos y diagnósticos."
+  },
+  "sidepanelSettings_shortcuts_preferences_label": {
+    "message": "Preferencias"
+  },
+  "sidepanelSettings_shortcuts_preferences_description": {
+    "message": "Idioma, notificaciones, persona, tutoriales y búsqueda web."
+  },
+  "sidepanelSettings_shortcuts_ui_label": {
+    "message": "Personalización de la interfaz"
+  },
+  "sidepanelSettings_shortcuts_ui_description": {
+    "message": "Tema, atajos, valores de visualización y comportamiento visual."
+  },
+  "sidepanelSettings_shortcuts_dataAdmin_label": {
+    "message": "Datos y administración"
+  },
+  "sidepanelSettings_shortcuts_dataAdmin_description": {
+    "message": "Gestión de datos, moderación, evaluaciones y herramientas de administración."
+  },
+  "sidepanelSettings_shortcuts_serverAuth_label": {
+    "message": "Servidor y autenticación"
+  },
+  "sidepanelSettings_shortcuts_serverAuth_description": {
+    "message": "Cambiar la URL del servidor o la clave API."
+  },
+  "sidepanelSettings_shortcuts_health_label": {
+    "message": "Diagnósticos completos"
+  },
+  "sidepanelSettings_shortcuts_health_description": {
+    "message": "Abrir comprobaciones detalladas del servidor y subsistemas."
+  },
+  "sidepanelSettings_local_title": {
+    "message": "Comportamiento del panel lateral"
   }
 }

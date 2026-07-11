@@ -1001,18 +1001,6 @@
   "actor_presetPlaceholder": {
     "message": "یک پیش‌تنظیم انتخاب کنید"
   },
-  "actor_preset.sliceOfLife": {
-    "message": "زندگی روزمره"
-  },
-  "actor_preset.dungeonCrawl": {
-    "message": "سیاه‌چال‌گردی"
-  },
-  "actor_preset.romance": {
-    "message": "رمانتیک"
-  },
-  "actor_preset.workSession": {
-    "message": "جلسه کاری"
-  },
   "actor_applyPreset": {
     "message": "اعمال"
   },
@@ -1033,15 +1021,6 @@
   },
   "actor_templateModeHelp": {
     "message": "نحوه تعامل اکتور با الگوهای فعال صحنه را کنترل می‌کند. ادغام هر دو را نگه می‌دارد؛ جایگزینی اجازه می‌دهد اکتور فیلدهای هم‌پوشان را جایگزین کند؛ نادیده‌گرفتن وقتی الگوها فعال هستند اکتور را رد می‌کند."
-  },
-  "actor_templateMode.merge": {
-    "message": "ادغام با الگوها"
-  },
-  "actor_templateMode.override": {
-    "message": "جایگزینی الگوها"
-  },
-  "actor_templateMode.ignore": {
-    "message": "نادیده‌گرفتن هنگام فعال بودن الگوها"
   },
   "actor_bladeAspectsTitle": {
     "message": "جنبه‌ها"
@@ -1465,5 +1444,29 @@
   },
   "acp_workspace_title": {
     "message": "ترمینال فضای کاری"
+  },
+  "tts_routeTitle": {
+    "message": "تبدیل متن به گفتار"
+  },
+  "actor_preset_sliceOfLife": {
+    "message": "زندگی روزمره"
+  },
+  "actor_preset_dungeonCrawl": {
+    "message": "سیاه‌چال‌گردی"
+  },
+  "actor_preset_romance": {
+    "message": "رمانتیک"
+  },
+  "actor_preset_workSession": {
+    "message": "جلسه کاری"
+  },
+  "actor_templateMode_merge": {
+    "message": "ادغام با الگوها"
+  },
+  "actor_templateMode_override": {
+    "message": "جایگزینی الگوها"
+  },
+  "actor_templateMode_ignore": {
+    "message": "نادیده‌گرفتن هنگام فعال بودن الگوها"
   }
 }

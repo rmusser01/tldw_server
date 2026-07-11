@@ -2,6 +2,7 @@
 
 import React from "react"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { WatchlistsHealthBar } from "../WatchlistsHealthBar"
 import type { WatchlistsOverviewData } from "@/services/watchlists-overview"
@@ -77,6 +78,7 @@ const buildOverviewData = (
   overrides: Partial<WatchlistsOverviewData> = {}
 ): WatchlistsOverviewData => ({
   fetchedAt: "2026-05-19T12:00:00Z",
+  latestBriefing: null,
   sources: {
     total: 0,
     healthy: 0,
@@ -131,10 +133,29 @@ describe("WatchlistsHealthBar", () => {
     })
 
     fireEvent.click(screen.getByTestId("watchlists-health-setup-feeds"))
-    fireEvent.click(screen.getByTestId("watchlists-health-setup-monitors"))
-
     expect(onNavigate).toHaveBeenCalledWith("sources")
-    expect(onNavigate).toHaveBeenCalledWith("jobs")
+  })
+
+  it("names global health controls and offers one setup recovery action", async () => {
+    const onNavigate = vi.fn()
+    const onOpenSettings = vi.fn()
+    render(
+      <WatchlistsHealthBar
+        onNavigate={onNavigate}
+        onOpenSettings={onOpenSettings}
+      />
+    )
+
+    await screen.findByText("No watchlist data yet")
+
+    const disclosure = screen.getByRole("button", {
+      name: "Show Watchlists health details"
+    })
+    expect(disclosure).toHaveAttribute("aria-describedby", "watchlists-health-bar-summary")
+    expect(screen.getByRole("button", { name: "Refresh Watchlists health" })).toBeVisible()
+    expect(screen.getByRole("button", { name: "Open Watchlists settings" })).toBeVisible()
+    expect(screen.getByTestId("watchlists-health-setup-feeds")).toBeVisible()
+    expect(screen.queryByTestId("watchlists-health-setup-monitors")).not.toBeInTheDocument()
   })
 
   it("places failed run recovery next to the Activity health state", async () => {
@@ -188,9 +209,36 @@ describe("WatchlistsHealthBar", () => {
       expect(screen.getByTestId("watchlists-health-bar-summary")).toHaveTextContent("2 failed")
     })
 
-    fireEvent.click(screen.getByLabelText("Toggle health bar"))
+    fireEvent.click(screen.getByLabelText("Show Watchlists health details"))
     fireEvent.click(screen.getByTestId("watchlists-health-open-activity"))
 
     expect(onNavigate).toHaveBeenCalledWith("runs")
+  })
+
+  it("uses native buttons for health cards without nested interactive controls", async () => {
+    const user = userEvent.setup()
+    const onNavigate = vi.fn()
+    render(<WatchlistsHealthBar onNavigate={onNavigate} />)
+
+    await screen.findByText("No watchlist data yet")
+    const disclosure = screen.queryByRole("button", { name: "Show Watchlists health details" })
+    if (disclosure) await user.click(disclosure)
+
+    const feedsCard = screen.getByRole("button", { name: /Feeds\s+0/ })
+    const monitorsCard = screen.getByRole("button", { name: /Monitors\s+0\/0/ })
+    expect(feedsCard).toHaveAttribute("type", "button")
+    expect(feedsCard).not.toHaveAttribute("role")
+    expect(feedsCard.querySelector("button, input, select, textarea, a[href]")).toBeNull()
+
+    await user.click(feedsCard)
+    expect(onNavigate).toHaveBeenCalledWith("sources")
+
+    monitorsCard.focus()
+    await user.keyboard("{Enter}")
+    expect(onNavigate).toHaveBeenCalledWith("jobs")
+
+    const activityCard = screen.getByRole("button", { name: /Activity\s+OK/ })
+    expect(activityCard.tagName).toBe("BUTTON")
+    expect(activityCard).not.toHaveAttribute("tabindex")
   })
 })

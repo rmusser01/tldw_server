@@ -3388,5 +3388,74 @@
   },
   "dataManagement_navTitle": {
     "message": "資料管理"
+  },
+  "navigation_setupRecovery": {
+    "message": "設定與復原"
+  },
+  "navigation_preferencesWorkflow": {
+    "message": "偏好設定與工作流程"
+  },
+  "navigation_dataAdmin": {
+    "message": "資料與管理"
+  },
+  "preferencesSettings_navTitle": {
+    "message": "偏好設定"
+  },
+  "preferencesSettings_title": {
+    "message": "一般偏好設定"
+  },
+  "setupRecovery_title": {
+    "message": "設定與復原"
+  },
+  "quickIngestSettings_ocrDefaults_title": {
+    "message": "OCR 預設值"
+  },
+  "quickIngestSettings_ocrDefaults_description": {
+    "message": "供從圖片或掃描文件擷取文字的匯入流程使用。"
+  },
+  "sidepanelSettings_shortcuts_title": {
+    "message": "設定捷徑"
+  },
+  "sidepanelSettings_shortcuts_description": {
+    "message": "前往負責此變更的完整設定頁面。"
+  },
+  "sidepanelSettings_shortcuts_setupRecovery_label": {
+    "message": "設定與復原"
+  },
+  "sidepanelSettings_shortcuts_setupRecovery_description": {
+    "message": "連線、驗證、供應商金鑰、模型與診斷。"
+  },
+  "sidepanelSettings_shortcuts_preferences_label": {
+    "message": "偏好設定"
+  },
+  "sidepanelSettings_shortcuts_preferences_description": {
+    "message": "語言、通知、角色、教學與網頁搜尋。"
+  },
+  "sidepanelSettings_shortcuts_ui_label": {
+    "message": "介面自訂"
+  },
+  "sidepanelSettings_shortcuts_ui_description": {
+    "message": "主題、捷徑、顯示預設值與視覺行為。"
+  },
+  "sidepanelSettings_shortcuts_dataAdmin_label": {
+    "message": "資料與管理"
+  },
+  "sidepanelSettings_shortcuts_dataAdmin_description": {
+    "message": "資料管理、審核、評估與管理工具。"
+  },
+  "sidepanelSettings_shortcuts_serverAuth_label": {
+    "message": "伺服器與驗證"
+  },
+  "sidepanelSettings_shortcuts_serverAuth_description": {
+    "message": "變更伺服器 URL 或 API 金鑰。"
+  },
+  "sidepanelSettings_shortcuts_health_label": {
+    "message": "完整診斷"
+  },
+  "sidepanelSettings_shortcuts_health_description": {
+    "message": "開啟詳細的伺服器與子系統檢查。"
+  },
+  "sidepanelSettings_local_title": {
+    "message": "側邊面板行為"
   }
 }

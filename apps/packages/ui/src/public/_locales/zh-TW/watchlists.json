@@ -43,5 +43,1100 @@
   },
   "items_queue_generateReport": {
     "message": "從佇列產生報告"
+  },
+  "setupWizard_title": {
+    "message": "建立監視清單"
+  },
+  "setupWizard_containerTitle": {
+    "message": "建立監視清單"
+  },
+  "setupWizard_containerHelp": {
+    "message": "請先建立專案容器。接著在同一設定流程中設定來源、頻率、簡報、傳送和測試。"
+  },
+  "setupWizard_actions_continue": {
+    "message": "繼續前往來源"
+  },
+  "setupWizard_sections_preset": {
+    "message": "領域預設"
+  },
+  "setupWizard_fields_name": {
+    "message": "監視清單名稱"
+  },
+  "setupWizard_fields_objective": {
+    "message": "目標"
+  },
+  "setupWizard_validation_nameRequired": {
+    "message": "請輸入監視清單名稱。"
+  },
+  "setupWizard_errors_createFailed": {
+    "message": "無法建立監視清單。"
+  },
+  "setupWizard_presets_cti_osint_label": {
+    "message": "CTI / OSINT"
+  },
+  "setupWizard_presets_cti_osint_description": {
+    "message": "追蹤弱點、惡意軟體、威脅行為者、安全公告和來源變更。"
+  },
+  "setupWizard_presets_news_label": {
+    "message": "新聞"
+  },
+  "setupWizard_presets_news_description": {
+    "message": "追蹤持續發展的事件、人物、組織和來源多樣性。"
+  },
+  "setupWizard_presets_general_label": {
+    "message": "一般"
+  },
+  "setupWizard_presets_general_description": {
+    "message": "追蹤主題並收集更新以供檢閱。"
+  },
+  "setupWizard_presets_blank_label": {
+    "message": "空白"
+  },
+  "setupWizard_presets_blank_description": {
+    "message": "從空白監視清單開始並自行設定詳細資料。"
+  },
+  "setupWizard_startModes_sources_label": {
+    "message": "從來源開始"
+  },
+  "setupWizard_startModes_sources_description": {
+    "message": "使用初始資訊提供和選用監視器建立監視清單。"
+  },
+  "setupWizard_startModes_topic_label": {
+    "message": "從主題開始"
+  },
+  "setupWizard_startModes_topic_description": {
+    "message": "先建立監視清單目標，再於收集開始前新增資訊提供。"
+  },
+  "setupWizard_startModes_report_goal_label": {
+    "message": "從報告目標開始"
+  },
+  "setupWizard_startModes_report_goal_description": {
+    "message": "先定義簡報目標，再連接來源和範本。"
+  },
+  "setupWizard_boundaries_alerts": {
+    "message": "內容比對提醒將於之後設定。此設定定義監視清單及其初始收集範圍。"
+  },
+  "overview_pipelineSetup_title": {
+    "message": "設定簡報"
+  },
+  "overview_pipelineSetup_open": {
+    "message": "設定簡報"
+  },
+  "overview_pipelineSetup_progress": {
+    "message": "簡報設定步驟"
+  },
+  "overview_pipelineSetup_steps_sources": {
+    "message": "來源"
+  },
+  "overview_pipelineSetup_steps_cadence": {
+    "message": "頻率"
+  },
+  "overview_pipelineSetup_steps_briefing": {
+    "message": "簡報"
+  },
+  "overview_pipelineSetup_steps_delivery": {
+    "message": "傳送"
+  },
+  "overview_pipelineSetup_steps_test": {
+    "message": "測試"
+  },
+  "overview_pipelineSetup_actions_next": {
+    "message": "繼續前往{{step}}"
+  },
+  "overview_pipelineSetup_source_existing": {
+    "message": "使用現有來源"
+  },
+  "overview_pipelineSetup_source_new": {
+    "message": "新增來源"
+  },
+  "overview_pipelineSetup_source_fallback": {
+    "message": "來源 {{id}}"
+  },
+  "overview_pipelineSetup_sources_help": {
+    "message": "選擇現有來源或新增一個來源，然後測試連線。"
+  },
+  "overview_pipelineSetup_sourcesLoading": {
+    "message": "正在載入來源..."
+  },
+  "overview_pipelineSetup_sourcesError": {
+    "message": "無法為設定工具載入資訊提供。"
+  },
+  "overview_pipelineSetup_sourceTest_action": {
+    "message": "測試來源"
+  },
+  "overview_pipelineSetup_sourceTest_ready": {
+    "message": "來源已就緒。"
+  },
+  "overview_pipelineSetup_sourceTest_cancelled": {
+    "message": "來源測試已取消。"
+  },
+  "overview_pipelineSetup_sourceTest_failed": {
+    "message": "來源測試失敗。{{message}}"
+  },
+  "overview_pipelineSetup_sourceTest_summary": {
+    "message": "已就緒 {{ready}} 個，已篩選 {{filtered}} 個"
+  },
+  "overview_pipelineSetup_sourceTest_sample": {
+    "message": "範例項目"
+  },
+  "overview_pipelineSetup_sourceTest_readyItem": {
+    "message": "已就緒"
+  },
+  "overview_pipelineSetup_sourceTest_filteredItem": {
+    "message": "已篩選"
+  },
+  "overview_pipelineSetup_sourceTest_untitled": {
+    "message": "無標題項目"
+  },
+  "overview_pipelineSetup_fields_sources": {
+    "message": "來源"
+  },
+  "overview_pipelineSetup_fields_sourceName": {
+    "message": "來源名稱"
+  },
+  "overview_pipelineSetup_fields_sourceUrl": {
+    "message": "來源 URL"
+  },
+  "overview_pipelineSetup_fields_monitorName": {
+    "message": "監視器名稱"
+  },
+  "overview_pipelineSetup_fields_schedule": {
+    "message": "排程"
+  },
+  "overview_pipelineSetup_fields_timezone": {
+    "message": "時區"
+  },
+  "overview_pipelineSetup_fields_intervalEvery": {
+    "message": "每"
+  },
+  "overview_pipelineSetup_fields_intervalUnit": {
+    "message": "間隔單位"
+  },
+  "overview_pipelineSetup_fields_weekday": {
+    "message": "星期"
+  },
+  "overview_pipelineSetup_fields_hour": {
+    "message": "小時"
+  },
+  "overview_pipelineSetup_fields_minute": {
+    "message": "分鐘"
+  },
+  "overview_pipelineSetup_fields_cronExpression": {
+    "message": "Cron 運算式"
+  },
+  "overview_pipelineSetup_fields_showName": {
+    "message": "節目名稱"
+  },
+  "overview_pipelineSetup_fields_premise": {
+    "message": "節目構想"
+  },
+  "overview_pipelineSetup_fields_includeAudio": {
+    "message": "音訊"
+  },
+  "overview_pipelineSetup_fields_audioHelp": {
+    "message": "新增可播放的語音版本。"
+  },
+  "overview_pipelineSetup_fields_audioMinutes": {
+    "message": "目標時間（分鐘）"
+  },
+  "overview_pipelineSetup_fields_speakerCount": {
+    "message": "來賓人數"
+  },
+  "overview_pipelineSetup_fields_template": {
+    "message": "報告範本"
+  },
+  "overview_pipelineSetup_fields_audioProvider": {
+    "message": "替代音訊供應商"
+  },
+  "overview_pipelineSetup_fields_audioModel": {
+    "message": "替代音訊模型"
+  },
+  "overview_pipelineSetup_fields_customInstructions": {
+    "message": "自訂編輯指示"
+  },
+  "overview_pipelineSetup_fields_emailDelivery": {
+    "message": "電子郵件"
+  },
+  "overview_pipelineSetup_fields_emailRecipients": {
+    "message": "郵件收件人"
+  },
+  "overview_pipelineSetup_fields_chatbookDelivery": {
+    "message": "Chatbook"
+  },
+  "overview_pipelineSetup_fields_chatbookTitle": {
+    "message": "Chatbook 標題"
+  },
+  "overview_pipelineSetup_schedule_manual": {
+    "message": "僅手動"
+  },
+  "overview_pipelineSetup_schedule_interval": {
+    "message": "每 N 小時或分鐘"
+  },
+  "overview_pipelineSetup_schedule_daily": {
+    "message": "每天"
+  },
+  "overview_pipelineSetup_schedule_weekdays": {
+    "message": "工作日"
+  },
+  "overview_pipelineSetup_schedule_weekly": {
+    "message": "每週"
+  },
+  "overview_pipelineSetup_schedule_advanced": {
+    "message": "進階 Cron"
+  },
+  "overview_pipelineSetup_intervalUnits_hours": {
+    "message": "小時"
+  },
+  "overview_pipelineSetup_intervalUnits_minutes": {
+    "message": "分鐘"
+  },
+  "overview_pipelineSetup_weekdays_monday": {
+    "message": "星期一"
+  },
+  "overview_pipelineSetup_weekdays_tuesday": {
+    "message": "星期二"
+  },
+  "overview_pipelineSetup_weekdays_wednesday": {
+    "message": "星期三"
+  },
+  "overview_pipelineSetup_weekdays_thursday": {
+    "message": "星期四"
+  },
+  "overview_pipelineSetup_weekdays_friday": {
+    "message": "星期五"
+  },
+  "overview_pipelineSetup_weekdays_saturday": {
+    "message": "星期六"
+  },
+  "overview_pipelineSetup_weekdays_sunday": {
+    "message": "星期日"
+  },
+  "overview_pipelineSetup_advancedCron": {
+    "message": "進階 Cron"
+  },
+  "overview_pipelineSetup_nextOccurrence": {
+    "message": "下次執行"
+  },
+  "overview_pipelineSetup_manualOccurrence": {
+    "message": "僅手動"
+  },
+  "overview_pipelineSetup_nextOccurrencePending": {
+    "message": "儲存有效排程以計算確切時間。"
+  },
+  "overview_pipelineSetup_briefing_question": {
+    "message": "您要製作什麼？"
+  },
+  "overview_pipelineSetup_briefing_help": {
+    "message": "請選擇編輯形式。每個選項都以您選擇的來源為依據。"
+  },
+  "overview_pipelineSetup_briefing_advanced": {
+    "message": "進階簡報設定"
+  },
+  "overview_pipelineSetup_formats_concise_briefing": {
+    "message": "精簡簡報"
+  },
+  "overview_pipelineSetup_formats_solo_update": {
+    "message": "單人更新"
+  },
+  "overview_pipelineSetup_formats_host_discussion": {
+    "message": "主持人討論"
+  },
+  "overview_pipelineSetup_formats_sportscast": {
+    "message": "體育播報"
+  },
+  "overview_pipelineSetup_formats_culture_roundtable": {
+    "message": "文化圓桌"
+  },
+  "overview_pipelineSetup_formats_custom": {
+    "message": "自訂"
+  },
+  "overview_pipelineSetup_speaker_defaultLabel": {
+    "message": "參與者 {{index}}"
+  },
+  "overview_pipelineSetup_speaker_defaultRole": {
+    "message": "主持人"
+  },
+  "overview_pipelineSetup_speaker_labelField": {
+    "message": "參與者 {{index}} 標籤"
+  },
+  "overview_pipelineSetup_speaker_roleField": {
+    "message": "參與者 {{index}} 角色"
+  },
+  "overview_pipelineSetup_speaker_voiceField": {
+    "message": "參與者 {{index}} 聲音"
+  },
+  "overview_pipelineSetup_speaker_personaField": {
+    "message": "參與者 {{index}} 人設"
+  },
+  "overview_pipelineSetup_preview_generate": {
+    "message": "預覽報告"
+  },
+  "overview_pipelineSetup_preview_diagnostics": {
+    "message": "預覽診斷"
+  },
+  "overview_pipelineSetup_preview_context": {
+    "message": "預覽執行：{{runId}}"
+  },
+  "overview_pipelineSetup_preview_noRunContext": {
+    "message": "請先成功執行監視器，再預覽此報告。"
+  },
+  "overview_pipelineSetup_preview_templateRequired": {
+    "message": "產生預覽前請選擇範本。"
+  },
+  "overview_pipelineSetup_preview_templateEmpty": {
+    "message": "所選範本是空的。"
+  },
+  "overview_pipelineSetup_preview_emptyResult": {
+    "message": "預覽未傳回算繪內容。"
+  },
+  "overview_pipelineSetup_preview_error": {
+    "message": "無法產生預覽。"
+  },
+  "overview_pipelineSetup_delivery_help": {
+    "message": "一律包含報告。外部傳送會等待所選成果準備就緒。"
+  },
+  "overview_pipelineSetup_delivery_reports": {
+    "message": "報告"
+  },
+  "overview_pipelineSetup_delivery_required": {
+    "message": "必要儲存空間"
+  },
+  "overview_pipelineSetup_delivery_alwaysOn": {
+    "message": "一律開啟"
+  },
+  "overview_pipelineSetup_receipt_labels_schedule": {
+    "message": "排程"
+  },
+  "overview_pipelineSetup_receipt_labels_sources": {
+    "message": "來源"
+  },
+  "overview_pipelineSetup_receipt_labels_artifacts": {
+    "message": "成果"
+  },
+  "overview_pipelineSetup_receipt_labels_format": {
+    "message": "格式"
+  },
+  "overview_pipelineSetup_receipt_labels_showName": {
+    "message": "節目名稱"
+  },
+  "overview_pipelineSetup_receipt_labels_cast": {
+    "message": "來賓"
+  },
+  "overview_pipelineSetup_receipt_labels_duration": {
+    "message": "目標時間"
+  },
+  "overview_pipelineSetup_receipt_labels_destinations": {
+    "message": "目的地"
+  },
+  "overview_pipelineSetup_receipt_schedule_manual": {
+    "message": "僅手動"
+  },
+  "overview_pipelineSetup_receipt_schedule_scheduled": {
+    "message": "{{date}}（{{timezone}}）"
+  },
+  "overview_pipelineSetup_receipt_sources": {
+    "message": "{{count}} 個來源"
+  },
+  "overview_pipelineSetup_receipt_artifacts_textReport": {
+    "message": "文字報告"
+  },
+  "overview_pipelineSetup_receipt_artifacts_showNotes": {
+    "message": "節目說明"
+  },
+  "overview_pipelineSetup_receipt_artifacts_audio": {
+    "message": "音訊"
+  },
+  "overview_pipelineSetup_receipt_formats_concise_briefing": {
+    "message": "精簡簡報"
+  },
+  "overview_pipelineSetup_receipt_formats_solo_update": {
+    "message": "單人更新"
+  },
+  "overview_pipelineSetup_receipt_formats_host_discussion": {
+    "message": "主持人討論"
+  },
+  "overview_pipelineSetup_receipt_formats_sportscast": {
+    "message": "體育播報"
+  },
+  "overview_pipelineSetup_receipt_formats_culture_roundtable": {
+    "message": "文化圓桌"
+  },
+  "overview_pipelineSetup_receipt_formats_custom": {
+    "message": "自訂節目"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_1": {
+    "message": "單人"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_2": {
+    "message": "雙主持人"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_3": {
+    "message": "三位主持人"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_4": {
+    "message": "四位主持人"
+  },
+  "overview_pipelineSetup_receipt_programWithSpeakers": {
+    "message": "{{speakers}}{{format}}"
+  },
+  "overview_pipelineSetup_receipt_cast": {
+    "message": "{{count}} 位參與者"
+  },
+  "overview_pipelineSetup_receipt_duration": {
+    "message": "目標 {{count}} 分鐘"
+  },
+  "overview_pipelineSetup_receipt_destinations_email": {
+    "message": "電子郵件：{{recipients}}"
+  },
+  "overview_pipelineSetup_receipt_destinations_chatbook": {
+    "message": "Chatbook：{{title}}"
+  },
+  "overview_pipelineSetup_receipt_untitledChatbook": {
+    "message": "無標題"
+  },
+  "overview_pipelineSetup_receipt_dstChange": {
+    "message": "日光節約時間偏移變更後，下一次執行使用 {{timezoneName}}：{{date}}。"
+  },
+  "overview_pipelineSetup_test_providerDisclosure": {
+    "message": "測試會使用您設定的 LLM 和文字轉語音供應商。樣本限制為 60 秒；完整測試使用目標時間。"
+  },
+  "overview_pipelineSetup_test_textProviderDisclosure": {
+    "message": "測試會使用您設定的 LLM 供應商。純文字測試不使用文字轉語音。"
+  },
+  "overview_pipelineSetup_test_receipt": {
+    "message": "啟用摘要"
+  },
+  "overview_pipelineSetup_test_manualReceipt": {
+    "message": "此簡報會手動執行，將所選成果儲存在「報告」中；除非您選擇「傳送測試」，否則不會聯絡外部目的地。"
+  },
+  "overview_pipelineSetup_test_progress": {
+    "message": "測試進度"
+  },
+  "overview_pipelineSetup_test_stages_collection": {
+    "message": "收集來源"
+  },
+  "overview_pipelineSetup_test_stages_selection": {
+    "message": "選擇更新"
+  },
+  "overview_pipelineSetup_test_stages_text": {
+    "message": "建立報告"
+  },
+  "overview_pipelineSetup_test_stages_audio": {
+    "message": "建立音訊"
+  },
+  "overview_pipelineSetup_test_stages_persistence": {
+    "message": "儲存到報告"
+  },
+  "overview_pipelineSetup_test_stages_audioScript": {
+    "message": "撰寫音訊指令碼"
+  },
+  "overview_pipelineSetup_test_stages_audioScriptPersistence": {
+    "message": "儲存音訊指令碼"
+  },
+  "overview_pipelineSetup_test_stages_audioPersistence": {
+    "message": "將音訊儲存到報告"
+  },
+  "overview_pipelineSetup_test_stages_delivery": {
+    "message": "檢查測試傳送"
+  },
+  "overview_pipelineSetup_test_stages_deliveryAdapter": {
+    "message": "傳送到 {{adapter}}"
+  },
+  "overview_pipelineSetup_test_stages_unknown": {
+    "message": "階段 {{stage}}"
+  },
+  "overview_pipelineSetup_test_sample": {
+    "message": "產生 60 秒樣本"
+  },
+  "overview_pipelineSetup_test_full": {
+    "message": "產生完整測試節目"
+  },
+  "overview_pipelineSetup_test_text": {
+    "message": "產生測試報告"
+  },
+  "overview_pipelineSetup_test_send": {
+    "message": "傳送測試"
+  },
+  "overview_pipelineSetup_test_activate": {
+    "message": "啟用排程"
+  },
+  "overview_pipelineSetup_test_ready": {
+    "message": "測試已完成。簡報已準備就緒。在啟用排程之前，此草稿會維持未啟用狀態。"
+  },
+  "overview_pipelineSetup_test_cancelled": {
+    "message": "測試已取消。草稿已儲存。"
+  },
+  "overview_pipelineSetup_test_failed": {
+    "message": "測試失敗。草稿已儲存。{{message}}"
+  },
+  "overview_pipelineSetup_test_status_not_started": {
+    "message": "未開始"
+  },
+  "overview_pipelineSetup_test_status_queued": {
+    "message": "已排入佇列"
+  },
+  "overview_pipelineSetup_test_status_running": {
+    "message": "執行中"
+  },
+  "overview_pipelineSetup_test_status_ready": {
+    "message": "已就緒"
+  },
+  "overview_pipelineSetup_test_status_failed": {
+    "message": "失敗"
+  },
+  "overview_pipelineSetup_test_status_skipped": {
+    "message": "已略過"
+  },
+  "overview_pipelineSetup_test_status_cancelled": {
+    "message": "已取消"
+  },
+  "overview_pipelineSetup_activate_ready": {
+    "message": "排程已啟用。"
+  },
+  "overview_pipelineSetup_activate_failed": {
+    "message": "無法啟用排程。草稿已儲存。{{message}}"
+  },
+  "overview_pipelineSetup_validation_sourcesRequired": {
+    "message": "請至少選擇一個來源再繼續。"
+  },
+  "overview_pipelineSetup_validation_sourceNameRequired": {
+    "message": "請輸入來源名稱。"
+  },
+  "overview_pipelineSetup_validation_sourceUrlInvalid": {
+    "message": "請輸入有效的 HTTP 或 HTTPS 來源 URL。"
+  },
+  "overview_pipelineSetup_validation_monitorNameRequired": {
+    "message": "請輸入監視器名稱。"
+  },
+  "overview_pipelineSetup_validation_timezoneInvalid": {
+    "message": "請輸入有效的 IANA 時區。"
+  },
+  "overview_pipelineSetup_validation_intervalInvalid": {
+    "message": "請輸入支援的排程間隔。"
+  },
+  "overview_pipelineSetup_validation_hourInvalid": {
+    "message": "請輸入 0 到 23 之間的小時。"
+  },
+  "overview_pipelineSetup_validation_minuteInvalid": {
+    "message": "請輸入 0 到 59 之間的分鐘。"
+  },
+  "overview_pipelineSetup_validation_cronInvalid": {
+    "message": "請輸入有效的五欄位 Cron 運算式。"
+  },
+  "overview_pipelineSetup_validation_cronTooFrequent": {
+    "message": "請選擇間隔至少五分鐘的排程。"
+  },
+  "overview_pipelineSetup_validation_templateRequired": {
+    "message": "請輸入報告範本。"
+  },
+  "overview_pipelineSetup_validation_castSizeInvalid": {
+    "message": "請選擇一到四位參與者。"
+  },
+  "overview_pipelineSetup_validation_castIdsInvalid": {
+    "message": "每位參與者都需要唯一身分。"
+  },
+  "overview_pipelineSetup_validation_castVoicesRequired": {
+    "message": "請為每位參與者選擇聲音。"
+  },
+  "overview_pipelineSetup_validation_audioMinutesInvalid": {
+    "message": "請輸入 1 到 60 分鐘的時間。"
+  },
+  "overview_pipelineSetup_validation_emailInvalid": {
+    "message": "請輸入至少一個有效的電子郵件地址。"
+  },
+  "overview_pipelineSetup_validationError": {
+    "message": "請檢查醒目顯示的欄位再繼續。"
+  },
+  "overview_pipelineSetup_receipt_sources_one": {
+    "message": "{{count}} 個來源"
+  },
+  "overview_pipelineSetup_receipt_sources_other": {
+    "message": "{{count}} 個來源"
+  },
+  "overview_pipelineSetup_receipt_cast_one": {
+    "message": "{{count}} 位參與者"
+  },
+  "overview_pipelineSetup_receipt_cast_other": {
+    "message": "{{count}} 位參與者"
+  },
+  "overview_pipelineSetup_receipt_duration_one": {
+    "message": "目標 {{count}} 分鐘"
+  },
+  "overview_pipelineSetup_receipt_duration_other": {
+    "message": "目標 {{count}} 分鐘"
+  },
+  "overview_pipelineSetup_schedulePreview_loading": {
+    "message": "正在計算確切排程…"
+  },
+  "overview_pipelineSetup_schedulePreview_error": {
+    "message": "無法計算確切排程。請檢查 cron 運算式和時區。"
+  },
+  "overview_pipelineSetup_test_running": {
+    "message": "執行 {{runId}} 仍在進行：{{stage}}。你可以關閉設定並在概覽中監控。"
+  },
+  "overview_pipelineSetup_test_failedStage": {
+    "message": "{{stage}} 失敗。請開啟執行 {{runId}} 並重試此階段。"
+  },
+  "overview_pipelineSetup_test_failedWithCode": {
+    "message": "{{stage}} 失敗（{{code}}）。請開啟執行 {{runId}} 並重試此階段。"
+  },
+  "overview_pipelineSetup_test_cancelledStage": {
+    "message": "{{stage}} 已取消。草稿已儲存。"
+  },
+  "overview_pipelineSetup_test_cancelledWithCode": {
+    "message": "{{stage}} 已取消（{{code}}）。草稿已儲存。"
+  },
+  "overview_latest_heading_briefing": {
+    "message": "最新簡報"
+  },
+  "overview_latest_heading_episode": {
+    "message": "最新節目"
+  },
+  "overview_latest_empty_scheduled": {
+    "message": "首份簡報預定於{{date}}產生。"
+  },
+  "overview_latest_empty_manual": {
+    "message": "尚未開始。立即測試。"
+  },
+  "overview_latest_generatedAt": {
+    "message": "產生於 {{date}}"
+  },
+  "overview_latest_untitled": {
+    "message": "簡報 {{runId}}"
+  },
+  "overview_latest_artifacts": {
+    "message": "報告／音訊"
+  },
+  "overview_latest_audio": {
+    "message": "音訊"
+  },
+  "overview_latest_audioFailed": {
+    "message": "音訊產生失敗"
+  },
+  "overview_latest_ready": {
+    "message": "就緒"
+  },
+  "overview_latest_saved": {
+    "message": "已儲存"
+  },
+  "overview_latest_waiting": {
+    "message": "等待中"
+  },
+  "overview_latest_script": {
+    "message": "音訊腳本"
+  },
+  "overview_latest_stageWithStatus": {
+    "message": "{{stage}}：{{status}}"
+  },
+  "overview_latest_noUpdates": {
+    "message": "找不到符合條件的更新。已儲存狀態{{noun}}。"
+  },
+  "overview_latest_nextRun": {
+    "message": "下次執行：{{date}}"
+  },
+  "overview_latest_nextRunRelative": {
+    "message": "下次執行：{{relative}}"
+  },
+  "overview_latest_counts": {
+    "message": "簡報：已包含、未讀、新增"
+  },
+  "overview_latest_count_included": {
+    "message": "已包含 {{count}}"
+  },
+  "overview_latest_count_unread": {
+    "message": "未讀 {{count}}"
+  },
+  "overview_latest_count_new": {
+    "message": "新增 {{count}}"
+  },
+  "overview_latest_provenance_sources": {
+    "message": "{{count}} 個追蹤來源"
+  },
+  "overview_latest_provenance_sources_zero": {
+    "message": "{{count}} 個追蹤來源"
+  },
+  "overview_latest_provenance_sources_one": {
+    "message": "{{count}} 個追蹤來源"
+  },
+  "overview_latest_provenance_sources_two": {
+    "message": "{{count}} 個追蹤來源"
+  },
+  "overview_latest_provenance_sources_few": {
+    "message": "{{count}} 個追蹤來源"
+  },
+  "overview_latest_provenance_sources_many": {
+    "message": "{{count}} 個追蹤來源"
+  },
+  "overview_latest_provenance_sources_other": {
+    "message": "{{count}} 個追蹤來源"
+  },
+  "overview_latest_delivery_reports": {
+    "message": "查看所有報告"
+  },
+  "overview_latest_delivery_retryAria": {
+    "message": "重試 {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_retryUnknownAria": {
+    "message": "結果未知. 重試 {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_reviewRetry": {
+    "message": "檢查後重試"
+  },
+  "overview_latest_delivery_unknownConfirmation": {
+    "message": "提供者未確認透過 {{adapter}} 送達。重試可能會傳送重複內容。請檢查目的地，僅在可接受此風險時繼續。 ({{destination}})"
+  },
+  "overview_latest_playback_region": {
+    "message": "音訊: {{name}}"
+  },
+  "overview_latest_playback_playAria": {
+    "message": "播放 {{name}}"
+  },
+  "overview_latest_playback_pauseAria": {
+    "message": "暫停 {{name}}"
+  },
+  "overview_latest_playback_resumeAria": {
+    "message": "繼續播放 {{name}}"
+  },
+  "overview_latest_playback_seekAria": {
+    "message": "音訊: {{name}}"
+  },
+  "overview_latest_playback_loading": {
+    "message": "正在載入音訊"
+  },
+  "overview_latest_playback_error": {
+    "message": "音訊產生失敗。請開啟報告或重新產生音訊。"
+  },
+  "overview_latest_playback_play": {
+    "message": "播放"
+  },
+  "overview_latest_playback_pause": {
+    "message": "暫停"
+  },
+  "overview_latest_playback_resume": {
+    "message": "繼續"
+  },
+  "overview_latest_actions_label": {
+    "message": "最新簡報"
+  },
+  "overview_latest_actions_openReport": {
+    "message": "開啟 {{report}}"
+  },
+  "overview_latest_actions_openReportAria": {
+    "message": "開啟{{report}}：{{name}}"
+  },
+  "overview_latest_actions_regenerateAudio": {
+    "message": "重新產生音訊"
+  },
+  "overview_latest_actions_regenerateAudioAria": {
+    "message": "重新產生{{style}}{{noun}}音訊：{{name}}"
+  },
+  "overview_latest_actions_retry": {
+    "message": "重試"
+  },
+  "overview_latest_actions_retrySaveAria": {
+    "message": "重試 已儲存 報告: {{name}}"
+  },
+  "overview_latest_actions_retryTextAria": {
+    "message": "重試 報告: {{name}}"
+  },
+  "overview_latest_actions_retryStage": {
+    "message": "重試: {{stage}}"
+  },
+  "overview_latest_actions_inspect": {
+    "message": "檢查執行"
+  },
+  "overview_latest_actions_inspectAria": {
+    "message": "檢查執行 {{runId}}: {{name}}"
+  },
+  "overview_latest_actions_viewReports": {
+    "message": "查看所有報告"
+  },
+  "overview_latest_actions_testNow": {
+    "message": "立即測試"
+  },
+  "overview_latest_announcements_blockingFailure": {
+    "message": "{{name}}失敗。請檢查執行{{runId}}。"
+  },
+  "overview_latest_announcements_delivered": {
+    "message": "{{name}}：已送達。"
+  },
+  "overview_latest_announcements_nextRunUpdated": {
+    "message": "{{name}}：已更新下次執行時間。"
+  },
+  "overview_latest_announcements_partialAudioFailure": {
+    "message": "{{name}}：節目說明已就緒，音訊產生失敗。"
+  },
+  "overview_latest_announcements_readyText": {
+    "message": "{{name}}：報告已就緒。"
+  },
+  "overview_latest_announcements_readyWithAudio": {
+    "message": "{{name}}：音訊與節目說明已就緒。"
+  },
+  "overview_latest_announcements_stageProgress": {
+    "message": "{{name}}：{{stage}}{{status}}。"
+  },
+  "overview_latest_announcements_testQueued": {
+    "message": "測試已排入佇列。"
+  },
+  "overview_latest_retryError": {
+    "message": "重試 失敗. 檢查執行."
+  },
+  "overview_latest_regenerateError": {
+    "message": "重新產生 音訊: 失敗."
+  },
+  "overview_latest_testError": {
+    "message": "立即測試: 失敗."
+  },
+  "overview_latest_status_ready": {
+    "message": "就緒"
+  },
+  "overview_latest_status_failed": {
+    "message": "失敗"
+  },
+  "overview_latest_status_saved": {
+    "message": "已儲存"
+  },
+  "overview_latest_status_waiting": {
+    "message": "等待中"
+  },
+  "overview_latest_status_running": {
+    "message": "執行中"
+  },
+  "overview_latest_status_queued": {
+    "message": "已排入佇列"
+  },
+  "overview_latest_status_notStarted": {
+    "message": "未開始"
+  },
+  "overview_latest_status_notSelected": {
+    "message": "未選取"
+  },
+  "overview_latest_status_cancelled": {
+    "message": "已取消"
+  },
+  "overview_latest_status_delivered": {
+    "message": "已送達"
+  },
+  "overview_latest_status_unknown": {
+    "message": "結果未知"
+  },
+  "overview_latest_status_sending": {
+    "message": "傳送中"
+  },
+  "overview_latest_stages_renderText": {
+    "message": "報告"
+  },
+  "overview_latest_stages_persistText": {
+    "message": "已儲存 報告"
+  },
+  "overview_latest_stages_composeScript": {
+    "message": "音訊腳本"
+  },
+  "overview_latest_stages_persistScript": {
+    "message": "已儲存音訊腳本"
+  },
+  "overview_latest_stages_generateAudio": {
+    "message": "音訊"
+  },
+  "overview_latest_stages_persistAudio": {
+    "message": "已儲存 音訊"
+  },
+  "overview_latest_nouns_briefing": {
+    "message": "簡報"
+  },
+  "overview_latest_nouns_episode": {
+    "message": "節目"
+  },
+  "overview_latest_nouns_report": {
+    "message": "報告"
+  },
+  "overview_latest_nouns_showNotes": {
+    "message": "節目說明"
+  },
+  "outputs_openInNewTabAria": {
+    "message": "在新分頁中開啟: {{title}}"
+  },
+  "outputs_chatAboutAria": {
+    "message": "討論此內容: {{title}}"
+  },
+  "outputs_downloadAria": {
+    "message": "下載: {{title}}"
+  },
+  "overview_latest_delivery_chatbookDestination": {
+    "message": "Chatbook"
+  },
+  "overview_latest_delivery_confirmRetry": {
+    "message": "重試 送達"
+  },
+  "overview_latest_delivery_confirmRetryAria": {
+    "message": "重試 {{adapter}} 送達"
+  },
+  "overview_latest_delivery_recipientCount": {
+    "message": "{{count}} 收件者"
+  },
+  "overview_latest_delivery_recipientCount_zero": {
+    "message": "{{count}} 收件者"
+  },
+  "overview_latest_delivery_recipientCount_one": {
+    "message": "{{count}} 收件者"
+  },
+  "overview_latest_delivery_recipientCount_two": {
+    "message": "{{count}} 收件者"
+  },
+  "overview_latest_delivery_recipientCount_few": {
+    "message": "{{count}} 收件者"
+  },
+  "overview_latest_delivery_recipientCount_many": {
+    "message": "{{count}} 收件者"
+  },
+  "overview_latest_delivery_recipientCount_other": {
+    "message": "{{count}} 收件者"
+  },
+  "overview_latest_delivery_reviewAcknowledgement": {
+    "message": "我已檢查目的地，並接受重複送達的風險。"
+  },
+  "overview_latest_delivery_reviewSettings": {
+    "message": "檢查 設定"
+  },
+  "overview_latest_delivery_reviewTitle": {
+    "message": "檢查 {{adapter}} 送達"
+  },
+  "overview_latest_playback_accessError": {
+    "message": "音訊: 存取失敗. 請檢查登入狀態與伺服器連線。"
+  },
+  "overview_latest_playback_missing": {
+    "message": "音訊 已無法使用."
+  },
+  "overview_latest_actions_downloadAudio": {
+    "message": "下載音訊"
+  },
+  "overview_latest_actions_downloadAudioAria": {
+    "message": "下載音訊：{{name}}"
+  },
+  "overview_latest_actions_retryExactAria": {
+    "message": "重試 {{stage}}: {{name}}"
+  },
+  "overview_latest_actions_reviewScript": {
+    "message": "檢查音訊腳本"
+  },
+  "overview_latest_actions_reviewScriptAria": {
+    "message": "檢查音訊腳本：{{name}}"
+  },
+  "overview_latest_scriptAccessError": {
+    "message": "音訊 報告: 存取失敗. 請檢查登入狀態與伺服器連線。"
+  },
+  "overview_latest_scriptLoading": {
+    "message": "正在載入音訊腳本"
+  },
+  "overview_latest_scriptMissing": {
+    "message": "音訊 報告 已無法使用."
+  },
+  "overview_latest_recovery_renderText": {
+    "message": "正在產生 報告"
+  },
+  "overview_latest_recovery_persistText": {
+    "message": "正在儲存 報告"
+  },
+  "overview_latest_recovery_composeScript": {
+    "message": "正在編寫音訊腳本"
+  },
+  "overview_latest_recovery_persistScript": {
+    "message": "正在儲存音訊腳本"
+  },
+  "overview_latest_recovery_generateAudio": {
+    "message": "正在產生 音訊"
+  },
+  "overview_latest_recovery_persistAudio": {
+    "message": "正在儲存 音訊"
+  },
+  "outputs_artifactMissing": {
+    "message": "已無法使用."
+  },
+  "outputs_artifactAuthError": {
+    "message": "存取遭拒。請檢查登入狀態。"
+  },
+  "outputs_artifactAccessError": {
+    "message": "存取失敗. 請檢查登入狀態與伺服器連線。"
+  },
+  "overview_latest_status_stale": {
+    "message": "已過期"
+  },
+  "overview_latest_status_superseded": {
+    "message": "已被取代"
+  },
+  "overview_latest_status_unavailable": {
+    "message": "無法使用"
+  },
+  "overview_latest_status_partial": {
+    "message": "部分完成"
+  },
+  "accessibilityHardening_source_toggleActive": {
+    "message": "切換啟用狀態：{{name}}"
+  },
+  "accessibilityHardening_source_checkNow": {
+    "message": "立即檢查：{{name}}"
+  },
+  "accessibilityHardening_source_openWebsite": {
+    "message": "開啟來源網站：{{name}}"
+  },
+  "accessibilityHardening_source_openHealth": {
+    "message": "開啟來源狀態：{{name}}"
+  },
+  "accessibilityHardening_source_edit": {
+    "message": "編輯來源：{{name}}"
+  },
+  "accessibilityHardening_source_delete": {
+    "message": "刪除來源：{{name}}"
+  },
+  "accessibilityHardening_item_open": {
+    "message": "開啟更新：{{title}}"
+  },
+  "accessibilityHardening_item_select": {
+    "message": "選取更新：{{title}}"
+  },
+  "accessibilityHardening_item_description": {
+    "message": "{{state}}。來源：{{source}}。"
+  },
+  "accessibilityHardening_output_openNewTab": {
+    "message": "在新分頁中開啟 {{title}}"
+  },
+  "accessibilityHardening_output_chat": {
+    "message": "討論 {{title}}"
+  },
+  "accessibilityHardening_output_download": {
+    "message": "下載 {{title}}"
+  },
+  "accessibilityHardening_output_close": {
+    "message": "關閉預覽：{{title}}"
+  },
+  "accessibilityHardening_health_show": {
+    "message": "顯示監視清單狀態詳情"
+  },
+  "accessibilityHardening_health_hide": {
+    "message": "隱藏監視清單狀態詳情"
+  },
+  "accessibilityHardening_health_refresh": {
+    "message": "重新整理監視清單狀態"
+  },
+  "accessibilityHardening_health_settings": {
+    "message": "開啟監視清單設定"
+  },
+  "accessibilityHardening_delivery_email": {
+    "message": "啟用後，將每份報告傳送給已設定的收件者。"
+  },
+  "accessibilityHardening_delivery_chatbook": {
+    "message": "啟用後，將每份報告發佈到 Chatbook。"
+  },
+  "accessibilityHardening_help_open": {
+    "message": "開啟監視清單說明"
+  },
+  "accessibilityHardening_help_title": {
+    "message": "監視清單說明"
+  },
+  "overview_pipelineSetup_test_scheduledReceipt": {
+    "message": "{{schedule}}：從 {{sources}} 收集更新，以 {{program}}{{duration}} 形式產生 {{artifacts}}，然後儲存並傳送到 {{destinations}}。"
+  },
+  "overview_pipelineSetup_test_audioTestRequired": {
+    "message": "啟用前，請成功產生音訊樣本或完整測試。"
   }
 }

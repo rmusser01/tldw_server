@@ -92,14 +92,19 @@ vi.mock("antd", async () => {
     </div>
   )
 
-  const Modal = ({ open, title, children, footer }: any) =>
-    open ? (
+  const Modal = ({ open, title, children, footer, afterOpenChange }: any) => {
+    React.useEffect(() => {
+      afterOpenChange?.(open)
+    }, [afterOpenChange, open])
+
+    return open ? (
       <div>
         <h3>{title}</h3>
         {children}
         <div>{footer}</div>
       </div>
     ) : null
+  }
   const Drawer = ({ open, title, children }: any) =>
     open ? (
       <div>
@@ -110,10 +115,12 @@ vi.mock("antd", async () => {
 
   const Empty = ({ description }: any) => <div>{description}</div>
   const Tooltip = ({ children }: any) => <>{children}</>
-  const Button = ({ children, onClick, disabled, ...rest }: any) => (
-    <button type="button" onClick={() => onClick?.()} disabled={Boolean(disabled)} {...rest}>
-      {children}
-    </button>
+  const Button = React.forwardRef<HTMLButtonElement, any>(
+    ({ children, onClick, disabled, ...rest }, ref) => (
+      <button ref={ref} type="button" onClick={() => onClick?.()} disabled={Boolean(disabled)} {...rest}>
+        {children}
+      </button>
+    )
   )
   const Switch = ({ checked, onChange, ...rest }: any) => (
     <button
@@ -284,8 +291,10 @@ describe("WatchlistsPlaygroundPage experimental IA", () => {
     expect(screen.queryByTestId("watchlists-tab-runs")).not.toBeInTheDocument()
     expect(screen.queryByTestId("watchlists-tab-templates")).not.toBeInTheDocument()
 
+    fireEvent.click(screen.getByTestId("watchlists-help-icon"))
     fireEvent.click(screen.getByTestId("watchlists-experimental-tab-jobs"))
     expect(mocks.state.setActiveTab).toHaveBeenCalledWith("jobs")
+    fireEvent.click(screen.getByTestId("watchlists-help-icon"))
     fireEvent.click(screen.getByTestId("watchlists-experimental-tab-runs"))
     expect(mocks.state.setActiveTab).toHaveBeenCalledWith("runs")
   })
@@ -300,9 +309,12 @@ describe("WatchlistsPlaygroundPage experimental IA", () => {
 
   it("routes task views to user outcomes and keeps legacy tabs mapped to the active task", () => {
     render(<WatchlistsPlaygroundPage />)
+    fireEvent.click(screen.getByTestId("watchlists-help-icon"))
 
     fireEvent.click(screen.getByTestId("watchlists-task-view-collect"))
+    fireEvent.click(screen.getByTestId("watchlists-help-icon"))
     fireEvent.click(screen.getByTestId("watchlists-task-view-review"))
+    fireEvent.click(screen.getByTestId("watchlists-help-icon"))
     fireEvent.click(screen.getByTestId("watchlists-task-view-briefings"))
 
     expect(mocks.state.setActiveTab).toHaveBeenCalledWith("sources")
@@ -312,11 +324,13 @@ describe("WatchlistsPlaygroundPage experimental IA", () => {
     cleanup()
     mocks.state.activeTab = "runs"
     render(<WatchlistsPlaygroundPage />)
+    fireEvent.click(screen.getByTestId("watchlists-help-icon"))
     expect(screen.getByTestId("watchlists-task-view-review")).toHaveAttribute("aria-pressed", "true")
 
     cleanup()
     mocks.state.activeTab = "templates"
     render(<WatchlistsPlaygroundPage />)
+    fireEvent.click(screen.getByTestId("watchlists-help-icon"))
     expect(screen.getByTestId("watchlists-task-view-briefings")).toHaveAttribute("aria-pressed", "true")
   })
 
@@ -353,6 +367,7 @@ describe("WatchlistsPlaygroundPage experimental IA", () => {
 
     render(<WatchlistsPlaygroundPage />)
 
+    fireEvent.click(screen.getByTestId("watchlists-help-icon"))
     fireEvent.click(screen.getByTestId("watchlists-show-all-views-toggle"))
 
     expect(screen.getByTestId("watchlists-tab-jobs")).toBeInTheDocument()
@@ -375,6 +390,7 @@ describe("WatchlistsPlaygroundPage experimental IA", () => {
 
     render(<WatchlistsPlaygroundPage />)
 
+    fireEvent.click(screen.getByTestId("watchlists-help-icon"))
     expect(screen.getByTestId("watchlists-experimental-tab-jobs")).toBeInTheDocument()
     expect(screen.queryByTestId("watchlists-tab-jobs")).not.toBeInTheDocument()
 

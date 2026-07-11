@@ -3373,5 +3373,74 @@
   },
   "dataManagement_navTitle": {
     "message": "إدارة البيانات"
+  },
+  "navigation_setupRecovery": {
+    "message": "الإعداد والاسترداد"
+  },
+  "navigation_preferencesWorkflow": {
+    "message": "التفضيلات وسير العمل"
+  },
+  "navigation_dataAdmin": {
+    "message": "البيانات والإدارة"
+  },
+  "preferencesSettings_navTitle": {
+    "message": "التفضيلات"
+  },
+  "preferencesSettings_title": {
+    "message": "التفضيلات العامة"
+  },
+  "setupRecovery_title": {
+    "message": "الإعداد والاسترداد"
+  },
+  "quickIngestSettings_ocrDefaults_title": {
+    "message": "إعدادات OCR الافتراضية"
+  },
+  "quickIngestSettings_ocrDefaults_description": {
+    "message": "تُستخدم في مسارات الإدخال التي تستخرج النص من الصور أو المستندات الممسوحة ضوئيًا."
+  },
+  "sidepanelSettings_shortcuts_title": {
+    "message": "اختصارات الإعدادات"
+  },
+  "sidepanelSettings_shortcuts_description": {
+    "message": "انتقل إلى صفحة الإعدادات الكاملة التي تملك هذا التغيير."
+  },
+  "sidepanelSettings_shortcuts_setupRecovery_label": {
+    "message": "الإعداد والاسترداد"
+  },
+  "sidepanelSettings_shortcuts_setupRecovery_description": {
+    "message": "الاتصال والمصادقة ومفاتيح المزوّدين والنماذج والتشخيصات."
+  },
+  "sidepanelSettings_shortcuts_preferences_label": {
+    "message": "التفضيلات"
+  },
+  "sidepanelSettings_shortcuts_preferences_description": {
+    "message": "اللغة والإشعارات والشخصية والبرامج التعليمية وبحث الويب."
+  },
+  "sidepanelSettings_shortcuts_ui_label": {
+    "message": "تخصيص الواجهة"
+  },
+  "sidepanelSettings_shortcuts_ui_description": {
+    "message": "السمة والاختصارات وافتراضيات العرض والسلوك المرئي."
+  },
+  "sidepanelSettings_shortcuts_dataAdmin_label": {
+    "message": "البيانات والإدارة"
+  },
+  "sidepanelSettings_shortcuts_dataAdmin_description": {
+    "message": "إدارة البيانات والمراجعة والتقييمات وأدوات الإدارة."
+  },
+  "sidepanelSettings_shortcuts_serverAuth_label": {
+    "message": "الخادم والمصادقة"
+  },
+  "sidepanelSettings_shortcuts_serverAuth_description": {
+    "message": "غيّر عنوان URL للخادم أو مفتاح API."
+  },
+  "sidepanelSettings_shortcuts_health_label": {
+    "message": "التشخيصات الكاملة"
+  },
+  "sidepanelSettings_shortcuts_health_description": {
+    "message": "افتح فحوصات مفصلة للخادم والأنظمة الفرعية."
+  },
+  "sidepanelSettings_local_title": {
+    "message": "سلوك اللوحة الجانبية"
   }
 }

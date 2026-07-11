@@ -3373,5 +3373,74 @@
   },
   "dataManagement_navTitle": {
     "message": "Керування даними"
+  },
+  "navigation_setupRecovery": {
+    "message": "Налаштування та відновлення"
+  },
+  "navigation_preferencesWorkflow": {
+    "message": "Уподобання та робочий процес"
+  },
+  "navigation_dataAdmin": {
+    "message": "Дані та адміністрування"
+  },
+  "preferencesSettings_navTitle": {
+    "message": "Уподобання"
+  },
+  "preferencesSettings_title": {
+    "message": "Загальні уподобання"
+  },
+  "setupRecovery_title": {
+    "message": "Налаштування та відновлення"
+  },
+  "quickIngestSettings_ocrDefaults_title": {
+    "message": "Типові параметри OCR"
+  },
+  "quickIngestSettings_ocrDefaults_description": {
+    "message": "Використовується потоками імпорту, які витягують текст із зображень або сканованих документів."
+  },
+  "sidepanelSettings_shortcuts_title": {
+    "message": "Ярлики налаштувань"
+  },
+  "sidepanelSettings_shortcuts_description": {
+    "message": "Перейдіть на повну сторінку налаштувань, яка відповідає за цю зміну."
+  },
+  "sidepanelSettings_shortcuts_setupRecovery_label": {
+    "message": "Налаштування та відновлення"
+  },
+  "sidepanelSettings_shortcuts_setupRecovery_description": {
+    "message": "Підключення, автентифікація, ключі провайдерів, моделі й діагностика."
+  },
+  "sidepanelSettings_shortcuts_preferences_label": {
+    "message": "Уподобання"
+  },
+  "sidepanelSettings_shortcuts_preferences_description": {
+    "message": "Мова, сповіщення, персона, навчання та вебпошук."
+  },
+  "sidepanelSettings_shortcuts_ui_label": {
+    "message": "Налаштування інтерфейсу"
+  },
+  "sidepanelSettings_shortcuts_ui_description": {
+    "message": "Тема, ярлики, типові параметри відображення та візуальна поведінка."
+  },
+  "sidepanelSettings_shortcuts_dataAdmin_label": {
+    "message": "Дані та адміністрування"
+  },
+  "sidepanelSettings_shortcuts_dataAdmin_description": {
+    "message": "Керування даними, модерація, оцінювання й адміністративні інструменти."
+  },
+  "sidepanelSettings_shortcuts_serverAuth_label": {
+    "message": "Сервер та автентифікація"
+  },
+  "sidepanelSettings_shortcuts_serverAuth_description": {
+    "message": "Змінити URL сервера або ключ API."
+  },
+  "sidepanelSettings_shortcuts_health_label": {
+    "message": "Повна діагностика"
+  },
+  "sidepanelSettings_shortcuts_health_description": {
+    "message": "Відкрити детальні перевірки сервера й підсистем."
+  },
+  "sidepanelSettings_local_title": {
+    "message": "Поведінка бокової панелі"
   }
 }

@@ -142,6 +142,95 @@ def test_build_audio_projection_script_only_partial_graph():
     assert projection.get("download_url") is None
 
 
+def test_succeeded_workflow_without_final_audio_projects_failed():
+    from tldw_Server_API.app.core.Watchlists.audio_artifact_projection import build_audio_projection
+
+    projection = build_audio_projection(
+        run_id=91,
+        task_id="task_missing_audio",
+        audio_request_id="wla_current",
+        workflow_run=_workflow_run(status="succeeded", metadata=_watchlist_meta()),
+        artifacts=[
+            _artifact(
+                "art_script",
+                type_="audio_script",
+                metadata=_watchlist_meta(script_artifact=True, title="Briefing script"),
+            )
+        ],
+    )
+
+    assert projection["status"] == "failed"
+    assert projection["fallback_reason"] == "audio_final_artifact_missing"
+    assert projection["final_artifact"] is None
+
+
+def test_final_only_audio_projection_keeps_public_program_metadata_and_drops_private_paths():
+    from tldw_Server_API.app.core.Watchlists.audio_artifact_projection import build_audio_projection
+
+    final_metadata = _watchlist_meta(
+        final_artifact=True,
+        program_format="host_discussion",
+        show_name="Tracked Weekly",
+        episode_title="Week 28",
+        premise="Private source at C:\\Users\\secret\\source.txt",
+        source_urls=[
+            "https://example.test/story?page=2",
+            "https://example.test/private?token=secret",
+        ],
+        show_notes={
+            "sources": [
+                {
+                    "item_id": 11,
+                    "source_id": 7,
+                    "title": "Public source",
+                    "url": "https://example.test/story?page=2",
+                    "private_path": "C:\\Users\\secret\\source.txt",
+                }
+            ],
+            "source_count": 1,
+        },
+        cast=[{"label": "Host", "role": "anchor", "synthetic_voice": "af_bella"}],
+        api_key="must-not-leak",
+        recipients=["private@example.test"],
+        posix_path="/private/source.txt",
+        windows_path="C:\\Users\\secret\\source.txt",
+        unc_path="\\\\server\\share\\secret.txt",
+        traversal_path="../../secret.txt",
+        local_uri="file:///private/source.txt",
+        unknown_public_looking_key="must-not-leak-either",
+    )
+
+    projection = build_audio_projection(
+        run_id=91,
+        task_id="task_final_only",
+        audio_request_id="wla_current",
+        workflow_run=_workflow_run(status="succeeded", metadata=_watchlist_meta()),
+        artifacts=[_artifact("art_final_only", metadata=final_metadata)],
+    )
+
+    assert projection["status"] == "completed"
+    assert projection["script_artifact"] is None
+    assert projection["artifact_id"] == "art_final_only"
+    assert projection["program_format"] == "host_discussion"
+    assert projection["show_name"] == "Tracked Weekly"
+    assert projection["episode_title"] == "Week 28"
+    assert projection["ai_generated_speech"] is True
+    assert projection["speech_disclosure"] == "Synthetic AI-generated speech"
+    assert projection["source_urls"] == ["https://example.test/story?page=2"]
+    assert projection["show_notes"]["sources"][0]["url"] == "https://example.test/story?page=2"
+    serialized = json.dumps(projection)
+    for leaked in (
+        "must-not-leak",
+        "private@example.test",
+        "/private/source.txt",
+        "C:\\Users\\secret",
+        "\\\\server\\share",
+        "../../secret.txt",
+        "file://",
+    ):
+        assert leaked not in serialized
+
+
 def test_speaker_artifacts_do_not_become_final_audio():
     from tldw_Server_API.app.core.Watchlists.audio_artifact_projection import build_audio_projection
 
@@ -342,6 +431,8 @@ def test_merge_and_stale_helpers_preserve_unrelated_metadata():
     assert merged["audio"] == projection
     assert merged["audio_briefing_status"] == "completed"
     assert merged["audio_request_id"] == "wla_current"
+    assert merged["ai_generated_speech"] is True
+    assert merged["speech_disclosure"] == "Synthetic AI-generated speech"
 
     stale = mark_audio_projection_stale(merged, superseded_by="wla_next")
 
@@ -349,6 +440,79 @@ def test_merge_and_stale_helpers_preserve_unrelated_metadata():
     assert stale["previous_audio"]["stale"] is True
     assert stale["previous_audio"]["superseded_by"] == "wla_next"
     assert stale["previous_audio"]["final_artifact"]["artifact_id"] == "art_final"
+
+
+@pytest.mark.parametrize("status", ["queued", "running"])
+def test_merge_audio_projection_keeps_incomplete_speech_pending(status: str):
+    from tldw_Server_API.app.core.Watchlists.audio_artifact_projection import (
+        merge_audio_projection_metadata,
+    )
+
+    merged = merge_audio_projection_metadata(
+        {"ai_generated_speech": True, "speech_disclosure": "stale"},
+        {"status": status, "final_artifact": None},
+    )
+
+    assert merged["ai_generated_speech"] is False
+    assert merged["speech_disclosure"] == "Synthetic speech generation pending"
+
+
+@pytest.mark.parametrize(
+    ("status", "disclosure"),
+    [
+        ("failed", "Synthetic speech generation failed"),
+        ("cancelled", "Synthetic speech generation cancelled"),
+    ],
+)
+def test_merge_audio_projection_records_terminal_speech_failure_without_final_artifact(
+    status: str,
+    disclosure: str,
+):
+    from tldw_Server_API.app.core.Watchlists.audio_artifact_projection import (
+        merge_audio_projection_metadata,
+    )
+
+    merged = merge_audio_projection_metadata(
+        {"ai_generated_speech": True, "speech_disclosure": "stale"},
+        {"status": status, "final_artifact": None},
+    )
+
+    assert merged["ai_generated_speech"] is False
+    assert merged["speech_disclosure"] == disclosure
+
+
+def test_scheduler_status_does_not_override_terminal_workflow_failure():
+    from tldw_Server_API.app.core.Watchlists.audio_artifact_projection import (
+        apply_scheduler_status_to_audio_projection,
+    )
+
+    merged = apply_scheduler_status_to_audio_projection(
+        {
+            "run_id": 91,
+            "task_id": "task_audio",
+            "status": "failed",
+            "fallback_reason": "audio_generation_failed",
+            "final_artifact": None,
+        },
+        {"task_id": "task_audio", "status": "running", "queue_name": "workflows"},
+    )
+
+    assert merged["status"] == "failed"
+    assert merged["fallback_reason"] == "audio_generation_failed"
+
+
+def test_merge_audio_projection_does_not_claim_completed_speech_without_final_artifact():
+    from tldw_Server_API.app.core.Watchlists.audio_artifact_projection import (
+        merge_audio_projection_metadata,
+    )
+
+    merged = merge_audio_projection_metadata(
+        {},
+        {"status": "completed", "final_artifact": None},
+    )
+
+    assert merged["ai_generated_speech"] is False
+    assert merged["speech_disclosure"] == "Synthetic speech unavailable"
 
 
 def test_mirror_audio_projection_updates_run_and_canonical_output_metadata():

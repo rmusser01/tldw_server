@@ -1376,10 +1376,10 @@
   "quickIngest_reviewRunLabel": {
     "message": "Review"
   },
-  "quickIngest_review.warnLongTime": {
+  "quickIngest_review_warnLongTime": {
     "message": "Processing may take a while ({{time}})"
   },
-  "quickIngest_review.summary": {
+  "quickIngest_review_summary": {
     "message": "{{count}} items | {{preset}} preset | {{time}} estimated"
   },
   "quickIngest_reviewDraftsCreated": {

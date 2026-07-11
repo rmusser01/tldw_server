@@ -1,4 +1,12 @@
 {
+  "accessibilityHardening": {
+    "source": { "toggleActive": "تبديل الحالة النشطة: {{name}}", "checkNow": "التحقق الآن: {{name}}", "openWebsite": "فتح موقع المصدر: {{name}}", "openHealth": "فتح حالة المصدر: {{name}}", "edit": "تعديل المصدر: {{name}}", "delete": "حذف المصدر: {{name}}" },
+    "item": { "open": "فتح التحديث: {{title}}", "select": "تحديد التحديث: {{title}}", "description": "{{state}}. المصدر: {{source}}." },
+    "output": { "openNewTab": "فتح {{title}} في علامة تبويب جديدة", "chat": "الدردشة حول {{title}}", "download": "تنزيل {{title}}", "close": "إغلاق المعاينة: {{title}}" },
+    "health": { "show": "إظهار تفاصيل حالة قوائم المراقبة", "hide": "إخفاء تفاصيل حالة قوائم المراقبة", "refresh": "تحديث حالة قوائم المراقبة", "settings": "فتح إعدادات قوائم المراقبة" },
+    "delivery": { "email": "إرسال كل تقرير إلى المستلمين المحددين عند التفعيل.", "chatbook": "نشر كل تقرير في Chatbook عند التفعيل." },
+    "help": { "open": "فتح مساعدة قوائم المراقبة", "title": "مساعدة قوائم المراقبة" }
+  },
   "items": {
     "queuedForBriefing": "في قائمة انتظار الإحاطة",
     "includeInNextBriefing": "أدرج في الإحاطة التالية",
@@ -17,5 +25,479 @@
       "generateError": "تعذر إنشاء تقرير من العناصر في قائمة الانتظار.",
       "generateReport": "إنشاء تقرير من قائمة الانتظار"
     }
+  },
+  "setupWizard": {
+    "title": "إنشاء قائمة مراقبة",
+    "containerTitle": "إنشاء قائمة مراقبة",
+    "containerHelp": "أنشئ حاوية المشروع أولاً. ثم اضبط المصادر ودورية التشغيل والموجز والتسليم والاختبار ضمن مسار إعداد واحد.",
+    "actions": {
+      "continue": "المتابعة إلى المصادر"
+    },
+    "sections": {
+      "preset": "إعداد مسبق للمجال"
+    },
+    "fields": {
+      "name": "اسم قائمة المراقبة",
+      "objective": "الهدف"
+    },
+    "validation": {
+      "nameRequired": "أضف اسماً لقائمة المراقبة."
+    },
+    "errors": {
+      "createFailed": "تعذر إنشاء قائمة المراقبة."
+    },
+    "presets": {
+      "cti_osint": {
+        "label": "CTI / OSINT",
+        "description": "راقب الثغرات والبرمجيات الضارة والجهات الفاعلة والتنبيهات وتغييرات المصادر."
+      },
+      "news": {
+        "label": "الأخبار",
+        "description": "تابع الأحداث المتطورة والأشخاص والمؤسسات وتنوع المصادر."
+      },
+      "general": {
+        "label": "عام",
+        "description": "تابع موضوعاً واجمع تحديثات لمراجعتها."
+      },
+      "blank": {
+        "label": "فارغة",
+        "description": "ابدأ بقائمة مراقبة فارغة واضبط التفاصيل بنفسك."
+      }
+    },
+    "startModes": {
+      "sources": {
+        "label": "البدء من المصادر",
+        "description": "أنشئ قائمة مراقبة بموجزات أولية ومراقب اختياري."
+      },
+      "topic": {
+        "label": "البدء من موضوع",
+        "description": "أنشئ هدف قائمة المراقبة أولاً، ثم أضف الموجزات قبل بدء الجمع."
+      },
+      "report_goal": {
+        "label": "البدء من هدف التقرير",
+        "description": "حدد هدف الموجز أولاً، ثم صِل المصادر والقوالب."
+      }
+    },
+    "boundaries": {
+      "alerts": "تأتي تنبيهات مطابقة المحتوى لاحقاً. يحدد هذا الإعداد قائمة المراقبة ونطاق الجمع الأولي لها."
+    }
+  },
+  "overview": {
+    "pipelineSetup": {
+      "title": "إعداد الموجز",
+      "open": "إعداد الموجز",
+      "progress": "خطوات إعداد الموجز",
+      "steps": {
+        "sources": "المصادر",
+        "cadence": "الدورية",
+        "briefing": "الموجز",
+        "delivery": "التسليم",
+        "test": "الاختبار"
+      },
+      "actions": {
+        "next": "المتابعة إلى {{step}}"
+      },
+      "source": {
+        "existing": "استخدام المصادر الموجودة",
+        "new": "إضافة مصدر جديد",
+        "fallback": "المصدر {{id}}"
+      },
+      "sources": {
+        "help": "اختر مصادر موجودة أو أضف مصدراً جديداً، ثم اختبر الاتصال للتأكد من جاهزيته."
+      },
+      "sourcesLoading": "جارٍ تحميل المصادر...",
+      "sourcesError": "تعذر تحميل الموجزات لأداة الإعداد.",
+      "sourceTest": {
+        "action": "اختبار المصدر",
+        "ready": "المصدر جاهز.",
+        "cancelled": "أُلغي اختبار المصدر.",
+        "failed": "فشل اختبار المصدر. {{message}}",
+        "summary": "الجاهز: {{ready}}، والمصفّى: {{filtered}}",
+        "sample": "عناصر نموذجية",
+        "readyItem": "جاهز",
+        "filteredItem": "مصفّى",
+        "untitled": "عنصر بلا عنوان"
+      },
+      "fields": {
+        "sources": "المصادر",
+        "sourceName": "اسم المصدر",
+        "sourceUrl": "عنوان URL للمصدر",
+        "monitorName": "اسم المراقب",
+        "schedule": "الجدول",
+        "timezone": "المنطقة الزمنية",
+        "intervalEvery": "كل",
+        "intervalUnit": "وحدة الفاصل",
+        "weekday": "يوم الأسبوع",
+        "hour": "الساعة",
+        "minute": "الدقيقة",
+        "cronExpression": "تعبير cron",
+        "showName": "اسم البرنامج",
+        "premise": "فكرة البرنامج",
+        "includeAudio": "الصوت",
+        "audioHelp": "أضف نسخة منطوقة قابلة للتشغيل.",
+        "audioMinutes": "المدة المستهدفة بالدقائق",
+        "speakerCount": "حجم فريق التقديم",
+        "template": "قالب التقرير",
+        "audioProvider": "تجاوز موفر الصوت",
+        "audioModel": "تجاوز نموذج الصوت",
+        "customInstructions": "تعليمات تحرير مخصصة",
+        "emailDelivery": "البريد الإلكتروني",
+        "emailRecipients": "مستلمو البريد",
+        "chatbookDelivery": "Chatbook",
+        "chatbookTitle": "عنوان Chatbook"
+      },
+      "schedule": {
+        "manual": "يدوي فقط",
+        "interval": "كل N ساعة أو دقيقة",
+        "daily": "يومياً",
+        "weekdays": "أيام العمل",
+        "weekly": "أسبوعياً",
+        "advanced": "cron متقدم"
+      },
+      "intervalUnits": {
+        "hours": "ساعات",
+        "minutes": "دقائق"
+      },
+      "weekdays": {
+        "monday": "الاثنين",
+        "tuesday": "الثلاثاء",
+        "wednesday": "الأربعاء",
+        "thursday": "الخميس",
+        "friday": "الجمعة",
+        "saturday": "السبت",
+        "sunday": "الأحد"
+      },
+      "advancedCron": "cron متقدم",
+      "nextOccurrence": "التشغيل التالي",
+      "manualOccurrence": "يدوي فقط",
+      "nextOccurrencePending": "احفظ جدولاً صالحاً لحساب الوقت الدقيق.",
+      "schedulePreview": {
+        "loading": "جارٍ حساب الجدول الدقيق…",
+        "error": "تعذر حساب الجدول الدقيق. راجع تعبير cron والمنطقة الزمنية."
+      },
+      "briefing": {
+        "question": "ماذا تريد أن تنشئ؟",
+        "help": "اختر الصيغة التحريرية. تبقى كل الخيارات مستندة إلى المصادر التي حددتها.",
+        "advanced": "إعدادات الموجز المتقدمة"
+      },
+      "formats": {
+        "concise_briefing": "موجز مختصر",
+        "solo_update": "تحديث فردي",
+        "host_discussion": "نقاش بين المقدمين",
+        "sportscast": "نشرة رياضية",
+        "culture_roundtable": "طاولة ثقافية مستديرة",
+        "custom": "مخصص"
+      },
+      "speaker": {
+        "defaultLabel": "المشارك {{index}}",
+        "defaultRole": "مقدم",
+        "labelField": "تسمية المشارك {{index}}",
+        "roleField": "دور المشارك {{index}}",
+        "voiceField": "صوت المشارك {{index}}",
+        "personaField": "شخصية المشارك {{index}}"
+      },
+      "preview": {
+        "generate": "معاينة التقرير",
+        "diagnostics": "تشخيص المعاينة",
+        "context": "تشغيل المعاينة: {{runId}}",
+        "noRunContext": "شغّل المراقب بنجاح قبل معاينة هذا التقرير.",
+        "templateRequired": "اختر قالباً قبل إنشاء المعاينة.",
+        "templateEmpty": "القالب المحدد فارغ.",
+        "emptyResult": "لم تُرجع المعاينة محتوى معروضاً.",
+        "error": "تعذر إنشاء المعاينة."
+      },
+      "delivery": {
+        "help": "تُحفظ التقارير دائماً. ينتظر التسليم الخارجي حتى تصبح المخرجات المحددة جاهزة بالكامل للإرسال.",
+        "reports": "التقارير",
+        "required": "تخزين مطلوب",
+        "alwaysOn": "مفعّل دائماً"
+      },
+      "receipt": {
+        "labels": {
+          "schedule": "الجدول",
+          "sources": "المصادر",
+          "artifacts": "المخرجات",
+          "format": "الصيغة",
+          "showName": "اسم البرنامج",
+          "cast": "فريق التقديم",
+          "duration": "المدة المستهدفة",
+          "destinations": "الوجهات"
+        },
+        "schedule": {
+          "manual": "يدوي فقط",
+          "scheduled": "{{date}} ({{timezone}})"
+        },
+        "sources": "{{count}} من المصادر",
+        "sources_zero": "{{count}} مصادر",
+        "sources_one": "{{count}} مصدر",
+        "sources_two": "{{count}} مصدران",
+        "sources_few": "{{count}} مصادر",
+        "sources_many": "{{count}} مصدرًا",
+        "sources_other": "{{count}} مصدر",
+        "artifacts": {
+          "textReport": "تقرير نصي",
+          "showNotes": "ملاحظات البرنامج",
+          "audio": "صوت"
+        },
+        "formats": {
+          "concise_briefing": "موجز مختصر",
+          "solo_update": "تحديث فردي",
+          "host_discussion": "نقاش بين المقدمين",
+          "sportscast": "نشرة رياضية",
+          "culture_roundtable": "طاولة ثقافية مستديرة",
+          "custom": "برنامج مخصص"
+        },
+        "speakerStyle": {
+          "1": "فردي",
+          "2": "بمقدمين",
+          "3": "بثلاثة مقدمين",
+          "4": "بأربعة مقدمين"
+        },
+        "programWithSpeakers": "{{format}} {{speakers}}",
+        "cast": "{{count}} من المشاركين",
+        "cast_zero": "{{count}} مشاركين",
+        "cast_one": "{{count}} مشارك",
+        "cast_two": "{{count}} مشاركان",
+        "cast_few": "{{count}} مشاركين",
+        "cast_many": "{{count}} مشاركًا",
+        "cast_other": "{{count}} مشارك",
+        "duration": "بهدف {{count}} دقيقة",
+        "duration_zero": "بهدف {{count}} دقائق",
+        "duration_one": "بهدف {{count}} دقيقة",
+        "duration_two": "بهدف {{count}} دقيقتين",
+        "duration_few": "بهدف {{count}} دقائق",
+        "duration_many": "بهدف {{count}} دقيقة",
+        "duration_other": "بهدف {{count}} دقيقة",
+        "destinations": {
+          "email": "البريد: {{recipients}}",
+          "chatbook": "Chatbook: {{title}}"
+        },
+        "untitledChatbook": "بلا عنوان",
+        "dstChange": "يستخدم التشغيل التالي {{timezoneName}} بعد تغير إزاحة التوقيت الصيفي: {{date}}."
+      },
+      "test": {
+        "providerDisclosure": "تستخدم الاختبارات موفري نموذج اللغة وتحويل النص إلى كلام الذين ضبطتهم. تقتصر العينة على 60 ثانية، ويستخدم الاختبار الكامل المدة المستهدفة.",
+        "textProviderDisclosure": "تستخدم الاختبارات موفر نموذج اللغة الذي ضبطته. لا تستخدم الاختبارات النصية تحويل النص إلى كلام.",
+        "receipt": "ملخص التفعيل",
+        "manualReceipt": "يعمل هذا الموجز يدوياً ويحفظ المخرجات المحددة في التقارير، ولا يتصل بأي وجهة خارجية إلا إذا اخترت إرسال الاختبار.",
+        "scheduledReceipt": "{{schedule}}، اجمع التحديثات من {{sources}}، وأنشئ {{artifacts}} بصيغة {{program}}{{duration}}، ثم احفظها وسلّمها إلى {{destinations}}.",
+        "audioTestRequired": "أنشئ عينة صوتية أو اختباراً كاملاً بنجاح قبل التفعيل.",
+        "progress": "تقدم الاختبار",
+        "stages": {
+          "collection": "جمع المصادر",
+          "selection": "تحديد التحديثات",
+          "text": "إنشاء التقرير",
+          "audio": "إنشاء الصوت",
+          "persistence": "الحفظ في التقارير",
+          "audioScript": "كتابة النص الصوتي",
+          "audioScriptPersistence": "حفظ النص الصوتي",
+          "audioPersistence": "حفظ الصوت في التقارير",
+          "delivery": "فحص تسليم الاختبار",
+          "deliveryAdapter": "التسليم إلى {{adapter}}",
+          "unknown": "المرحلة {{stage}}"
+        },
+        "sample": "إنشاء عينة من 60 ثانية",
+        "full": "إنشاء حلقة اختبار كاملة",
+        "text": "إنشاء تقرير اختبار",
+        "send": "إرسال الاختبار",
+        "activate": "تفعيل الجدول",
+        "ready": "اكتمل الاختبار. موجزك جاهز. تبقى هذه المسودة غير مفعلة حتى تفعّل جدولها.",
+        "running": "لا يزال التشغيل {{runId}} قيد التنفيذ: {{stage}}. يمكنك إغلاق الإعداد ومراقبته من نظرة عامة.",
+        "failedStage": "فشلت {{stage}}. افتح التشغيل {{runId}} وأعد محاولة هذه المرحلة.",
+        "failedWithCode": "فشلت {{stage}} ({{code}}). افتح التشغيل {{runId}} وأعد محاولة هذه المرحلة.",
+        "cancelledStage": "أُلغيت {{stage}}. حُفظت مسودتك.",
+        "cancelledWithCode": "أُلغيت {{stage}} ({{code}}). حُفظت مسودتك.",
+        "cancelled": "أُلغي الاختبار. حُفظت مسودتك.",
+        "failed": "فشل الاختبار. حُفظت مسودتك. {{message}}",
+        "status": {
+          "not_started": "لم يبدأ",
+          "queued": "في قائمة الانتظار",
+          "running": "قيد التشغيل",
+          "ready": "جاهز",
+          "failed": "فشل",
+          "skipped": "تم التخطي",
+          "cancelled": "أُلغي"
+        }
+      },
+      "activate": {
+        "ready": "فُعّل الجدول.",
+        "failed": "تعذر تفعيل الجدول. حُفظت مسودتك. {{message}}"
+      },
+      "validation": {
+        "sourcesRequired": "اختر مصدراً واحداً على الأقل قبل المتابعة.",
+        "sourceNameRequired": "أدخل اسم المصدر.",
+        "sourceUrlInvalid": "أدخل عنوان مصدر HTTP أو HTTPS صالحاً.",
+        "monitorNameRequired": "أدخل اسم المراقب.",
+        "timezoneInvalid": "أدخل منطقة زمنية صالحة وفق IANA.",
+        "intervalInvalid": "أدخل فاصل جدول مدعوماً.",
+        "hourInvalid": "أدخل ساعة من 0 إلى 23.",
+        "minuteInvalid": "أدخل دقيقة من 0 إلى 59.",
+        "cronInvalid": "أدخل تعبير cron صالحاً من خمسة حقول.",
+        "cronTooFrequent": "اختر جدولاً بفاصل خمس دقائق على الأقل.",
+        "templateRequired": "أدخل قالب تقرير.",
+        "castSizeInvalid": "اختر من مشارك واحد إلى أربعة.",
+        "castIdsInvalid": "يحتاج كل مشارك إلى هوية فريدة.",
+        "castVoicesRequired": "اختر صوتاً لكل مشارك.",
+        "audioMinutesInvalid": "أدخل مدة من دقيقة إلى 60 دقيقة.",
+        "emailInvalid": "أدخل عنوان بريد إلكتروني صالحاً واحداً على الأقل."
+      },
+      "validationError": "راجع الحقول المميزة قبل المتابعة."
+    },
+    "latest": {
+      "heading": {
+        "briefing": "أحدث موجز",
+        "episode": "أحدث حلقة"
+      },
+      "empty": {
+        "scheduled": "سيتم إنشاء أول موجز لك في {{date}}.",
+        "manual": "لم يبدأ. اختبار الآن."
+      },
+      "generatedAt": "تم الإنشاء {{date}}",
+      "untitled": "موجز {{runId}}",
+      "artifacts": "تقرير / صوت",
+      "audio": "صوت",
+      "audioFailed": "صوت فشل",
+      "ready": "جاهز",
+      "saved": "محفوظ",
+      "waiting": "قيد الانتظار",
+      "script": "صوت تقرير",
+      "stageWithStatus": "{{stage}}: {{status}}",
+      "noUpdates": "لم يتم العثور على تحديثات مؤهلة. تم حفظ {{noun}} للحالة.",
+      "nextRun": "التشغيل التالي: {{date}}",
+      "nextRunRelative": "التشغيل التالي: {{relative}}",
+      "counts": "موجز: مضمّن, غير مقروء, جديد",
+      "count": {
+        "included": "مضمّن {{count}}",
+        "unread": "غير مقروء {{count}}",
+        "new": "جديد {{count}}"
+      },
+      "provenance": {
+        "sources": "{{count}} مصادر متتبّعة",
+        "sources_zero": "{{count}} مصادر متتبّعة",
+        "sources_one": "{{count}} مصدر متتبّع",
+        "sources_two": "{{count}} مصادر متتبّعة",
+        "sources_few": "{{count}} مصادر متتبّعة",
+        "sources_many": "{{count}} مصادر متتبّعة",
+        "sources_other": "{{count}} مصادر متتبّعة"
+      },
+      "delivery": {
+        "reports": "عرض كل التقارير",
+        "retryAria": "إعادة المحاولة {{adapter}}: {{name}}",
+        "retryUnknownAria": "النتيجة غير معروفة. إعادة المحاولة {{adapter}}: {{name}}",
+        "reviewRetry": "مراجعة وإعادة المحاولة",
+        "unknownConfirmation": "لم يؤكد المزوّد تسليم {{adapter}}. قد تؤدي إعادة المحاولة إلى إرسال نسخة مكررة. راجع الوجهة ولا تتابع إلا إذا كان هذا الخطر مقبولًا. ({{destination}})",
+        "chatbookDestination": "Chatbook",
+        "confirmRetry": "إعادة محاولة التسليم",
+        "confirmRetryAria": "إعادة محاولة {{adapter}} التسليم",
+        "recipientCount": "{{count}} مستلمين",
+        "recipientCount_zero": "{{count}} مستلمين",
+        "recipientCount_one": "{{count}} مستلمين",
+        "recipientCount_two": "{{count}} مستلمين",
+        "recipientCount_few": "{{count}} مستلمين",
+        "recipientCount_many": "{{count}} مستلمين",
+        "recipientCount_other": "{{count}} مستلمين",
+        "reviewAcknowledgement": "راجعت الوجهة وأقبل خطر تكرار التسليم.",
+        "reviewSettings": "مراجعة الإعدادات",
+        "reviewTitle": "مراجعة {{adapter}} التسليم"
+      },
+      "playback": {
+        "region": "صوت: {{name}}",
+        "playAria": "تشغيل {{name}}",
+        "pauseAria": "إيقاف {{name}} مؤقتًا",
+        "resumeAria": "استئناف {{name}}",
+        "seekAria": "صوت: {{name}}",
+        "loading": "جارٍ تحميل الصوت",
+        "error": "صوت فشل. فتح تقرير / إعادة الإنشاء صوت.",
+        "play": "تشغيل",
+        "pause": "إيقاف مؤقت",
+        "resume": "استئناف",
+        "accessError": "صوت: فشل الوصول. تحقق من تسجيل الدخول واتصال الخادم.",
+        "missing": "صوت لم يعد متاحًا."
+      },
+      "actions": {
+        "label": "أحدث موجز",
+        "openReport": "فتح {{report}}",
+        "openReportAria": "فتح {{report}}: {{name}}",
+        "regenerateAudio": "إعادة الإنشاء صوت",
+        "regenerateAudioAria": "إعادة الإنشاء {{style}} {{noun}} صوت: {{name}}",
+        "retry": "إعادة المحاولة",
+        "retrySaveAria": "إعادة المحاولة محفوظ تقرير: {{name}}",
+        "retryTextAria": "إعادة المحاولة تقرير: {{name}}",
+        "retryStage": "إعادة المحاولة: {{stage}}",
+        "inspect": "فحص التشغيل",
+        "inspectAria": "فحص التشغيل {{runId}}: {{name}}",
+        "viewReports": "عرض كل التقارير",
+        "testNow": "اختبار الآن",
+        "downloadAudio": "تنزيل صوت",
+        "downloadAudioAria": "تنزيل صوت: {{name}}",
+        "retryExactAria": "إعادة محاولة {{stage}}: {{name}}",
+        "reviewScript": "مراجعة صوت تقرير",
+        "reviewScriptAria": "مراجعة صوت تقرير: {{name}}"
+      },
+      "announcements": {
+        "blockingFailure": "{{name}} فشل. فحص التشغيل {{runId}}.",
+        "delivered": "{{name}}: تم التسليم.",
+        "nextRunUpdated": "{{name}}: التشغيل التالي.",
+        "partialAudioFailure": "{{name}}: ملاحظات العرض جاهز, صوت فشل.",
+        "readyText": "{{name}}: تقرير جاهز.",
+        "readyWithAudio": "{{name}}: جاهز. صوت / ملاحظات العرض.",
+        "stageProgress": "{{name}}: {{stage}} {{status}}.",
+        "testQueued": "اختبار الآن: في قائمة الانتظار."
+      },
+      "retryError": "إعادة المحاولة فشل. فحص التشغيل.",
+      "regenerateError": "إعادة الإنشاء صوت: فشل.",
+      "testError": "اختبار الآن: فشل.",
+      "status": {
+        "ready": "جاهز",
+        "failed": "فشل",
+        "saved": "محفوظ",
+        "waiting": "قيد الانتظار",
+        "running": "قيد التشغيل",
+        "queued": "في قائمة الانتظار",
+        "notStarted": "لم يبدأ",
+        "notSelected": "غير محدد",
+        "cancelled": "ملغى",
+        "delivered": "تم التسليم",
+        "unknown": "النتيجة غير معروفة",
+        "sending": "جارٍ الإرسال",
+        "stale": "قديم",
+        "superseded": "مستبدل",
+        "unavailable": "غير متاح",
+        "partial": "جزئي"
+      },
+      "stages": {
+        "renderText": "تقرير",
+        "persistText": "محفوظ تقرير",
+        "composeScript": "صوت تقرير",
+        "persistScript": "محفوظ صوت تقرير",
+        "generateAudio": "صوت",
+        "persistAudio": "محفوظ صوت"
+      },
+      "nouns": {
+        "briefing": "موجز",
+        "episode": "حلقة",
+        "report": "تقرير",
+        "showNotes": "ملاحظات العرض"
+      },
+      "scriptAccessError": "صوت تقرير: فشل الوصول. تحقق من تسجيل الدخول واتصال الخادم.",
+      "scriptLoading": "جارٍ تحميل صوت تقرير",
+      "scriptMissing": "صوت تقرير لم يعد متاحًا.",
+      "recovery": {
+        "renderText": "جارٍ إنشاء تقرير",
+        "persistText": "جارٍ حفظ تقرير",
+        "composeScript": "جارٍ إعداد صوت تقرير",
+        "persistScript": "جارٍ حفظ صوت تقرير",
+        "generateAudio": "جارٍ إنشاء صوت",
+        "persistAudio": "جارٍ حفظ صوت"
+      }
+    }
+  },
+  "outputs": {
+    "openInNewTabAria": "فتح في علامة تبويب جديدة: {{title}}",
+    "chatAboutAria": "مناقشة هذا: {{title}}",
+    "downloadAria": "تنزيل: {{title}}",
+    "artifactMissing": "لم يعد متاحًا.",
+    "artifactAuthError": "رُفض الوصول. تحقق من تسجيل الدخول.",
+    "artifactAccessError": "فشل الوصول. تحقق من تسجيل الدخول واتصال الخادم."
   }
 }

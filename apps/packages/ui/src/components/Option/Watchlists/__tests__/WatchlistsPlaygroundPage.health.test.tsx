@@ -23,7 +23,8 @@ vi.mock("react-i18next", () => ({
       if (typeof defaultValue !== "string") return _key
       if (!options) return defaultValue
       return defaultValue.replace(/\{\{(\w+)\}\}/g, (_, token) => String(options[token] ?? ""))
-    }
+    },
+    i18n: { resolvedLanguage: "en", language: "en" }
   })
 }))
 
@@ -138,6 +139,7 @@ vi.mock("@/utils/watchlists-onboarding-telemetry", () => ({
 
 const buildOverviewData = (): WatchlistsOverviewData => ({
   fetchedAt: "2026-05-20T12:00:00Z",
+  latestBriefing: null,
   sources: {
     total: 1,
     healthy: 0,

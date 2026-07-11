@@ -77,6 +77,45 @@ def test_engine_duration_ms_since_accepts_timezone_aware_started_at() -> None:
 
 
 @pytest.mark.asyncio
+async def test_adapter_exception_outside_noncritical_tuple_fails_run(tmp_path, monkeypatch) -> None:
+    class ProviderInitFailed(Exception):
+        pass
+
+    db = WorkflowsDatabase(str(tmp_path / "wf.db"))
+    run_id = f"run-{uuid.uuid4().hex}"
+    db.create_run(
+        run_id=run_id,
+        tenant_id="default",
+        user_id="1",
+        inputs={},
+        workflow_id=None,
+        definition_version=1,
+        definition_snapshot={
+            "name": "provider-exception",
+            "version": 1,
+            "steps": [
+                {"id": "generate_audio", "type": "provider_step", "config": {}},
+            ],
+        },
+    )
+
+    async def _provider_adapter(_config, _context):
+        raise ProviderInitFailed("tts provider unavailable")
+
+    monkeypatch.setattr(engine_mod, "get_adapter", lambda _step_type: _provider_adapter)
+
+    engine = engine_mod.WorkflowEngine(db)
+    await engine.start_run(run_id)
+
+    run = db.get_run(run_id)
+    assert run is not None
+    assert run.status == "failed"
+    assert run.error == "tts provider unavailable"
+    step_runs = db.list_step_runs(run_id=run_id)
+    assert step_runs[-1]["status"] == "failed"
+
+
+@pytest.mark.asyncio
 async def test_invalid_transition_sets_invariant_violation(tmp_path, monkeypatch) -> None:
     db = WorkflowsDatabase(str(tmp_path / "wf.db"))
     run_id = f"run-{uuid.uuid4().hex}"

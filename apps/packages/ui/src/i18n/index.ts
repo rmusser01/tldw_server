@@ -20,6 +20,7 @@ const NAMESPACES = [
     "sources",
     "evaluations",
     "audiobook",
+    "watchlists",
     "tutorials"
 ] as const
 

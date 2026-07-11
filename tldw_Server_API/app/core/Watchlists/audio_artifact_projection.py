@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from typing import Any
 from urllib.parse import quote
 
 from loguru import logger
+
+from tldw_Server_API.app.core.Workflows.adapters._common import public_program_artifact_metadata
 
 _PROJECTION_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     AttributeError,
@@ -22,6 +25,63 @@ _PROJECTION_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
 )
 
 _CORRELATION_KEYS = ("source", "watchlist_job_id", "watchlist_run_id", "audio_request_id")
+_PROGRAM_METADATA_KEYS = {
+    "program_format",
+    "outcome_noun",
+    "show_name",
+    "premise",
+    "audience",
+    "tone",
+    "episode_title",
+    "analysis_allowed",
+    "show_notes",
+    "source_ids",
+    "source_urls",
+    "source_count",
+    "candidate_count",
+    "included_count",
+    "omitted_count",
+    "target_duration_minutes",
+    "estimated_duration_minutes",
+    "target_duration_guaranteed",
+    "cast",
+    "ai_generated_speech",
+    "speech_disclosure",
+    "is_no_material_update",
+}
+_PUBLIC_ARTIFACT_METADATA_KEYS = {
+    *_CORRELATION_KEYS,
+    "briefing_occurrence_id",
+    "briefing_attempt_id",
+    "watchlist_output_id",
+    "title",
+    "label",
+    "name",
+    "script_artifact",
+    "script_artifact_id",
+    "speaker_artifact",
+    "speaker_id",
+    "voice",
+    "model",
+    "sections_count",
+    "sections_generated",
+    "sections",
+    "voice_assignments",
+    "output_language",
+    "word_count",
+    "estimated_minutes",
+    "format",
+    "multi_voice",
+    "background_mixed",
+    "final_artifact",
+    "fallback_artifact",
+    "single_voice_fallback",
+    "fallback_reason",
+    "provenance",
+}
+_PRIVATE_LOCATION_VALUE_RE = re.compile(
+    r"(?i)(?:file:/{0,2}|(?:^|\s)[a-z]:[\\/]|\\\\|(?:^|\s)/(?:[^\s]+)|(?:^|[\\/])\.\.(?:[\\/]|$))"
+)
 
 
 def _get_value(obj: Any, key: str, default: Any = None) -> Any:
@@ -110,13 +170,62 @@ def _artifact_id(artifact: Any) -> Any:
     return _get_value(artifact, "artifact_id") or _get_value(artifact, "id")
 
 
-def _scrub_artifact_metadata(value: Any) -> Any:
-    """Remove raw artifact URI fields from metadata before mirroring to Watchlists."""
-    if isinstance(value, dict):
-        return {key: _scrub_artifact_metadata(item) for key, item in value.items() if key != "uri"}
-    if isinstance(value, list):
-        return [_scrub_artifact_metadata(item) for item in value]
-    return value
+def _safe_public_scalar(value: Any) -> Any:
+    """Keep bounded scalars that are not filesystem paths or local URIs."""
+    if isinstance(value, bool) or value is None or isinstance(value, (int, float)):
+        return value
+    if not isinstance(value, str):
+        return None
+    text = " ".join(value.split()).strip()
+    if not text or _PRIVATE_LOCATION_VALUE_RE.search(text):
+        return None
+    return text[:1000]
+
+
+def _scrub_artifact_metadata(value: Any) -> dict[str, Any]:
+    """Project artifact metadata through explicit public field allowlists."""
+    if not isinstance(value, dict):
+        return {}
+    scrubbed: dict[str, Any] = {}
+    for key in _PUBLIC_ARTIFACT_METADATA_KEYS:
+        if key not in value:
+            continue
+        item = value[key]
+        if key == "sections" and isinstance(item, list):
+            public_sections = []
+            for section in item[:5000]:
+                if not isinstance(section, dict):
+                    continue
+                public_section = {
+                    field: safe
+                    for field in ("section_index", "voice", "model", "fallback")
+                    if (safe := _safe_public_scalar(section.get(field))) is not None
+                }
+                if public_section:
+                    public_sections.append(public_section)
+            scrubbed[key] = public_sections
+            continue
+        if key == "voice_assignments" and isinstance(item, dict):
+            assignments: dict[str, str] = {}
+            for marker, voice in list(item.items())[:100]:
+                safe_marker = _safe_public_scalar(marker)
+                safe_voice = _safe_public_scalar(voice)
+                if isinstance(safe_marker, str) and isinstance(safe_voice, str):
+                    assignments[safe_marker] = safe_voice
+            scrubbed[key] = assignments
+            continue
+        if key == "provenance" and isinstance(item, dict):
+            source = _safe_public_scalar(item.get("source"))
+            if source is not None:
+                scrubbed[key] = {"source": source}
+            continue
+        safe_item = _safe_public_scalar(item)
+        if safe_item is not None:
+            scrubbed[key] = safe_item
+
+    speech_ready = bool(value.get("final_artifact") or value.get("is_final") or value.get("final"))
+    scrubbed.update(public_program_artifact_metadata(value, speech_ready=speech_ready))
+    return scrubbed
 
 
 def summarize_audio_artifact(
@@ -323,8 +432,31 @@ def build_audio_projection(
     script_artifact = max(script_candidates, key=lambda item: item[0])[1] if script_candidates else None
     final_artifact = max(audio_candidates, key=lambda item: item[0])[1] if audio_candidates else None
 
+    if script_artifact and final_artifact:
+        script_metadata = script_artifact.get("metadata")
+        final_metadata = final_artifact.get("metadata")
+        if isinstance(script_metadata, dict) and isinstance(final_metadata, dict):
+            combined_program = {
+                **{key: script_metadata[key] for key in _PROGRAM_METADATA_KEYS if key in script_metadata},
+                **{key: final_metadata[key] for key in _PROGRAM_METADATA_KEYS if key in final_metadata},
+            }
+            final_artifact["metadata"] = {
+                **final_metadata,
+                **public_program_artifact_metadata(combined_program, speech_ready=True),
+                "script_artifact_id": script_artifact.get("artifact_id"),
+            }
+            final_title = _first_non_empty_string(
+                final_artifact["metadata"].get("episode_title"),
+                final_artifact["metadata"].get("show_name"),
+            )
+            if final_title:
+                final_artifact["title"] = final_title
+
     if final_artifact and status not in {"failed", "cancelled"}:
         status = "completed"
+    elif status == "completed":
+        status = "failed"
+        fallback_reason = fallback_reason or "audio_final_artifact_missing"
 
     projection: dict[str, Any] = {
         "run_id": run_id,
@@ -346,14 +478,51 @@ def build_audio_projection(
                 "mime_type": final_artifact.get("mime_type"),
             }
         )
+        final_metadata = final_artifact.get("metadata")
+        if isinstance(final_metadata, dict):
+            projection.update({key: final_metadata[key] for key in _PROGRAM_METADATA_KEYS if key in final_metadata})
     return projection
+
+
+def apply_scheduler_status_to_audio_projection(
+    projection: dict[str, Any],
+    scheduler_status: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Merge Scheduler task status without overriding terminal Workflow outcomes."""
+    if not scheduler_status:
+        return dict(projection)
+    current_status = normalize_audio_status(projection.get("status"), task_id=projection.get("task_id"))
+    if current_status in {"completed", "failed", "cancelled"}:
+        return {
+            **projection,
+            "fallback_reason": projection.get("fallback_reason") or scheduler_status.get("fallback_reason"),
+        }
+    scheduler_value = normalize_audio_status(scheduler_status.get("status"), task_id=projection.get("task_id"))
+    return {
+        **projection,
+        "status": scheduler_value,
+        "fallback_reason": scheduler_status.get("fallback_reason") or projection.get("fallback_reason"),
+    }
 
 
 def merge_audio_projection_metadata(existing: dict[str, Any], projection: dict[str, Any]) -> dict[str, Any]:
     """Merge a durable audio projection into run/output metadata without dropping unrelated fields."""
     merged = dict(existing or {})
     merged["audio"] = dict(projection)
-    merged["audio_briefing_status"] = projection.get("status")
+    status = str(projection.get("status") or "unknown").strip().lower()
+    has_final_artifact = bool(projection.get("final_artifact"))
+    merged["audio_briefing_status"] = status
+    merged["ai_generated_speech"] = has_final_artifact
+    if has_final_artifact:
+        merged["speech_disclosure"] = "Synthetic AI-generated speech"
+    elif status == "failed":
+        merged["speech_disclosure"] = "Synthetic speech generation failed"
+    elif status == "cancelled":
+        merged["speech_disclosure"] = "Synthetic speech generation cancelled"
+    elif status in {"queued", "running", "pending"}:
+        merged["speech_disclosure"] = "Synthetic speech generation pending"
+    else:
+        merged["speech_disclosure"] = "Synthetic speech unavailable"
     if projection.get("audio_request_id"):
         merged["audio_request_id"] = projection.get("audio_request_id")
     else:

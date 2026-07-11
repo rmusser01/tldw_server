@@ -239,9 +239,6 @@
   "header_omniSearchStartChat": {
     "message": "Starta ny chatt \"{{query}}\""
   },
-  "header_connectionCard.connectedCaption": {
-    "message": "Chatt och verktyg är nu tillgängliga i Inställningar och sidopanelen."
-  },
   "header_quickIngestQueuedAria": {
     "message": "{{label}} — {{count}} objekt i kö — klicka för att granska och bearbeta"
   },
@@ -2722,5 +2719,8 @@
   },
   "repo2txt_status_generated": {
     "message": "Generated output for {{count}} files ({{tokenCount}} tokens)."
+  },
+  "header_connectionCard_connectedCaption": {
+    "message": "Chatt och verktyg är nu tillgängliga i Inställningar och sidopanelen."
   }
 }
