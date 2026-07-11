@@ -658,6 +658,31 @@ def test_create_job_email_validation_returns_structured_detail(client_with_user)
     assert "bad-email" in (meta.get("invalid_recipients") or [])
 
 
+def test_create_job_validates_legacy_delivery_config_before_normalizing(client_with_user):
+    response = client_with_user.post(
+        "/api/v1/watchlists/jobs",
+        json={
+            "name": "Invalid legacy delivery",
+            "scope": {"tags": ["alpha"]},
+            "schedule_expr": None,
+            "timezone": "UTC",
+            "active": True,
+            "output_prefs": {
+                "delivery_config": {
+                    "email_enabled": True,
+                    "email_recipients": "reader@example.com",
+                }
+            },
+        },
+    )
+
+    _assert_watchlists_validation_error(
+        response,
+        rule="invalid_email_recipients",
+        message_key="watchlists:jobs.form.emailRecipientsInvalidSubmit",
+    )
+
+
 def test_update_job_email_validation_returns_structured_detail(client_with_user):
     c = client_with_user
     create_resp = c.post(

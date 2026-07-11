@@ -591,6 +591,24 @@ def test_completed_audio_does_not_override_failed_text(projection_case):
     assert projection["stages"]["persist_audio"]["status"] == "ready"
 
 
+def test_projection_preserves_zero_candidate_count(projection_case):
+    from tldw_Server_API.app.core.Watchlists.briefing_projection import build_briefing_projection
+
+    _client, seeded, watchlists_db, collections_db = projection_case
+    occurrence = watchlists_db.get_briefing_occurrence(seeded.occurrence_id)
+    stages = json.loads(occurrence.stages_json)
+    stages["select"]["candidate_count"] = 0
+    watchlists_db.update_briefing_occurrence(seeded.occurrence_id, stages=stages)
+
+    projection = build_briefing_projection(
+        occurrence=watchlists_db.get_briefing_occurrence(seeded.occurrence_id),
+        watchlists_db=watchlists_db,
+        collections_db=collections_db,
+    )
+
+    assert projection["selection"]["candidate_count"] == 0
+
+
 def test_failed_audio_with_script_artifact_marks_generation_stage_failed(projection_case):
     from tldw_Server_API.app.core.Watchlists.briefing_projection import build_briefing_projection
 

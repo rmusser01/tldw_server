@@ -702,7 +702,7 @@
     "message": "Último episodio"
   },
   "overview_latest_empty_scheduled": {
-    "message": "resumen: {{date}}."
+    "message": "Tu primer resumen está programado para {{date}}."
   },
   "overview_latest_empty_manual": {
     "message": "No iniciado. Probar ahora."

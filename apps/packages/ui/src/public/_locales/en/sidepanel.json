@@ -1512,7 +1512,7 @@
     "message": "Opens /chat in a new tab. Use Continue in WebUI from the composer tools to carry a draft or page context."
   },
   "header_openFullChatWebuiRouteOnlyDescription": {
-    "message": "Opens /chat in a new tab. Use Continue in WebUI from the composer tools to carry a draft or page context."
+    "message": "Opens /chat in a new tab without transferring the current draft or page context."
   },
   "flashcards_opening": {
     "message": "Opening Flashcards"

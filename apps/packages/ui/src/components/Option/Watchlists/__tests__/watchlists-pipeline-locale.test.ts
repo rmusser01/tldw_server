@@ -114,7 +114,7 @@ describe("Watchlists pipeline locale contract", () => {
     }
   )
 
-  it.each(canonicalLocales)(
+  it.each(["en", ...canonicalLocales])(
     "%s keeps nested and extension setup copy identical",
     (locale) => {
       const nested = setupCopy(readNested(locale))

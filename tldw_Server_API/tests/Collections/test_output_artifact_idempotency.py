@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
@@ -34,6 +35,28 @@ def test_outputs_schema_adds_nullable_idempotency_key_and_active_unique_index(tm
     finally:
         db.close()
         close_all_backends()
+
+
+def test_active_idempotency_index_creation_survives_legacy_drop_noop() -> None:
+    db = CollectionsDatabase.__new__(CollectionsDatabase)
+    statements: list[str] = []
+
+    class Backend:
+        backend_type = BackendType.SQLITE
+
+        @staticmethod
+        def execute(statement: str, _params: tuple[object, ...]) -> None:
+            statements.append(statement)
+            if statement.startswith("DROP INDEX"):
+                raise RuntimeError("index already exists")
+
+    db._backend = Backend()
+    db._local = SimpleNamespace()
+    db._uses_shared_content_backend = False
+
+    db._ensure_output_idempotency_index()
+
+    assert any(statement.startswith("CREATE UNIQUE INDEX") for statement in statements)
 
 
 def test_create_output_artifact_reuses_idempotency_key_but_keeps_legacy_callers(tmp_path: Path) -> None:

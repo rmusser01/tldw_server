@@ -259,15 +259,13 @@ When importing content that already exists:
   - Example: "Research Note" becomes "[Imported] Research Note"
   - Useful for identifying imported content
 
-- **Import Media**: Not supported yet
-  - Default: false
-  - Keep this set to false; the server rejects true values in v1
-  - OpenWebUI JSON and database imports preserve attachment references first; use OpenWebUI attachment hydration after import to copy referenced images and register supported files
+- **Import Media**:
+  - Chatbook archives: omit this option to restore all restorable media data and bundled stored artifacts present in the archive
+  - OpenWebUI JSON and database imports: attachment references are preserved first; use OpenWebUI attachment hydration after import to copy referenced images and register supported files
 
-- **Import Embeddings**: Not supported yet
-  - Default: false
-  - Keep this set to false; the server rejects true values in v1
-  - OpenWebUI JSON and database imports do not import embeddings
+- **Import Embeddings**:
+  - Chatbook archives: omit this option to restore embeddings present in the archive
+  - OpenWebUI JSON and database imports: embeddings are not imported
 
 ### Preview Before Import
 
@@ -503,7 +501,7 @@ A: Depends on conflict resolution. Use "skip" to avoid duplicates. OpenWebUI JSO
 A: Yes, use the preview endpoint to see contents without importing.
 
 **Q: What happens to media files during import?**
-A: Chatbook media import is not supported yet; keep `import_media=false`. OpenWebUI JSON and database imports preserve file, image, and artifact references first. Run OpenWebUI attachment hydration after import when you have the server-local OpenWebUI data root and want to copy referenced images or register supported files.
+A: Chatbook archive import restores media records, derived media data, and bundled tldw-stored artifacts present in the archive by default. Pointer-only external sources remain metadata only. OpenWebUI JSON and database imports preserve file, image, and artifact references first; run OpenWebUI attachment hydration after import when you have the server-local OpenWebUI data root and want to copy referenced images or register supported files.
 
 **Q: Can I undo an import?**
 A: No automatic undo. Keep backups before importing.

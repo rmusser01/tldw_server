@@ -3954,7 +3954,7 @@
     "message": "Failed to generate preview."
   },
   "overview_pipelineSetup_delivery_help": {
-    "message": "Reports is always included. External delivery waits until selected artifacts are ready."
+    "message": "The Reports destination is always included. External delivery waits until selected artifacts are ready."
   },
   "overview_pipelineSetup_delivery_reports": {
     "message": "Reports"

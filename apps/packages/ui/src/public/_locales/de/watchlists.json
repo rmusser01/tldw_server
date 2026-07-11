@@ -687,13 +687,13 @@
     "message": "{{stage}} wurde abgebrochen ({{code}}). Ihr Entwurf wurde gespeichert."
   },
   "overview_latest_heading_briefing": {
-    "message": "Neueste Übersicht"
+    "message": "Neuestes Briefing"
   },
   "overview_latest_heading_episode": {
     "message": "Neueste Episode"
   },
   "overview_latest_empty_scheduled": {
-    "message": "Übersicht: {{date}}."
+    "message": "Ihr erstes Briefing ist für {{date}} geplant."
   },
   "overview_latest_empty_manual": {
     "message": "Nicht gestartet. Jetzt testen."
@@ -738,7 +738,7 @@
     "message": "Nächster Lauf: {{relative}}"
   },
   "overview_latest_counts": {
-    "message": "Übersicht: Enthalten, Ungelesen, Neu"
+    "message": "Briefing: Enthalten, Ungelesen, Neu"
   },
   "overview_latest_count_included": {
     "message": "Enthalten {{count}}"
@@ -816,7 +816,7 @@
     "message": "Fortsetzen"
   },
   "overview_latest_actions_label": {
-    "message": "Neueste Übersicht"
+    "message": "Neuestes Briefing"
   },
   "overview_latest_actions_openReport": {
     "message": "Öffnen {{report}}"

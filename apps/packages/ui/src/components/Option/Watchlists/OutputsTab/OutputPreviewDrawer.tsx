@@ -371,14 +371,20 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
   const renderAudioArtifactGraph = () => {
     if (!audioSummary.requested) return null
 
-    const downloadArtifact = async (artifact: AudioArtifactSummary) => {
+    const downloadArtifact = async (
+      artifact: AudioArtifactSummary,
+      fallbackExtension: "md" | "mp3"
+    ) => {
       if (!artifact.downloadUrl) return
       try {
         const blob = await fetchWatchlistArtifactBlob(artifact.downloadUrl, {})
         const url = createWatchlistArtifactObjectUrl(blob)
         const anchor = document.createElement("a")
         anchor.href = url
-        anchor.download = artifact.displayName || artifact.label
+        const baseName = artifact.displayName || artifact.label
+        anchor.download = /\.[^./\\]+$/.test(baseName)
+          ? baseName
+          : `${baseName}.${fallbackExtension}`
         document.body.appendChild(anchor)
         anchor.click()
         anchor.remove()
@@ -388,7 +394,11 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
       }
     }
 
-    const renderArtifact = (artifact: AudioArtifactSummary, key: string) => (
+    const renderArtifact = (
+      artifact: AudioArtifactSummary,
+      key: string,
+      fallbackExtension: "md" | "mp3"
+    ) => (
       <div key={key}>
         <div className="font-medium text-text">{artifact.label}</div>
         {artifact.displayName ? <div>{artifact.displayName}</div> : null}
@@ -399,7 +409,7 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
             aria-label={t("watchlists:accessibilityHardening.output.download", "Download {{title}}", {
               title: artifact.label
             })}
-            onClick={() => void downloadArtifact(artifact)}
+            onClick={() => void downloadArtifact(artifact, fallbackExtension)}
           >
             {t("watchlists:outputs.download", "Download")}
           </Button>
@@ -455,13 +465,13 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
         )}
         <div className={`grid grid-cols-1 gap-2 text-xs text-text-muted ${isConstrained ? "" : "sm:grid-cols-2"}`}>
           {audioSummary.scriptArtifact && (
-            renderArtifact(audioSummary.scriptArtifact, "script")
+            renderArtifact(audioSummary.scriptArtifact, "script", "md")
           )}
           {audioSummary.speakerArtifacts.map((artifact, index) => (
-            renderArtifact(artifact, `${artifact.speakerId || artifact.label}-${index}`)
+            renderArtifact(artifact, `${artifact.speakerId || artifact.label}-${index}`, "mp3")
           ))}
           {audioSummary.finalArtifact && (
-            renderArtifact(audioSummary.finalArtifact, "final")
+            renderArtifact(audioSummary.finalArtifact, "final", "mp3")
           )}
         </div>
       </div>

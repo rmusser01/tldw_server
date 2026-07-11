@@ -305,7 +305,7 @@
     "presetCriticalReview": "批判的レビュー",
     "presetQAAnalysis": "Q&A 分析",
     "presetBulletedNotes": "Bulleted Notes",
-    "analysisProviderRequired": "Choose an analysis provider, then retry analysis."
+    "analysisProviderRequired": "分析プロバイダーを選択してから、分析を再試行してください。"
   },
   "empty": {
     "connectTitle": "レビューを使用するには接続してください",

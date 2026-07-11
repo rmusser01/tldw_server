@@ -349,7 +349,7 @@
         "episode": "أحدث حلقة"
       },
       "empty": {
-        "scheduled": "موجز: {{date}}.",
+        "scheduled": "سيتم إنشاء أول موجز لك في {{date}}.",
         "manual": "لم يبدأ. اختبار الآن."
       },
       "generatedAt": "تم الإنشاء {{date}}",

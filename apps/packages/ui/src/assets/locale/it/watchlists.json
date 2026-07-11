@@ -340,7 +340,7 @@
         "episode": "Ultimo episodio"
       },
       "empty": {
-        "scheduled": "briefing: {{date}}.",
+        "scheduled": "Il tuo primo briefing è programmato per {{date}}.",
         "manual": "Non avviato. Prova ora."
       },
       "generatedAt": "Generato {{date}}",

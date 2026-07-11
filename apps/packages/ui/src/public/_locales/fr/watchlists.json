@@ -702,7 +702,7 @@
     "message": "Dernier épisode"
   },
   "overview_latest_empty_scheduled": {
-    "message": "briefing: {{date}}."
+    "message": "Votre premier briefing est prévu pour le {{date}}."
   },
   "overview_latest_empty_manual": {
     "message": "Non démarré. Tester maintenant."

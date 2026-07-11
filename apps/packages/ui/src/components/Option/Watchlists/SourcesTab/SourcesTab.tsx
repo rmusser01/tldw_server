@@ -1457,8 +1457,7 @@ export const SourcesTab: React.FC = () => {
           ? t("watchlists:sources.compactSummaryGroupSingular", "group")
           : t("watchlists:sources.compactSummaryGroupPlural", "groups")
         const sourceTags = Array.isArray(source.tags) ? source.tags : []
-        const targetIds = resolveCheckNowTargetIds(source.id)
-        const checkNowLoading = targetIds.some((id) => checkingSourceIds.includes(id))
+        const checkNowLoading = checkingSourceIds.includes(source.id)
         const isSelected = selectedRowKeys.some((key) => String(key) === String(source.id))
         const sourceSafeUrl = safeExternalUrl(source.url)
         const sourceWebsiteLabel = t(

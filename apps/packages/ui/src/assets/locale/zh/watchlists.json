@@ -333,27 +333,27 @@
     },
     "latest": {
       "heading": {
-        "briefing": "最新 简报",
-        "episode": "最新 节目"
+        "briefing": "最新简报",
+        "episode": "最新节目"
       },
       "empty": {
-        "scheduled": "简报: {{date}}.",
-        "manual": "未开始. 立即测试."
+        "scheduled": "首份简报计划于{{date}}生成。",
+        "manual": "尚未开始。立即测试。"
       },
       "generatedAt": "生成于 {{date}}",
       "untitled": "简报 {{runId}}",
-      "artifacts": "报告 / 音频",
+      "artifacts": "报告／音频",
       "audio": "音频",
-      "audioFailed": "音频 失败",
+      "audioFailed": "音频生成失败",
       "ready": "就绪",
       "saved": "已保存",
       "waiting": "等待中",
-      "script": "音频 报告",
-      "stageWithStatus": "{{stage}}: {{status}}",
+      "script": "音频脚本",
+      "stageWithStatus": "{{stage}}：{{status}}",
       "noUpdates": "未找到符合条件的更新。已保存状态{{noun}}。",
-      "nextRun": "下次运行: {{date}}",
-      "nextRunRelative": "下次运行: {{relative}}",
-      "counts": "简报: 已包含, 未读, 新增",
+      "nextRun": "下次运行：{{date}}",
+      "nextRunRelative": "下次运行：{{relative}}",
+      "counts": "简报：已包含、未读、新增",
       "count": {
         "included": "已包含 {{count}}",
         "unread": "未读 {{count}}",
@@ -395,19 +395,19 @@
         "resumeAria": "继续播放 {{name}}",
         "seekAria": "音频: {{name}}",
         "loading": "正在加载音频",
-        "error": "音频 失败. 打开 报告 / 重新生成 音频.",
+        "error": "音频生成失败。请打开报告或重新生成音频。",
         "play": "播放",
         "pause": "暂停",
         "resume": "继续",
         "accessError": "音频: 访问失败. 请检查登录状态和服务器连接。",
-        "missing": "音频 已不可用."
+        "missing": "音频已不可用。"
       },
       "actions": {
-        "label": "最新 简报",
+        "label": "最新简报",
         "openReport": "打开 {{report}}",
-        "openReportAria": "打开 {{report}}: {{name}}",
-        "regenerateAudio": "重新生成 音频",
-        "regenerateAudioAria": "重新生成 {{style}} {{noun}} 音频: {{name}}",
+        "openReportAria": "打开{{report}}：{{name}}",
+        "regenerateAudio": "重新生成音频",
+        "regenerateAudioAria": "重新生成{{style}}{{noun}}音频：{{name}}",
         "retry": "重试",
         "retrySaveAria": "重试 已保存 报告: {{name}}",
         "retryTextAria": "重试 报告: {{name}}",
@@ -416,21 +416,21 @@
         "inspectAria": "检查运行 {{runId}}: {{name}}",
         "viewReports": "查看所有报告",
         "testNow": "立即测试",
-        "downloadAudio": "下载 音频",
-        "downloadAudioAria": "下载 音频: {{name}}",
+        "downloadAudio": "下载音频",
+        "downloadAudioAria": "下载音频：{{name}}",
         "retryExactAria": "重试 {{stage}}: {{name}}",
-        "reviewScript": "检查 音频 报告",
-        "reviewScriptAria": "检查 音频 报告: {{name}}"
+        "reviewScript": "检查音频脚本",
+        "reviewScriptAria": "检查音频脚本：{{name}}"
       },
       "announcements": {
-        "blockingFailure": "{{name}} 失败. 检查运行 {{runId}}.",
-        "delivered": "{{name}}: 已送达.",
-        "nextRunUpdated": "{{name}}: 下次运行.",
-        "partialAudioFailure": "{{name}}: 节目说明 就绪, 音频 失败.",
-        "readyText": "{{name}}: 报告 就绪.",
-        "readyWithAudio": "{{name}}: 就绪. 音频 / 节目说明.",
-        "stageProgress": "{{name}}: {{stage}} {{status}}.",
-        "testQueued": "立即测试: 已排队."
+        "blockingFailure": "{{name}}失败。请检查运行{{runId}}。",
+        "delivered": "{{name}}：已送达。",
+        "nextRunUpdated": "{{name}}：已更新下次运行时间。",
+        "partialAudioFailure": "{{name}}：节目说明已就绪，音频生成失败。",
+        "readyText": "{{name}}：报告已就绪。",
+        "readyWithAudio": "{{name}}：音频和节目说明已就绪。",
+        "stageProgress": "{{name}}：{{stage}}{{status}}。",
+        "testQueued": "测试已排队。"
       },
       "retryError": "重试 失败. 检查运行.",
       "regenerateError": "重新生成 音频: 失败.",
@@ -456,8 +456,8 @@
       "stages": {
         "renderText": "报告",
         "persistText": "已保存 报告",
-        "composeScript": "音频 报告",
-        "persistScript": "已保存 音频 报告",
+        "composeScript": "音频脚本",
+        "persistScript": "已保存音频脚本",
         "generateAudio": "音频",
         "persistAudio": "已保存 音频"
       },
@@ -467,14 +467,14 @@
         "report": "报告",
         "showNotes": "节目说明"
       },
-      "scriptAccessError": "音频 报告: 访问失败. 请检查登录状态和服务器连接。",
-      "scriptLoading": "正在加载 音频 报告",
-      "scriptMissing": "音频 报告 已不可用.",
+      "scriptAccessError": "音频脚本访问失败。请检查登录状态和服务器连接。",
+      "scriptLoading": "正在加载音频脚本",
+      "scriptMissing": "音频脚本已不可用。",
       "recovery": {
         "renderText": "正在生成 报告",
         "persistText": "正在保存 报告",
-        "composeScript": "正在编写 音频 报告",
-        "persistScript": "正在保存 音频 报告",
+        "composeScript": "正在编写音频脚本",
+        "persistScript": "正在保存音频脚本",
         "generateAudio": "正在生成 音频",
         "persistAudio": "正在保存 音频"
       }

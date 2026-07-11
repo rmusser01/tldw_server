@@ -693,7 +693,7 @@
     "message": "Seneste episode"
   },
   "overview_latest_empty_scheduled": {
-    "message": "briefing: {{date}}."
+    "message": "Din første briefing er planlagt til {{date}}."
   },
   "overview_latest_empty_manual": {
     "message": "Ikke startet. Test nu."

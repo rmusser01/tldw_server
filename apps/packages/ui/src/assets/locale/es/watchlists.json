@@ -340,7 +340,7 @@
         "episode": "Último episodio"
       },
       "empty": {
-        "scheduled": "resumen: {{date}}.",
+        "scheduled": "Tu primer resumen está programado para {{date}}.",
         "manual": "No iniciado. Probar ahora."
       },
       "generatedAt": "Generado {{date}}",

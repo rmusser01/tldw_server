@@ -1134,6 +1134,19 @@ def _raw_delivery_configs(output_prefs: dict[str, Any] | None) -> list[dict[str,
     pipeline = output_prefs.get(BRIEFING_PIPELINE_KEY)
     if isinstance(pipeline, dict):
         candidates.append(pipeline.get("delivery"))
+    legacy = output_prefs.get("delivery_config")
+    if isinstance(legacy, dict):
+        candidates.append(legacy)
+        legacy_adapter: dict[str, Any] = {}
+        if "email_enabled" in legacy or "email_recipients" in legacy:
+            legacy_adapter["email"] = {
+                "enabled": legacy.get("email_enabled", False),
+                "recipients": legacy.get("email_recipients", []),
+            }
+        if "create_chatbook" in legacy:
+            legacy_adapter["chatbook"] = {"enabled": legacy.get("create_chatbook")}
+        if legacy_adapter:
+            candidates.append(legacy_adapter)
     return [dict(candidate) for candidate in candidates if isinstance(candidate, dict)]
 
 
@@ -1143,6 +1156,17 @@ def _validate_raw_delivery_config(output_prefs: dict[str, Any] | None) -> None:
         MAX_EMAIL_RECIPIENTS,
         normalize_email_recipients,
     )
+
+    if isinstance(output_prefs, dict):
+        legacy = output_prefs.get("delivery_config")
+        if legacy is not None and not isinstance(legacy, dict):
+            _raise_watchlists_validation_error(
+                rule="invalid_delivery_configuration",
+                message_key="watchlists:jobs.form.deliveryInvalid",
+                message="Delivery configuration must be an object.",
+                remediation_key="watchlists:jobs.form.deliveryRemediation",
+                remediation="Provide a valid delivery configuration.",
+            )
 
     for delivery in _raw_delivery_configs(output_prefs):
         email = delivery.get("email")

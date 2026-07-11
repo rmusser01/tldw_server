@@ -687,16 +687,16 @@
     "message": "{{stage}} はキャンセルされました（{{code}}）。下書きは保存されています。"
   },
   "overview_latest_heading_briefing": {
-    "message": "最新 ブリーフィング"
+    "message": "最新ブリーフィング"
   },
   "overview_latest_heading_episode": {
-    "message": "最新 エピソード"
+    "message": "最新エピソード"
   },
   "overview_latest_empty_scheduled": {
-    "message": "ブリーフィング: {{date}}."
+    "message": "最初のブリーフィングは{{date}}に予定されています。"
   },
   "overview_latest_empty_manual": {
-    "message": "未開始. 今すぐテスト."
+    "message": "まだ開始されていません。今すぐテストできます。"
   },
   "overview_latest_generatedAt": {
     "message": "生成日時 {{date}}"
@@ -705,13 +705,13 @@
     "message": "ブリーフィング {{runId}}"
   },
   "overview_latest_artifacts": {
-    "message": "レポート / 音声"
+    "message": "レポート／音声"
   },
   "overview_latest_audio": {
     "message": "音声"
   },
   "overview_latest_audioFailed": {
-    "message": "音声 失敗"
+    "message": "音声の生成に失敗"
   },
   "overview_latest_ready": {
     "message": "準備完了"
@@ -723,25 +723,25 @@
     "message": "待機中"
   },
   "overview_latest_script": {
-    "message": "音声 レポート"
+    "message": "音声台本"
   },
   "overview_latest_stageWithStatus": {
-    "message": "{{stage}}: {{status}}"
+    "message": "{{stage}}：{{status}}"
   },
   "overview_latest_noUpdates": {
     "message": "条件に一致する更新はありませんでした。ステータス用の{{noun}}を保存しました。"
   },
   "overview_latest_nextRun": {
-    "message": "次回実行: {{date}}"
+    "message": "次回実行：{{date}}"
   },
   "overview_latest_nextRunRelative": {
-    "message": "次回実行: {{relative}}"
+    "message": "次回実行：{{relative}}"
   },
   "overview_latest_counts": {
-    "message": "ブリーフィング: 含む, 未読, 新着"
+    "message": "ブリーフィング：収録、未読、新着"
   },
   "overview_latest_count_included": {
-    "message": "含む {{count}}"
+    "message": "収録 {{count}}件"
   },
   "overview_latest_count_unread": {
     "message": "未読 {{count}}"
@@ -804,7 +804,7 @@
     "message": "音声を読み込み中"
   },
   "overview_latest_playback_error": {
-    "message": "音声 失敗. 開く レポート / 再生成 音声."
+    "message": "音声の生成に失敗しました。レポートを開くか、音声を再生成してください。"
   },
   "overview_latest_playback_play": {
     "message": "再生"
@@ -816,19 +816,19 @@
     "message": "再開"
   },
   "overview_latest_actions_label": {
-    "message": "最新 ブリーフィング"
+    "message": "最新ブリーフィング"
   },
   "overview_latest_actions_openReport": {
-    "message": "開く {{report}}"
+    "message": "{{report}}を開く"
   },
   "overview_latest_actions_openReportAria": {
-    "message": "開く {{report}}: {{name}}"
+    "message": "{{report}}を開く：{{name}}"
   },
   "overview_latest_actions_regenerateAudio": {
-    "message": "再生成 音声"
+    "message": "音声を再生成"
   },
   "overview_latest_actions_regenerateAudioAria": {
-    "message": "再生成 {{style}} {{noun}} 音声: {{name}}"
+    "message": "{{style}}{{noun}}の音声を再生成：{{name}}"
   },
   "overview_latest_actions_retry": {
     "message": "再試行"
@@ -855,28 +855,28 @@
     "message": "今すぐテスト"
   },
   "overview_latest_announcements_blockingFailure": {
-    "message": "{{name}} 失敗. 実行を確認 {{runId}}."
+    "message": "{{name}}に失敗しました。実行{{runId}}を確認してください。"
   },
   "overview_latest_announcements_delivered": {
-    "message": "{{name}}: 配信済み."
+    "message": "{{name}}：配信済み。"
   },
   "overview_latest_announcements_nextRunUpdated": {
-    "message": "{{name}}: 次回実行."
+    "message": "{{name}}：次回実行を更新しました。"
   },
   "overview_latest_announcements_partialAudioFailure": {
-    "message": "{{name}}: ショーノート 準備完了, 音声 失敗."
+    "message": "{{name}}：ショーノートは準備完了、音声の生成に失敗しました。"
   },
   "overview_latest_announcements_readyText": {
-    "message": "{{name}}: レポート 準備完了."
+    "message": "{{name}}：レポートの準備ができました。"
   },
   "overview_latest_announcements_readyWithAudio": {
-    "message": "{{name}}: 準備完了. 音声 / ショーノート."
+    "message": "{{name}}：音声とショーノートの準備ができました。"
   },
   "overview_latest_announcements_stageProgress": {
-    "message": "{{name}}: {{stage}} {{status}}."
+    "message": "{{name}}：{{stage}}は{{status}}です。"
   },
   "overview_latest_announcements_testQueued": {
-    "message": "今すぐテスト: キュー済み."
+    "message": "テストをキューに追加しました。"
   },
   "overview_latest_retryError": {
     "message": "再試行 失敗. 実行を確認."
@@ -930,10 +930,10 @@
     "message": "保存済み レポート"
   },
   "overview_latest_stages_composeScript": {
-    "message": "音声 レポート"
+    "message": "音声台本"
   },
   "overview_latest_stages_persistScript": {
-    "message": "保存済み 音声 レポート"
+    "message": "保存済みの音声台本"
   },
   "overview_latest_stages_generateAudio": {
     "message": "音声"
@@ -1002,34 +1002,34 @@
     "message": "確認 {{adapter}} 配信"
   },
   "overview_latest_playback_accessError": {
-    "message": "音声: アクセスに失敗しました. サインインとサーバー接続を確認してください。"
+    "message": "音声へのアクセスに失敗しました。サインインとサーバー接続を確認してください。"
   },
   "overview_latest_playback_missing": {
-    "message": "音声 は利用できなくなりました."
+    "message": "音声は利用できなくなりました。"
   },
   "overview_latest_actions_downloadAudio": {
-    "message": "ダウンロード 音声"
+    "message": "音声をダウンロード"
   },
   "overview_latest_actions_downloadAudioAria": {
-    "message": "ダウンロード 音声: {{name}}"
+    "message": "音声をダウンロード：{{name}}"
   },
   "overview_latest_actions_retryExactAria": {
     "message": "再試行 {{stage}}: {{name}}"
   },
   "overview_latest_actions_reviewScript": {
-    "message": "確認 音声 レポート"
+    "message": "音声台本を確認"
   },
   "overview_latest_actions_reviewScriptAria": {
-    "message": "確認 音声 レポート: {{name}}"
+    "message": "音声台本を確認：{{name}}"
   },
   "overview_latest_scriptAccessError": {
-    "message": "音声 レポート: アクセスに失敗しました. サインインとサーバー接続を確認してください。"
+    "message": "音声台本へのアクセスに失敗しました。サインインとサーバー接続を確認してください。"
   },
   "overview_latest_scriptLoading": {
-    "message": "読み込み中 音声 レポート"
+    "message": "音声台本を読み込み中"
   },
   "overview_latest_scriptMissing": {
-    "message": "音声 レポート は利用できなくなりました."
+    "message": "音声台本は利用できなくなりました。"
   },
   "overview_latest_recovery_renderText": {
     "message": "生成中 レポート"
@@ -1038,19 +1038,19 @@
     "message": "保存中 レポート"
   },
   "overview_latest_recovery_composeScript": {
-    "message": "作成中 音声 レポート"
+    "message": "音声台本を作成中"
   },
   "overview_latest_recovery_persistScript": {
-    "message": "保存中 音声 レポート"
+    "message": "音声台本を保存中"
   },
   "overview_latest_recovery_generateAudio": {
-    "message": "生成中 音声"
+    "message": "音声を生成中"
   },
   "overview_latest_recovery_persistAudio": {
-    "message": "保存中 音声"
+    "message": "音声を保存中"
   },
   "outputs_artifactMissing": {
-    "message": "は利用できなくなりました."
+    "message": "このアーティファクトは利用できなくなりました。"
   },
   "outputs_artifactAuthError": {
     "message": "アクセスが拒否されました。サインインを確認してください。"

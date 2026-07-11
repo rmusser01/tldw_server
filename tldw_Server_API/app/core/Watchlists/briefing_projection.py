@@ -272,15 +272,14 @@ def _output(collections_db: Any, occurrence: Any) -> tuple[dict[str, Any] | None
 def _with_audio(
     stages: dict[str, dict[str, Any]],
     audio: Mapping[str, Any] | None,
-    artifact_status: str,
-) -> tuple[dict[str, dict[str, Any]], str]:
+) -> dict[str, dict[str, Any]]:
     if audio is None:
-        return stages, artifact_status
+        return stages
     status = str(audio.get("status") or "unknown").lower()
     if status == "completed" and audio.get("final_artifact"):
         for name in _AUDIO_STAGES:
             stages[name] = {**stages.get(name, {}), "status": "ready", "code": None, "retryable": False}
-        return stages, artifact_status
+        return stages
     if status in {"failed", "dead"}:
         failed_candidates = _AUDIO_STAGES
         if audio.get("script_artifact"):
@@ -302,14 +301,14 @@ def _with_audio(
                     "retryable": True,
                 }
                 break
-        return stages, "failed"
+        return stages
     if status in {"cancelled", "canceled"}:
         for name in _AUDIO_STAGES:
             existing = stages.get(name, {})
             if existing.get("status") not in {"ready", "skipped"}:
                 stages[name] = {**existing, "status": "cancelled", "retryable": True}
-        return stages, "cancelled"
-    return stages, artifact_status
+        return stages
+    return stages
 
 
 def _aggregate_artifact_status(
@@ -340,7 +339,7 @@ def build_briefing_projection(
     """Combine authoritative occurrence state with current output/audio projections."""
     contract = _json_object(occurrence.contract_json)
     stages, raw_stages = _stages(occurrence)
-    stages, _artifact_status = _with_audio(stages, audio, str(occurrence.artifact_status))
+    stages = _with_audio(stages, audio)
     output, output_error = _output(collections_db, occurrence)
     if output_error:
         failed_stage = {
@@ -355,8 +354,11 @@ def build_briefing_projection(
         audio_enabled=bool(contract.get("audio", {}).get("enabled")),
     )
     select = raw_stages.get("select") if isinstance(raw_stages.get("select"), Mapping) else {}
+    raw_candidate_count = select.get("candidate_count")
     candidate_count = int(
-        select.get("candidate_count") or int(occurrence.selected_count or 0) + int(occurrence.omitted_count or 0)
+        raw_candidate_count
+        if raw_candidate_count is not None
+        else int(occurrence.selected_count or 0) + int(occurrence.omitted_count or 0)
     )
     delivery_stages = [stage for name, stage in stages.items() if name.startswith("deliver:")]
     delivery_status = str(occurrence.delivery_status)

@@ -506,7 +506,7 @@
         "error": "Failed to generate preview."
       },
       "delivery": {
-        "help": "Reports is always included. External delivery waits until selected artifacts are ready.",
+        "help": "The Reports destination is always included. External delivery waits until selected artifacts are ready.",
         "reports": "Reports",
         "required": "Required storage",
         "alwaysOn": "Always on"

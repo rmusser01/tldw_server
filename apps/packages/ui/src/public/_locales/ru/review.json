@@ -1332,6 +1332,6 @@
     "message": "Bulleted Notes"
   },
   "mediaPage_analysisProviderRequired": {
-    "message": "Choose an analysis provider, then retry analysis."
+    "message": "Выберите поставщика анализа, затем повторите анализ."
   }
 }

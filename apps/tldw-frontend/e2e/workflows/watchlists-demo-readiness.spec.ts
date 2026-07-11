@@ -491,15 +491,6 @@ const setupWatchlistsReadinessRoutes = async (
       return
     }
 
-    if (method === "POST" && runBriefingMatch) {
-      const payload = request.postDataJSON() as Record<string, unknown>
-      state.briefingRetries.push(payload)
-      state.briefingByRun = readyBriefingProjection()
-      state.latestBriefing = state.briefingByRun
-      await jsonResponse(route, state.briefingByRun)
-      return
-    }
-
     const runBriefingRetryMatch = pathname.match(/^\/api\/v1\/watchlists\/runs\/(\d+)\/briefing\/retry$/)
     if (method === "POST" && runBriefingRetryMatch) {
       const payload = request.postDataJSON() as Record<string, unknown>

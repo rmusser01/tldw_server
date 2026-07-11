@@ -484,7 +484,7 @@
     "openInNewTabAria": "새 탭에서 열기: {{title}}",
     "chatAboutAria": "이 항목에 대해 채팅: {{title}}",
     "downloadAria": "다운로드: {{title}}",
-    "artifactMissing": "은(는) 더 이상 사용할 수 없습니다.",
+    "artifactMissing": "이 아티팩트는 더 이상 사용할 수 없습니다.",
     "artifactAuthError": "접근이 거부되었습니다. 로그인을 확인하세요.",
     "artifactAccessError": "접근 실패. 로그인과 서버 연결을 확인하세요."
   }

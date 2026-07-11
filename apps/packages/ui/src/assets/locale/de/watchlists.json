@@ -333,11 +333,11 @@
     },
     "latest": {
       "heading": {
-        "briefing": "Neueste Übersicht",
+        "briefing": "Neuestes Briefing",
         "episode": "Neueste Episode"
       },
       "empty": {
-        "scheduled": "Übersicht: {{date}}.",
+        "scheduled": "Ihr erstes Briefing ist für {{date}} geplant.",
         "manual": "Nicht gestartet. Jetzt testen."
       },
       "generatedAt": "Erstellt {{date}}",
@@ -353,7 +353,7 @@
       "noUpdates": "Es wurden keine passenden Aktualisierungen gefunden. Ein Status-{{noun}} wurde gespeichert.",
       "nextRun": "Nächster Lauf: {{date}}",
       "nextRunRelative": "Nächster Lauf: {{relative}}",
-      "counts": "Übersicht: Enthalten, Ungelesen, Neu",
+      "counts": "Briefing: Enthalten, Ungelesen, Neu",
       "count": {
         "included": "Enthalten {{count}}",
         "unread": "Ungelesen {{count}}",
@@ -403,7 +403,7 @@
         "missing": "Audio ist nicht mehr verfügbar."
       },
       "actions": {
-        "label": "Neueste Übersicht",
+        "label": "Neuestes Briefing",
         "openReport": "Öffnen {{report}}",
         "openReportAria": "Öffnen {{report}}: {{name}}",
         "regenerateAudio": "Neu erzeugen Audio",

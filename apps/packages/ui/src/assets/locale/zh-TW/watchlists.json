@@ -3,9 +3,9 @@
     "source": { "toggleActive": "切換啟用狀態：{{name}}", "checkNow": "立即檢查：{{name}}", "openWebsite": "開啟來源網站：{{name}}", "openHealth": "開啟來源狀態：{{name}}", "edit": "編輯來源：{{name}}", "delete": "刪除來源：{{name}}" },
     "item": { "open": "開啟更新：{{title}}", "select": "選取更新：{{title}}", "description": "{{state}}。來源：{{source}}。" },
     "output": { "openNewTab": "在新分頁中開啟 {{title}}", "chat": "討論 {{title}}", "download": "下載 {{title}}", "close": "關閉預覽：{{title}}" },
-    "health": { "show": "顯示監看清單狀態詳情", "hide": "隱藏監看清單狀態詳情", "refresh": "重新整理監看清單狀態", "settings": "開啟監看清單設定" },
+    "health": { "show": "顯示監視清單狀態詳情", "hide": "隱藏監視清單狀態詳情", "refresh": "重新整理監視清單狀態", "settings": "開啟監視清單設定" },
     "delivery": { "email": "啟用後，將每份報告傳送給已設定的收件者。", "chatbook": "啟用後，將每份報告發佈到 Chatbook。" },
-    "help": { "open": "開啟監看清單說明", "title": "監看清單說明" }
+    "help": { "open": "開啟監視清單說明", "title": "監視清單說明" }
   },
   "items": {
     "queuedForBriefing": "已加入簡報佇列",
@@ -333,27 +333,27 @@
     },
     "latest": {
       "heading": {
-        "briefing": "最新 簡報",
-        "episode": "最新 節目"
+        "briefing": "最新簡報",
+        "episode": "最新節目"
       },
       "empty": {
-        "scheduled": "簡報: {{date}}.",
-        "manual": "未開始. 立即測試."
+        "scheduled": "首份簡報預定於{{date}}產生。",
+        "manual": "尚未開始。立即測試。"
       },
       "generatedAt": "產生於 {{date}}",
       "untitled": "簡報 {{runId}}",
-      "artifacts": "報告 / 音訊",
+      "artifacts": "報告／音訊",
       "audio": "音訊",
-      "audioFailed": "音訊 失敗",
+      "audioFailed": "音訊產生失敗",
       "ready": "就緒",
       "saved": "已儲存",
       "waiting": "等待中",
-      "script": "音訊 報告",
-      "stageWithStatus": "{{stage}}: {{status}}",
+      "script": "音訊腳本",
+      "stageWithStatus": "{{stage}}：{{status}}",
       "noUpdates": "找不到符合條件的更新。已儲存狀態{{noun}}。",
-      "nextRun": "下次執行: {{date}}",
-      "nextRunRelative": "下次執行: {{relative}}",
-      "counts": "簡報: 已包含, 未讀, 新增",
+      "nextRun": "下次執行：{{date}}",
+      "nextRunRelative": "下次執行：{{relative}}",
+      "counts": "簡報：已包含、未讀、新增",
       "count": {
         "included": "已包含 {{count}}",
         "unread": "未讀 {{count}}",
@@ -395,7 +395,7 @@
         "resumeAria": "繼續播放 {{name}}",
         "seekAria": "音訊: {{name}}",
         "loading": "正在載入音訊",
-        "error": "音訊 失敗. 開啟 報告 / 重新產生 音訊.",
+        "error": "音訊產生失敗。請開啟報告或重新產生音訊。",
         "play": "播放",
         "pause": "暫停",
         "resume": "繼續",
@@ -403,11 +403,11 @@
         "missing": "音訊 已無法使用."
       },
       "actions": {
-        "label": "最新 簡報",
+        "label": "最新簡報",
         "openReport": "開啟 {{report}}",
-        "openReportAria": "開啟 {{report}}: {{name}}",
-        "regenerateAudio": "重新產生 音訊",
-        "regenerateAudioAria": "重新產生 {{style}} {{noun}} 音訊: {{name}}",
+        "openReportAria": "開啟{{report}}：{{name}}",
+        "regenerateAudio": "重新產生音訊",
+        "regenerateAudioAria": "重新產生{{style}}{{noun}}音訊：{{name}}",
         "retry": "重試",
         "retrySaveAria": "重試 已儲存 報告: {{name}}",
         "retryTextAria": "重試 報告: {{name}}",
@@ -416,21 +416,21 @@
         "inspectAria": "檢查執行 {{runId}}: {{name}}",
         "viewReports": "查看所有報告",
         "testNow": "立即測試",
-        "downloadAudio": "下載 音訊",
-        "downloadAudioAria": "下載 音訊: {{name}}",
+        "downloadAudio": "下載音訊",
+        "downloadAudioAria": "下載音訊：{{name}}",
         "retryExactAria": "重試 {{stage}}: {{name}}",
-        "reviewScript": "檢查 音訊 報告",
-        "reviewScriptAria": "檢查 音訊 報告: {{name}}"
+        "reviewScript": "檢查音訊腳本",
+        "reviewScriptAria": "檢查音訊腳本：{{name}}"
       },
       "announcements": {
-        "blockingFailure": "{{name}} 失敗. 檢查執行 {{runId}}.",
-        "delivered": "{{name}}: 已送達.",
-        "nextRunUpdated": "{{name}}: 下次執行.",
-        "partialAudioFailure": "{{name}}: 節目說明 就緒, 音訊 失敗.",
-        "readyText": "{{name}}: 報告 就緒.",
-        "readyWithAudio": "{{name}}: 就緒. 音訊 / 節目說明.",
-        "stageProgress": "{{name}}: {{stage}} {{status}}.",
-        "testQueued": "立即測試: 已排入佇列."
+        "blockingFailure": "{{name}}失敗。請檢查執行{{runId}}。",
+        "delivered": "{{name}}：已送達。",
+        "nextRunUpdated": "{{name}}：已更新下次執行時間。",
+        "partialAudioFailure": "{{name}}：節目說明已就緒，音訊產生失敗。",
+        "readyText": "{{name}}：報告已就緒。",
+        "readyWithAudio": "{{name}}：音訊與節目說明已就緒。",
+        "stageProgress": "{{name}}：{{stage}}{{status}}。",
+        "testQueued": "測試已排入佇列。"
       },
       "retryError": "重試 失敗. 檢查執行.",
       "regenerateError": "重新產生 音訊: 失敗.",
@@ -456,8 +456,8 @@
       "stages": {
         "renderText": "報告",
         "persistText": "已儲存 報告",
-        "composeScript": "音訊 報告",
-        "persistScript": "已儲存 音訊 報告",
+        "composeScript": "音訊腳本",
+        "persistScript": "已儲存音訊腳本",
         "generateAudio": "音訊",
         "persistAudio": "已儲存 音訊"
       },
@@ -468,13 +468,13 @@
         "showNotes": "節目說明"
       },
       "scriptAccessError": "音訊 報告: 存取失敗. 請檢查登入狀態與伺服器連線。",
-      "scriptLoading": "正在載入 音訊 報告",
+      "scriptLoading": "正在載入音訊腳本",
       "scriptMissing": "音訊 報告 已無法使用.",
       "recovery": {
         "renderText": "正在產生 報告",
         "persistText": "正在儲存 報告",
-        "composeScript": "正在編寫 音訊 報告",
-        "persistScript": "正在儲存 音訊 報告",
+        "composeScript": "正在編寫音訊腳本",
+        "persistScript": "正在儲存音訊腳本",
         "generateAudio": "正在產生 音訊",
         "persistAudio": "正在儲存 音訊"
       }

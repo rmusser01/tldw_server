@@ -145,6 +145,7 @@ class FakeWatchlistsDB:
         self.items = items
         self.occurrence: SimpleNamespace | None = None
         self.list_calls: list[dict[str, Any]] = []
+        self.batch_item_calls: list[list[int]] = []
         self.stage_snapshots: list[dict[str, Any]] = []
 
     def create_or_get_briefing_occurrence(
@@ -207,6 +208,11 @@ class FakeWatchlistsDB:
 
     def get_item(self, item_id: int) -> Any:
         return next(item for item in self.items if int(item.id) == int(item_id))
+
+    def get_items_by_ids(self, item_ids: list[int]) -> list[Any]:
+        self.batch_item_calls.append(list(item_ids))
+        by_id = {int(item.id): item for item in self.items}
+        return [by_id[item_id] for item_id in item_ids if item_id in by_id]
 
 
 class FakeCollectionsDB:
@@ -1228,6 +1234,7 @@ async def test_render_retry_reuses_durable_selection_order(
     )
 
     assert rendered_ids == [[1, 2], [1, 2]]
+    assert watchlists_db.batch_item_calls == [[1, 2]]
     assert retried.stages["select"]["selected_item_ids"] == [1, 2]
     assert any(snapshot["persist_text"]["status"] == "running" for snapshot in watchlists_db.stage_snapshots)
 

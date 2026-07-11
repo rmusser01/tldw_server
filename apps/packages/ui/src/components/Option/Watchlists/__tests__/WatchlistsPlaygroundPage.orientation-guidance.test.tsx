@@ -4,6 +4,7 @@ import React from "react"
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { getTutorialById } from "@/tutorials/registry"
 import { WatchlistsPlaygroundPage } from "../WatchlistsPlaygroundPage"
 
 const mocks = vi.hoisted(() => {
@@ -294,6 +295,15 @@ describe("WatchlistsPlaygroundPage orientation guidance", () => {
     localStorage.removeItem("watchlists:ia-experiment:v1")
     localStorage.removeItem("watchlists:secondary-expanded:v1")
     localStorage.removeItem("watchlists:teach-points:v1")
+  })
+
+  it("renders every Watchlists tutorial target on the default route", async () => {
+    renderPage()
+    await screen.findByTestId("watchlists-outcome-first-region")
+
+    for (const step of getTutorialById("watchlists-basics")?.steps ?? []) {
+      expect(document.querySelector(step.target), step.target).not.toBeNull()
+    }
   })
 
   it("closes Help before navigating from orientation guidance and restores trigger focus", async () => {

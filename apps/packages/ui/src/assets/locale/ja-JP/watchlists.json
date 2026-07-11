@@ -333,29 +333,29 @@
     },
     "latest": {
       "heading": {
-        "briefing": "最新 ブリーフィング",
-        "episode": "最新 エピソード"
+        "briefing": "最新ブリーフィング",
+        "episode": "最新エピソード"
       },
       "empty": {
-        "scheduled": "ブリーフィング: {{date}}.",
-        "manual": "未開始. 今すぐテスト."
+        "scheduled": "最初のブリーフィングは{{date}}に予定されています。",
+        "manual": "まだ開始されていません。今すぐテストできます。"
       },
       "generatedAt": "生成日時 {{date}}",
       "untitled": "ブリーフィング {{runId}}",
-      "artifacts": "レポート / 音声",
+      "artifacts": "レポート／音声",
       "audio": "音声",
-      "audioFailed": "音声 失敗",
+      "audioFailed": "音声の生成に失敗",
       "ready": "準備完了",
       "saved": "保存済み",
       "waiting": "待機中",
-      "script": "音声 レポート",
-      "stageWithStatus": "{{stage}}: {{status}}",
+      "script": "音声台本",
+      "stageWithStatus": "{{stage}}：{{status}}",
       "noUpdates": "条件に一致する更新はありませんでした。ステータス用の{{noun}}を保存しました。",
-      "nextRun": "次回実行: {{date}}",
-      "nextRunRelative": "次回実行: {{relative}}",
-      "counts": "ブリーフィング: 含む, 未読, 新着",
+      "nextRun": "次回実行：{{date}}",
+      "nextRunRelative": "次回実行：{{relative}}",
+      "counts": "ブリーフィング：収録、未読、新着",
       "count": {
-        "included": "含む {{count}}",
+        "included": "収録 {{count}}件",
         "unread": "未読 {{count}}",
         "new": "新着 {{count}}"
       },
@@ -395,19 +395,19 @@
         "resumeAria": "{{name}}を再開",
         "seekAria": "音声: {{name}}",
         "loading": "音声を読み込み中",
-        "error": "音声 失敗. 開く レポート / 再生成 音声.",
+        "error": "音声の生成に失敗しました。レポートを開くか、音声を再生成してください。",
         "play": "再生",
         "pause": "一時停止",
         "resume": "再開",
-        "accessError": "音声: アクセスに失敗しました. サインインとサーバー接続を確認してください。",
-        "missing": "音声 は利用できなくなりました."
+        "accessError": "音声へのアクセスに失敗しました。サインインとサーバー接続を確認してください。",
+        "missing": "音声は利用できなくなりました。"
       },
       "actions": {
-        "label": "最新 ブリーフィング",
-        "openReport": "開く {{report}}",
-        "openReportAria": "開く {{report}}: {{name}}",
-        "regenerateAudio": "再生成 音声",
-        "regenerateAudioAria": "再生成 {{style}} {{noun}} 音声: {{name}}",
+        "label": "最新ブリーフィング",
+        "openReport": "{{report}}を開く",
+        "openReportAria": "{{report}}を開く：{{name}}",
+        "regenerateAudio": "音声を再生成",
+        "regenerateAudioAria": "{{style}}{{noun}}の音声を再生成：{{name}}",
         "retry": "再試行",
         "retrySaveAria": "再試行 保存済み レポート: {{name}}",
         "retryTextAria": "再試行 レポート: {{name}}",
@@ -416,21 +416,21 @@
         "inspectAria": "実行を確認 {{runId}}: {{name}}",
         "viewReports": "すべてのレポートを表示",
         "testNow": "今すぐテスト",
-        "downloadAudio": "ダウンロード 音声",
-        "downloadAudioAria": "ダウンロード 音声: {{name}}",
+        "downloadAudio": "音声をダウンロード",
+        "downloadAudioAria": "音声をダウンロード：{{name}}",
         "retryExactAria": "再試行 {{stage}}: {{name}}",
-        "reviewScript": "確認 音声 レポート",
-        "reviewScriptAria": "確認 音声 レポート: {{name}}"
+        "reviewScript": "音声台本を確認",
+        "reviewScriptAria": "音声台本を確認：{{name}}"
       },
       "announcements": {
-        "blockingFailure": "{{name}} 失敗. 実行を確認 {{runId}}.",
-        "delivered": "{{name}}: 配信済み.",
-        "nextRunUpdated": "{{name}}: 次回実行.",
-        "partialAudioFailure": "{{name}}: ショーノート 準備完了, 音声 失敗.",
-        "readyText": "{{name}}: レポート 準備完了.",
-        "readyWithAudio": "{{name}}: 準備完了. 音声 / ショーノート.",
-        "stageProgress": "{{name}}: {{stage}} {{status}}.",
-        "testQueued": "今すぐテスト: キュー済み."
+        "blockingFailure": "{{name}}に失敗しました。実行{{runId}}を確認してください。",
+        "delivered": "{{name}}：配信済み。",
+        "nextRunUpdated": "{{name}}：次回実行を更新しました。",
+        "partialAudioFailure": "{{name}}：ショーノートは準備完了、音声の生成に失敗しました。",
+        "readyText": "{{name}}：レポートの準備ができました。",
+        "readyWithAudio": "{{name}}：音声とショーノートの準備ができました。",
+        "stageProgress": "{{name}}：{{stage}}は{{status}}です。",
+        "testQueued": "テストをキューに追加しました。"
       },
       "retryError": "再試行 失敗. 実行を確認.",
       "regenerateError": "再生成 音声: 失敗.",
@@ -456,8 +456,8 @@
       "stages": {
         "renderText": "レポート",
         "persistText": "保存済み レポート",
-        "composeScript": "音声 レポート",
-        "persistScript": "保存済み 音声 レポート",
+        "composeScript": "音声台本",
+        "persistScript": "保存済みの音声台本",
         "generateAudio": "音声",
         "persistAudio": "保存済み 音声"
       },
@@ -467,16 +467,16 @@
         "report": "レポート",
         "showNotes": "ショーノート"
       },
-      "scriptAccessError": "音声 レポート: アクセスに失敗しました. サインインとサーバー接続を確認してください。",
-      "scriptLoading": "読み込み中 音声 レポート",
-      "scriptMissing": "音声 レポート は利用できなくなりました.",
+      "scriptAccessError": "音声台本へのアクセスに失敗しました。サインインとサーバー接続を確認してください。",
+      "scriptLoading": "音声台本を読み込み中",
+      "scriptMissing": "音声台本は利用できなくなりました。",
       "recovery": {
         "renderText": "生成中 レポート",
         "persistText": "保存中 レポート",
-        "composeScript": "作成中 音声 レポート",
-        "persistScript": "保存中 音声 レポート",
-        "generateAudio": "生成中 音声",
-        "persistAudio": "保存中 音声"
+        "composeScript": "音声台本を作成中",
+        "persistScript": "音声台本を保存中",
+        "generateAudio": "音声を生成中",
+        "persistAudio": "音声を保存中"
       }
     }
   },
@@ -484,7 +484,7 @@
     "openInNewTabAria": "新しいタブで開く: {{title}}",
     "chatAboutAria": "これについてチャット: {{title}}",
     "downloadAria": "ダウンロード: {{title}}",
-    "artifactMissing": "は利用できなくなりました.",
+    "artifactMissing": "このアーティファクトは利用できなくなりました。",
     "artifactAuthError": "アクセスが拒否されました。サインインを確認してください。",
     "artifactAccessError": "アクセスに失敗しました. サインインとサーバー接続を確認してください。"
   }

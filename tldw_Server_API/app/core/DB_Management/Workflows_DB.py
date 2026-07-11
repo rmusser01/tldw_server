@@ -2156,8 +2156,14 @@ class WorkflowsDatabase:
             with self.backend.transaction() as conn:  # type: ignore[union-attr]
                 self._execute_backend(query, params, connection=conn)
         else:
-            self._conn.execute(query, params)
-            self._conn.commit()
+            try:
+                self._conn.execute(query, params)
+                self._conn.commit()
+            except sqlite3.OperationalError as exc:
+                if "locked" not in str(exc).lower():
+                    raise
+                self._sqlite_retry_execute(query, params)
+                self._sqlite_retry_commit()
 
     # ---------- Run control ----------
     def set_cancel_requested(self, run_id: str, cancel: bool = True) -> None:

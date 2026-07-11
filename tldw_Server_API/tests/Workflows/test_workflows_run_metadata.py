@@ -4,7 +4,7 @@ import json
 import sqlite3
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -136,6 +136,23 @@ def test_sqlite_metadata_migration_reraises_non_duplicate_errors():
     with pytest.raises(sqlite3.OperationalError, match="disk I/O error"):
         db._sqlite_migrate_to_v9()
     assert connection.rollback_called is True
+
+
+def test_update_run_metadata_retries_locked_sqlite_write() -> None:
+    db = WorkflowsDatabase.__new__(WorkflowsDatabase)
+    db.get_run = MagicMock(
+        return_value=SimpleNamespace(definition_snapshot_json='{"name":"audio_briefing"}')
+    )
+    db._using_backend = MagicMock(return_value=False)
+    db._conn = MagicMock()
+    db._conn.execute.side_effect = sqlite3.OperationalError("database is locked")
+    db._sqlite_retry_execute = MagicMock()
+    db._sqlite_retry_commit = MagicMock()
+
+    db.update_run_metadata("wf_audio_locked", {"audio_request_id": "wla_locked"})
+
+    db._sqlite_retry_execute.assert_called_once()
+    db._sqlite_retry_commit.assert_called_once_with()
 
 
 @pytest.mark.asyncio

@@ -157,7 +157,7 @@ Implementation notes:
 - `conflict_resolution` (form field): `skip` (default) or `rename` for current import flows
 - `prefix_imported` (form field): boolean, default `false`
 - `content_selections` (form field): optional JSON object encoded as a string; unsupported content types are rejected
-- `import_media` and `import_embeddings` (form fields): must remain `false` in v1; true values are rejected
+- `import_media` and `import_embeddings` (form fields): optional. For `source_format=chatbook`, omit them to restore media data and embeddings present in the archive. For OpenWebUI imports, omit them or keep them false; true values are rejected because OpenWebUI attachment copying uses the hydration endpoints instead.
 
 Supported multipart fields:
 ```json

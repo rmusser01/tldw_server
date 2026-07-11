@@ -337,7 +337,7 @@
         "episode": "Seneste episode"
       },
       "empty": {
-        "scheduled": "briefing: {{date}}.",
+        "scheduled": "Din første briefing er planlagt til {{date}}.",
         "manual": "Ikke startet. Test nu."
       },
       "generatedAt": "Genereret {{date}}",

@@ -1730,10 +1730,12 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
       key: "sources",
       label: (
         <Tooltip title={t("watchlists:tabs.sourcesTooltip", "RSS feeds, websites, or forums you want to monitor")}>
-          <span className="flex items-center gap-2">
-            <Rss className="h-4 w-4" />
-            {t("watchlists:tabs.sources", "Feeds")}
-            {tabAttentionBadge(overviewBadges.sources)}
+          <span className="flex items-center gap-2" data-tour="watchlists-create-monitors">
+            <span className="flex items-center gap-2" data-tour="watchlists-add-feeds">
+              <Rss className="h-4 w-4" />
+              {t("watchlists:tabs.sources", "Feeds")}
+              {tabAttentionBadge(overviewBadges.sources)}
+            </span>
           </span>
         </Tooltip>
       ),
@@ -1767,7 +1769,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
       key: "items",
       label: (
         <Tooltip title={t("watchlists:tabs.itemsTooltip", "Updates collected from your sources")}>
-          <span className="flex items-center gap-2">
+          <span className="flex items-center gap-2" data-tour="watchlists-review-updates">
             <Newspaper className="h-4 w-4" />
             {t("watchlists:tabs.items", "Updates")}
           </span>

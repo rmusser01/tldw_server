@@ -729,7 +729,7 @@
     "message": "أحدث حلقة"
   },
   "overview_latest_empty_scheduled": {
-    "message": "موجز: {{date}}."
+    "message": "سيتم إنشاء أول موجز لك في {{date}}."
   },
   "overview_latest_empty_manual": {
     "message": "لم يبدأ. اختبار الآن."

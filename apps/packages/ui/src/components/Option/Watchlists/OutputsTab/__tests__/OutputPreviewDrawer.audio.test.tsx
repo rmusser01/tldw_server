@@ -291,6 +291,38 @@ describe("OutputPreviewDrawer audio support", () => {
     expect(screen.getByRole("button", { name: "Download Final mix" })).toBeEnabled()
   })
 
+  it("adds an extension when a sub-artifact download has no display filename", async () => {
+    let downloadedName = ""
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function () {
+      downloadedName = this.download
+    })
+    serviceMocks.getWatchlistRunAudio.mockResolvedValue({
+      run_id: 9,
+      status: "completed",
+      final_artifact: {
+        title: "Final mix",
+        download_url: "/api/v1/workflows/artifacts/art_final/download"
+      }
+    })
+
+    render(
+      <OutputPreviewDrawer
+        open
+        onClose={vi.fn()}
+        output={buildOutput({
+          metadata: {
+            audio_briefing_requested: true,
+            audio_briefing_status: "pending",
+            audio_briefing_task_id: "task_audio_pending"
+          }
+        })}
+      />
+    )
+
+    fireEvent.click(await screen.findByRole("button", { name: "Download Final mix" }))
+    await waitFor(() => expect(downloadedName).toBe("Final mix.mp3"))
+  })
+
   it("aborts a protected audio fetch when the selected output changes", async () => {
     let resolveFirst!: (blob: Blob) => void
     artifactMocks.fetchBlob

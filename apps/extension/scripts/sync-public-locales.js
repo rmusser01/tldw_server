@@ -50,85 +50,103 @@ function toChromeMessageKey(key) {
 
 // Flatten nested assets locales into Chrome i18n keys: section.subkey -> section_subkey.
 // Only string-ish leaves are written as { message: string } entries.
-function flatten(obj, prefix = '', out = {}, invalid = []) {
+function flatten(obj, prefix = '', out = {}, invalid = [], origins = {}, sourcePath = '') {
   if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
     for (const [key, value] of Object.entries(obj)) {
       const segment = toChromeMessageKey(key);
       const next = prefix ? `${prefix}_${segment}` : segment;
-      flatten(value, next, out, invalid);
+      const nextSourcePath = sourcePath ? `${sourcePath}.${key}` : key;
+      flatten(value, next, out, invalid, origins, nextSourcePath);
     }
   } else {
     const normalized = normalizeMessage(obj, prefix, invalid);
     if (normalized !== null) {
+      if (
+        Object.prototype.hasOwnProperty.call(out, prefix) &&
+        origins[prefix] !== sourcePath
+      ) {
+        throw new Error(
+          `[sync-public-locales] Key collision: ${origins[prefix]} and ${sourcePath} both map to ${prefix}`
+        );
+      }
+      origins[prefix] = sourcePath;
       out[prefix] = normalized;
     }
   }
   return out;
 }
 
-const locales = fs
-  .readdirSync(publicBase, { withFileTypes: true })
-  .filter((dirent) => dirent.isDirectory())
-  .map((dirent) => dirent.name);
+function syncPublicLocales() {
+  const locales = fs
+    .readdirSync(publicBase, { withFileTypes: true })
+    .filter((dirent) => dirent.isDirectory())
+    .map((dirent) => dirent.name);
 
-for (const locale of locales) {
-  const assetLocale = localeMap[locale] || locale;
-  for (const filename of files) {
-    const assetPath = path.join(assetsBase, assetLocale, filename);
-    if (!fs.existsSync(assetPath)) {
-      continue;
-    }
-    const assets = JSON.parse(fs.readFileSync(assetPath, 'utf8'));
-    const invalidLeaves = [];
-    const flat = flatten(assets, '', {}, invalidLeaves);
-    if (invalidLeaves.length) {
-      console.warn(
-        `[sync-public-locales] Skipped non-string values in ${assetPath}: ${invalidLeaves.join(
-          ', '
-        )}`
-      );
-      process.exitCode = 1;
-    }
-    const output = Object.fromEntries(
-      Object.entries(flat).map(([key, value]) => [key, { message: value }])
-    );
-    const outPath = path.join(publicBase, locale, filename);
-    // NOTE: This rewrites public locale files. Asset-derived keys overwrite existing values.
-    let merged = output;
-    let existingRaw = null;
-    if (fs.existsSync(outPath)) {
-      existingRaw = fs.readFileSync(outPath, 'utf8');
-      const existing = JSON.parse(existingRaw);
-      const publicOnlyKeys = Object.keys(existing).filter((key) => !(key in output) && /^[A-Za-z0-9_]+$/.test(key));
-      const invalidPublicOnlyKeys = Object.keys(existing).filter((key) => !(key in output) && !/^[A-Za-z0-9_]+$/.test(key));
-      if (publicOnlyKeys.length) {
-        console.warn(
-          `[sync-public-locales] Preserving ${publicOnlyKeys.length} public-only keys in ${outPath}.`
-        );
+  for (const locale of locales) {
+    const assetLocale = localeMap[locale] || locale;
+    for (const filename of files) {
+      const assetPath = path.join(assetsBase, assetLocale, filename);
+      if (!fs.existsSync(assetPath)) {
+        continue;
       }
-      if (invalidPublicOnlyKeys.length) {
+      const assets = JSON.parse(fs.readFileSync(assetPath, 'utf8'));
+      const invalidLeaves = [];
+      const flat = flatten(assets, '', {}, invalidLeaves);
+      if (invalidLeaves.length) {
         console.warn(
-          `[sync-public-locales] Dropping ${invalidPublicOnlyKeys.length} invalid Chrome i18n keys in ${outPath}: ${invalidPublicOnlyKeys.join(
+          `[sync-public-locales] Skipped non-string values in ${assetPath}: ${invalidLeaves.join(
             ', '
           )}`
         );
+        process.exitCode = 1;
       }
-      merged = { ...existing, ...output };
-      for (const key of invalidPublicOnlyKeys) {
-        delete merged[key];
+      const output = Object.fromEntries(
+        Object.entries(flat).map(([key, value]) => [key, { message: value }])
+      );
+      const outPath = path.join(publicBase, locale, filename);
+      // NOTE: This rewrites public locale files. Asset-derived keys overwrite existing values.
+      let merged = output;
+      let existingRaw = null;
+      if (fs.existsSync(outPath)) {
+        existingRaw = fs.readFileSync(outPath, 'utf8');
+        const existing = JSON.parse(existingRaw);
+        const publicOnlyKeys = Object.keys(existing).filter((key) => !(key in output) && /^[A-Za-z0-9_]+$/.test(key));
+        const invalidPublicOnlyKeys = Object.keys(existing).filter((key) => !(key in output) && !/^[A-Za-z0-9_]+$/.test(key));
+        if (publicOnlyKeys.length) {
+          console.warn(
+            `[sync-public-locales] Preserving ${publicOnlyKeys.length} public-only keys in ${outPath}.`
+          );
+        }
+        if (invalidPublicOnlyKeys.length) {
+          console.warn(
+            `[sync-public-locales] Dropping ${invalidPublicOnlyKeys.length} invalid Chrome i18n keys in ${outPath}: ${invalidPublicOnlyKeys.join(
+              ', '
+            )}`
+          );
+        }
+        merged = { ...existing, ...output };
+        for (const key of invalidPublicOnlyKeys) {
+          delete merged[key];
+        }
       }
+      const nextJson = JSON.stringify(merged, null, 2) + '\n';
+      if (existingRaw !== null && existingRaw === nextJson) {
+        continue;
+      }
+      if (dryRun) {
+        console.log(`[sync-public-locales] DRY RUN: would write ${outPath}`);
+        continue;
+      }
+      if (backup && existingRaw !== null) {
+        fs.writeFileSync(`${outPath}.bak`, existingRaw);
+      }
+      fs.writeFileSync(outPath, nextJson);
     }
-    const nextJson = JSON.stringify(merged, null, 2) + '\n';
-    if (existingRaw !== null && existingRaw === nextJson) {
-      continue;
-    }
-    if (dryRun) {
-      console.log(`[sync-public-locales] DRY RUN: would write ${outPath}`);
-      continue;
-    }
-    if (backup && existingRaw !== null) {
-      fs.writeFileSync(`${outPath}.bak`, existingRaw);
-    }
-    fs.writeFileSync(outPath, nextJson);
   }
 }
+
+if (require.main === module) {
+  syncPublicLocales();
+}
+
+module.exports = { flatten, syncPublicLocales, toChromeMessageKey };

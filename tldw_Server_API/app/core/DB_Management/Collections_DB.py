@@ -947,6 +947,33 @@ class CollectionsDatabase:
         if updated:
             logger.debug("collections backfill: audiobook_projects.project_id updated {} rows", updated)
 
+    def _ensure_output_idempotency_index(self) -> None:
+        """Replace the legacy output idempotency index without coupling both DDL steps."""
+        try:
+            self.backend.execute("DROP INDEX IF EXISTS ux_outputs_user_idempotency", ())
+        except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as exc:
+            if _is_backfill_noop_error(exc):
+                logger.debug("collections backfill: legacy output idempotency index already absent")
+            else:
+                raise
+
+        active_output_predicate = (
+            "idempotency_key IS NOT NULL AND deleted = FALSE"
+            if self.backend.backend_type == BackendType.POSTGRESQL
+            else "idempotency_key IS NOT NULL AND deleted = 0"
+        )
+        try:
+            self.backend.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ux_outputs_user_idempotency_active "
+                f"ON outputs(user_id, idempotency_key) WHERE {active_output_predicate}",
+                (),
+            )
+        except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as exc:
+            if _is_backfill_noop_error(exc):
+                logger.debug("collections backfill: active output idempotency index already exists")
+            else:
+                raise
+
     def ensure_schema(self) -> None:
         """Create tables if they do not already exist."""
         if self.backend.backend_type == BackendType.POSTGRESQL:
@@ -1841,23 +1868,7 @@ class CollectionsDatabase:
                     logger.debug("collections backfill: outputs.idempotency_key already exists or skipped")
                 else:
                     raise
-        try:
-            self.backend.execute("DROP INDEX IF EXISTS ux_outputs_user_idempotency", ())
-            active_output_predicate = (
-                "idempotency_key IS NOT NULL AND deleted = FALSE"
-                if self.backend.backend_type == BackendType.POSTGRESQL
-                else "idempotency_key IS NOT NULL AND deleted = 0"
-            )
-            self.backend.execute(
-                "CREATE UNIQUE INDEX IF NOT EXISTS ux_outputs_user_idempotency_active "
-                f"ON outputs(user_id, idempotency_key) WHERE {active_output_predicate}",
-                (),
-            )
-        except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as exc:
-            if _is_backfill_noop_error(exc):
-                logger.debug("collections backfill: outputs idempotency index already exists or skipped")
-            else:
-                raise
+        self._ensure_output_idempotency_index()
         try:
             self.backend.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_outputs_user_title_format ON outputs(user_id, title, format) WHERE deleted = 0", ())
         except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as exc:

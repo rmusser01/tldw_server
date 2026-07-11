@@ -305,7 +305,7 @@
     "presetCriticalReview": "Критический обзор",
     "presetQAAnalysis": "Анализ вопросов и ответов",
     "presetBulletedNotes": "Bulleted Notes",
-    "analysisProviderRequired": "Choose an analysis provider, then retry analysis."
+    "analysisProviderRequired": "Выберите поставщика анализа, затем повторите анализ."
   },
   "empty": {
     "connectTitle": "Подключитесь, чтобы использовать обзор",

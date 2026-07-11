@@ -195,9 +195,13 @@ describe("OverviewTab canonical setup", () => {
     expect(latestHeading.compareDocumentPosition(screen.getByText("System healthy")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
 
     const setupTrigger = screen.getByRole("button", { name: "Test now" })
+    const sourceFetchesBeforeOpen = mocks.fetchSources.mock.calls.length
     setupTrigger.focus()
     fireEvent.click(setupTrigger)
     expect(await screen.findByRole("dialog", { name: "Set up briefing" })).toBeInTheDocument()
+    await waitFor(() =>
+      expect(mocks.fetchSources).toHaveBeenCalledTimes(sourceFetchesBeforeOpen + 1)
+    )
     expect(pipeline().getByLabelText("Use existing sources")).toBeChecked()
     expect(screen.queryByRole("dialog", { name: "Add initial collection" })).not.toBeInTheDocument()
 

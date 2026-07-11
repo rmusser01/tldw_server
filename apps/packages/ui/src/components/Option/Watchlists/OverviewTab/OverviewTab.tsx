@@ -153,6 +153,7 @@ export const OverviewTab: React.FC = () => {
   const [pipelineInitialDraft, setPipelineInitialDraft] = useState<Partial<PipelineWizardDraft>>()
   const [pipelineSessionKey, setPipelineSessionKey] = useState(0)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const pipelineSourcesLoadingRef = useRef(false)
   const overviewRequestRef = useRef(0)
   const previousBriefingRef = useRef<WatchlistBriefingProjection | null>(null)
   const explicitPoliteAnnouncementRef = useRef(false)
@@ -445,6 +446,8 @@ export const OverviewTab: React.FC = () => {
   }, [setActiveTab])
 
   const loadPipelineSources = useCallback(async () => {
+    if (pipelineSourcesLoadingRef.current) return
+    pipelineSourcesLoadingRef.current = true
     setPipelineSourcesLoading(true)
     try {
       const result = await fetchWatchlistSources({
@@ -464,6 +467,7 @@ export const OverviewTab: React.FC = () => {
         )
       )
     } finally {
+      pipelineSourcesLoadingRef.current = false
       setPipelineSourcesLoading(false)
     }
   }, [selectedWatchlistId, t])
@@ -487,8 +491,7 @@ export const OverviewTab: React.FC = () => {
     setPipelineSessionKey((value) => value + 1)
     setPipelineSetupOpen(true)
     void trackWatchlistsOnboardingTelemetry({ type: "pipeline_setup_opened" })
-    void loadPipelineSources()
-  }, [loadPipelineSources])
+  }, [])
 
   const handleTestLatest = useCallback(async (jobId?: number) => {
     if (!jobId) {

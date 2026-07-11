@@ -288,10 +288,16 @@ async def _load_durable_selection(
     item_ids = select_stage.get("selected_item_ids")
     if not isinstance(item_ids, list):
         raise ValueError("briefing_selection_missing")
-    rows_list: list[Any] = []
-    for item_id in item_ids:
-        rows_list.append(await asyncio.to_thread(watchlists_db.get_item, int(item_id)))
-    rows = tuple(rows_list)
+    normalized_item_ids = [int(item_id) for item_id in item_ids]
+    fetched_rows = await asyncio.to_thread(
+        watchlists_db.get_items_by_ids,
+        normalized_item_ids,
+    )
+    rows_by_id = {int(row.id): row for row in fetched_rows}
+    try:
+        rows = tuple(rows_by_id[item_id] for item_id in normalized_item_ids)
+    except KeyError as exc:
+        raise ValueError("briefing_selection_item_missing") from exc
     selected_count = int(select_stage.get("selected_count", len(rows)) or 0)
     candidate_count = int(select_stage.get("candidate_count", selected_count) or 0)
     omitted_count = int(select_stage.get("omitted_count", max(0, candidate_count - selected_count)) or 0)

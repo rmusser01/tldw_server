@@ -790,7 +790,9 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_note_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_order_by_validation.py
               tldw_Server_API/tests/ChaChaNotesDB/test_persona_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_quiz_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_quizzes_basic.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
@@ -1445,6 +1447,8 @@ jobs:
               tldw_Server_API/tests/Watchlists/test_youtube_*.py
           - name: product-watchlists-pipeline
             paths: >-
+              tldw_Server_API/tests/Watchlists/test_briefing_*.py
+              tldw_Server_API/tests/Watchlists/test_schedule_*.py
               tldw_Server_API/tests/Watchlists/test_watchlists_*.py
           - name: product-workflows-adapters-core
             paths: >-
@@ -2200,7 +2204,9 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_note_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_order_by_validation.py
               tldw_Server_API/tests/ChaChaNotesDB/test_persona_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_quiz_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_quizzes_basic.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
@@ -2855,6 +2861,8 @@ jobs:
               tldw_Server_API/tests/Watchlists/test_youtube_*.py
           - name: product-watchlists-pipeline
             paths: >-
+              tldw_Server_API/tests/Watchlists/test_briefing_*.py
+              tldw_Server_API/tests/Watchlists/test_schedule_*.py
               tldw_Server_API/tests/Watchlists/test_watchlists_*.py
           - name: product-workflows-adapters-core
             paths: >-
@@ -3481,7 +3489,9 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_note_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_order_by_validation.py
               tldw_Server_API/tests/ChaChaNotesDB/test_persona_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_quiz_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_quizzes_basic.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
@@ -4136,6 +4146,8 @@ jobs:
               tldw_Server_API/tests/Watchlists/test_youtube_*.py
           - name: product-watchlists-pipeline
             paths: >-
+              tldw_Server_API/tests/Watchlists/test_briefing_*.py
+              tldw_Server_API/tests/Watchlists/test_schedule_*.py
               tldw_Server_API/tests/Watchlists/test_watchlists_*.py
           - name: product-workflows-adapters-core
             paths: >-
@@ -4686,7 +4698,9 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_note_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_order_by_validation.py
               tldw_Server_API/tests/ChaChaNotesDB/test_persona_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_quiz_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_quizzes_basic.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
@@ -5341,6 +5355,8 @@ jobs:
               tldw_Server_API/tests/Watchlists/test_youtube_*.py
           - name: product-watchlists-pipeline
             paths: >-
+              tldw_Server_API/tests/Watchlists/test_briefing_*.py
+              tldw_Server_API/tests/Watchlists/test_schedule_*.py
               tldw_Server_API/tests/Watchlists/test_watchlists_*.py
           - name: product-workflows-adapters-core
             paths: >-
@@ -5892,7 +5908,9 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_note_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_order_by_validation.py
               tldw_Server_API/tests/ChaChaNotesDB/test_persona_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_quiz_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_quizzes_basic.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
@@ -6547,6 +6565,8 @@ jobs:
               tldw_Server_API/tests/Watchlists/test_youtube_*.py
           - name: product-watchlists-pipeline
             paths: >-
+              tldw_Server_API/tests/Watchlists/test_briefing_*.py
+              tldw_Server_API/tests/Watchlists/test_schedule_*.py
               tldw_Server_API/tests/Watchlists/test_watchlists_*.py
           - name: product-workflows-adapters-core
             paths: >-

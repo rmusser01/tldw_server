@@ -693,7 +693,7 @@
     "message": "تازه‌ترین قسمت"
   },
   "overview_latest_empty_scheduled": {
-    "message": "خلاصه: {{date}}."
+    "message": "اولین خلاصهٔ شما برای {{date}} برنامه‌ریزی شده است."
   },
   "overview_latest_empty_manual": {
     "message": "شروع‌نشده. اکنون آزمایش کن."
