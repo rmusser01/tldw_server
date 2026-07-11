@@ -13,6 +13,7 @@ const ORIGINAL_ENV = {
   TLDW_WEBUI_EXPOSE_RUNTIME_AUTH: process.env.TLDW_WEBUI_EXPOSE_RUNTIME_AUTH,
   NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE: process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE,
   TLDW_INTERNAL_API_ORIGIN: process.env.TLDW_INTERNAL_API_ORIGIN,
+  SINGLE_USER_SESSION_COOKIE_NAME: process.env.SINGLE_USER_SESSION_COOKIE_NAME,
 };
 
 const restoreEnv = () => {
@@ -31,6 +32,7 @@ const configureRuntimeAuth = () => {
   process.env.TLDW_WEBUI_EXPOSE_RUNTIME_AUTH = '1';
   process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = 'quickstart';
   process.env.TLDW_INTERNAL_API_ORIGIN = BACKEND_ORIGIN;
+  delete process.env.SINGLE_USER_SESSION_COOKIE_NAME;
 };
 
 const backendResponse = ({
@@ -129,6 +131,28 @@ describe('WebUI runtime session bootstrap API', () => {
     });
   });
 
+  it('forwards only the configured session cookie and csrf cookie inbound', async () => {
+    process.env.SINGLE_USER_SESSION_COOKIE_NAME = 'custom_session';
+
+    const res = await callRoute({
+      headers: {
+        cookie:
+          'tldw_single_user_session=drop-default; custom_session=keep-custom; csrf_token=keep-csrf; unrelated=drop',
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(mockFetch).toHaveBeenCalledWith(
+      SESSION_ENDPOINT,
+      expect.objectContaining({
+        headers: {
+          Cookie: 'custom_session=keep-custom; csrf_token=keep-csrf',
+          'X-API-KEY': API_KEY,
+        },
+      })
+    );
+  });
+
   it('forwards separate auth and csrf cookies while preserving safe attributes', async () => {
     const cookies = [
       'tldw_single_user_session=opaque; Path=/api; HttpOnly; SameSite=Lax; Max-Age=2592000',
@@ -142,6 +166,22 @@ describe('WebUI runtime session bootstrap API', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.headers['set-cookie']).toEqual([cookies[0], cookies[1], cookies[3]]);
+  });
+
+  it('forwards only the configured session cookie and csrf cookie outbound', async () => {
+    process.env.SINGLE_USER_SESSION_COOKIE_NAME = 'custom_session';
+    const cookies = [
+      'tldw_single_user_session=drop-default; Path=/api; HttpOnly; SameSite=Lax',
+      'custom_session=keep-custom; Path=/api; HttpOnly; SameSite=Lax',
+      'csrf_token=keep-csrf; Path=/; SameSite=Lax',
+      'unrelated=drop; Path=/; HttpOnly',
+    ];
+    mockFetch.mockResolvedValue(backendResponse({ cookies }));
+
+    const res = await callRoute();
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['set-cookie']).toEqual([cookies[1], cookies[2]]);
   });
 
   it('copies only safe response metadata and never returns a secret body', async () => {
@@ -246,6 +286,20 @@ describe('WebUI runtime session bootstrap API', () => {
     expect(JSON.stringify(res.body ?? '')).not.toContain(API_KEY);
   });
 
+  it.each(['invalid name', 'session=value', 'session;name', '/session'])(
+    'fails closed without forwarding the key for invalid cookie name %j',
+    async (cookieName) => {
+      process.env.SINGLE_USER_SESSION_COOKIE_NAME = cookieName;
+
+      const res = await callRoute();
+
+      expect(res.statusCode).toBe(503);
+      expect(res.body).toBeUndefined();
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(JSON.stringify(res.body ?? '')).not.toContain(API_KEY);
+    }
+  );
+
   it.each([
     ['non-loopback host', { headers: { host: 'webui.example.test' } }],
     ['untrusted peer', { remoteAddress: '203.0.113.10' }],
@@ -267,6 +321,13 @@ describe('WebUI runtime session bootstrap API', () => {
     ['path-bearing', 'http://app:8000/backend'],
     ['query-bearing', 'http://app:8000/?target=other'],
     ['fragment-bearing', 'http://app:8000/#backend'],
+    ['empty-query marker', 'http://app:8000?'],
+    ['empty-fragment marker', 'http://app:8000#'],
+    ['dot-segment path', 'http://app:8000/./'],
+    ['collapsed dot-segment path', 'http://app:8000/a/../'],
+    ['noncanonical host case', 'http://APP:8000'],
+    ['default port', 'http://app:80'],
+    ['surrounding whitespace', ' http://app:8000 '],
   ])('fails closed for a %s internal origin', async (_name, origin) => {
     process.env.TLDW_INTERNAL_API_ORIGIN = origin;
 

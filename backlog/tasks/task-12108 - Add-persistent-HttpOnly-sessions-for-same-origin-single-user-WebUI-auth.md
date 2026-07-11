@@ -48,6 +48,10 @@ modified_files:
 - apps/tldw-frontend/__tests__/pages/api/runtime-config.test.ts
 - apps/tldw-frontend/__tests__/pages/api/runtime-session.test.ts
 - apps/tldw-frontend/__tests__/frontend-quickstart-networking.test.ts
+- Dockerfiles/docker-compose.yml
+- Dockerfiles/docker-compose.single-user.yml
+- Dockerfiles/docker-compose.host-storage.yml
+- Dockerfiles/docker-compose.webui.yml
 ---
 
 ## Description

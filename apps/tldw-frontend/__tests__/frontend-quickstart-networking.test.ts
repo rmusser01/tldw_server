@@ -6,22 +6,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 const appDir = path.resolve(__dirname, "..")
 const repoRoot = path.resolve(appDir, "..", "..")
 const nextConfigPath = path.join(appDir, "next.config.mjs")
-const validateNetworkingConfigPath = path.join(
-  appDir,
-  "scripts",
-  "validate-networking-config.mjs"
-)
+const validateNetworkingConfigPath = path.join(appDir, "scripts", "validate-networking-config.mjs")
 const makefilePath = path.join(repoRoot, "Makefile")
-const webuiComposePath = path.join(
-  repoRoot,
-  "Dockerfiles",
-  "docker-compose.webui.yml"
-)
-const singleUserComposePath = path.join(
-  repoRoot,
-  "Dockerfiles",
-  "docker-compose.single-user.yml"
-)
+const webuiComposePath = path.join(repoRoot, "Dockerfiles", "docker-compose.webui.yml")
+const singleUserComposePath = path.join(repoRoot, "Dockerfiles", "docker-compose.single-user.yml")
+const baseComposePath = path.join(repoRoot, "Dockerfiles", "docker-compose.yml")
+const hostStorageComposePath = path.join(repoRoot, "Dockerfiles", "docker-compose.host-storage.yml")
 
 const ORIGINAL_ENV = {
   NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE: process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE,
@@ -33,8 +23,7 @@ const restoreEnv = () => {
   if (ORIGINAL_ENV.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE === undefined) {
     delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
   } else {
-    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE =
-      ORIGINAL_ENV.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = ORIGINAL_ENV.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
   }
 
   if (ORIGINAL_ENV.TLDW_INTERNAL_API_ORIGIN === undefined) {
@@ -58,8 +47,7 @@ const loadNextConfig = async (env: {
   if (env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE === undefined) {
     delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
   } else {
-    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE =
-      env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
   }
 
   if (env.TLDW_INTERNAL_API_ORIGIN === undefined) {
@@ -103,7 +91,7 @@ describe("frontend quickstart networking", () => {
   it("adds a quickstart same-origin proxy rewrite for /api/:path*", async () => {
     const nextConfig = await loadNextConfig({
       NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE: "quickstart",
-      TLDW_INTERNAL_API_ORIGIN: "http://app:8000",
+      TLDW_INTERNAL_API_ORIGIN: "http://app:8000"
     })
 
     expect(nextConfig.rewrites).toEqual(expect.any(Function))
@@ -114,16 +102,16 @@ describe("frontend quickstart networking", () => {
       expect.arrayContaining([
         {
           source: "/api/v1/media",
-          destination: "http://app:8000/api/v1/media/",
+          destination: "http://app:8000/api/v1/media/"
         },
         {
           source: "/api/:path*/",
-          destination: "http://app:8000/api/:path*/",
+          destination: "http://app:8000/api/:path*/"
         },
         {
           source: "/api/:path*",
-          destination: "http://app:8000/api/:path*",
-        },
+          destination: "http://app:8000/api/:path*"
+        }
       ])
     )
   })
@@ -131,7 +119,7 @@ describe("frontend quickstart networking", () => {
   it("preserves API trailing slashes so quickstart rewrites hit backend-canonical routes", async () => {
     const nextConfig = await loadNextConfig({
       NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE: "quickstart",
-      TLDW_INTERNAL_API_ORIGIN: "http://app:8000",
+      TLDW_INTERNAL_API_ORIGIN: "http://app:8000"
     })
 
     expect(nextConfig.skipTrailingSlashRedirect).toBe(true)
@@ -143,7 +131,7 @@ describe("frontend quickstart networking", () => {
     expect(() =>
       validateNetworkingConfig({
         NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE: "quickstart",
-        TLDW_INTERNAL_API_ORIGIN: "",
+        TLDW_INTERNAL_API_ORIGIN: ""
       })
     ).toThrow(/TLDW_INTERNAL_API_ORIGIN/i)
   })
@@ -154,7 +142,14 @@ describe("frontend quickstart networking", () => {
     ["credentials", "http://user:pass@app:8000"],
     ["path", "http://app:8000/backend"],
     ["query", "http://app:8000/?target=other"],
-    ["fragment", "http://app:8000/#backend"]
+    ["fragment", "http://app:8000/#backend"],
+    ["empty query marker", "http://app:8000?"],
+    ["empty fragment marker", "http://app:8000#"],
+    ["dot-segment path", "http://app:8000/./"],
+    ["collapsed dot-segment path", "http://app:8000/a/../"],
+    ["noncanonical host case", "http://APP:8000"],
+    ["default port", "http://app:80"],
+    ["surrounding whitespace", " http://app:8000 "]
   ])("rejects an internal quickstart API origin with %s", async (_name, origin) => {
     const validateNetworkingConfig = await loadValidateNetworkingConfig()
 
@@ -164,6 +159,17 @@ describe("frontend quickstart networking", () => {
         TLDW_INTERNAL_API_ORIGIN: origin
       })
     ).toThrow(/TLDW_INTERNAL_API_ORIGIN/i)
+  })
+
+  it("returns the canonical internal quickstart API origin", async () => {
+    const validateNetworkingConfig = await loadValidateNetworkingConfig()
+
+    expect(
+      validateNetworkingConfig({
+        NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE: "quickstart",
+        TLDW_INTERNAL_API_ORIGIN: "http://app:8000/"
+      })
+    ).toMatchObject({ internalApiOrigin: "http://app:8000" })
   })
 
   it("rejects an absolute NEXT_PUBLIC_API_URL in quickstart mode", async () => {
@@ -217,7 +223,7 @@ describe("frontend quickstart networking", () => {
     const nextConfig = await loadNextConfig({
       NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE: "advanced",
       TLDW_INTERNAL_API_ORIGIN: "http://app:8000",
-      NEXT_PUBLIC_API_URL: "https://api.example.test",
+      NEXT_PUBLIC_API_URL: "https://api.example.test"
     })
 
     const rewrites = await nextConfig.rewrites()
@@ -226,8 +232,8 @@ describe("frontend quickstart networking", () => {
       expect.arrayContaining([
         expect.objectContaining({
           source: "/api/:path*",
-          destination: "http://app:8000/api/:path*",
-        }),
+          destination: "http://app:8000/api/:path*"
+        })
       ])
     )
   })
@@ -236,7 +242,7 @@ describe("frontend quickstart networking", () => {
     await expect(
       loadNextConfig({
         NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE: "advanced",
-        TLDW_INTERNAL_API_ORIGIN: "http://app:8000",
+        TLDW_INTERNAL_API_ORIGIN: "http://app:8000"
       })
     ).rejects.toThrow(/NEXT_PUBLIC_API_URL/i)
   })
@@ -244,7 +250,7 @@ describe("frontend quickstart networking", () => {
   it("normalizes a trailing slash from the internal quickstart API origin", async () => {
     const nextConfig = await loadNextConfig({
       NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE: "quickstart",
-      TLDW_INTERNAL_API_ORIGIN: "http://app:8000/",
+      TLDW_INTERNAL_API_ORIGIN: "http://app:8000/"
     })
 
     const rewrites = await nextConfig.rewrites()
@@ -253,12 +259,12 @@ describe("frontend quickstart networking", () => {
       expect.arrayContaining([
         {
           source: "/api/:path*/",
-          destination: "http://app:8000/api/:path*/",
+          destination: "http://app:8000/api/:path*/"
         },
         {
           source: "/api/:path*",
-          destination: "http://app:8000/api/:path*",
-        },
+          destination: "http://app:8000/api/:path*"
+        }
       ])
     )
   })
@@ -266,9 +272,7 @@ describe("frontend quickstart networking", () => {
   it("defaults quickstart Makefile wiring to quickstart deployment mode", () => {
     const makefile = readFileSync(makefilePath, "utf8")
 
-    expect(makefile).toContain(
-      "NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE ?= quickstart"
-    )
+    expect(makefile).toContain("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE ?= quickstart")
     expect(makefile).toContain("TLDW_INTERNAL_API_ORIGIN ?= http://app:8000")
   })
 
@@ -285,7 +289,7 @@ describe("frontend quickstart networking", () => {
     expect(compose).toContain("NEXT_PUBLIC_X_API_KEY=${NEXT_PUBLIC_X_API_KEY:-}")
     expect(compose).not.toContain("NEXT_PUBLIC_X_API_KEY:-${SINGLE_USER_API_KEY")
     expect(makefile).toContain(
-      "docker compose --env-file \"$(TLDW_ENV_FILE)\" -f \"$(DOCKER_SINGLE_COMPOSE)\" -f \"$(DOCKER_WEBUI_COMPOSE)\""
+      'docker compose --env-file "$(TLDW_ENV_FILE)" -f "$(DOCKER_SINGLE_COMPOSE)" -f "$(DOCKER_WEBUI_COMPOSE)"'
     )
   })
 
@@ -298,24 +302,35 @@ describe("frontend quickstart networking", () => {
     expect(startTarget?.groups?.recipe).toBeTruthy()
     expect(startTarget?.groups?.recipe).not.toContain("grep '^SINGLE_USER_API_KEY='")
     expect(startTarget?.groups?.recipe).not.toContain("cut -d= -f2-")
-    expect(startTarget?.groups?.recipe).not.toContain(
-      "NEXT_PUBLIC_X_API_KEY=\"$$(grep"
-    )
+    expect(startTarget?.groups?.recipe).not.toContain('NEXT_PUBLIC_X_API_KEY="$$(grep')
   })
 
   it("passes runtime auth env to the WebUI container without changing the loopback port binding", () => {
     const compose = readFileSync(webuiComposePath, "utf8")
 
     expect(compose).toContain("- AUTH_MODE=${AUTH_MODE:-single_user}")
-    expect(compose).toContain(
-      "- SINGLE_USER_API_KEY=${SINGLE_USER_API_KEY:-change-me}"
-    )
+    expect(compose).toContain("- SINGLE_USER_API_KEY=${SINGLE_USER_API_KEY:-change-me}")
     expect(compose).toContain(
       "- TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=${TLDW_WEBUI_EXPOSE_RUNTIME_AUTH:-0}"
     )
     expect(compose).toContain('"127.0.0.1:8080:3000"')
     expect(compose).toContain(
       "- TLDW_INTERNAL_API_ORIGIN=${TLDW_INTERNAL_API_ORIGIN:-http://app:8000}"
+    )
+    expect(compose).toContain(
+      "- SINGLE_USER_SESSION_COOKIE_NAME=${SINGLE_USER_SESSION_COOKIE_NAME:-tldw_single_user_session}"
+    )
+  })
+
+  it.each([
+    ["base", baseComposePath],
+    ["single-user", singleUserComposePath],
+    ["host-storage", hostStorageComposePath]
+  ])("passes the defaulted session cookie name to the %s backend", (_name, composePath) => {
+    const compose = readFileSync(composePath, "utf8")
+
+    expect(compose).toContain(
+      "- SINGLE_USER_SESSION_COOKIE_NAME=${SINGLE_USER_SESSION_COOKIE_NAME:-tldw_single_user_session}"
     )
   })
 
@@ -324,8 +339,6 @@ describe("frontend quickstart networking", () => {
 
     expect(compose).toContain("- TLDW_SETUP_ALLOW_REMOTE=${TLDW_SETUP_ALLOW_REMOTE:-1}")
     expect(compose).toContain("- AUTH_MODE=${AUTH_MODE:-single_user}")
-    expect(compose).toContain(
-      "- SINGLE_USER_API_KEY=${SINGLE_USER_API_KEY:-change-me}"
-    )
+    expect(compose).toContain("- SINGLE_USER_API_KEY=${SINGLE_USER_API_KEY:-change-me}")
   })
 })

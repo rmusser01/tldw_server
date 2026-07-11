@@ -17,6 +17,7 @@ services:
       # Placeholder values (change-me, CHANGE_ME*, etc.) are auto-replaced
       # by the entrypoint with a secure random key on first run.
       - SINGLE_USER_API_KEY=${SINGLE_USER_API_KEY:-change-me}
+      - SINGLE_USER_SESSION_COOKIE_NAME=${SINGLE_USER_SESSION_COOKIE_NAME:-tldw_single_user_session}
       # Multi-user admin bootstrap (uncomment for first run):
       # - ADMIN_USERNAME=myadmin
       # - ADMIN_PASSWORD=change-me-to-secure-password

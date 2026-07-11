@@ -2,7 +2,6 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { resolveRuntimeAuthPolicy } from './runtime-auth-policy';
 
 const SESSION_PATH = '/api/v1/auth/single-user/session';
-const ALLOWED_COOKIE_NAMES = new Set(['tldw_single_user_session', 'csrf_token']);
 const BACKEND_TIMEOUT_MS = 5_000;
 
 const cookieName = (value: string): string => {
@@ -10,11 +9,14 @@ const cookieName = (value: string): string => {
   return separator > 0 ? value.slice(0, separator).trim() : '';
 };
 
-const filteredRequestCookies = (value?: string): string =>
+const filteredRequestCookies = (
+  value: string | undefined,
+  allowedCookieNames: Set<string>
+): string =>
   String(value || '')
     .split(';')
     .map((cookie) => cookie.trim())
-    .filter((cookie) => ALLOWED_COOKIE_NAMES.has(cookieName(cookie)))
+    .filter((cookie) => allowedCookieNames.has(cookieName(cookie)))
     .join('; ');
 
 const isExactSameOrigin = (req: NextApiRequest): boolean => {
@@ -39,18 +41,22 @@ const hasAcceptableFetchMetadata = (req: NextApiRequest): boolean => {
   return value === undefined || value === 'same-origin';
 };
 
-const safeResponseCookies = (headers: Headers): string[] => {
+const safeResponseCookies = (headers: Headers, allowedCookieNames: Set<string>): string[] => {
   if (typeof headers.getSetCookie !== 'function') throw new TypeError('Invalid headers');
   const cookies = headers.getSetCookie();
   if (!Array.isArray(cookies)) throw new TypeError('Invalid Set-Cookie headers');
   if (cookies.some((cookie) => /[\r\n]/.test(cookie))) {
     throw new TypeError('Invalid Set-Cookie header');
   }
-  return cookies.filter((cookie) => ALLOWED_COOKIE_NAMES.has(cookieName(cookie)));
+  return cookies.filter((cookie) => allowedCookieNames.has(cookieName(cookie)));
 };
 
-const copySafeResponseMetadata = (backend: Response, res: NextApiResponse): void => {
-  const cookies = safeResponseCookies(backend.headers);
+const copySafeResponseMetadata = (
+  backend: Response,
+  res: NextApiResponse,
+  allowedCookieNames: Set<string>
+): void => {
+  const cookies = safeResponseCookies(backend.headers, allowedCookieNames);
   const contentType = backend.headers.get('content-type');
   const cacheControl = backend.headers.get('cache-control');
 
@@ -87,8 +93,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return;
   }
 
+  const allowedCookieNames = new Set([policy.sessionCookieName, 'csrf_token']);
   const headers: Record<string, string> = { 'X-API-KEY': policy.apiKey };
-  const cookies = filteredRequestCookies(req.headers.cookie);
+  const cookies = filteredRequestCookies(req.headers.cookie, allowedCookieNames);
   if (cookies) headers.Cookie = cookies;
   if (typeof req.headers['user-agent'] === 'string') {
     headers['User-Agent'] = req.headers['user-agent'];
@@ -104,7 +111,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!Number.isInteger(backend.status) || backend.status < 200 || backend.status > 599) {
       throw new TypeError('Invalid backend status');
     }
-    copySafeResponseMetadata(backend, res);
+    copySafeResponseMetadata(backend, res, allowedCookieNames);
     res.status(backend.status).end();
   } catch (error) {
     res.status(isTimeout(error) ? 504 : 502).end();

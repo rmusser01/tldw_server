@@ -1,16 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import handler from "@web/pages/api/_tldw-webui/runtime-config"
-import {
-  createApiRequest,
-  createApiResponse
-} from "./test-utils"
+import { createApiRequest, createApiResponse } from "./test-utils"
 
 const ORIGINAL_ENV = {
   AUTH_MODE: process.env.AUTH_MODE,
   SINGLE_USER_API_KEY: process.env.SINGLE_USER_API_KEY,
   TLDW_WEBUI_EXPOSE_RUNTIME_AUTH: process.env.TLDW_WEBUI_EXPOSE_RUNTIME_AUTH,
   NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE: process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE,
-  TLDW_INTERNAL_API_ORIGIN: process.env.TLDW_INTERNAL_API_ORIGIN
+  TLDW_INTERNAL_API_ORIGIN: process.env.TLDW_INTERNAL_API_ORIGIN,
+  SINGLE_USER_SESSION_COOKIE_NAME: process.env.SINGLE_USER_SESSION_COOKIE_NAME
 }
 
 const restoreEnv = () => {
@@ -29,6 +27,7 @@ const configureRuntimeAuth = () => {
   process.env.TLDW_WEBUI_EXPOSE_RUNTIME_AUTH = "1"
   process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
   process.env.TLDW_INTERNAL_API_ORIGIN = "http://app:8000"
+  delete process.env.SINGLE_USER_SESSION_COOKIE_NAME
 }
 
 const callRuntimeConfig = async (
@@ -87,6 +86,34 @@ describe("WebUI runtime config API", () => {
     expect(JSON.stringify(res.body ?? "")).not.toContain("runtime-single-user-key")
   })
 
+  it("keeps a valid custom session cookie name server-only", async () => {
+    process.env.SINGLE_USER_SESSION_COOKIE_NAME = "custom_session"
+
+    const res = await callRuntimeConfig()
+
+    expect(res.statusCode).toBe(200)
+    expect(res.body.runtimeAuth).toEqual({
+      available: true,
+      authMode: "single-user",
+      transport: "cookie-session"
+    })
+    expect(JSON.stringify(res.body)).not.toContain("custom_session")
+  })
+
+  it.each(["invalid name", "session=value", "session;name", "/session"])(
+    "returns unavailable for invalid cookie name %j",
+    async (cookieName) => {
+      process.env.SINGLE_USER_SESSION_COOKIE_NAME = cookieName
+
+      const res = await callRuntimeConfig()
+
+      expect(res.statusCode).toBe(200)
+      expect(res.body.runtimeAuth).toEqual({ available: false })
+      expect(JSON.stringify(res.body)).not.toContain(cookieName)
+      expect(JSON.stringify(res.body)).not.toContain("runtime-single-user-key")
+    }
+  )
+
   it.each([
     ["disabled exposure", { TLDW_WEBUI_EXPOSE_RUNTIME_AUTH: "0" }],
     ["true exposure flag", { TLDW_WEBUI_EXPOSE_RUNTIME_AUTH: "true" }],
@@ -143,57 +170,52 @@ describe("WebUI runtime config API", () => {
     expect(JSON.stringify(res.body)).not.toContain("runtime-single-user-key")
   })
 
-  it.each([
-    ["127.0.0.1"],
-    ["::1"],
-    ["::ffff:127.0.0.1"]
-  ])("returns runtime single-user auth for loopback peer %s", async (remoteAddress) => {
-    const res = await callRuntimeConfig({}, remoteAddress)
+  it.each([["127.0.0.1"], ["::1"], ["::ffff:127.0.0.1"]])(
+    "returns runtime single-user auth for loopback peer %s",
+    async (remoteAddress) => {
+      const res = await callRuntimeConfig({}, remoteAddress)
 
-    expect(res.statusCode).toBe(200)
-    expect(res.body).toMatchObject({
-      runtimeAuth: {
-        available: true,
-        authMode: "single-user",
-        transport: "cookie-session"
-      }
-    })
-  })
+      expect(res.statusCode).toBe(200)
+      expect(res.body).toMatchObject({
+        runtimeAuth: {
+          available: true,
+          authMode: "single-user",
+          transport: "cookie-session"
+        }
+      })
+    }
+  )
 
-  it.each([
-    ["172.17.0.1"],
-    ["172.18.0.1"],
-    ["::ffff:172.18.0.1"],
-    ["192.168.65.1"]
-  ])("returns runtime single-user auth for quickstart Docker gateway peer %s", async (remoteAddress) => {
-    const res = await callRuntimeConfig({}, remoteAddress)
+  it.each([["172.17.0.1"], ["172.18.0.1"], ["::ffff:172.18.0.1"], ["192.168.65.1"]])(
+    "returns runtime single-user auth for quickstart Docker gateway peer %s",
+    async (remoteAddress) => {
+      const res = await callRuntimeConfig({}, remoteAddress)
 
-    expect(res.statusCode).toBe(200)
-    expect(res.body).toMatchObject({
-      runtimeAuth: {
-        available: true,
-        authMode: "single-user",
-        transport: "cookie-session"
-      }
-    })
-  })
+      expect(res.statusCode).toBe(200)
+      expect(res.body).toMatchObject({
+        runtimeAuth: {
+          available: true,
+          authMode: "single-user",
+          transport: "cookie-session"
+        }
+      })
+    }
+  )
 
-  it.each([
-    ["192.168.1.50"],
-    ["10.0.0.5"],
-    ["172.17.0.2"],
-    ["172.32.0.1"]
-  ])("returns unavailable for nonlocal spoof peer %s", async (remoteAddress) => {
-    const res = await callRuntimeConfig({ host: "127.0.0.1:8080" }, remoteAddress)
+  it.each([["192.168.1.50"], ["10.0.0.5"], ["172.17.0.2"], ["172.32.0.1"]])(
+    "returns unavailable for nonlocal spoof peer %s",
+    async (remoteAddress) => {
+      const res = await callRuntimeConfig({ host: "127.0.0.1:8080" }, remoteAddress)
 
-    expect(res.statusCode).toBe(200)
-    expect(res.body).toMatchObject({
-      runtimeAuth: {
-        available: false
-      }
-    })
-    expect(JSON.stringify(res.body)).not.toContain("runtime-single-user-key")
-  })
+      expect(res.statusCode).toBe(200)
+      expect(res.body).toMatchObject({
+        runtimeAuth: {
+          available: false
+        }
+      })
+      expect(JSON.stringify(res.body)).not.toContain("runtime-single-user-key")
+    }
+  )
 
   it("returns unavailable for a Docker gateway peer outside quickstart deployment mode", async () => {
     process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "production"
@@ -252,21 +274,20 @@ describe("WebUI runtime config API", () => {
     expect(JSON.stringify(res.body)).not.toContain("runtime-single-user-key")
   })
 
-  it.each([
-    ["api.example.test"],
-    ["192.168.1.50:8080"],
-    ["0.0.0.0:8080"]
-  ])("returns unavailable for non-loopback host %s", async (host) => {
-    const res = await callRuntimeConfig({ host })
+  it.each([["api.example.test"], ["192.168.1.50:8080"], ["0.0.0.0:8080"]])(
+    "returns unavailable for non-loopback host %s",
+    async (host) => {
+      const res = await callRuntimeConfig({ host })
 
-    expect(res.statusCode).toBe(200)
-    expect(res.body).toMatchObject({
-      runtimeAuth: {
-        available: false
-      }
-    })
-    expect(JSON.stringify(res.body)).not.toContain("runtime-single-user-key")
-  })
+      expect(res.statusCode).toBe(200)
+      expect(res.body).toMatchObject({
+        runtimeAuth: {
+          available: false
+        }
+      })
+      expect(JSON.stringify(res.body)).not.toContain("runtime-single-user-key")
+    }
+  )
 
   it.each([
     ["forwarded", "forwarded", "for=203.0.113.10;host=localhost:8080"],
@@ -307,7 +328,14 @@ describe("WebUI runtime config API", () => {
     ["credential-bearing origin", "http://user:pass@app:8000"],
     ["path-bearing origin", "http://app:8000/backend"],
     ["query-bearing origin", "http://app:8000/?target=other"],
-    ["fragment-bearing origin", "http://app:8000/#backend"]
+    ["fragment-bearing origin", "http://app:8000/#backend"],
+    ["empty-query marker", "http://app:8000?"],
+    ["empty-fragment marker", "http://app:8000#"],
+    ["dot-segment path", "http://app:8000/./"],
+    ["collapsed dot-segment path", "http://app:8000/a/../"],
+    ["noncanonical host case", "http://APP:8000"],
+    ["default port", "http://app:80"],
+    ["surrounding whitespace", " http://app:8000 "]
   ])("returns unavailable for %s internal API origin", async (_name, origin) => {
     process.env.TLDW_INTERNAL_API_ORIGIN = origin
 

@@ -1,8 +1,16 @@
 import type { NextApiRequest } from 'next';
 
 export type RuntimeAuthPolicy =
-  | { available: true; apiKey: string; internalApiOrigin: string }
+  | {
+      available: true;
+      apiKey: string;
+      internalApiOrigin: string;
+      sessionCookieName: string;
+    }
   | { available: false; reason: string };
+
+const DEFAULT_SESSION_COOKIE_NAME = 'tldw_single_user_session';
+const COOKIE_NAME_PATTERN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 
 const PLACEHOLDER_KEYS = new Set([
   'change-me',
@@ -85,15 +93,24 @@ const hasForwardingHeaders = (req: NextApiRequest): boolean =>
     (name) => name === 'forwarded' || name === 'x-real-ip' || name.startsWith('x-forwarded-')
   );
 
+const resolvedSessionCookieName = (): string | null => {
+  const configured = process.env.SINGLE_USER_SESSION_COOKIE_NAME;
+  const value =
+    configured === undefined || configured === '' ? DEFAULT_SESSION_COOKIE_NAME : configured;
+  return COOKIE_NAME_PATTERN.test(value) ? value : null;
+};
+
 const validatedInternalOrigin = (): string | null => {
-  const value = normalizeEnvValue(process.env.TLDW_INTERNAL_API_ORIGIN);
+  const value = String(process.env.TLDW_INTERNAL_API_ORIGIN || '');
   try {
     const url = new URL(value);
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
     if (url.username || url.password || url.pathname !== '/' || url.search || url.hash) {
       return null;
     }
-    return url.origin === 'null' ? null : url.origin;
+    const origin = url.origin;
+    if (origin === 'null' || (value !== origin && value !== `${origin}/`)) return null;
+    return origin;
   } catch {
     return null;
   }
@@ -118,8 +135,11 @@ export const resolveRuntimeAuthPolicy = (req: NextApiRequest): RuntimeAuthPolicy
   const apiKey = process.env.SINGLE_USER_API_KEY;
   if (!isUsableApiKey(apiKey)) return { available: false, reason: 'api-key' };
 
+  const sessionCookieName = resolvedSessionCookieName();
+  if (!sessionCookieName) return { available: false, reason: 'session-cookie-name' };
+
   const internalApiOrigin = validatedInternalOrigin();
   if (!internalApiOrigin) return { available: false, reason: 'internal-origin' };
 
-  return { available: true, apiKey, internalApiOrigin };
+  return { available: true, apiKey, internalApiOrigin, sessionCookieName };
 };

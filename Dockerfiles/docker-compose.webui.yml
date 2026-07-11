@@ -34,6 +34,7 @@ services:
       - PORT=3000
       - AUTH_MODE=${AUTH_MODE:-single_user}
       - SINGLE_USER_API_KEY=${SINGLE_USER_API_KEY:-change-me}
+      - SINGLE_USER_SESSION_COOKIE_NAME=${SINGLE_USER_SESSION_COOKIE_NAME:-tldw_single_user_session}
       - TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=${TLDW_WEBUI_EXPOSE_RUNTIME_AUTH:-0}
       - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL:-}
       # Browser-visible credentials must be explicitly supplied with a public
