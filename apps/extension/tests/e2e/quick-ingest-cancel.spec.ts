@@ -1,121 +1,133 @@
+import http from "node:http"
+import type { AddressInfo } from "node:net"
+
 import { expect, test } from "@playwright/test"
 import { launchWithBuiltExtension } from "./utils/extension-build"
-import { forceConnected, waitForConnectionStore } from "./utils/connection"
+import { waitForConnectionStore } from "./utils/connection"
 import { setQuickIngestSwitch } from "./utils/quick-ingest-options"
 
 const API_KEY = "THIS-IS-A-SECURE-KEY-123-FAKE-KEY"
 
 test.describe("Quick ingest cancel flow", () => {
+  let server: http.Server
+  let serverUrl: string
+  const unexpectedRequests: string[] = []
+
+  test.beforeAll(async () => {
+    server = http.createServer((request, response) => {
+      const method = (request.method || "GET").toUpperCase()
+      const url = new URL(request.url || "/", "http://127.0.0.1")
+
+      if (method === "OPTIONS") {
+        response.writeHead(204, {
+          "access-control-allow-origin": "*",
+          "access-control-allow-headers": "content-type, x-api-key, authorization"
+        })
+        response.end()
+        return
+      }
+
+      let body: unknown = {}
+      if (url.pathname === "/openapi.json") {
+        body = {
+          openapi: "3.1.0",
+          info: { title: "tldw mock", version: "e2e" },
+          paths: {
+            "/api/v1/health": {},
+            "/api/v1/media": {},
+            "/api/v1/media/process-web-scraping": {}
+          }
+        }
+      } else if (url.pathname === "/api/v1/health") {
+        body = { status: "ok" }
+      } else if (url.pathname === "/api/v1/health/live") {
+        body = { status: "alive" }
+      } else if (url.pathname === "/api/v1/rag/health") {
+        body = { status: "healthy" }
+      } else if (url.pathname === "/api/v1/setup/first-run/state") {
+        body = { status: "completed" }
+      } else if (url.pathname === "/api/v1/users/storage") {
+        body = {
+          user_id: 1,
+          storage_used_mb: 0,
+          storage_quota_mb: 5120,
+          available_mb: 5120,
+          usage_percentage: 0
+        }
+      } else if (url.pathname === "/api/v1/media") {
+        body = {
+          items: [],
+          pagination: {
+            page: 1,
+            results_per_page: 20,
+            total_items: 0,
+            total_pages: 0
+          }
+        }
+      } else if (url.pathname === "/api/v1/ingestion-sources/capabilities") {
+        body = { can_create_local_directory: false }
+      } else if (
+        url.pathname !== "/api/v1/config/docs-info" &&
+        url.pathname !== "/api/v1/users/me/profile"
+      ) {
+        unexpectedRequests.push(`${method} ${url.pathname}`)
+      }
+
+      response.writeHead(200, {
+        "content-type": "application/json",
+        "access-control-allow-origin": "*"
+      })
+      response.end(JSON.stringify(body))
+    })
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+    const address = server.address() as AddressInfo
+    serverUrl = `http://127.0.0.1:${address.port}`
+  })
+
+  test.afterAll(async () => {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()))
+    })
+  })
+
   test("quick ingest cancel all reaches terminal wizard results", async () => {
     const { context, page, optionsUrl } = await launchWithBuiltExtension({
       seedConfig: {
-        serverUrl: "http://127.0.0.1:8000",
+        serverUrl,
         authMode: "single-user",
         apiKey: API_KEY
-      },
-      allowOffline: true
+      }
+    })
+    const browserErrors: string[] = []
+    page.on("pageerror", (error) => {
+      browserErrors.push(error.stack || error.message)
+    })
+    page.on("console", (message) => {
+      if (message.type() === "error") browserErrors.push(message.text())
+    })
+    let releaseDirectResponse: (() => void) | null = null
+    await page.route("**/api/v1/media/process-web-scraping", async (route) => {
+      await new Promise<void>((resolve) => {
+        releaseDirectResponse = resolve
+      })
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ status: "persist-ok", media_ids: [4242] })
+      })
     })
 
     try {
       await page.goto(optionsUrl + "#/media", { waitUntil: "domcontentloaded" })
       await waitForConnectionStore(page, "quick-ingest-cancel")
-      await forceConnected(page, {}, "quick-ingest-cancel")
-
-      const patched = await page.evaluate(() => {
-        try {
-          const runtime =
-            (globalThis as any)?.browser?.runtime ||
-            (globalThis as any)?.chrome?.runtime
-          const onMessage = runtime?.onMessage
-          const originalSendMessage =
-            typeof runtime?.sendMessage === "function"
-              ? runtime.sendMessage.bind(runtime)
-              : null
-          if (!runtime || !onMessage || !originalSendMessage) {
-            return false
-          }
-
-          const originalAddListener =
-            typeof onMessage.addListener === "function"
-              ? onMessage.addListener.bind(onMessage)
-              : null
-          const originalRemoveListener =
-            typeof onMessage.removeListener === "function"
-              ? onMessage.removeListener.bind(onMessage)
-              : null
-          const listeners = new Set<(message: any, sender?: any, sendResponse?: any) => void>()
-
-          const emit = (message: any) => {
-            for (const listener of [...listeners]) {
-              try {
-                listener(message, {}, () => undefined)
-              } catch {
-                // best-effort test emitter
-              }
-            }
-          }
-
-          onMessage.addListener = (listener: any) => {
-            listeners.add(listener)
-          }
-          onMessage.removeListener = (listener: any) => {
-            listeners.delete(listener)
-          }
-
-          runtime.sendMessage = async (message: any) => {
-            if (message?.type === "tldw:quick-ingest/start") {
-              return { ok: true, sessionId: "qi-e2e-cancel-session" }
-            }
-            if (message?.type === "tldw:quick-ingest/cancel") {
-              emit({
-                type: "tldw:quick-ingest/cancelled",
-                payload: {
-                  sessionId: "qi-e2e-cancel-session",
-                  reason: "Cancelled by user."
-                }
-              })
-              setTimeout(() => {
-                emit({
-                  type: "tldw:quick-ingest/completed",
-                  payload: {
-                    sessionId: "qi-e2e-cancel-session",
-                    results: [
-                      {
-                        id: "qi-e2e-item-1",
-                        status: "ok",
-                        type: "html",
-                        url: "https://example.com/cancel-me"
-                      }
-                    ]
-                  }
-                })
-                ;(window as any).__quickIngestLateCompletionEmitted = true
-              }, 0)
-              return { ok: true }
-            }
-            return originalSendMessage(message)
-          }
-
-          ;(window as any).__restoreQuickIngestCancelPatch = () => {
-            runtime.sendMessage = originalSendMessage
-            if (originalAddListener) {
-              onMessage.addListener = originalAddListener
-            }
-            if (originalRemoveListener) {
-              onMessage.removeListener = originalRemoveListener
-            }
-            listeners.clear()
-          }
-          return true
-        } catch {
-          return false
-        }
-      })
-
-      if (!patched) {
-        test.skip(true, "Unable to patch runtime messaging in extension page context.")
-        return
-      }
+      await page.waitForFunction(
+        () => {
+          const state = (window as any).__tldw_useConnectionStore?.getState?.().state
+          return state?.isConnected === true && state?.phase === "connected"
+        },
+        null,
+        { timeout: 20_000 }
+      )
 
       const openQuickIngestButton = page
         .getByRole("button", { name: /quick ingest/i })
@@ -150,43 +162,61 @@ test.describe("Quick ingest cancel flow", () => {
 
       const startButton = dialog.getByRole("button", { name: /start processing/i }).first()
       await expect(startButton).toBeVisible()
+      const directRequestStarted = page.waitForRequest(
+        "**/api/v1/media/process-web-scraping",
+        { timeout: 10_000 }
+      )
       await startButton.click()
 
       const cancelButton = dialog.getByRole("button", { name: /cancel all/i }).first()
       await expect(cancelButton).toBeVisible({ timeout: 10000 })
+      await directRequestStarted
 
-      await cancelButton.click()
+      // A global tutorial notification can overlap the modal briefly. The
+      // regression is about the cancellation/completion race once this visible
+      // control is invoked, so bypass unrelated notification hit-testing.
+      await cancelButton.click({ force: true })
 
-      await expect(dialog.getByTestId("wizard-results-step")).toBeVisible({
-        timeout: 10000
-      })
-      await expect(dialog.getByRole("region", { name: /error items/i })).toBeVisible()
+      const resultsStep = dialog.getByTestId("wizard-results-step")
+      const errorBoundary = page.getByTestId("error-boundary")
+      const terminalView = await Promise.race([
+        resultsStep.waitFor({ state: "visible", timeout: 10000 }).then(() => "results"),
+        errorBoundary.waitFor({ state: "visible", timeout: 10000 }).then(() => "error")
+      ])
+      if (terminalView === "error") {
+        await errorBoundary.getByText("View error details", { exact: true }).click()
+        const details = (await errorBoundary.locator("pre").textContent()) || ""
+        throw new Error(
+          `Options error boundary rendered after Cancel All.\n${details}\n${browserErrors.join("\n")}`
+        )
+      }
 
-      await page.waitForFunction(
-        () => (window as any).__quickIngestLateCompletionEmitted === true
+      await expect(resultsStep).toBeVisible()
+      await expect(dialog.getByRole("region", { name: /cancelled items/i })).toBeVisible()
+
+      const lateResponse = page.waitForResponse((response) =>
+        response.url().includes("/api/v1/media/process-web-scraping")
+      )
+      if (!releaseDirectResponse) {
+        throw new Error("Deferred direct response was not registered.")
+      }
+      releaseDirectResponse()
+      await lateResponse
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+          )
       )
       await expect(dialog.getByTestId("wizard-results-step")).toBeVisible()
-      await expect(dialog.getByRole("region", { name: /error items/i })).toBeVisible()
+      await expect(dialog.getByRole("region", { name: /cancelled items/i })).toBeVisible()
       await expect(
         dialog.getByRole("region", { name: /completed items/i })
       ).toHaveCount(0)
+      expect(browserErrors).toEqual([])
+      expect(unexpectedRequests).toEqual([])
     } finally {
-      try {
-        await page.evaluate(() => {
-          try {
-            const restore = (window as any).__restoreQuickIngestCancelPatch
-            if (typeof restore === "function") {
-              restore()
-            }
-            delete (window as any).__restoreQuickIngestCancelPatch
-            delete (window as any).__quickIngestLateCompletionEmitted
-          } catch {
-            // ignore best-effort cleanup failures
-          }
-        })
-      } catch {
-        // ignore cleanup failures if page already closed
-      }
+      releaseDirectResponse?.()
       await context.close()
     }
   })

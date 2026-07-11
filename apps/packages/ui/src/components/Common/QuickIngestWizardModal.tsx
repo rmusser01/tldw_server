@@ -650,6 +650,34 @@ const buildSessionPatchFromWizardState = (
   }
 }
 
+const buildWizardPersistenceSignature = (
+  patch: Partial<QuickIngestSessionRecord>
+): string => {
+  const resultSummary = patch.resultSummary
+  return JSON.stringify({
+    ...patch,
+    completedAt: patch.completedAt == null ? null : true,
+    resultSummary: resultSummary
+      ? {
+          ...resultSummary,
+          attemptedAt: resultSummary.attemptedAt == null ? null : true,
+          completedAt: resultSummary.completedAt == null ? null : true,
+        }
+      : resultSummary,
+  })
+}
+
+const cancelQuickIngestSessionBestEffort = (
+  request: Parameters<typeof cancelQuickIngestSession>[0]
+): void => {
+  void cancelQuickIngestSession(request).catch((error) => {
+    console.warn("[QuickIngest] Failed to cancel session.", {
+      sessionId: request.sessionId,
+      error,
+    })
+  })
+}
+
 const mapReattachedJobStatusToProgress = (
   status: string,
   result?: unknown
@@ -861,7 +889,6 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     state,
     minimize,
     restore,
-    cancelProcessing,
     skipToProcessing,
     updateItemProgress,
     updateProcessingState,
@@ -878,6 +905,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   const hasStartedRunRef = useRef(false)
   const runStartedAtRef = useRef<number | null>(null)
   const cancelledSessionIdsRef = useRef<Set<string>>(new Set())
+  const cancelRequestedRef = useRef(false)
   const validQueueItems = useMemo(
     () =>
       queueItems.filter(
@@ -1318,6 +1346,31 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     [finalizeRun, trackedQueueItems, validQueueItems]
   )
 
+  const handleCancelAll = useCallback(() => {
+    if (cancelRequestedRef.current) return
+    cancelRequestedRef.current = true
+
+    if (persistedReattachTimerRef.current != null) {
+      window.clearTimeout(persistedReattachTimerRef.current)
+      persistedReattachTimerRef.current = null
+    }
+
+    const persistedTracking = persistedTrackingRef.current
+    const sessionId = String(
+      activeSessionIdRef.current || persistedTracking?.sessionId || ""
+    ).trim()
+    if (sessionId) {
+      cancelledSessionIdsRef.current.add(sessionId)
+      cancelQuickIngestSessionBestEffort({
+        sessionId,
+        batchIds: resolveTrackingBatchIds(persistedTracking),
+        reason: "user_cancelled",
+      })
+    }
+
+    finalizeFailure("Cancelled by user.", "cancelled")
+  }, [finalizeFailure])
+
   const markRunActive = useCallback(() => {
     runStartedAtRef.current = Date.now()
     for (const item of validQueueItems) {
@@ -1339,10 +1392,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       if (!sessionId || sessionId !== String(activeSessionIdRef.current || "").trim()) {
         return
       }
-      if (
-        cancelledSessionIdsRef.current.has(sessionId) &&
-        message.type !== "tldw:quick-ingest/progress"
-      ) {
+      if (cancelledSessionIdsRef.current.has(sessionId)) {
         return
       }
 
@@ -1417,6 +1467,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       } catch {
         // Best effort; background proxy handles auth for direct runtimes.
       }
+      if (cancelRequestedRef.current) return
 
       const requestPayload = await buildQuickIngestPayload(
         validQueueItems,
@@ -1429,6 +1480,8 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
           typeDefaults: presetConfig.typeDefaults,
         }
       )
+      if (cancelRequestedRef.current) return
+
       const analysisProviderWarning = getQuickIngestAnalysisProviderWarning({
         common: requestPayload.common,
         advancedValues: requestPayload.advancedValues,
@@ -1452,6 +1505,19 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       markRunActive()
 
       const startAck = await startQuickIngestSession(requestPayload)
+      if (cancelRequestedRef.current) {
+        const cancelledSessionId = String(startAck?.sessionId || "").trim()
+        if (startAck?.ok && cancelledSessionId) {
+          cancelledSessionIdsRef.current.add(cancelledSessionId)
+          if (!cancelledSessionId.startsWith("qi-direct-")) {
+            cancelQuickIngestSessionBestEffort({
+              sessionId: cancelledSessionId,
+              reason: "user_cancelled",
+            })
+          }
+        }
+        return
+      }
       if (!startAck?.ok || !startAck?.sessionId) {
         finalizeFailure(
           startAck?.error ||
@@ -1514,6 +1580,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
 
       finalizeRun("complete", normalizedResults)
     } catch (error) {
+      if (cancelRequestedRef.current) return
       finalizeFailure(
         error instanceof Error ? error.message : "Quick ingest failed.",
         "failed"
@@ -1549,24 +1616,6 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     void startRun()
   }, [currentStep, processingState.status, session.lifecycle, session.tracking, startRun])
 
-  useEffect(() => {
-    if (processingState.status !== "cancelled") return
-    const persistedTracking = persistedTrackingRef.current
-    const sessionId = String(
-      activeSessionIdRef.current || persistedTracking?.sessionId || ""
-    ).trim()
-    if (!sessionId || cancelledSessionIdsRef.current.has(sessionId)) return
-    cancelledSessionIdsRef.current.add(sessionId)
-    void cancelQuickIngestSession({
-      sessionId,
-      batchIds: resolveTrackingBatchIds(persistedTracking),
-      reason: "user_cancelled",
-    }).catch(() => {
-      // best effort cancellation
-    })
-    finalizeFailure("Cancelled by user.", "cancelled")
-  }, [finalizeFailure, processingState.status])
-
   // Modal title with item count
   const modalTitle = useMemo(() => {
     const base = qi("wizard.title", "Quick Ingest")
@@ -1598,7 +1647,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
               danger
               onClick={() => {
                 Modal.destroyAll()
-                cancelProcessing()
+                handleCancelAll()
                 onClose()
               }}
             >
@@ -1618,7 +1667,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     } else {
       onClose()
     }
-  }, [isProcessingActive, qi, minimize, cancelProcessing, onClose])
+  }, [handleCancelAll, isProcessingActive, qi, minimize, onClose])
 
   // Quick-process callback for AddContentStep (skip to processing with defaults)
   const handleQuickProcess = useCallback(() => {
@@ -1717,7 +1766,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
           />
         )
       case 4:
-        return <ProcessingStep />
+        return <ProcessingStep onCancelAll={handleCancelAll} />
       case 5:
         return (
           <WizardResultsStep
@@ -1735,6 +1784,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   }, [
     connectionRecoveryMessage,
     currentStep,
+    handleCancelAll,
     handleOpenMedia,
     handleOpenCollection,
     handleOpenWorkspace,
@@ -1810,6 +1860,10 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
     [session]
   )
   const sessionRef = useRef(session)
+  const lastPersistedSignatureRef = useRef<{
+    sessionId: string
+    signature: string
+  } | null>(null)
 
   useEffect(() => {
     sessionRef.current = session
@@ -1824,7 +1878,26 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
     (state: IngestWizardState) => {
       const currentSession = sessionRef.current
       if (!currentSession) return
-      upsertSession(buildSessionPatchFromWizardState(state, currentSession))
+      const patch = buildSessionPatchFromWizardState(state, currentSession)
+      if (patch.completedAt == null) {
+        lastPersistedSignatureRef.current = null
+        upsertSession(patch)
+        return
+      }
+      const signature = buildWizardPersistenceSignature(patch)
+      // React may replay queued reducer updates after this synchronous Zustand
+      // write rerenders the parent. Persist each semantic snapshot only once.
+      if (
+        lastPersistedSignatureRef.current?.sessionId === currentSession.id &&
+        lastPersistedSignatureRef.current.signature === signature
+      ) {
+        return
+      }
+      lastPersistedSignatureRef.current = {
+        sessionId: currentSession.id,
+        signature,
+      }
+      upsertSession(patch)
     },
     [upsertSession]
   )
