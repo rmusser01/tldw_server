@@ -4,7 +4,7 @@ title: Fix Quick Ingest repeat ingestion and queued job recovery
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-11 08:36'
+updated_date: '2026-07-11 09:04'
 labels: []
 dependencies: []
 documentation:
@@ -55,6 +55,8 @@ Task 2 complete at 853f6a5a77: restored direct-job reads retry status-less/netwo
 Task 3 complete at 02da73990a: persistence uses structured extractor signals and exact repository messages, repeated real repository writes classify as skipped duplicates, null-ID/storage failures are accounted, touched URL/exception logs are sanitized, and frontend terminal status uses one typed helper with duplicate precedence. Outside-sandbox backend pytest passed 15/15, frontend Vitest 39/39, Bandit 0 findings; reviews approved.
 
 Task 4 complete at a72449d733: restored llm in the global extraction default and explicitly propagated existing perform_analysis/summarize_checkbox intent through enhanced, queued, crawl, legacy, and friendly-ingest paths via internal default-true arguments only. Async enhanced extraction is offloaded from the event loop. No public schema/request field changed. Outside-sandbox 115 tests passed and Bandit reported 0 findings; reviews approved.
+
+Task 5 complete at f4e6e81c33: added a thread-safe, exactly-once, nonblocking yt-dlp floor diagnostic at all seven validated Video_DL boundaries plus existing-environment update docs. Lazy version-helper imports cannot break ingestion. Outside-sandbox focused pytest passed 24/24, adjacent video tests 33/33, Bandit 0 findings; reviews approved.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

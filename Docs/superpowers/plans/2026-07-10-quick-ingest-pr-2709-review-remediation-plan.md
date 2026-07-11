@@ -255,21 +255,21 @@ git commit -m "fix: honor web analysis intent during extraction"
 - Modify: `tldw_Server_API/app/core/Ingestion_Media_Processing/Video/Video_DL_Ingestion_Lib.py`
 - Modify: `Docs/Code_Documentation/Ingestion_Pipeline_Video.md`
 
-- [ ] **Step 1: Write failing version diagnostic tests**
+- [x] **Step 1: Write failing version diagnostic tests**
 
 Patch installed-version lookup and logging to prove versions below `2026.7.4` emit exactly one warning containing `pip install -U "yt-dlp>=2026.7.4"`; current versions emit none; missing or malformed metadata never raises.
 
-- [ ] **Step 2: Run the focused test outside the sandbox and verify RED**
+- [x] **Step 2: Run the focused test outside the sandbox and verify RED**
 
 Run: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_yt_dlp_support.py -q`
 
 Expected: FAIL because the helper does not exist.
 
-- [ ] **Step 3: Implement a minimal one-shot helper**
+- [x] **Step 3: Implement a minimal one-shot helper**
 
 Use `importlib.metadata.version("yt-dlp")` and `packaging.version.Version`. Keep module state only for suppressing duplicate warnings. Return normally for every lookup or parse failure. Call it immediately before video yt-dlp request boundaries, after outbound URL validation so unrelated/blocked requests do not create misleading diagnostics.
 
-- [ ] **Step 4: Run focused video tests outside the sandbox**
+- [x] **Step 4: Run focused video tests outside the sandbox**
 
 Run:
 
@@ -282,7 +282,7 @@ source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && py
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the diagnostic**
+- [x] **Step 5: Commit the diagnostic**
 
 ```bash
 git add tldw_Server_API/app/core/Ingestion_Media_Processing/yt_dlp_support.py tldw_Server_API/app/core/Ingestion_Media_Processing/Video/Video_DL_Ingestion_Lib.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_yt_dlp_support.py Docs/Code_Documentation/Ingestion_Pipeline_Video.md
