@@ -318,9 +318,14 @@ without returning findings, so it is not counted as review evidence. The
 reconstructed browser regression, 56 focused unit tests, two font contract
 tests, TypeScript compile, and `git diff --check` all passed afterward.
 
-- [ ] **Step 3: Rebase on latest origin/dev**
+- [x] **Step 3: Rebase on latest origin/dev**
 
 Resolve conflicts without discarding unrelated upstream changes, then rerun focused Vitest, compile, packaged cancellation, and launch health.
+
+Observed: `origin/dev` was already current. The production extension rebuilt in
+37.0 seconds, the strict headed cancellation regression passed in 23.3 seconds,
+56 focused unit tests and two font contract tests passed, TypeScript compilation
+passed, and all three launch-health modes passed.
 
 - [ ] **Step 4: Finalize TASK-12947 and remove this plan only after every stage is complete**
 

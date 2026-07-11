@@ -29,10 +29,10 @@ Investigate why the local Playwright extension harness fails to expose or comple
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Extension launch behavior is proven with a clean headed/headless and minimal/full locale matrix; any missing-target failure must be reproduced with retained diagnostics before launcher code changes.
-- [ ] #2 The supported extension launcher reliably returns an extension id, seeded storage, and a loaded options page without relying on CI-only behavior.
-- [ ] #3 Host-side browser-extension UAT validates PDF, reachable link, repeated link, exact YouTube Short, and repeated YouTube in one extension context with no page or console errors.
-- [ ] #4 Focused automated regression coverage fails before the fix and passes afterward, with adjacent extension tests and compile green.
+- [x] #1 Extension launch behavior is proven with a clean headed/headless and minimal/full locale matrix; any missing-target failure must be reproduced with retained diagnostics before launcher code changes.
+- [x] #2 The supported extension launcher reliably returns an extension id, seeded storage, and a loaded options page without relying on CI-only behavior.
+- [x] #3 Host-side browser-extension UAT validates PDF, reachable link, repeated link, exact YouTube Short, and repeated YouTube in one extension context with no page or console errors.
+- [x] #4 Focused automated regression coverage fails before the fix and passes afterward, with adjacent extension tests and compile green.
 - [ ] #5 Changes are rebased on current dev and published in a separate reviewed PR against dev.
 <!-- AC:END -->
 
@@ -78,11 +78,11 @@ Execute Docs/superpowers/plans/2026-07-11-extension-quick-ingest-cancellation.md
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
 - [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
 
 ## Implementation Notes
@@ -97,4 +97,5 @@ Execute Docs/superpowers/plans/2026-07-11-extension-quick-ingest-cancellation.md
 - Persistence fix: derive a semantic signature from the existing persisted patch, normalize only volatile timestamp presence, and suppress an equivalent replay before the synchronous write. Real timestamps and all meaningful status, queue, progress, tracking, and result values remain persisted.
 - Browser regression: the test now uses the production MV3 direct HTTP path against a strict local server, defers only process-web-scraping, cancels before response, releases late success, and asserts cancelled remains terminal with zero page, console, or unexpected-request errors. It passed in 22.6 seconds.
 - Adjacent verification: Quick Ingest tests passed 56/56, font tests 2/2, TypeScript compile passed. ESLint has no applicable workspace configuration; Bandit is not applicable to TypeScript/assets. No credentials, auth headers, request bodies, or backend payloads are logged.
+2026-07-11 post-rebase verification: origin/dev was already current. Production Chrome MV3 build passed in 37.0s and packaged all nine fonts. The strict headed cancellation regression passed in 23.3s, Quick Ingest unit tests passed 56/56, font contract tests passed 2/2, TypeScript compile passed, and launch health passed headed/minimal 4.2s, headless/minimal 3.4s, and headless/full 2.9s. git diff --check was clean. Existing build warnings about duplicate imports, circular chunks, and bundle size remain outside this diff.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
