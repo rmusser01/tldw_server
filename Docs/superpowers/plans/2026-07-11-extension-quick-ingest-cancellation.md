@@ -17,7 +17,7 @@
 ## File Map
 
 - Modify `apps/packages/ui/src/components/Common/QuickIngest/ProcessingStep.tsx`: accept an optional modal-owned Cancel All callback while retaining the context fallback for standalone callers.
-- Modify `apps/packages/ui/src/components/Common/QuickIngestWizardModal.tsx`: own cancellation intent, perform synchronous finalization/cancellation, and guard setup, runtime messages, direct submission, errors, and persisted reattachment.
+- Modify `apps/packages/ui/src/components/Common/QuickIngestWizardModal.tsx`: own cancellation intent and guard setup, runtime messages, direct submission, and errors while preserving the existing persisted-reattachment cleanup fence.
 - Modify `apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx`: add behavioral regressions for each asynchronous race.
 - Verify `apps/extension/tests/e2e/quick-ingest-cancel.spec.ts`: existing packaged-extension stale-completion regression must pass unchanged.
 - Update `backlog/tasks/task-12947 - Fix-browser-extension-E2E-launch-and-validate-Quick-Ingest.md`: record red/green evidence, host UAT evidence, verification, and PR.
@@ -95,11 +95,11 @@ git commit -m "fix: make quick ingest cancellation terminal"
 **Goal**: Prevent any awaited continuation from reviving cancellation or starting additional work.
 **Success Criteria**: Deferred extension/direct acknowledgements, setup, errors, and persisted polls cannot mutate cancelled state; direct submission never begins after pre-ack cancellation.
 **Tests**: Focused deferred-promise Vitest tests.
-**Status**: In Progress
+**Status**: Complete
 
 ### Task 2: Guard setup and start acknowledgement
 
-- [ ] **Step 1: Add a local deferred helper in the session test**
+- [x] **Step 1: Add a local deferred helper in the session test**
 
 ```ts
 const deferred = <T,>() => {
@@ -122,7 +122,7 @@ initialize: vi.fn(),
 tldwClient: { initialize: (...args: unknown[]) => mocks.initialize(...args) }
 ```
 
-- [ ] **Step 2: Write failing pre-ack tests**
+- [x] **Step 2: Write failing pre-ack tests**
 
 Add separate tests for:
 
@@ -130,7 +130,7 @@ Add separate tests for:
 2. Deferred direct acknowledgement: cancel first, resolve `qi-direct-*` second, assert `submitQuickIngestBatch` is never called.
 3. Deferred setup/error continuation: cancel while setup is awaiting, then resume or reject it, assert no session starts and cancelled results remain terminal.
 
-- [ ] **Step 3: Run the three tests on the host and verify RED**
+- [x] **Step 3: Run the three tests on the host and verify RED**
 
 ```bash
 bunx vitest run src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx --maxWorkers=1 --no-file-parallelism -t "acknowledgement|setup"
@@ -138,13 +138,13 @@ bunx vitest run src/components/Common/QuickIngest/__tests__/QuickIngestWizardMod
 
 Expected: FAIL because `startRun` currently continues after cancellation and its catch path finalizes as failed.
 
-- [ ] **Step 4: Add cancellation checkpoints to startRun**
+- [x] **Step 4: Add cancellation checkpoints to startRun**
 
 Initialize cancellation intent once per keyed wizard-session mount. After each awaited setup boundary, return immediately when cancellation was requested. Immediately after a successful start acknowledgement, fence and cancel a returned extension session or return before direct submission. In `catch`, return without finalizing when cancellation already won.
 
 Do not write active tracking for a session acknowledged after cancellation.
 
-- [ ] **Step 5: Run the focused tests and full session file**
+- [x] **Step 5: Run the focused tests and full session file**
 
 ```bash
 bunx vitest run src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx --maxWorkers=1 --no-file-parallelism
@@ -152,29 +152,33 @@ bunx vitest run src/components/Common/QuickIngest/__tests__/QuickIngestWizardMod
 
 Expected: all tests PASS with no unhandled rejections or React update-depth warnings.
 
-### Task 3: Guard persisted direct-job reattachment
+### Task 3: Characterize persisted direct-job reattachment
 
-- [ ] **Step 1: Write a failing deferred reattachment test**
+- [x] **Step 1: Write deferred reattachment characterization tests**
 
 Return a deferred promise from `reattachQuickIngestSession`, cancel the refreshed direct session, then resolve the in-flight poll as `processing`. Assert cancelled results remain visible, processing is not restored, and advancing timers does not schedule another call. Add a separate late-`completed` case to prove terminal results cannot be overwritten.
 
-- [ ] **Step 2: Run the focused test on the host and verify RED**
+- [x] **Step 2: Run the focused tests on the host**
 
 ```bash
 bunx vitest run src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx --maxWorkers=1 --no-file-parallelism -t "late persisted reattach"
 ```
 
-Expected: FAIL because the current poll updates state and schedules another timer after cancellation.
+Observed before any poll implementation change: PASS. The existing effect-local
+cleanup flag already prevents both late state writes and another timer.
 
-- [ ] **Step 3: Guard the reattachment poll**
+- [x] **Step 3: Confirm no additional poll guard is needed**
 
-After `await reattachQuickIngestSession`, return when either the effect-local cleanup flag or `cancelRequestedRef.current` is true. Check the same intent immediately before scheduling another timer. The shared Cancel All handler clears any already-scheduled timer.
+The terminal session update reruns the persisted-reattach effect and invokes its
+cleanup, setting the existing local `cancelled` flag before the deferred poll
+continues. Keep the characterization tests and do not add redundant production
+state.
 
-- [ ] **Step 4: Run the focused test and full session file**
+- [x] **Step 4: Run the focused test and full session file**
 
 Expected: all tests PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/packages/ui/src/components/Common/QuickIngestWizardModal.tsx apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx backlog/tasks/task-12947\ -\ Fix-browser-extension-E2E-launch-and-validate-Quick-Ingest.md
@@ -185,7 +189,7 @@ git commit -m "test: cover quick ingest cancellation races"
 **Goal**: Validate real ingestion through the packaged browser extension before treating automated browser regressions as release evidence.
 **Success Criteria**: One headed installed-extension context ingests PDF, reachable URL, duplicate URL, exact YouTube Short, and duplicate YouTube; jobs leave queued state; exactly three unique media rows exist; no update-depth, page, or console errors occur.
 **Tests**: Host-side UAT against an isolated FastAPI process and Media DB.
-**Status**: Not Started
+**Status**: In Progress
 
 ### Task 4: Run the required UAT matrix
 

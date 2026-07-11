@@ -1,6 +1,6 @@
 import React from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { act, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 const mocks = vi.hoisted(() => ({
@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   submitQuickIngestBatch: vi.fn(),
   cancelQuickIngestSession: vi.fn(),
   reattachQuickIngestSession: vi.fn(),
+  initialize: vi.fn(),
   getQuickIngestAnalysisProviderWarning: vi.fn(),
   checkConnection: vi.fn(),
   navigate: vi.fn(),
@@ -169,7 +170,7 @@ vi.mock("@/services/tldw/quick-ingest-session-reattach", () => ({
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
-    initialize: vi.fn().mockResolvedValue(undefined),
+    initialize: (...args: unknown[]) => mocks.initialize(...args),
   },
 }))
 
@@ -348,6 +349,16 @@ const emitRuntimeMessage = (message: any) => {
   }
 }
 
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
+
 const SessionBackedQuickIngestModal = () => {
   const open = useQuickIngestSessionStore(
     (store) => store.session?.visibility === "visible"
@@ -367,6 +378,8 @@ describe("QuickIngestWizardModal session runtime", () => {
     mocks.submitQuickIngestBatch.mockReset()
     mocks.cancelQuickIngestSession.mockReset()
     mocks.reattachQuickIngestSession.mockReset()
+    mocks.initialize.mockReset()
+    mocks.initialize.mockResolvedValue(undefined)
     mocks.getQuickIngestAnalysisProviderWarning.mockReset()
     mocks.getQuickIngestAnalysisProviderWarning.mockReturnValue(null)
     mocks.checkConnection.mockReset()
@@ -928,6 +941,116 @@ describe("QuickIngestWizardModal session runtime", () => {
     await waitFor(() => {
       expect(screen.getByTestId("wizard-results")).toHaveTextContent("cancelled:1")
     })
+    expect(screen.getByTestId("wizard-result-queued-url-1")).toHaveTextContent(
+      "queued-url-1:cancelled"
+    )
+  })
+
+  it("cancels an extension session acknowledged after cancellation", async () => {
+    const user = userEvent.setup()
+    const startAck = deferred<any>()
+    useQuickIngestSessionStore.getState().createDraftSession()
+    mocks.startQuickIngestSession.mockReturnValue(startAck.promise)
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+
+    await user.click(screen.getByRole("button", { name: "Queue And Process" }))
+    await waitFor(() => {
+      expect(mocks.startQuickIngestSession).toHaveBeenCalledTimes(1)
+    })
+
+    await user.click(screen.getByRole("button", { name: "Cancel Processing" }))
+    startAck.resolve({ ok: true, sessionId: "qi-runtime-late-ack" })
+
+    await waitFor(() => {
+      expect(mocks.cancelQuickIngestSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: "qi-runtime-late-ack",
+          reason: "user_cancelled",
+        })
+      )
+    })
+    expect(mocks.submitQuickIngestBatch).not.toHaveBeenCalled()
+    expect(screen.getByTestId("wizard-results")).toHaveTextContent("cancelled:1")
+  })
+
+  it("does not submit a direct session acknowledged after cancellation", async () => {
+    const user = userEvent.setup()
+    const startAck = deferred<any>()
+    useQuickIngestSessionStore.getState().createDraftSession()
+    mocks.startQuickIngestSession.mockReturnValue(startAck.promise)
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+
+    await user.click(screen.getByRole("button", { name: "Queue And Process" }))
+    await waitFor(() => {
+      expect(mocks.startQuickIngestSession).toHaveBeenCalledTimes(1)
+    })
+
+    await user.click(screen.getByRole("button", { name: "Cancel Processing" }))
+    startAck.resolve({ ok: true, sessionId: "qi-direct-late-ack" })
+
+    await act(async () => {
+      await startAck.promise
+      await Promise.resolve()
+    })
+
+    expect(mocks.submitQuickIngestBatch).not.toHaveBeenCalled()
+    expect(screen.getByTestId("wizard-results")).toHaveTextContent("cancelled:1")
+  })
+
+  it("does not start a session when setup resumes after cancellation", async () => {
+    const user = userEvent.setup()
+    const setup = deferred<void>()
+    useQuickIngestSessionStore.getState().createDraftSession()
+    mocks.initialize.mockReturnValue(setup.promise)
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+
+    await user.click(screen.getByRole("button", { name: "Queue And Process" }))
+    await waitFor(() => {
+      expect(mocks.initialize).toHaveBeenCalledTimes(1)
+    })
+
+    await user.click(screen.getByRole("button", { name: "Cancel Processing" }))
+    setup.resolve()
+
+    await act(async () => {
+      await setup.promise
+      await Promise.resolve()
+    })
+
+    expect(mocks.startQuickIngestSession).not.toHaveBeenCalled()
+    expect(mocks.submitQuickIngestBatch).not.toHaveBeenCalled()
+    expect(screen.getByTestId("wizard-results")).toHaveTextContent("cancelled:1")
+  })
+
+  it("keeps cancellation terminal when start acknowledgement rejects", async () => {
+    const user = userEvent.setup()
+    const startAck = deferred<any>()
+    useQuickIngestSessionStore.getState().createDraftSession()
+    mocks.startQuickIngestSession.mockReturnValue(startAck.promise)
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+
+    await user.click(screen.getByRole("button", { name: "Queue And Process" }))
+    await waitFor(() => {
+      expect(mocks.startQuickIngestSession).toHaveBeenCalledTimes(1)
+    })
+
+    await user.click(screen.getByRole("button", { name: "Cancel Processing" }))
+    startAck.reject(new Error("late start failure"))
+
+    await act(async () => {
+      try {
+        await startAck.promise
+      } catch {
+        // startRun owns the rejection; this await only flushes the deferred promise.
+      }
+      await Promise.resolve()
+    })
+
+    expect(screen.getByTestId("wizard-results")).toHaveTextContent("cancelled:1")
     expect(screen.getByTestId("wizard-result-queued-url-1")).toHaveTextContent(
       "queued-url-1:cancelled"
     )
@@ -1499,6 +1622,130 @@ describe("QuickIngestWizardModal session runtime", () => {
         })
       )
     })
+  })
+
+  it("ignores late persisted reattach processing after cancellation", async () => {
+    vi.useFakeTimers()
+    const reattach = deferred<any>()
+    mocks.reattachQuickIngestSession.mockReturnValue(reattach.promise)
+
+    useQuickIngestSessionStore.getState().upsertSession({
+      ...createEmptyQuickIngestSession(),
+      lifecycle: "processing",
+      currentStep: 4,
+      queueItems: [
+        {
+          id: "queued-url-1",
+          kind: "url",
+          url: "https://example.com/article",
+          detectedType: "web",
+          icon: "Globe",
+          fileSize: 0,
+          validation: { valid: true },
+        } as any,
+      ],
+      processingState: {
+        status: "running",
+        perItemProgress: [],
+        elapsed: 3,
+        estimatedRemaining: 20,
+      },
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "qi-direct-late-processing",
+        batchIds: ["batch-77"],
+        jobIds: [77],
+        itemIds: ["queued-url-1"],
+        startedAt: Date.now(),
+      } as any,
+    })
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(mocks.reattachQuickIngestSession).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel Processing" }))
+    reattach.resolve({
+      lifecycle: "processing",
+      jobs: [{ jobId: 77, status: "processing" }],
+      errorMessage: null,
+    })
+    await act(async () => {
+      await reattach.promise
+      await Promise.resolve()
+    })
+
+    expect(screen.getByTestId("wizard-results")).toHaveTextContent("cancelled:1")
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000)
+    })
+    expect(mocks.reattachQuickIngestSession).toHaveBeenCalledTimes(1)
+  })
+
+  it("ignores late persisted reattach completion after cancellation", async () => {
+    const user = userEvent.setup()
+    const reattach = deferred<any>()
+    mocks.reattachQuickIngestSession.mockReturnValue(reattach.promise)
+
+    useQuickIngestSessionStore.getState().upsertSession({
+      ...createEmptyQuickIngestSession(),
+      lifecycle: "processing",
+      currentStep: 4,
+      queueItems: [
+        {
+          id: "queued-url-1",
+          kind: "url",
+          url: "https://example.com/article",
+          detectedType: "web",
+          icon: "Globe",
+          fileSize: 0,
+          validation: { valid: true },
+        } as any,
+      ],
+      processingState: {
+        status: "running",
+        perItemProgress: [],
+        elapsed: 3,
+        estimatedRemaining: 20,
+      },
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "qi-direct-late-completion",
+        batchIds: ["batch-77"],
+        jobIds: [77],
+        itemIds: ["queued-url-1"],
+        startedAt: Date.now(),
+      } as any,
+    })
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    await waitFor(() => {
+      expect(mocks.reattachQuickIngestSession).toHaveBeenCalledTimes(1)
+    })
+
+    await user.click(screen.getByRole("button", { name: "Cancel Processing" }))
+    reattach.resolve({
+      lifecycle: "completed",
+      jobs: [
+        {
+          jobId: 77,
+          status: "completed",
+          result: { media_id: "media-77", title: "Late completion" },
+        },
+      ],
+      errorMessage: null,
+    })
+    await act(async () => {
+      await reattach.promise
+      await Promise.resolve()
+    })
+
+    expect(screen.getByTestId("wizard-results")).toHaveTextContent("cancelled:1")
+    expect(screen.getByTestId("wizard-result-queued-url-1")).toHaveTextContent(
+      "queued-url-1:cancelled"
+    )
   })
 
   it("reruns persisted direct-session reattach when item mapping metadata arrives later", async () => {

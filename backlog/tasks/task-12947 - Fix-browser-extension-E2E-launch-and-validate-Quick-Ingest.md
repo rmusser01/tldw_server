@@ -4,7 +4,7 @@ title: Fix browser extension E2E launch and validate Quick Ingest
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-11 17:58'
+updated_date: '2026-07-11 18:02'
 labels: []
 dependencies: []
 documentation:
@@ -52,6 +52,8 @@ Execute Docs/superpowers/plans/2026-07-11-extension-quick-ingest-cancellation.md
 2026-07-11 plan review: cancellation intent must be initialized once per keyed wizard-session mount and never reset inside startRun, otherwise a delayed start effect could erase an already-recorded cancellation. The implementation plan now includes idempotent cancellation and distinct late-processing/late-completed reattachment cases.
 
 2026-07-11 Stage 1 TDD evidence (host): focused Vitest RED had 2/2 failures. Immediate completion produced complete:1 instead of cancelled:1; immediate progress preserved outcome processed under cancelled status. After adding the modal-owned synchronous idempotent fence and rejecting all fenced runtime messages, the same 2 tests passed (25 unrelated tests skipped by the name filter). No sleeps were used.
+
+2026-07-11 Stage 2 TDD evidence (host): four deferred tests failed before the async guards: late extension ack was not cancelled, late direct ack invoked submitQuickIngestBatch, resumed setup started a session, and late start rejection changed cancelled status to error. After adding cancellation checks after awaited setup/start boundaries and in catch, the focused selection passed 5/5. Two persisted-reattach characterization tests passed before any poll code change, proving the existing effect cleanup already blocks late processing/completed snapshots; no redundant poll guard was added. Full session file: 33/33 passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

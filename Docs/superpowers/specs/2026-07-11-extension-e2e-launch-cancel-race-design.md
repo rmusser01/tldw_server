@@ -23,11 +23,6 @@ there is no session ID to fence or cancel. A later extension acknowledgement can
 leave background work running, and a later direct acknowledgement can still
 submit the backend batch.
 
-Persisted direct-job reattachment has the same terminal-state risk. Its polling
-effect can resolve after cancellation and write running or completed state over
-the cancelled results unless the poll also observes the run-level cancellation
-intent.
-
 ## Goals
 
 - Record a repeatable extension launch command and retain current helper
@@ -35,8 +30,7 @@ intent.
 - Make user cancellation terminal before any asynchronous cancellation work.
 - Prevent extension work or direct submission from continuing when cancellation
   precedes the session acknowledgement.
-- Prevent payload preparation, error handling, or persisted-job reattachment
-  from reviving a cancelled run.
+- Prevent payload preparation or error handling from reviving a cancelled run.
 - Preserve current background-runtime cancellation behavior and direct-job
   cancellation metadata.
 - Prove the product flow through the installed extension with PDF, web-link,
@@ -82,10 +76,11 @@ returns. For a direct session, it returns without calling
 `submitQuickIngestBatch`. The error path also returns without replacing an
 already-cancelled outcome.
 
-Persisted-job reattachment will check the same intent after every awaited poll
-and before scheduling another poll. Cancellation therefore stops both state
-writes and future polling even when an in-flight request cannot itself be
-aborted.
+Persisted-job reattachment retains its existing effect-local cleanup fence.
+Deferred `processing` and `completed` characterization tests prove that a
+terminal session update already runs the effect cleanup before an in-flight poll
+can write state or schedule another poll, so no additional production guard is
+needed.
 
 Runtime completion and failure messages continue to pass through the existing
 message handler. Once fenced, every subsequent message for that session,
@@ -103,8 +98,8 @@ state update runs first.
 4. Any later message for a fenced session is ignored.
 5. If the start acknowledgement arrives later, `startRun` fences and cancels
    extension work or suppresses direct batch submission.
-6. If payload setup or persisted reattachment resumes later, it observes the
-   cancellation intent and returns without updating state.
+6. If payload setup resumes later, it observes the cancellation intent and
+   returns without updating state.
 7. The results step remains cancelled even if a stale completion arrives
    immediately.
 
@@ -120,8 +115,9 @@ state update runs first.
 - A deferred direct acknowledgement test proves cancellation prevents
   `submitQuickIngestBatch` from being called.
 - A cancelled-session test proves later progress cannot mutate terminal state.
-- A deferred persisted-reattachment poll test proves a late running or completed
-  snapshot cannot replace cancelled results or schedule another poll.
+- Deferred persisted-reattachment characterization tests prove the existing
+  cleanup fence prevents late running or completed snapshots from replacing
+  cancelled results or scheduling another poll.
 - A cancellation-during-setup test proves no session starts and no later setup
   failure replaces the cancelled outcome.
 

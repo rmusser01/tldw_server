@@ -1441,6 +1441,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       } catch {
         // Best effort; background proxy handles auth for direct runtimes.
       }
+      if (cancelRequestedRef.current) return
 
       const requestPayload = await buildQuickIngestPayload(
         validQueueItems,
@@ -1453,6 +1454,8 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
           typeDefaults: presetConfig.typeDefaults,
         }
       )
+      if (cancelRequestedRef.current) return
+
       const analysisProviderWarning = getQuickIngestAnalysisProviderWarning({
         common: requestPayload.common,
         advancedValues: requestPayload.advancedValues,
@@ -1476,6 +1479,21 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       markRunActive()
 
       const startAck = await startQuickIngestSession(requestPayload)
+      if (cancelRequestedRef.current) {
+        const cancelledSessionId = String(startAck?.sessionId || "").trim()
+        if (startAck?.ok && cancelledSessionId) {
+          cancelledSessionIdsRef.current.add(cancelledSessionId)
+          if (!cancelledSessionId.startsWith("qi-direct-")) {
+            void cancelQuickIngestSession({
+              sessionId: cancelledSessionId,
+              reason: "user_cancelled",
+            }).catch(() => {
+              // Cancellation is best effort after the UI has become terminal.
+            })
+          }
+        }
+        return
+      }
       if (!startAck?.ok || !startAck?.sessionId) {
         finalizeFailure(
           startAck?.error ||
@@ -1538,6 +1556,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
 
       finalizeRun("complete", normalizedResults)
     } catch (error) {
+      if (cancelRequestedRef.current) return
       finalizeFailure(
         error instanceof Error ? error.message : "Quick ingest failed.",
         "failed"
