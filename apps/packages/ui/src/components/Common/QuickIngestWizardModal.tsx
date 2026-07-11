@@ -861,7 +861,6 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     state,
     minimize,
     restore,
-    cancelProcessing,
     skipToProcessing,
     updateItemProgress,
     updateProcessingState,
@@ -878,6 +877,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   const hasStartedRunRef = useRef(false)
   const runStartedAtRef = useRef<number | null>(null)
   const cancelledSessionIdsRef = useRef<Set<string>>(new Set())
+  const cancelRequestedRef = useRef(false)
   const validQueueItems = useMemo(
     () =>
       queueItems.filter(
@@ -1318,6 +1318,33 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     [finalizeRun, trackedQueueItems, validQueueItems]
   )
 
+  const handleCancelAll = useCallback(() => {
+    if (cancelRequestedRef.current) return
+    cancelRequestedRef.current = true
+
+    if (persistedReattachTimerRef.current != null) {
+      window.clearTimeout(persistedReattachTimerRef.current)
+      persistedReattachTimerRef.current = null
+    }
+
+    const persistedTracking = persistedTrackingRef.current
+    const sessionId = String(
+      activeSessionIdRef.current || persistedTracking?.sessionId || ""
+    ).trim()
+    if (sessionId) {
+      cancelledSessionIdsRef.current.add(sessionId)
+      void cancelQuickIngestSession({
+        sessionId,
+        batchIds: resolveTrackingBatchIds(persistedTracking),
+        reason: "user_cancelled",
+      }).catch(() => {
+        // Cancellation is best effort after the UI has become terminal.
+      })
+    }
+
+    finalizeFailure("Cancelled by user.", "cancelled")
+  }, [finalizeFailure])
+
   const markRunActive = useCallback(() => {
     runStartedAtRef.current = Date.now()
     for (const item of validQueueItems) {
@@ -1339,10 +1366,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       if (!sessionId || sessionId !== String(activeSessionIdRef.current || "").trim()) {
         return
       }
-      if (
-        cancelledSessionIdsRef.current.has(sessionId) &&
-        message.type !== "tldw:quick-ingest/progress"
-      ) {
+      if (cancelledSessionIdsRef.current.has(sessionId)) {
         return
       }
 
@@ -1549,24 +1573,6 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     void startRun()
   }, [currentStep, processingState.status, session.lifecycle, session.tracking, startRun])
 
-  useEffect(() => {
-    if (processingState.status !== "cancelled") return
-    const persistedTracking = persistedTrackingRef.current
-    const sessionId = String(
-      activeSessionIdRef.current || persistedTracking?.sessionId || ""
-    ).trim()
-    if (!sessionId || cancelledSessionIdsRef.current.has(sessionId)) return
-    cancelledSessionIdsRef.current.add(sessionId)
-    void cancelQuickIngestSession({
-      sessionId,
-      batchIds: resolveTrackingBatchIds(persistedTracking),
-      reason: "user_cancelled",
-    }).catch(() => {
-      // best effort cancellation
-    })
-    finalizeFailure("Cancelled by user.", "cancelled")
-  }, [finalizeFailure, processingState.status])
-
   // Modal title with item count
   const modalTitle = useMemo(() => {
     const base = qi("wizard.title", "Quick Ingest")
@@ -1598,7 +1604,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
               danger
               onClick={() => {
                 Modal.destroyAll()
-                cancelProcessing()
+                handleCancelAll()
                 onClose()
               }}
             >
@@ -1618,7 +1624,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     } else {
       onClose()
     }
-  }, [isProcessingActive, qi, minimize, cancelProcessing, onClose])
+  }, [handleCancelAll, isProcessingActive, qi, minimize, onClose])
 
   // Quick-process callback for AddContentStep (skip to processing with defaults)
   const handleQuickProcess = useCallback(() => {
@@ -1717,7 +1723,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
           />
         )
       case 4:
-        return <ProcessingStep />
+        return <ProcessingStep onCancelAll={handleCancelAll} />
       case 5:
         return (
           <WizardResultsStep
@@ -1735,6 +1741,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   }, [
     connectionRecoveryMessage,
     currentStep,
+    handleCancelAll,
     handleOpenMedia,
     handleOpenCollection,
     handleOpenWorkspace,

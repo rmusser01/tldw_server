@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
   runtimeListeners: [] as Array<(message: any) => void>,
   modalProps: [] as any[],
+  afterCancelProcessing: null as null | (() => void),
 }))
 
 vi.mock("react-i18next", () => ({
@@ -270,12 +271,23 @@ vi.mock("@/components/Common/QuickIngest/ProcessingStep", async () => {
     typeof import("@/components/Common/QuickIngest/IngestWizardContext")
   >("@/components/Common/QuickIngest/IngestWizardContext")
   return {
-    ProcessingStep: () => {
+    ProcessingStep: ({ onCancelAll }: { onCancelAll?: () => void }) => {
       const { state, cancelProcessing } = actual.useIngestWizard()
       return (
         <div data-testid="wizard-processing">
           {state.processingState.status}:{state.processingState.perItemProgress.length}
-          <button onClick={cancelProcessing}>Cancel Processing</button>
+          <button
+            onClick={() => {
+              if (onCancelAll) {
+                onCancelAll()
+              } else {
+                cancelProcessing()
+              }
+              mocks.afterCancelProcessing?.()
+            }}
+          >
+            Cancel Processing
+          </button>
         </div>
       )
     },
@@ -360,6 +372,7 @@ describe("QuickIngestWizardModal session runtime", () => {
     mocks.checkConnection.mockReset()
     mocks.navigate.mockReset()
     mocks.modalProps.splice(0, mocks.modalProps.length)
+    mocks.afterCancelProcessing = null
     mocks.cancelQuickIngestSession.mockResolvedValue({ ok: true })
     useQuickIngestSessionStore.setState({
       session: null,
@@ -838,6 +851,86 @@ describe("QuickIngestWizardModal session runtime", () => {
     await waitFor(() => {
       expect(screen.getByTestId("wizard-results")).toHaveTextContent("complete:1")
     })
+  })
+
+  it("keeps cancellation terminal when runtime completion arrives in the cancel click", async () => {
+    const user = userEvent.setup()
+    useQuickIngestSessionStore.getState().createDraftSession()
+    mocks.startQuickIngestSession.mockResolvedValue({
+      ok: true,
+      sessionId: "qi-runtime-cancel-completion-race",
+    })
+    mocks.afterCancelProcessing = () => {
+      emitRuntimeMessage({
+        type: "tldw:quick-ingest/completed",
+        payload: {
+          sessionId: "qi-runtime-cancel-completion-race",
+          results: [
+            {
+              id: "queued-url-1",
+              status: "ok",
+              url: "https://example.com/article",
+              type: "html",
+            },
+          ],
+        },
+      })
+    }
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+
+    await user.click(screen.getByRole("button", { name: "Queue And Process" }))
+    await waitFor(() => {
+      expect(mocks.startQuickIngestSession).toHaveBeenCalledTimes(1)
+    })
+
+    await user.click(screen.getByRole("button", { name: "Cancel Processing" }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId("wizard-results")).toHaveTextContent("cancelled:1")
+    })
+    expect(screen.getByTestId("wizard-result-queued-url-1")).toHaveTextContent(
+      "queued-url-1:cancelled"
+    )
+  })
+
+  it("ignores runtime progress emitted in the cancel click", async () => {
+    const user = userEvent.setup()
+    useQuickIngestSessionStore.getState().createDraftSession()
+    mocks.startQuickIngestSession.mockResolvedValue({
+      ok: true,
+      sessionId: "qi-runtime-cancel-progress-race",
+    })
+    mocks.afterCancelProcessing = () => {
+      emitRuntimeMessage({
+        type: "tldw:quick-ingest/progress",
+        payload: {
+          sessionId: "qi-runtime-cancel-progress-race",
+          result: {
+            id: "queued-url-1",
+            status: "ok",
+            url: "https://example.com/article",
+            type: "html",
+          },
+        },
+      })
+    }
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+
+    await user.click(screen.getByRole("button", { name: "Queue And Process" }))
+    await waitFor(() => {
+      expect(mocks.startQuickIngestSession).toHaveBeenCalledTimes(1)
+    })
+
+    await user.click(screen.getByRole("button", { name: "Cancel Processing" }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId("wizard-results")).toHaveTextContent("cancelled:1")
+    })
+    expect(screen.getByTestId("wizard-result-queued-url-1")).toHaveTextContent(
+      "queued-url-1:cancelled"
+    )
   })
 
   it("uses runtime completion events for extension-backed sessions instead of calling the broken SSE path", async () => {

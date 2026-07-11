@@ -26,11 +26,11 @@
 **Goal**: Prove Cancel All fences the run synchronously and rejects late completion and progress.
 **Success Criteria**: The new tests fail as success/progress before production changes, then pass with cancelled results after the minimal callback/fence implementation.
 **Tests**: Focused Vitest tests in `QuickIngestWizardModal.session.test.tsx`.
-**Status**: Not Started
+**Status**: Complete
 
 ### Task 1: Add the synchronous cancellation fence
 
-- [ ] **Step 1: Change the ProcessingStep test double to exercise the callback contract**
+- [x] **Step 1: Change the ProcessingStep test double to exercise the callback contract**
 
 Update the existing mock so the button calls the supplied callback and only falls back to context cancellation when no callback is provided:
 
@@ -46,11 +46,11 @@ ProcessingStep: ({ onCancelAll }: { onCancelAll?: () => void }) => {
 }
 ```
 
-- [ ] **Step 2: Write failing late-completion and late-progress tests**
+- [x] **Step 2: Write failing late-completion and late-progress tests**
 
 Start an extension session, click Cancel Processing, immediately emit `completed`, then emit `progress`. Assert the wizard remains `cancelled`, unresolved items have `outcome: "cancelled"`, and no successful result is merged.
 
-- [ ] **Step 3: Run the focused tests on the host and verify RED**
+- [x] **Step 3: Run the focused tests on the host and verify RED**
 
 Run from `apps/packages/ui` outside the sandbox:
 
@@ -60,7 +60,7 @@ bunx vitest run src/components/Common/QuickIngest/__tests__/QuickIngestWizardMod
 
 Expected: FAIL because the current passive effect permits an immediate completion and explicitly accepts progress for cancelled sessions.
 
-- [ ] **Step 4: Implement the minimal callback and synchronous fence**
+- [x] **Step 4: Implement the minimal callback and synchronous fence**
 
 Add optional props to the real component:
 
@@ -80,11 +80,11 @@ In `WizardModalContent`, add `cancelRequestedRef`, create one idempotent `handle
 
 Change the runtime guard to return for every message whose session ID is fenced, including progress.
 
-- [ ] **Step 5: Run the focused tests and verify GREEN**
+- [x] **Step 5: Run the focused tests and verify GREEN**
 
 Run the command from Step 3. Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/packages/ui/src/components/Common/QuickIngest/ProcessingStep.tsx apps/packages/ui/src/components/Common/QuickIngestWizardModal.tsx apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx backlog/tasks/task-12947\ -\ Fix-browser-extension-E2E-launch-and-validate-Quick-Ingest.md
@@ -95,7 +95,7 @@ git commit -m "fix: make quick ingest cancellation terminal"
 **Goal**: Prevent any awaited continuation from reviving cancellation or starting additional work.
 **Success Criteria**: Deferred extension/direct acknowledgements, setup, errors, and persisted polls cannot mutate cancelled state; direct submission never begins after pre-ack cancellation.
 **Tests**: Focused deferred-promise Vitest tests.
-**Status**: Not Started
+**Status**: In Progress
 
 ### Task 2: Guard setup and start acknowledgement
 
