@@ -133,7 +133,7 @@ git commit -m "fix: retry transient quick ingest job reads"
 - Modify: `apps/packages/ui/src/services/__tests__/quick-ingest-batch.test.ts`
 - Modify: `apps/packages/ui/src/services/tldw/quick-ingest-batch.ts`
 
-- [ ] **Step 1: Write failing backend boundary tests**
+- [x] **Step 1: Write failing backend boundary tests**
 
 Add coverage for:
 
@@ -142,28 +142,28 @@ Add coverage for:
 3. A batch containing one exact duplicate and one unrelated failure returns errors and does not collapse to all-duplicate status.
 4. A URL containing `?token=secret-value` never writes `secret-value` to captured logs.
 
-- [ ] **Step 2: Run the backend test outside the sandbox and verify RED**
+- [x] **Step 2: Run the backend test outside the sandbox and verify RED**
 
 Run: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Services/test_enhanced_webscraping_persist.py -q`
 
 Expected: FAIL because a repository duplicate ID is counted as stored and broad substring matching classifies unrelated failures as duplicates.
 
-- [ ] **Step 3: Implement exact duplicate classification**
+- [x] **Step 3: Implement exact duplicate classification**
 
 Treat extraction output as duplicate only for `is_duplicate is True` or `error_code == "duplicate_content"`. After `add_media_with_keywords`, inspect its repository-owned message and classify only the two exact overwrite-disabled forms as duplicate; do not append that returned existing ID to `media_ids`. Preserve canonicalization, overwrite, and insert/update success behavior. Use `redact_url_for_log` for every touched article URL log.
 
-- [ ] **Step 4: Write the failing frontend terminal-status helper test**
+- [x] **Step 4: Write the failing frontend terminal-status helper test**
 
 Extend batch tests to prove duplicate wins over completed, error wins over completed, and success remains completed for conference collection patches.
 
-- [ ] **Step 5: Replace the repeated ternary with one local helper**
+- [x] **Step 5: Replace the repeated ternary with one local helper**
 
 ```ts
 const terminalConferenceStatus = (skipped: boolean, error?: string) =>
   skipped ? "skipped_existing" : error ? "failed" : "completed"
 ```
 
-- [ ] **Step 6: Run backend and frontend focused tests outside the sandbox**
+- [x] **Step 6: Run backend and frontend focused tests outside the sandbox**
 
 Run the Step 2 command and:
 
@@ -171,7 +171,7 @@ Run the Step 2 command and:
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit duplicate and logging corrections**
+- [x] **Step 7: Commit duplicate and logging corrections**
 
 ```bash
 git add tldw_Server_API/app/services/enhanced_web_scraping_service.py tldw_Server_API/tests/Services/test_enhanced_webscraping_persist.py apps/packages/ui/src/services/tldw/quick-ingest-batch.ts apps/packages/ui/src/services/__tests__/quick-ingest-batch.test.ts

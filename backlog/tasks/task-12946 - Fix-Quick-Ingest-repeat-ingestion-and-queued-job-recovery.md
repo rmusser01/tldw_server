@@ -4,7 +4,7 @@ title: Fix Quick Ingest repeat ingestion and queued job recovery
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-11 07:29'
+updated_date: '2026-07-11 07:53'
 labels: []
 dependencies: []
 documentation:
@@ -51,6 +51,8 @@ Draft PR: https://github.com/rmusser01/tldw_server/pull/2709
 Task 1 complete at 7be983885e: Webpack watch ignores now preserve valid existing semantics in schema-valid shapes and append absolute normalized backend runtime roots. Outside-sandbox focused Vitest passed 7/7; spec and quality reviews approved.
 
 Task 2 complete at 853f6a5a77: restored direct-job reads retry status-less/network/status-0, 408, 429, and 5xx failures up to three attempts while permanent/malformed responses interrupt immediately. Outside-sandbox focused Vitest passed 17/17 and adjacent session/store suites passed 45/45; spec and quality reviews approved.
+
+Task 3 complete at 02da73990a: persistence uses structured extractor signals and exact repository messages, repeated real repository writes classify as skipped duplicates, null-ID/storage failures are accounted, touched URL/exception logs are sanitized, and frontend terminal status uses one typed helper with duplicate precedence. Outside-sandbox backend pytest passed 15/15, frontend Vitest 39/39, Bandit 0 findings; reviews approved.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
