@@ -37,19 +37,28 @@ const addUrlToQuickIngest = async (dialog: Locator, url: string) => {
 }
 
 const startQueuedQuickIngest = async (dialog: Locator) => {
-  const useDefaultsButton = dialog
-    .getByRole('button', { name: /use defaults & process/i })
-    .first()
-  if (await useDefaultsButton.isVisible({ timeout: 3000 }).catch(() => false)) {
-    await useDefaultsButton.click()
-    return
-  }
-
   const configureButton = dialog
     .getByRole('button', { name: /configure \d+ items/i })
     .first()
   await expect(configureButton).toBeVisible()
   await configureButton.click()
+
+  const analysisSwitch = dialog
+    .getByRole('switch', { name: /^Ingestion options\s*[–-]\s*analysis$/i })
+    .first()
+  await expect(analysisSwitch).toBeVisible()
+  if ((await analysisSwitch.getAttribute('aria-checked')) === 'true') {
+    await analysisSwitch.click()
+    await expect(analysisSwitch).toHaveAttribute('aria-checked', 'false')
+  }
+  const chunkingSwitch = dialog
+    .getByRole('switch', { name: /^Ingestion options\s*[–-]\s*chunking$/i })
+    .first()
+  await expect(chunkingSwitch).toBeVisible()
+  if ((await chunkingSwitch.getAttribute('aria-checked')) === 'true') {
+    await chunkingSwitch.click()
+    await expect(chunkingSwitch).toHaveAttribute('aria-checked', 'false')
+  }
 
   const nextButton = dialog.getByRole('button', { name: /^next$/i }).first()
   await expect(nextButton).toBeVisible()

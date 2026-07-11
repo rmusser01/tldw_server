@@ -146,6 +146,7 @@ export const reattachQuickIngestSession = async (
         method: "GET",
         timeoutMs: 10_000,
         returnResponse: true,
+        preferDirect: true,
       })
 
       if (!response?.ok || !normalizeJobStatus(response.data?.status)) {

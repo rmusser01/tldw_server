@@ -37,6 +37,14 @@ describe("reattachQuickIngestSession", () => {
         status: "processing",
       }),
     ])
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/media/ingest/jobs/77",
+        method: "GET",
+        returnResponse: true,
+        preferDirect: true,
+      })
+    )
   })
 
   it("marks a persisted processing session as interrupted when reattachment cannot prove live progress", async () => {

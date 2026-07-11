@@ -208,34 +208,45 @@ describeLive('Live server UX workflows (no mocks)', () => {
         timeout: 20_000
       })
 
-      const useDefaultsButton = dialog
-        .getByRole('button', { name: /use defaults/i })
+      const configureButton = dialog
+        .getByRole('button', { name: /configure \d+ items/i })
         .first()
-      if (await useDefaultsButton.isVisible({ timeout: 3_000 }).catch(() => false)) {
-        await expect(useDefaultsButton).toBeEnabled({ timeout: 20_000 })
-        await useDefaultsButton.click()
-      } else {
-        const configureButton = dialog
-          .getByRole('button', { name: /configure \d+ items/i })
-          .first()
-        if (await configureButton.isVisible({ timeout: 5_000 }).catch(() => false)) {
-          await expect(configureButton).toBeEnabled({ timeout: 20_000 })
-          await configureButton.click()
-        }
-
-        const nextButton = dialog.getByRole('button', { name: /^next$/i }).first()
-        if (await nextButton.isVisible({ timeout: 5_000 }).catch(() => false)) {
-          await expect(nextButton).toBeEnabled({ timeout: 20_000 })
-          await nextButton.click()
-          await expect(dialog.getByText(/ready to process/i)).toBeVisible({
-            timeout: 20_000
-          })
-        }
-
-        const runButton = dialog.getByTestId('quick-ingest-run').first()
-        await expect(runButton).toBeEnabled({ timeout: 20_000 })
-        await runButton.click()
+      if (await configureButton.isVisible({ timeout: 5_000 }).catch(() => false)) {
+        await expect(configureButton).toBeEnabled({ timeout: 20_000 })
+        await configureButton.click()
       }
+
+      const analysisSwitch = dialog
+        .getByRole('switch', { name: /^Ingestion options\s*[–-]\s*analysis$/i })
+        .first()
+      if (await analysisSwitch.isVisible({ timeout: 5_000 }).catch(() => false)) {
+        if ((await analysisSwitch.getAttribute('aria-checked')) === 'true') {
+          await analysisSwitch.click()
+          await expect(analysisSwitch).toHaveAttribute('aria-checked', 'false')
+        }
+      }
+      const chunkingSwitch = dialog
+        .getByRole('switch', { name: /^Ingestion options\s*[–-]\s*chunking$/i })
+        .first()
+      if (await chunkingSwitch.isVisible({ timeout: 5_000 }).catch(() => false)) {
+        if ((await chunkingSwitch.getAttribute('aria-checked')) === 'true') {
+          await chunkingSwitch.click()
+          await expect(chunkingSwitch).toHaveAttribute('aria-checked', 'false')
+        }
+      }
+
+      const nextButton = dialog.getByRole('button', { name: /^next$/i }).first()
+      if (await nextButton.isVisible({ timeout: 5_000 }).catch(() => false)) {
+        await expect(nextButton).toBeEnabled({ timeout: 20_000 })
+        await nextButton.click()
+        await expect(dialog.getByText(/ready to process/i)).toBeVisible({
+          timeout: 20_000
+        })
+      }
+
+      const runButton = dialog.getByTestId('quick-ingest-run').first()
+      await expect(runButton).toBeEnabled({ timeout: 20_000 })
+      await runButton.click()
 
       const resultsStep = dialog.getByTestId('wizard-results-step')
       const completedRegion = dialog.getByRole('region', { name: /completed items/i }).first()

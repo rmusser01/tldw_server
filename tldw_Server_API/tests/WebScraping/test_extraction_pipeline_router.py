@@ -38,6 +38,35 @@ def test_pipeline_trace_default_order(monkeypatch):
     assert [entry["strategy"] for entry in result["extraction_trace"]] == expected[:stop_at]
 
 
+def test_default_pipeline_does_not_call_llm_provider(monkeypatch):
+    from tldw_Server_API.app.core.Chat import chat_service
+
+    llm_calls = []
+
+    def _fake_llm_call(**kwargs):
+        llm_calls.append(kwargs)
+        return {"choices": [{"message": {"content": ""}}], "usage": {}}
+
+    monkeypatch.setattr(chat_service, "perform_chat_api_call", _fake_llm_call)
+
+    result = extract_article_with_pipeline(
+        """
+        <html>
+          <body>
+            <p>Plain article content without structured metadata.</p>
+            <p>Another paragraph for fallback extraction.</p>
+          </body>
+        </html>
+        """,
+        "https://example.com/plain",
+    )
+
+    assert result["extraction_successful"] is True
+    assert llm_calls == []
+    assert "llm" not in result["extraction_strategy_order"]
+    assert all(entry["strategy"] != "llm" for entry in result["extraction_trace"])
+
+
 def test_pipeline_strategy_order_override_from_router():
     rules = ScraperRouter.validate_rules(
         {

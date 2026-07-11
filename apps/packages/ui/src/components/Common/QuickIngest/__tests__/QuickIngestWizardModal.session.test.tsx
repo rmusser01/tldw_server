@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   checkConnection: vi.fn(),
   navigate: vi.fn(),
   runtimeListeners: [] as Array<(message: any) => void>,
+  modalProps: [] as any[],
 }))
 
 vi.mock("react-i18next", () => ({
@@ -33,8 +34,10 @@ vi.mock("react-i18next", () => ({
 
 vi.mock("antd", () => ({
   Modal: Object.assign(
-    ({ children, open, onCancel, className, title }: any) =>
-      open ? (
+    (props: any) => {
+      mocks.modalProps.push(props)
+      const { children, open, onCancel, className, title } = props
+      return open ? (
         <div role="dialog" className={className}>
           <div className="ant-modal-content">
             <h2>{title}</h2>
@@ -42,7 +45,8 @@ vi.mock("antd", () => ({
             {children}
           </div>
         </div>
-      ) : null,
+      ) : null
+    },
     {
       confirm: vi.fn(),
       destroyAll: vi.fn(),
@@ -353,6 +357,7 @@ describe("QuickIngestWizardModal session runtime", () => {
     mocks.getQuickIngestAnalysisProviderWarning.mockReturnValue(null)
     mocks.checkConnection.mockReset()
     mocks.navigate.mockReset()
+    mocks.modalProps.splice(0, mocks.modalProps.length)
     mocks.cancelQuickIngestSession.mockResolvedValue({ ok: true })
     useQuickIngestSessionStore.setState({
       session: null,
@@ -421,6 +426,42 @@ describe("QuickIngestWizardModal session runtime", () => {
     await waitFor(() => {
       expect(screen.getByTestId("wizard-results")).toHaveTextContent("complete:1")
     })
+  })
+
+  it("keeps AntD modal portal props stable while results land", async () => {
+    const user = userEvent.setup()
+    useQuickIngestSessionStore.getState().createDraftSession()
+    mocks.startQuickIngestSession.mockResolvedValue({
+      ok: true,
+      sessionId: "qi-direct-stable-modal",
+    })
+    mocks.submitQuickIngestBatch.mockResolvedValue({
+      ok: true,
+      results: [
+        {
+          id: "queued-url-1",
+          status: "ok",
+          outcome: "skipped",
+          url: "https://example.com/article",
+          type: "html",
+        },
+      ],
+    })
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+
+    await user.click(screen.getByRole("button", { name: "Queue And Process" }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId("wizard-results")).toHaveTextContent("complete:1")
+    })
+
+    const renderedModalProps = mocks.modalProps.filter((props) => props.open)
+    expect(renderedModalProps.length).toBeGreaterThan(1)
+    expect(renderedModalProps.every((props) => props.getContainer === false)).toBe(
+      true
+    )
+    expect(new Set(renderedModalProps.map((props) => props.styles)).size).toBe(1)
   })
 
   it("keeps quick defaults on the add step when analysis needs a provider", async () => {

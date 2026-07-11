@@ -133,11 +133,36 @@ test.describe("Quick ingest cancel flow", () => {
       await urlInput.fill("https://example.com/cancel-me")
       await dialog.getByRole("button", { name: /add urls/i }).first().click()
 
-      const useDefaultsButton = dialog
-        .getByRole("button", { name: /use defaults & process/i })
+      const configureButton = dialog
+        .getByRole("button", { name: /configure \d+ items/i })
         .first()
-      await expect(useDefaultsButton).toBeVisible()
-      await useDefaultsButton.click()
+      await expect(configureButton).toBeVisible()
+      await configureButton.click()
+
+      const analysisSwitch = dialog
+        .getByRole("switch", { name: /^Ingestion options\s*[–-]\s*analysis$/i })
+        .first()
+      await expect(analysisSwitch).toBeVisible()
+      if ((await analysisSwitch.getAttribute("aria-checked")) === "true") {
+        await analysisSwitch.click()
+        await expect(analysisSwitch).toHaveAttribute("aria-checked", "false")
+      }
+      const chunkingSwitch = dialog
+        .getByRole("switch", { name: /^Ingestion options\s*[–-]\s*chunking$/i })
+        .first()
+      await expect(chunkingSwitch).toBeVisible()
+      if ((await chunkingSwitch.getAttribute("aria-checked")) === "true") {
+        await chunkingSwitch.click()
+        await expect(chunkingSwitch).toHaveAttribute("aria-checked", "false")
+      }
+
+      const nextButton = dialog.getByRole("button", { name: /^next$/i }).first()
+      await expect(nextButton).toBeVisible()
+      await nextButton.click()
+
+      const startButton = dialog.getByRole("button", { name: /start processing/i }).first()
+      await expect(startButton).toBeVisible()
+      await startButton.click()
 
       const cancelButton = dialog.getByRole("button", { name: /cancel all/i }).first()
       await expect(cancelButton).toBeVisible({ timeout: 10000 })

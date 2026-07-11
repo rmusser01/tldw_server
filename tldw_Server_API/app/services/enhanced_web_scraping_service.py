@@ -709,6 +709,8 @@ class WebScrapingService:
         """Store results in database"""
         media_ids = []
         errors = []
+        skipped_articles = 0
+        duplicate_articles = 0
 
         logger.info(f"Storing {len(result.get('articles', []))} articles to database")
 
@@ -746,6 +748,12 @@ class WebScrapingService:
                     f"extraction_successful={article.get('extraction_successful')}"
                 )
                 if not article.get("extraction_successful"):
+                    error_text = str(article.get("error") or "").strip().lower()
+                    if article.get("is_duplicate") is True or "duplicate" in error_text:
+                        skipped_articles += 1
+                        duplicate_articles += 1
+                        logger.info(f"Skipping duplicate article: {article.get('url', 'Unknown URL')}")
+                        continue
                     error_msg = f"Failed to extract: {article.get('url', 'Unknown URL')}"
                     logger.warning(error_msg)
                     errors.append(error_msg)
@@ -971,11 +979,23 @@ class WebScrapingService:
             except _WEB_SCRAPE_NONCRITICAL_EXCEPTIONS as me:
                 logger.debug(f"webscraping.persist: batch metric observe failed: {me}")
 
+        stored_articles = len(media_ids)
+        status = (
+            "duplicate"
+            if stored_articles == 0
+            and duplicate_articles > 0
+            and duplicate_articles == len(result.get("articles", []))
+            and not errors
+            else "persist-ok"
+        )
+
         return {
-            "status": "persist-ok",
+            "status": status,
             "media_ids": media_ids,
             "total_articles": len(result.get("articles", [])),
-            "stored_articles": len(media_ids),
+            "stored_articles": stored_articles,
+            "skipped_articles": skipped_articles,
+            "duplicate_articles": duplicate_articles,
             "method": result.get("method"),
             "errors": errors if errors else None,
         }

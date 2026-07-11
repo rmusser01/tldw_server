@@ -128,6 +128,13 @@ const RESULT_SUCCESS_STATUS_TOKENS = [
 const RESULT_CANCELLED_STATUS_TOKENS = ["cancelled", "canceled"]
 const FILE_REATTACH_WARNING = "Reattach this file after refresh to process it."
 const PERSISTED_REATTACH_POLL_INTERVAL_MS = 1_500
+const QUICK_INGEST_MODAL_STYLES = {
+  body: {
+    padding: "0 16px 16px",
+    maxHeight: "calc(100vh - 180px)",
+    overflowY: "auto",
+  },
+}
 
 const mapDetectedTypeToEntryType = (
   detectedType: DetectedMediaType
@@ -1744,13 +1751,8 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         footer={null}
         width={800}
         className="quick-ingest-modal quick-ingest-wizard-modal"
-        styles={{
-          body: {
-            padding: "0 16px 16px",
-            maxHeight: "calc(100vh - 180px)",
-            overflowY: "auto",
-          },
-        }}
+        getContainer={false}
+        styles={QUICK_INGEST_MODAL_STYLES}
       >
         {/* Stepper navigation */}
         <IngestWizardStepper />

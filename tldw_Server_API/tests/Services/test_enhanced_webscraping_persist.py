@@ -129,3 +129,50 @@ async def test_enhanced_webscraping_persist_sanitizes_storage_failure(
     assert res["errors"] == ["Storage failed for article"]
     assert "storage backend exploded" not in str(res)
     assert "/private/db/media.sqlite" not in str(res)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_enhanced_webscraping_persist_reports_duplicate_articles_as_skipped(
+    tmp_path: Path,
+    monkeypatch,
+):
+    import tldw_Server_API.app.services.enhanced_web_scraping_service as svc_mod
+
+    monkeypatch.setattr(
+        svc_mod,
+        "get_user_media_db_path",
+        lambda _user_id: str(tmp_path / "media_test.db"),
+    )
+
+    result = {
+        "method": "Individual URLs",
+        "articles": [
+            {
+                "url": "https://example.com/a?repeat=1",
+                "title": "Article A",
+                "content": "",
+                "extraction_successful": False,
+                "error": "Duplicate content",
+                "is_duplicate": True,
+            },
+        ],
+    }
+
+    res = await WebScrapingService()._store_persistent(
+        result=result,
+        keywords="foo,bar",
+        user_id=7,
+        perform_chunking=False,
+        chunking_mode=None,
+        auto_chunking_goal="balanced",
+        auto_chunking_use_llm=False,
+    )
+
+    assert res["status"] == "duplicate"
+    assert res["media_ids"] == []
+    assert res["total_articles"] == 1
+    assert res["stored_articles"] == 0
+    assert res["skipped_articles"] == 1
+    assert res["duplicate_articles"] == 1
+    assert res["errors"] is None

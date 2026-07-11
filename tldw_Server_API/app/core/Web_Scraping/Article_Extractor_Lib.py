@@ -390,10 +390,10 @@ DEFAULT_EXTRACTION_STRATEGY_ORDER = [
     "jsonld",
     "schema",
     "regex",
-    "llm",
     "cluster",
     "trafilatura",
 ]
+EXPLICIT_EXTRACTION_STRATEGIES = {"llm"}
 _STRATEGY_ALIASES = {
     "json-ld": "jsonld",
     "json_ld": "jsonld",
@@ -402,7 +402,7 @@ _STRATEGY_ALIASES = {
     "schema_xpath": "schema",
     "clustering": "cluster",
 }
-_KNOWN_STRATEGIES = set(DEFAULT_EXTRACTION_STRATEGY_ORDER)
+_KNOWN_STRATEGIES = set(DEFAULT_EXTRACTION_STRATEGY_ORDER) | EXPLICIT_EXTRACTION_STRATEGIES
 _MAX_REGEX_TOTAL_MATCHES = 200
 _MAX_REGEX_MATCHES_PER_LABEL = {
     "number": 50,

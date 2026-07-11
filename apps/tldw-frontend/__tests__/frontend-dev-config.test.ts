@@ -33,10 +33,12 @@ describe("frontend dev config", () => {
     )
   })
 
-  it("provides a webpack dev fallback script", () => {
+  it("uses webpack for local dev and keeps Turbopack as an explicit opt-in", () => {
     const packageJson = loadPackageJson()
 
+    expect(packageJson.scripts?.dev).toBe("next dev --webpack")
     expect(packageJson.scripts?.["dev:webpack"]).toBe("next dev --webpack")
+    expect(packageJson.scripts?.["dev:turbopack"]).toBe("next dev")
   })
 
   it("routes Turbopack build entrypoints through the profile wrapper", () => {

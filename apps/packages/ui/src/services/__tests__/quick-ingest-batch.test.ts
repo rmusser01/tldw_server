@@ -249,6 +249,89 @@ describe("submitQuickIngestBatch", () => {
     })
   })
 
+  it("marks duplicate direct HTML scrape responses as skipped", async () => {
+    mocks.bgRequest.mockResolvedValue({
+      status: "duplicate",
+      media_ids: [],
+      total_articles: 1,
+      stored_articles: 0,
+      skipped_articles: 1,
+      duplicate_articles: 1,
+      errors: null
+    })
+
+    const result = await submitQuickIngestBatch({
+      entries: [
+        {
+          id: "entry-duplicate-html",
+          url: "http://localhost:8080/e2e/quick-ingest-source.html?repeat=1",
+          type: "html"
+        }
+      ],
+      files: [],
+      storeRemote: true,
+      processOnly: false,
+      common: {
+        perform_analysis: false,
+        perform_chunking: false,
+        overwrite_existing: false
+      },
+      advancedValues: {},
+      __quickIngestSessionId: "qi-direct-duplicate-html"
+    })
+
+    expect(result.ok).toBe(true)
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/media/process-web-scraping",
+        method: "POST"
+      })
+    )
+    expect(result.results?.[0]).toMatchObject({
+      id: "entry-duplicate-html",
+      status: "ok",
+      outcome: "skipped",
+      message: DUPLICATE_SKIP_MESSAGE
+    })
+  })
+
+  it("surfaces direct HTML scrape responses with zero stored articles as failed", async () => {
+    mocks.bgRequest.mockResolvedValue({
+      status: "persist-ok",
+      media_ids: [],
+      total_articles: 1,
+      stored_articles: 0,
+      errors: ["Failed to extract: http://localhost:8080/e2e/source.html"]
+    })
+
+    const result = await submitQuickIngestBatch({
+      entries: [
+        {
+          id: "entry-failed-html",
+          url: "http://localhost:8080/e2e/source.html",
+          type: "html"
+        }
+      ],
+      files: [],
+      storeRemote: true,
+      processOnly: false,
+      common: {
+        perform_analysis: false,
+        perform_chunking: false,
+        overwrite_existing: false
+      },
+      advancedValues: {},
+      __quickIngestSessionId: "qi-direct-failed-html"
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.results?.[0]).toMatchObject({
+      id: "entry-failed-html",
+      status: "error",
+      error: "Failed to extract: http://localhost:8080/e2e/source.html"
+    })
+  })
+
   it("defaults perform_chunking to true when common options are omitted", async () => {
     mocks.bgUpload.mockResolvedValue({
       batch_id: "batch-default-chunking",
