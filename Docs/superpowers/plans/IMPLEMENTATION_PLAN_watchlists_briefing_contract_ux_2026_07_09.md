@@ -1273,6 +1273,48 @@ git add apps/tldw-frontend/e2e/workflows/watchlists-demo-readiness.spec.ts apps/
 git commit -m "test: verify watchlists briefing acceptance"
 ```
 
+### Task 11: Close the independent validity review and rebuild PR #2710
+
+**Files:**
+- Modify: `tldw_Server_API/app/api/v1/endpoints/workflows.py`
+- Modify: `tldw_Server_API/tests/Workflows/test_artifact_download_range.py`
+- Modify: `apps/packages/ui/src/components/Option/Watchlists/OverviewTab/PipelineWizard.tsx`
+- Modify: `apps/packages/ui/src/components/Option/Watchlists/OverviewTab/LatestBriefing.tsx`
+- Modify: focused Watchlists tests and locale catalogs
+- Modify: this plan and `TASK-12105`
+
+**Interfaces:**
+- Produces one default-tenant resolver for all Workflow ownership checks, a localized natural-language activation receipt, selected-audio activation proof, and truthful aggregate artifact status.
+- Consumes the existing real Watchlists occurrence and Workflow artifact so final CDP UAT exercises the production backend rather than a mocked bridge.
+
+- [x] **Step 1: Reproduce the tenant, receipt, status, and gate defects**
+
+Record the real authenticated artifact 404 with an existing default-tenant file, the missing receipt sentence, the contradictory `Ready` plus `Unavailable` state, the ungated audio activation action, and the two red Watchlists package gates.
+
+- [x] **Step 2: Add failing regressions before implementation**
+
+Add an endpoint test using `User(tenant_id=None)`, an exact natural-language receipt assertion, an aggregate partial-status assertion, and activation assertions for audio versus text-only drafts. Run each test and confirm it fails for the intended missing behavior.
+
+- [x] **Step 3: Implement the minimal contract fixes**
+
+Normalize absent or blank tenant claims once and use that helper throughout Workflow endpoints. Render one localized sentence above the exact receipt details. Require a successful current-draft audio sample or full test before activation, while leaving text-only activation available. Derive aggregate `Partial` whenever ready text remains usable but the selected current audio artifact cannot be fetched.
+
+- [x] **Step 4: Repair the known package gates**
+
+Update the stale accessible-name expectation to the shipped record-specific label and replace nested callback signatures in `PipelineWizardProps` with named handler aliases so the static interface guard parses the contract correctly.
+
+- [ ] **Step 5: Rebuild the branch on current `origin/dev`**
+
+Create a dated safety reference, replay only the Watchlists feature range beginning after `20c911e01d7f5065ea53913c3e01f3ba5bd78675` onto current `origin/dev`, resolve conflicts without importing unrelated history, and verify PR #2710 is cleanly mergeable.
+
+- [ ] **Step 6: Repeat real-backend extension CDP UAT**
+
+Build the Chrome extension from the rebuilt commit, start the real FastAPI backend from the same worktree, load the unpacked extension through Playwright/CDP without CUA, click Play and verify playback advances, click Download audio and verify an authenticated 200 response plus a completed browser download.
+
+- [ ] **Step 7: Run final verification and update evidence**
+
+Run focused backend and UI suites, Watchlists accessibility/type gates, locale validation, extension build, diff checks, and Bandit on every touched Python production file. Update `TASK-12105` and PR #2710 with exact results; keep the PR draft until the required human-written Change summary is supplied.
+
 ## Plan Self-Review Checklist
 
 - [ ] Every specification acceptance criterion maps to a task and executable verification step.

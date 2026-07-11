@@ -268,6 +268,8 @@
         "textProviderDisclosure": "Tester använder din konfigurerade LLM-leverantör. Tester med endast text använder inte talsyntes.",
         "receipt": "Aktiveringsöversikt",
         "manualReceipt": "Den här briefingen körs manuellt, sparar valda artefakter i Rapporter och kontaktar inget externt mål om du inte väljer Skicka test.",
+        "scheduledReceipt": "{{schedule}}: samla uppdateringar från {{sources}}, skapa {{artifacts}} som {{program}}{{duration}} och spara och leverera dem sedan till {{destinations}}.",
+        "audioTestRequired": "Skapa ett lyckat ljudprov eller fullständigt test före aktivering.",
         "progress": "Testförlopp",
         "stages": {
           "collection": "Samla källor",

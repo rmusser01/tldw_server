@@ -268,6 +268,8 @@
         "textProviderDisclosure": "测试使用您配置的 LLM 提供商。纯文本测试不使用文本转语音。",
         "receipt": "启用摘要",
         "manualReceipt": "此简报手动运行，将所选成果保存在“报告”中；除非您选择“发送测试”，否则不会联系外部目的地。",
+        "scheduledReceipt": "{{schedule}}：从 {{sources}} 收集更新，以 {{program}}{{duration}} 形式生成 {{artifacts}}，然后保存并发送到 {{destinations}}。",
+        "audioTestRequired": "激活前，请成功生成音频样本或完整测试。",
         "progress": "测试进度",
         "stages": {
           "collection": "收集来源",

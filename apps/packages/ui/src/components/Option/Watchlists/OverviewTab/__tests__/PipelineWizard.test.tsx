@@ -161,6 +161,32 @@ describe("PipelineWizard", () => {
     expect(receipt).toHaveTextContent("two-host sportscast")
     expect(receipt).toHaveTextContent("targeting 20 minutes")
     expect(receipt).toHaveTextContent("Reports")
+    expect(receipt).toHaveTextContent(
+      "Sunday, July 12 at 6:00 PM PDT (America/Los_Angeles), collect updates from 8 sources, generate text show notes and audio as a two-host sportscast, targeting 20 minutes, then save and deliver them to Reports."
+    )
+  })
+
+  it("requires a successful current-draft audio test before activation", async () => {
+    const props = renderWizard({ initialStep: "test", initialDraft: sportscastDraft })
+    const activate = inDialog().getByRole("button", { name: "Activate schedule" })
+
+    expect(activate).toBeDisabled()
+    expect(inDialog().getByText("Generate a successful audio sample or full test before activation.")).toBeInTheDocument()
+
+    fireEvent.click(inDialog().getByRole("button", { name: "Generate 60-second sample" }))
+
+    await waitFor(() => expect(activate).toBeEnabled())
+    fireEvent.click(activate)
+    await waitFor(() => expect(props.onActivate).toHaveBeenCalledTimes(1))
+  })
+
+  it("keeps text-only activation available without an audio capability test", () => {
+    renderWizard({
+      initialStep: "test",
+      initialDraft: { ...sportscastDraft, audioEnabled: false, audioSpeakers: [] }
+    })
+
+    expect(inDialog().getByRole("button", { name: "Activate schedule" })).toBeEnabled()
   })
 
   it("keeps a schedule classified as scheduled when projection is unavailable", () => {

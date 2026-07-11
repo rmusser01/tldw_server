@@ -189,7 +189,7 @@ const statusLabel = (status: string, t: TFunction): string => {
 const statusColor = (status: string): string => {
   if (["ready", "successful", "delivered"].includes(status)) return "green"
   if (["failed", "cancelled"].includes(status)) return "red"
-  if (["queued", "running", "sending", "unknown"].includes(status)) return "gold"
+  if (["queued", "running", "sending", "unknown", "partial"].includes(status)) return "gold"
   return "default"
 }
 
@@ -385,6 +385,9 @@ export const LatestBriefing: React.FC<LatestBriefingProps> = ({
         : ["unavailable", "Unavailable"]
     : null
   const textReady = Boolean(projection.output) || projection.stages.persist_text?.status === "ready"
+  const overallArtifactStatus = audioUnavailable && textReady
+    ? "partial"
+    : projection.artifact_status
   const audioFailedStage = AUDIO_STAGES.find((stage) => projection.stages[stage]?.status === "failed")
   const composeScriptStage = projection.stages.compose_audio_script
   const persistScriptStage = projection.stages.persist_audio_script
@@ -593,8 +596,8 @@ export const LatestBriefing: React.FC<LatestBriefingProps> = ({
                   })}
                 </Tag>
               )}
-              <Tag color={statusColor(projection.artifact_status)}>
-                {statusLabel(projection.artifact_status, t)}
+              <Tag color={statusColor(audioUnavailable && textReady ? "partial" : overallArtifactStatus)}>
+                {statusLabel(audioUnavailable && textReady ? "partial" : overallArtifactStatus, t)}
               </Tag>
             </div>
           </header>

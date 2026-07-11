@@ -617,6 +617,7 @@ describe("LatestBriefing", () => {
     render(<LatestBriefing projection={readyEpisode()} {...actions()} />)
 
     expect(await screen.findByText("This audio artifact is no longer available.")).toBeVisible()
+    expect(screen.getByText("Localized partial")).toBeVisible()
     expect(screen.getByText("Unavailable")).toHaveClass("text-danger")
     expect(screen.queryByRole("button", { name: "Play Purple and Gold Weekly" })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Download audio for Purple and Gold Weekly" })).not.toBeInTheDocument()

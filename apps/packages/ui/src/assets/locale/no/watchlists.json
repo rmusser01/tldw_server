@@ -268,6 +268,8 @@
         "textProviderDisclosure": "Tester bruker den konfigurerte LLM-leverandøren. Tester med bare tekst bruker ikke talesyntese.",
         "receipt": "Aktiveringsoversikt",
         "manualReceipt": "Denne orienteringen kjøres manuelt, lagrer valgte artefakter i Rapporter og kontakter ingen eksterne mål med mindre du velger Send test.",
+        "scheduledReceipt": "{{schedule}}: samle oppdateringer fra {{sources}}, lag {{artifacts}} som {{program}}{{duration}}, og lagre og lever dem deretter til {{destinations}}.",
+        "audioTestRequired": "Lag en vellykket lydprøve eller full test før aktivering.",
         "progress": "Testfremdrift",
         "stages": {
           "collection": "Samle kilder",

@@ -271,6 +271,8 @@
         "textProviderDisclosure": "I test usano il provider LLM configurato. I test di solo testo non usano la sintesi vocale.",
         "receipt": "Riepilogo di attivazione",
         "manualReceipt": "Questo briefing viene eseguito manualmente, salva gli artefatti selezionati in Report e non contatta destinazioni esterne a meno che non selezioni Invia test.",
+        "scheduledReceipt": "{{schedule}}, raccogli gli aggiornamenti da {{sources}}, genera {{artifacts}} come {{program}}{{duration}}, quindi salvali e consegnali a {{destinations}}.",
+        "audioTestRequired": "Genera correttamente un campione audio o un test completo prima dell’attivazione.",
         "progress": "Avanzamento del test",
         "stages": {
           "collection": "Raccogli fonti",

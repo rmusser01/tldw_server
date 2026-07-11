@@ -271,6 +271,8 @@
         "textProviderDisclosure": "Os testes usam o provedor de LLM configurado. Testes somente de texto não usam conversão de texto em fala.",
         "receipt": "Resumo da ativação",
         "manualReceipt": "Este briefing é executado manualmente, salva os artefatos selecionados em Relatórios e não contata destinos externos, a menos que você escolha Enviar teste.",
+        "scheduledReceipt": "{{schedule}}, colete atualizações de {{sources}}, gere {{artifacts}} como {{program}}{{duration}} e depois salve e entregue em {{destinations}}.",
+        "audioTestRequired": "Gere com sucesso uma amostra de áudio ou um teste completo antes de ativar.",
         "progress": "Progresso do teste",
         "stages": {
           "collection": "Coletar fontes",

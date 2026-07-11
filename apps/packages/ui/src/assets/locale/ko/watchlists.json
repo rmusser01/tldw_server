@@ -268,6 +268,8 @@
         "textProviderDisclosure": "테스트는 구성된 LLM 공급자를 사용합니다. 텍스트 전용 테스트에서는 텍스트 음성 변환을 사용하지 않습니다.",
         "receipt": "활성화 요약",
         "manualReceipt": "이 브리핑은 수동으로 실행되고 선택한 결과물을 보고서에 저장하며, 테스트 보내기를 선택하지 않는 한 외부 대상으로 전송하지 않습니다.",
+        "scheduledReceipt": "{{schedule}}에 {{sources}}에서 업데이트를 수집하고, {{artifacts}}을(를) {{program}}{{duration}} 형식으로 생성한 다음 {{destinations}}에 저장하고 전달합니다.",
+        "audioTestRequired": "활성화하기 전에 오디오 샘플이나 전체 테스트를 성공적으로 생성하세요.",
         "progress": "테스트 진행률",
         "stages": {
           "collection": "소스 수집",

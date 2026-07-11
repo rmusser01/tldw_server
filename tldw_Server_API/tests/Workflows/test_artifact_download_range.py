@@ -115,6 +115,35 @@ def test_artifact_download_with_range(monkeypatch, tmp_path, client_and_db):
     assert r2.content == b"0123456789"
 
 
+def test_artifact_download_defaults_missing_single_user_tenant(
+    monkeypatch,
+    tmp_path,
+    client_and_db,
+):
+    """Single-user principals without a tenant claim still own default-tenant runs."""
+    monkeypatch.setenv("WORKFLOWS_ARTIFACT_ALLOWED_MIME", "application/octet-stream")
+    client, db = client_and_db
+    run_id = _bootstrap_run_with_artifact(db, tmp_path)
+    artifact_id = db.list_artifacts_for_run(run_id)[0]["artifact_id"]
+
+    async def override_user_without_tenant():
+        return User(
+            id=1,
+            username="tester",
+            email="t@e.com",
+            is_active=True,
+            is_admin=True,
+            tenant_id=None,
+        )
+
+    app.dependency_overrides[get_request_user] = override_user_without_tenant
+
+    response = client.get(f"/api/v1/workflows/artifacts/{artifact_id}/download")
+
+    assert response.status_code == 200
+    assert response.content == b"0123456789abcdefghijklmnopqrstuvwxyz"
+
+
 def test_artifact_download_blocks_outside_scope(monkeypatch, tmp_path, client_and_db):
     monkeypatch.setenv("WORKFLOWS_ARTIFACT_ALLOWED_MIME", "application/octet-stream")
     monkeypatch.setenv("WORKFLOWS_ARTIFACT_VALIDATE_STRICT", "true")

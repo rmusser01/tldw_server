@@ -268,6 +268,8 @@
         "textProviderDisclosure": "テストでは設定済みの LLM プロバイダーを使用します。テキストのみのテストでは音声合成を使用しません。",
         "receipt": "有効化の概要",
         "manualReceipt": "このブリーフィングは手動で実行され、選択した成果物を「レポート」に保存します。「テストを送信」を選ばない限り、外部の配信先には送信しません。",
+        "scheduledReceipt": "{{schedule}}に{{sources}}から更新を収集し、{{artifacts}}を{{program}}{{duration}}として生成して、{{destinations}}に保存・配信します。",
+        "audioTestRequired": "有効化する前に、音声サンプルまたは完全テストを正常に生成してください。",
         "progress": "テストの進行状況",
         "stages": {
           "collection": "ソースを収集",

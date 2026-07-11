@@ -69,6 +69,26 @@ export interface PipelineWizardSchedulePreviewOptions {
   signal: AbortSignal
 }
 
+type PipelineWizardTestHandler = (
+  draft: PipelineWizardDraft,
+  options: PipelineWizardTestOptions,
+  onProgress: (projection: WatchlistBriefingProjection) => void
+) => PipelineWizardActionResult | void | Promise<PipelineWizardActionResult | void>
+
+type PipelineWizardActivateHandler = (
+  draft: PipelineWizardDraft,
+  options: { jobId?: number }
+) => PipelineWizardActionResult | void | Promise<PipelineWizardActionResult | void>
+
+type PipelineWizardSourceTestHandler = (
+  draft: PipelineWizardDraft
+) => PipelineWizardActionResult | void | Promise<PipelineWizardActionResult | void>
+
+type PipelineWizardSchedulePreviewHandler = (
+  draft: PipelineWizardDraft,
+  options: PipelineWizardSchedulePreviewOptions
+) => Promise<PipelineWizardSchedulePreviewResult>
+
 interface PipelineWizardProps {
   open: boolean
   sources?: WatchlistSource[]
@@ -80,21 +100,10 @@ interface PipelineWizardProps {
   sessionKey?: string | number
   onCancel: () => void
   onSaveDraft?: (draft: PipelineWizardDraft) => void | Promise<void>
-  onTest?: (
-    draft: PipelineWizardDraft,
-    options: PipelineWizardTestOptions,
-    onProgress: (projection: WatchlistBriefingProjection) => void
-  ) => PipelineWizardActionResult | void | Promise<PipelineWizardActionResult | void>
-  onActivate?: (
-    draft: PipelineWizardDraft,
-    options: { jobId?: number }
-  ) => PipelineWizardActionResult | void | Promise<PipelineWizardActionResult | void>
-  onTestSource?: (draft: PipelineWizardDraft) =>
-    PipelineWizardActionResult | void | Promise<PipelineWizardActionResult | void>
-  onPreviewSchedule?: (
-    draft: PipelineWizardDraft,
-    options: PipelineWizardSchedulePreviewOptions
-  ) => Promise<PipelineWizardSchedulePreviewResult>
+  onTest?: PipelineWizardTestHandler
+  onActivate?: PipelineWizardActivateHandler
+  onTestSource?: PipelineWizardSourceTestHandler
+  onPreviewSchedule?: PipelineWizardSchedulePreviewHandler
   previewLoading?: boolean
   previewError?: string | null
   previewRendered?: string | null
@@ -242,6 +251,7 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
   const [sourceTestResult, setSourceTestResult] = useState<JobPreviewResult | null>(null)
   const [inactiveJobId, setInactiveJobId] = useState<number | undefined>()
   const [testProjection, setTestProjection] = useState<WatchlistBriefingProjection | null>(null)
+  const [audioTestPassed, setAudioTestPassed] = useState(false)
   const [schedulePreview, setSchedulePreview] = useState<PipelineWizardSchedulePreviewResult | null>(null)
   const [schedulePreviewLoading, setSchedulePreviewLoading] = useState(false)
   const [schedulePreviewError, setSchedulePreviewError] = useState<string | null>(null)
@@ -268,6 +278,7 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
       setSourceTestResult(null)
       setInactiveJobId(undefined)
       setTestProjection(null)
+      setAudioTestPassed(false)
       setSchedulePreview(null)
       setSchedulePreviewLoading(false)
       setSchedulePreviewError(null)
@@ -399,6 +410,7 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
     setActionMessage(null)
     setSourceTestResult(null)
     setTestProjection(null)
+    setAudioTestPassed(false)
     const generation = ++saveGenerationRef.current
     void Promise.resolve(onSaveDraft?.(next)).catch((error) => {
       const stale = generation !== saveGenerationRef.current
@@ -576,6 +588,7 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
     setActionError(null)
     setActionMessage(null)
     setTestProjection(null)
+    setAudioTestPassed(false)
     try {
       const result = await onTest?.(
         draftRef.current,
@@ -592,6 +605,9 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
         ? getPipelineWizardBriefingOutcome(actionResult.briefing, options.externalDelivery)
         : undefined
       const resultStatus = observedOutcome?.status || actionResult?.status
+      if (draftRef.current.audioEnabled && resultStatus === "ready") {
+        setAudioTestPassed(true)
+      }
       if (resultStatus === "failed") {
         const stage = briefingStageLabel(observedOutcome?.stage)
         setActionError(observedOutcome?.code
@@ -787,6 +803,46 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
           { speakers: receiptSpeakerStyle, format: receiptProgramFormat }
         )
       : receiptProgramFormat
+    : ""
+  const receiptSchedule = receipt?.nextRunLabel
+    ? t("watchlists:overview.pipelineSetup.receipt.schedule.scheduled", "{{date}} ({{timezone}})", {
+        date: receipt.nextRunLabel,
+        timezone: receipt.timezone
+      })
+    : ""
+  const receiptSourceCount = receipt
+    ? t("watchlists:overview.pipelineSetup.receipt.sources", "{{count}} sources", {
+        count: receipt.sourceCount
+      })
+    : ""
+  const receiptDuration = receipt?.targetMinutes
+    ? `, ${t("watchlists:overview.pipelineSetup.receipt.duration", "targeting {{count}} minutes", {
+        count: receipt.targetMinutes
+      })}`
+    : ""
+  const receiptSentence = receipt
+    ? receipt.scheduleMode === "manual"
+      ? t(
+          "watchlists:overview.pipelineSetup.test.manualReceipt",
+          "This briefing runs manually, saves selected artifacts in Reports, and contacts no external destination unless you choose Send test."
+        )
+      : receipt.nextRunLabel
+        ? t(
+            "watchlists:overview.pipelineSetup.test.scheduledReceipt",
+            "{{schedule}}, collect updates from {{sources}}, generate {{artifacts}} as a {{program}}{{duration}}, then save and deliver them to {{destinations}}.",
+            {
+              schedule: receiptSchedule,
+              sources: receiptSourceCount,
+              artifacts: formatList(receiptArtifacts),
+              program: programFormatLabel,
+              duration: receiptDuration,
+              destinations: formatList(receiptDestinations)
+            }
+          )
+        : t(
+            "watchlists:overview.pipelineSetup.nextOccurrencePending",
+            "Save a valid schedule to calculate the exact time."
+          )
     : ""
   const speakerFieldLabel = (index: number, field: "label" | "role" | "voice" | "persona") => {
     const speakerNumber = new Intl.NumberFormat(locale).format(index + 1)
@@ -1308,6 +1364,11 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
             </div>
             <div className="border-y border-border py-4" data-testid="watchlists-pipeline-receipt">
               <p className="font-medium">{t("watchlists:overview.pipelineSetup.test.receipt", "Activation receipt")}</p>
+              {receiptSentence && (
+                <p className="mt-2 max-w-[72ch] text-sm text-text" data-testid="watchlists-pipeline-receipt-sentence">
+                  {receiptSentence}
+                </p>
+              )}
               {receipt && (
                 <dl className="mt-3 grid gap-x-4 gap-y-2 text-sm sm:grid-cols-[minmax(8rem,auto)_1fr]">
                   <dt className="font-medium">{t("watchlists:overview.pipelineSetup.receipt.labels.schedule", "Schedule")}</dt>
@@ -1383,10 +1444,18 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
               <Button className="min-h-11 w-full whitespace-normal" onClick={() => void runTest({ externalDelivery: true, audioSampleSeconds: draft.audioEnabled ? 60 : null })} disabled={!hasExternalDelivery || isBusy}>
                 {t("watchlists:overview.pipelineSetup.test.send", "Send test")}
               </Button>
-              <Button type="primary" className="min-h-11 w-full whitespace-normal" onClick={() => void activate()} loading={actionBusy}>
+              <Button type="primary" className="min-h-11 w-full whitespace-normal" onClick={() => void activate()} loading={actionBusy} disabled={draft.audioEnabled && !audioTestPassed}>
                 {t("watchlists:overview.pipelineSetup.test.activate", "Activate schedule")}
               </Button>
             </div>
+            {draft.audioEnabled && !audioTestPassed && (
+              <p className="text-sm text-text-muted" role="status">
+                {t(
+                  "watchlists:overview.pipelineSetup.test.audioTestRequired",
+                  "Generate a successful audio sample or full test before activation."
+                )}
+              </p>
+            )}
           </section>
         )}
       </div>

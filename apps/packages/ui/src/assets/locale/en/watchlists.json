@@ -567,6 +567,8 @@
         "textProviderDisclosure": "Tests use your configured LLM provider. Text-only tests do not use text-to-speech.",
         "receipt": "Activation receipt",
         "manualReceipt": "This briefing runs manually, saves selected artifacts in Reports, and contacts no external destination unless you choose Send test.",
+        "scheduledReceipt": "{{schedule}}, collect updates from {{sources}}, generate {{artifacts}} as a {{program}}{{duration}}, then save and deliver them to {{destinations}}.",
+        "audioTestRequired": "Generate a successful audio sample or full test before activation.",
         "progress": "Test progress",
         "stages": {
           "collection": "Collect sources",

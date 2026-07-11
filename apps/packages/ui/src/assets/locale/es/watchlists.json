@@ -271,6 +271,8 @@
         "textProviderDisclosure": "Las pruebas usan el proveedor de LLM configurado. Las pruebas de solo texto no usan texto a voz.",
         "receipt": "Resumen de activación",
         "manualReceipt": "Este informe se ejecuta manualmente, guarda los artefactos seleccionados en Informes y no contacta ningún destino externo salvo que elijas Enviar prueba.",
+        "scheduledReceipt": "{{schedule}}, recopila actualizaciones de {{sources}}, genera {{artifacts}} como {{program}}{{duration}} y después guárdalos y entrégalos en {{destinations}}.",
+        "audioTestRequired": "Genera correctamente una muestra de audio o una prueba completa antes de activar.",
         "progress": "Progreso de la prueba",
         "stages": {
           "collection": "Recopilar fuentes",
