@@ -9,6 +9,23 @@ function isAbsoluteUrl(value) {
   }
 }
 
+function isBareHttpOrigin(value) {
+  try {
+    const parsed = new URL(value)
+    return (
+      /^https?:$/i.test(parsed.protocol) &&
+      parsed.origin !== "null" &&
+      !parsed.username &&
+      !parsed.password &&
+      parsed.pathname === "/" &&
+      !parsed.search &&
+      !parsed.hash
+    )
+  } catch {
+    return false
+  }
+}
+
 export function validateNetworkingConfig(env = process.env) {
   const deploymentMode =
     String(env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE || "").trim() || "advanced"
@@ -17,10 +34,10 @@ export function validateNetworkingConfig(env = process.env) {
 
   if (
     deploymentMode === QUICKSTART_MODE &&
-    internalApiOrigin.length === 0
+    !isBareHttpOrigin(internalApiOrigin)
   ) {
     throw new Error(
-      "Invalid WebUI networking config: quickstart mode requires TLDW_INTERNAL_API_ORIGIN."
+      "Invalid WebUI networking config: quickstart mode requires TLDW_INTERNAL_API_ORIGIN to be an absolute HTTP(S) origin."
     )
   }
 

@@ -9,7 +9,8 @@ const ORIGINAL_ENV = {
   AUTH_MODE: process.env.AUTH_MODE,
   SINGLE_USER_API_KEY: process.env.SINGLE_USER_API_KEY,
   TLDW_WEBUI_EXPOSE_RUNTIME_AUTH: process.env.TLDW_WEBUI_EXPOSE_RUNTIME_AUTH,
-  NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE: process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+  NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE: process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE,
+  TLDW_INTERNAL_API_ORIGIN: process.env.TLDW_INTERNAL_API_ORIGIN
 }
 
 const restoreEnv = () => {
@@ -27,6 +28,7 @@ const configureRuntimeAuth = () => {
   process.env.SINGLE_USER_API_KEY = "runtime-single-user-key"
   process.env.TLDW_WEBUI_EXPOSE_RUNTIME_AUTH = "1"
   process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+  process.env.TLDW_INTERNAL_API_ORIGIN = "http://app:8000"
 }
 
 const callRuntimeConfig = async (
@@ -62,7 +64,7 @@ describe("WebUI runtime config API", () => {
     restoreEnv()
   })
 
-  it("returns runtime single-user auth for local quickstart requests", async () => {
+  it("returns only cookie-session capability for local quickstart requests", async () => {
     const res = await callRuntimeConfig()
 
     expect(res.statusCode).toBe(200)
@@ -71,12 +73,18 @@ describe("WebUI runtime config API", () => {
       runtimeAuth: {
         available: true,
         authMode: "single-user",
-        apiKey: "runtime-single-user-key"
+        transport: "cookie-session"
       },
       networking: {
         deploymentMode: "quickstart"
       }
     })
+    expect(res.body.runtimeAuth).toEqual({
+      available: true,
+      authMode: "single-user",
+      transport: "cookie-session"
+    })
+    expect(JSON.stringify(res.body ?? "")).not.toContain("runtime-single-user-key")
   })
 
   it.each([
@@ -108,6 +116,7 @@ describe("WebUI runtime config API", () => {
         available: false
       }
     })
+    expect(res.body.runtimeAuth).toEqual({ available: false })
     expect(res.body).toMatchObject({
       runtimeAuth: expect.not.objectContaining({
         apiKey: expect.any(String)
@@ -127,10 +136,10 @@ describe("WebUI runtime config API", () => {
     expect(res.statusCode).toBe(200)
     expect(res.body).toMatchObject({
       runtimeAuth: {
-        available: false,
-        reason: "disabled"
+        available: false
       }
     })
+    expect(res.body.runtimeAuth).toEqual({ available: false })
     expect(JSON.stringify(res.body)).not.toContain("runtime-single-user-key")
   })
 
@@ -146,7 +155,7 @@ describe("WebUI runtime config API", () => {
       runtimeAuth: {
         available: true,
         authMode: "single-user",
-        apiKey: "runtime-single-user-key"
+        transport: "cookie-session"
       }
     })
   })
@@ -164,7 +173,7 @@ describe("WebUI runtime config API", () => {
       runtimeAuth: {
         available: true,
         authMode: "single-user",
-        apiKey: "runtime-single-user-key"
+        transport: "cookie-session"
       }
     })
   })
@@ -264,6 +273,7 @@ describe("WebUI runtime config API", () => {
     ["x-forwarded-for", "x-forwarded-for", "203.0.113.10"],
     ["empty x-forwarded-for", "x-forwarded-for", ""],
     ["x-forwarded-host", "x-forwarded-host", "localhost:8080"],
+    ["x-forwarded-proto", "x-forwarded-proto", "http"],
     ["x-real-ip", "x-real-ip", "203.0.113.10"]
   ])("returns unavailable when %s is present", async (_name, header, value) => {
     const res = await callRuntimeConfig({ [header]: value })
@@ -287,6 +297,29 @@ describe("WebUI runtime config API", () => {
     await handler(req, res)
 
     expect(res.statusCode).toBe(405)
+    expect(JSON.stringify(res.body ?? "")).not.toContain("runtime-single-user-key")
+  })
+
+  it.each([
+    ["missing origin", ""],
+    ["relative origin", "/api"],
+    ["non-HTTP origin", "ftp://app:8000"],
+    ["credential-bearing origin", "http://user:pass@app:8000"],
+    ["path-bearing origin", "http://app:8000/backend"],
+    ["query-bearing origin", "http://app:8000/?target=other"],
+    ["fragment-bearing origin", "http://app:8000/#backend"]
+  ])("returns unavailable for %s internal API origin", async (_name, origin) => {
+    process.env.TLDW_INTERNAL_API_ORIGIN = origin
+
+    const res = await callRuntimeConfig()
+
+    expect(res.statusCode).toBe(200)
+    expect(res.body).toMatchObject({
+      runtimeAuth: {
+        available: false
+      }
+    })
+    expect(res.body.runtimeAuth).toEqual({ available: false })
     expect(JSON.stringify(res.body)).not.toContain("runtime-single-user-key")
   })
 })

@@ -148,6 +148,24 @@ describe("frontend quickstart networking", () => {
     ).toThrow(/TLDW_INTERNAL_API_ORIGIN/i)
   })
 
+  it.each([
+    ["relative URL", "/api"],
+    ["non-HTTP URL", "ftp://app:8000"],
+    ["credentials", "http://user:pass@app:8000"],
+    ["path", "http://app:8000/backend"],
+    ["query", "http://app:8000/?target=other"],
+    ["fragment", "http://app:8000/#backend"]
+  ])("rejects an internal quickstart API origin with %s", async (_name, origin) => {
+    const validateNetworkingConfig = await loadValidateNetworkingConfig()
+
+    expect(() =>
+      validateNetworkingConfig({
+        NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE: "quickstart",
+        TLDW_INTERNAL_API_ORIGIN: origin
+      })
+    ).toThrow(/TLDW_INTERNAL_API_ORIGIN/i)
+  })
+
   it("rejects an absolute NEXT_PUBLIC_API_URL in quickstart mode", async () => {
     const validateNetworkingConfig = await loadValidateNetworkingConfig()
 

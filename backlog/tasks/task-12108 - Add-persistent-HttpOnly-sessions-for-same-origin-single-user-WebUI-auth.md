@@ -17,6 +17,7 @@ documentation:
 - docs/superpowers/plans/2026-07-10-single-user-http-only-session-implementation-plan.md
 - .superpowers/sdd/http-task-2-report.md
 - .superpowers/sdd/http-task-3-report.md
+- .superpowers/sdd/http-task-4-report.md
 priority: high
 modified_files:
 - tldw_Server_API/app/core/AuthNZ/auth_principal_resolver.py
@@ -40,6 +41,13 @@ modified_files:
 - tldw_Server_API/tests/AuthNZ/test_websocket_cookie_route_contract.py
 - tldw_Server_API/tests/Audio/test_audio_streaming_service_core.py
 - tldw_Server_API/tests/sandbox/test_ws_signed_validation.py
+- apps/tldw-frontend/pages/api/_tldw-webui/runtime-auth-policy.ts
+- apps/tldw-frontend/pages/api/_tldw-webui/session.ts
+- apps/tldw-frontend/pages/api/_tldw-webui/runtime-config.ts
+- apps/tldw-frontend/scripts/validate-networking-config.mjs
+- apps/tldw-frontend/__tests__/pages/api/runtime-config.test.ts
+- apps/tldw-frontend/__tests__/pages/api/runtime-session.test.ts
+- apps/tldw-frontend/__tests__/frontend-quickstart-networking.test.ts
 ---
 
 ## Description
