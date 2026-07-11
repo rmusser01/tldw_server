@@ -98,7 +98,7 @@ const setup = (
 
 describe("useSourceSavedViews", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     api.listWorkspaceSourceViews.mockResolvedValue({ items: [] });
   });
 
@@ -223,12 +223,17 @@ describe("useSourceSavedViews", () => {
     expect(result.current.currentSignature).not.toBeNull();
   });
 
-  it("does not let a late initial load overwrite a newer create", async () => {
+  it("reconciles all rows after a create supersedes the initial load", async () => {
     const initialLoad = deferred<{ items: ReturnType<typeof validView>[] }>();
-    api.listWorkspaceSourceViews.mockReturnValue(initialLoad.promise);
-    api.createWorkspaceSourceView.mockResolvedValue(
-      validView({ id: "created-view", name: "Created" }),
-    );
+    const reconciliation = deferred<{
+      items: ReturnType<typeof validView>[];
+    }>();
+    const existing = validView({ id: "existing-view", name: "Existing" });
+    const created = validView({ id: "created-view", name: "Created" });
+    api.listWorkspaceSourceViews
+      .mockReturnValueOnce(initialLoad.promise)
+      .mockReturnValueOnce(reconciliation.promise);
+    api.createWorkspaceSourceView.mockResolvedValue(created);
     const { result } = setup();
     await waitFor(() =>
       expect(api.listWorkspaceSourceViews).toHaveBeenCalledTimes(1),
@@ -238,14 +243,27 @@ describe("useSourceSavedViews", () => {
     expect(result.current.views.map((view) => view.id)).toEqual([
       "created-view",
     ]);
-
-    await act(async () =>
-      initialLoad.resolve({ items: [validView({ id: "stale-list-view" })] }),
+    expect(result.current.activeViewId).toBe("created-view");
+    expect(result.current.announcement).toBe("Saved view created.");
+    await waitFor(() =>
+      expect(api.listWorkspaceSourceViews).toHaveBeenCalledTimes(2),
     );
+
+    await act(async () => initialLoad.resolve({ items: [existing] }));
 
     expect(result.current.views.map((view) => view.id)).toEqual([
       "created-view",
     ]);
+
+    await act(async () =>
+      reconciliation.resolve({ items: [existing, created] }),
+    );
+
+    expect(result.current.views.map((view) => view.id)).toEqual([
+      "existing-view",
+      "created-view",
+    ]);
+    expect(result.current.activeViewId).toBe("created-view");
     expect(result.current.announcement).toBe("Saved view created.");
   });
 
@@ -580,11 +598,45 @@ describe("useSourceSavedViews", () => {
     });
     expect(result.current.views[0]?.version).toBe(5);
     expect(result.current.duplicateConflict?.version).toBe(5);
+    expect(result.current.canRetryVersion).toBe(true);
     expect(api.updateWorkspaceSourceView).toHaveBeenCalledTimes(1);
 
     rerender({ workspaceId: null, state: localState() });
     expect(result.current.duplicateConflict).toBeNull();
     expect(result.current.versionConflict).toBeNull();
+    expect(result.current.canRetryVersion).toBe(false);
+  });
+
+  it("does not retry a failed create after a replace supersedes it", async () => {
+    api.createWorkspaceSourceView.mockRejectedValue(new Error("offline"));
+    api.updateWorkspaceSourceView.mockRejectedValue({
+      status: 409,
+      details: {
+        detail: {
+          code: "source_view_version_conflict",
+          view_id: "view-1",
+          current_version: 5,
+        },
+      },
+    });
+    api.listWorkspaceSourceViews
+      .mockResolvedValueOnce({ items: [validView()] })
+      .mockResolvedValueOnce({ items: [validView({ version: 5 })] });
+    const { result } = setup();
+    await waitFor(() => expect(result.current.views).toHaveLength(1));
+
+    await act(async () => result.current.createView("Old create"));
+    expect(result.current.canRetryMutation).toBe(true);
+    expect(result.current.canRetryVersion).toBe(false);
+
+    await act(async () => result.current.replaceView(result.current.views[0]!));
+    expect(result.current.canRetryMutation).toBe(false);
+    expect(result.current.canRetryVersion).toBe(true);
+
+    await act(async () => result.current.retryMutation());
+
+    expect(api.createWorkspaceSourceView).toHaveBeenCalledTimes(1);
+    expect(api.updateWorkspaceSourceView).toHaveBeenCalledTimes(1);
   });
 
   it("retries a version conflict with the refreshed server version", async () => {
@@ -625,6 +677,7 @@ describe("useSourceSavedViews", () => {
       expect.objectContaining({ version: 5, name: "Name" }),
     );
     expect(result.current.versionConflict).toBeNull();
+    expect(result.current.canRetryVersion).toBe(false);
     expect(result.current.announcement).toBe("Saved view replaced.");
   });
 

@@ -80,16 +80,14 @@ interface PatchOptions {
   onSuccess: (
     view: WorkspaceSourceSavedViewValidResponse,
     token: OperationToken,
-  ) => void;
+  ) => boolean;
 }
 
-interface VersionRetry {
-  generation: number;
+interface VersionRetry extends OperationToken {
   run: (version: number) => Promise<void>;
 }
 
-interface MutationRetry {
-  generation: number;
+interface MutationRetry extends OperationToken {
   run: () => Promise<void>;
 }
 
@@ -205,6 +203,7 @@ export const useSourceSavedViews = (
   const mountedRef = React.useRef(false);
   const lifecycleRef = React.useRef(0);
   const operationEpochRef = React.useRef(0);
+  const hasAuthoritativeViewsRef = React.useRef(false);
   const identityPending = identityRef.current !== workspaceId;
   const renderGeneration =
     generationRef.current + (identityPending ? 1 : 0);
@@ -234,6 +233,8 @@ export const useSourceSavedViews = (
     (generation: number): OperationToken | null => {
       if (!isGenerationCurrent(generation)) return null;
       operationEpochRef.current += 1;
+      versionRetryRef.current = null;
+      mutationRetryRef.current = null;
       return {
         generation,
         lifecycle: lifecycleRef.current,
@@ -284,9 +285,9 @@ export const useSourceSavedViews = (
       generation: number,
       targetWorkspaceId: string,
       prepare?: (current: ControllerState) => ControllerState,
-    ) => {
+    ): Promise<OperationToken | null> => {
       const token = beginOperation(generation);
-      if (!token) return;
+      if (!token) return null;
       commitOperation(token, (current) => {
         const loadingState = {
           ...current,
@@ -298,6 +299,41 @@ export const useSourceSavedViews = (
       try {
         const response =
           await tldwClient.listWorkspaceSourceViews(targetWorkspaceId);
+        if (!isOperationCurrent(token)) return null;
+        hasAuthoritativeViewsRef.current = true;
+        commitOperation(token, (current) => ({
+          ...current,
+          views: response.items,
+          loading: false,
+          listError: null,
+        }));
+        return token;
+      } catch (error) {
+        if (!isOperationCurrent(token)) return null;
+        commitOperation(token, (current) => ({
+          ...current,
+          loading: false,
+          listError: requestError(error),
+        }));
+        return token;
+      }
+    },
+    [beginOperation, commitOperation, isOperationCurrent],
+  );
+
+  const reconcileOperation = React.useCallback(
+    async (token: OperationToken, targetWorkspaceId: string) => {
+      if (!isOperationCurrent(token)) return;
+      commitOperation(token, (current) => ({
+        ...current,
+        loading: true,
+        listError: null,
+      }));
+      try {
+        const response =
+          await tldwClient.listWorkspaceSourceViews(targetWorkspaceId);
+        if (!isOperationCurrent(token)) return;
+        hasAuthoritativeViewsRef.current = true;
         commitOperation(token, (current) => ({
           ...current,
           views: response.items,
@@ -312,7 +348,7 @@ export const useSourceSavedViews = (
         }));
       }
     },
-    [beginOperation, commitOperation],
+    [commitOperation, isOperationCurrent],
   );
 
   React.useLayoutEffect(() => {
@@ -322,6 +358,7 @@ export const useSourceSavedViews = (
       mountedRef.current = false;
       lifecycleRef.current += 1;
       operationEpochRef.current += 1;
+      hasAuthoritativeViewsRef.current = false;
       versionRetryRef.current = null;
       mutationRetryRef.current = null;
     };
@@ -333,6 +370,7 @@ export const useSourceSavedViews = (
       generationRef.current += 1;
     }
     operationEpochRef.current += 1;
+    hasAuthoritativeViewsRef.current = false;
     versionRetryRef.current = null;
     mutationRetryRef.current = null;
     setState(emptyState(generationRef.current));
@@ -428,6 +466,7 @@ export const useSourceSavedViews = (
     ): Promise<void> => {
       const token = beginOperation(generation);
       if (!token) return;
+      const needsReconciliation = !hasAuthoritativeViewsRef.current;
       commitOperation(token, (current) => ({
         ...current,
         loading: false,
@@ -447,40 +486,50 @@ export const useSourceSavedViews = (
         if (!validResponse(response)) {
           throw new Error("The server returned an invalid saved view.");
         }
-        options.onSuccess(response, token);
+        const committed = options.onSuccess(response, token);
+        if (committed && needsReconciliation) {
+          void reconcileOperation(token, targetWorkspaceId);
+        }
       } catch (error) {
         if (!isOperationCurrent(token)) return;
         const detail = parseConflictDetail(error);
         if (detail?.code === "source_view_version_conflict") {
-          versionRetryRef.current = {
+          const refreshToken = await load(
             generation,
-            run: (version) =>
-              performPatch(generation, targetWorkspaceId, {
-                ...options,
-                version,
-              }),
-          };
-          await load(generation, targetWorkspaceId, (current) => ({
-            ...current,
-            duplicateConflict:
-              current.duplicateConflict?.viewId === detail.view_id
-                ? {
-                    ...current.duplicateConflict,
-                    version: detail.current_version,
-                  }
-                : current.duplicateConflict,
-            versionConflict: {
-              viewId: detail.view_id,
-              currentVersion: detail.current_version,
-              retryable: true,
-            },
-            mutation: null,
-            mutationError: null,
-          }));
+            targetWorkspaceId,
+            (current) => ({
+              ...current,
+              duplicateConflict:
+                current.duplicateConflict?.viewId === detail.view_id
+                  ? {
+                      ...current.duplicateConflict,
+                      version: detail.current_version,
+                    }
+                  : current.duplicateConflict,
+              versionConflict: {
+                viewId: detail.view_id,
+                currentVersion: detail.current_version,
+                retryable: true,
+              },
+              mutation: null,
+              mutationError: null,
+            }),
+          );
+          if (refreshToken && isOperationCurrent(refreshToken)) {
+            versionRetryRef.current = {
+              ...refreshToken,
+              run: (version) =>
+                performPatch(generation, targetWorkspaceId, {
+                  ...options,
+                  version,
+                }),
+            };
+            commitOperation(refreshToken, (current) => ({ ...current }));
+          }
           return;
         }
         mutationRetryRef.current = {
-          generation,
+          ...token,
           run: () => performPatch(generation, targetWorkspaceId, options),
         };
         commitOperation(token, (current) => ({
@@ -490,7 +539,13 @@ export const useSourceSavedViews = (
         }));
       }
     },
-    [beginOperation, commitOperation, isOperationCurrent, load],
+    [
+      beginOperation,
+      commitOperation,
+      isOperationCurrent,
+      load,
+      reconcileOperation,
+    ],
   );
 
   const createView = React.useCallback(
@@ -524,6 +579,7 @@ export const useSourceSavedViews = (
       const run = async () => {
         const token = beginOperation(renderGeneration);
         if (!token) return;
+        const needsReconciliation = !hasAuthoritativeViewsRef.current;
         commitOperation(token, (current) => ({
           ...current,
           loading: false,
@@ -548,12 +604,15 @@ export const useSourceSavedViews = (
           if (!validResponse(response)) {
             throw new Error("The server returned an invalid saved view.");
           }
-          finishValidMutation(
+          const committed = finishValidMutation(
             token,
             response,
             "Saved view created.",
             serialized.state,
           );
+          if (committed && needsReconciliation) {
+            void reconcileOperation(token, workspaceId);
+          }
         } catch (error) {
           if (!isOperationCurrent(token)) return;
           const detail = parseConflictDetail(error);
@@ -587,7 +646,7 @@ export const useSourceSavedViews = (
             }));
             return;
           }
-          mutationRetryRef.current = { generation: renderGeneration, run };
+          mutationRetryRef.current = { ...token, run };
           commitOperation(token, (current) => ({
             ...current,
             mutation: null,
@@ -605,6 +664,7 @@ export const useSourceSavedViews = (
       finishValidMutation,
       isGenerationCurrent,
       isOperationCurrent,
+      reconcileOperation,
       renderGeneration,
       workspaceId,
     ],
@@ -628,14 +688,13 @@ export const useSourceSavedViews = (
         schema_version: SOURCE_SAVED_VIEW_SCHEMA_VERSION,
         state: conflict.state,
       },
-      onSuccess: (view, token) => {
+      onSuccess: (view, token) =>
         finishValidMutation(
           token,
           view,
           "Saved view replaced.",
           conflict.state,
-        );
-      },
+        ),
     });
   }, [
     exposed.duplicateConflict,
@@ -672,14 +731,13 @@ export const useSourceSavedViews = (
           schema_version: SOURCE_SAVED_VIEW_SCHEMA_VERSION,
           state: serialized.state,
         },
-        onSuccess: (response, token) => {
+        onSuccess: (response, token) =>
           finishValidMutation(
             token,
             response,
             "Saved view replaced.",
             serialized.state,
-          );
-        },
+          ),
       });
     },
     [
@@ -710,16 +768,16 @@ export const useSourceSavedViews = (
           state: wireState,
         },
         onSuccess: (response, token) => {
-          if (
-            finishValidMutation(
-              token,
-              response,
-              "Saved view reset.",
-              wireState,
-            )
-          ) {
+          const committed = finishValidMutation(
+            token,
+            response,
+            "Saved view reset.",
+            wireState,
+          );
+          if (committed) {
             onApplyState(applySavedSourceViewState(currentState, wireState));
           }
+          return committed;
         },
       });
     },
@@ -744,6 +802,7 @@ export const useSourceSavedViews = (
       const run = async () => {
         const token = beginOperation(renderGeneration);
         if (!token) return;
+        const needsReconciliation = !hasAuthoritativeViewsRef.current;
         commitOperation(token, (current) => ({
           ...current,
           loading: false,
@@ -756,7 +815,7 @@ export const useSourceSavedViews = (
           if (!isOperationCurrent(token)) return;
           versionRetryRef.current = null;
           mutationRetryRef.current = null;
-          commitOperation(token, (current) => ({
+          const committed = commitOperation(token, (current) => ({
             ...clearTransientState(current),
             views: current.views.filter(
               (candidate) => candidate.id !== view.id,
@@ -770,9 +829,12 @@ export const useSourceSavedViews = (
             mutation: null,
             announcement: "Saved view deleted.",
           }));
+          if (committed && needsReconciliation) {
+            void reconcileOperation(token, workspaceId);
+          }
         } catch (error) {
           if (!isOperationCurrent(token)) return;
-          mutationRetryRef.current = { generation: renderGeneration, run };
+          mutationRetryRef.current = { ...token, run };
           commitOperation(token, (current) => ({
             ...current,
             mutation: null,
@@ -787,6 +849,7 @@ export const useSourceSavedViews = (
       commitOperation,
       isGenerationCurrent,
       isOperationCurrent,
+      reconcileOperation,
       renderGeneration,
       workspaceId,
     ],
@@ -796,11 +859,11 @@ export const useSourceSavedViews = (
     const retryOperation = mutationRetryRef.current;
     if (
       !retryOperation ||
-      !isGenerationCurrent(retryOperation.generation)
+      !isOperationCurrent(retryOperation)
     )
       return;
     await retryOperation.run();
-  }, [isGenerationCurrent]);
+  }, [isOperationCurrent]);
 
   const retryVersionConflict = React.useCallback(async () => {
     const retryOperation = versionRetryRef.current;
@@ -808,13 +871,13 @@ export const useSourceSavedViews = (
       state.generation === generationRef.current ? state.versionConflict : null;
     if (
       !retryOperation ||
-      !isGenerationCurrent(retryOperation.generation) ||
+      !isOperationCurrent(retryOperation) ||
       conflict === null
     ) {
       return;
     }
     await retryOperation.run(conflict.currentVersion);
-  }, [isGenerationCurrent, state.generation, state.versionConflict]);
+  }, [isOperationCurrent, state.generation, state.versionConflict]);
 
   const currentSignature = getSourceListViewStateSignature(currentState);
   const modified =
@@ -840,8 +903,14 @@ export const useSourceSavedViews = (
     mutationError: exposed.mutationError,
     announcement: exposed.announcement,
     canRetryMutation:
-      mutationRetryRef.current?.generation === renderGeneration &&
-      isGenerationCurrent(renderGeneration),
+      exposed.mutationError !== null &&
+      mutationRetryRef.current !== null &&
+      mutationRetryRef.current.generation === renderGeneration &&
+      isOperationCurrent(mutationRetryRef.current),
+    canRetryVersion:
+      versionRetryRef.current !== null &&
+      exposed.versionConflict !== null &&
+      isOperationCurrent(versionRetryRef.current),
     load: retry,
     retry,
     retryMutation,
