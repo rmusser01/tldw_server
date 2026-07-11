@@ -314,14 +314,16 @@ export const serializeSourceListViewState = (
     sort: state.sort
   }
   const result = validateWireState(wireState)
-  if (result.ok) return result
-  return {
-    ok: false,
-    issues: result.issues.map((issue) => ({
-      ...issue,
-      field: WIRE_TO_LOCAL_FIELDS[issue.field as WireField] ?? issue.field
-    }))
+  if (result.ok === false) {
+    return {
+      ok: false,
+      issues: result.issues.map((issue) => ({
+        ...issue,
+        field: WIRE_TO_LOCAL_FIELDS[issue.field as WireField] ?? issue.field
+      }))
+    }
   }
+  return result
 }
 
 export const deserializeSourceViewState = (

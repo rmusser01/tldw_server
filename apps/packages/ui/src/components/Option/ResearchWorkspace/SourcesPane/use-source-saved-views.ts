@@ -69,13 +69,14 @@ interface OperationToken {
   epoch: number;
 }
 
+type WithoutVersion<T> = T extends unknown ? Omit<T, "version"> : never;
+
 interface PatchOptions {
   kind: "replace" | "reset";
   viewId: string;
   version: number;
-  body: Omit<
-    Parameters<typeof tldwClient.updateWorkspaceSourceView>[2],
-    "version"
+  body: WithoutVersion<
+    Parameters<typeof tldwClient.updateWorkspaceSourceView>[2]
   >;
   onSuccess: (
     view: WorkspaceSourceSavedViewValidResponse,
@@ -565,8 +566,8 @@ export const useSourceSavedViews = (
         });
       }
       const serialized = serializeSourceListViewState(currentState);
-      if (!serialized.ok) issues.push(...serialized.issues);
-      if (issues.length > 0 || !serialized.ok) {
+      if (serialized.ok === false) issues.push(...serialized.issues);
+      if (issues.length > 0 || serialized.ok === false) {
         commitGeneration(renderGeneration, (current) => ({
           ...current,
           serializationIssues: issues,
@@ -715,7 +716,7 @@ export const useSourceSavedViews = (
         return;
       }
       const serialized = serializeSourceListViewState(currentState);
-      if (!serialized.ok) {
+      if (serialized.ok === false) {
         commitGeneration(renderGeneration, (current) => ({
           ...current,
           serializationIssues: serialized.issues,
