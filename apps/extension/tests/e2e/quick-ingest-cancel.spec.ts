@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test"
 import { launchWithBuiltExtension } from "./utils/extension-build"
 import { forceConnected, waitForConnectionStore } from "./utils/connection"
+import { setQuickIngestSwitch } from "./utils/quick-ingest-options"
 
 const API_KEY = "THIS-IS-A-SECURE-KEY-123-FAKE-KEY"
 
@@ -88,7 +89,8 @@ test.describe("Quick ingest cancel flow", () => {
                     ]
                   }
                 })
-              }, 500)
+                ;(window as any).__quickIngestLateCompletionEmitted = true
+              }, 0)
               return { ok: true }
             }
             return originalSendMessage(message)
@@ -133,11 +135,22 @@ test.describe("Quick ingest cancel flow", () => {
       await urlInput.fill("https://example.com/cancel-me")
       await dialog.getByRole("button", { name: /add urls/i }).first().click()
 
-      const useDefaultsButton = dialog
-        .getByRole("button", { name: /use defaults & process/i })
+      const configureButton = dialog
+        .getByRole("button", { name: /configure \d+ items/i })
         .first()
-      await expect(useDefaultsButton).toBeVisible()
-      await useDefaultsButton.click()
+      await expect(configureButton).toBeVisible()
+      await configureButton.click()
+
+      await setQuickIngestSwitch(dialog, "analysis", false)
+      await setQuickIngestSwitch(dialog, "chunking", false)
+
+      const nextButton = dialog.getByRole("button", { name: /^next$/i }).first()
+      await expect(nextButton).toBeVisible()
+      await nextButton.click()
+
+      const startButton = dialog.getByRole("button", { name: /start processing/i }).first()
+      await expect(startButton).toBeVisible()
+      await startButton.click()
 
       const cancelButton = dialog.getByRole("button", { name: /cancel all/i }).first()
       await expect(cancelButton).toBeVisible({ timeout: 10000 })
@@ -149,8 +162,14 @@ test.describe("Quick ingest cancel flow", () => {
       })
       await expect(dialog.getByRole("region", { name: /error items/i })).toBeVisible()
 
-      await page.waitForTimeout(1200)
+      await page.waitForFunction(
+        () => (window as any).__quickIngestLateCompletionEmitted === true
+      )
       await expect(dialog.getByTestId("wizard-results-step")).toBeVisible()
+      await expect(dialog.getByRole("region", { name: /error items/i })).toBeVisible()
+      await expect(
+        dialog.getByRole("region", { name: /completed items/i })
+      ).toHaveCount(0)
     } finally {
       try {
         await page.evaluate(() => {
@@ -160,6 +179,7 @@ test.describe("Quick ingest cancel flow", () => {
               restore()
             }
             delete (window as any).__restoreQuickIngestCancelPatch
+            delete (window as any).__quickIngestLateCompletionEmitted
           } catch {
             // ignore best-effort cleanup failures
           }

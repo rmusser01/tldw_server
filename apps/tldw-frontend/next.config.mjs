@@ -6,6 +6,20 @@ import { validateNetworkingConfig } from './scripts/validate-networking-config.m
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const paTesseractPath = path.resolve(__dirname, 'node_modules/pa-tesseract.js');
+const repoWorkspaceRoot = path.resolve(__dirname, '../..');
+const backendRuntimeWatchIgnoreRoots = [
+  'Databases',
+  'tldw_Server_API/Databases',
+  'tldw_Server_API/Logs',
+  'logs',
+].map((root) => path.resolve(repoWorkspaceRoot, root).split(path.sep).join('/'));
+const backendRuntimeWatchIgnorePatterns = backendRuntimeWatchIgnoreRoots.map(
+  (root) => `${root}/**`
+);
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const backendRuntimeWatchIgnoreSource = backendRuntimeWatchIgnoreRoots
+  .map((root) => `^${escapeRegExp(root)}(?:/|$)`)
+  .join('|');
 const {
   deploymentMode,
   internalApiOrigin: validatedInternalApiOrigin
@@ -146,6 +160,7 @@ const nextConfig = {
     ignoreBuildErrors: true,
   },
   turbopack: {
+    root: repoWorkspaceRoot,
     // Keep Turbopack aliases aligned with shared UI + web shims.
     resolveAlias: {
       '@tldw/ui': '../packages/ui/src',
@@ -160,7 +175,7 @@ const nextConfig = {
     },
   },
   // Ensure Next resolves the correct monorepo root when multiple lockfiles exist.
-  outputFileTracingRoot: path.resolve(__dirname, '../..'),
+  outputFileTracingRoot: repoWorkspaceRoot,
   transpilePackages: ['@tldw/ui'],
   webpack: (config) => {
     // Support extension-aligned aliases + shims
@@ -185,6 +200,31 @@ const nextConfig = {
       __dirname,
       'extension/shims/wxt-browser.ts'
     );
+    const existingIgnored = config.watchOptions?.ignored;
+    if (existingIgnored instanceof RegExp) {
+      config.watchOptions = {
+        ...config.watchOptions,
+        ignored: new RegExp(
+          `(?:${existingIgnored.source})|(?:${backendRuntimeWatchIgnoreSource})`,
+          existingIgnored.flags.replace(/[gy]/g, '')
+        ),
+      };
+      return config;
+    }
+    const normalizedExistingIgnored = (
+      Array.isArray(existingIgnored)
+        ? existingIgnored
+        : existingIgnored == null
+          ? []
+          : [existingIgnored]
+    ).filter((item) => typeof item === 'string' && item.trim());
+    config.watchOptions = {
+      ...config.watchOptions,
+      ignored: [
+        ...normalizedExistingIgnored,
+        ...backendRuntimeWatchIgnorePatterns,
+      ],
+    };
     return config;
   },
 };

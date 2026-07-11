@@ -29,8 +29,8 @@ def test_scrape_from_sitemap_uses_blocking(monkeypatch):
     def fake_fetch(*args, **kwargs):
         return FakeResp()
 
-    def fake_blocking(url):
-        calls.append(url)
+    def fake_blocking(url, *, allow_llm_extraction=None):
+        calls.append((url, allow_llm_extraction))
         return {"url": url, "title": "ok", "author": "", "date": "", "content": "", "extraction_successful": True}
 
     monkeypatch.setattr(AEL, "http_fetch", fake_fetch)
@@ -38,7 +38,10 @@ def test_scrape_from_sitemap_uses_blocking(monkeypatch):
 
     results = AEL.scrape_from_sitemap("https://example.com/sitemap.xml")
     assert len(results) == 2
-    assert set(calls) == {"https://example.com/a", "https://example.com/b"}
+    assert set(calls) == {
+        ("https://example.com/a", True),
+        ("https://example.com/b", True),
+    }
 
 
 def test_scrape_by_url_level_uses_blocking(monkeypatch):
@@ -48,8 +51,8 @@ def test_scrape_by_url_level_uses_blocking(monkeypatch):
 
     calls = []
 
-    def fake_blocking(url):
-        calls.append(url)
+    def fake_blocking(url, *, allow_llm_extraction=None):
+        calls.append((url, allow_llm_extraction))
         return {"url": url, "title": "t", "author": "", "date": "", "content": "", "extraction_successful": True}
 
     monkeypatch.setattr(AEL, "scrape_article_blocking", fake_blocking)
@@ -57,7 +60,7 @@ def test_scrape_by_url_level_uses_blocking(monkeypatch):
     # Level 1 should include only the first url
     results = AEL.scrape_by_url_level("https://example.com", level=1)
     assert len(results) == 1
-    assert calls == ["https://example.com/one"]
+    assert calls == [("https://example.com/one", True)]
 
 
 def test_scrape_from_sitemap_blocks_on_shared_sync_policy_denial(monkeypatch):

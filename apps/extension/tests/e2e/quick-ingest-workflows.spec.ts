@@ -1,6 +1,7 @@
 import { expect, test, type BrowserContext } from '@playwright/test'
 import path from 'path'
 import { launchWithBuiltExtension } from './utils/extension-build'
+import { setQuickIngestSwitch } from './utils/quick-ingest-options'
 
 const SERVER_URL = process.env.TLDW_URL || 'http://127.0.0.1:8000'
 const API_KEY = process.env.TLDW_API_KEY || 'THIS-IS-A-SECURE-KEY-123-FAKE-KEY'
@@ -89,10 +90,9 @@ test.describe('Quick Ingest workflows and UX', () => {
 
       await expect(page.getByText(/File settings follow/i)).toBeVisible()
 
-      const analysisToggle = page.getByLabel(/Ingestion options .*analysis/i)
-      await analysisToggle.click()
-      const chunkingToggle = page.getByLabel(/Ingestion options .*chunking/i)
-      await chunkingToggle.click()
+      const dialog = page.getByRole('dialog', { name: /quick ingest/i }).first()
+      await setQuickIngestSwitch(dialog, 'analysis', false)
+      await setQuickIngestSwitch(dialog, 'chunking', false)
 
       // Snapshot for UX review
       const screenshotPath = testInfo.outputPath('quick-ingest-workflows.png')

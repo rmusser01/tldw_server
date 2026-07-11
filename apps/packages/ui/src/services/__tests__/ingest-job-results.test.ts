@@ -45,4 +45,18 @@ describe("ingest job result helpers", () => {
     expect(completedIngestJobIndicatesFailure(payload)).toBe(true)
     expect(extractCompletedIngestJobError(payload)).toBe("Quota exceeded")
   })
+
+  it("surfaces backend errors arrays from persist-style responses", () => {
+    const payload = {
+      status: "persist-ok",
+      total_articles: 1,
+      stored_articles: 0,
+      errors: ["Failed to extract: https://example.com/article"]
+    }
+
+    expect(completedIngestJobIndicatesFailure(payload)).toBe(true)
+    expect(extractCompletedIngestJobError(payload)).toBe(
+      "Failed to extract: https://example.com/article"
+    )
+  })
 })

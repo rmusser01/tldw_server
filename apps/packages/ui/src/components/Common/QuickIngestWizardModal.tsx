@@ -128,6 +128,13 @@ const RESULT_SUCCESS_STATUS_TOKENS = [
 const RESULT_CANCELLED_STATUS_TOKENS = ["cancelled", "canceled"]
 const FILE_REATTACH_WARNING = "Reattach this file after refresh to process it."
 const PERSISTED_REATTACH_POLL_INTERVAL_MS = 1_500
+const QUICK_INGEST_MODAL_STYLES = {
+  body: {
+    padding: "0 16px 16px",
+    maxHeight: "calc(100vh - 180px)",
+    overflowY: "auto",
+  },
+}
 
 const mapDetectedTypeToEntryType = (
   detectedType: DetectedMediaType
@@ -834,6 +841,7 @@ type WizardModalContentProps = {
   markProcessingTracking: (tracking: PersistedQuickIngestTracking) => void
   markInterrupted: (reason?: string) => void
   showSession: () => void
+  replaceWithNewDraft: () => QuickIngestSessionRecord
   shouldAttemptPersistedReattach: boolean
 }
 
@@ -845,6 +853,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   markProcessingTracking,
   markInterrupted,
   showSession,
+  replaceWithNewDraft,
   shouldAttemptPersistedReattach,
 }) => {
   const { t } = useTranslation(["option"])
@@ -1640,6 +1649,10 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     onClose()
   }, [navigate, onClose])
 
+  const handleIngestMore = useCallback(() => {
+    replaceWithNewDraft()
+  }, [replaceWithNewDraft])
+
   const handleOpenWorkspace = useCallback(
     (item: WizardResultItem) => {
       const mediaId = item.mediaId
@@ -1709,6 +1722,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         return (
           <WizardResultsStep
             onClose={onClose}
+            onIngestMore={handleIngestMore}
             onOpenMedia={handleOpenMedia}
             onSearchKnowledge={handleSearchKnowledge}
             onOpenWorkspace={handleOpenWorkspace}
@@ -1724,6 +1738,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     handleOpenMedia,
     handleOpenCollection,
     handleOpenWorkspace,
+    handleIngestMore,
     handleQuickProcess,
     handleRetryConnection,
     handleSearchKnowledge,
@@ -1744,13 +1759,8 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         footer={null}
         width={800}
         className="quick-ingest-modal quick-ingest-wizard-modal"
-        styles={{
-          body: {
-            padding: "0 16px 16px",
-            maxHeight: "calc(100vh - 180px)",
-            overflowY: "auto",
-          },
-        }}
+        getContainer={false}
+        styles={QUICK_INGEST_MODAL_STYLES}
       >
         {/* Stepper navigation */}
         <IngestWizardStepper />
@@ -1781,6 +1791,7 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
     markInterrupted,
     createDraftSession,
     showSession,
+    replaceWithNewDraft,
   } =
     useQuickIngestSessionStore(
       useShallow((store) => ({
@@ -1790,6 +1801,7 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
         markInterrupted: store.markInterrupted,
         createDraftSession: store.createDraftSession,
         showSession: store.showSession,
+        replaceWithNewDraft: store.replaceWithNewDraft,
       }))
     )
 
@@ -1833,6 +1845,7 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
         markProcessingTracking={markProcessingTracking}
         markInterrupted={markInterrupted}
         showSession={showSession}
+        replaceWithNewDraft={replaceWithNewDraft}
         shouldAttemptPersistedReattach={
           session.lifecycle === "processing" &&
           session.tracking?.mode === "webui-direct" &&

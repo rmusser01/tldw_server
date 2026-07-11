@@ -38,6 +38,7 @@ import {
 
 type WizardResultsStepProps = {
   onClose: () => void
+  onIngestMore?: () => void
   onRetryItems?: (
     itemIds: string[],
     retryItems?: ConferenceRetryRequestItem[]
@@ -316,6 +317,7 @@ ErrorRow.displayName = "ErrorRow"
 
 export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
   onClose,
+  onIngestMore,
   onRetryItems,
   onOpenMedia,
   onDiscussInChat,
@@ -486,8 +488,12 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
   )
 
   const handleIngestMore = useCallback(() => {
+    if (onIngestMore) {
+      onIngestMore()
+      return
+    }
     reset()
-  }, [reset])
+  }, [onIngestMore, reset])
 
   // -- Elapsed time ---------------------------------------------------------
 

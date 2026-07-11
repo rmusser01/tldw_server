@@ -157,10 +157,10 @@ Verify: `ffmpeg -version`
 
 ### 12. YouTube download fails ("yt-dlp error")
 
-**Symptoms:** URL ingestion returns an error mentioning yt-dlp, HTTP 403, or "format not available".
+**Symptoms:** URL ingestion returns an error mentioning yt-dlp, HTTP 403, "format not available", or YouTube reporting that content is "not available on this app".
 
 **Fix:**
-1. Update yt-dlp to the latest version: `pip install -U yt-dlp`
+1. Update yt-dlp to at least the project minimum: `pip install -U "yt-dlp>=2026.7.4"`
 2. Some sites require cookies. If authentication is needed, configure yt-dlp cookies.
 3. Check if the URL is accessible: `yt-dlp --simulate "YOUR_URL"`
 

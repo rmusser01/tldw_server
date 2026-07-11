@@ -100,8 +100,10 @@ async def test_fallback_url_level_rejects_threshold_control(monkeypatch):
 @pytest.mark.asyncio
 async def test_fallback_url_level_ephemeral_smoke_applies_max_pages_cap(monkeypatch):
     _force_fallback(monkeypatch)
+    captured = {}
 
-    async def fake_scrape_by_url_level(base_url, level):
+    async def fake_scrape_by_url_level(base_url, level, *, allow_llm_extraction=None):
+        captured["allow_llm_extraction"] = allow_llm_extraction
         return [
             {"url": "https://example.com/1", "title": "A", "content": "c1", "extraction_successful": True},
             {"url": "https://example.com/2", "title": "B", "content": "c2", "extraction_successful": True},
@@ -133,6 +135,7 @@ async def test_fallback_url_level_ephemeral_smoke_applies_max_pages_cap(monkeypa
     assert result["engine"] == "legacy_fallback"
     assert result["total_articles"] == 2
     assert len(result["results"]) == 2
+    assert captured["allow_llm_extraction"] is False
     fallback_context = result["fallback_context"]
     assert fallback_context["enabled"] is True
     assert fallback_context["trigger_error_type"] == "RuntimeError"
@@ -142,7 +145,10 @@ async def test_fallback_url_level_ephemeral_smoke_applies_max_pages_cap(monkeypa
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_ingest_web_content_skips_analysis_without_provider(monkeypatch):
-    async def fake_scrape_article(url, custom_cookies=None):
+    captured = {}
+
+    async def fake_scrape_article(url, custom_cookies=None, *, allow_llm_extraction=None):
+        captured["allow_llm_extraction"] = allow_llm_extraction
         return {
             "url": url,
             "title": "Example",
@@ -168,6 +174,7 @@ async def test_ingest_web_content_skips_analysis_without_provider(monkeypatch):
 
     assert result is not None
     assert result[0]["analysis"] is None
+    assert captured["allow_llm_extraction"] is True
     assert result[0]["analysis_status"] == "skipped"
     assert result[0]["analysis_error"] == "Choose an analysis provider before running ingest analysis."
 
@@ -244,8 +251,10 @@ async def test_fallback_url_level_sanitizes_unexpected_runtime_error(monkeypatch
 @pytest.mark.asyncio
 async def test_fallback_ephemeral_result_retrievable_within_ttl(monkeypatch):
     _force_fallback(monkeypatch)
+    captured = {}
 
-    async def fake_scrape_by_url_level(base_url, level):
+    async def fake_scrape_by_url_level(base_url, level, *, allow_llm_extraction=None):
+        captured["allow_llm_extraction"] = allow_llm_extraction
         return [
             {"url": "https://example.com/a", "title": "A", "content": "c1", "extraction_successful": True},
             {"url": "https://example.com/b", "title": "B", "content": "c2", "extraction_successful": True},
@@ -279,6 +288,7 @@ async def test_fallback_ephemeral_result_retrievable_within_ttl(monkeypatch):
     stored = local_store.get_data(ephemeral_id)
     assert isinstance(stored, dict)
     assert len(stored.get("articles", [])) == 2
+    assert captured["allow_llm_extraction"] is False
 
     state["now"] = 300.0
     assert local_store.get_data(ephemeral_id) is None

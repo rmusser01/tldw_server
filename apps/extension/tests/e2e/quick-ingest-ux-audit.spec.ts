@@ -5,6 +5,7 @@ import {
   forceUnconfigured,
   forceErrorUnreachable
 } from './utils/connection'
+import { setQuickIngestSwitch } from './utils/quick-ingest-options'
 
 const API_KEY = 'THIS-IS-A-SECURE-KEY-123-FAKE-KEY'
 
@@ -37,19 +38,14 @@ const addUrlToQuickIngest = async (dialog: Locator, url: string) => {
 }
 
 const startQueuedQuickIngest = async (dialog: Locator) => {
-  const useDefaultsButton = dialog
-    .getByRole('button', { name: /use defaults & process/i })
-    .first()
-  if (await useDefaultsButton.isVisible({ timeout: 3000 }).catch(() => false)) {
-    await useDefaultsButton.click()
-    return
-  }
-
   const configureButton = dialog
     .getByRole('button', { name: /configure \d+ items/i })
     .first()
   await expect(configureButton).toBeVisible()
   await configureButton.click()
+
+  await setQuickIngestSwitch(dialog, 'analysis', false)
+  await setQuickIngestSwitch(dialog, 'chunking', false)
 
   const nextButton = dialog.getByRole('button', { name: /^next$/i }).first()
   await expect(nextButton).toBeVisible()

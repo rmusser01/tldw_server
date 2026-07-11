@@ -139,4 +139,22 @@ describe("quick ingest session store", () => {
       startedAt: 1700000000000,
     })
   })
+
+  it("clears completed run tracking when the session returns to draft", () => {
+    const store = createQuickIngestSessionStore()
+
+    store.getState().markProcessingTracking({
+      mode: "webui-direct",
+      sessionId: "qi-direct-completed",
+      batchId: "batch-1",
+      jobIds: [77],
+    })
+
+    store.getState().upsertSession({
+      lifecycle: "draft",
+      currentStep: 1,
+    })
+
+    expect(store.getState().session?.tracking).toBeUndefined()
+  })
 })

@@ -14,7 +14,8 @@ import { MediaPage } from "../utils/page-objects"
 import {
   seedAuth,
   generateTestId,
-  waitForConnection
+  waitForConnection,
+  TEST_CONFIG
 } from "../utils/helpers"
 import { expectApiCall } from "../utils/api-assertions"
 import {
@@ -459,11 +460,19 @@ test.describe("Media Ingestion Workflow", () => {
   })
 
   test.describe("Quick Ingest", () => {
+    test.describe.configure({ mode: "serial" })
+
     const quickIngestFixtureFile = path.resolve(
       process.cwd(),
       "e2e/fixtures/media/quick-ingest-sample.mkv"
     )
-    const quickIngestFixtureUrl = "https://example.com/e2e/quick-ingest-source.html"
+    const quickIngestFixtureUrl = new URL(
+      "/e2e/quick-ingest-source.html",
+      TEST_CONFIG.webUrl
+    ).toString()
+    const mockedQuickIngestJobUrl =
+      "https://www.youtube.com/watch?v=tldw-quick-ingest-e2e"
+    let mockedQuickIngestLifecycleSequence = 0
     const bulkConferencePlaylistUrl =
       "https://www.youtube.com/watch?v=PrNmmN6qBiw&list=PL0065D9B288E6804B"
     const bulkConferenceCollectionId = 700
@@ -785,10 +794,13 @@ test.describe("Media Ingestion Workflow", () => {
         }
       } = {}
     ) => {
-      const sourceUrl = options.sourceUrl ?? quickIngestFixtureUrl
-      const mediaId = options.mediaId ?? "qi-media-e2e-101"
-      const jobId = options.jobId ?? 101
-      const batchId = options.batchId ?? "batch-e2e-quick-ingest"
+      mockedQuickIngestLifecycleSequence += 1
+      const mockSequence = mockedQuickIngestLifecycleSequence
+      const sourceUrl =
+        options.sourceUrl ?? `${mockedQuickIngestJobUrl}&mock=${mockSequence}`
+      const mediaId = options.mediaId ?? `qi-media-e2e-${mockSequence}`
+      const jobId = options.jobId ?? 1000 + mockSequence
+      const batchId = options.batchId ?? `batch-e2e-quick-ingest-${mockSequence}`
       const title = "Quick ingest source"
       let remainingProcessingResponses = Math.max(0, options.processingResponses ?? 0)
 
@@ -919,7 +931,26 @@ test.describe("Media Ingestion Workflow", () => {
           .first()
       }
       await expect(emptyStateTrigger).toBeVisible({ timeout: 15_000 })
-      await emptyStateTrigger.click()
+      await expect
+        .poll(
+          async () => {
+            const trigger = authedPage
+              .getByTestId("first-ingest-tutorial")
+              .getByRole("button", { name: /^ingest$/i })
+              .or(authedPage.getByRole("button", { name: /open quick ingest/i }))
+              .first()
+            if (!(await trigger.isVisible().catch(() => false))) {
+              return false
+            }
+            await trigger.click({ timeout: 2_000 }).catch(() => undefined)
+            return await dialog.isVisible().catch(() => false)
+          },
+          {
+            timeout: 15_000,
+            message: "Timed out opening Quick Ingest from the visible media page trigger",
+          }
+        )
+        .toBe(true)
       await expect(dialog).toBeVisible({ timeout: 15_000 })
       await expect(dialog).toContainText(
         /Add URLs or files\. Stored items appear in Media/i
@@ -990,18 +1021,24 @@ test.describe("Media Ingestion Workflow", () => {
       test.setTimeout(180_000)
       skipIfServerUnavailable(serverInfo)
 
-      const {
-        sourceUrl: ingestUrl,
-        mediaId: expectedMediaId,
-        title,
-      } = await mockQuickIngestLifecycle(
-        authedPage,
-        {
-          mediaId: "qi-media-url-complete"
-        }
-      )
-      const mediaId = await ingestAndWaitForReady(authedPage, { url: ingestUrl })
-      expect(mediaId).toBe(expectedMediaId)
+      const ingestUrl = quickIngestFixtureUrl
+      const title = "quick-ingest-source.html"
+      const processRequestPromise = authedPage.waitForRequest((request) => {
+        if (request.method().toUpperCase() !== "POST") return false
+        const url = new URL(request.url())
+        return url.pathname.replace(/\/+$/, "") === "/api/v1/media/process-web-scraping"
+      })
+
+      const mediaIdPromise = ingestAndWaitForReady(authedPage, { url: ingestUrl })
+      const processRequest = await processRequestPromise
+      const processBody = processRequest.postDataJSON() as Record<string, unknown>
+      expect(processBody).toMatchObject({
+        url_input: ingestUrl,
+        summarize_checkbox: false,
+        perform_chunking: false,
+      })
+      const mediaId = await mediaIdPromise
+      expect(mediaId).not.toBe("unknown")
 
       await dismissQuickIngest(authedPage)
       const dialog = await reopenQuickIngest(authedPage)
@@ -1019,7 +1056,7 @@ test.describe("Media Ingestion Workflow", () => {
       await authedPage.waitForURL(
         (url) =>
           url.pathname === "/media" &&
-          url.searchParams.get("id") === expectedMediaId,
+          url.searchParams.get("id") === mediaId,
         { timeout: 15_000 }
       )
       await expect(dialog).toBeHidden({ timeout: 15_000 })
@@ -1081,7 +1118,7 @@ test.describe("Media Ingestion Workflow", () => {
               {
                 status: "Success",
                 media_id: "qi-media-url-fallback",
-                source_url: quickIngestFixtureUrl,
+                source_url: mockedQuickIngestJobUrl,
                 title: "Quick ingest source"
               }
             ]
@@ -1147,7 +1184,7 @@ test.describe("Media Ingestion Workflow", () => {
 
       const { sourceUrl: ingestUrl } = await mockQuickIngestLifecycle(authedPage, {
         mediaId: "qi-media-url-resume",
-        processingResponses: 1
+        processingResponses: 5
       })
       const dialog = await queueUrlAndStartProcessing(authedPage, ingestUrl, {
         waitForState: "processing"
@@ -1171,7 +1208,8 @@ test.describe("Media Ingestion Workflow", () => {
       skipIfServerUnavailable(serverInfo)
 
       const { sourceUrl: ingestUrl, title } = await mockQuickIngestLifecycle(authedPage, {
-        mediaId: "qi-media-url-refresh"
+        mediaId: "qi-media-url-refresh",
+        processingResponses: 1
       })
 
       let dialog = await openQuickIngestDialog(authedPage)
@@ -1181,7 +1219,8 @@ test.describe("Media Ingestion Workflow", () => {
       await expect(dialog).toContainText(ingestUrl)
 
       dialog = await startQueuedQuickIngestProcessing(dialog, {
-        waitForState: "processing"
+        waitForState: "processing",
+        requireJobSubmit: true,
       })
       await authedPage.reload({ waitUntil: "domcontentloaded" })
       dialog = await reopenQuickIngest(authedPage)
@@ -1236,7 +1275,7 @@ test.describe("Media Ingestion Workflow", () => {
 
       const { sourceUrl: ingestUrl } = await mockQuickIngestLifecycle(authedPage, {
         mediaId: "qi-media-url-draft",
-        processingResponses: 1
+        processingResponses: 5
       })
       let dialog = await openQuickIngestDialog(authedPage)
       await advanceQuickIngestToConfigureStep(dialog, ingestUrl, { proceedToConfigure: false })
@@ -1296,6 +1335,18 @@ test.describe("Media Ingestion Workflow", () => {
       await metadataPanel.getByLabel("Shared tags").fill("conference, talks")
 
       await dialog.getByRole("button", { name: /configure 33 items/i }).click()
+      for (const option of ["analysis", "chunking"]) {
+        const toggle = dialog
+          .getByRole("switch", {
+            name: new RegExp(`^Ingestion options\\s*[–-]\\s*${option}$`, "i")
+          })
+          .first()
+        await expect(toggle).toBeVisible()
+        if ((await toggle.getAttribute("aria-checked")) === "true") {
+          await toggle.click()
+          await expect(toggle).toHaveAttribute("aria-checked", "false")
+        }
+      }
       await dialog.getByRole("button", { name: "Next" }).click()
       await expect(dialog).toContainText("Ready to Process")
       await dialog.getByRole("button", { name: /start processing/i }).click()

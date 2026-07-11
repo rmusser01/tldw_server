@@ -27,6 +27,16 @@ const firstNonEmptyString = (...values: unknown[]): string | undefined => {
   return undefined
 }
 
+const firstStringFromArray = (value: unknown): string | undefined => {
+  if (!Array.isArray(value)) return undefined
+  for (const item of value) {
+    if (typeof item !== "string") continue
+    const normalized = item.trim()
+    if (normalized) return normalized
+  }
+  return undefined
+}
+
 export const extractCompletedIngestJobPayload = (
   value: unknown
 ): RecordLike | undefined => {
@@ -55,9 +65,11 @@ export const extractCompletedIngestJobError = (
   return firstNonEmptyString(
     payload?.error,
     payload?.detail,
+    firstStringFromArray(payload?.errors),
     record?.error_message,
     record?.cancellation_reason,
-    record?.error
+    record?.error,
+    firstStringFromArray(record?.errors)
   )
 }
 
