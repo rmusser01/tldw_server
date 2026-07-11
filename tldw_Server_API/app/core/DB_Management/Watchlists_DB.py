@@ -82,7 +82,7 @@ _WATCHLISTS_DB_NONCRITICAL_EXCEPTIONS = (
 )
 
 _DEFAULT_WATCHLIST_NAME = "Imported Watchlist"
-_VALID_WATCHLIST_DOMAINS = {"cti_osint", "news", "general"}
+_VALID_WATCHLIST_DOMAINS = {"cti_osint", "news", "sports", "culture", "creator", "general"}
 _VALID_WATCHLIST_STATUSES = {"active", "paused", "archived"}
 _VALID_WATCHLIST_PRIORITIES = {"low", "medium", "high", "critical"}
 _VALID_CONTENT_ALERT_RULE_KINDS = {"keyword", "regex", "descriptor", "classification", "entity", "ioc", "cve"}

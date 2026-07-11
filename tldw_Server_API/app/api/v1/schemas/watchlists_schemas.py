@@ -9,7 +9,7 @@ from pydantic import AnyUrl, BaseModel, ConfigDict, Field, field_validator, mode
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 
 SourceType = Literal["rss", "site", "forum"]  # forums are feature-flagged for Phase 3
-WatchlistDomain = Literal["cti_osint", "news", "general"]
+WatchlistDomain = Literal["cti_osint", "news", "sports", "culture", "creator", "general"]
 WatchlistStatus = Literal["active", "paused", "archived"]
 WatchlistPriority = Literal["low", "medium", "high", "critical"]
 WatchlistContentAlertRuleKind = Literal["keyword", "regex", "descriptor", "classification", "entity", "ioc", "cve"]

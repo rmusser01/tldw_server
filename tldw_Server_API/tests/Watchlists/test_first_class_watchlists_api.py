@@ -134,6 +134,18 @@ def test_watchlist_crud_delete_restore_and_static_routes(client_with_user):
     assert static_sources.status_code == 200, static_sources.text
 
 
+def test_watchlist_domains_support_creator_sports_and_culture_use_cases(client_with_user):
+    client = client_with_user
+
+    for domain in ["sports", "culture", "creator"]:
+        created = _create_watchlist(client, name=f"{domain.title()} Watch", domain=domain)
+        assert created["domain"] == domain
+
+        fetched = client.get(f"/api/v1/watchlists/{created['id']}")
+        assert fetched.status_code == 200, fetched.text
+        assert fetched.json()["domain"] == domain
+
+
 def test_watchlist_scopes_sources_jobs_runs_items_and_default_create(client_with_user):
     client = client_with_user
 

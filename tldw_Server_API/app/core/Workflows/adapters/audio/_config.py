@@ -141,6 +141,10 @@ class MultiVoiceTTSConfig(BaseAdapterConfig):
     normalize: bool = Field(True, description="EBU R128 normalize final output")
     target_lufs: float = Field(-16.0, description="Target LUFS for normalization")
     fallback_voice: str = Field("nova", description="Fallback voice for fallback provider")
+    allow_system_tts_fallback: bool = Field(
+        False,
+        description="Allow local system TTS when configured providers cannot produce audio",
+    )
     background_audio_uri: str | None = Field(
         None,
         description="Optional file:// URI for background music/ambience to mix under narration",

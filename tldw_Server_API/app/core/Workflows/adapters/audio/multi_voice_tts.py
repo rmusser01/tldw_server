@@ -114,6 +114,128 @@ async def _synthesize_section(
     return size_bytes
 
 
+def _system_tts_fallback_enabled(value: Any) -> bool:
+    """Return true when the workflow explicitly permits host speech fallback."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"true", "1", "yes", "on"}
+
+
+def _normalize_audio_format(value: Any) -> str:
+    """Normalize user/workflow audio format input to a supported container."""
+    fmt = str(value or "mp3").strip().lower().lstrip(".")
+    return fmt if fmt in {"mp3", "wav", "opus", "flac", "aac"} else "mp3"
+
+
+async def _convert_wav_to_format(wav_path: Path, output_path: Path, fmt: str) -> bool:
+    """Convert a local WAV fallback to the requested output format."""
+    fmt = _normalize_audio_format(fmt)
+    if fmt == "wav" and wav_path.suffix.lower() == ".wav":
+        if wav_path != output_path:
+            wav_path.replace(output_path)
+        return output_path.exists()
+
+    ffmpeg_path = shutil.which("ffmpeg")
+    if not ffmpeg_path:
+        return False
+    cmd = [
+        ffmpeg_path,
+        "-y",
+        "-nostdin",
+        "-i",
+        str(wav_path),
+        *_codec_args_for_format(fmt),
+        str(output_path),
+    ]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            await asyncio.wait_for(proc.communicate(), timeout=120)
+        except asyncio.TimeoutError:
+            proc.kill()
+            with contextlib.suppress(Exception):
+                await proc.communicate()
+            return False
+        return proc.returncode == 0 and output_path.exists()
+    except _MULTI_TTS_NONCRITICAL_EXCEPTIONS:
+        return False
+
+
+async def _synthesize_section_with_system_tts(text: str, fmt: str, speed: float, output_path: Path) -> int:
+    """Synthesize speech with a local host TTS binary when provider TTS is unavailable."""
+    fmt = _normalize_audio_format(fmt)
+    tts_path = shutil.which("espeak-ng") or shutil.which("espeak")
+    say_path = shutil.which("say")
+    if not tts_path and not say_path:
+        return 0
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    wav_path = output_path if fmt == "wav" else output_path.with_suffix(".system.wav")
+    words_per_minute = max(80, min(260, int(175 * max(0.5, min(2.0, speed)))))
+    spoken_text = " ".join(str(text or "").split())[:4000]
+    if not spoken_text:
+        return 0
+
+    if tts_path:
+        cmd = [tts_path, "-w", str(wav_path), "-s", str(words_per_minute), spoken_text]
+        synth_path = wav_path
+    else:
+        synth_path = output_path.with_suffix(".system.aiff")
+        cmd = [str(say_path), "-o", str(synth_path), "-r", str(words_per_minute), spoken_text]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            await asyncio.wait_for(proc.communicate(), timeout=120)
+        except asyncio.TimeoutError:
+            proc.kill()
+            with contextlib.suppress(Exception):
+                await proc.communicate()
+            return 0
+        if proc.returncode != 0 or not synth_path.exists():
+            return 0
+        if not await _convert_wav_to_format(synth_path, output_path, fmt):
+            return 0
+        return output_path.stat().st_size if output_path.exists() else 0
+    except _MULTI_TTS_NONCRITICAL_EXCEPTIONS:
+        return 0
+    finally:
+        if wav_path != output_path:
+            with contextlib.suppress(OSError):
+                wav_path.unlink()
+        if "synth_path" in locals() and synth_path not in {output_path, wav_path}:
+            with contextlib.suppress(OSError):
+                synth_path.unlink()
+
+
+async def _recover_system_tts_orphan(output_path: Path, fmt: str) -> int:
+    """Recover valid local TTS files left next to an empty requested output."""
+    candidates = [
+        output_path.with_suffix(".system.wav"),
+        output_path.with_suffix(".system.aiff"),
+        output_path.with_name(f"{output_path.stem}.system."),
+        output_path.with_name(f"{output_path.stem}.system"),
+    ]
+    for candidate in candidates:
+        if candidate == output_path or not candidate.exists() or candidate.stat().st_size <= 0:
+            continue
+        if await _convert_wav_to_format(candidate, output_path, fmt):
+            if candidate != output_path:
+                with contextlib.suppress(OSError):
+                    candidate.unlink()
+            return output_path.stat().st_size if output_path.exists() else 0
+    return 0
+
+
 async def _concat_files(file_paths: list[Path], output_path: Path, fmt: str = "mp3") -> bool:
     """Concatenate audio files using ffmpeg concat demuxer."""
     ffmpeg_path = shutil.which("ffmpeg")
@@ -428,8 +550,8 @@ async def run_multi_voice_tts_adapter(config: dict[str, Any], context: dict[str,
     default_model = str(config.get("default_model") or "kokoro")
     default_provider = str(config.get("default_provider") or config.get("provider") or "").strip() or None
     default_voice = str(config.get("default_voice") or "af_heart")
-    fmt = str(config.get("response_format") or "mp3").lower()
-    ext = fmt if fmt in {"mp3", "wav", "opus", "flac", "aac"} else "mp3"
+    fmt = _normalize_audio_format(config.get("response_format"))
+    ext = fmt
     try:
         speed = float(config.get("speed", 1.0))
     except (TypeError, ValueError):
@@ -440,6 +562,7 @@ async def run_multi_voice_tts_adapter(config: dict[str, Any], context: dict[str,
     fallback_provider = str(config.get("fallback_provider") or "").strip() or None
     fallback_voice = str(config.get("fallback_voice") or "nova")
     background_audio_uri = config.get("background_audio_uri")
+    allow_system_tts_fallback = _system_tts_fallback_enabled(config.get("allow_system_tts_fallback"))
     if isinstance(background_audio_uri, str):
         normalized_bg_uri = background_audio_uri.strip()
         if normalized_bg_uri.lower() in {"", "none", "null"}:
@@ -474,6 +597,7 @@ async def run_multi_voice_tts_adapter(config: dict[str, Any], context: dict[str,
     segment_files: list[Path] = []
     speaker_segments: list[dict[str, Any]] = []
     sections_generated = 0
+    system_tts_fallback_used = False
 
     for idx, section in enumerate(sections):
         # Check cancellation between sections
@@ -498,7 +622,7 @@ async def run_multi_voice_tts_adapter(config: dict[str, Any], context: dict[str,
             continue
 
         try:
-            await _synthesize_section(
+            section_size = await _synthesize_section(
                 clean_text,
                 default_model,
                 kokoro_voice,
@@ -507,6 +631,8 @@ async def run_multi_voice_tts_adapter(config: dict[str, Any], context: dict[str,
                 section_path,
                 provider=default_provider,
             )
+            if section_size <= 0 or not section_path.exists() or section_path.stat().st_size <= 0:
+                raise RuntimeError("primary_tts_empty_output")
             segment_files.append(section_path)
             speaker_segments.append(
                 {
@@ -520,12 +646,12 @@ async def run_multi_voice_tts_adapter(config: dict[str, Any], context: dict[str,
                 }
             )
             sections_generated += 1
-        except _MULTI_TTS_NONCRITICAL_EXCEPTIONS:
+        except Exception:
             logger.warning(f"Section {idx} TTS failed with {default_model}/{kokoro_voice}")
             # Fallback attempt
             if fallback_provider:
                 try:
-                    await _synthesize_section(
+                    section_size = await _synthesize_section(
                         clean_text,
                         "tts-1",
                         fallback_voice,
@@ -534,6 +660,8 @@ async def run_multi_voice_tts_adapter(config: dict[str, Any], context: dict[str,
                         section_path,
                         provider=fallback_provider,
                     )
+                    if section_size <= 0 or not section_path.exists() or section_path.stat().st_size <= 0:
+                        raise RuntimeError("fallback_tts_empty_output")
                     segment_files.append(section_path)
                     speaker_segments.append(
                         {
@@ -548,8 +676,29 @@ async def run_multi_voice_tts_adapter(config: dict[str, Any], context: dict[str,
                         }
                     )
                     sections_generated += 1
-                except _MULTI_TTS_NONCRITICAL_EXCEPTIONS:
+                except Exception:
                     logger.warning(f"Section {idx} fallback TTS also failed")
+
+            if allow_system_tts_fallback and (not section_path.exists() or section_path.stat().st_size <= 0):
+                system_size = await _synthesize_section_with_system_tts(clean_text, fmt, speed, section_path)
+                if system_size <= 0:
+                    system_size = await _recover_system_tts_orphan(section_path, fmt)
+                if system_size > 0:
+                    segment_files.append(section_path)
+                    speaker_segments.append(
+                        {
+                            "path": section_path,
+                            "section_index": idx,
+                            "speaker_id": str(voice_marker),
+                            "label": str(voice_marker).replace("_", " ").title(),
+                            "voice": "system",
+                            "model": "system_tts",
+                            "fallback": True,
+                            "fallback_reason": "system_tts_fallback",
+                        }
+                    )
+                    sections_generated += 1
+                    system_tts_fallback_used = True
 
         # Add silence gap between sections (not after last)
         if pause_duration > 0 and idx < len(sections) - 1:
@@ -557,16 +706,41 @@ async def run_multi_voice_tts_adapter(config: dict[str, Any], context: dict[str,
             if await _generate_silence(pause_duration, silence_path, fmt):
                 segment_files.append(silence_path)
 
-    if sections_generated == 0:
+    # Concatenate
+    concat_path = out_dir / f"briefing_raw.{ext}"
+    if sections_generated == 0 and allow_system_tts_fallback:
+        segment_files.clear()
+        speaker_segments.clear()
+        combined_text = clean_text_for_tts(" ".join(str(section.get("text", "")).strip() for section in sections))
+        system_size = await _synthesize_section_with_system_tts(combined_text, fmt, speed, concat_path)
+        if system_size <= 0:
+            system_size = await _recover_system_tts_orphan(concat_path, fmt)
+        if system_size > 0:
+            segment_files.append(concat_path)
+            speaker_segments.append(
+                {
+                    "path": concat_path,
+                    "section_index": 0,
+                    "speaker_id": "system",
+                    "label": "System",
+                    "voice": "system",
+                    "model": "system_tts",
+                    "fallback": True,
+                    "fallback_reason": "system_tts_final_fallback",
+                }
+            )
+            sections_generated = 1
+            system_tts_fallback_used = True
+
+    if sections_generated == 0 or not segment_files:
         shutil.rmtree(out_dir, ignore_errors=True)
         raise AdapterError("no_sections_generated")
 
-    # Concatenate
-    concat_path = out_dir / f"briefing_raw.{ext}"
     if len(segment_files) == 1:
         # Single file, just rename
         source_path = segment_files[0]
-        source_path.rename(concat_path)
+        if source_path != concat_path:
+            source_path.rename(concat_path)
         for segment in speaker_segments:
             if segment.get("path") == source_path:
                 segment["path"] = concat_path
@@ -660,6 +834,7 @@ async def run_multi_voice_tts_adapter(config: dict[str, Any], context: dict[str,
                         "multi_voice": True,
                         "fallback_artifact": speaker_group["fallback"],
                         "fallback_reason": speaker_group.get("fallback_reason"),
+                        "system_tts_fallback": bool(system_tts_fallback_used),
                     },
                     artifact_id=f"mvtts_speaker_{uuid.uuid4()}",
                 )
@@ -683,6 +858,7 @@ async def run_multi_voice_tts_adapter(config: dict[str, Any], context: dict[str,
                     "format": ext,
                     "multi_voice": True,
                     "background_mixed": background_mixed,
+                    "system_tts_fallback": bool(system_tts_fallback_used),
                     "final_artifact": True,
                 },
                 artifact_id=audio_artifact_id,
@@ -698,6 +874,7 @@ async def run_multi_voice_tts_adapter(config: dict[str, Any], context: dict[str,
         "size_bytes": size_bytes,
         "normalized": normalized,
         "background_mixed": background_mixed,
+        "system_tts_fallback": system_tts_fallback_used,
     }
 
     if audio_artifact_id:
