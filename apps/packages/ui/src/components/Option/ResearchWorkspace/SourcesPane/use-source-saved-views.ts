@@ -706,6 +706,16 @@ export const useSourceSavedViews = (
     workspaceId,
   ]);
 
+  const dismissDuplicateConflict = React.useCallback(() => {
+    if (!isGenerationCurrent(renderGeneration)) return;
+    versionRetryRef.current = null;
+    commitGeneration(renderGeneration, (current) => ({
+      ...current,
+      duplicateConflict: null,
+      versionConflict: null,
+    }));
+  }, [commitGeneration, isGenerationCurrent, renderGeneration]);
+
   const replaceView = React.useCallback(
     async (view: WorkspaceSourceSavedViewResponse) => {
       if (
@@ -919,6 +929,7 @@ export const useSourceSavedViews = (
     applyView,
     createView,
     confirmReplace,
+    dismissDuplicateConflict,
     replaceView,
     resetView,
     deleteView,

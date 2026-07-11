@@ -268,6 +268,15 @@ describe("SourcesPane stage 4 filters and sort", () => {
     expect(screen.getByText(/Sort: Added date/)).toBeInTheDocument()
   })
 
+  it("exposes the actual Sources pane as a programmatically focusable landmark", () => {
+    render(<ControlledSourcesPane />)
+
+    const landmark = screen.getByRole("region", { name: "Sources" })
+    expect(landmark).toHaveAttribute("tabindex", "-1")
+    landmark.focus()
+    expect(document.activeElement).toBe(landmark)
+  })
+
   it("renders portal-free saved-view controls and preserves search, folder, selection, and expanded state", async () => {
     const model = savedViewsController()
     const openOverlay = vi.fn()

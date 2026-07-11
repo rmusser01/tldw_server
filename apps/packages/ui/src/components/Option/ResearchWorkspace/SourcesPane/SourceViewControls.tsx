@@ -17,6 +17,7 @@ import {
   applySavedSourceViewState,
   serializeSourceListViewState
 } from "./source-saved-views"
+import type { SourceViewStateValidationIssue } from "./source-saved-views"
 import type { SourceSavedViewsController } from "./use-source-saved-views"
 
 const SOURCE_VIEW_PRESET_ORDER = [
@@ -29,6 +30,12 @@ const SOURCE_VIEW_PRESET_ORDER = [
   "largeFiles"
 ] as const
 
+const INVALID_VIEW_REASON_LABELS = {
+  invalid_json: "Invalid saved state JSON",
+  invalid_state: "Invalid saved state",
+  unsupported_schema_version: "Unsupported schema version"
+} as const
+
 let sourceViewOverlayRequestSequence = 0
 
 type SourceViewOverlayKind = "save" | "replace" | "reset" | "delete"
@@ -39,6 +46,7 @@ export interface SourceViewOverlayRequest {
   generation: number
   invoker: HTMLElement
   view?: WorkspaceSourceSavedViewResponse
+  validationIssues?: SourceViewStateValidationIssue[]
 }
 
 interface SourceViewControlsProps {
@@ -58,6 +66,13 @@ const isFocusable = (element: HTMLElement | null): element is HTMLElement => {
   if (!element?.isConnected) return false
   if (element.matches(":disabled, [aria-disabled='true']")) return false
   if (element.closest("[hidden], [aria-hidden='true']")) return false
+  if (
+    !element.matches(
+      "a[href], button, input, select, textarea, summary, [contenteditable='true'], [tabindex]"
+    )
+  ) {
+    return false
+  }
   let current: HTMLElement | null = element
   while (current) {
     const style = window.getComputedStyle(current)
@@ -82,10 +97,32 @@ const restoreOverlayFocus = (invoker: HTMLElement | null) => {
       return
     }
 
-    const sourcesLandmark = document.querySelector<HTMLElement>(
-      "[role='complementary'][aria-label*='Sources' i], [data-testid='workspace-sources-pane-root']"
+    const sourcesTab = Array.from(
+      document.querySelectorAll<HTMLElement>("[role='tab']")
+    ).find(
+      (candidate) =>
+        /\bsources\b/i.test(candidate.textContent ?? "") &&
+        isFocusable(candidate)
     )
-    if (sourcesLandmark?.isConnected) sourcesLandmark.focus()
+    if (sourcesTab) {
+      sourcesTab.focus()
+      return
+    }
+
+    const restoreSources = document.querySelector<HTMLElement>(
+      "[data-testid='workspace-restore-sources']"
+    )
+    if (isFocusable(restoreSources)) {
+      restoreSources.focus()
+      return
+    }
+
+    const sourcesLandmark = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        "[data-sources-focus-target], [role='complementary'][aria-label*='Sources' i]"
+      )
+    ).find(isFocusable)
+    if (sourcesLandmark) sourcesLandmark.focus()
   }, 0)
 }
 
@@ -109,12 +146,18 @@ const SavedViewActions: React.FC<{
       <Tooltip title={`Replace saved view ${view.name}`}>
         <button
           type="button"
+          data-source-view-action
           aria-label={`Replace saved view ${view.name}`}
           disabled={!controller.available || controller.busy}
           onClick={(event) => {
             event.preventDefault()
             event.stopPropagation()
             openOverlay("replace", event.currentTarget, view)
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.stopPropagation()
+            }
           }}
           className="inline-flex h-7 w-7 items-center justify-center rounded text-text-muted hover:bg-surface2 hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-50"
         >
@@ -125,12 +168,18 @@ const SavedViewActions: React.FC<{
       <Tooltip title={`Reset saved view ${view.name}`}>
         <button
           type="button"
+          data-source-view-action
           aria-label={`Reset saved view ${view.name}`}
           disabled={!controller.available || controller.busy}
           onClick={(event) => {
             event.preventDefault()
             event.stopPropagation()
             openOverlay("reset", event.currentTarget, view)
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.stopPropagation()
+            }
           }}
           className="inline-flex h-7 w-7 items-center justify-center rounded text-text-muted hover:bg-surface2 hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-50"
         >
@@ -141,12 +190,18 @@ const SavedViewActions: React.FC<{
     <Tooltip title={`Delete saved view ${view.name}`}>
       <button
         type="button"
+        data-source-view-action
         aria-label={`Delete saved view ${view.name}`}
         disabled={!controller.available || controller.busy}
         onClick={(event) => {
           event.preventDefault()
           event.stopPropagation()
           openOverlay("delete", event.currentTarget, view)
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.stopPropagation()
+          }
         }}
         className="inline-flex h-7 w-7 items-center justify-center rounded text-text-muted hover:bg-error/10 hover:text-error focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-error disabled:cursor-not-allowed disabled:opacity-50"
       >
@@ -172,16 +227,27 @@ export const SourceViewControls: React.FC<SourceViewControlsProps> = ({
     ) => {
       if (!controller.available) return
       sourceViewOverlayRequestSequence += 1
+      const validation =
+        kind === "replace"
+          ? serializeSourceListViewState(sourceListViewState)
+          : null
       setMenuOpen(false)
       onOpenOverlay({
         id: sourceViewOverlayRequestSequence,
         kind,
         generation: controller.generation,
         invoker,
-        view
+        view,
+        validationIssues:
+          validation?.ok === false ? validation.issues : undefined
       })
     },
-    [controller.available, controller.generation, onOpenOverlay]
+    [
+      controller.available,
+      controller.generation,
+      onOpenOverlay,
+      sourceListViewState
+    ]
   )
 
   const menuItems = React.useMemo<MenuProps["items"]>(
@@ -213,6 +279,16 @@ export const SourceViewControls: React.FC<SourceViewControlsProps> = ({
                       />
                     )}
                     <span className="min-w-0 flex-1 truncate">{view.name}</span>
+                    {!view.valid && (
+                      <>
+                        <span className="text-[11px] font-medium text-warning">
+                          Invalid
+                        </span>
+                        <span className="sr-only">
+                          {INVALID_VIEW_REASON_LABELS[view.invalid_reason]}. Apply unavailable.
+                        </span>
+                      </>
+                    )}
                     {controller.activeViewId === view.id && controller.modified && (
                       <span className="text-[11px] font-medium text-warning">
                         Modified
@@ -262,12 +338,13 @@ export const SourceViewControls: React.FC<SourceViewControlsProps> = ({
   const handleMenuKeyDown: React.KeyboardEventHandler<HTMLElement> = (event) => {
     const items = Array.from(
       event.currentTarget.querySelectorAll<HTMLElement>(
-        "[role='menuitem']:not([aria-disabled='true'])"
+        "[role='menuitem']:not([aria-disabled='true']), [data-source-view-action]:not(:disabled)"
       )
     )
-    const activeItem = (document.activeElement as HTMLElement | null)?.closest(
-      "[role='menuitem']"
-    ) as HTMLElement | null
+    const activeElement = document.activeElement as HTMLElement | null
+    const activeItem = activeElement?.matches("[data-source-view-action]")
+      ? activeElement
+      : (activeElement?.closest("[role='menuitem']") as HTMLElement | null)
     const activeIndex = activeItem ? items.indexOf(activeItem) : -1
 
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -449,6 +526,25 @@ export const SourceViewOverlayHost: React.FC<SourceViewOverlayHostProps> = ({
   const duplicate =
     activeRequest?.kind === "save" ? controller.duplicateConflict : null
   const view = activeRequest?.view
+  const replacementIssues =
+    activeRequest?.kind === "replace"
+      ? [
+          ...(activeRequest.validationIssues ?? []),
+          ...controller.serializationIssues
+        ].filter(
+          (issue, index, issues) =>
+            issues.findIndex(
+              (candidate) =>
+                candidate.field === issue.field && candidate.message === issue.message
+            ) === index
+        )
+      : []
+  const replaceInvalid = replacementIssues.length > 0
+
+  const cancel = () => {
+    if (duplicate) controller.dismissDuplicateConflict()
+    close()
+  }
 
   const submit = async () => {
     if (!isRequestCurrent() || !activeRequest) return
@@ -463,7 +559,10 @@ export const SourceViewOverlayHost: React.FC<SourceViewOverlayHostProps> = ({
       return
     }
     if (!view) return
-    if (activeRequest.kind === "replace") await controller.replaceView(view)
+    if (activeRequest.kind === "replace") {
+      if (replaceInvalid) return
+      await controller.replaceView(view)
+    }
     if (activeRequest.kind === "reset") await controller.resetView(view)
     if (activeRequest.kind === "delete") await controller.deleteView(view)
   }
@@ -490,6 +589,11 @@ export const SourceViewOverlayHost: React.FC<SourceViewOverlayHostProps> = ({
 
   return (
     <>
+      <span
+        data-testid="source-view-overlay-host"
+        className="sr-only"
+        aria-hidden="true"
+      />
       <div className="sr-only" aria-live="polite" role="status">
         {controller.announcement ?? ""}
       </div>
@@ -555,7 +659,7 @@ export const SourceViewOverlayHost: React.FC<SourceViewOverlayHostProps> = ({
       <Modal
         title={title}
         open={activeRequest !== null}
-        onCancel={() => close()}
+        onCancel={cancel}
         destroyOnHidden
         focusable={{ focusTriggerAfterClose: false }}
         modalRender={(node) =>
@@ -574,7 +678,7 @@ export const SourceViewOverlayHost: React.FC<SourceViewOverlayHostProps> = ({
         footer={
           activeRequest
             ? [
-                <Button key="cancel" onClick={() => close()} disabled={controller.busy}>
+                <Button key="cancel" onClick={cancel} disabled={controller.busy}>
                   Cancel
                 </Button>,
                 <Button
@@ -586,7 +690,8 @@ export const SourceViewOverlayHost: React.FC<SourceViewOverlayHostProps> = ({
                   disabled={
                     controller.busy ||
                     !isRequestCurrent() ||
-                    (activeRequest.kind === "save" && !duplicate && saveInvalid)
+                    (activeRequest.kind === "save" && !duplicate && saveInvalid) ||
+                    (activeRequest.kind === "replace" && replaceInvalid)
                   }
                   onClick={() => void submit()}
                 >
@@ -631,15 +736,26 @@ export const SourceViewOverlayHost: React.FC<SourceViewOverlayHostProps> = ({
             )}
           </div>
         ) : (
-          <p className="text-sm text-text-muted">
-            {duplicate
-              ? `A saved view named ${duplicate.name} already exists. Replace it with the current filters and sort?`
-              : activeRequest?.kind === "replace"
-                ? `Replace ${view?.name ?? "this saved view"} with the current filters and sort?`
-                : activeRequest?.kind === "reset"
-                  ? `Reset ${view?.name ?? "this saved view"} to the default source view?`
-                  : `Delete ${view?.name ?? "this saved view"}?`}
-          </p>
+          <div className="space-y-3">
+            <p className="text-sm text-text-muted">
+              {duplicate
+                ? `A saved view named ${duplicate.name} already exists. Replace it with the current filters and sort?`
+                : activeRequest?.kind === "replace"
+                  ? `Replace ${view?.name ?? "this saved view"} with the current filters and sort?`
+                  : activeRequest?.kind === "reset"
+                    ? `Reset ${view?.name ?? "this saved view"} to the default source view?`
+                    : `Delete ${view?.name ?? "this saved view"}?`}
+            </p>
+            {replacementIssues.length > 0 && (
+              <ul role="alert" className="space-y-1 text-xs text-error">
+                {replacementIssues.map((issue) => (
+                  <li key={`${issue.field}:${issue.message}`}>
+                    {issueFieldLabel(issue.field)}: {issue.message}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         )}
       </Modal>
     </>

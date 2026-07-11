@@ -1,5 +1,6 @@
 import React from "react"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { WorkspaceSourceSavedViewResponse } from "@/services/tldw/domains/workspace-api"
 import {
@@ -84,6 +85,7 @@ const controller = (
     applyView: vi.fn(),
     createView: vi.fn(),
     confirmReplace: vi.fn(),
+    dismissDuplicateConflict: vi.fn(),
     replaceView: vi.fn(),
     resetView: vi.fn(),
     deleteView: vi.fn(),
@@ -92,10 +94,12 @@ const controller = (
 
 const Harness = ({
   model = controller(),
-  showControls = true
+  showControls = true,
+  sourceListViewState = DEFAULT_SOURCE_LIST_VIEW_STATE
 }: {
   model?: SourceSavedViewsController
   showControls?: boolean
+  sourceListViewState?: typeof DEFAULT_SOURCE_LIST_VIEW_STATE
 }) => {
   const [request, setRequest] = React.useState<SourceViewOverlayRequest | null>(null)
   return (
@@ -103,7 +107,7 @@ const Harness = ({
       {showControls && (
         <SourceViewControls
           controller={model}
-          sourceListViewState={DEFAULT_SOURCE_LIST_VIEW_STATE}
+          sourceListViewState={sourceListViewState}
           onApplySourceListViewState={vi.fn()}
           onOpenOverlay={setRequest}
         />
@@ -151,7 +155,7 @@ describe("SourceViewControls", () => {
       "Web captures",
       "Large files",
       "My PDFs",
-      "Old view"
+      "Old viewInvalidUnsupported schema version. Apply unavailable."
     ])
     expect(within(menu).getByText("Built-in views")).toBeInTheDocument()
     expect(within(menu).getByText("Saved views")).toBeInTheDocument()
@@ -213,6 +217,54 @@ describe("SourceViewControls", () => {
     expect(invalid).toHaveAttribute("aria-disabled", "true")
     expect(screen.getByRole("button", { name: "Reset saved view Old view" })).toBeEnabled()
     expect(screen.getByRole("button", { name: "Delete saved view Old view" })).toBeEnabled()
+  })
+
+  it("routes Enter and Space on row actions without applying the saved view", async () => {
+    const user = userEvent.setup()
+    const model = controller()
+    render(<Harness model={model} />)
+
+    await user.click(screen.getByRole("button", { name: "Source views" }))
+    const replace = await screen.findByRole("button", {
+      name: "Replace saved view My PDFs"
+    })
+    replace.focus()
+    await user.keyboard("{Enter}")
+    expect(
+      await screen.findByRole("alertdialog", { name: "Replace saved view?" })
+    ).toBeInTheDocument()
+    expect(model.applyView).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    await user.click(screen.getByRole("button", { name: "Source views" }))
+    const deleteAction = await screen.findByRole("button", {
+      name: "Delete saved view My PDFs"
+    })
+    deleteAction.focus()
+    await user.keyboard(" ")
+    expect(
+      await screen.findByRole("alertdialog", { name: "Delete saved view?" })
+    ).toBeInTheDocument()
+    expect(model.applyView).not.toHaveBeenCalled()
+  })
+
+  it("keeps invalid rows keyboard navigable for Reset/Delete and exposes the reason", async () => {
+    const user = userEvent.setup()
+    const model = controller()
+    render(<Harness model={model} />)
+
+    await user.click(screen.getByRole("button", { name: "Source views" }))
+    const invalid = await screen.findByRole("menuitem", { name: /Old view/ })
+    expect(invalid).toHaveAttribute("aria-disabled", "true")
+    expect(within(invalid).getByText(/Unsupported schema version/i)).toBeInTheDocument()
+
+    const reset = screen.getByRole("button", { name: "Reset saved view Old view" })
+    reset.focus()
+    await user.keyboard("{Enter}")
+    expect(
+      await screen.findByRole("alertdialog", { name: "Reset saved view?" })
+    ).toBeInTheDocument()
+    expect(model.applyView).not.toHaveBeenCalled()
   })
 
   it("validates save fields, confirms replacement, exposes busy state, and returns focus", async () => {
@@ -295,6 +347,66 @@ describe("SourceViewControls", () => {
     expect(limitAlert).toHaveTextContent("100")
     expect(limitAlert).toHaveTextContent(/Delete an existing saved view/)
     expect(screen.queryByRole("button", { name: /Retry/ })).not.toBeInTheDocument()
+  })
+
+  it("visibly blocks replacement when the current local state is invalid", async () => {
+    const user = userEvent.setup()
+    const model = controller()
+    render(
+      <Harness
+        model={model}
+        sourceListViewState={{
+          ...DEFAULT_SOURCE_LIST_VIEW_STATE,
+          fileSizeMin: 20,
+          fileSizeMax: 10
+        }}
+      />
+    )
+
+    await user.click(screen.getByRole("button", { name: "Source views" }))
+    await user.click(
+      screen.getByRole("button", { name: "Replace saved view My PDFs" })
+    )
+
+    const dialog = await screen.findByRole("alertdialog", {
+      name: "Replace saved view?"
+    })
+    expect(within(dialog).getByRole("alert")).toHaveTextContent(/File size max/i)
+    expect(within(dialog).getByRole("button", { name: "Replace" })).toBeDisabled()
+    expect(model.replaceView).not.toHaveBeenCalled()
+  })
+
+  it("dismisses duplicate replacement on Cancel so the next Save starts fresh", async () => {
+    const user = userEvent.setup()
+    const dismissDuplicateConflict = vi.fn()
+    const duplicate = {
+      viewId: "view-1",
+      version: 2,
+      name: "My PDFs",
+      state: validView().state
+    }
+    const { rerender } = render(
+      <Harness model={controller({ dismissDuplicateConflict })} />
+    )
+    await user.click(screen.getByRole("button", { name: "Save source view" }))
+    rerender(
+      <Harness
+        model={controller({ duplicateConflict: duplicate, dismissDuplicateConflict })}
+      />
+    )
+    expect(
+      await screen.findByRole("alertdialog", { name: "Replace saved view?" })
+    ).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    expect(dismissDuplicateConflict).toHaveBeenCalledTimes(1)
+
+    rerender(<Harness model={controller({ dismissDuplicateConflict })} />)
+    await user.click(screen.getByRole("button", { name: "Save source view" }))
+    expect(
+      await screen.findByRole("dialog", { name: "Save source view" })
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
   })
 
   it.each([

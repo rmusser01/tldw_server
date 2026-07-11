@@ -1957,6 +1957,10 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
   return (
     <div
       data-testid="workspace-sources-pane-root"
+      data-sources-focus-target
+      role="region"
+      aria-label={t("playground:sources.title", "Sources")}
+      tabIndex={-1}
       className="flex h-full min-h-0 flex-col overflow-hidden"
     >
       {messageContextHolder}

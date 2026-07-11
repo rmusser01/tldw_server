@@ -1,42 +1,55 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import React from "react"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
+import type { WorkspaceSourceSavedViewResponse } from "@/services/tldw/domains/workspace-api"
 import { ResearchWorkspace } from "../index"
+import type { SourceListViewState } from "../SourcesPane/source-list-view"
+import type { SourceSavedViewsController } from "../SourcesPane/use-source-saved-views"
 
 const savedViewMocks = vi.hoisted(() => ({
   useSourceSavedViews: vi.fn(),
-  controller: {
-    available: true,
-    generation: 7,
-    views: [],
-    loading: false,
-    listError: null,
-    activeViewId: null,
-    activeSnapshot: null,
-    currentSignature: null,
-    modified: false,
-    serializationIssues: [],
-    duplicateConflict: null,
-    limitState: null,
-    versionConflict: null,
-    mutation: null,
-    busy: false,
-    mutationError: null,
-    announcement: null,
-    canRetryMutation: false,
-    canRetryVersion: false,
-    load: vi.fn(),
-    retry: vi.fn(),
-    retryMutation: vi.fn(),
-    retryVersionConflict: vi.fn(),
-    applyView: vi.fn(),
-    createView: vi.fn(),
-    confirmReplace: vi.fn(),
-    replaceView: vi.fn(),
-    resetView: vi.fn(),
-    deleteView: vi.fn()
-  }
+  generation: 0,
+  controllers: [] as Array<{
+    workspaceId: string | null
+    controller: unknown
+  }>
 }))
+
+const validView = (workspaceId: string): WorkspaceSourceSavedViewResponse => ({
+  id: `${workspaceId}-view`,
+  workspace_id: workspaceId,
+  name: "Saved PDFs",
+  schema_version: 1,
+  version: 1,
+  created_at: "2026-07-10T00:00:00Z",
+  updated_at: "2026-07-10T00:00:00Z",
+  valid: true,
+  invalid_reason: null,
+  state: {
+    type_filters: ["pdf"],
+    status_filters: [],
+    review_state_filters: [],
+    lifecycle_state_filters: [],
+    date_field: "added_at",
+    date_from: null,
+    date_to: null,
+    require_url: false,
+    require_file_size: false,
+    require_duration: false,
+    require_page_count: false,
+    file_size_min: null,
+    file_size_max: null,
+    duration_min: null,
+    duration_max: null,
+    page_count_min: null,
+    page_count_max: null,
+    sort: "name_asc"
+  }
+})
+
+const latestController = (): SourceSavedViewsController =>
+  savedViewMocks.controllers.at(-1)!.controller as SourceSavedViewsController
 
 const testState = {
   isMobile: false,
@@ -185,21 +198,6 @@ vi.mock("../SourcesPane/use-source-saved-views", () => ({
   useSourceSavedViews: savedViewMocks.useSourceSavedViews
 }))
 
-vi.mock("../SourcesPane/SourceViewControls", () => ({
-  SourceViewOverlayHost: (props: {
-    controller: unknown
-    request: { kind: string } | null
-  }) => (
-    <div data-testid="source-view-overlay-host">
-      {props.request && (
-        <div role="dialog" aria-label="Source view overlay">
-          {props.request.kind}
-        </div>
-      )}
-    </div>
-  )
-}))
-
 vi.mock("../WorkspaceHeader", () => ({
   WorkspaceHeader: (props: { onToggleLeftPane: () => void }) => (
     <div data-testid="workspace-header">
@@ -210,50 +208,58 @@ vi.mock("../WorkspaceHeader", () => ({
   )
 }))
 
-vi.mock("../SourcesPane", () => ({
-  SourcesPane: (props: {
-    sourceListViewState?: { sort?: string }
-    onPatchSourceListViewState?: (patch: { sort: string }) => void
-    sourceSavedViewsController?: unknown
-    onOpenSourceViewOverlay?: (request: {
-      id: number
-      kind: "save"
-      generation: number
-      invoker: HTMLElement
-    }) => void
-  }) => (
-    <div data-testid="workspace-sources-pane">
-      <div data-testid="source-list-sort-state">
-        {props.sourceListViewState?.sort ?? "missing"}
-      </div>
-      <button
-        type="button"
-        onClick={() => props.onPatchSourceListViewState?.({ sort: "name_asc" })}
+vi.mock("../SourcesPane", async () => {
+  const { SourceViewControls } = await vi.importActual<
+    typeof import("../SourcesPane/SourceViewControls")
+  >("../SourcesPane/SourceViewControls")
+  return {
+    SourcesPane: (props: {
+      sourceListViewState?: SourceListViewState
+      onPatchSourceListViewState?: (patch: Partial<SourceListViewState>) => void
+      onApplySourceListViewState?: (state: SourceListViewState) => void
+      sourceSavedViewsController?: SourceSavedViewsController
+      onOpenSourceViewOverlay?: React.ComponentProps<
+        typeof SourceViewControls
+      >["onOpenOverlay"]
+    }) => (
+      <div
+        data-testid="workspace-sources-pane"
+        data-sources-focus-target
+        role="region"
+        aria-label="Sources"
+        tabIndex={-1}
       >
-        Patch source list sort
-      </button>
-      <button
-        type="button"
-        aria-label="Open mock saved view"
-        onClick={(event) =>
-          props.onOpenSourceViewOverlay?.({
-            id: 1,
-            kind: "save",
-            generation: 7,
-            invoker: event.currentTarget
-          })
-        }
-      >
-        Open saved view
-      </button>
-      <div data-testid="saved-view-controller-identity">
-        {props.sourceSavedViewsController === savedViewMocks.controller
-          ? "shared"
-          : "different"}
+        <div data-testid="source-list-sort-state">
+          {props.sourceListViewState?.sort ?? "missing"}
+        </div>
+        <button
+          type="button"
+          onClick={() => props.onPatchSourceListViewState?.({ sort: "name_asc" })}
+        >
+          Patch source list sort
+        </button>
+        {props.sourceSavedViewsController &&
+          props.sourceListViewState &&
+          props.onApplySourceListViewState &&
+          props.onOpenSourceViewOverlay && (
+            <SourceViewControls
+              controller={props.sourceSavedViewsController}
+              sourceListViewState={props.sourceListViewState}
+              onApplySourceListViewState={props.onApplySourceListViewState}
+              onOpenOverlay={props.onOpenSourceViewOverlay}
+            />
+          )}
+        <div data-testid="saved-view-controller-identity">
+          {savedViewMocks.controllers.some(
+            ({ controller }) => controller === props.sourceSavedViewsController
+          )
+            ? "shared"
+            : "different"}
+        </div>
       </div>
-    </div>
-  )
-}))
+    )
+  }
+})
 
 vi.mock("../ChatPane", () => ({
   ChatPane: () => <div data-testid="workspace-chat-pane">Chat</div>
@@ -322,8 +328,76 @@ describe("ResearchWorkspace source list view state", () => {
     }
     testState.workspaceChatSessions = {}
     testState.setSourceStatusByMediaId = vi.fn()
+    savedViewMocks.generation = 0
+    savedViewMocks.controllers = []
     savedViewMocks.useSourceSavedViews.mockReset()
-    savedViewMocks.useSourceSavedViews.mockReturnValue(savedViewMocks.controller)
+    savedViewMocks.useSourceSavedViews.mockImplementation(
+      (
+        workspaceId: string | null,
+        currentState: SourceListViewState,
+        onApply: (state: SourceListViewState) => void
+      ) => {
+        const previous = savedViewMocks.controllers.at(-1)
+        if (previous?.workspaceId === workspaceId) {
+          const existing = previous.controller as SourceSavedViewsController
+          existing.applyView.mockImplementation(
+            (view: WorkspaceSourceSavedViewResponse) => {
+              if (!view.valid) return
+              onApply({
+                ...currentState,
+                typeFilters: [...view.state.type_filters],
+                sort: view.state.sort
+              })
+            }
+          )
+          return existing
+        }
+
+        savedViewMocks.generation += 1
+        const applyView = vi.fn((view: WorkspaceSourceSavedViewResponse) => {
+          if (!view.valid) return
+          onApply({
+            ...currentState,
+            typeFilters: [...view.state.type_filters],
+            sort: view.state.sort
+          })
+        })
+        const controller = {
+          available: workspaceId !== null,
+          generation: savedViewMocks.generation,
+          views: workspaceId === null ? [] : [validView(workspaceId)],
+          loading: false,
+          listError: null,
+          activeViewId: null,
+          activeSnapshot: null,
+          currentSignature: null,
+          modified: false,
+          serializationIssues: [],
+          duplicateConflict: null,
+          limitState: null,
+          versionConflict: null,
+          mutation: null,
+          busy: false,
+          mutationError: null,
+          announcement: null,
+          canRetryMutation: false,
+          canRetryVersion: false,
+          load: vi.fn(),
+          retry: vi.fn(),
+          retryMutation: vi.fn(),
+          retryVersionConflict: vi.fn(),
+          applyView,
+          createView: vi.fn(),
+          confirmReplace: vi.fn(),
+          dismissDuplicateConflict: vi.fn(),
+          replaceView: vi.fn(),
+          resetView: vi.fn(),
+          deleteView: vi.fn()
+        } as unknown as SourceSavedViewsController
+        savedViewMocks.controllers.push({ workspaceId, controller })
+        return controller
+      }
+    )
   })
 
   it("preserves source list view state across sources pane remounts", async () => {
@@ -348,10 +422,17 @@ describe("ResearchWorkspace source list view state", () => {
     )
   })
 
-  it("shares one saved-view controller and one overlay host across desktop and drawer panes", async () => {
+  it("shares one controller and one real overlay host across desktop and drawer panes", async () => {
+    const user = userEvent.setup()
     testState.isMobile = true
     const { rerender } = render(<ResearchWorkspace />)
-    fireEvent.click(screen.getByRole("button", { name: "Toggle sources" }))
+    expect(savedViewMocks.controllers).toHaveLength(1)
+    expect(
+      savedViewMocks.useSourceSavedViews.mock.calls.every(
+        ([workspaceId]) => workspaceId === "workspace-1"
+      )
+    ).toBe(true)
+    await user.click(screen.getByRole("button", { name: "Toggle sources" }))
 
     testState.isMobile = false
     rerender(<ResearchWorkspace />)
@@ -366,10 +447,17 @@ describe("ResearchWorkspace source list view state", () => {
     ).toBe(true)
     expect(screen.getAllByTestId("source-view-overlay-host")).toHaveLength(1)
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Open mock saved view" })[1]!)
-    expect(
-      screen.getAllByRole("dialog", { name: "Source view overlay" })
-    ).toHaveLength(1)
+    const invokers = screen.getAllByRole("button", { name: "Save source view" })
+    expect(invokers).toHaveLength(2)
+    await user.click(invokers[0]!)
+    expect(screen.getAllByRole("textbox", { name: "View name" })).toHaveLength(1)
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(document.activeElement).toBe(invokers[0]))
+
+    await user.click(invokers[1]!)
+    expect(screen.getAllByRole("textbox", { name: "View name" })).toHaveLength(1)
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(document.activeElement).toBe(invokers[1]))
   })
 
   it("passes the raw nullable workspace identity to the single page controller", () => {
@@ -393,5 +481,110 @@ describe("ResearchWorkspace source list view state", () => {
       expect.anything(),
       expect.anything()
     )
+    expect(screen.getByRole("button", { name: "Save source view" })).toBeDisabled()
+    fireEvent.click(screen.getByRole("button", { name: "Save source view" }))
+    expect(screen.queryByRole("dialog", { name: "Save source view" })).not.toBeInTheDocument()
+  })
+
+  it.each([
+    { label: "workspace B", nextWorkspaceId: "workspace-2" },
+    { label: "no workspace", nextWorkspaceId: null }
+  ])(
+    "synchronously closes an A overlay for $label and refuses its stale submit",
+    async ({ nextWorkspaceId }) => {
+      const user = userEvent.setup()
+      const { rerender } = render(<ResearchWorkspace />)
+      const controllerA = latestController()
+      await user.click(screen.getByRole("button", { name: "Save source view" }))
+      const dialog = await screen.findByRole("dialog", { name: "Save source view" })
+      await user.type(within(dialog).getByRole("textbox", { name: "View name" }), "Draft A")
+      const staleSubmit = within(dialog).getByRole("button", { name: "Save" })
+
+      testState.workspaceId = nextWorkspaceId
+      rerender(<ResearchWorkspace />)
+
+      expect(screen.queryByRole("dialog", { name: "Save source view" })).not.toBeInTheDocument()
+      expect(screen.queryByDisplayValue("Draft A")).not.toBeInTheDocument()
+      fireEvent.click(staleSubmit)
+      expect(controllerA.createView).not.toHaveBeenCalled()
+      expect(latestController().createView).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each([
+    { label: "workspace B", nextWorkspaceId: "workspace-2" },
+    { label: "no workspace", nextWorkspaceId: null }
+  ])(
+    "discards an A replacement confirmation for $label and refuses its stale action",
+    async ({ nextWorkspaceId }) => {
+      const user = userEvent.setup()
+      const { rerender } = render(<ResearchWorkspace />)
+      const controllerA = latestController()
+      await user.click(screen.getByRole("button", { name: "Source views" }))
+      await user.click(
+        screen.getByRole("button", { name: "Replace saved view Saved PDFs" })
+      )
+      const confirmation = await screen.findByRole("alertdialog", {
+        name: "Replace saved view?"
+      })
+      const staleReplace = within(confirmation).getByRole("button", {
+        name: "Replace"
+      })
+
+      testState.workspaceId = nextWorkspaceId
+      rerender(<ResearchWorkspace />)
+
+      expect(
+        screen.queryByRole("alertdialog", { name: "Replace saved view?" })
+      ).not.toBeInTheDocument()
+      fireEvent.click(staleReplace)
+      expect(controllerA.replaceView).not.toHaveBeenCalled()
+      expect(latestController().replaceView).not.toHaveBeenCalled()
+    }
+  )
+
+  it("restores focus to the real Sources tab after the invoking mobile pane unmounts", async () => {
+    const user = userEvent.setup()
+    testState.isMobile = true
+    render(<ResearchWorkspace />)
+    await user.click(screen.getByRole("tab", { name: /Sources/ }))
+    await user.click(screen.getByRole("button", { name: "Save source view" }))
+    expect(await screen.findByRole("dialog", { name: "Save source view" })).toBeInTheDocument()
+
+    const sourcesTab = screen.getByRole("tab", { name: /Sources/ })
+    await user.click(screen.getByRole("tab", { name: /Chat/ }))
+    expect(screen.queryByRole("button", { name: "Save source view" })).not.toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+
+    await waitFor(() => expect(document.activeElement).toBe(sourcesTab))
+  })
+
+  it("lists saved views after remount and only restores one when explicitly reselected", async () => {
+    const user = userEvent.setup()
+    const first = render(<ResearchWorkspace />)
+    const firstController = latestController()
+    expect(firstController.applyView).not.toHaveBeenCalled()
+    expect(firstController.activeViewId).toBeNull()
+
+    await user.click(screen.getByRole("button", { name: "Save source view" }))
+    const saveDialog = await screen.findByRole("dialog", { name: "Save source view" })
+    await user.type(within(saveDialog).getByRole("textbox", { name: "View name" }), "Current filters")
+    await user.click(within(saveDialog).getByRole("button", { name: "Save" }))
+    expect(firstController.createView).toHaveBeenCalledWith("Current filters")
+    await user.click(within(saveDialog).getByRole("button", { name: "Cancel" }))
+
+    first.unmount()
+    savedViewMocks.controllers = []
+    const remounted = render(<ResearchWorkspace />)
+    const reloadedController = latestController()
+    expect(reloadedController.applyView).not.toHaveBeenCalled()
+    expect(reloadedController.activeViewId).toBeNull()
+    await user.click(screen.getByRole("button", { name: "Source views" }))
+    expect(await screen.findByRole("menuitem", { name: /Saved PDFs/ })).toBeInTheDocument()
+    await user.click(screen.getByRole("menuitem", { name: /Saved PDFs/ }))
+    expect(reloadedController.applyView).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId("source-list-sort-state")).toHaveTextContent("name_asc")
+
+    remounted.unmount()
   })
 })

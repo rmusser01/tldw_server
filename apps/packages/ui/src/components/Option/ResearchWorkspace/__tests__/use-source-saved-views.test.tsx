@@ -485,6 +485,33 @@ describe("useSourceSavedViews", () => {
     expect(result.current.announcement).toBe("Saved view replaced.");
   });
 
+  it("dismisses duplicate replacement and lets the next save start fresh", async () => {
+    api.createWorkspaceSourceView
+      .mockRejectedValueOnce({
+        status: 409,
+        details: {
+          detail: {
+            code: "source_view_name_exists",
+            view_id: "view-1",
+            version: 2,
+          },
+        },
+      })
+      .mockResolvedValueOnce(validView({ id: "view-2", name: "Fresh name" }));
+    const { result } = setup();
+
+    await act(async () => result.current.createView("Duplicate"));
+    expect(result.current.duplicateConflict).not.toBeNull();
+
+    act(() => result.current.dismissDuplicateConflict());
+    expect(result.current.duplicateConflict).toBeNull();
+
+    await act(async () => result.current.createView("Fresh name"));
+    expect(api.createWorkspaceSourceView).toHaveBeenCalledTimes(2);
+    expect(api.updateWorkspaceSourceView).not.toHaveBeenCalled();
+    expect(result.current.activeViewId).toBe("view-2");
+  });
+
   it("treats malformed duplicate detail as an ordinary retryable error", async () => {
     api.createWorkspaceSourceView.mockRejectedValue({
       status: 409,
