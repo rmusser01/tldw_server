@@ -44,6 +44,8 @@ Investigate repeated user reports of WebUI/browser-extension Quick Ingest failur
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-07-10 follow-up UAT isolated the repeat YouTube Shorts failure to stale yt-dlp in the project venv. Before updating, yt-dlp 2025.8.11 quarantined `https://www.youtube.com/shorts/6-rf_YXDpPg` at 20% with "content is not available on this app." After updating the venv to yt-dlp 2026.7.4, the same Quick Ingest browser flow completed the YouTube job at 100% and added media id 5. Raised `pyproject.toml` yt-dlp floor to `>=2026.7.4` so fresh installs pick up the extractor fix.
+
+Draft PR: https://github.com/rmusser01/tldw_server/pull/2709
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
