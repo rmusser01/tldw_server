@@ -667,6 +667,17 @@ const buildWizardPersistenceSignature = (
   })
 }
 
+const cancelQuickIngestSessionBestEffort = (
+  request: Parameters<typeof cancelQuickIngestSession>[0]
+): void => {
+  void cancelQuickIngestSession(request).catch((error) => {
+    console.warn("[QuickIngest] Failed to cancel session.", {
+      sessionId: request.sessionId,
+      error,
+    })
+  })
+}
+
 const mapReattachedJobStatusToProgress = (
   status: string,
   result?: unknown
@@ -1350,12 +1361,10 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     ).trim()
     if (sessionId) {
       cancelledSessionIdsRef.current.add(sessionId)
-      void cancelQuickIngestSession({
+      cancelQuickIngestSessionBestEffort({
         sessionId,
         batchIds: resolveTrackingBatchIds(persistedTracking),
         reason: "user_cancelled",
-      }).catch(() => {
-        // Cancellation is best effort after the UI has become terminal.
       })
     }
 
@@ -1501,11 +1510,9 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         if (startAck?.ok && cancelledSessionId) {
           cancelledSessionIdsRef.current.add(cancelledSessionId)
           if (!cancelledSessionId.startsWith("qi-direct-")) {
-            void cancelQuickIngestSession({
+            cancelQuickIngestSessionBestEffort({
               sessionId: cancelledSessionId,
               reason: "user_cancelled",
-            }).catch(() => {
-              // Cancellation is best effort after the UI has become terminal.
             })
           }
         }
@@ -1872,6 +1879,11 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
       const currentSession = sessionRef.current
       if (!currentSession) return
       const patch = buildSessionPatchFromWizardState(state, currentSession)
+      if (patch.completedAt == null) {
+        lastPersistedSignatureRef.current = null
+        upsertSession(patch)
+        return
+      }
       const signature = buildWizardPersistenceSignature(patch)
       // React may replay queued reducer updates after this synchronous Zustand
       // write rerenders the parent. Persist each semantic snapshot only once.

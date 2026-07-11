@@ -395,6 +395,7 @@ describe("QuickIngestWizardModal session runtime", () => {
 
   afterEach(() => {
     vi.useRealTimers()
+    vi.restoreAllMocks()
   })
 
   it("submits the queued wizard batch through the authenticated quick-ingest transport", async () => {
@@ -949,8 +950,11 @@ describe("QuickIngestWizardModal session runtime", () => {
   it("cancels an extension session acknowledged after cancellation", async () => {
     const user = userEvent.setup()
     const startAck = deferred<any>()
+    const cancelError = new Error("cancel transport unavailable")
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
     useQuickIngestSessionStore.getState().createDraftSession()
     mocks.startQuickIngestSession.mockReturnValue(startAck.promise)
+    mocks.cancelQuickIngestSession.mockRejectedValueOnce(cancelError)
 
     render(<QuickIngestWizardModal open onClose={vi.fn()} />)
 
@@ -968,6 +972,15 @@ describe("QuickIngestWizardModal session runtime", () => {
           sessionId: "qi-runtime-late-ack",
           reason: "user_cancelled",
         })
+      )
+    })
+    await waitFor(() => {
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[QuickIngest] Failed to cancel session.",
+        {
+          sessionId: "qi-runtime-late-ack",
+          error: cancelError,
+        }
       )
     })
     expect(mocks.submitQuickIngestBatch).not.toHaveBeenCalled()

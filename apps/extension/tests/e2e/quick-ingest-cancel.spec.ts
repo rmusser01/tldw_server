@@ -106,12 +106,7 @@ test.describe("Quick ingest cancel flow", () => {
       if (message.type() === "error") browserErrors.push(message.text())
     })
     let releaseDirectResponse: (() => void) | null = null
-    let markDirectRequestStarted: (() => void) | null = null
-    const directRequestStarted = new Promise<void>((resolve) => {
-      markDirectRequestStarted = resolve
-    })
     await page.route("**/api/v1/media/process-web-scraping", async (route) => {
-      markDirectRequestStarted?.()
       await new Promise<void>((resolve) => {
         releaseDirectResponse = resolve
       })
@@ -167,6 +162,10 @@ test.describe("Quick ingest cancel flow", () => {
 
       const startButton = dialog.getByRole("button", { name: /start processing/i }).first()
       await expect(startButton).toBeVisible()
+      const directRequestStarted = page.waitForRequest(
+        "**/api/v1/media/process-web-scraping",
+        { timeout: 10_000 }
+      )
       await startButton.click()
 
       const cancelButton = dialog.getByRole("button", { name: /cancel all/i }).first()
