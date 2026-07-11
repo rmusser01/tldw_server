@@ -29,7 +29,7 @@
 **Goal:** Expose validated CRUD routes with recoverable invalid rows and machine-readable conflicts.
 **Success Criteria:** API isolation, validation, error codes, reset, and rate-limit contracts pass.
 **Tests:** New workspace saved-view API tests and rate-limit contract tests.
-**Status:** Not Started
+**Status:** Complete
 
 ## Stage 4: Client Orchestration And Accessible UI
 **Goal:** Load, save, apply, replace, reset, and delete saved views without blocking ordinary filters or built-ins.
@@ -309,7 +309,7 @@ git commit -m "Persist workspace source saved views (TASK-12093.2)"
 - Modify: `tldw_Server_API/tests/Workspaces/test_workspace_rate_limit_contract.py`
 - Modify: `apps/tldw-frontend/lib/api/openapi.fingerprint.json`
 
-- [ ] **Step 1: Write failing schema and API tests**
+- [x] **Step 1: Write failing schema and API tests**
 
 Cover strict state/create/patch validation (`extra="forbid"`), create/list/patch/delete, active workspace ownership, owner/workspace isolation, workspace 404, duplicate-name metadata including concurrent-race recovery, count-limit code, version conflict metadata, deterministic list order, invalid JSON, invalid V1 state, unsupported schema version, reset via PATCH, and route rate-limit categories. Exact `422` cases include boolean/zero/negative versions, boolean numeric fields, explicit null PATCH operations, invalid/inverted dates and ranges, and unknown top-level fields.
 
@@ -341,7 +341,7 @@ All `409` details are exact:
 {"code":"source_view_version_conflict","view_id":"...","current_version":3}
 ```
 
-- [ ] **Step 2: Run API tests and verify RED**
+- [x] **Step 2: Run API tests and verify RED**
 
 ```bash
 /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py tldw_Server_API/tests/Workspaces/test_workspace_rate_limit_contract.py -q
@@ -349,23 +349,23 @@ All `409` details are exact:
 
 Expected: FAIL because schemas and routes do not exist.
 
-- [ ] **Step 3: Add strict Pydantic contracts**
+- [x] **Step 3: Add strict Pydantic contracts**
 
 Define V1 state, create, patch, response, and list models matching the exact wire contract above. Set `extra="forbid"` on state, create, and patch. V1 input fields use the default matrix from Task 1 and emit a complete canonical model. Canonicalize enum arrays server-side by deduplicating and declaration-order sorting. Require a strict positive integer optimistic `version`; schema/numeric validators reject booleans while allowing ordinary JSON integer/float range values, and require finite nonnegative values with ordered ranges. Create accepts only a strictly validated schema version 1. Patch requires `version` plus at least one of `name` or `state`; a model validator rejects version-only requests, explicit null operations, `schema_version` without state, and anything except schema version 1 whenever state is present. Response-model validation enforces the valid/state/reason invariants; use stable invalid reasons `invalid_json`, `invalid_state`, and `unsupported_schema_version`.
 
-- [ ] **Step 4: Add safe row-to-response conversion**
+- [x] **Step 4: Add safe row-to-response conversion**
 
 Check stored schema version before parsing JSON. Parse known-version JSON without exposing it in logs, validate it through the Pydantic state model, and persist/measure canonical JSON using one deterministic UTF-8 serializer (sorted keys and compact separators); the limit is bytes, not characters. Convert malformed rows into recoverable response objects instead of failing the list. Reset is not a special implicit operation: the client PATCHes the canonical V1 default state together with `schema_version = 1`, and the DB updates both columns and increments `version` atomically.
 
-- [ ] **Step 5: Add CRUD endpoints and explicit conflict mapping**
+- [x] **Step 5: Add CRUD endpoints and explicit conflict mapping**
 
 Add GET/POST/PATCH/DELETE under `/{workspace_id}/source-views`. Use a focused saved-view workspace guard that requires `db.get_workspace(workspace_id)` to be active and its `client_id` to equal `str(current_user.id)`; do not broaden or silently change the generic `_require_workspace` contract in this task. Pass the same owner ID to every DB operation and special-case the focused saved-view conflict/not-found exceptions into structured responses. Use read/write/delete rate-limit dependencies consistently.
 
-- [ ] **Step 6: Re-run API tests and verify GREEN**
+- [x] **Step 6: Re-run API tests and verify GREEN**
 
 Run the command from Step 2. Expected: PASS.
 
-- [ ] **Step 7: Generate and verify the API fingerprint**
+- [x] **Step 7: Generate and verify the API fingerprint**
 
 Run from `apps/tldw-frontend`:
 
@@ -381,7 +381,7 @@ Review and stage only the committed `lib/api/openapi.fingerprint.json`; generate
 
 Expected: fingerprint generation succeeds and the drift check exits 0.
 
-- [ ] **Step 8: Commit Stage 3**
+- [x] **Step 8: Commit Stage 3**
 
 ```bash
 git add tldw_Server_API/app/api/v1/schemas/workspace_schemas.py tldw_Server_API/app/api/v1/endpoints/workspaces.py tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py tldw_Server_API/tests/Workspaces/test_workspace_rate_limit_contract.py apps/tldw-frontend/lib/api/openapi.fingerprint.json
