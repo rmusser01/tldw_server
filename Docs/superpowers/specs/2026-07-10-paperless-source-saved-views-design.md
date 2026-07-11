@@ -18,7 +18,7 @@ Add immutable built-in source presets and user-managed, server-backed saved view
 
 ## Non-Goals
 
-- Shared team views, default views, dashboard widgets, or cross-workspace views.
+- Shared team views, personal views while accessing another owner's shared workspace, default views, dashboard widgets, or cross-workspace views.
 - A generic filter expression or query language.
 - Browser-local persistence as the system of record.
 - Auto-saving manual filter changes into an applied saved view.
@@ -29,6 +29,8 @@ Add immutable built-in source presets and user-managed, server-backed saved view
 Use a dedicated workspace source-view resource. The workspace API owns typed CRUD routes, and `CharactersRAGDB` owns a cross-SQLite/PostgreSQL table and access methods. Built-in presets remain immutable TypeScript definitions and never create server rows.
 
 The API receives the authenticated user ID explicitly even though the default SQLite layout already uses a per-user database. Persisting and querying `owner_user_id` provides defense in depth for shared PostgreSQL backends and makes the user/workspace isolation contract testable.
+
+V1 is available only for an active workspace in the authenticated user's primary ChaCha store, where `workspaces.client_id` equals the authenticated user ID. Existing shared-workspace reads use a separate owner-store path; extending personal saved views into that path requires a later sharing-specific authorization design and is not inferred from mere knowledge of a workspace ID.
 
 ## Persisted Data Model
 
@@ -62,9 +64,9 @@ The server contract is narrower than `SourceListViewState`. It excludes the loca
 - numeric file-size, duration, and page-count minimums/maximums
 - `sort`
 
-Pydantic models reject unknown fields on writes. String fields use existing source enums, dates use `YYYY-MM-DD`, and numeric ranges must be finite and non-negative. The client owns explicit camelCase/snake_case serialization helpers and always fills omitted optional fields from `DEFAULT_SOURCE_LIST_VIEW_STATE`.
+Pydantic models reject unknown fields on writes. String fields use existing source enums, dates use real `YYYY-MM-DD` calendar dates, and numeric ranges must be finite and non-negative with each minimum less than or equal to its maximum. The client owns explicit camelCase/snake_case serialization helpers and always fills omitted optional fields from `DEFAULT_SOURCE_LIST_VIEW_STATE`. Client serialization returns an explicit validation result; invalid local dates or numeric ranges block the request and identify the affected field inline rather than falling through to a generic server `422`.
 
-`lifecycleStateFilters` is added to the client view state because Partially indexed cannot be represented by the existing coarse `ready | processing | error` status. It filters against `source.statusDetails.lifecycleState`, participates in active-filter detection, and appears in the collapsed summary so a preset never applies an invisible condition.
+`lifecycleStateFilters` is added to the client view state because Partially indexed cannot be represented by the existing coarse `ready | processing | error` status. It filters against `source.statusDetails.lifecycleState`, participates in active-filter detection, and remains visible in both collapsed and expanded Advanced states through an accessible removable summary/chip so a preset never applies an invisible condition.
 
 ## Built-In Presets
 
@@ -91,11 +93,11 @@ Routes live under `/api/v1/workspaces/{workspace_id}/source-views` and use exist
 - `PATCH /source-views/{view_id}`: explicitly replace name and/or state using the expected `version`.
 - `DELETE /source-views/{view_id}`: delete only a row owned by the current user in the workspace.
 
-Every route first confirms that the workspace is visible through the current user's workspace database. Saved views are personal preferences, so a user who can read the workspace may manage their own rows; no route mutates shared workspace content.
+Every route first confirms that the workspace is active and owned by the current user's primary ChaCha store (`workspaces.client_id = current user`). Knowledge of another tenant's workspace ID never grants access. Saved views are personal preferences and no route mutates shared workspace content.
 
 Responses include `id`, `workspace_id`, `name`, `schema_version`, `state`, `valid`, `invalid_reason`, `version`, `created_at`, and `updated_at`. Normal valid rows return typed V1 state. A corrupt JSON payload or unsupported stored schema version returns metadata with `valid = false`, `state = null`, and a stable `invalid_reason` instead of failing the list.
 
-Saved views are ordered deterministically by `updated_at DESC`, then `name_key ASC`, then `id ASC`.
+Saved views are ordered deterministically by `updated_at DESC`, then `name_key ASC`, then `id ASC`. Valid V1 rows are canonicalized server-side: enum arrays are deduplicated and ordered by declaration order, omitted fields receive defaults, and one deterministic UTF-8 JSON encoding is used for persistence and the 16 KiB byte limit. Response invariants are strict: valid rows have non-null state and null reason; invalid rows have null state and one stable reason. Schema-version support is checked before JSON parsing, so an unsupported version takes precedence over malformed state JSON.
 
 Conflict responses use a structured `detail` object with a stable `code`:
 
@@ -104,6 +106,8 @@ Conflict responses use a structured `detail` object with a stable `code`:
 - `source_view_version_conflict`: includes the requested view ID and current version.
 
 The API never includes metadata for a view outside the authenticated user and workspace scope.
+
+Delete is intentionally unconditional after user/workspace ownership checks; it does not use optimistic version matching. A second delete returns `404`. This keeps the bodyless `DELETE` contract simple while PATCH remains versioned for state/name replacement.
 
 ## Duplicate-Name Replacement
 
@@ -118,11 +122,13 @@ Add a focused `SourceViewControls` row near search and advanced filters. It cont
 - Management actions for replacing or deleting a valid saved view.
 - Warning, Reset, and Delete actions for an invalid saved view; invalid views cannot be applied.
 
-Applying a view fully replaces persisted fields and preserves the `expanded` disclosure flag. Manual changes after applying a view mark the control as Modified but do not write to the server. Switching workspaces clears the applied selection and loads that workspace's personal views.
+Applying a view fully replaces persisted fields and preserves the `expanded` disclosure flag. Manual changes after applying a view mark the control as Modified but do not write to the server. The saved-view hook is instantiated once at the Research Workspace page state boundary and its controller is passed to any desktop/drawer pane instances, preventing duplicate active/conflict state. The page renders exactly one saved-view overlay host; repeated pane controls render triggers/menus only, so shared confirmation state cannot create duplicate modal portals. The overlay host captures the controller generation and actual invoking element when opened. Any generation change synchronously closes the overlay, discards drafts/confirmation state, and clears the invoker; submit also verifies the captured generation. On ordinary close, focus returns to the original element only if it remains connected and focusable, otherwise to the visible saved-view trigger or Sources pane landmark.
+
+The controller exposes an explicit availability state. A null workspace ID performs no request and synchronously clears loaded rows, active snapshots, conflicts, limits, errors, announcements, and mutation state while invalidating all pending completions. Save and server-view management are disabled with an accessible "Select a workspace" explanation, while built-in presets remain usable. Every workspace identity change increments a request generation; completions must match the captured generation, not merely the current ID, so an old A response cannot be accepted after A to B to A.
 
 The control uses the existing accessible menu/dialog primitives: arrow keys move through menu items, Enter/Space applies or invokes an action, Escape closes without changes, dialogs trap focus, and closing restores focus to the invoking control. Every icon-only action has an `aria-label` in addition to its tooltip.
 
-The save dialog trims names and reports validation errors inline. A duplicate uses the approved replacement confirmation. Network failures show a compact retryable error and do not disable built-in presets, manual filters, or the source list.
+The save dialog trims names and reports validation errors inline. A duplicate uses the approved replacement confirmation. Reaching the saved-view limit shows non-retryable guidance with the server-provided limit and directs the user to delete an existing view. Network failures show a compact retryable error and do not disable built-in presets, manual filters, or the source list. Async errors use an alert/live region, mutations expose an accessible busy state, and successful create/replace/reset/delete operations produce concise polite status announcements.
 
 Successful create or replacement marks the returned view active and unmodified; applying it again is unnecessary because its canonical state equals the current state. Resetting an invalid view writes `schema_version = 1` with the canonical default filter/sort state, preserves its name, increments its version, marks it active, and immediately applies that default state. Deleting the active view clears the active selection without changing current filters.
 
@@ -144,6 +150,8 @@ Successful create or replacement marks the returned view active and unmodified; 
 - Unsupported schema version: list it as invalid with `invalid_reason = unsupported_schema_version`, using the same recovery path.
 - Duplicate name: no overwrite until explicit confirmation.
 - Concurrent update: return `409`, refresh, and require retry.
+- Saved-view limit: show the limit and deletion guidance without a Retry action that cannot succeed.
+- No active workspace: clear personal-view state, disable Save/manage actions with accessible guidance, and leave built-in presets enabled.
 - Deleted or inaccessible workspace/view: return `404` without leaking another user's row.
 - Malformed write payload: return `422`; do not persist partial state.
 
@@ -152,11 +160,13 @@ Logs record identifiers and stable reason codes, never raw saved-state JSON.
 ## Security And Privacy
 
 - Scope every database operation by `owner_user_id`, `workspace_id`, and view ID where applicable.
-- Verify workspace visibility before view access.
+- Verify an active workspace row with `workspaces.client_id = owner_user_id` before every view operation; every mutation locks that row inside the transaction.
 - Use bound SQL parameters and canonical server-side name normalization.
 - Bound names, payload size, and row count to prevent preference-storage abuse.
 - Never return the existence or metadata of another user's view.
-- Extend `build_chacha_rls_sql()` for PostgreSQL: enable and force RLS on `workspace_source_saved_views`, and create a tenant policy with both `USING` and `WITH CHECK` clauses requiring `owner_user_id = current_setting('app.current_user_id', true)`.
+- Extend `build_chacha_rls_sql()` for PostgreSQL: enable and force RLS on `workspace_source_saved_views`, and create a tenant policy whose `USING` and `WITH CHECK` clauses require both `owner_user_id = current_setting('app.current_user_id', true)` and an active referenced workspace whose `client_id` equals the same setting. The PostgreSQL table-creation/migration helper applies this policy in the same initialization transaction; the general startup policy builder safely no-ops when the table does not yet exist.
+
+Normal workspace deletion is soft deletion. Saved-view rows are retained for possible workspace recovery but become inaccessible immediately because every API/DB access and the PostgreSQL policy require `workspaces.deleted = false`. A later physical workspace deletion uses the foreign-key cascade. Create/update/delete races serialize on the workspace row.
 
 ## Testing Strategy
 
@@ -164,7 +174,9 @@ Logs record identifiers and stable reason codes, never raw saved-state JSON.
 
 - Every built-in preset maps to the expected canonical state.
 - V1 serialization excludes `expanded` and round-trips all supported fields.
+- Invalid local dates, negative/non-finite values, and inverted ranges block saving with field-specific validation.
 - Lifecycle filters participate in filtering, summaries, and reset.
+- Lifecycle filters remain visible and keyboard-removable in collapsed and expanded Advanced states.
 - Unknown/malformed response state fails soft.
 
 ### Database Tests
@@ -173,14 +185,17 @@ Logs record identifiers and stable reason codes, never raw saved-state JSON.
 - Create/list/update/delete behavior and optimistic locking.
 - Case-insensitive normalized-name uniqueness.
 - User and workspace isolation.
+- Active workspace ownership checks, soft-delete inaccessibility, hard-delete cascade, and mutation/delete races.
 - View-count and payload-size limits.
 - Corrupt JSON and unsupported versions remain listable and resettable.
 - Valid JSON with invalid V1 fields remains listable and resettable.
-- PostgreSQL RLS SQL includes owner-scoped `USING` and `WITH CHECK` clauses.
+- PostgreSQL fresh creation and V52 migration install forced RLS immediately, with owner-and-workspace-scoped `USING` and `WITH CHECK` clauses.
+- Concurrent create and rename-to-duplicate races return safe duplicate metadata after rollback.
 
 ### API Tests
 
-- Workspace visibility, authenticated isolation, validation, duplicate `409`, and version conflicts.
+- Active workspace ownership, authenticated isolation, strict top-level/state validation, duplicate `409`, and version conflicts.
+- Canonical full valid responses, invalid response invariants, and unsupported-version precedence.
 - Invalid rows return recoverable response objects rather than a list failure.
 - Rate-limit route contracts include all saved-view endpoints.
 
@@ -192,6 +207,10 @@ Logs record identifiers and stable reason codes, never raw saved-state JSON.
 - Mark an applied view Modified after manual changes.
 - Reset/delete an invalid view.
 - Preserve built-in/manual filtering when saved-view requests fail.
+- Render saved-view-limit guidance without a futile Retry action.
+- Share one saved-view controller across simultaneous responsive pane instances, render exactly one overlay portal with invoker focus restoration, and suppress requests for a null workspace.
+- Clear all controller state on non-null to null and reject stale completions across null and A to B to A generation changes.
+- Close and invalidate open Save/Replace overlays on every workspace generation change, preventing stale drafts from submitting into a new workspace and exercising focus fallback when the invoker unmounts.
 - Operate the view menu, save action, confirmation, reset, and delete flows by keyboard with accessible names and focus restoration.
 
 ## Rollout And Compatibility

@@ -15,8 +15,8 @@
 
 ## Stage 1: Canonical Source View State
 **Goal:** Represent every required preset and create a strict V1 client serialization boundary.
-**Success Criteria:** Presets, lifecycle filtering, full-state apply, serialization, invalid response handling, and Modified detection are deterministic pure functions.
-**Tests:** `source-list-view.test.ts`, new `source-saved-views.test.ts`.
+**Success Criteria:** Presets, lifecycle filtering, validated full-state serialization/apply, invalid response handling, Modified detection, and visible lifecycle predicates are deterministic and accessible.
+**Tests:** `source-list-view.test.ts`, new `source-saved-views.test.ts`, existing SourcesPane filter tests.
 **Status:** Not Started
 
 ## Stage 2: Persistence And Tenant Isolation
@@ -50,9 +50,12 @@
 **Files:**
 - Modify: `apps/packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/source-list-view.ts`
 - Modify: `apps/packages/ui/src/components/Option/ResearchWorkspace/use-source-list-view-state.ts`
+- Modify: `apps/packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/SourceAdvancedControls.tsx`
 - Create: `apps/packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/source-saved-views.ts`
+- Create: `apps/packages/ui/src/types/workspace-source-saved-view.ts`
 - Modify: `apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/source-list-view.test.ts`
 - Create: `apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/source-saved-views.test.ts`
+- Modify: `apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/SourcesPane.stage4.filters-and-sort.test.tsx`
 
 - [ ] **Step 0: Capture the pre-implementation static-analysis baselines**
 
@@ -70,21 +73,21 @@ The Ruff command is expected to exit 1 because this is known whole-file debt; co
 
 - [ ] **Step 1: Write failing lifecycle-filter tests**
 
-Add tests proving `lifecycleStateFilters: ["partially_queryable"]` matches only sources whose `statusDetails.lifecycleState` is `partially_queryable`, participates in `hasActiveSourceFilters`, appears in `buildSourceFilterSummary`, and is cleared by a full reset.
+Add tests proving `lifecycleStateFilters: ["partially_queryable"]` matches only sources whose `statusDetails.lifecycleState` is `partially_queryable`, participates in `hasActiveSourceFilters`, appears in `buildSourceFilterSummary`, remains visibly represented with an accessible keyboard-removable chip/summary whether Advanced is collapsed or expanded, and is cleared by a full reset.
 
 - [ ] **Step 2: Run the lifecycle tests and verify RED**
 
 Run from `apps/tldw-frontend`:
 
 ```bash
-bun run test:run -- ../packages/ui/src/components/Option/ResearchWorkspace/__tests__/source-list-view.test.ts --maxWorkers=1 --no-file-parallelism
+bun run test:run -- ../packages/ui/src/components/Option/ResearchWorkspace/__tests__/source-list-view.test.ts ../packages/ui/src/components/Option/ResearchWorkspace/__tests__/SourcesPane.stage4.filters-and-sort.test.tsx --maxWorkers=1 --no-file-parallelism
 ```
 
 Expected: FAIL because `SourceListViewState` and filtering do not yet support lifecycle states.
 
 - [ ] **Step 3: Implement the minimal lifecycle filter**
 
-Add `lifecycleStateFilters: WorkspaceSourceLifecycleState[]` to the state/default, filter against `source.statusDetails?.lifecycleState`, include it in active-filter detection, and add stable labels to the collapsed summary. Keep processing `statusFilters` and review filters separate.
+Add `lifecycleStateFilters: WorkspaceSourceLifecycleState[]` to the state/default, filter against `source.statusDetails?.lifecycleState`, include it in active-filter detection, and add stable labels. In `SourceAdvancedControls`, keep an active lifecycle predicate visibly represented in both disclosure states with a focusable clear action. Add `min={0}` to every numeric range input. Keep processing `statusFilters` and review filters separate.
 
 - [ ] **Step 4: Write failing V1 contract and preset tests**
 
@@ -95,13 +98,14 @@ expect(SOURCE_VIEW_PRESETS.partiallyIndexed.state.lifecycleStateFilters)
   .toEqual(["partially_queryable"])
 expect(SOURCE_VIEW_PRESETS.largeFiles.state.fileSizeMin)
   .toBe(50 * 1024 * 1024)
-expect(serializeSourceListViewState({ ...state, expanded: true }))
-  .not.toHaveProperty("expanded")
+const serialized = serializeSourceListViewState({ ...state, expanded: true })
+expect(serialized.ok).toBe(true)
+if (serialized.ok) expect(serialized.state).not.toHaveProperty("expanded")
 expect(deserializeSourceViewState(validV1)).toEqual(expectedState)
 expect(deserializeSourceViewState(malformed)).toBeNull()
 ```
 
-Cover all seven menu entries, full default filling, exact enum arrays, nonnegative finite numeric ranges, `YYYY-MM-DD` dates, canonical equality/signature generation, and preserving `expanded` only when applying a view.
+Cover all seven menu entries, full default filling, exact enum arrays, nonnegative finite numeric ranges, minimum-not-greater-than-maximum invariants, real `YYYY-MM-DD` calendar dates with `date_from <= date_to`, canonical equality/signature generation, and preserving `expanded` only when applying a view. Invalid local state must return field-specific validation issues and must not produce a request payload.
 
 The V1 wire fields are all optional on input with these server/client defaults, and all are present in canonical responses/signatures:
 
@@ -117,7 +121,7 @@ The V1 wire fields are all optional on input with these server/client defaults, 
 | `file_size_min`, `file_size_max`, `duration_min`, `duration_max`, `page_count_min`, `page_count_max` | finite nonnegative number or null | `null` |
 | `sort` | `manual | name_asc | name_desc | added_desc | added_asc | source_created_desc | source_created_asc | file_size_desc | file_size_asc | duration_desc | duration_asc | page_count_desc | page_count_asc` | `manual` |
 
-Reject unknown enum values/fields. Deduplicate arrays and emit them in the declaration order shown above so equality signatures do not depend on click order.
+Reject unknown enum values/fields. Reject booleans as numeric values. Deduplicate arrays and emit them in the declaration order shown above so equality signatures do not depend on click order.
 
 - [ ] **Step 5: Run the V1 contract tests and verify RED**
 
@@ -129,7 +133,7 @@ Expected: FAIL because the module does not exist.
 
 - [ ] **Step 6: Implement the pure saved-view module**
 
-Create explicit types and helpers, including:
+Define the V1 wire type, saved-view sort union, and invalid-reason union once in neutral `@/types/workspace-source-saved-view`; both the pure component helper and `workspace-api.ts` import them. `source-list-view.ts` aliases or imports the neutral sort union so the neutral module never depends on a component module. Create explicit constants and helpers, including:
 
 ```typescript
 export const SOURCE_SAVED_VIEW_SCHEMA_VERSION = 1
@@ -153,31 +157,16 @@ export interface WorkspaceSourceSavedViewStateV1 {
   duration_max: number | null
   page_count_min: number | null
   page_count_max: number | null
-  sort: SourceListSortOption
+  sort: WorkspaceSourceSavedViewSort
 }
+
+export type SourceViewStateValidationResult =
+  | { ok: true; state: WorkspaceSourceSavedViewStateV1 }
+  | { ok: false; issues: Array<{ field: string; message: string }> }
 
 export const serializeSourceListViewState = (
   state: SourceListViewState
-): WorkspaceSourceSavedViewStateV1 => ({
-  type_filters: canonicalizeTypes(state.typeFilters),
-  status_filters: canonicalizeStatuses(state.statusFilters),
-  review_state_filters: canonicalizeReviewStates(state.reviewStateFilters),
-  lifecycle_state_filters: canonicalizeLifecycleStates(state.lifecycleStateFilters),
-  date_field: state.dateField === "sourceCreatedAt" ? "source_created_at" : "added_at",
-  date_from: state.dateFrom,
-  date_to: state.dateTo,
-  require_url: state.requireUrl,
-  require_file_size: state.requireFileSize,
-  require_duration: state.requireDuration,
-  require_page_count: state.requirePageCount,
-  file_size_min: state.fileSizeMin,
-  file_size_max: state.fileSizeMax,
-  duration_min: state.durationMin,
-  duration_max: state.durationMax,
-  page_count_min: state.pageCountMin,
-  page_count_max: state.pageCountMax,
-  sort: state.sort
-})
+): SourceViewStateValidationResult => validateThenCanonicalize(state)
 
 export const applySavedSourceViewState = (
   current: SourceListViewState,
@@ -188,7 +177,7 @@ export const applySavedSourceViewState = (
 })
 ```
 
-Keep presets immutable and fixed-order. Retain Unreviewed as the preset shipped by Child Task 1.
+Keep presets immutable and fixed-order. Retain Unreviewed as the preset shipped by Child Task 1. Signature generation consumes only an `ok` canonical state; invalid local state yields no signature, is considered Modified, and produces inline save validation instead of throwing during render.
 
 - [ ] **Step 7: Add full-state apply to the page hook**
 
@@ -197,7 +186,7 @@ Add `applySourceListViewState(next)` alongside patch/reset. It must replace ever
 - [ ] **Step 8: Run Stage 1 tests and verify GREEN**
 
 ```bash
-bun run test:run -- ../packages/ui/src/components/Option/ResearchWorkspace/__tests__/source-list-view.test.ts ../packages/ui/src/components/Option/ResearchWorkspace/__tests__/source-saved-views.test.ts --maxWorkers=1 --no-file-parallelism
+bun run test:run -- ../packages/ui/src/components/Option/ResearchWorkspace/__tests__/source-list-view.test.ts ../packages/ui/src/components/Option/ResearchWorkspace/__tests__/source-saved-views.test.ts ../packages/ui/src/components/Option/ResearchWorkspace/__tests__/SourcesPane.stage4.filters-and-sort.test.tsx --maxWorkers=1 --no-file-parallelism
 ```
 
 Expected: PASS.
@@ -205,7 +194,7 @@ Expected: PASS.
 - [ ] **Step 9: Commit Stage 1**
 
 ```bash
-git add apps/packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/source-list-view.ts apps/packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/source-saved-views.ts apps/packages/ui/src/components/Option/ResearchWorkspace/use-source-list-view-state.ts apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/source-list-view.test.ts apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/source-saved-views.test.ts
+git add apps/packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/source-list-view.ts apps/packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/source-saved-views.ts apps/packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/SourceAdvancedControls.tsx apps/packages/ui/src/components/Option/ResearchWorkspace/use-source-list-view-state.ts apps/packages/ui/src/types/workspace-source-saved-view.ts apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/source-list-view.test.ts apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/source-saved-views.test.ts apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/SourcesPane.stage4.filters-and-sort.test.tsx
 git commit -m "Add canonical source saved view state (TASK-12093.2)"
 ```
 
@@ -225,14 +214,15 @@ Cover:
 - create/list/get/update/delete;
 - deterministic ordering;
 - NFKC + case-fold `name_key` uniqueness;
-- owner and workspace isolation on every method;
+- owner and active-workspace isolation on every method, including `workspaces.client_id = owner_user_id`;
 - 100-view and 16 KiB limits;
 - expected-version conflicts;
-- cascade deletion with the workspace;
+- soft-deleted workspaces immediately becoming inaccessible while retaining rows, plus physical workspace deletion cascading rows;
+- create/update/delete serialization against workspace soft deletion;
 - raw corrupt, unsupported-version, and valid-but-invalid-state rows remaining retrievable for API recovery.
 - opening a real V52 SQLite database migrates to V53 and creates the additive table without rebuilding unrelated workspace tables.
 
-Use two owner IDs against one test database to prove isolation independently of per-user file paths.
+Use two owner IDs against one test database to prove isolation independently of per-user file paths. User B must be unable to probe, list, create, update, or delete views for user A's workspace even when B knows the workspace ID.
 
 - [ ] **Step 2: Run DB tests and verify RED**
 
@@ -244,11 +234,12 @@ Expected: FAIL because the table and methods do not exist.
 
 - [ ] **Step 3: Add portable schema and conflict types**
 
-Add constants for limits and stable codes plus a focused conflict subclass carrying `code` and safe metadata. For this RED/GREEN cycle, implement only the SQLite half: bump `_CURRENT_SCHEMA_VERSION` from 52 to 53, add `_migrate_from_v52_to_v53` to `_sqlite_linear_migration_steps`, and have it call a dedicated idempotent `_ensure_workspace_source_saved_view_schema_sqlite` helper. The normal SQLite post-migration ensure path calls it too. Add the table to fresh SQLite initialization with:
+Add constants for limits and stable codes plus a focused conflict subclass carrying `code` and safe metadata. For this RED/GREEN cycle, implement only the SQLite half: bump `_CURRENT_SCHEMA_VERSION` from 52 to 53, add `_migrate_from_v52_to_v53` to `_sqlite_linear_migration_steps`, and have it call a dedicated idempotent `_ensure_workspace_source_saved_view_schema_sqlite` helper. The normal SQLite post-migration ensure path calls it too. Add the table to fresh SQLite initialization with a named unique constraint:
 
 ```sql
 PRIMARY KEY (workspace_id, id),
-UNIQUE (owner_user_id, workspace_id, name_key),
+CONSTRAINT uq_workspace_source_saved_views_owner_name
+  UNIQUE (owner_user_id, workspace_id, name_key),
 FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
 ```
 
@@ -256,9 +247,9 @@ Use UUID text IDs, ISO UTC text, and integer versions consistently across backen
 
 - [ ] **Step 4: Implement scoped DB methods**
 
-Implement normalization and CRUD methods that always accept `owner_user_id` and `workspace_id`. Use bound parameters, preflight duplicates for useful metadata, and still translate unique violations for races. Never log `state_json`.
+Implement normalization and CRUD methods that always accept `owner_user_id` and `workspace_id`. Every operation first verifies an active workspace whose `client_id` matches `owner_user_id`; every mutation performs that check while locking/serializing the workspace row in the same transaction. Enforce the state limit as `len(state_json.encode("utf-8")) <= 16 * 1024`. Use bound parameters and preflight duplicates for useful metadata. Name the unique constraint and translate only that constraint/SQLSTATE: after the failed transaction has rolled back, look up the conflicting owned row in a fresh transaction to populate `view_id` and `version`. Never log `state_json`.
 
-For this step, SQLite uses the existing immediate write transaction so count, duplicate preflight, and insert occur in the same transaction. Add the PostgreSQL row-lock branch only after its failing tests in Step 7.
+For this step, SQLite uses the existing immediate write transaction so workspace validation, count, duplicate preflight, and every mutation occur in the same transaction. Soft deletion retains saved-view rows but makes them inaccessible; only a physical workspace delete exercises the foreign-key cascade. Add the PostgreSQL row-lock branch only after its failing tests in Step 7.
 
 - [ ] **Step 5: Run SQLite tests and verify GREEN**
 
@@ -266,13 +257,24 @@ Run the command from Step 2. Expected: PASS.
 
 - [ ] **Step 6: Write failing PostgreSQL schema/RLS tests**
 
-Add integration coverage for the table, unique key, optimistic update, ordering, owner predicates, and concurrent count-limit serialization. Add a two-principal PostgreSQL RLS test following the existing source-review RLS pattern: set `app.current_user_id` for principal A and prove principal B rows cannot be selected, updated, or inserted with `WITH CHECK`. Extend the RLS contract test to require:
+Add integration coverage for the table, named unique key, optimistic update, ordering, active workspace-owner predicates, concurrent count-limit serialization, concurrent create duplicates, two-row rename-to-same-name races, and create/update/delete races with workspace soft deletion. Add a two-principal PostgreSQL RLS test following the existing source-review RLS pattern: set `app.current_user_id` for principal A and prove principal B cannot select, create, update, delete, or directly insert a view for A's workspace. Assert fresh creation and V52 migration install the policy immediately, before any separate startup ensure, by checking `relrowsecurity`, `relforcerowsecurity`, `qual`, and `with_check`. Also execute `ensure_chacha_rls()` against PostgreSQL while the saved-view table is absent and require a successful no-op, proving the `to_regclass(...)` guard is executable rather than only textually present. Extend the RLS contract test to require an owner-and-active-workspace predicate equivalent to:
 
 ```sql
 ALTER TABLE IF EXISTS workspace_source_saved_views ENABLE ROW LEVEL SECURITY
 ALTER TABLE IF EXISTS workspace_source_saved_views FORCE ROW LEVEL SECURITY
-USING (owner_user_id = current_setting('app.current_user_id', true))
-WITH CHECK (owner_user_id = current_setting('app.current_user_id', true))
+USING (
+  owner_user_id = current_setting('app.current_user_id', true)
+  AND EXISTS (
+    SELECT 1 FROM workspaces w
+    WHERE w.id = workspace_source_saved_views.workspace_id
+      AND w.client_id = current_setting('app.current_user_id', true)
+      AND w.deleted = false
+  )
+)
+WITH CHECK (
+  owner_user_id = current_setting('app.current_user_id', true)
+  AND EXISTS (same active-workspace subquery)
+)
 ```
 
 - [ ] **Step 7: Run PostgreSQL/RLS tests and verify RED**
@@ -285,7 +287,7 @@ Expected: RLS assertion FAIL; PostgreSQL test may SKIP locally only when the sta
 
 - [ ] **Step 8: Implement PostgreSQL migration, locking, and RLS**
 
-Add `_ensure_workspace_source_saved_view_schema_postgres`, the `current_version < 53` migration branch, and the normal post-migration ensure call. Before owner-scoped count/duplicate/insert, lock the scoped workspace row with `SELECT id FROM workspaces WHERE id = ? FOR UPDATE`; this serializes concurrent creates for the same workspace. Add idempotent enable/force/drop/create RLS statements with both `USING` and `WITH CHECK`. Do not create a separate RLS initializer.
+Add `_ensure_workspace_source_saved_view_schema_postgres`, the `current_version < 53` migration branch, and the normal post-migration ensure call. Every mutation first locks `SELECT id FROM workspaces WHERE id = ? AND client_id = ? AND deleted = false FOR UPDATE`; absence maps to the focused not-found path. This serializes creates, renames, deletes, and workspace deletion for the same workspace. Apply idempotent enable/force/drop/create RLS statements with both owner-and-active-workspace `USING` and `WITH CHECK` inside this schema helper's transaction immediately after table creation. Keep `build_chacha_rls_sql()` as the general startup path, but guard the saved-view policy block with `to_regclass(...)` so a missing table is a successful no-op. Do not create a separate RLS initializer.
 
 - [ ] **Step 9: Re-run PostgreSQL/RLS tests and verify GREEN/SKIP**
 
@@ -309,7 +311,7 @@ git commit -m "Persist workspace source saved views (TASK-12093.2)"
 
 - [ ] **Step 1: Write failing schema and API tests**
 
-Cover strict V1 field validation (`extra="forbid"`), create/list/patch/delete, owner/workspace isolation, workspace 404, duplicate-name metadata, count-limit code, version conflict metadata, deterministic list order, invalid JSON, invalid V1 state, unsupported schema version, reset via PATCH, and route rate-limit categories.
+Cover strict state/create/patch validation (`extra="forbid"`), create/list/patch/delete, active workspace ownership, owner/workspace isolation, workspace 404, duplicate-name metadata including concurrent-race recovery, count-limit code, version conflict metadata, deterministic list order, invalid JSON, invalid V1 state, unsupported schema version, reset via PATCH, and route rate-limit categories. Exact `422` cases include boolean/zero/negative versions, boolean numeric fields, explicit null PATCH operations, invalid/inverted dates and ranges, and unknown top-level fields.
 
 Assert conflict shape exactly:
 
@@ -327,9 +329,9 @@ Pin the wire contract and PATCH invariants in tests:
 - `GET /source-views` -> `200 {"items": WorkspaceSourceSavedViewResponse[]}`.
 - `POST /source-views` body -> `{"name": str, "schema_version": 1, "state": WorkspaceSourceSavedViewStateV1}`; success -> `201` plus one response object.
 - `PATCH /source-views/{view_id}` body -> `{"version": int, "name"?: str, "schema_version"?: 1, "state"?: WorkspaceSourceSavedViewStateV1}`; success -> `200` plus one response object. At least one of `name` or `state` is required. If `state` is present, `schema_version` is required and must be `1`. `schema_version` is forbidden when `state` is absent. A reset always sends both state fields atomically.
-- `DELETE /source-views/{view_id}` -> `204` with no body.
+- `DELETE /source-views/{view_id}` -> `204` with no body. Delete is intentionally unconditional after owner/workspace checks; a repeated delete returns `404` rather than a version conflict.
 
-Every response object is exactly `id`, `workspace_id`, `name`, `schema_version`, `state`, `valid`, `invalid_reason`, `version`, `created_at`, and `updated_at`. `state` is canonical/full for valid rows and null for invalid rows.
+Every response object is exactly `id`, `workspace_id`, `name`, `schema_version`, `state`, `valid`, `invalid_reason`, `version`, `created_at`, and `updated_at`. A valid row has canonical/full non-null state and null `invalid_reason`; an invalid row has null state and one stable non-null reason. Unsupported schema version is determined before JSON parsing and therefore takes precedence over malformed JSON.
 
 All `409` details are exact:
 
@@ -349,15 +351,15 @@ Expected: FAIL because schemas and routes do not exist.
 
 - [ ] **Step 3: Add strict Pydantic contracts**
 
-Define V1 state, create, patch, response, and list models matching the exact wire contract above. V1 input fields use the default matrix from Task 1 and emit a complete canonical model. Create accepts only schema version 1. Patch requires `version` plus at least one of `name` or `state`; a model validator rejects version-only requests, rejects `schema_version` without state, and requires `schema_version = 1` whenever state is present. Response state is nullable only when `valid` is false; use stable invalid reasons `invalid_json`, `invalid_state`, and `unsupported_schema_version`.
+Define V1 state, create, patch, response, and list models matching the exact wire contract above. Set `extra="forbid"` on state, create, and patch. V1 input fields use the default matrix from Task 1 and emit a complete canonical model. Canonicalize enum arrays server-side by deduplicating and declaration-order sorting. Require a strict positive integer optimistic `version`; schema/numeric validators reject booleans while allowing ordinary JSON integer/float range values, and require finite nonnegative values with ordered ranges. Create accepts only a strictly validated schema version 1. Patch requires `version` plus at least one of `name` or `state`; a model validator rejects version-only requests, explicit null operations, `schema_version` without state, and anything except schema version 1 whenever state is present. Response-model validation enforces the valid/state/reason invariants; use stable invalid reasons `invalid_json`, `invalid_state`, and `unsupported_schema_version`.
 
 - [ ] **Step 4: Add safe row-to-response conversion**
 
-Parse stored JSON without exposing it in logs. Validate known V1 payloads through the Pydantic state model. Convert malformed rows into recoverable response objects instead of failing the list. Reset is not a special implicit operation: the client PATCHes the canonical V1 default state together with `schema_version = 1`, and the DB updates both columns and increments `version` atomically.
+Check stored schema version before parsing JSON. Parse known-version JSON without exposing it in logs, validate it through the Pydantic state model, and persist/measure canonical JSON using one deterministic UTF-8 serializer (sorted keys and compact separators); the limit is bytes, not characters. Convert malformed rows into recoverable response objects instead of failing the list. Reset is not a special implicit operation: the client PATCHes the canonical V1 default state together with `schema_version = 1`, and the DB updates both columns and increments `version` atomically.
 
 - [ ] **Step 5: Add CRUD endpoints and explicit conflict mapping**
 
-Add GET/POST/PATCH/DELETE under `/{workspace_id}/source-views`. Call `_require_workspace` first, pass `str(current_user.id)` to every DB operation, and special-case the focused saved-view conflict exception into structured 409 details. Use read/write/delete rate-limit dependencies consistently.
+Add GET/POST/PATCH/DELETE under `/{workspace_id}/source-views`. Use a focused saved-view workspace guard that requires `db.get_workspace(workspace_id)` to be active and its `client_id` to equal `str(current_user.id)`; do not broaden or silently change the generic `_require_workspace` contract in this task. Pass the same owner ID to every DB operation and special-case the focused saved-view conflict/not-found exceptions into structured responses. Use read/write/delete rate-limit dependencies consistently.
 
 - [ ] **Step 6: Re-run API tests and verify GREEN**
 
@@ -408,11 +410,11 @@ Expected: FAIL because methods/types are absent.
 
 - [ ] **Step 3: Add API response/request types and methods**
 
-Model structured conflict details, valid/invalid responses, and the exact V1 snake_case state from Tasks 1 and 3. Add list/create/update/delete methods to `workspaceApiMethods` using `workspacePath` and `encodeWorkspacePathSegment`.
+Import the exact V1 snake_case state and invalid-reason types from `@/types/workspace-source-saved-view`; do not redeclare them in the service layer. Model structured conflict details and valid/invalid response envelopes. Add list/create/update/delete methods to `workspaceApiMethods` using `workspacePath` and `encodeWorkspacePathSegment`.
 
 - [ ] **Step 4: Write failing orchestration-hook tests**
 
-Test workspace-scoped loading, retry, apply valid view, disable invalid apply, create success, `source_view_name_exists` confirmation data, replacement, version-conflict refresh, reset to V1 defaults, delete active view, workspace switch, and built-ins remaining usable when list fails.
+Test null workspace availability (no request), non-null to null synchronously clearing rows/active/conflict/limit/error/mutation state, stale completions after nulling, workspace-scoped loading, retry, apply valid view, disable invalid apply, create success, local serialization validation blocking requests with field issues, `source_view_name_exists` confirmation data, `source_view_limit_reached` non-retryable limit state, replacement, version-conflict refresh, reset to V1 defaults, delete active view, workspace switch, deferred list and mutation responses after a switch, A to B to A stale-response rejection, and built-ins remaining usable when list fails.
 
 Mock the real `bgRequest` error shape, not a simplified code-only error:
 
@@ -425,7 +427,7 @@ const conflict = {
 }
 ```
 
-The hook's conflict parser reads `error.details?.detail`, validates the code-specific fields, and treats malformed details as an ordinary retryable request error.
+The hook's conflict parser reads `error.details?.detail`, validates the code-specific fields, and treats malformed details as an ordinary retryable request error. A valid `source_view_limit_reached` detail is a non-retryable state containing the server limit and deletion guidance.
 
 - [ ] **Step 5: Run hook tests and verify RED**
 
@@ -437,7 +439,7 @@ Expected: FAIL because the hook is absent.
 
 - [ ] **Step 6: Implement minimal hook state machine**
 
-The hook accepts `workspaceId`, current view state, and `onApplyState`. It owns only server view loading/mutations, active-view snapshot/signature, Modified detection, duplicate/replace state, exact nested `error.details.detail` conflict extraction, and retryable errors. Abort or ignore stale responses after workspace changes. Do not move source filters into a second store.
+The hook accepts raw `workspaceId: string | null`, current view state, and `onApplyState`. It exposes `available = workspaceId !== null` and performs no request while unavailable. Every identity change first increments a monotonic generation and synchronously clears rows, active snapshot, conflicts, limit state, errors, announcements, and mutation state. Every async operation captures the generation and may commit only when it still matches; comparing workspace IDs alone is insufficient because A to B to A can reuse an ID. Abort requests where supported as an additional optimization. The hook otherwise owns only server view loading/mutations, active-view snapshot/signature, Modified detection, local serialization issues, duplicate/replace state, saved-view-limit state, success announcements, exact nested `error.details.detail` conflict extraction, and retryable errors. It is a single page-level controller: do not instantiate it inside `SourcesPane` and do not move source filters into a second store.
 
 - [ ] **Step 7: Re-run client/hook tests and verify GREEN**
 
@@ -462,7 +464,7 @@ git commit -m "Add source saved view client orchestration (TASK-12093.2)"
 
 - [ ] **Step 1: Write failing presentational accessibility tests**
 
-Cover grouped built-in/saved items, fixed ordering, Save accessible name, keyboard menu navigation, Enter/Space activation, Escape close, modal focus trap/return, Modified label, retry error, invalid warning, disabled invalid Apply, Reset/Delete, save validation, and replacement confirmation.
+Cover grouped built-in/saved items, fixed ordering, Save accessible name, keyboard menu navigation, Enter/Space activation, Escape close, modal focus trap/return, Modified label, retry error, invalid warning, disabled invalid Apply, Reset/Delete, field-specific local-state save validation, replacement confirmation, and non-retryable saved-view-limit guidance. When unavailable, Save/manage actions are disabled, expose an accessible "Select a workspace" explanation, and do not open a dialog; built-ins remain enabled. Opening captures the controller generation; a generation change closes the overlay and discards its draft, and submit refuses a stale generation. Focus returns to the invoker only while it remains connected/focusable, otherwise to the visible saved-view trigger or Sources pane landmark. Request errors use `role="alert"`/an appropriate live region, mutation controls expose an accessible busy/disabled state, and create/replace/reset/delete success uses one polite status region.
 
 - [ ] **Step 2: Run control tests and verify RED**
 
@@ -474,11 +476,11 @@ Expected: FAIL because the component does not exist.
 
 - [ ] **Step 3: Implement the focused control component**
 
-Use existing Ant Design menu/modal primitives and Lucide icons. Keep the row compact and unframed near search/advanced controls. Every icon-only control needs both a tooltip and `aria-label`; do not add nested cards or explanatory feature copy.
+Use existing Ant Design menu/modal primitives and Lucide icons. Keep the row compact and unframed near search/advanced controls. Split repeated trigger/menu controls from a single `SourceViewOverlayHost` exported by the same module; only the page-level host renders modal portals. It stores the invoking element and captured controller generation, resets all overlay-local state on generation change, validates generation again before submit, and uses the documented focus fallback. Every icon-only control needs both a tooltip and `aria-label`; do not add nested cards or explanatory feature copy.
 
 - [ ] **Step 4: Write failing integration tests**
 
-Test that SourcesPane receives the full-state apply callback, applies presets before filtering, saves the current state, preserves `expanded`, and leaves search/folder/selection state untouched. After remount/reload, verify the server-backed view is listed and the user can reselect it to restore filters/sort. Do not persist or automatically restore an active/default view. Test workspace changes reload the correct list and clear active selection.
+Test that Research Workspace creates exactly one saved-view controller beside `useSourceListViewState`, passes the same controller to simultaneous desktop/drawer SourcesPane mounts, and renders exactly one page-level overlay host. Invoking Save or confirmation from either pane yields one dialog/alert portal and closing restores focus to that pane's actual invoking control. Open Save and Replace in workspace A, switch to B and separately to null, and verify the dialog closes synchronously, drafts/confirmation state are discarded, and stale submission cannot call either controller generation. Unmount the invoking pane before close and verify focus falls back to the visible trigger or Sources landmark. Verify a null active workspace causes no request, old rows disappear synchronously, Save neither opens a dialog nor issues a request, and the ID is never converted to the synthetic pane fallback `"local"`. Test applying presets before filtering, saving current state, preserving `expanded`, and leaving search/folder/selection state untouched. After remount/reload, verify the server-backed view is listed and the user can reselect it to restore filters/sort. Do not persist or automatically restore an active/default view. Test workspace changes reload the correct list, clear active selection, and ignore deferred responses after non-null to null and A to B to A generation changes.
 
 - [ ] **Step 5: Run integration tests and verify RED**
 
@@ -490,7 +492,7 @@ Expected: FAIL until props/hook wiring exists.
 
 - [ ] **Step 6: Wire controls into Research Workspace**
 
-Expose `applySourceListViewState` from the page hook, pass it to SourcesPane, instantiate the saved-view hook with the active store workspace ID, and render `SourceViewControls` above `SourceAdvancedControls`. Keep server-view errors local and nonblocking.
+Expose `applySourceListViewState` from the page hook. Instantiate `useSourceSavedViews` exactly once in `ResearchWorkspace`, beside the source-list state hook, with the raw nullable active-store workspace ID. Pass one controller model and full-state apply callback to every SourcesPane instance; panes render portal-free `SourceViewControls` above `SourceAdvancedControls` but never create their own controller or issue requests for the synthetic `"local"` fallback. Render one `SourceViewOverlayHost` at page level and route dialog opens through it with the invoking element and current controller generation; generation changes synchronously reset the host. Keep server-view errors local and nonblocking.
 
 - [ ] **Step 7: Re-run Stage 4 UI tests and verify GREEN**
 
@@ -571,7 +573,7 @@ The existing-file Ruff command is expected to exit 1 while the 27 baseline findi
 Run frontend static gates from `apps/tldw-frontend`:
 
 ```bash
-bunx eslint ../packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/source-list-view.ts ../packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/source-saved-views.ts ../packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/use-source-saved-views.ts ../packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/SourceViewControls.tsx ../packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/index.tsx ../packages/ui/src/components/Option/ResearchWorkspace/use-source-list-view-state.ts ../packages/ui/src/components/Option/ResearchWorkspace/index.tsx ../packages/ui/src/services/tldw/domains/workspace-api.ts ../packages/ui/src/components/Option/ResearchWorkspace/__tests__/source-list-view.test.ts ../packages/ui/src/components/Option/ResearchWorkspace/__tests__/source-saved-views.test.ts ../packages/ui/src/components/Option/ResearchWorkspace/__tests__/use-source-saved-views.test.tsx ../packages/ui/src/components/Option/ResearchWorkspace/__tests__/SourceViewControls.test.tsx ../packages/ui/src/components/Option/ResearchWorkspace/__tests__/SourcesPane.stage4.filters-and-sort.test.tsx ../packages/ui/src/components/Option/ResearchWorkspace/__tests__/ResearchWorkspace.stage12.source-list-view-state.test.tsx ../packages/ui/src/services/__tests__/tldw-api-client.workspace-api.test.ts
+bunx eslint ../packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/source-list-view.ts ../packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/source-saved-views.ts ../packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/use-source-saved-views.ts ../packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/SourceAdvancedControls.tsx ../packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/SourceViewControls.tsx ../packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/index.tsx ../packages/ui/src/components/Option/ResearchWorkspace/use-source-list-view-state.ts ../packages/ui/src/components/Option/ResearchWorkspace/index.tsx ../packages/ui/src/types/workspace-source-saved-view.ts ../packages/ui/src/services/tldw/domains/workspace-api.ts ../packages/ui/src/components/Option/ResearchWorkspace/__tests__/source-list-view.test.ts ../packages/ui/src/components/Option/ResearchWorkspace/__tests__/source-saved-views.test.ts ../packages/ui/src/components/Option/ResearchWorkspace/__tests__/use-source-saved-views.test.tsx ../packages/ui/src/components/Option/ResearchWorkspace/__tests__/SourceViewControls.test.tsx ../packages/ui/src/components/Option/ResearchWorkspace/__tests__/SourcesPane.stage4.filters-and-sort.test.tsx ../packages/ui/src/components/Option/ResearchWorkspace/__tests__/ResearchWorkspace.stage12.source-list-view-state.test.tsx ../packages/ui/src/services/__tests__/tldw-api-client.workspace-api.test.ts
 bun run typecheck
 ```
 
