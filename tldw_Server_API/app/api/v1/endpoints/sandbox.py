@@ -79,6 +79,10 @@ from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
 from tldw_Server_API.app.core.AuthNZ.ip_allowlist import is_single_user_ip_allowed, resolve_client_ip
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
+    cookie_websocket_rejection_code,
+    resolve_single_user_cookie_websocket,
+)
 from tldw_Server_API.app.core.config import settings as app_settings
 from tldw_Server_API.app.core.Metrics import increment_counter, observe_histogram
 from tldw_Server_API.app.core.Sandbox.audit_metadata import build_run_completion_audit_metadata
@@ -516,6 +520,9 @@ async def _resolve_sandbox_ws_user_id(
             raise HTTPException(status_code=401, detail="invalid_api_key")
         return int(user_id)
 
+    cookie_identity = await resolve_single_user_cookie_websocket(websocket)
+    if cookie_identity is not None:
+        return cookie_identity.user_id
     raise HTTPException(status_code=401, detail="auth_required")
 
 
@@ -1947,7 +1954,7 @@ async def stream_run_logs(websocket: WebSocket, run_id: str) -> None:
         user_id = await _resolve_sandbox_ws_user_id(websocket, token=auth_token, api_key=api_key)
     except HTTPException:
         try:
-            await websocket.close(code=4401)
+            await websocket.close(code=cookie_websocket_rejection_code(websocket) or 4401)
         finally:
             return  # noqa: B012
     # Ownership check before streaming

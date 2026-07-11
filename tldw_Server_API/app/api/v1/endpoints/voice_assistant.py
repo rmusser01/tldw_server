@@ -67,6 +67,10 @@ from tldw_Server_API.app.core.TTS.tts_request_resolution import (
     resolve_tts_request_defaults,
 )
 from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime
+from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
+    cookie_websocket_rejection_code,
+    resolve_single_user_cookie_websocket,
+)
 from tldw_Server_API.app.core.VoiceAssistant import (
     ActionType,
     VoiceCommand,
@@ -1033,6 +1037,11 @@ async def websocket_voice_assistant(
     7. Server sends TRANSCRIPTION, INTENT, ACTION_START, ACTION_RESULT, TTS_CHUNK*, TTS_END
     8. Repeat from step 5
     """
+    cookie_identity = await resolve_single_user_cookie_websocket(websocket)
+    cookie_close_code = cookie_websocket_rejection_code(websocket)
+    if cookie_close_code is not None:
+        await websocket.close(code=cookie_close_code)
+        return
     await websocket.accept()
 
     user_id: Optional[int] = None
@@ -1065,7 +1074,12 @@ async def websocket_voice_assistant(
             return
 
         auth_token = auth_data.get("token") or token
-        authenticated, user_id = await _authenticate_websocket(websocket, auth_token)
+        if auth_token:
+            authenticated, user_id = await _authenticate_websocket(websocket, auth_token)
+        elif cookie_identity is not None:
+            authenticated, user_id = True, cookie_identity.user_id
+        else:
+            authenticated, user_id = False, None
 
         if not authenticated or user_id is None:
             await websocket.send_json(

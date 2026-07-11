@@ -66,6 +66,10 @@ from tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps import (
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.jobs_adapter import (
     PromptStudioJobsAdapter,
 )
+from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
+    cookie_websocket_rejection_code,
+    resolve_single_user_cookie_websocket,
+)
 from tldw_Server_API.app.core.Streaming.streams import WebSocketStream
 from tldw_Server_API.app.core.testing import env_flag_enabled
 from tldw_Server_API.app.services.app_lifecycle import assert_may_start_work, is_lifecycle_draining
@@ -454,6 +458,15 @@ async def _accept_prompt_studio_websocket_if_needed(websocket: WebSocket) -> Non
     if hasattr(websocket, "accept") and not already_accepted:
         await websocket.accept()
 
+
+async def _allow_prompt_studio_cookie_websocket(websocket: WebSocket) -> bool:
+    await resolve_single_user_cookie_websocket(websocket)
+    close_code = cookie_websocket_rejection_code(websocket)
+    if close_code is None:
+        return True
+    await websocket.close(code=close_code)
+    return False
+
 @router.websocket("")
 async def websocket_endpoint_base(websocket: WebSocket):
     """
@@ -462,6 +475,8 @@ async def websocket_endpoint_base(websocket: WebSocket):
     Args:
         websocket: WebSocket connection
     """
+    if not await _allow_prompt_studio_cookie_websocket(websocket):
+        return
     # Wrap socket for lifecycle metrics; keep domain payloads unchanged
     stream = WebSocketStream(
         websocket,
@@ -517,6 +532,8 @@ async def websocket_endpoint(
         project_id: Project ID to subscribe to
         db: Database instance
     """
+    if not await _allow_prompt_studio_cookie_websocket(websocket):
+        return
     stream = WebSocketStream(
         websocket,
         heartbeat_interval_s=0.0,

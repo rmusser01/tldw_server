@@ -64,6 +64,10 @@ from tldw_Server_API.app.core.AuthNZ.ip_allowlist import (
     resolve_client_ip,
 )
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
+    cookie_websocket_rejection_code,
+    resolve_single_user_cookie_websocket,
+)
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.scope_context import get_scope as _get_scope
@@ -1976,6 +1980,9 @@ async def _resolve_watchlists_ws_user_id(
             raise HTTPException(status_code=401, detail="invalid_api_key")
         return int(user_id)
 
+    cookie_identity = await resolve_single_user_cookie_websocket(websocket)
+    if cookie_identity is not None:
+        return cookie_identity.user_id
     raise HTTPException(status_code=401, detail="auth_required")
 
 
@@ -4983,7 +4990,7 @@ async def stream_run(
         user_id = await _resolve_watchlists_ws_user_id(websocket, token=token, api_key=api_key)
     except HTTPException:
         try:
-            await websocket.close(code=4401)
+            await websocket.close(code=cookie_websocket_rejection_code(websocket) or 4401)
         finally:
             return  # noqa: B012
     db = WatchlistsDatabase.for_user(user_id)

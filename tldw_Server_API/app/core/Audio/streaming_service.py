@@ -12,6 +12,10 @@ from loguru import logger
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import list_org_memberships_for_user
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.settings import is_multi_user_mode
+from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
+    cookie_websocket_rejection_code,
+    resolve_single_user_cookie_websocket,
+)
 from tldw_Server_API.app.core.Metrics.metrics_manager import (
     MetricDefinition,
     MetricType,
@@ -344,6 +348,17 @@ async def _audio_ws_authenticate(
     Returns (authenticated, user_id) where user_id is best-effort (JWT or API key owner).
     """
     jwt_user_id: Optional[int] = None
+
+    existing_session_id = getattr(websocket.state, "single_user_session_id", None)
+    existing_user_id = getattr(websocket.state, "user_id", None)
+    if existing_session_id is not None and existing_user_id is not None:
+        return True, int(existing_user_id)
+    cookie_identity = await resolve_single_user_cookie_websocket(websocket)
+    if cookie_identity is not None:
+        return True, cookie_identity.user_id
+    if cookie_websocket_rejection_code(websocket) is not None:
+        await websocket.close(code=cookie_websocket_rejection_code(websocket) or 4401)
+        return False, None
 
     def _ensure_ws_state() -> Any:
         state = getattr(websocket, "state", None)

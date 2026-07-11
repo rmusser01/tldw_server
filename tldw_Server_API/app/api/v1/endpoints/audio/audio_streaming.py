@@ -71,6 +71,10 @@ from tldw_Server_API.app.core.Audio.streaming_service import (
 )
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import resolve_byok_credentials
 from tldw_Server_API.app.core.AuthNZ.settings import is_multi_user_mode
+from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
+    cookie_websocket_rejection_code,
+    resolve_single_user_cookie_websocket,
+)
 from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async as chat_api_call_async
 from tldw_Server_API.app.core.Chat.chat_helpers import (
     get_or_create_character_context,
@@ -872,6 +876,15 @@ async def audio_chat_turn(
 ws_router = APIRouter()
 
 
+async def _preflight_audio_cookie_websocket(websocket: WebSocket) -> bool:
+    await resolve_single_user_cookie_websocket(websocket)
+    close_code = cookie_websocket_rejection_code(websocket)
+    if close_code is None:
+        return True
+    await websocket.close(code=close_code)
+    return False
+
+
 @ws_router.websocket("/stream/transcribe")
 async def websocket_transcribe(
     websocket: WebSocket, token: Optional[str] = Query(None)  # Legacy query-token auth; disabled by default.
@@ -890,6 +903,8 @@ async def websocket_transcribe(
         websocket (WebSocket): The active WebSocket connection.
         token (Optional[str]): Legacy API key or JWT query-string token, ignored unless AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH is enabled.
     """
+    if not await _preflight_audio_cookie_websocket(websocket):
+        return
     # Create a lightweight WebSocketStream for uniform metrics on outer error paths
     _outer_stream = None
     try:
@@ -1570,6 +1585,8 @@ async def websocket_audio_chat_stream(
       - Single-user: API key via header or an initial auth message; optional IP allowlist.
       - Legacy `token` query-string auth is accepted only when AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH is enabled.
     """
+    if not await _preflight_audio_cookie_websocket(websocket):
+        return
     await websocket.accept()
 
     try:
@@ -3032,6 +3049,8 @@ async def websocket_tts(
     - Single-user: fixed API key via header or initial auth message; optional IP allowlist.
     - Legacy `token` query-string auth is accepted only when AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH is enabled.
     """
+    if not await _preflight_audio_cookie_websocket(websocket):
+        return
     await websocket.accept()
 
     try:
@@ -3268,6 +3287,8 @@ async def websocket_tts_realtime(
       - JSON status/warning/error frames
       - Binary audio frames for synthesized audio
     """
+    if not await _preflight_audio_cookie_websocket(websocket):
+        return
     await websocket.accept()
 
     try:

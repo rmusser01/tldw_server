@@ -16,10 +16,28 @@ documentation:
 - Docs/superpowers/specs/2026-07-10-single-user-http-only-session-design.md
 - docs/superpowers/plans/2026-07-10-single-user-http-only-session-implementation-plan.md
 - .superpowers/sdd/http-task-2-report.md
+- .superpowers/sdd/http-task-3-report.md
 priority: high
 modified_files:
 - tldw_Server_API/app/core/AuthNZ/auth_principal_resolver.py
 - tldw_Server_API/tests/AuthNZ/unit/test_auth_principal_service_and_single_user_tokens.py
+- tldw_Server_API/app/core/AuthNZ/websocket_session_auth.py
+- tldw_Server_API/app/api/v1/endpoints/agent_client_protocol.py
+- tldw_Server_API/app/api/v1/endpoints/acp_multiplex.py
+- tldw_Server_API/app/api/v1/endpoints/persona.py
+- tldw_Server_API/app/api/v1/endpoints/watchlists.py
+- tldw_Server_API/app/api/v1/endpoints/workflows.py
+- tldw_Server_API/app/api/v1/endpoints/meetings.py
+- tldw_Server_API/app/api/v1/API_Deps/Meetings_DB_Deps.py
+- tldw_Server_API/app/api/v1/endpoints/prompt_studio/prompt_studio_websocket.py
+- tldw_Server_API/app/api/v1/endpoints/sandbox.py
+- tldw_Server_API/app/api/v1/endpoints/mcp_unified_endpoint.py
+- tldw_Server_API/app/core/MCP_unified/server.py
+- tldw_Server_API/app/api/v1/endpoints/voice_assistant.py
+- tldw_Server_API/app/api/v1/endpoints/audio/audio_streaming.py
+- tldw_Server_API/app/core/Audio/streaming_service.py
+- tldw_Server_API/tests/AuthNZ/unit/test_websocket_session_auth.py
+- tldw_Server_API/tests/AuthNZ/test_websocket_cookie_route_contract.py
 ---
 
 ## Description

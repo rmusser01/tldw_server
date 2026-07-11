@@ -474,6 +474,8 @@ async def stream_session_ws(
     session_id: str,
     meetings_db: MeetingsDatabase = Depends(get_meetings_db_for_websocket),
 ) -> None:
+    # Authentication, including the shared cookie WebSocket resolver, runs in
+    # get_meetings_db_for_websocket before this handler can accept the socket.
     session_service = MeetingSessionService(db=meetings_db)
     events_service = MeetingEventsService(db=meetings_db)
 
