@@ -66,6 +66,9 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import (
     redact_urls_for_log,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils import resolve_safe_local_path
+from tldw_Server_API.app.core.Ingestion_Media_Processing.yt_dlp_support import (
+    warn_if_yt_dlp_is_stale,
+)
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
 from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
@@ -460,6 +463,7 @@ def get_video_info(url: str, *, use_cookies: bool = False, cookies: Optional[dic
                 ydl_opts.setdefault('http_headers', {})['Cookie'] = cookie_header
         except _VIDEO_NONCRITICAL_EXCEPTIONS:
             pass
+    warn_if_yt_dlp_is_stale()
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         try:
             info_dict = ydl.extract_info(url, download=False)
@@ -484,6 +488,7 @@ def get_youtube(video_url: str, *, use_cookies: bool = False, cookies: Optional[
                 ydl_opts.setdefault('http_headers', {})['Cookie'] = cookie_header
         except _VIDEO_NONCRITICAL_EXCEPTIONS:
             pass
+    warn_if_yt_dlp_is_stale()
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         logging.debug("About to extract youtube info")
         info_dict = ydl.extract_info(video_url, download=False)
@@ -506,6 +511,7 @@ def get_playlist_videos(playlist_url: str, *, use_cookies: bool = False, cookies
         except _VIDEO_NONCRITICAL_EXCEPTIONS:
             pass
 
+    warn_if_yt_dlp_is_stale()
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(playlist_url, download=False)
 
@@ -587,6 +593,7 @@ def download_video(
     downloaded_path: Optional[Path] = None
 
     try:
+        warn_if_yt_dlp_is_stale()
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             result = ydl.extract_info(video_url, download=True)
 
@@ -634,6 +641,7 @@ def download_video(
 def extract_video_info(url):
     _raise_if_url_blocked(url)
     try:
+        warn_if_yt_dlp_is_stale()
         with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
             info = ydl.extract_info(url, download=False)
 
@@ -659,6 +667,7 @@ def get_youtube_playlist_urls(playlist_id):
         'quiet': True,
     }
 
+    warn_if_yt_dlp_is_stale()
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         result = ydl.extract_info(playlist_url, download=False)
         return [entry['url'] for entry in result['entries'] if entry.get('url')]
@@ -827,6 +836,7 @@ def extract_metadata(url, use_cookies=False, cookies=None):
         else:
             logging.warning("Invalid cookie input provided; continuing without cookies header.")
 
+    warn_if_yt_dlp_is_stale()
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         try:
             info = ydl.extract_info(url, download=False)

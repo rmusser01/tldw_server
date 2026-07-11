@@ -81,6 +81,7 @@ Endpoint specifics:
 ## Dependencies & Config
 
 - Requires `ffmpeg` and `yt-dlp`.
+- Existing environments are not updated by pulling new code; update the active environment with `pip install -U "yt-dlp>=2026.7.4"`.
 - Summarization provider is chosen via `api_name`; credentials come from server config.
 
 ## Error Handling & Notes
