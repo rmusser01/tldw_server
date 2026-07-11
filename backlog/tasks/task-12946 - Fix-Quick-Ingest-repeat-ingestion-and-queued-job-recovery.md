@@ -4,7 +4,7 @@ title: Fix Quick Ingest repeat ingestion and queued job recovery
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-11 09:04'
+updated_date: '2026-07-11 16:23'
 labels: []
 dependencies: []
 documentation:
@@ -20,14 +20,14 @@ Investigate repeated user reports of WebUI/browser-extension Quick Ingest failur
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Repeat Quick Ingest submissions complete without Maximum update depth errors and classify existing media as skipped.
-- [ ] #2 Restored direct ingest jobs survive transient status-read failures and terminate correctly for permanent missing jobs.
-- [ ] #3 Webpack dev watch ignores preserve existing patterns and match backend runtime directories using absolute normalized paths.
-- [ ] #4 Stale yt-dlp installations produce actionable diagnostics and current installations continue normally.
-- [ ] #5 Touched persistence logs redact user-controlled URL secrets.
-- [ ] #6 Focused automated verification, Bandit, and full PDF, local-link, and YouTube Shorts UAT pass outside the sandbox.
+- [x] #1 Repeat Quick Ingest submissions complete without Maximum update depth errors and classify existing media as skipped.
+- [x] #2 Restored direct ingest jobs survive transient status-read failures and terminate correctly for permanent missing jobs.
+- [x] #3 Webpack dev watch ignores preserve existing patterns and match backend runtime directories using absolute normalized paths.
+- [x] #4 Stale yt-dlp installations produce actionable diagnostics and current installations continue normally.
+- [x] #5 Touched persistence logs redact user-controlled URL secrets.
+- [x] #6 Focused automated verification, Bandit, and full PDF, local-link, and YouTube Shorts UAT pass outside the sandbox.
 - [ ] #7 All actionable PR review threads are resolved and the branch is current with dev.
-- [ ] #8 Existing perform_analysis and summarize_checkbox declarations govern request-level LLM extraction without a new public API field, while non-API scraper consumers retain the established default order.
+- [x] #8 Existing perform_analysis and summarize_checkbox declarations govern request-level LLM extraction without a new public API field, while non-API scraper consumers retain the established default order.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -57,20 +57,18 @@ Task 3 complete at 02da73990a: persistence uses structured extractor signals and
 Task 4 complete at a72449d733: restored llm in the global extraction default and explicitly propagated existing perform_analysis/summarize_checkbox intent through enhanced, queued, crawl, legacy, and friendly-ingest paths via internal default-true arguments only. Async enhanced extraction is offloaded from the event loop. No public schema/request field changed. Outside-sandbox 115 tests passed and Bandit reported 0 findings; reviews approved.
 
 Task 5 complete at f4e6e81c33: added a thread-safe, exactly-once, nonblocking yt-dlp floor diagnostic at all seven validated Video_DL boundaries plus existing-environment update docs. Lazy version-helper imports cannot break ingestion. Outside-sandbox focused pytest passed 24/24, adjacent video tests 33/33, Bandit 0 findings; reviews approved.
+
+2026-07-11 renewed host-side UAT: a clean PDF run completed, but every same-mounted-session second submission reproduced Maximum update depth in @rc-component/portal before the link result rendered. Three isolated attempts disproved getContainer and stale-tracking-only fixes. Proven findings retained: returning a session to draft must clear old direct job tracking; the media worker's generic exponential idle backoff reached a 30-second ceiling (observed queued for 28 seconds before claim), so its user-facing default ceiling is reduced to 2 seconds while preserving the env override. Remaining proposed architecture change requires approval: Ingest More should call the existing replaceWithNewDraft() so the provider key/session/run refs remount instead of reusing the completed provider. Full PDF/link/YouTube repeat UAT is not yet passing; prior final summary cleared as stale.
+
+2026-07-11 approved architecture fix and fresh host-side UAT: Ingest More now calls the existing replaceWithNewDraft path, creating a new session/provider key instead of reusing completed reducer and run refs. Draft upserts also clear stale direct-job tracking. One mounted WebUI walkthrough passed PDF, RFC 9110 link, repeated RFC link, exact YouTube Short https://www.youtube.com/shorts/6-rf_YXDpPg, and repeated YouTube Short. First submissions succeeded; repeats were classified as skipped existing. pageErrors and consoleErrors were empty. PDF and YouTube jobs began within one second of creation, confirming the media worker 2-second default idle-backoff ceiling removes the observed 28-second queued-at-0-percent delay. Jobs DB: three completed 100-percent jobs with Success, Success, Skipped. Media DB: exactly three rows for PDF, RFC link, and YouTube Short. Evidence: /tmp/task12946_quick_ingest_uat_10_evidence.json and /tmp/task12946_quick_ingest_uat_10_final.png. Focused UI Vitest passed 46/46, media worker pytest passed 19/19, extension TypeScript compile passed, and Bandit reported zero findings. The focused extension Playwright test could not be completed locally after three launch attempts: two headless attempts exposed no MV3 targets and the required headful attempt timed out; repository CI uses xvfb with TLDW_E2E_EXTENSION_HEADLESS=0, so this test remains for CI verification after push.
 <!-- SECTION:NOTES:END -->
-
-## Final Summary
-
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Investigated with real WebUI walkthroughs before relying on E2E. Root causes fixed: repeat/duplicate web scrape responses were returned as HTTP 200 with zero stored articles and not classified as skipped/failure consistently; Quick Ingest direct scrape handling treated some error payloads as success; default web scraping extraction implicitly invoked LLM analysis without an explicit provider; Next dev mode watched backend runtime DB/log writes and could remount the UI; AntD Modal portal styling in QuickIngestWizardModal still triggered the reported Maximum update depth crash on repeat duplicate URL submissions; restored queued-job polling did not force the direct backend path and could leave refresh/reopen flows stuck at 0%; stale yt-dlp 2025.8.11 caused current YouTube/Shorts extractor failures that disappeared after updating to yt-dlp 2026.7.4. Added regression coverage for duplicate persistence, extraction method defaults, batch result classification, restored job polling, modal session stability, dev watcher config, and Quick Ingest E2E helper timing/isolation. Verification was run outside the sandbox: manual UAT covered duplicate URLs, mixed file+URL ingest, backend job status progressing to completed/100%, and PDF + local link + YouTube Shorts ingestion after the yt-dlp update; focused Vitest passed 75 tests across 6 files; focused backend pytest passed 11 tests; Bandit on touched backend code reported 0 findings; targeted Playwright Quick Ingest/media ingest set passed 14 tests.
-<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
 - [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

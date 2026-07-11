@@ -297,7 +297,7 @@ git commit -m "fix: warn when yt-dlp is below supported version"
 - Modify: `apps/extension/tests/e2e/quick-ingest-workflows.spec.ts`
 - Create: `apps/extension/tests/e2e/utils/quick-ingest-options.ts`
 
-- [ ] **Step 1: Strengthen the modal unit assertion**
+- [x] **Step 1: Strengthen the modal unit assertion**
 
 Assert the production AntD modal receives:
 
@@ -309,15 +309,15 @@ expect(modalProps.styles.body).toEqual(expect.objectContaining({
 }))
 ```
 
-- [ ] **Step 2: Replace non-waiting Playwright visibility checks**
+- [x] **Step 2: Replace non-waiting Playwright visibility checks**
 
 For changed transition controls, use `await expect(locator).toBeVisible({ timeout: 5_000 })` before interaction. Use count/immediate visibility only for genuinely optional controls, with a short documented branch. Reuse one option-toggle helper for identical selector/state transitions.
 
-- [ ] **Step 3: Add the real repeated-submission browser scenario**
+- [x] **Step 3: Add the real repeated-submission browser scenario**
 
 In one mounted WebUI session, open Quick Ingest, submit a persisted URL, wait for terminal success, reset/reopen without reloading the app, submit the same URL again, and assert terminal skipped/existing status. Capture `pageerror` and console errors before the first submission and assert no message contains `Maximum update depth exceeded`.
 
-- [ ] **Step 4: Run focused UI unit tests outside the sandbox**
+- [x] **Step 4: Run focused UI unit tests outside the sandbox**
 
 Run:
 
@@ -352,11 +352,11 @@ git commit -m "test: cover repeated quick ingest browser flow"
 - Modify through Backlog CLI/MCP: `backlog/tasks/task-12946 - Fix-Quick-Ingest-repeat-ingestion-and-queued-job-recovery.md`
 - Modify: `Docs/superpowers/plans/2026-07-10-quick-ingest-pr-2709-review-remediation-plan.md` status checkboxes during execution.
 
-- [ ] **Step 1: Run all affected automated suites outside the sandbox**
+- [x] **Step 1: Run all affected automated suites outside the sandbox**
 
 Run the focused commands from Tasks 1-6, then the affected frontend Quick Ingest suite and backend web/video suites. Record exact pass/fail totals in TASK-12946.
 
-- [ ] **Step 2: Run Bandit outside the sandbox**
+- [x] **Step 2: Run Bandit outside the sandbox**
 
 Run:
 
@@ -373,7 +373,7 @@ source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && py
 
 Expected: no new findings in changed code.
 
-- [ ] **Step 3: Perform full user acceptance testing outside the sandbox**
+- [x] **Step 3: Perform full user acceptance testing outside the sandbox**
 
 Start the real backend and WebUI. Through the browser, upload a PDF, ingest a reachable local link, ingest `https://www.youtube.com/shorts/6-rf_YXDpPg`, then repeat the link and YouTube submissions in the same mounted app session. Verify visible progress leaves queued/0%, each first submission reaches terminal success with stored media, repeats are visibly skipped/existing, and no maximum-depth console/page error occurs. Inspect corresponding backend job status/results and Media DB entries rather than relying only on UI toasts.
 
