@@ -19,7 +19,8 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     getConfig: vi.fn(),
     initialize: vi.fn(),
     ragHealth: vi.fn(),
-    updateConfig: vi.fn()
+    updateConfig: vi.fn(),
+    clearManualSingleUserCredentials: vi.fn()
   }
 }))
 
@@ -826,6 +827,7 @@ describe("connection store stability", () => {
     expect(state.configStep).toBe("url")
     expect(state.hasCompletedFirstRun).toBe(false)
     expect(localStorage.getItem("__tldw_first_run_complete")).toBeNull()
+    expect(mockedClient.clearManualSingleUserCredentials).toHaveBeenCalledOnce()
   })
 
   it("exits demo mode when entering onboarding so setup does not look connected", async () => {

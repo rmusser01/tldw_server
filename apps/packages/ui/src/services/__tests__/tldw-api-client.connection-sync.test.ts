@@ -5,7 +5,11 @@ const mocks = vi.hoisted(() => ({
   bgUpload: vi.fn(),
   bgStream: vi.fn(),
   tldwRequest: vi.fn(),
-  storage: new Map<string, unknown>()
+  storage: new Map<string, unknown>(),
+  sessionStorage: new Map<string, unknown>(),
+  failDeviceWrite: false,
+  failSessionWrite: false,
+  failClearWrite: false
 }))
 
 vi.mock("@/services/background-proxy", () => ({
@@ -19,15 +23,41 @@ vi.mock("@/services/tldw/request-core", () => ({
 }))
 
 vi.mock("@/utils/safe-storage", () => ({
-  createSafeStorage: () => ({
-    get: vi.fn(async (key: string) => mocks.storage.get(key)),
-    set: vi.fn(async (key: string, value: unknown) => {
-      mocks.storage.set(key, value)
-    }),
-    remove: vi.fn(async (key: string) => {
-      mocks.storage.delete(key)
-    })
-  }),
+  createSafeStorage: (options?: { area?: string }) => {
+    const values = options?.area === "session" ? mocks.sessionStorage : mocks.storage
+    return {
+      get: vi.fn(async (key: string) => values.get(key)),
+      set: vi.fn(async (key: string, value: unknown) => {
+        if (
+          options?.area === "session" &&
+          mocks.failSessionWrite &&
+          key === "tldwManualSessionApiKey"
+        ) {
+          throw new Error("session storage unavailable")
+        }
+        if (
+          options?.area !== "session" &&
+          mocks.failDeviceWrite &&
+          key === "tldwConfig" &&
+          Boolean((value as { apiKey?: unknown })?.apiKey)
+        ) {
+          throw new Error("device storage unavailable")
+        }
+        if (
+          options?.area !== "session" &&
+          mocks.failClearWrite &&
+          key === "tldwConfig" &&
+          !(value as { apiKey?: unknown })?.apiKey
+        ) {
+          throw new Error("persistent clear unavailable")
+        }
+        values.set(key, value)
+      }),
+      remove: vi.fn(async (key: string) => {
+        values.delete(key)
+      })
+    }
+  },
   safeStorageSerde: {
     serialize: (value: unknown) => value,
     deserialize: (value: unknown) => value
@@ -43,6 +73,10 @@ describe("TldwApiClient connection storage sync", () => {
     mocks.bgStream.mockReset()
     mocks.tldwRequest.mockReset()
     mocks.storage.clear()
+    mocks.sessionStorage.clear()
+    mocks.failDeviceWrite = false
+    mocks.failSessionWrite = false
+    mocks.failClearWrite = false
     window.localStorage.clear()
   })
 
@@ -254,5 +288,132 @@ describe("TldwApiClient connection storage sync", () => {
         expectedStatuses: [404]
       })
     )
+  })
+
+  it("persists an explicit device choice atomically", async () => {
+    const client = new TldwApiClient()
+
+    await expect(
+      client.saveManualSingleUserCredential({
+        serverUrl: "https://api.example.test/path",
+        apiKey: "secret",
+        persistence: "device"
+      })
+    ).resolves.toBe("device")
+
+    expect(mocks.storage.get("tldwConfig")).toMatchObject({
+      serverUrl: "https://api.example.test/path",
+      apiKey: "secret",
+      credentialSource: "manual",
+      apiKeyPersistence: "device",
+      apiKeyServerOrigin: "https://api.example.test"
+    })
+    expect(mocks.sessionStorage.has("tldwManualSessionApiKey")).toBe(false)
+    await expect(client.getConfig()).resolves.toMatchObject({ apiKey: "secret" })
+  })
+
+  it("keeps a session choice out of persistent config and hydrates a new client", async () => {
+    const client = new TldwApiClient()
+
+    await expect(
+      client.saveManualSingleUserCredential({
+        serverUrl: "https://api.example.test",
+        apiKey: "session-secret",
+        persistence: "session"
+      })
+    ).resolves.toBe("session")
+
+    expect(mocks.storage.get("tldwConfig")).not.toHaveProperty("apiKey")
+    expect(mocks.sessionStorage.get("tldwManualSessionApiKey")).toMatchObject({
+      apiKey: "session-secret",
+      apiKeyPersistence: "session"
+    })
+    const reloaded = new TldwApiClient()
+    await reloaded.initialize()
+    await expect(reloaded.getConfig()).resolves.toMatchObject({
+      serverUrl: "https://api.example.test",
+      apiKey: "session-secret",
+      apiKeyPersistence: "session"
+    })
+  })
+
+  it("falls back from a failed device write to session storage", async () => {
+    mocks.failDeviceWrite = true
+    const client = new TldwApiClient()
+
+    await expect(
+      client.saveManualSingleUserCredential({
+        serverUrl: "https://api.example.test",
+        apiKey: "fallback-secret",
+        persistence: "device"
+      })
+    ).resolves.toBe("session")
+
+    expect(mocks.storage.get("tldwConfig")).not.toHaveProperty("apiKey")
+    expect(mocks.sessionStorage.get("tldwManualSessionApiKey")).toMatchObject({
+      apiKey: "fallback-secret"
+    })
+  })
+
+  it("falls back to memory when session storage is unavailable", async () => {
+    mocks.failSessionWrite = true
+    const client = new TldwApiClient()
+
+    await expect(
+      client.saveManualSingleUserCredential({
+        serverUrl: "https://api.example.test",
+        apiKey: "memory-secret",
+        persistence: "session"
+      })
+    ).resolves.toBe("memory")
+
+    expect(mocks.storage.get("tldwConfig")).not.toHaveProperty("apiKey")
+    expect(mocks.storage.get("tldwConfig")).not.toHaveProperty(
+      "apiKeyPersistence"
+    )
+    expect(mocks.storage.get("tldwConfig")).not.toHaveProperty(
+      "credentialSource"
+    )
+    await expect(client.getConfig()).resolves.toMatchObject({
+      apiKey: "memory-secret"
+    })
+  })
+
+  it("clears persistent, session, and in-memory manual credentials", async () => {
+    const client = new TldwApiClient()
+    await client.saveManualSingleUserCredential({
+      serverUrl: "https://api.example.test",
+      apiKey: "secret",
+      persistence: "session"
+    })
+
+    await client.clearManualSingleUserCredentials()
+
+    expect(mocks.storage.get("tldwConfig")).not.toHaveProperty("apiKey")
+    expect(mocks.storage.get("tldwConfig")).not.toHaveProperty("credentialSource")
+    expect(mocks.sessionStorage.has("tldwManualSessionApiKey")).toBe(false)
+    await expect(client.getConfig()).resolves.not.toMatchObject({ apiKey: "secret" })
+  })
+
+  it("does not claim a device credential was cleared when persistence fails", async () => {
+    const client = new TldwApiClient()
+    await client.saveManualSingleUserCredential({
+      serverUrl: "https://api.example.test",
+      apiKey: "device-secret",
+      persistence: "device"
+    })
+    mocks.failClearWrite = true
+
+    await expect(client.clearManualSingleUserCredentials()).rejects.toThrow(
+      "persistent clear unavailable"
+    )
+
+    expect(mocks.storage.get("tldwConfig")).toMatchObject({
+      apiKey: "device-secret",
+      apiKeyPersistence: "device"
+    })
+    await expect(client.getConfig()).resolves.toMatchObject({
+      apiKey: "device-secret"
+    })
   })
 })

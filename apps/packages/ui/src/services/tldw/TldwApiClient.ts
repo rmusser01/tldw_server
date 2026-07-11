@@ -54,7 +54,16 @@ import {
 } from "@/services/tldw/runtime-auth-override"
 import type {
   ApiKeyPersistence,
-  CredentialSource
+  CredentialSource,
+  ManualSessionCredential
+} from "@/services/tldw/single-user-credential"
+import {
+  clearManualCredentials,
+  isCompleteDeviceCredential,
+  MANUAL_SESSION_KEY,
+  normalizeServerOrigin,
+  resolveManualCredential,
+  toPersistedTldwConfig
 } from "@/services/tldw/single-user-credential"
 import {
   type TldwProvidersResponse
@@ -1443,6 +1452,7 @@ export interface SandboxWorkspaceDiagnosticsResponse {
 
 export class TldwApiClientBase {
   private storage: Storage
+  private sessionStorage: Storage
   private config: TldwConfig | null = null
   private baseUrl: string = ''
   private headers: HeadersInit = {}
@@ -1461,6 +1471,64 @@ export class TldwApiClientBase {
     this.storage = createSafeStorage({
       serde: safeStorageSerde
     })
+    this.sessionStorage = createSafeStorage({
+      area: "session",
+      serde: safeStorageSerde
+    })
+  }
+
+  private applyConfigState(): void {
+    const config = this.config
+    const quickstartWebUiServerUrl = getQuickstartWebUiServerUrl()
+    const hostedMode = isHostedTldwDeployment()
+    const nextBaseUrl = hostedMode
+      ? String(config?.serverUrl || "").replace(/\/$/, "")
+      : (isActiveCookieSessionConfig(config, quickstartWebUiServerUrl)
+          ? quickstartWebUiServerUrl
+          : config?.serverUrl || DEFAULT_SERVER_URL
+        ).replace(/\/$/, "")
+    if (this.baseUrl && this.baseUrl !== nextBaseUrl) {
+      this.openApiPathSet = null
+      this.openApiPathSetPromise = null
+      this.resolvedPathCache.clear()
+    }
+    this.baseUrl = nextBaseUrl
+
+    this.headers = { "Content-Type": "application/json" }
+    const runtimeApiKey = !hostedMode
+      ? getRuntimeSingleUserApiKeyOverride()
+      : null
+    const cookieSession = isActiveCookieSessionConfig(
+      config,
+      quickstartWebUiServerUrl
+    )
+    if (!cookieSession) {
+      if (runtimeApiKey) {
+        this.headers["X-API-KEY"] = runtimeApiKey
+      } else if (
+        !hostedMode &&
+        config?.authMode === "single-user" &&
+        config.apiKey
+      ) {
+        const key = String(config.apiKey).trim()
+        if (key) this.headers["X-API-KEY"] = key
+      } else if (
+        !hostedMode &&
+        config?.authMode === "multi-user" &&
+        config.accessToken
+      ) {
+        this.headers["Authorization"] = `Bearer ${config.accessToken}`
+      }
+    }
+    if (config?.orgId) {
+      this.headers["X-TLDW-Org-Id"] = String(config.orgId)
+    }
+  }
+
+  private publishConfigUpdated(): void {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("tldw:config-updated"))
+    }
   }
 
   private getEnvApiKey(): string | null {
@@ -1753,7 +1821,59 @@ export class TldwApiClientBase {
     )
       ? storedCookieSession
       : null
-    const stored = activeCookieSession || storedManual
+    let hydratedManual = storedManual
+    if (storedManual) {
+      const origin = normalizeServerOrigin(storedManual.serverUrl)
+      const hasLegacyManualKey =
+        storedManual.authMode === "single-user" &&
+        storedManual.authSource === "manual" &&
+        typeof storedManual.apiKey === "string" &&
+        Boolean(storedManual.apiKey.trim()) &&
+        !storedManual.credentialSource &&
+        !storedManual.apiKeyPersistence &&
+        !storedManual.apiKeyServerOrigin &&
+        Boolean(origin) &&
+        !activeCookieSession &&
+        !envApiKey &&
+        !getRuntimeSingleUserApiKeyOverride()
+
+      let persistedManual = storedManual
+      if (hasLegacyManualKey && origin) {
+        persistedManual = {
+          ...storedManual,
+          credentialSource: "manual",
+          apiKeyPersistence: "device",
+          apiKeyServerOrigin: origin
+        }
+      } else if (
+        storedManual.apiKey &&
+        !isCompleteDeviceCredential(storedManual)
+      ) {
+        persistedManual = toPersistedTldwConfig(storedManual)
+      }
+
+      if (persistedManual !== storedManual) {
+        await this.storage
+          .set("tldwConfig", persistedManual)
+          .catch(() => undefined)
+      }
+
+      const manualApiKey = await resolveManualCredential(persistedManual, {
+        session: this.sessionStorage
+      })
+      hydratedManual = { ...persistedManual }
+      if (manualApiKey) {
+        hydratedManual.apiKey = manualApiKey
+      } else if (!isCompleteDeviceCredential(hydratedManual)) {
+        delete hydratedManual.apiKey
+        if (hydratedManual.apiKeyPersistence === "session") {
+          await this.sessionStorage
+            .remove(MANUAL_SESSION_KEY)
+            .catch(() => undefined)
+        }
+      }
+    }
+    const stored = activeCookieSession || hydratedManual
 
     if (!stored) {
       // True first-run without quickstart auth material: leave config null so
@@ -1775,60 +1895,110 @@ export class TldwApiClientBase {
         hydrated.apiKey = envApiKey
       }
       this.config = hydrated
-      if (!activeCookieSession) {
-        await this.storage.set("tldwConfig", hydrated)
-      }
     }
+    this.applyConfigState()
+  }
 
-    const config = this.config
-    const hostedMode = isHostedTldwDeployment()
-    const nextBaseUrl = hostedMode
-      ? String(config?.serverUrl || "").replace(/\/$/, "")
-      : (isActiveCookieSessionConfig(config, quickstartWebUiServerUrl)
-          ? quickstartWebUiServerUrl
-          : config?.serverUrl || DEFAULT_SERVER_URL
-        ).replace(/\/$/, "")
-    if (this.baseUrl && this.baseUrl !== nextBaseUrl) {
-      this.openApiPathSet = null
-      this.openApiPathSetPromise = null
-      this.resolvedPathCache.clear()
+  private async activateManualConfig(config: TldwConfig): Promise<void> {
+    this.config = config
+    await this.syncConnectionServerUrl(config.serverUrl)
+    this.applyConfigState()
+    this.publishConfigUpdated()
+  }
+
+  private async writeSessionOrMemory(
+    input: { serverUrl: string; apiKey: string },
+    serverOrigin: string
+  ): Promise<"session" | "memory"> {
+    const persisted: TldwConfig = {
+      authMode: "single-user",
+      authSource: "manual",
+      serverUrl: input.serverUrl,
+      credentialSource: "manual",
+      apiKeyPersistence: "session",
+      apiKeyServerOrigin: serverOrigin
     }
-    this.baseUrl = nextBaseUrl
-
-    // Set up headers based on auth mode
-    this.headers = {
-      "Content-Type": "application/json"
+    const record: ManualSessionCredential = {
+      credentialSource: "manual",
+      apiKeyPersistence: "session",
+      apiKeyServerOrigin: serverOrigin,
+      apiKey: input.apiKey
     }
+    const hydrated = { ...persisted, apiKey: input.apiKey }
 
-    const runtimeApiKey = !hostedMode
-      ? getRuntimeSingleUserApiKeyOverride()
-      : null
-    const cookieSession = isActiveCookieSessionConfig(
-      config,
-      quickstartWebUiServerUrl
-    )
-    if (!cookieSession) {
-      if (runtimeApiKey) {
-        this.headers["X-API-KEY"] = runtimeApiKey
-      } else if (
-        !hostedMode &&
-        config?.authMode === "single-user" &&
-        config.apiKey
-      ) {
-        const key = String(config.apiKey || "").trim()
-        if (key) {
-          this.headers["X-API-KEY"] = key
+    try {
+      await this.storage.set("tldwConfig", persisted)
+      await this.sessionStorage.set(MANUAL_SESSION_KEY, record)
+      await this.activateManualConfig(hydrated)
+      return "session"
+    } catch {
+      await clearManualCredentials(this.storage, this.sessionStorage).catch(
+        async () => {
+          await this.sessionStorage
+            .remove(MANUAL_SESSION_KEY)
+            .catch(() => undefined)
         }
-      } else if (
-        !hostedMode &&
-        config?.authMode === "multi-user" &&
-        config.accessToken
-      ) {
-        this.headers["Authorization"] = `Bearer ${config.accessToken}`
+      )
+      await this.activateManualConfig(hydrated)
+      return "memory"
+    }
+  }
+
+  async saveManualSingleUserCredential(input: {
+    serverUrl: string
+    apiKey: string
+    persistence: ApiKeyPersistence
+  }): Promise<"device" | "session" | "memory"> {
+    const serverUrl = String(input.serverUrl || "").trim()
+    const apiKey = String(input.apiKey || "").trim()
+    const serverOrigin = normalizeServerOrigin(serverUrl)
+    if (!serverOrigin) throw new Error("Invalid server URL")
+    if (!apiKey) throw new Error("API key is required")
+
+    await this.clearManualSingleUserCredentials()
+    if (input.persistence === "device") {
+      const deviceConfig: TldwConfig = {
+        authMode: "single-user",
+        authSource: "manual",
+        serverUrl,
+        apiKey,
+        credentialSource: "manual",
+        apiKeyPersistence: "device",
+        apiKeyServerOrigin: serverOrigin
+      }
+      try {
+        await this.storage.set("tldwConfig", deviceConfig)
+        await this.sessionStorage
+          .remove(MANUAL_SESSION_KEY)
+          .catch(() => undefined)
+        await this.activateManualConfig(deviceConfig)
+        return "device"
+      } catch {
+        return await this.writeSessionOrMemory(
+          { serverUrl, apiKey },
+          serverOrigin
+        )
       }
     }
-    if (config?.orgId) {
-      this.headers["X-TLDW-Org-Id"] = String(config.orgId)
+
+    return await this.writeSessionOrMemory(
+      { serverUrl, apiKey },
+      serverOrigin
+    )
+  }
+
+  async hydrateManualSingleUserCredential(): Promise<TldwConfig | null> {
+    await this.initialize()
+    return this.config?.credentialSource === "manual" ? this.config : null
+  }
+
+  async clearManualSingleUserCredentials(): Promise<void> {
+    await clearManualCredentials(this.storage, this.sessionStorage)
+    if (this.config?.authSource !== "cookie-session") {
+      this.config =
+        (await this.storage.get<TldwConfig>("tldwConfig").catch(() => null)) ||
+        null
+      this.applyConfigState()
     }
   }
 
@@ -1846,17 +2016,50 @@ export class TldwApiClientBase {
   }
 
   async updateConfig(config: Partial<TldwConfig>): Promise<void> {
-    const currentConfig = (await this.getConfig()) || {}
-    const newConfig = { ...(currentConfig as any), ...config } as TldwConfig
-    await this.storage.set('tldwConfig', newConfig)
-    this.config = newConfig
+    let currentConfig = (await this.getConfig()) || ({} as TldwConfig)
+    const targetAuthMode = config.authMode || currentConfig.authMode
+    const submittedApiKey = Object.prototype.hasOwnProperty.call(config, "apiKey")
+      ? String(config.apiKey || "").trim()
+      : null
+    if (
+      submittedApiKey &&
+      targetAuthMode === "single-user" &&
+      (config.serverUrl || currentConfig.serverUrl)
+    ) {
+      await this.saveManualSingleUserCredential({
+        serverUrl: config.serverUrl || currentConfig.serverUrl,
+        apiKey: submittedApiKey,
+        persistence: config.apiKeyPersistence || "device"
+      })
+      return
+    }
+
+    const authModeChanged = Boolean(
+      config.authMode && config.authMode !== currentConfig.authMode
+    )
+    const originChanged = Object.prototype.hasOwnProperty.call(
+      config,
+      "serverUrl"
+    )
+      ? normalizeServerOrigin(config.serverUrl || "") !==
+        normalizeServerOrigin(currentConfig.serverUrl || "")
+      : false
+    if (authModeChanged || originChanged || submittedApiKey === "") {
+      await this.clearManualSingleUserCredentials()
+      currentConfig =
+        (await this.storage.get<TldwConfig>("tldwConfig").catch(() => null)) ||
+        ({} as TldwConfig)
+    }
+
+    const newConfig = { ...currentConfig, ...config } as TldwConfig
+    const persisted = toPersistedTldwConfig(newConfig)
+    await this.storage.set("tldwConfig", persisted)
+    this.config = persisted
     if (Object.prototype.hasOwnProperty.call(config, "serverUrl")) {
       await this.syncConnectionServerUrl(config.serverUrl)
     }
     await this.initialize().catch(() => null)
-    if (typeof window !== "undefined") {
-      window.dispatchEvent(new CustomEvent("tldw:config-updated"))
-    }
+    this.publishConfigUpdated()
   }
 
   async healthCheck(): Promise<boolean> {

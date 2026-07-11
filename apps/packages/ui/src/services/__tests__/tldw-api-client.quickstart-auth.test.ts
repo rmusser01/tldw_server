@@ -5,7 +5,8 @@ const mocks = vi.hoisted(() => ({
   bgUpload: vi.fn(),
   bgStream: vi.fn(),
   tldwRequest: vi.fn(),
-  storage: new Map<string, unknown>()
+  storage: new Map<string, unknown>(),
+  sessionStorage: new Map<string, unknown>()
 }))
 
 vi.mock("@/services/background-proxy", () => ({
@@ -19,15 +20,18 @@ vi.mock("@/services/tldw/request-core", () => ({
 }))
 
 vi.mock("@/utils/safe-storage", () => ({
-  createSafeStorage: () => ({
-    get: vi.fn(async (key: string) => mocks.storage.get(key)),
-    set: vi.fn(async (key: string, value: unknown) => {
-      mocks.storage.set(key, value)
-    }),
-    remove: vi.fn(async (key: string) => {
-      mocks.storage.delete(key)
-    })
-  }),
+  createSafeStorage: (options?: { area?: string }) => {
+    const values = options?.area === "session" ? mocks.sessionStorage : mocks.storage
+    return {
+      get: vi.fn(async (key: string) => values.get(key)),
+      set: vi.fn(async (key: string, value: unknown) => {
+        values.set(key, value)
+      }),
+      remove: vi.fn(async (key: string) => {
+        values.delete(key)
+      })
+    }
+  },
   safeStorageSerde: {
     serialize: (value: unknown) => value,
     deserialize: (value: unknown) => value
@@ -68,6 +72,7 @@ describe("TldwApiClient quickstart auth bootstrap", () => {
     mocks.bgStream.mockReset()
     mocks.tldwRequest.mockReset()
     mocks.storage.clear()
+    mocks.sessionStorage.clear()
     window.localStorage.clear()
   })
 
@@ -151,5 +156,39 @@ describe("TldwApiClient quickstart auth bootstrap", () => {
     await expect(client.ensureConfigForRequest(true)).rejects.toThrow(
       /API key is missing/i
     )
+  })
+
+  it("scrubs an ambiguous legacy persistent key instead of migrating it", async () => {
+    mocks.storage.set("tldwConfig", {
+      authMode: "single-user",
+      serverUrl: "https://api.example.test/path",
+      apiKey: "ambiguous-secret"
+    })
+    const client = new TldwApiClient()
+
+    await client.initialize()
+
+    expect(mocks.storage.get("tldwConfig")).not.toHaveProperty("apiKey")
+    expect(mocks.sessionStorage.has("tldwManualSessionApiKey")).toBe(false)
+    await expect(client.getConfig()).resolves.not.toHaveProperty("apiKey")
+  })
+
+  it("migrates a confidently manual legacy key to complete device metadata", async () => {
+    mocks.storage.set("tldwConfig", {
+      authMode: "single-user",
+      authSource: "manual",
+      serverUrl: "https://api.example.test/path",
+      apiKey: "legacy-manual-secret"
+    })
+    const client = new TldwApiClient()
+
+    await client.initialize()
+
+    expect(mocks.storage.get("tldwConfig")).toMatchObject({
+      apiKey: "legacy-manual-secret",
+      credentialSource: "manual",
+      apiKeyPersistence: "device",
+      apiKeyServerOrigin: "https://api.example.test"
+    })
   })
 })

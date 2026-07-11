@@ -131,7 +131,7 @@ git commit -m "feat(web): define manual API-key persistence policy"
 - Consumes: Task 1 storage policy.
 - Produces: `saveManualSingleUserCredential()`, `hydrateManualSingleUserCredential()`, `clearManualSingleUserCredentials()`, idempotent legacy migration.
 
-- [ ] **Step 1: Write failing lifecycle and migration unit tests**
+- [x] **Step 1: Write failing lifecycle and migration unit tests**
 
 ```ts
 it("persists an explicit device choice atomically", async () => {
@@ -167,13 +167,13 @@ it("does not migrate an ambiguous legacy bridge", async () => {
 })
 ```
 
-- [ ] **Step 2: Run tests and confirm failures**
+- [x] **Step 2: Run tests and confirm failures**
 
 Run: `cd apps && bunx vitest run packages/ui/src/services/__tests__/tldw-api-client.connection-sync.test.ts packages/ui/src/services/__tests__/tldw-api-client.quickstart-auth.test.ts tldw-frontend/__tests__/extension/runtime-bootstrap.test.ts`
 
 Expected: current config writes cannot distinguish device/session/runtime ownership.
 
-- [ ] **Step 3: Implement ordered writes and hydration**
+- [x] **Step 3: Implement ordered writes and hydration**
 
 ```ts
 async saveManualSingleUserCredential(input: {
@@ -204,13 +204,13 @@ async saveManualSingleUserCredential(input: {
 
 Hydrate the session record into `this.config` without persisting it. Migrate a legacy persistent key only when the stored config is single-user, URL origin is valid, runtime/cookie auth is absent, and ownership is confidently manual; otherwise delete the ambiguous key. Make logout, disconnect, reset, auth-mode change, and origin change clear device metadata, session storage, and in-memory overrides. Do not clear on network/5xx responses.
 
-- [ ] **Step 4: Run client persistence regression tests**
+- [x] **Step 4: Run client persistence regression tests**
 
 Run: `cd apps && bunx vitest run packages/ui/src/services/__tests__/tldw-api-client.connection-sync.test.ts packages/ui/src/services/__tests__/tldw-api-client.quickstart-auth.test.ts tldw-frontend/__tests__/extension/runtime-bootstrap.test.ts`
 
 Expected: all selected tests pass.
 
-- [ ] **Step 5: Commit persistence behavior**
+- [x] **Step 5: Commit persistence behavior**
 
 ```bash
 git add apps/packages/ui/src/services/tldw apps/tldw-frontend/extension/shims/runtime-bootstrap.ts apps/tldw-frontend/__tests__/extension/runtime-bootstrap.test.ts

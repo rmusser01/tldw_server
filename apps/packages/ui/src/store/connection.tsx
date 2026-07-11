@@ -1129,6 +1129,7 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
 
   async restartOnboarding() {
     const prev = get().state
+    await tldwClient.clearManualSingleUserCredentials()
     await setFirstRunCompleteFlag(false)
     set({
       state: {

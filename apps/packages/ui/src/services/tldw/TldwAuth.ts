@@ -201,7 +201,11 @@ export class TldwAuthService {
    */
   async logout(): Promise<void> {
     const config = await tldwClient.getConfig()
-    if (!config || config.authMode !== 'multi-user') {
+    if (!config) {
+      return
+    }
+    if (config.authMode === 'single-user') {
+      await tldwClient.clearManualSingleUserCredentials()
       return
     }
 
