@@ -119,6 +119,17 @@ const clearTransientState = (state: ControllerState): ControllerState => ({
   mutationError: null,
 });
 
+const sameValidationIssues = (
+  left: SourceViewStateValidationIssue[],
+  right: SourceViewStateValidationIssue[],
+): boolean =>
+  left.length === right.length &&
+  left.every(
+    (issue, index) =>
+      issue.field === right[index]?.field &&
+      issue.message === right[index]?.message,
+  );
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
@@ -392,6 +403,31 @@ export const useSourceSavedViews = (
     !identityPending && state.generation === renderGeneration
       ? state
       : emptyState(renderGeneration);
+
+  const serializedCurrentState = React.useMemo(
+    () => serializeSourceListViewState(currentState),
+    [currentState],
+  );
+
+  React.useLayoutEffect(() => {
+    if (exposed.serializationIssues.length === 0) return;
+    const nextIssues = [
+      ...exposed.serializationIssues.filter((issue) => issue.field === "name"),
+      ...(serializedCurrentState.ok === false
+        ? serializedCurrentState.issues
+        : []),
+    ];
+    if (sameValidationIssues(exposed.serializationIssues, nextIssues)) return;
+    commitGeneration(renderGeneration, (current) => ({
+      ...current,
+      serializationIssues: nextIssues,
+    }));
+  }, [
+    commitGeneration,
+    exposed.serializationIssues,
+    renderGeneration,
+    serializedCurrentState,
+  ]);
 
   const retry = React.useCallback(async () => {
     if (

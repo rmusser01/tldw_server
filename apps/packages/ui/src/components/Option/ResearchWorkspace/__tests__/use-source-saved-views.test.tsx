@@ -448,6 +448,29 @@ describe("useSourceSavedViews", () => {
     expect(result.current.serializationIssues).toEqual([]);
   });
 
+  it("recomputes state issues after same-workspace local state correction", async () => {
+    api.createWorkspaceSourceView.mockResolvedValue(
+      validView({ name: "Corrected view", state: wireState() }),
+    );
+    const { result, rerender } = setup(
+      "ws-a",
+      localState({ fileSizeMin: 20, fileSizeMax: 10 }),
+    );
+
+    await act(async () => result.current.createView("Corrected view"));
+    expect(result.current.serializationIssues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ field: "fileSizeMax" }),
+      ]),
+    );
+
+    rerender({ workspaceId: "ws-a", state: localState() });
+    expect(result.current.serializationIssues).toEqual([]);
+
+    await act(async () => result.current.createView("Corrected view"));
+    expect(api.createWorkspaceSourceView).toHaveBeenCalledTimes(1);
+  });
+
   it("retains duplicate metadata and explicitly replaces with the server version", async () => {
     api.createWorkspaceSourceView.mockRejectedValue({
       status: 409,

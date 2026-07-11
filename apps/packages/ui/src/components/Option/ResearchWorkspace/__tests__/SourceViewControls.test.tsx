@@ -376,6 +376,61 @@ describe("SourceViewControls", () => {
     expect(model.replaceView).not.toHaveBeenCalled()
   })
 
+  it("unblocks a corrected same-workspace state without discarding a valid name", async () => {
+    const user = userEvent.setup()
+    const issues = [
+      { field: "fileSizeMax", message: "Must be greater than fileSizeMin." }
+    ]
+    const invalidModel = controller({ serializationIssues: issues })
+    const invalidState = {
+      ...DEFAULT_SOURCE_LIST_VIEW_STATE,
+      fileSizeMin: 20,
+      fileSizeMax: 10
+    }
+    const { rerender } = render(
+      <Harness model={invalidModel} sourceListViewState={invalidState} />
+    )
+
+    await user.click(screen.getByRole("button", { name: "Save source view" }))
+    const dialog = await screen.findByRole("dialog", { name: "Save source view" })
+    const name = within(dialog).getByRole("textbox", { name: "View name" })
+    await user.type(name, "Corrected view")
+    expect(within(dialog).getByRole("button", { name: "Save" })).toBeDisabled()
+
+    const correctedModel = controller({ serializationIssues: [] })
+    rerender(
+      <Harness
+        model={correctedModel}
+        sourceListViewState={DEFAULT_SOURCE_LIST_VIEW_STATE}
+      />
+    )
+
+    expect(name).toHaveValue("Corrected view")
+    expect(within(dialog).getByRole("button", { name: "Save" })).toBeEnabled()
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }))
+
+    await user.click(screen.getByRole("button", { name: "Save source view" }))
+    const reopened = await screen.findByRole("dialog", { name: "Save source view" })
+    const reopenedName = within(reopened).getByRole("textbox", {
+      name: "View name"
+    })
+    expect(reopenedName).toHaveValue("")
+    expect(within(reopened).getByRole("button", { name: "Save" })).toBeDisabled()
+    await user.type(reopenedName, "Reopened view")
+    expect(within(reopened).getByRole("button", { name: "Save" })).toBeEnabled()
+    await user.click(within(reopened).getByRole("button", { name: "Cancel" }))
+
+    await user.click(screen.getByRole("button", { name: "Source views" }))
+    await user.click(
+      screen.getByRole("button", { name: "Replace saved view My PDFs" })
+    )
+    expect(
+      within(
+        await screen.findByRole("alertdialog", { name: "Replace saved view?" })
+      ).getByRole("button", { name: "Replace" })
+    ).toBeEnabled()
+  })
+
   it("dismisses duplicate replacement on Cancel so the next Save starts fresh", async () => {
     const user = userEvent.setup()
     const dismissDuplicateConflict = vi.fn()
@@ -425,6 +480,41 @@ describe("SourceViewControls", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
     expect(createA).not.toHaveBeenCalled()
     expect(screen.queryByDisplayValue("Workspace A")).not.toBeInTheDocument()
+  })
+
+  it("refuses an attached Save handler after its controller generation becomes stale", async () => {
+    const user = userEvent.setup()
+    const model = controller({ generation: 1 })
+    render(<Harness model={model} />)
+    await user.click(screen.getByRole("button", { name: "Save source view" }))
+    const dialog = await screen.findByRole("dialog", { name: "Save source view" })
+    await user.type(
+      within(dialog).getByRole("textbox", { name: "View name" }),
+      "Stale save"
+    )
+
+    model.generation = 2
+    await user.click(within(dialog).getByRole("button", { name: "Save" }))
+
+    expect(model.createView).not.toHaveBeenCalled()
+  })
+
+  it("refuses an attached Replace handler after its controller generation becomes stale", async () => {
+    const user = userEvent.setup()
+    const model = controller({ generation: 1 })
+    render(<Harness model={model} />)
+    await user.click(screen.getByRole("button", { name: "Source views" }))
+    await user.click(
+      screen.getByRole("button", { name: "Replace saved view My PDFs" })
+    )
+    const dialog = await screen.findByRole("alertdialog", {
+      name: "Replace saved view?"
+    })
+
+    model.generation = 2
+    await user.click(within(dialog).getByRole("button", { name: "Replace" }))
+
+    expect(model.replaceView).not.toHaveBeenCalled()
   })
 
   it("falls back to the Sources landmark when the invoking pane unmounts", async () => {
