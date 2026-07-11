@@ -148,9 +148,15 @@ const createSpeakers = (
 ): PipelineWizardAudioSpeakerDraft[] =>
   Array.from({ length: Math.max(1, Math.min(4, count)) }, (_item, index) => {
     const current = existing[index]
+    const defaultId = `speaker_${index + 1}`
+    const label = current?.label?.trim()
+    const isDefaultLabel = !label || /^Speaker \d+$/i.test(label)
+    const priorSpeakerIds = existing.slice(0, index).map((speaker) => speaker.id)
     return {
-      id: current?.id || `speaker_${index + 1}`,
-      label: current?.label || speakerLabel(index + 1),
+      id: current?.id && current.id !== defaultId && !priorSpeakerIds.includes(current.id)
+        ? current.id
+        : defaultId,
+      label: isDefaultLabel ? speakerLabel(index + 1) : current.label,
       role: current?.role || speakerRole(index + 1),
       voice: current?.voice || DEFAULT_SPEAKER_VOICES[index] || DEFAULT_SPEAKER_VOICES[0],
       persona: current?.persona
@@ -737,7 +743,7 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
 
   const receiptArtifacts = receipt?.artifacts.map((artifact) =>
     artifact === "show_notes"
-      ? t("watchlists:overview.pipelineSetup.receipt.artifacts.showNotes", "show notes")
+      ? t("watchlists:overview.pipelineSetup.receipt.artifacts.showNotes", "text show notes")
       : artifact === "audio"
         ? t("watchlists:overview.pipelineSetup.receipt.artifacts.audio", "audio")
         : t("watchlists:overview.pipelineSetup.receipt.artifacts.textReport", "text report")
@@ -782,6 +788,18 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
         )
       : receiptProgramFormat
     : ""
+  const speakerFieldLabel = (index: number, field: "label" | "role" | "voice" | "persona") => {
+    const speakerNumber = new Intl.NumberFormat(locale).format(index + 1)
+    const fallback =
+      field === "label"
+        ? `Speaker ${speakerNumber} label`
+        : field === "role"
+          ? `Speaker ${speakerNumber} role`
+          : field === "voice"
+            ? `Speaker ${speakerNumber} voice`
+            : `Speaker ${speakerNumber} persona`
+    return t(`watchlists:overview.pipelineSetup.speaker.${field}Field.${index + 1}`, fallback)
+  }
 
   const observedStages = testProjection
     ? Object.entries(testProjection.stages)
@@ -870,7 +888,14 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
             {t("common:back", "Back")}
           </Button>
         ) : null,
-        <Button key="next" type="primary" className="min-h-11 w-full whitespace-normal sm:w-auto" onClick={moveNext} disabled={isBusy}>
+        <Button
+          key="next"
+          type="primary"
+          className="min-h-11 w-full whitespace-normal sm:w-auto"
+          data-testid="watchlists-pipeline-next-step"
+          onClick={moveNext}
+          disabled={isBusy}
+        >
           {t(
             "watchlists:overview.pipelineSetup.actions.next",
             "Next: {{step}}",
@@ -1141,12 +1166,12 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
                 </div>
                 <div className="divide-y divide-border border-y border-border">
                   {draft.audioSpeakers.map((speaker, index) => (
-                    <div key={speaker.id || index} className="grid gap-3 py-3 sm:grid-cols-2">
-                      <Form.Item label={t("watchlists:overview.pipelineSetup.speaker.labelField", "Speaker {{index}} label", { index: index + 1 })}>
-                        <Input aria-label={t("watchlists:overview.pipelineSetup.speaker.labelField", "Speaker {{index}} label", { index: index + 1 })} value={speaker.label} onChange={(event) => updateSpeaker(index, { label: event.target.value })} />
+                    <div key={`${speaker.id || "speaker"}-${index}`} className="grid gap-3 py-3 sm:grid-cols-2">
+                      <Form.Item label={speakerFieldLabel(index, "label")}>
+                        <Input aria-label={speakerFieldLabel(index, "label")} value={speaker.label} onChange={(event) => updateSpeaker(index, { label: event.target.value })} />
                       </Form.Item>
-                      <Form.Item label={t("watchlists:overview.pipelineSetup.speaker.roleField", "Speaker {{index}} role", { index: index + 1 })}>
-                        <Input aria-label={t("watchlists:overview.pipelineSetup.speaker.roleField", "Speaker {{index}} role", { index: index + 1 })} value={speaker.role} onChange={(event) => updateSpeaker(index, { role: event.target.value })} />
+                      <Form.Item label={speakerFieldLabel(index, "role")}>
+                        <Input aria-label={speakerFieldLabel(index, "role")} value={speaker.role} onChange={(event) => updateSpeaker(index, { role: event.target.value })} />
                       </Form.Item>
                     </div>
                   ))}
@@ -1171,9 +1196,9 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
                     </div>
                   )}
                   {draft.audioEnabled && draft.audioSpeakers.map((speaker, index) => (
-                    <div key={speaker.id || index} className="grid gap-3 sm:grid-cols-2">
+                    <div key={`${speaker.id || "speaker"}-${index}`} className="grid gap-3 sm:grid-cols-2">
                       <Form.Item
-                        label={t("watchlists:overview.pipelineSetup.speaker.voiceField", "Speaker {{index}} voice", { index: index + 1 })}
+                        label={speakerFieldLabel(index, "voice")}
                         validateStatus={stepErrors.includes("audioSpeakerVoices") && !speaker.voice.trim() ? "error" : undefined}
                         help={stepErrors.includes("audioSpeakerVoices") && !speaker.voice.trim()
                           ? <span id={`pipeline-speaker-${index + 1}-voice-error`}>{validationMessage("audioSpeakerVoices")}</span>
@@ -1183,7 +1208,7 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
                           id={`pipeline-speaker-${index + 1}-voice`}
                           data-pipeline-speaker-voice
                           className={TOUCH_TARGET_CLASS}
-                          aria-label={t("watchlists:overview.pipelineSetup.speaker.voiceField", "Speaker {{index}} voice", { index: index + 1 })}
+                          aria-label={speakerFieldLabel(index, "voice")}
                           aria-invalid={stepErrors.includes("audioSpeakerVoices") && !speaker.voice.trim()}
                           aria-describedby={stepErrors.includes("audioSpeakerVoices") && !speaker.voice.trim() ? `pipeline-speaker-${index + 1}-voice-error` : undefined}
                           value={speaker.voice || undefined}
@@ -1191,8 +1216,8 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
                           onChange={(value) => updateSpeaker(index, { voice: value })}
                         />
                       </Form.Item>
-                      <Form.Item label={t("watchlists:overview.pipelineSetup.speaker.personaField", "Speaker {{index}} persona", { index: index + 1 })}>
-                        <Input aria-label={t("watchlists:overview.pipelineSetup.speaker.personaField", "Speaker {{index}} persona", { index: index + 1 })} value={speaker.persona} onChange={(event) => updateSpeaker(index, { persona: event.target.value })} />
+                      <Form.Item label={speakerFieldLabel(index, "persona")}>
+                        <Input aria-label={speakerFieldLabel(index, "persona")} value={speaker.persona} onChange={(event) => updateSpeaker(index, { persona: event.target.value })} />
                       </Form.Item>
                     </div>
                   ))}

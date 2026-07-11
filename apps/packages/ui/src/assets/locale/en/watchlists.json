@@ -531,7 +531,7 @@
         "sources_other": "{{count}} sources",
         "artifacts": {
           "textReport": "text report",
-          "showNotes": "show notes",
+          "showNotes": "text show notes",
           "audio": "audio"
         },
         "formats": {

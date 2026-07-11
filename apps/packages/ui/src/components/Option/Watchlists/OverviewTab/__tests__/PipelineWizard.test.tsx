@@ -126,6 +126,22 @@ describe("PipelineWizard", () => {
     expect(inDialog().getAllByRole("button").filter((button) => button.classList.contains("ant-btn-primary"))).toHaveLength(1)
   })
 
+  it("persists multiple existing source selections before cadence", async () => {
+    const props = renderWizard({ initialDraft: { sourceIds: [] } })
+
+    fireEvent.click(inDialog().getByLabelText("Lakers source 1"))
+    fireEvent.click(inDialog().getByLabelText("Lakers source 2"))
+    fireEvent.click(inDialog().getByLabelText("Lakers source 3"))
+
+    await waitFor(() => {
+      expect(props.onSaveDraft).toHaveBeenLastCalledWith(
+        expect.objectContaining({ sourceIds: [1, 2, 3] })
+      )
+    })
+    fireEvent.click(inDialog().getByRole("button", { name: "Next: Cadence" }))
+    expect(inDialog().getByRole("heading", { name: "Cadence" })).toBeInTheDocument()
+  })
+
   it("keeps the step sequence scrollable and uses logical alignment for narrow RTL layouts", () => {
     renderWizard()
     dialog().setAttribute("dir", "rtl")

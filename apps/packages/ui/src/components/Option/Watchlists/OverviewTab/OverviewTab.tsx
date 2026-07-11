@@ -773,7 +773,7 @@ export const OverviewTab: React.FC = () => {
       await updateWatchlistJob(persisted.jobId, { active: true })
       closePipelineSetup()
       void loadOverview(false)
-      setActiveTab("jobs")
+      setActiveTab("overview")
       return { jobId: persisted.jobId, status: "active" as const }
     } finally {
       setPipelineSetupSubmitting(false)
@@ -883,6 +883,22 @@ export const OverviewTab: React.FC = () => {
           onViewReports={handleOpenAttentionOutputs}
           onReviewDeliverySettings={handleReviewDeliverySettings}
         />
+      )}
+
+      {data && data.sources.total > 0 && data.jobs.total === 0 && (
+        <DesignSystemAlert
+          variant="info"
+          title={t("watchlists:overview.noBriefing.title", "Ready for a briefing schedule")}
+          action={{
+            label: t("watchlists:overview.noBriefing.setup", "Set up briefing"),
+            onClick: openPipelineSetup
+          }}
+        >
+          {t(
+            "watchlists:overview.noBriefing.description",
+            "Your feeds are ready. Choose cadence, format, audio, and delivery in the same setup flow."
+          )}
+        </DesignSystemAlert>
       )}
 
       {error && (

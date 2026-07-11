@@ -205,6 +205,21 @@ describe("OverviewTab canonical setup", () => {
     await waitFor(() => expect(setupTrigger).toHaveFocus())
   })
 
+  it("offers the canonical briefing setup when feeds exist but no monitor is scheduled", async () => {
+    mocks.fetchOverview.mockResolvedValue(overview(3, 0))
+    render(<OverviewTab />)
+
+    const setupTrigger = await screen.findByRole("button", { name: "Set up briefing" })
+    expect(screen.queryByText("Add initial collection")).not.toBeInTheDocument()
+    setupTrigger.focus()
+    fireEvent.click(setupTrigger)
+
+    expect(await screen.findByRole("dialog", { name: "Set up briefing" })).toBeInTheDocument()
+    expect(pipeline().getByLabelText("Use existing sources")).toBeChecked()
+    fireEvent.click(pipeline().getByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(setupTrigger).toHaveFocus())
+  })
+
   it("adapts advanced schedule previews through the authenticated service", async () => {
     render(<OverviewTab />)
     fireEvent.click(await screen.findByRole("button", { name: "Test now" }))

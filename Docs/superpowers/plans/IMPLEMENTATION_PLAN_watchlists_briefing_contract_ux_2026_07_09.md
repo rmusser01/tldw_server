@@ -1136,8 +1136,11 @@ git commit -m "fix: harden watchlists accessibility and layout"
 
 **Files:**
 - Modify: `apps/tldw-frontend/e2e/workflows/watchlists-demo-readiness.spec.ts`
-- Modify: `apps/extension/tests/e2e/watchlists.spec.ts`
-- Modify: `Docs/Runbooks/watchlists_demo_readiness_2026_05_20.md`
+- Modify: `apps/packages/ui/src/components/Option/Watchlists/OverviewTab/OverviewTab.tsx`
+- Modify: `apps/packages/ui/src/components/Option/Watchlists/OverviewTab/PipelineWizard.tsx`
+- Modify: `apps/packages/ui/src/components/Option/Watchlists/OverviewTab/__tests__/OverviewTab.quick-setup.test.tsx`
+- Modify: `apps/packages/ui/src/components/Option/Watchlists/OverviewTab/__tests__/PipelineWizard.test.tsx`
+- Modify: `apps/packages/ui/src/assets/locale/en/watchlists.json`
 - Modify: `Docs/superpowers/plans/IMPLEMENTATION_PLAN_watchlists_briefing_contract_ux_2026_07_09.md`
 - Modify: `backlog/tasks/task-12105 - Unify-Watchlists-briefing-pipeline-contract-and-harden-latest-briefing-UX.md`
 
@@ -1145,7 +1148,7 @@ git commit -m "fix: harden watchlists accessibility and layout"
 - Produces repeatable UAT evidence for daily news briefing and two-host sportscast/culture roundtable.
 - Consumes the same worktree revision for backend, frontend, and extension build.
 
-- [ ] **Step 1: Write failing WebUI acceptance assertions**
+- [x] **Step 1: Write failing WebUI acceptance assertions**
 
 The Playwright flow must:
 
@@ -1163,6 +1166,8 @@ The Playwright flow must:
 
 Use the same semantic locators and fixture API. At side-panel width, assert step navigation, receipt wrapping, playback/recovery controls, unique names, and no horizontal overflow. Do not mark a skipped unpacked-extension launch as passing.
 
+Current status: extension E2E launch is blocked before browser startup in this worktree because the extension build cannot resolve `wxt` from `apps/extension/wxt.config.ts` (`Cannot find module 'wxt'`). `bun install` reports no changes; adding existing workspace `.bin` paths gets past `cross-env` but not module resolution. Do not claim extension acceptance until the extension dependency layout is fixed or the build is run in an environment with resolvable extension dependencies.
+
 - [ ] **Step 3: Run focused backend verification**
 
 ```bash
@@ -1171,13 +1176,31 @@ Use the same semantic locators and fixture API. At side-panel width, assert step
 
 Expected: all selected tests pass.
 
-- [ ] **Step 4: Run focused frontend verification**
+- [x] **Step 4: Run focused frontend verification**
 
 ```bash
 ./node_modules/.bin/vitest run ../packages/ui/src/components/Option/Watchlists
 ```
 
 Expected: Watchlists shared UI suite passes.
+
+Verified:
+
+```bash
+cd apps/packages/ui
+bun run test src/components/Option/Watchlists/OverviewTab/__tests__/LatestBriefing.test.tsx src/components/Option/Watchlists/OverviewTab/__tests__/PipelineWizard.test.tsx src/components/Option/Watchlists/OverviewTab/__tests__/OverviewTab.quick-setup.test.tsx --reporter=dot --maxWorkers=1 --no-file-parallelism
+```
+
+Result: 3 files passed, 61 tests passed.
+
+Focused WebUI acceptance:
+
+```bash
+cd apps/tldw-frontend
+TLDW_WEB_URL=http://localhost:18097 TLDW_WEB_CMD='bun run dev:webpack -- -p 18097' ./node_modules/.bin/playwright test e2e/workflows/watchlists-demo-readiness.spec.ts --reporter=line --grep "canonical briefing flow"
+```
+
+Result: 1 passed. Note: `dev:webpack` and a fresh port were required in this worktree because Turbopack rejects the symlinked `apps/tldw-frontend/node_modules` path and Playwright `reuseExistingServer` can attach to a stale server on port 8080.
 
 - [ ] **Step 5: Run static and build checks**
 
@@ -1223,6 +1246,8 @@ Start both processes from this worktree and record `git rev-parse HEAD` in each 
 
 Use the `browser:control-in-app-browser` skill for the real WebUI flow. Capture screenshots for setup receipt, running state, ready Latest episode, audio failure recovery, delivery failure recovery, narrow layout, and 200% zoom. Run axe on the page and manually verify focus order, record-specific names, live announcements, contrast, RTL, long copy, and reduced motion.
 
+Current status: CDP/browser setup succeeded against the Codex in-app browser and its documentation was read. A matched WebUI instance was started from this worktree with `NEXT_PUBLIC_API_URL=http://127.0.0.1:18099 bun run dev:webpack -- -p 18101`, and a deterministic local mock API was started on `127.0.0.1:18099`. The in-app browser could not reach `localhost`, `127.0.0.1`, or the machine LAN address for the WebUI and returned `ERR_CONNECTION_REFUSED`; `agent.browsers.list()` exposed only the in-app browser target, so there was no alternate CDP target to try. Do not claim completed live CDP UAT in this environment. The equivalent WebUI acceptance path is covered by the focused Playwright regression under Step 4.
+
 - [ ] **Step 9: Run extension UAT**
 
 Build from the same commit. If the environment supports unpacked extension launch, execute the full flow. If it does not, run the extension component/E2E harness, capture the exact launch blocker, and do not claim full extension acceptance.
@@ -1230,6 +1255,8 @@ Build from the same commit. If the environment supports unpacked extension launc
 - [ ] **Step 10: Perform Impeccable polish**
 
 Use real generated data and review every default, empty, loading, partial, failed, ready, long-copy, RTL, narrow, and dark-theme state. Check 4-point spacing rhythm, hierarchy, 44-pixel targets, focus, motion under 500 ms, reduced motion, exact copy, and no nested-card or repeated-guidance regressions. Rerun the detector and affected tests after any polish change.
+
+Review notes: the Task 10 patch now covers the most important UX gaps found in the final pass: feeds-without-monitor has a direct canonical setup CTA; schedule activation returns to the Overview/Latest surface; receipt copy explicitly names text show notes plus audio; duplicate/default speaker labels are position-stable; and the focused E2E exercises a non-news sportscast/podcast-style flow with two speakers, 15-minute target audio, email/chatbook delivery, sample-generation isolation, Latest episode recovery, script review, and repeat Test Now without source duplication. Remaining UAT gaps are environmental: extension build cannot resolve `wxt`, and live in-app-browser CDP cannot reach the local WebUI server.
 
 - [ ] **Step 11: Update runbook, plan stages, and Backlog evidence**
 
