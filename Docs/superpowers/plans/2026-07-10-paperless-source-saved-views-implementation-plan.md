@@ -17,7 +17,7 @@
 **Goal:** Represent every required preset and create a strict V1 client serialization boundary.
 **Success Criteria:** Presets, lifecycle filtering, validated full-state serialization/apply, invalid response handling, Modified detection, and visible lifecycle predicates are deterministic and accessible.
 **Tests:** `source-list-view.test.ts`, new `source-saved-views.test.ts`, existing SourcesPane filter tests.
-**Status:** Not Started
+**Status:** Complete
 
 ## Stage 2: Persistence And Tenant Isolation
 **Goal:** Add portable saved-view storage, CRUD, optimistic locking, limits, and PostgreSQL RLS.
@@ -57,7 +57,7 @@
 - Create: `apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/source-saved-views.test.ts`
 - Modify: `apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/SourcesPane.stage4.filters-and-sort.test.tsx`
 
-- [ ] **Step 0: Capture the pre-implementation static-analysis baselines**
+- [x] **Step 0: Capture the pre-implementation static-analysis baselines**
 
 Run `bun run typecheck` from `apps/tldw-frontend` and record the exit code plus diagnostics in `TASK-12093.2` implementation notes. Later typecheck verification must introduce no new diagnostics.
 
@@ -71,11 +71,11 @@ jq 'length' /tmp/task_12093_2_ruff_before.json
 
 The Ruff command is expected to exit 1 because this is known whole-file debt; continue only when `jq 'length'` prints `27`, then record that count in the task notes. Do not baseline any new test module: those files must pass Ruff outright.
 
-- [ ] **Step 1: Write failing lifecycle-filter tests**
+- [x] **Step 1: Write failing lifecycle-filter tests**
 
 Add tests proving `lifecycleStateFilters: ["partially_queryable"]` matches only sources whose `statusDetails.lifecycleState` is `partially_queryable`, participates in `hasActiveSourceFilters`, appears in `buildSourceFilterSummary`, remains visibly represented with an accessible keyboard-removable chip/summary whether Advanced is collapsed or expanded, and is cleared by a full reset.
 
-- [ ] **Step 2: Run the lifecycle tests and verify RED**
+- [x] **Step 2: Run the lifecycle tests and verify RED**
 
 Run from `apps/tldw-frontend`:
 
@@ -85,11 +85,11 @@ bun run test:run -- ../packages/ui/src/components/Option/ResearchWorkspace/__tes
 
 Expected: FAIL because `SourceListViewState` and filtering do not yet support lifecycle states.
 
-- [ ] **Step 3: Implement the minimal lifecycle filter**
+- [x] **Step 3: Implement the minimal lifecycle filter**
 
 Add `lifecycleStateFilters: WorkspaceSourceLifecycleState[]` to the state/default, filter against `source.statusDetails?.lifecycleState`, include it in active-filter detection, and add stable labels. In `SourceAdvancedControls`, keep an active lifecycle predicate visibly represented in both disclosure states with a focusable clear action. Add `min={0}` to every numeric range input. Keep processing `statusFilters` and review filters separate.
 
-- [ ] **Step 4: Write failing V1 contract and preset tests**
+- [x] **Step 4: Write failing V1 contract and preset tests**
 
 Test:
 
@@ -123,7 +123,7 @@ The V1 wire fields are all optional on input with these server/client defaults, 
 
 Reject unknown enum values/fields. Reject booleans as numeric values. Deduplicate arrays and emit them in the declaration order shown above so equality signatures do not depend on click order.
 
-- [ ] **Step 5: Run the V1 contract tests and verify RED**
+- [x] **Step 5: Run the V1 contract tests and verify RED**
 
 ```bash
 bun run test:run -- ../packages/ui/src/components/Option/ResearchWorkspace/__tests__/source-saved-views.test.ts --maxWorkers=1 --no-file-parallelism
@@ -131,7 +131,7 @@ bun run test:run -- ../packages/ui/src/components/Option/ResearchWorkspace/__tes
 
 Expected: FAIL because the module does not exist.
 
-- [ ] **Step 6: Implement the pure saved-view module**
+- [x] **Step 6: Implement the pure saved-view module**
 
 Define the V1 wire type, saved-view sort union, and invalid-reason union once in neutral `@/types/workspace-source-saved-view`; both the pure component helper and `workspace-api.ts` import them. `source-list-view.ts` aliases or imports the neutral sort union so the neutral module never depends on a component module. Create explicit constants and helpers, including:
 
@@ -179,11 +179,11 @@ export const applySavedSourceViewState = (
 
 Keep presets immutable and fixed-order. Retain Unreviewed as the preset shipped by Child Task 1. Signature generation consumes only an `ok` canonical state; invalid local state yields no signature, is considered Modified, and produces inline save validation instead of throwing during render.
 
-- [ ] **Step 7: Add full-state apply to the page hook**
+- [x] **Step 7: Add full-state apply to the page hook**
 
 Add `applySourceListViewState(next)` alongside patch/reset. It must replace every persisted field and preserve only `expanded` when asked by the saved-view helper.
 
-- [ ] **Step 8: Run Stage 1 tests and verify GREEN**
+- [x] **Step 8: Run Stage 1 tests and verify GREEN**
 
 ```bash
 bun run test:run -- ../packages/ui/src/components/Option/ResearchWorkspace/__tests__/source-list-view.test.ts ../packages/ui/src/components/Option/ResearchWorkspace/__tests__/source-saved-views.test.ts ../packages/ui/src/components/Option/ResearchWorkspace/__tests__/SourcesPane.stage4.filters-and-sort.test.tsx --maxWorkers=1 --no-file-parallelism
@@ -191,7 +191,7 @@ bun run test:run -- ../packages/ui/src/components/Option/ResearchWorkspace/__tes
 
 Expected: PASS.
 
-- [ ] **Step 9: Commit Stage 1**
+- [x] **Step 9: Commit Stage 1**
 
 ```bash
 git add apps/packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/source-list-view.ts apps/packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/source-saved-views.ts apps/packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/SourceAdvancedControls.tsx apps/packages/ui/src/components/Option/ResearchWorkspace/use-source-list-view-state.ts apps/packages/ui/src/types/workspace-source-saved-view.ts apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/source-list-view.test.ts apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/source-saved-views.test.ts apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/SourcesPane.stage4.filters-and-sort.test.tsx
