@@ -457,6 +457,7 @@ async def _resolve_sandbox_ws_user_id(
     *,
     token: str | None,
     api_key: str | None,
+    signed_url_token: bool = False,
 ) -> int:
     if not token:
         auth_hdr = websocket.headers.get("authorization") or websocket.headers.get("Authorization")
@@ -520,7 +521,10 @@ async def _resolve_sandbox_ws_user_id(
             raise HTTPException(status_code=401, detail="invalid_api_key")
         return int(user_id)
 
-    cookie_identity = await resolve_single_user_cookie_websocket(websocket)
+    cookie_identity = await resolve_single_user_cookie_websocket(
+        websocket,
+        ignore_signed_url_token=signed_url_token,
+    )
     if cookie_identity is not None:
         return cookie_identity.user_id
     raise HTTPException(status_code=401, detail="auth_required")
@@ -1951,7 +1955,12 @@ async def stream_run_logs(websocket: WebSocket, run_id: str) -> None:
     except _SANDBOX_NONCRITICAL_EXCEPTIONS:
         api_key = None
     try:
-        user_id = await _resolve_sandbox_ws_user_id(websocket, token=auth_token, api_key=api_key)
+        user_id = await _resolve_sandbox_ws_user_id(
+            websocket,
+            token=auth_token,
+            api_key=api_key,
+            signed_url_token=signed_flag,
+        )
     except HTTPException:
         try:
             await websocket.close(code=cookie_websocket_rejection_code(websocket) or 4401)

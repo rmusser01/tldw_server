@@ -48,6 +48,26 @@ _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS = (
 
 AUTH_TOKEN_TYPE_ACCESS = "access"  # nosec B105 - auth token type enum, not a credential
 AUTH_TOKEN_TYPE_API_KEY = "api_key"  # nosec B105 - auth token type enum, not a credential
+_AUDIO_WS_PENDING_TEXT_FRAME = "audio_ws_pending_text_frame"
+
+
+def _ensure_audio_ws_state(websocket: WebSocket) -> Any:
+    state = getattr(websocket, "state", None)
+    if state is None:
+        state = SimpleNamespace()
+        with contextlib.suppress(Exception):
+            websocket.state = state
+    return state
+
+
+async def receive_audio_websocket_text(websocket: WebSocket) -> str:
+    """Receive text while replaying a first application frame inspected during auth."""
+    state = _ensure_audio_ws_state(websocket)
+    pending = getattr(state, _AUDIO_WS_PENDING_TEXT_FRAME, None)
+    if pending is not None:
+        setattr(state, _AUDIO_WS_PENDING_TEXT_FRAME, None)
+        return str(pending)
+    return await websocket.receive_text()
 
 
 def _get_chat_history_max_messages() -> int:
@@ -349,24 +369,21 @@ async def _audio_ws_authenticate(
     """
     jwt_user_id: Optional[int] = None
 
+    cookie_user_id: Optional[int] = None
     existing_session_id = getattr(websocket.state, "single_user_session_id", None)
     existing_user_id = getattr(websocket.state, "user_id", None)
     if existing_session_id is not None and existing_user_id is not None:
-        return True, int(existing_user_id)
-    cookie_identity = await resolve_single_user_cookie_websocket(websocket)
-    if cookie_identity is not None:
-        return True, cookie_identity.user_id
-    if cookie_websocket_rejection_code(websocket) is not None:
-        await websocket.close(code=cookie_websocket_rejection_code(websocket) or 4401)
-        return False, None
+        cookie_user_id = int(existing_user_id)
+    else:
+        cookie_identity = await resolve_single_user_cookie_websocket(websocket)
+        if cookie_identity is not None:
+            cookie_user_id = cookie_identity.user_id
+        elif cookie_websocket_rejection_code(websocket) is not None:
+            await websocket.close(code=cookie_websocket_rejection_code(websocket) or 4401)
+            return False, None
 
     def _ensure_ws_state() -> Any:
-        state = getattr(websocket, "state", None)
-        if state is None:
-            state = SimpleNamespace()
-            with contextlib.suppress(Exception):
-                setattr(websocket, "state", state)
-        return state
+        return _ensure_audio_ws_state(websocket)
 
     async def _attach_ws_principal(
         *,
@@ -702,6 +719,35 @@ async def _audio_ws_authenticate(
         except Exception as exc:  # noqa: BLE001
             logger.debug(f"Failed to evaluate single-user IP allowlist: {exc}")
             return False
+
+    if cookie_user_id is not None:
+        try:
+            first_message = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
+        except asyncio.TimeoutError:
+            return True, cookie_user_id
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"Failed to inspect initial audio websocket frame: {exc}")
+            return False, None
+        try:
+            auth_data = json.loads(first_message)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            auth_data = None
+        if not isinstance(auth_data, dict) or auth_data.get("type") != "auth":
+            setattr(_ensure_ws_state(), _AUDIO_WS_PENDING_TEXT_FRAME, first_message)
+            return True, cookie_user_id
+        if auth_data.get("token") != expected_key:
+            await _stream_error("Invalid authentication message")
+            return False, None
+        if not _ip_allowed_single_user(client_ip):
+            await _stream_error("IP not allowed", code=1008)
+            return False, None
+        await _attach_ws_principal(
+            kind="user",
+            user_id=settings.SINGLE_USER_FIXED_ID if hasattr(settings, "SINGLE_USER_FIXED_ID") else None,
+            subject="single_user",
+            token_type=AUTH_TOKEN_TYPE_ACCESS,
+        )
+        return True, settings.SINGLE_USER_FIXED_ID if hasattr(settings, "SINGLE_USER_FIXED_ID") else None
 
     header_api_key = websocket.headers.get("x-api-key") or websocket.headers.get("X-API-KEY")
     auth_header = websocket.headers.get("authorization") or websocket.headers.get("Authorization")

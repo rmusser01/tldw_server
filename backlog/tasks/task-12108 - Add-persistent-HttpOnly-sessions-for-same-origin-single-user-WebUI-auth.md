@@ -38,6 +38,8 @@ modified_files:
 - tldw_Server_API/app/core/Audio/streaming_service.py
 - tldw_Server_API/tests/AuthNZ/unit/test_websocket_session_auth.py
 - tldw_Server_API/tests/AuthNZ/test_websocket_cookie_route_contract.py
+- tldw_Server_API/tests/Audio/test_audio_streaming_service_core.py
+- tldw_Server_API/tests/sandbox/test_ws_signed_validation.py
 ---
 
 ## Description

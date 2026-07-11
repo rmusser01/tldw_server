@@ -55,16 +55,17 @@ def trusted_webui_origins() -> set[str]:
     return {origin for origin in normalized if origin is not None} | ({"*"} if "*" in origins else set())
 
 
-def _has_explicit_websocket_credential(websocket: WebSocket) -> bool:
+def _has_explicit_websocket_credential(
+    websocket: WebSocket,
+    *,
+    ignore_signed_url_token: bool = False,
+) -> bool:
     headers = getattr(websocket, "headers", {}) or {}
     if headers.get("authorization") is not None or headers.get("x-api-key") is not None:
         return True
 
     protocols = [part.strip().lower() for part in (headers.get("sec-websocket-protocol") or "").split(",")]
-    if any(
-        protocol in _EXPLICIT_SUBPROTOCOL_SCHEMES and index + 1 < len(protocols)
-        for index, protocol in enumerate(protocols)
-    ):
+    if any(protocol in _EXPLICIT_SUBPROTOCOL_SCHEMES for protocol in protocols):
         return True
 
     scope = getattr(websocket, "scope", {}) or {}
@@ -75,7 +76,10 @@ def _has_explicit_websocket_credential(websocket: WebSocket) -> bool:
         query_names = {name for name, _value in parse_qsl(str(raw_query), keep_blank_values=True)}
     except ValueError:
         query_names = set()
-    return bool(query_names & _EXPLICIT_QUERY_CREDENTIALS)
+    explicit_query_credentials = _EXPLICIT_QUERY_CREDENTIALS
+    if ignore_signed_url_token:
+        explicit_query_credentials = explicit_query_credentials - {"token"}
+    return bool(query_names & explicit_query_credentials)
 
 
 def cookie_websocket_rejection_code(websocket: WebSocket) -> int | None:
@@ -94,6 +98,8 @@ def _ensure_websocket_state(websocket: WebSocket) -> Any:
 
 async def resolve_single_user_cookie_websocket(
     websocket: WebSocket,
+    *,
+    ignore_signed_url_token: bool = False,
 ) -> SingleUserSessionIdentity | None:
     """Resolve an opaque single-user cookie after explicit WS credentials."""
     state = _ensure_websocket_state(websocket)
@@ -106,7 +112,10 @@ async def resolve_single_user_cookie_websocket(
     cookies = getattr(websocket, "cookies", {}) or {}
     if not cookies.get(settings.SINGLE_USER_SESSION_COOKIE_NAME):
         return None
-    if _has_explicit_websocket_credential(websocket):
+    if _has_explicit_websocket_credential(
+        websocket,
+        ignore_signed_url_token=ignore_signed_url_token,
+    ):
         return None
 
     state.single_user_session_id = None

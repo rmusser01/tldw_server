@@ -167,6 +167,74 @@ async def test_explicit_credentials_suppress_cookie_fallback(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "subprotocol",
+    [
+        "bearer",
+        "bearer, ",
+        "api-key",
+        "api-key, ",
+        "x-api-key",
+        "x-api-key, ",
+    ],
+)
+async def test_malformed_auth_subprotocol_suppresses_cookie_fallback(
+    subprotocol,
+    monkeypatch,
+    single_user_settings,
+):
+    validate = AsyncMock(return_value=_identity())
+    monkeypatch.setattr(session_auth, "validate_single_user_session", validate)
+    websocket = _websocket(headers={"Sec-WebSocket-Protocol": subprotocol})
+
+    assert await session_auth.resolve_single_user_cookie_websocket(websocket) is None
+    assert websocket.state.single_user_cookie_websocket_attempted is False
+    validate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_sandbox_signed_url_token_can_be_excluded_from_identity_precedence(
+    monkeypatch,
+    single_user_settings,
+):
+    identity = _identity()
+    validate = AsyncMock(return_value=identity)
+    monkeypatch.setattr(session_auth, "validate_single_user_session", validate)
+    websocket = _websocket(query_string=b"token=hmac-signature&exp=9999999999")
+
+    assert await session_auth.resolve_single_user_cookie_websocket(
+        websocket,
+        ignore_signed_url_token=True,
+    ) == identity
+    validate.assert_awaited_once_with(websocket)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "explicit_query",
+    [
+        b"token=hmac-signature&exp=9999999999&auth_token=identity",
+        b"token=hmac-signature&exp=9999999999&api_key=identity",
+    ],
+)
+async def test_sandbox_signed_url_exclusion_preserves_real_query_precedence(
+    explicit_query,
+    monkeypatch,
+    single_user_settings,
+):
+    validate = AsyncMock(return_value=_identity())
+    monkeypatch.setattr(session_auth, "validate_single_user_session", validate)
+    websocket = _websocket(query_string=explicit_query)
+
+    assert await session_auth.resolve_single_user_cookie_websocket(
+        websocket,
+        ignore_signed_url_token=True,
+    ) is None
+    assert websocket.state.single_user_cookie_websocket_attempted is False
+    validate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_absent_cookie_is_not_a_failed_cookie_auth_attempt(
     monkeypatch,
     single_user_settings,
