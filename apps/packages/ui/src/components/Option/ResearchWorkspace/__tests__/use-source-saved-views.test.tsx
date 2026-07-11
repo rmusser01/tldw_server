@@ -126,6 +126,19 @@ describe("useSourceSavedViews", () => {
     expect(api.listWorkspaceSourceViews).toHaveBeenNthCalledWith(2, "ws-a");
   });
 
+  it("keeps local preset controls available when saved-view listing fails", async () => {
+    api.listWorkspaceSourceViews.mockRejectedValue(new Error("offline"));
+    const { result } = setup("ws-a", localState({ typeFilters: ["pdf"] }));
+
+    await waitFor(() => expect(result.current.listError).not.toBeNull());
+
+    expect(result.current.available).toBe(true);
+    expect(result.current.views).toEqual([]);
+    expect(result.current.busy).toBe(false);
+    expect(result.current.mutation).toBeNull();
+    expect(result.current.currentSignature).not.toBeNull();
+  });
+
   it("applies a valid view and ignores an invalid view", async () => {
     const onApply = vi.fn();
     api.listWorkspaceSourceViews.mockResolvedValue({
@@ -271,6 +284,29 @@ describe("useSourceSavedViews", () => {
     expect(result.current.mutationError?.retryable).toBe(true);
   });
 
+  it("treats malformed version-conflict detail as an ordinary retryable error", async () => {
+    api.listWorkspaceSourceViews.mockResolvedValue({ items: [validView()] });
+    api.updateWorkspaceSourceView.mockRejectedValue({
+      status: 409,
+      details: {
+        detail: {
+          code: "source_view_version_conflict",
+          view_id: "view-1",
+          current_version: "5",
+        },
+      },
+    });
+    const { result } = setup();
+    await waitFor(() => expect(result.current.views).toHaveLength(1));
+
+    await act(async () => result.current.replaceView(result.current.views[0]!));
+
+    expect(result.current.versionConflict).toBeNull();
+    expect(result.current.mutationError?.retryable).toBe(true);
+    expect(result.current.canRetryMutation).toBe(true);
+    expect(api.listWorkspaceSourceViews).toHaveBeenCalledTimes(1);
+  });
+
   it.each([
     {
       code: "source_view_name_exists",
@@ -308,7 +344,7 @@ describe("useSourceSavedViews", () => {
     });
     expect(result.current.mutationError).toBeNull();
 
-    rerender({ workspaceId: "ws-b", state: localState() });
+    rerender({ workspaceId: null, state: localState() });
     expect(result.current.limitState).toBeNull();
   });
 
@@ -336,7 +372,7 @@ describe("useSourceSavedViews", () => {
     api.listWorkspaceSourceViews
       .mockResolvedValueOnce({ items: [] })
       .mockResolvedValueOnce({ items: [validView({ version: 5 })] });
-    const { result } = setup();
+    const { result, rerender } = setup();
 
     await act(async () => result.current.createView("Name"));
     await act(async () => result.current.confirmReplace());
@@ -349,6 +385,10 @@ describe("useSourceSavedViews", () => {
     expect(result.current.views[0]?.version).toBe(5);
     expect(result.current.duplicateConflict?.version).toBe(5);
     expect(api.updateWorkspaceSourceView).toHaveBeenCalledTimes(1);
+
+    rerender({ workspaceId: null, state: localState() });
+    expect(result.current.duplicateConflict).toBeNull();
+    expect(result.current.versionConflict).toBeNull();
   });
 
   it("retries a version conflict with the refreshed server version", async () => {
@@ -415,6 +455,32 @@ describe("useSourceSavedViews", () => {
     expect(result.current.canRetryMutation).toBe(false);
   });
 
+  it("directly replaces a valid saved view with the current canonical state", async () => {
+    const current = localState({ typeFilters: ["pdf"], sort: "name_desc" });
+    const row = validView();
+    const updated = validView({
+      version: 3,
+      state: wireState({ type_filters: ["pdf"], sort: "name_desc" }),
+    });
+    api.listWorkspaceSourceViews.mockResolvedValue({ items: [row] });
+    api.updateWorkspaceSourceView.mockResolvedValue(updated);
+    const { result } = setup("ws-a", current);
+    await waitFor(() => expect(result.current.views).toHaveLength(1));
+
+    await act(async () => result.current.replaceView(result.current.views[0]!));
+
+    expect(api.updateWorkspaceSourceView).toHaveBeenCalledWith("ws-a", "view-1", {
+      version: 2,
+      name: "Needs review",
+      schema_version: 1,
+      state: wireState({ type_filters: ["pdf"], sort: "name_desc" }),
+    });
+    expect(result.current.activeViewId).toBe("view-1");
+    expect(result.current.activeSnapshot).toEqual(updated.state);
+    expect(result.current.modified).toBe(false);
+    expect(result.current.announcement).toBe("Saved view replaced.");
+  });
+
   it("resets an invalid row to canonical V1 defaults and preserves expanded", async () => {
     const row = invalidView();
     const resetResponse = validView({
@@ -465,16 +531,37 @@ describe("useSourceSavedViews", () => {
 
   it("synchronously clears all exposed state when a workspace becomes null", async () => {
     api.listWorkspaceSourceViews.mockResolvedValue({ items: [validView()] });
+    api.createWorkspaceSourceView.mockResolvedValue(
+      validView({ name: "Snapshot", state: wireState() }),
+    );
     const { result, rerender } = setup();
     await waitFor(() => expect(result.current.views).toHaveLength(1));
     act(() => result.current.applyView(result.current.views[0]!));
+    await act(async () => result.current.createView("Snapshot"));
+    rerender({
+      workspaceId: "ws-a",
+      state: localState({ fileSizeMin: Number.NaN }),
+    });
+    await act(async () => result.current.createView("Invalid snapshot"));
+
+    expect(result.current.activeSnapshot).not.toBeNull();
+    expect(result.current.modified).toBe(true);
+    expect(result.current.serializationIssues).not.toEqual([]);
+    expect(result.current.announcement).toBe("Saved view created.");
 
     rerender({ workspaceId: null, state: localState() });
 
     expect(result.current.available).toBe(false);
     expect(result.current.views).toEqual([]);
     expect(result.current.activeViewId).toBeNull();
+    expect(result.current.activeSnapshot).toBeNull();
+    expect(result.current.modified).toBe(false);
+    expect(result.current.serializationIssues).toEqual([]);
+    expect(result.current.duplicateConflict).toBeNull();
+    expect(result.current.limitState).toBeNull();
+    expect(result.current.versionConflict).toBeNull();
     expect(result.current.listError).toBeNull();
+    expect(result.current.mutationError).toBeNull();
     expect(result.current.mutation).toBeNull();
     expect(result.current.announcement).toBeNull();
   });
@@ -493,7 +580,7 @@ describe("useSourceSavedViews", () => {
     });
     expect(result.current.mutation).toBe("create");
 
-    rerender({ workspaceId: "ws-b", state: localState() });
+    rerender({ workspaceId: null, state: localState() });
     expect(result.current.views).toEqual([]);
     expect(result.current.activeViewId).toBeNull();
     expect(result.current.duplicateConflict).toBeNull();
@@ -618,6 +705,71 @@ describe("useSourceSavedViews", () => {
     expect(result.current.activeViewId).toBeNull();
     expect(result.current.announcement).toBeNull();
     expect(result.current.generation).toBe(2);
+  });
+
+  it("ignores a stale PATCH completion after a workspace switch", async () => {
+    const oldPatch = deferred<ReturnType<typeof validView>>();
+    api.updateWorkspaceSourceView.mockReturnValue(oldPatch.promise);
+    api.listWorkspaceSourceViews
+      .mockResolvedValueOnce({ items: [validView()] })
+      .mockResolvedValueOnce({
+        items: [validView({ id: "fresh-b", workspace_id: "ws-b" })],
+      });
+    const { result, rerender } = setup(
+      "ws-a",
+      localState({ typeFilters: ["pdf"] }),
+    );
+    await waitFor(() => expect(result.current.views).toHaveLength(1));
+
+    let pending!: Promise<void>;
+    act(() => {
+      pending = result.current.replaceView(result.current.views[0]!);
+    });
+    expect(result.current.mutation).toBe("replace");
+    rerender({ workspaceId: "ws-b", state: localState() });
+    await waitFor(() => expect(result.current.views[0]?.id).toBe("fresh-b"));
+
+    await act(async () => {
+      oldPatch.resolve(validView({ id: "stale-patch" }));
+      await pending;
+    });
+
+    expect(result.current.views.map((view) => view.id)).toEqual(["fresh-b"]);
+    expect(result.current.activeViewId).toBeNull();
+    expect(result.current.mutation).toBeNull();
+    expect(result.current.announcement).toBeNull();
+  });
+
+  it("ignores a stale DELETE completion after a workspace switch", async () => {
+    const oldDelete = deferred<void>();
+    api.deleteWorkspaceSourceView.mockReturnValue(oldDelete.promise);
+    api.listWorkspaceSourceViews
+      .mockResolvedValueOnce({ items: [validView()] })
+      .mockResolvedValueOnce({
+        items: [validView({ id: "fresh-b", workspace_id: "ws-b" })],
+      });
+    const { result, rerender } = setup();
+    await waitFor(() => expect(result.current.views).toHaveLength(1));
+    act(() => result.current.applyView(result.current.views[0]!));
+
+    let pending!: Promise<void>;
+    act(() => {
+      pending = result.current.deleteView(result.current.views[0]!);
+    });
+    expect(result.current.mutation).toBe("delete");
+    rerender({ workspaceId: "ws-b", state: localState() });
+    await waitFor(() => expect(result.current.views[0]?.id).toBe("fresh-b"));
+
+    await act(async () => {
+      oldDelete.resolve(undefined);
+      await pending;
+    });
+
+    expect(result.current.views.map((view) => view.id)).toEqual(["fresh-b"]);
+    expect(result.current.activeViewId).toBeNull();
+    expect(result.current.activeSnapshot).toBeNull();
+    expect(result.current.mutation).toBeNull();
+    expect(result.current.announcement).toBeNull();
   });
 
   it("derives Modified from the active canonical signature and treats invalid local state as Modified", async () => {

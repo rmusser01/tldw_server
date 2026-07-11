@@ -1707,7 +1707,8 @@ export const workspaceApiMethods = {
       path: workspacePath(workspaceId, "/source-views"),
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: data
+      body: data,
+      expectedStatuses: [409]
     })
   },
 
@@ -1721,7 +1722,8 @@ export const workspaceApiMethods = {
       path: workspacePath(workspaceId, `/source-views/${encodedViewId}`),
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: data
+      body: data,
+      expectedStatuses: [409]
     })
   },
 

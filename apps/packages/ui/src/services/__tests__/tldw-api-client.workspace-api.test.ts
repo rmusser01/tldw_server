@@ -918,7 +918,8 @@ describe("workspace API domain contract", () => {
       path: "/api/v1/workspaces/workspace%20with%20spaces/source-views",
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: { name: "Review PDFs", schema_version: 1, state }
+      body: { name: "Review PDFs", schema_version: 1, state },
+      expectedStatuses: [409]
     })
 
     await workspaceApiMethods.updateWorkspaceSourceView(
@@ -940,7 +941,8 @@ describe("workspace API domain contract", () => {
         name: "Review PDFs",
         schema_version: 1,
         state
-      }
+      },
+      expectedStatuses: [409]
     })
   })
 
