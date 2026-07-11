@@ -7,6 +7,13 @@
 #     -f Dockerfiles/docker-compose.webui.yml up -d --build
 
 services:
+  # These overrides are intentionally scoped to the loopback HTTP WebUI
+  # quickstart overlay. TLS/non-loopback deployments must override Secure=1.
+  app:
+    environment:
+      - CSRF_ENABLED=${CSRF_ENABLED:-1}
+      - SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-0}
+
   webui:
     build:
       context: ..

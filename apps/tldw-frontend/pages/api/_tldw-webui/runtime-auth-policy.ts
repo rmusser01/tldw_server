@@ -89,10 +89,62 @@ const isTrustedLocalPeer = (remoteAddress?: string): boolean => {
   );
 };
 
-const hasForwardingHeaders = (req: NextApiRequest): boolean =>
-  Object.keys(req.headers).some(
+const singleHeaderValue = (value?: string | string[]): string | null => {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value) && value.length === 1) return value[0];
+  return null;
+};
+
+const normalizedPeerAddress = (value?: string): string => {
+  const normalized = normalizeEnvValue(value).toLowerCase();
+  return normalized.startsWith('::ffff:') ? normalized.slice('::ffff:'.length) : normalized;
+};
+
+const hasUntrustedForwardingHeaders = (req: NextApiRequest): boolean => {
+  const forwardingNames = Object.keys(req.headers).filter(
     (name) => name === 'forwarded' || name === 'x-real-ip' || name.startsWith('x-forwarded-')
   );
+  if (forwardingNames.length === 0) return false;
+
+  const expectedNames = new Set([
+    'x-forwarded-for',
+    'x-forwarded-host',
+    'x-forwarded-port',
+    'x-forwarded-proto',
+  ]);
+  if (
+    forwardingNames.length !== expectedNames.size ||
+    forwardingNames.some((name) => !expectedNames.has(name))
+  ) {
+    return true;
+  }
+
+  const host = singleHeaderValue(req.headers.host);
+  const forwardedFor = singleHeaderValue(req.headers['x-forwarded-for']);
+  const forwardedHost = singleHeaderValue(req.headers['x-forwarded-host']);
+  const forwardedPort = singleHeaderValue(req.headers['x-forwarded-port']);
+  const forwardedProto = singleHeaderValue(req.headers['x-forwarded-proto']);
+  if (!host || !forwardedFor || !forwardedHost || !forwardedPort || !forwardedProto) {
+    return true;
+  }
+
+  const protocol = (req.socket as typeof req.socket & { encrypted?: boolean })?.encrypted
+    ? 'https'
+    : 'http';
+  try {
+    const expectedUrl = new URL(`${protocol}://${host}`);
+    const expectedPort = expectedUrl.port || (protocol === 'https' ? '443' : '80');
+    return (
+      forwardedHost.toLowerCase() !== host.toLowerCase() ||
+      forwardedPort !== expectedPort ||
+      forwardedProto !== protocol ||
+      normalizedPeerAddress(forwardedFor) !==
+        normalizedPeerAddress(req.socket?.remoteAddress)
+    );
+  } catch {
+    return true;
+  }
+};
 
 const resolvedSessionCookieName = (): string | null => {
   const configured = process.env.SINGLE_USER_SESSION_COOKIE_NAME;
@@ -137,7 +189,7 @@ export const resolveRuntimeAuthPolicy = (req: NextApiRequest): RuntimeAuthPolicy
   if (!isTrustedLocalPeer(req.socket?.remoteAddress)) {
     return { available: false, reason: 'peer' };
   }
-  if (hasForwardingHeaders(req)) return { available: false, reason: 'forwarded' };
+  if (hasUntrustedForwardingHeaders(req)) return { available: false, reason: 'forwarded' };
 
   const apiKey = process.env.SINGLE_USER_API_KEY;
   if (!isUsableApiKey(apiKey)) return { available: false, reason: 'api-key' };

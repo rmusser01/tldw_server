@@ -3,9 +3,11 @@ import { test, expect } from "@playwright/test"
 const serverUrl = process.env.TLDW_SERVER_URL || "http://127.0.0.1:8000"
 const apiKey =
   process.env.TLDW_API_KEY || "THIS-IS-A-SECURE-KEY-123-FAKE-KEY"
-const hostedMode =
-  String(process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE || "").trim().toLowerCase() ===
-  "hosted"
+const deploymentMode = String(
+  process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE || ""
+).trim().toLowerCase()
+const hostedMode = deploymentMode === "hosted"
+const quickstartMode = deploymentMode === "quickstart"
 
 const normalizeUrl = (value: string) => value.replace(/\/$/, "")
 
@@ -84,6 +86,39 @@ if (hostedMode) {
     })
     expect(stored?.accessToken ?? "").toBe("")
     expect(stored?.refreshToken ?? "").toBe("")
+  })
+} else if (quickstartMode) {
+  test("loopback quickstart authenticates without a browser-readable API key", async ({
+    page,
+  }) => {
+    await page.goto("/chat", { waitUntil: "domcontentloaded" })
+
+    await expect
+      .poll(
+        async () => {
+          try {
+            return await page.evaluate(async () =>
+              fetch("/api/v1/auth/sessions", {
+                credentials: "same-origin",
+                cache: "no-store",
+              }).then((response) => response.status)
+            )
+          } catch {
+            return 0
+          }
+        },
+        { timeout: 60_000 }
+      )
+      .toBe(200)
+
+    const browserState = await page.evaluate(() => ({
+      local: { ...localStorage },
+      session: { ...sessionStorage },
+      cookies: document.cookie,
+    }))
+
+    expect(JSON.stringify(browserState)).not.toContain(apiKey)
+    expect(browserState.cookies).not.toContain("tldw_single_user_session=")
   })
 } else {
   test("login via settings saves config", async ({ page }) => {

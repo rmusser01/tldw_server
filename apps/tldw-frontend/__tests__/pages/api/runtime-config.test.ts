@@ -199,6 +199,45 @@ describe("WebUI runtime config API", () => {
     }
   )
 
+  it.each(["127.0.0.1", "::1", "::ffff:127.0.0.1", "172.17.0.1"])(
+    "accepts the canonical forwarding quartet injected for trusted peer %s",
+    async (remoteAddress) => {
+      const res = await callRuntimeConfig(
+        {
+          host: "localhost:8080",
+          "x-forwarded-for": remoteAddress,
+          "x-forwarded-host": "localhost:8080",
+          "x-forwarded-port": "8080",
+          "x-forwarded-proto": "http"
+        },
+        remoteAddress
+      )
+
+      expect(res.body.runtimeAuth).toMatchObject({ available: true })
+    }
+  )
+
+  it.each([
+    ["peer", "x-forwarded-for", "203.0.113.10"],
+    ["host", "x-forwarded-host", "example.test:8080"],
+    ["port", "x-forwarded-port", "8443"],
+    ["protocol", "x-forwarded-proto", "https"]
+  ])(
+    "rejects a canonical forwarding quartet with mismatched %s",
+    async (_name, header, value) => {
+      const res = await callRuntimeConfig({
+        host: "localhost:8080",
+        "x-forwarded-for": "127.0.0.1",
+        "x-forwarded-host": "localhost:8080",
+        "x-forwarded-port": "8080",
+        "x-forwarded-proto": "http",
+        [header]: value
+      })
+
+      expect(res.body.runtimeAuth).toEqual({ available: false })
+    }
+  )
+
   it.each([["172.17.0.1"], ["172.18.0.1"], ["::ffff:172.18.0.1"], ["192.168.65.1"]])(
     "returns runtime single-user auth for quickstart Docker gateway peer %s",
     async (remoteAddress) => {

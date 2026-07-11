@@ -524,7 +524,7 @@ git commit -m "feat(web): use cookie auth for quickstart requests"
 - Consumes: completed backend and client cookie-session flow.
 - Produces: executable hard-reload/relaunch/WebSocket evidence and documented loopback cookie settings.
 
-- [ ] **Step 1: Add failing lifecycle assertions**
+- [x] **Step 1: Add failing lifecycle assertions**
 
 ```ts
 test("cookie session survives a process relaunch without browser-readable key", async () => {
@@ -543,13 +543,13 @@ test("cookie session survives a process relaunch without browser-readable key", 
 
 Add hard reload, exact logout revocation, API-key rotation after backend restart, representative persona/ACP/audio WebSockets, and cross-Origin WebSocket rejection.
 
-- [ ] **Step 2: Run lifecycle test and confirm the pre-configuration failure**
+- [x] **Step 2: Run lifecycle test and confirm the pre-configuration failure**
 
 Run: `cd apps/tldw-frontend && bunx playwright test e2e/single-user-cookie-lifecycle.spec.ts --reporter=line`
 
 Expected: the test fails until the E2E quickstart starts with cookie-session CSRF and loopback cookie settings.
 
-- [ ] **Step 3: Wire explicit loopback deployment settings and documentation**
+- [x] **Step 3: Wire explicit loopback deployment settings and documentation**
 
 ```yaml
 # docker-compose.webui.yml, API service environment for the local quickstart profile
@@ -559,7 +559,7 @@ CSRF_ENABLED: ${CSRF_ENABLED:-1}
 
 Document that these defaults apply only to loopback HTTP quickstart; TLS/non-loopback deployments keep Secure cookies and are not automatically provisioned by this release.
 
-- [ ] **Step 4: Run complete verification**
+- [x] **Step 4: Run complete verification**
 
 Run backend: `source .venv/bin/activate && CSRF_ENABLED=1 python -m pytest tldw_Server_API/tests/AuthNZ -q`
 
@@ -571,7 +571,7 @@ Run security scan: `source .venv/bin/activate && python -m bandit -r tldw_Server
 
 Expected: all tests pass; Bandit reports no new findings in changed code.
 
-- [ ] **Step 5: Finalize and commit TASK-12108**
+- [x] **Step 5: Finalize and commit TASK-12108**
 
 Record exact commands/results, checked acceptance criteria, security scan result, known skips, and summary in Backlog.md. Then run:
 

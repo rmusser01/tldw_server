@@ -1,7 +1,7 @@
 ---
 id: TASK-12108
 title: Add persistent HttpOnly sessions for same-origin single-user WebUI auth
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
 updated_date: 2026-07-10 22:44
@@ -19,6 +19,7 @@ documentation:
 - .superpowers/sdd/http-task-3-report.md
 - .superpowers/sdd/http-task-4-report.md
 - .superpowers/sdd/http-task-5-report.md
+- .superpowers/sdd/http-task-6-report.md
 priority: high
 modified_files:
 - tldw_Server_API/app/core/AuthNZ/auth_principal_resolver.py
@@ -80,6 +81,14 @@ modified_files:
 - apps/packages/ui/src/services/__tests__/voice-conversation.test.ts
 - apps/packages/ui/src/services/__tests__/tldw-api-client.quickstart-auth.test.ts
 - apps/packages/ui/src/services/__tests__/background-proxy.test.ts
+- Dockerfiles/README.md
+- apps/tldw-frontend/e2e/login.spec.ts
+- apps/tldw-frontend/e2e/single-user-cookie-lifecycle.spec.ts
+- apps/tldw-frontend/scripts/playwright-cookie-lifecycle.mjs
+- apps/tldw-frontend/package.json
+- apps/tldw-frontend/playwright.config.ts
+- Docs/superpowers/plans/2026-07-10-single-user-http-only-session-implementation-plan.md
+- .superpowers/sdd/http-task-6-report.md
 ---
 
 ## Description
@@ -90,19 +99,19 @@ Replace browser-visible runtime API-key provisioning in the runtime-enabled loop
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Runtime-enabled loopback quickstart WebUI bootstrap authenticates without returning the API key to browser JavaScript.
-- [ ] #2 The persistent session cookie is HttpOnly, host-only, SameSite=Lax, Secure outside explicit loopback HTTP, and has a bounded lifetime.
-- [ ] #3 Cookie-authenticated state-changing requests require the existing double-submit CSRF token while header-authenticated API clients remain unaffected.
-- [ ] #4 A single-user API-key rotation invalidates previously issued cookie sessions after settings reload/process restart.
-- [ ] #5 Logout revokes the current server-side session and clears the session cookie.
-- [ ] #6 Regression coverage includes hard reload, close/reopen of the same browser profile, and representative same-origin WebSockets without API-key re-entry.
-- [ ] #7 Runtime bootstrap fails closed and does not fall back to exposing or persisting the API key in browser JavaScript.
+- [x] #1 Runtime-enabled loopback quickstart WebUI bootstrap authenticates without returning the API key to browser JavaScript.
+- [x] #2 The persistent session cookie is HttpOnly, host-only, SameSite=Lax, Secure outside explicit loopback HTTP, and has a bounded lifetime.
+- [x] #3 Cookie-authenticated state-changing requests require the existing double-submit CSRF token while header-authenticated API clients remain unaffected.
+- [x] #4 A single-user API-key rotation invalidates previously issued cookie sessions after settings reload/process restart.
+- [x] #5 Logout revokes the current server-side session and clears the session cookie.
+- [x] #6 Regression coverage includes hard reload, close/reopen of the same browser profile, and representative same-origin WebSockets without API-key re-entry.
+- [x] #7 Runtime bootstrap fails closed and does not fall back to exposing or persisting the API key in browser JavaScript.
 <!-- AC:END -->
 
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Implementation plan: docs/superpowers/plans/2026-07-10-single-user-http-only-session-implementation-plan.md. Task 5 is in progress: cookie-authenticated WebUI HTTP requests and secret-free same-origin WebSockets.
+All six implementation tasks are complete. Design and execution plan: Docs/superpowers/plans/2026-07-10-single-user-http-only-session-implementation-plan.md. Exact final evidence: .superpowers/sdd/http-task-6-report.md.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -114,7 +123,7 @@ Hybrid design: reuse the existing AuthNZ SessionManager/sessions table for a hig
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented persistent opaque HttpOnly single-user sessions for the runtime-enabled same-origin loopback WebUI. The API key remains server-side; cookie-authenticated HTTP and representative WebSockets use exact Origin/CSRF protections, logout revokes the active session, and API-key rotation invalidates prior cookies. Added documented loopback compose defaults and a dynamic-port Playwright lifecycle covering hard reload, browser close/reopen with the same profile, secret inventory, WebSockets, hostile-Origin rejection, logout, reprovisioning, and rotation. Verification: lifecycle passed; configured frontend gate 312/312; focused suites 183/183; compose, ESLint, and diff-check passed; Bandit 0 high/medium (18 low token-label heuristics). Full AuthNZ with process-wide CSRF forcing: 934 passed and 36 legacy multi-user integration tests failed because they do not send CSRF tokens; all feature-specific AuthNZ/CSRF/WebSocket tests and the real CSRF-enabled lifecycle passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
@@ -123,12 +132,12 @@ Hybrid design: reuse the existing AuthNZ SessionManager/sessions table for a hig
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
 
 ## Implementation Notes

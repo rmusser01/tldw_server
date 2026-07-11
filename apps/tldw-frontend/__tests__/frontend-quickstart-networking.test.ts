@@ -334,6 +334,30 @@ describe("frontend quickstart networking", () => {
     )
   })
 
+  it("enables CSRF with non-Secure cookies only in the loopback HTTP WebUI overlay", () => {
+    const compose = readFileSync(webuiComposePath, "utf8")
+
+    expect(compose).toContain("- CSRF_ENABLED=${CSRF_ENABLED:-1}")
+    expect(compose).toContain("- SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-0}")
+  })
+
+  it("provides an explicit cookie lifecycle browser regression command", () => {
+    const packageJson = readFileSync(
+      path.join(appDir, "package.json"),
+      "utf8"
+    )
+
+    expect(packageJson).toContain('"e2e:cookie-lifecycle"')
+    expect(packageJson).toContain("node scripts/playwright-cookie-lifecycle.mjs")
+
+    const launcher = readFileSync(
+      path.join(appDir, "scripts", "playwright-cookie-lifecycle.mjs"),
+      "utf8"
+    )
+    expect(launcher).toContain('reservePorts(["api", "hostile", "web"])')
+    expect(launcher).toContain('TLDW_COOKIE_LIFECYCLE: "1"')
+  })
+
   it("enables remote setup writes for the Docker single-user app service", () => {
     const compose = readFileSync(singleUserComposePath, "utf8")
 
