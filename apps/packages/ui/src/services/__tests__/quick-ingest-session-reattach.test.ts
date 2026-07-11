@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
   bgRequest: vi.fn(),
@@ -13,6 +13,10 @@ import { reattachQuickIngestSession } from "@/services/tldw/quick-ingest-session
 describe("reattachQuickIngestSession", () => {
   beforeEach(() => {
     mocks.bgRequest.mockReset()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it("reattaches active direct jobs into a processing snapshot", async () => {
@@ -47,6 +51,231 @@ describe("reattachQuickIngestSession", () => {
     )
   })
 
+  it("retries a thrown status read and preserves direct transport", async () => {
+    vi.useFakeTimers()
+    mocks.bgRequest
+      .mockRejectedValueOnce(new Error("network timeout"))
+      .mockResolvedValueOnce({
+        ok: true,
+        data: {
+          status: "processing",
+        },
+      })
+
+    const pendingSnapshot = reattachQuickIngestSession({
+      mode: "webui-direct",
+      batchId: "batch-1",
+      jobIds: [77],
+      startedAt: Date.now(),
+    })
+
+    await vi.runAllTimersAsync()
+    const snapshot = await pendingSnapshot
+
+    expect(snapshot.lifecycle).toBe("processing")
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(2)
+    for (const [request] of mocks.bgRequest.mock.calls) {
+      expect(request).toEqual(expect.objectContaining({ preferDirect: true }))
+    }
+  })
+
+  it("retries a thrown transient numeric status", async () => {
+    vi.useFakeTimers()
+    mocks.bgRequest
+      .mockRejectedValueOnce(
+        Object.assign(new Error("service unavailable"), { status: 503 })
+      )
+      .mockResolvedValueOnce({
+        ok: true,
+        data: {
+          status: "processing",
+        },
+      })
+
+    const pendingSnapshot = reattachQuickIngestSession({
+      mode: "webui-direct",
+      jobIds: [77],
+      startedAt: Date.now(),
+    })
+
+    await vi.runAllTimersAsync()
+    const snapshot = await pendingSnapshot
+
+    expect(snapshot.lifecycle).toBe("processing")
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(2)
+  })
+
+  it("retries a thrown status-zero transport failure", async () => {
+    vi.useFakeTimers()
+    mocks.bgRequest
+      .mockRejectedValueOnce(
+        Object.assign(new Error("network unavailable"), { status: 0 })
+      )
+      .mockResolvedValueOnce({
+        ok: true,
+        data: {
+          status: "processing",
+        },
+      })
+
+    const pendingSnapshot = reattachQuickIngestSession({
+      mode: "webui-direct",
+      jobIds: [77],
+      startedAt: Date.now(),
+    })
+
+    await vi.runAllTimersAsync()
+    const snapshot = await pendingSnapshot
+
+    expect(snapshot.lifecycle).toBe("processing")
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(2)
+  })
+
+  it("does not retry a thrown permanent numeric status", async () => {
+    vi.useFakeTimers()
+    mocks.bgRequest
+      .mockRejectedValueOnce(
+        Object.assign(new Error("unauthorized"), { status: 401 })
+      )
+      .mockResolvedValueOnce({
+        ok: true,
+        data: {
+          status: "processing",
+        },
+      })
+
+    const pendingSnapshot = reattachQuickIngestSession({
+      mode: "webui-direct",
+      jobIds: [77],
+      startedAt: Date.now(),
+    })
+
+    await vi.runAllTimersAsync()
+    const snapshot = await pendingSnapshot
+
+    expect(snapshot.lifecycle).toBe("interrupted")
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(1)
+  })
+
+  it("retries an HTTP 503 status read and returns the completed job", async () => {
+    vi.useFakeTimers()
+    mocks.bgRequest
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        error: "service unavailable",
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        data: {
+          status: "completed",
+          result: { media_id: "media-77" },
+        },
+      })
+
+    const pendingSnapshot = reattachQuickIngestSession({
+      mode: "webui-direct",
+      batchId: "batch-1",
+      jobIds: [77],
+      startedAt: Date.now(),
+    })
+
+    await vi.runAllTimersAsync()
+    const snapshot = await pendingSnapshot
+
+    expect(snapshot.lifecycle).toBe("completed")
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(2)
+    for (const [request] of mocks.bgRequest.mock.calls) {
+      expect(request).toEqual(expect.objectContaining({ preferDirect: true }))
+    }
+  })
+
+  it("retries a resolved status-zero transport failure", async () => {
+    vi.useFakeTimers()
+    mocks.bgRequest
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 0,
+        error: "network unavailable",
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        data: {
+          status: "processing",
+        },
+      })
+
+    const pendingSnapshot = reattachQuickIngestSession({
+      mode: "webui-direct",
+      jobIds: [77],
+      startedAt: Date.now(),
+    })
+
+    await vi.runAllTimersAsync()
+    const snapshot = await pendingSnapshot
+
+    expect(snapshot.lifecycle).toBe("processing")
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(2)
+  })
+
+  it("does not retry a string HTTP status", async () => {
+    vi.useFakeTimers()
+    mocks.bgRequest
+      .mockResolvedValueOnce({
+        ok: false,
+        status: "503",
+        error: "service unavailable",
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        data: {
+          status: "completed",
+        },
+      })
+
+    const pendingSnapshot = reattachQuickIngestSession({
+      mode: "webui-direct",
+      jobIds: [77],
+      startedAt: Date.now(),
+    })
+
+    await vi.runAllTimersAsync()
+    const snapshot = await pendingSnapshot
+
+    expect(snapshot.lifecycle).toBe("interrupted")
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not retry an ok response carrying a transient status code", async () => {
+    vi.useFakeTimers()
+    mocks.bgRequest
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 503,
+        data: {
+          status: "processing",
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        data: {
+          status: "completed",
+        },
+      })
+
+    const pendingSnapshot = reattachQuickIngestSession({
+      mode: "webui-direct",
+      jobIds: [77],
+      startedAt: Date.now(),
+    })
+
+    await vi.runAllTimersAsync()
+    const snapshot = await pendingSnapshot
+
+    expect(snapshot.lifecycle).toBe("processing")
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(1)
+  })
+
   it("marks a persisted processing session as interrupted when reattachment cannot prove live progress", async () => {
     mocks.bgRequest.mockResolvedValue({
       ok: false,
@@ -63,7 +292,68 @@ describe("reattachQuickIngestSession", () => {
 
     expect(result.lifecycle).toBe("interrupted")
     expect(result.errorMessage).toMatch(/could not reconnect/i)
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(1)
   })
+
+  it.each([401, 403])(
+    "does not retry permanent HTTP %i status reads",
+    async (status) => {
+      mocks.bgRequest.mockResolvedValue({
+        ok: false,
+        status,
+        error: "permanent failure",
+      })
+
+      const result = await reattachQuickIngestSession({
+        mode: "webui-direct",
+        jobIds: [77],
+        startedAt: Date.now(),
+      })
+
+      expect(result.lifecycle).toBe("interrupted")
+      expect(mocks.bgRequest).toHaveBeenCalledTimes(1)
+    }
+  )
+
+  it("does not retry a successful response with no job status", async () => {
+    mocks.bgRequest.mockResolvedValue({
+      ok: true,
+      data: {},
+    })
+
+    const result = await reattachQuickIngestSession({
+      mode: "webui-direct",
+      jobIds: [77],
+      startedAt: Date.now(),
+    })
+
+    expect(result.lifecycle).toBe("interrupted")
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([408, 429])(
+    "stops after three transient HTTP %i status-read attempts",
+    async (status) => {
+      vi.useFakeTimers()
+      mocks.bgRequest.mockResolvedValue({
+        ok: false,
+        status,
+        error: "transient failure",
+      })
+
+      const pendingSnapshot = reattachQuickIngestSession({
+        mode: "webui-direct",
+        jobIds: [77],
+        startedAt: Date.now(),
+      })
+
+      await vi.runAllTimersAsync()
+      const result = await pendingSnapshot
+
+      expect(result.lifecycle).toBe("interrupted")
+      expect(mocks.bgRequest).toHaveBeenCalledTimes(3)
+    }
+  )
 
   it("maps reattached jobs back to submitted queue item identities", async () => {
     mocks.bgRequest

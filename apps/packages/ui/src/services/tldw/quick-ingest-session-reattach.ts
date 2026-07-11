@@ -24,6 +24,8 @@ const ACTIVE_JOB_STATUSES = new Set([
 ])
 
 const FAILED_JOB_STATUSES = new Set(["failed", "quarantined", "timeout"])
+const STATUS_READ_ATTEMPTS = 3
+const STATUS_READ_RETRY_DELAY_MS = 100
 
 const normalizeJobIds = (jobIds?: number[]): number[] =>
   Array.isArray(jobIds)
@@ -71,6 +73,52 @@ const interruptedSnapshot = (
 
 const normalizeJobStatus = (value: unknown): string =>
   String(value || "").trim().toLowerCase()
+
+const isTransientHttpStatus = (status: unknown): status is number =>
+  typeof status === "number" &&
+  Number.isFinite(status) &&
+  (status === 0 ||
+    status === 408 ||
+    status === 429 ||
+    (status >= 500 && status < 600))
+
+const isTransientStatusRead = (
+  response: { ok?: unknown; status?: unknown } | null
+): boolean => response?.ok === false && isTransientHttpStatus(response.status)
+
+const isTransientThrownStatusRead = (error: unknown): boolean => {
+  const status = (error as { status?: unknown } | null)?.status
+  return typeof status === "undefined" || isTransientHttpStatus(status)
+}
+
+const readJobStatus = async (jobId: number): Promise<any> => {
+  for (let attempt = 0; attempt < STATUS_READ_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await bgRequest<any>({
+        path: `/api/v1/media/ingest/jobs/${jobId}`,
+        method: "GET",
+        timeoutMs: 10_000,
+        returnResponse: true,
+        preferDirect: true,
+      })
+
+      if (!isTransientStatusRead(response) || attempt === STATUS_READ_ATTEMPTS - 1) {
+        return response
+      }
+    } catch (error) {
+      if (
+        !isTransientThrownStatusRead(error) ||
+        attempt === STATUS_READ_ATTEMPTS - 1
+      ) {
+        return null
+      }
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, STATUS_READ_RETRY_DELAY_MS))
+  }
+
+  return null
+}
 
 const isLogicalFailure = (job: ReattachedQuickIngestJob): boolean =>
   FAILED_JOB_STATUSES.has(job.status) ||
@@ -141,13 +189,7 @@ export const reattachQuickIngestSession = async (
 
   try {
     for (const [index, jobId] of jobIds.entries()) {
-      const response = await bgRequest<any>({
-        path: `/api/v1/media/ingest/jobs/${jobId}`,
-        method: "GET",
-        timeoutMs: 10_000,
-        returnResponse: true,
-        preferDirect: true,
-      })
+      const response = await readJobStatus(jobId)
 
       if (!response?.ok || !normalizeJobStatus(response.data?.status)) {
         return interruptedSnapshot()
