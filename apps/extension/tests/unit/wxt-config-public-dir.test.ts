@@ -8,6 +8,10 @@ import config from "../../wxt.config.ts"
 
 const testDir = path.dirname(fileURLToPath(import.meta.url))
 const extensionRoot = path.resolve(testDir, "../..")
+const referencedFontFiles = (css: string) =>
+  [...css.matchAll(/url\(["']?\/fonts\/([^"')]+)["']?\)/g)].map((match) =>
+    match[1].replace(/[?#].*$/, "")
+  )
 
 describe("wxt config publicDir", () => {
   test("points directly at shared ui public assets", () => {
@@ -25,13 +29,19 @@ describe("wxt config publicDir", () => {
       "../packages/ui/src/assets/tailwind-shared.css"
     )
     const sharedCss = readFileSync(sharedCssPath, "utf8")
-    const referencedFonts = [
-      ...sharedCss.matchAll(/url\(["']?\/fonts\/([^"')]+)["']?\)/g),
-    ].map((match) => match[1])
+    const referencedFonts = referencedFontFiles(sharedCss)
 
     expect(referencedFonts.length).toBeGreaterThan(0)
     for (const fontFile of referencedFonts) {
       expect(existsSync(path.join(sharedPublicDir, "fonts", fontFile))).toBe(true)
     }
+  })
+
+  test("normalizes cache-busting font URL suffixes", () => {
+    expect(
+      referencedFontFiles(
+        'url("/fonts/Inter-Regular.ttf?v=3.19") url(/fonts/Arimo.ttf#iefix)'
+      )
+    ).toEqual(["Inter-Regular.ttf", "Arimo.ttf"])
   })
 })
