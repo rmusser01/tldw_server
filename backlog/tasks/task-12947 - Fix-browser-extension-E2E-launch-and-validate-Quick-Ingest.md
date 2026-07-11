@@ -1,7 +1,7 @@
 ---
 id: TASK-12947
 title: Fix browser extension E2E launch and validate Quick Ingest
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
 updated_date: 2026-07-11 18:02
@@ -9,7 +9,6 @@ labels: []
 dependencies: []
 documentation:
 - Docs/superpowers/specs/2026-07-11-extension-e2e-launch-cancel-race-design.md
-- Docs/superpowers/plans/2026-07-11-extension-quick-ingest-cancellation.md
 modified_files:
 - apps/packages/ui/src/components/Common/QuickIngest/ProcessingStep.tsx
 - apps/packages/ui/src/components/Common/QuickIngestWizardModal.tsx
@@ -18,7 +17,6 @@ modified_files:
 - apps/extension/tests/unit/wxt-config-public-dir.test.ts
 - apps/packages/ui/src/public/fonts/
 - Docs/superpowers/specs/2026-07-11-extension-e2e-launch-cancel-race-design.md
-- Docs/superpowers/plans/2026-07-11-extension-quick-ingest-cancellation.md
 ---
 
 ## Description
@@ -33,13 +31,13 @@ Investigate why the local Playwright extension harness fails to expose or comple
 - [x] #2 The supported extension launcher reliably returns an extension id, seeded storage, and a loaded options page without relying on CI-only behavior.
 - [x] #3 Host-side browser-extension UAT validates PDF, reachable link, repeated link, exact YouTube Short, and repeated YouTube in one extension context with no page or console errors.
 - [x] #4 Focused automated regression coverage fails before the fix and passes afterward, with adjacent extension tests and compile green.
-- [ ] #5 Changes are rebased on current dev and published in a separate reviewed PR against dev.
+- [x] #5 Changes are rebased on current dev and published in a separate reviewed PR against dev.
 <!-- AC:END -->
 
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Execute Docs/superpowers/plans/2026-07-11-extension-quick-ingest-cancellation.md using host-side TDD and UAT. Order: terminal runtime fence; async setup/start guards; persisted reattach guard; installed-extension PDF/link/YouTube UAT; packaged regression/static verification; review/rebase/PR.
+Completed in five stages: characterize launch behavior; implement terminal cancellation with host-side TDD; run installed-extension PDF/link/YouTube UAT; replace the obsolete browser mock and package shared fonts; review, rebase, verify, and publish PR #2711.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -68,7 +66,11 @@ Execute Docs/superpowers/plans/2026-07-11-extension-quick-ingest-cancellation.md
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+PR #2711 fixes the browser-extension Quick Ingest cancellation race and the reported React maximum-update-depth loop. Cancellation is now fenced synchronously across setup, late extension/direct acknowledgement, direct submission, runtime progress/completion, and persisted reattachment. Wizard persistence suppresses only semantically equivalent React replays while retaining real timestamps and meaningful state. The packaged MV3 regression uses the production direct HTTP path and fails on browser or unexpected-request errors. Shared fonts are included through WXT's public directory with a static contract test.
+
+Installed-extension UAT completed PDF, URL, duplicate URL, the requested YouTube Short, and duplicate YouTube against isolated databases with zero browser errors and exactly three unique media records. Post-rebase production build, 56 unit tests, two font tests, compile, strict cancellation E2E, three launch-health modes, and diff checks passed. ESLint has no applicable workspace configuration; Bandit is not applicable to TypeScript/assets. Existing unrelated build warnings remain.
+
+The PR is not merge-ready until the human requester adds the repository-required Change summary in their own words.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
@@ -77,11 +79,11 @@ Execute Docs/superpowers/plans/2026-07-11-extension-quick-ingest-cancellation.md
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
 
@@ -98,4 +100,5 @@ Execute Docs/superpowers/plans/2026-07-11-extension-quick-ingest-cancellation.md
 - Browser regression: the test now uses the production MV3 direct HTTP path against a strict local server, defers only process-web-scraping, cancels before response, releases late success, and asserts cancelled remains terminal with zero page, console, or unexpected-request errors. It passed in 22.6 seconds.
 - Adjacent verification: Quick Ingest tests passed 56/56, font tests 2/2, TypeScript compile passed. ESLint has no applicable workspace configuration; Bandit is not applicable to TypeScript/assets. No credentials, auth headers, request bodies, or backend payloads are logged.
 2026-07-11 post-rebase verification: origin/dev was already current. Production Chrome MV3 build passed in 37.0s and packaged all nine fonts. The strict headed cancellation regression passed in 23.3s, Quick Ingest unit tests passed 56/56, font contract tests passed 2/2, TypeScript compile passed, and launch health passed headed/minimal 4.2s, headless/minimal 3.4s, and headless/full 2.9s. git diff --check was clean. Existing build warnings about duplicate imports, circular chunks, and bundle size remain outside this diff.
+Published PR #2711 against dev: https://github.com/rmusser01/tldw_server/pull/2711. The branch remains merge-gated until the human requester writes the required Change summary.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
