@@ -166,6 +166,10 @@ test.describe("Quick ingest cancel flow", () => {
         () => (window as any).__quickIngestLateCompletionEmitted === true
       )
       await expect(dialog.getByTestId("wizard-results-step")).toBeVisible()
+      await expect(dialog.getByRole("region", { name: /error items/i })).toBeVisible()
+      await expect(
+        dialog.getByRole("region", { name: /completed items/i })
+      ).toHaveCount(0)
     } finally {
       try {
         await page.evaluate(() => {
