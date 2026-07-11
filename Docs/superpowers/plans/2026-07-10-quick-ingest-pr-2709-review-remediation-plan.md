@@ -42,9 +42,14 @@
 - Modify: `apps/tldw-frontend/__tests__/next-config-dev-watch-guard.test.ts`
 - Modify: `apps/tldw-frontend/next.config.mjs`
 
-- [ ] **Step 1: Write the failing behavioral test**
+- [x] **Step 1: Write the failing behavioral test**
 
-Load `next.config.mjs`, pass `ignored: [/node_modules/, "**/.next/**"]`, and assert both entries survive unchanged. Resolve representative runtime files from the repository workspace and assert appended forward-slash globs match:
+Load `next.config.mjs` with each Webpack-valid input shape. For a standalone
+`/node_modules/` expression, assert its matching semantics survive in a single
+schema-valid expression that also matches the backend roots. For string and
+string-array inputs, assert the original strings survive unchanged and the
+absolute globs are appended. Resolve representative runtime files from the
+repository workspace and assert the final ignore value matches:
 
 ```ts
 expect(webpackConfig.watchOptions.ignored).toContain(existingRegex)
@@ -55,21 +60,25 @@ expect(backendPatterns).toEqual(expect.arrayContaining([
 ]))
 ```
 
-- [ ] **Step 2: Run the focused test outside the sandbox and verify RED**
+- [x] **Step 2: Run the focused test outside the sandbox and verify RED**
 
 Run: `bunx vitest run apps/tldw-frontend/__tests__/next-config-dev-watch-guard.test.ts`
 
 Expected: FAIL because the current filter drops the regular expression and the appended patterns are relative.
 
-- [ ] **Step 3: Implement the minimal normalization**
+- [x] **Step 3: Implement the minimal normalization**
 
-Keep every non-null Webpack-supported ignore entry, discard only blank strings, and construct absolute globs from the repository workspace root with backslashes normalized to `/`.
+Preserve the semantics of every Webpack-supported ignore shape while keeping the
+final shape schema-valid (`RegExp`, string, or string array). Discard only blank
+strings and construct absolute globs from the repository workspace root with
+backslashes normalized to `/`. Do not produce a mixed RegExp/string array,
+which Watchpack treats as an invalid string array.
 
-- [ ] **Step 4: Run the focused test outside the sandbox and verify GREEN**
+- [x] **Step 4: Run the focused test outside the sandbox and verify GREEN**
 
 Run the Step 2 command. Expected: PASS.
 
-- [ ] **Step 5: Commit the isolated config fix**
+- [x] **Step 5: Commit the isolated config fix**
 
 ```bash
 git add apps/tldw-frontend/next.config.mjs apps/tldw-frontend/__tests__/next-config-dev-watch-guard.test.ts
