@@ -19,6 +19,8 @@
 - Modify `apps/packages/ui/src/components/Common/QuickIngest/ProcessingStep.tsx`: accept an optional modal-owned Cancel All callback while retaining the context fallback for standalone callers.
 - Modify `apps/packages/ui/src/components/Common/QuickIngestWizardModal.tsx`: own cancellation intent and guard setup, runtime messages, direct submission, and errors while preserving the existing persisted-reattachment cleanup fence.
 - Modify `apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx`: add behavioral regressions for each asynchronous race.
+- Modify `apps/extension/tests/unit/wxt-config-public-dir.test.ts`: assert every root-relative shared font is present in WXT's public directory.
+- Add `apps/packages/ui/src/public/fonts/*`: package the existing shared WebUI fonts with the extension.
 - Verify `apps/extension/tests/e2e/quick-ingest-cancel.spec.ts`: existing packaged-extension stale-completion regression must pass unchanged.
 - Update `backlog/tasks/task-12947 - Fix-browser-extension-E2E-launch-and-validate-Quick-Ingest.md`: record red/green evidence, host UAT evidence, verification, and PR.
 
@@ -189,11 +191,11 @@ git commit -m "test: cover quick ingest cancellation races"
 **Goal**: Validate real ingestion through the packaged browser extension before treating automated browser regressions as release evidence.
 **Success Criteria**: One headed installed-extension context ingests PDF, reachable URL, duplicate URL, exact YouTube Short, and duplicate YouTube; jobs leave queued state; exactly three unique media rows exist; no update-depth, page, or console errors occur.
 **Tests**: Host-side UAT against an isolated FastAPI process and Media DB.
-**Status**: In Progress
+**Status**: Complete
 
 ### Task 4: Run the required UAT matrix
 
-- [ ] **Step 1: Build production extension artifacts on the host**
+- [x] **Step 1: Build production extension artifacts on the host**
 
 ```bash
 bun run build:chrome:prod
@@ -201,15 +203,15 @@ bun run build:chrome:prod
 
 Run from `apps/extension`. Expected: `.output/chrome-mv3` builds successfully.
 
-- [ ] **Step 2: Start a fresh isolated backend on an unused host port**
+- [x] **Step 2: Start a fresh isolated backend on an unused host port**
 
 Activate `.venv`, use a temporary config/database root, and start uvicorn outside the sandbox. Confirm `/api/v1/health` before opening the extension.
 
-- [ ] **Step 3: Launch one headed persistent Chromium extension context**
+- [x] **Step 3: Launch one headed persistent Chromium extension context**
 
 Seed the isolated server URL and API key, enable Quick Ingest, and retain the profile, screenshots, browser console, page errors, and request/response log until all UAT items finish.
 
-- [ ] **Step 4: Ingest multiple item types through the visible extension UI**
+- [x] **Step 4: Ingest multiple item types through the visible extension UI**
 
 In this order:
 
@@ -219,49 +221,77 @@ In this order:
 4. Add `https://www.youtube.com/shorts/6-rf_YXDpPg` and wait for terminal success.
 5. Add the same YouTube Short again and verify it is visibly skipped as existing.
 
-- [ ] **Step 5: Validate backend lifecycle and storage**
+- [x] **Step 5: Validate backend lifecycle and storage**
 
 Capture job timestamps/status transitions and query the isolated Media DB. Require every job to leave queued state promptly and exactly three unique records for PDF, standards URL, and YouTube Short.
 
-- [ ] **Step 6: Fail the stage on any browser or product error**
+- [x] **Step 6: Fail the stage on any browser or product error**
 
 Treat `Maximum update depth exceeded`, page errors, relevant console errors, stuck 0% jobs, missing terminal results, duplicates stored as new, or an incorrect Media DB count as a failure requiring renewed investigation before browser regression work.
+
+Observed host evidence from the definitive fully isolated run:
+
+- One headed packaged-extension context completed PDF, RFC 9110, duplicate RFC,
+  the exact requested YouTube Short, and duplicate YouTube in 44.9 seconds.
+- Browser diagnostics contained zero page errors, console errors, and failed
+  media requests. All five terminal screenshots were visually inspected.
+- Isolated `jobs.db` contained three media-ingest jobs, all `completed` at 100%.
+  The web-document path is synchronous and does not create a Jobs row.
+- Isolated `Media_DB_v2.db` contained exactly three unique active rows: PDF,
+  `web_document`, and YouTube `video`.
+- The first live attempt exposed missing Inter font files. A failing public-dir
+  contract test reproduced the packaging defect; adding all nine existing shared
+  fonts made the test pass and the rebuilt extension emitted no font errors.
 
 ## Stage 4: Automated Browser and Static Verification
 **Goal**: Convert the successful UAT behavior into repeatable regression evidence.
 **Success Criteria**: Packaged-extension cancellation and launch-health tests pass without skips; compile, lint, and changed-scope security checks pass.
 **Tests**: Playwright, TypeScript, ESLint, Bandit applicability review.
-**Status**: Not Started
+**Status**: Complete
 
 ### Task 5: Run browser regressions after UAT
 
-- [ ] **Step 1: Run the existing headed cancellation regression on the host**
+- [x] **Step 1: Run the headed cancellation regression on the host**
 
 ```bash
 TLDW_E2E_SKIP_EXTENSION_BUILD=1 TLDW_E2E_EXTENSION_HEADLESS=0 TLDW_E2E_EXTENSION_MINIMAL_LOCALES=1 bunx playwright test tests/e2e/quick-ingest-cancel.spec.ts --reporter=line
 ```
 
-Expected: PASS with cancelled/error results still visible after late completion.
+Observed: PASS in 22.6 seconds. The rebuilt MV3 extension connected naturally to
+a local HTTP server, used the production direct-session request, retained the
+cancelled region after a deferred successful response, and reported no page,
+console, or unexpected-request errors. Replacing the prior MV2 runtime mock was
+necessary because production Quick Ingest uses the direct HTTP path in MV3.
 
-- [ ] **Step 2: Run packaged launch health in the validated matrix**
+- [x] **Step 2: Run packaged launch health in the validated matrix**
 
-Run headed/minimal, headless/minimal, and headless/full explicitly. Expected: all PASS without skips or missing MV3 targets.
+Run headed/minimal, headless/minimal, and headless/full explicitly. Observed:
+all three passed without skips or missing MV3 targets in 4.2, 3.0, and 2.9
+seconds respectively.
 
-- [ ] **Step 3: Run adjacent unit tests, compile, and lint**
+- [x] **Step 3: Run adjacent unit tests, compile, and lint**
 
 ```bash
 bunx vitest run src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx --maxWorkers=1 --no-file-parallelism
+bun test tests/unit/wxt-config-public-dir.test.ts
 bun run compile
-bunx eslint packages/ui/src/components/Common/QuickIngestWizardModal.tsx packages/ui/src/components/Common/QuickIngest/ProcessingStep.tsx packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx
 ```
 
-Use `apps/packages/ui` for Vitest and `apps/extension` for compile. Run ESLint from `apps` with paths adjusted to the workspace root.
+Use `apps/packages/ui` for Vitest and `apps/extension` for the static test and
+compile. Observed: 56 Quick Ingest unit tests passed, two public-directory tests
+passed, and TypeScript compilation passed. ESLint is unavailable for these
+workspaces because the repository has no applicable ESLint configuration;
+invoking a downloaded ESLint 10 binary therefore refused to run. The legacy
+files are also not Prettier-clean as a baseline, so no formatting-only rewrite
+was retained.
 
-- [ ] **Step 4: Record security applicability**
+- [x] **Step 4: Record security applicability**
 
-Bandit does not scan TypeScript. Record a changed-scope Bandit skip with rationale, while ensuring no credentials, auth headers, or backend payloads are logged by new code.
+Bandit does not scan TypeScript or static font assets, so it is not applicable to
+this changed scope. Manual review confirms the new code does not log credentials,
+auth headers, request bodies, or backend payloads.
 
-- [ ] **Step 5: Commit verification/task updates**
+- [x] **Step 5: Commit verification/task updates**
 
 ```bash
 git add backlog/tasks/task-12947\ -\ Fix-browser-extension-E2E-launch-and-validate-Quick-Ingest.md Docs/superpowers/plans/2026-07-11-extension-quick-ingest-cancellation.md
@@ -272,15 +302,21 @@ git commit -m "docs: record extension quick ingest validation"
 **Goal**: Deliver a current, reviewed PR against `dev` with complete evidence.
 **Success Criteria**: Diff review has no unresolved P1/P2 findings, branch is rebased on latest `origin/dev`, checks pass, and PR includes the required human-owned Change summary gate.
 **Tests**: `git diff --check`, focused verification rerun after rebase, GitHub checks.
-**Status**: Not Started
+**Status**: In Progress
 
 ### Task 6: Review, rebase, and publish
 
-- [ ] **Step 1: Review the complete diff against origin/dev**
+- [x] **Step 1: Review the complete diff against origin/dev**
 
 Prioritize terminal-state races, stale closures, duplicate finalization, persisted tracking regressions, unhandled promises, and missing test cases.
 
-- [ ] **Step 2: Address all valid findings and rerun affected verification**
+- [x] **Step 2: Address all valid findings and rerun affected verification**
+
+The complete diff received a line-by-line local correctness review. No P1/P2
+finding remained. A requested independent review agent stalled and was closed
+without returning findings, so it is not counted as review evidence. The
+reconstructed browser regression, 56 focused unit tests, two font contract
+tests, TypeScript compile, and `git diff --check` all passed afterward.
 
 - [ ] **Step 3: Rebase on latest origin/dev**
 

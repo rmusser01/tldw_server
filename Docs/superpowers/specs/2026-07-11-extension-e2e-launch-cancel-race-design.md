@@ -23,6 +23,21 @@ there is no session ID to fence or cancel. A later extension acknowledgement can
 leave background work running, and a later direct acknowledgement can still
 submit the backend batch.
 
+Live packaged-extension validation also exposed a separate asset defect. The
+shared stylesheet references root-relative `/fonts/*` files, while WXT packages
+`apps/packages/ui/src/public` and that public directory contained no fonts. The
+extension therefore emitted `ERR_FILE_NOT_FOUND` for Inter during otherwise
+successful ingestion.
+
+The installed-extension cancellation regression also reproduced the reported
+React maximum-update-depth failure. The wizard synchronously persisted every
+`onStateChange` snapshot to the parent Zustand store. During terminal
+cancellation, React replayed the queued reducer updates from the preceding
+running state after that external-store write rerendered the parent. Each replay
+produced the same semantic terminal state but fresh completion timestamps, so
+the persistence callback wrote again and triggered another replay until React
+raised invariant 185.
+
 ## Goals
 
 - Record a repeatable extension launch command and retain current helper
@@ -31,8 +46,11 @@ submit the backend batch.
 - Prevent extension work or direct submission from continuing when cancellation
   precedes the session acknowledgement.
 - Prevent payload preparation or error handling from reviving a cancelled run.
+- Prevent React reducer replays from persisting equivalent wizard snapshots.
 - Preserve current background-runtime cancellation behavior and direct-job
   cancellation metadata.
+- Package every root-relative shared font used by the extension and enforce the
+  WXT public-directory contract statically.
 - Prove the product flow through the installed extension with PDF, web-link,
   duplicate-link, YouTube Short, and duplicate-YouTube ingestion.
 
@@ -88,6 +106,30 @@ including progress, is ignored. A user cancellation therefore wins regardless
 of whether the background acknowledgement, a stale completion, or the next
 state update runs first.
 
+### Semantic persistence replay guard
+
+The modal will compute the existing persisted-session patch first, then derive a
+semantic signature from that patch. Only volatile completion timestamps are
+normalized to presence markers; the first persisted patch retains its real
+timestamps and all status, queue, progress, tracking, and result values remain
+part of the signature. A ref stores the last signature together with the current
+session ID and is updated before the synchronous Zustand write. If React replays
+the same semantic terminal snapshot, the callback returns without writing to the
+external store again. A different snapshot or a new keyed session persists
+normally.
+
+This guard is intentionally local to wizard-session persistence. It does not
+change the reducer, Zustand schema, API payloads, or background message
+contracts.
+
+### Shared font packaging
+
+The existing WebUI font files are copied into the shared UI public directory,
+which is WXT's configured `publicDir`. A unit test extracts every root-relative
+`/fonts/*` URL from the shared stylesheet and asserts that the corresponding
+file exists under that directory. This keeps the extension package aligned with
+the stylesheet without changing font declarations or adding build-time copying.
+
 ## Data Flow
 
 1. User clicks `Cancel All` in `ProcessingStep`.
@@ -120,11 +162,21 @@ state update runs first.
   cancelled results or scheduling another poll.
 - A cancellation-during-setup test proves no session starts and no later setup
   failure replaces the cancelled outcome.
+- A WXT configuration test proves every root-relative shared font reference is
+  present in the configured extension public directory.
 
 ### Browser regression
 
-- The existing `quick-ingest-cancel.spec.ts` must pass in a real headed packaged
-  extension and retain the cancelled/error region after its late completion.
+- `quick-ingest-cancel.spec.ts` launches a real headed packaged MV3 extension
+  against a local HTTP server that implements the extension page and background
+  health/configuration requests. It uses the production direct-session path,
+  defers only the real `process-web-scraping` response, cancels while that request
+  is in flight, releases a late success, and requires the cancelled region to
+  remain terminal. It does not replace the manifest, runtime messaging, or
+  connection store.
+- The regression fails on unexpected server requests, page errors, or console
+  errors so a maximum-update-depth exception cannot be hidden behind a locator
+  timeout.
 - The packaged extension launch-health spec must pass without skips.
 
 ### User acceptance testing
@@ -141,9 +193,12 @@ will ingest:
 The run will capture page errors, console errors, API traffic, visible progress,
 job lifecycle timestamps, and final Media DB rows. Success requires no maximum
 update-depth error, all jobs leaving queued state promptly, and exactly three
-unique stored media records.
+unique stored media records. The definitive host run uses isolated Auth, Jobs,
+and Media databases so terminal job state can be verified directly.
 
 ## Rollout and Compatibility
 
-The production change is confined to internal React callbacks and refs. No API,
+The production logic changes are confined to internal React callbacks, refs,
+and semantic persistence deduplication; the asset change only adds
+already-declared font files to the packaged public directory. No API,
 background message, persisted-session, or extension-launch contract changes.

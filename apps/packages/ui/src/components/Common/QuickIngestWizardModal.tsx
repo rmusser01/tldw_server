@@ -650,6 +650,23 @@ const buildSessionPatchFromWizardState = (
   }
 }
 
+const buildWizardPersistenceSignature = (
+  patch: Partial<QuickIngestSessionRecord>
+): string => {
+  const resultSummary = patch.resultSummary
+  return JSON.stringify({
+    ...patch,
+    completedAt: patch.completedAt == null ? null : true,
+    resultSummary: resultSummary
+      ? {
+          ...resultSummary,
+          attemptedAt: resultSummary.attemptedAt == null ? null : true,
+          completedAt: resultSummary.completedAt == null ? null : true,
+        }
+      : resultSummary,
+  })
+}
+
 const mapReattachedJobStatusToProgress = (
   status: string,
   result?: unknown
@@ -1836,6 +1853,10 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
     [session]
   )
   const sessionRef = useRef(session)
+  const lastPersistedSignatureRef = useRef<{
+    sessionId: string
+    signature: string
+  } | null>(null)
 
   useEffect(() => {
     sessionRef.current = session
@@ -1850,7 +1871,21 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
     (state: IngestWizardState) => {
       const currentSession = sessionRef.current
       if (!currentSession) return
-      upsertSession(buildSessionPatchFromWizardState(state, currentSession))
+      const patch = buildSessionPatchFromWizardState(state, currentSession)
+      const signature = buildWizardPersistenceSignature(patch)
+      // React may replay queued reducer updates after this synchronous Zustand
+      // write rerenders the parent. Persist each semantic snapshot only once.
+      if (
+        lastPersistedSignatureRef.current?.sessionId === currentSession.id &&
+        lastPersistedSignatureRef.current.signature === signature
+      ) {
+        return
+      }
+      lastPersistedSignatureRef.current = {
+        sessionId: currentSession.id,
+        signature,
+      }
+      upsertSession(patch)
     },
     [upsertSession]
   )

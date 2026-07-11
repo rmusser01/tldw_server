@@ -4,12 +4,21 @@ title: Fix browser extension E2E launch and validate Quick Ingest
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-11 18:02'
+updated_date: 2026-07-11 18:02
 labels: []
 dependencies: []
 documentation:
-  - Docs/superpowers/specs/2026-07-11-extension-e2e-launch-cancel-race-design.md
-  - Docs/superpowers/plans/2026-07-11-extension-quick-ingest-cancellation.md
+- Docs/superpowers/specs/2026-07-11-extension-e2e-launch-cancel-race-design.md
+- Docs/superpowers/plans/2026-07-11-extension-quick-ingest-cancellation.md
+modified_files:
+- apps/packages/ui/src/components/Common/QuickIngest/ProcessingStep.tsx
+- apps/packages/ui/src/components/Common/QuickIngestWizardModal.tsx
+- apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx
+- apps/extension/tests/e2e/quick-ingest-cancel.spec.ts
+- apps/extension/tests/unit/wxt-config-public-dir.test.ts
+- apps/packages/ui/src/public/fonts/
+- Docs/superpowers/specs/2026-07-11-extension-e2e-launch-cancel-race-design.md
+- Docs/superpowers/plans/2026-07-11-extension-quick-ingest-cancellation.md
 ---
 
 ## Description
@@ -75,3 +84,17 @@ Execute Docs/superpowers/plans/2026-07-11-extension-quick-ingest-cancellation.md
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+2026-07-11 implementation and validation evidence:
+- Launch investigation: clean packaged MV3 launch health passes headed/minimal, headless/minimal, and headless/full; no launcher or manifest change is justified.
+- Cancellation TDD: synchronous run-level intent and session fencing make Cancel All terminal. Deferred extension/direct acknowledgements, setup continuations, errors, progress, completion, and persisted reattachment cannot revive or continue a cancelled run. Full session suite passed 33/33.
+- Installed-extension UAT: one headed context against isolated Auth, Jobs, and Media stores completed PDF, RFC 9110 URL, duplicate URL skip, exact Short https://www.youtube.com/shorts/6-rf_YXDpPg, and duplicate YouTube skip in 44.9 seconds. Browser diagnostics had zero page errors, console errors, or failed media requests; jobs reached completed/100%; Media DB contained exactly three unique active rows.
+- Font packaging: live UAT exposed missing Inter requests. A static publicDir contract failed first, then passed 2/2 after packaging all nine referenced shared fonts.
+- Maximum-depth root cause: the installed MV3 cancellation regression reproduced React invariant 185. React replayed terminal reducer updates after synchronous wizard-state persistence rerendered the parent; fresh completion timestamps made equivalent cancelled snapshots appear distinct and caused repeated Zustand upserts.
+- Persistence fix: derive a semantic signature from the existing persisted patch, normalize only volatile timestamp presence, and suppress an equivalent replay before the synchronous write. Real timestamps and all meaningful status, queue, progress, tracking, and result values remain persisted.
+- Browser regression: the test now uses the production MV3 direct HTTP path against a strict local server, defers only process-web-scraping, cancels before response, releases late success, and asserts cancelled remains terminal with zero page, console, or unexpected-request errors. It passed in 22.6 seconds.
+- Adjacent verification: Quick Ingest tests passed 56/56, font tests 2/2, TypeScript compile passed. ESLint has no applicable workspace configuration; Bandit is not applicable to TypeScript/assets. No credentials, auth headers, request bodies, or backend payloads are logged.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
