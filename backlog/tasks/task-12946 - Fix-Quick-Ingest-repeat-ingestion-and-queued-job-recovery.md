@@ -2,35 +2,14 @@
 id: TASK-12946
 title: Fix Quick Ingest repeat ingestion and queued job recovery
 status: In Progress
-modified_files:
-- apps/extension/tests/e2e/live-ux-workflows.spec.ts
-- apps/extension/tests/e2e/quick-ingest-cancel.spec.ts
-- apps/extension/tests/e2e/quick-ingest-ux-audit.spec.ts
-- apps/packages/ui/src/components/Common/QuickIngestWizardModal.tsx
-- apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx
-- apps/packages/ui/src/services/tldw/ingest-job-results.ts
-- apps/packages/ui/src/services/tldw/quick-ingest-batch.ts
-- apps/packages/ui/src/services/tldw/quick-ingest-session-reattach.ts
-- apps/packages/ui/src/services/__tests__/ingest-job-results.test.ts
-- apps/packages/ui/src/services/__tests__/quick-ingest-batch.test.ts
-- apps/packages/ui/src/services/__tests__/quick-ingest-session-reattach.test.ts
-- apps/tldw-frontend/package.json
-- apps/tldw-frontend/next.config.mjs
-- apps/tldw-frontend/__tests__/frontend-dev-config.test.ts
-- apps/tldw-frontend/__tests__/next-config-dev-watch-guard.test.ts
-- apps/tldw-frontend/e2e/onboarding-uat/helpers.ts
-- apps/tldw-frontend/e2e/utils/journey-helpers.ts
-- apps/tldw-frontend/e2e/workflows/media-ingest.spec.ts
-- Docs/Getting_Started/TROUBLESHOOTING.md
-- Docs/Published/Getting_Started/TROUBLESHOOTING.md
-- Docs/superpowers/specs/2026-07-10-quick-ingest-pr-2709-review-remediation-design.md
-- pyproject.toml
-- tldw_Server_API/app/core/Web_Scraping/Article_Extractor_Lib.py
-- tldw_Server_API/app/services/enhanced_web_scraping_service.py
-- tldw_Server_API/tests/Services/test_enhanced_webscraping_persist.py
-- tldw_Server_API/tests/WebScraping/test_extraction_pipeline_router.py
+assignee: []
+created_date: ''
+updated_date: '2026-07-11 06:31'
+labels: []
+dependencies: []
 documentation:
-- Docs/superpowers/specs/2026-07-10-quick-ingest-pr-2709-review-remediation-design.md
+  - >-
+    Docs/superpowers/specs/2026-07-10-quick-ingest-pr-2709-review-remediation-design.md
 ---
 
 ## Description
@@ -41,15 +20,34 @@ Investigate repeated user reports of WebUI/browser-extension Quick Ingest failur
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [ ] #1 Repeat Quick Ingest submissions complete without Maximum update depth errors and classify existing media as skipped.
+- [ ] #2 Restored direct ingest jobs survive transient status-read failures and terminate correctly for permanent missing jobs.
+- [ ] #3 Webpack dev watch ignores preserve existing patterns and match backend runtime directories using absolute normalized paths.
+- [ ] #4 Stale yt-dlp installations produce actionable diagnostics and current installations continue normally.
+- [ ] #5 Touched persistence logs redact user-controlled URL secrets.
+- [ ] #6 Focused automated verification, Bandit, and full PDF, local-link, and YouTube Shorts UAT pass outside the sandbox.
+- [ ] #7 All actionable PR review threads are resolved and the branch is current with dev.
+- [ ] #8 Existing perform_analysis and summarize_checkbox declarations govern request-level LLM extraction without a new public API field, while non-API scraper consumers retain the established default order.
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Docs/superpowers/plans/2026-07-10-quick-ingest-pr-2709-review-remediation-plan.md
+<!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-07-10 follow-up UAT isolated the repeat YouTube Shorts failure to stale yt-dlp in the project venv. Before updating, yt-dlp 2025.8.11 quarantined `https://www.youtube.com/shorts/6-rf_YXDpPg` at 20% with "content is not available on this app." After updating the venv to yt-dlp 2026.7.4, the same Quick Ingest browser flow completed the YouTube job at 100% and added media id 5. Raised `pyproject.toml` yt-dlp floor to `>=2026.7.4` so fresh installs pick up the extractor fix.
 
 Draft PR: https://github.com/rmusser01/tldw_server/pull/2709
+2026-07-10: Rebasing review follow-up completed cleanly onto current origin/dev. Approved remediation design committed at Docs/superpowers/specs/2026-07-10-quick-ingest-pr-2709-review-remediation-design.md; implementation remains pending spec/plan gates.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+2026-07-10: Corrected the remediation design after tracing both public web ingestion contracts. No new strategy request field will be added; existing perform_analysis/summarize_checkbox intent will be propagated to the internal extraction pipeline.
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
