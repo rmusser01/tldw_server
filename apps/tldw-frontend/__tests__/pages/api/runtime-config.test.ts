@@ -86,21 +86,34 @@ describe("WebUI runtime config API", () => {
     expect(JSON.stringify(res.body ?? "")).not.toContain("runtime-single-user-key")
   })
 
-  it("keeps a valid custom session cookie name server-only", async () => {
-    process.env.SINGLE_USER_SESSION_COOKIE_NAME = "custom_session"
+  it.each(["custom_session", "CSRF_TOKEN"])(
+    "keeps valid custom session cookie name %s server-only",
+    async (cookieName) => {
+      process.env.SINGLE_USER_SESSION_COOKIE_NAME = cookieName
 
-    const res = await callRuntimeConfig()
+      const res = await callRuntimeConfig()
 
-    expect(res.statusCode).toBe(200)
-    expect(res.body.runtimeAuth).toEqual({
-      available: true,
-      authMode: "single-user",
-      transport: "cookie-session"
-    })
-    expect(JSON.stringify(res.body)).not.toContain("custom_session")
-  })
+      expect(res.statusCode).toBe(200)
+      expect(res.body.runtimeAuth).toEqual({
+        available: true,
+        authMode: "single-user",
+        transport: "cookie-session"
+      })
+      expect(JSON.stringify(res.body)).not.toContain(cookieName)
+    }
+  )
 
-  it.each(["invalid name", "session=value", "session;name", "/session"])(
+  it.each([
+    "",
+    "csrf_token",
+    "__Host-session",
+    "__Http-session",
+    "__secure-session",
+    "invalid name",
+    "session=value",
+    "session;name",
+    "/session"
+  ])(
     "returns unavailable for invalid cookie name %j",
     async (cookieName) => {
       process.env.SINGLE_USER_SESSION_COOKIE_NAME = cookieName
@@ -109,7 +122,7 @@ describe("WebUI runtime config API", () => {
 
       expect(res.statusCode).toBe(200)
       expect(res.body.runtimeAuth).toEqual({ available: false })
-      expect(JSON.stringify(res.body)).not.toContain(cookieName)
+      if (cookieName) expect(JSON.stringify(res.body)).not.toContain(cookieName)
       expect(JSON.stringify(res.body)).not.toContain("runtime-single-user-key")
     }
   )

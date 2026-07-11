@@ -11,6 +11,7 @@ export type RuntimeAuthPolicy =
 
 const DEFAULT_SESSION_COOKIE_NAME = 'tldw_single_user_session';
 const COOKIE_NAME_PATTERN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+const RESERVED_COOKIE_PREFIX_PATTERN = /^__(?:Host|Http|Secure)-/i;
 
 const PLACEHOLDER_KEYS = new Set([
   'change-me',
@@ -95,9 +96,15 @@ const hasForwardingHeaders = (req: NextApiRequest): boolean =>
 
 const resolvedSessionCookieName = (): string | null => {
   const configured = process.env.SINGLE_USER_SESSION_COOKIE_NAME;
-  const value =
-    configured === undefined || configured === '' ? DEFAULT_SESSION_COOKIE_NAME : configured;
-  return COOKIE_NAME_PATTERN.test(value) ? value : null;
+  const value = configured === undefined ? DEFAULT_SESSION_COOKIE_NAME : configured;
+  if (
+    !COOKIE_NAME_PATTERN.test(value) ||
+    value === 'csrf_token' ||
+    RESERVED_COOKIE_PREFIX_PATTERN.test(value)
+  ) {
+    return null;
+  }
+  return value;
 };
 
 const validatedInternalOrigin = (): string | null => {

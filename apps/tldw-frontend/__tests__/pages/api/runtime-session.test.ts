@@ -286,7 +286,17 @@ describe('WebUI runtime session bootstrap API', () => {
     expect(JSON.stringify(res.body ?? '')).not.toContain(API_KEY);
   });
 
-  it.each(['invalid name', 'session=value', 'session;name', '/session'])(
+  it.each([
+    '',
+    'csrf_token',
+    '__Host-session',
+    '__Http-session',
+    '__secure-session',
+    'invalid name',
+    'session=value',
+    'session;name',
+    '/session',
+  ])(
     'fails closed without forwarding the key for invalid cookie name %j',
     async (cookieName) => {
       process.env.SINGLE_USER_SESSION_COOKIE_NAME = cookieName;

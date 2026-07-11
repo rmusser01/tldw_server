@@ -52,6 +52,8 @@ modified_files:
 - Dockerfiles/docker-compose.single-user.yml
 - Dockerfiles/docker-compose.host-storage.yml
 - Dockerfiles/docker-compose.webui.yml
+- tldw_Server_API/app/core/AuthNZ/settings.py
+- tldw_Server_API/tests/AuthNZ/unit/test_settings_single_user_session_cookie.py
 ---
 
 ## Description
@@ -102,3 +104,9 @@ Hybrid design: reuse the existing AuthNZ SessionManager/sessions table for a hig
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Task 4 remaining medium finding fixed from reviewed base 35461f5743. WebUI and backend Settings now apply the same cookie-name contract: default only when absent; reject explicit empty, invalid token syntax, exact csrf_token, and case-insensitive __Host-/__Http-/__Secure- prefixes; accept valid custom names including case-distinct CSRF_TOKEN. Compose `${VAR:-default}` behavior remains intentionally unchanged. TDD: frontend RED 8/114 pass plus 2-case __Http- RED, then GREEN 155/155; backend RED 9/3 pass plus 1-case __Http- RED, then GREEN 21/21. ESLint, strict targeted tsc, Python compile, Bandit (0 findings), and diff check all exit 0. Full evidence appended to `.superpowers/sdd/http-task-4-report.md`.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
