@@ -1130,7 +1130,7 @@ git commit -m "fix: harden watchlists accessibility and layout"
 
 **Tests:** Backend, frontend, typecheck, lint, builds, Playwright, CDP UAT, axe, Impeccable audit, Bandit, and manual UX checks.
 
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 10: Add acceptance coverage, run matched revisions, and polish
 
@@ -1142,7 +1142,7 @@ git commit -m "fix: harden watchlists accessibility and layout"
 - Modify: `apps/packages/ui/src/components/Option/Watchlists/OverviewTab/__tests__/PipelineWizard.test.tsx`
 - Modify: `apps/packages/ui/src/assets/locale/en/watchlists.json`
 - Modify: `Docs/superpowers/plans/IMPLEMENTATION_PLAN_watchlists_briefing_contract_ux_2026_07_09.md`
-- Modify: `backlog/tasks/task-12105 - Unify-Watchlists-briefing-pipeline-contract-and-harden-latest-briefing-UX.md`
+- Modify: `backlog/tasks/task-12946 - Unify-Watchlists-briefing-pipeline-contract-and-harden-latest-briefing-UX.md`
 
 **Interfaces:**
 - Produces repeatable UAT evidence for daily news briefing and two-host sportscast/culture roundtable.
@@ -1269,7 +1269,7 @@ Use `superpowers:requesting-code-review` with the approved specification, this p
 - [ ] **Step 13: Commit Task 10**
 
 ```bash
-git add apps/tldw-frontend/e2e/workflows/watchlists-demo-readiness.spec.ts apps/extension/tests/e2e/watchlists.spec.ts Docs/Runbooks/watchlists_demo_readiness_2026_05_20.md Docs/superpowers/plans/IMPLEMENTATION_PLAN_watchlists_briefing_contract_ux_2026_07_09.md "backlog/tasks/task-12105 - Unify-Watchlists-briefing-pipeline-contract-and-harden-latest-briefing-UX.md"
+git add apps/tldw-frontend/e2e/workflows/watchlists-demo-readiness.spec.ts apps/extension/tests/e2e/watchlists.spec.ts Docs/Runbooks/watchlists_demo_readiness_2026_05_20.md Docs/superpowers/plans/IMPLEMENTATION_PLAN_watchlists_briefing_contract_ux_2026_07_09.md "backlog/tasks/task-12946 - Unify-Watchlists-briefing-pipeline-contract-and-harden-latest-briefing-UX.md"
 git commit -m "test: verify watchlists briefing acceptance"
 ```
 
@@ -1281,7 +1281,7 @@ git commit -m "test: verify watchlists briefing acceptance"
 - Modify: `apps/packages/ui/src/components/Option/Watchlists/OverviewTab/PipelineWizard.tsx`
 - Modify: `apps/packages/ui/src/components/Option/Watchlists/OverviewTab/LatestBriefing.tsx`
 - Modify: focused Watchlists tests and locale catalogs
-- Modify: this plan and `TASK-12105`
+- Modify: this plan and `TASK-12946`
 
 **Interfaces:**
 - Produces one default-tenant resolver for all Workflow ownership checks, a localized natural-language activation receipt, selected-audio activation proof, and truthful aggregate artifact status.
@@ -1303,28 +1303,28 @@ Normalize absent or blank tenant claims once and use that helper throughout Work
 
 Update the stale accessible-name expectation to the shipped record-specific label and replace nested callback signatures in `PipelineWizardProps` with named handler aliases so the static interface guard parses the contract correctly.
 
-- [ ] **Step 5: Rebuild the branch on current `origin/dev`**
+- [x] **Step 5: Rebuild the branch on current `origin/dev`**
 
 Create a dated safety reference, replay only the Watchlists feature range beginning after `20c911e01d7f5065ea53913c3e01f3ba5bd78675` onto current `origin/dev`, resolve conflicts without importing unrelated history, and verify PR #2710 is cleanly mergeable.
 
-- [ ] **Step 6: Repeat real-backend extension CDP UAT**
+- [x] **Step 6: Repeat real-backend extension CDP UAT**
 
 Build the Chrome extension from the rebuilt commit, start the real FastAPI backend from the same worktree, load the unpacked extension through Playwright/CDP without CUA, click Play and verify playback advances, click Download audio and verify an authenticated 200 response plus a completed browser download.
 
-- [ ] **Step 7: Run final verification and update evidence**
+- [x] **Step 7: Run final verification and update evidence**
 
-Run focused backend and UI suites, Watchlists accessibility/type gates, locale validation, extension build, diff checks, and Bandit on every touched Python production file. Update `TASK-12105` and PR #2710 with exact results; keep the PR draft until the required human-written Change summary is supplied.
+Run focused backend and UI suites, Watchlists accessibility/type gates, locale validation, extension build, diff checks, and Bandit on every touched Python production file. Update `TASK-12946` and PR #2710 with exact results; keep the PR draft until the required human-written Change summary is supplied.
 
 ## Plan Self-Review Checklist
 
-- [ ] Every specification acceptance criterion maps to a task and executable verification step.
-- [ ] No setup path writes briefing preferences outside the canonical builder.
-- [ ] Collection status and fulfillment status remain distinct.
-- [ ] Audio success is required before configured delivery runs.
-- [ ] Retry idempotency covers output, audio, Chatbook, and email.
-- [ ] Zero-item and capped-selection outcomes are tested.
-- [ ] Sportscast and culture-roundtable paths are tested without adding a parallel pipeline.
-- [ ] WebUI and extension use the same components and contract.
-- [ ] Accessibility tests use multiple real record names.
-- [ ] Matched-revision UAT does not reuse the earlier mismatched backend.
-- [ ] Bandit, audit, build, and code-review gates are recorded before completion.
+- [x] Every specification acceptance criterion maps to a task and executable verification step.
+- [x] No setup path writes briefing preferences outside the canonical builder.
+- [x] Collection status and fulfillment status remain distinct.
+- [x] Audio success is required before configured delivery runs.
+- [x] Retry idempotency covers output, audio, Chatbook, and email.
+- [x] Zero-item and capped-selection outcomes are tested.
+- [x] Sportscast and culture-roundtable paths are tested without adding a parallel pipeline.
+- [x] WebUI and extension use the same components and contract.
+- [x] Accessibility tests use multiple real record names.
+- [x] Matched-revision UAT does not reuse the earlier mismatched backend.
+- [x] Bandit, audit, build, and code-review gates are recorded before completion.
