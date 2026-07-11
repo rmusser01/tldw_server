@@ -18263,14 +18263,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             return self._is_workspace_source_saved_view_sqlite_unique_error(exc)
         return self._is_workspace_source_saved_view_postgres_unique_error(exc)
 
-    def _raise_workspace_source_saved_view_duplicate_after_rollback(
+    def _raise_workspace_source_saved_view_duplicate_from_fresh_transaction(
         self,
         owner_user_id: str,
         workspace_id: str,
         name_key: str,
     ) -> None:
-        """Resolve duplicate metadata in a fresh scoped transaction after rollback."""
-        with self.transaction() as conn:
+        """Resolve duplicate metadata through a backend-appropriate fresh transaction."""
+        def raise_scoped_conflict(conn: Any) -> None:
             self._require_workspace_source_saved_view_workspace(conn, owner_user_id, workspace_id)
             conflict = self._find_workspace_source_saved_view_name_with_conn(
                 conn,
@@ -18281,6 +18281,20 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if conflict is None:
                 raise WorkspaceSourceSavedViewNotFoundError
             self._raise_workspace_source_saved_view_name_conflict(conflict)
+
+        if self.backend_type == BackendType.POSTGRESQL:
+            backend = self.backend
+            with backend.transaction() as raw_conn:
+                conn = BackendConnectionWrapper(self, raw_conn, backend)
+                conn.execute(
+                    "SELECT set_config('app.current_user_id', ?, true)",
+                    (str(owner_user_id),),
+                )
+                raise_scoped_conflict(conn)
+            return
+
+        with self.transaction() as conn:
+            raise_scoped_conflict(conn)
 
     def create_workspace_source_saved_view(
         self,
@@ -18354,7 +18368,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         except (sqlite3.IntegrityError, BackendDatabaseError) as exc:
             if not self._is_workspace_source_saved_view_unique_error(exc):
                 raise
-            self._raise_workspace_source_saved_view_duplicate_after_rollback(
+            self._raise_workspace_source_saved_view_duplicate_from_fresh_transaction(
                 owner_user_id,
                 workspace_id,
                 name_key,
@@ -18503,7 +18517,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         except (sqlite3.IntegrityError, BackendDatabaseError) as exc:
             if name_key is None or not self._is_workspace_source_saved_view_unique_error(exc):
                 raise
-            self._raise_workspace_source_saved_view_duplicate_after_rollback(
+            self._raise_workspace_source_saved_view_duplicate_from_fresh_transaction(
                 owner_user_id,
                 workspace_id,
                 name_key,

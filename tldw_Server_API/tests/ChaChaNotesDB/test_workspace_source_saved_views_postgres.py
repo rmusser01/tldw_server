@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
+from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig, DatabaseError
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import ensure_chacha_rls
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
@@ -279,6 +279,101 @@ def test_postgres_concurrent_count_duplicate_and_rename_conflicts_have_safe_meta
         backend.get_pool().close_all()
 
 
+@pytest.mark.parametrize("operation", ["create", "update"])
+def test_postgres_named_unique_recovery_uses_independent_connection_when_nested(
+    pg_database_config: DatabaseConfig,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+) -> None:
+    backend, db = _database(pg_database_config)
+    workspace_id = f"ws-named-unique-{operation}"
+    db.upsert_workspace(workspace_id, "Named unique recovery")
+    conflict = _create(db, workspace_id, name="Conflict")
+    conflict = db.update_workspace_source_saved_view(
+        OWNER_A,
+        workspace_id,
+        conflict["id"],
+        expected_version=1,
+        state_json="conflicting row version two",
+        schema_version=2,
+    )
+    candidate = _create(db, workspace_id, name="Candidate")
+    original_find = db._find_workspace_source_saved_view_name_with_conn
+    original_detect = db._is_workspace_source_saved_view_postgres_unique_error
+    find_connection_ids: list[int] = []
+    detected_errors: list[tuple[str | None, str | None]] = []
+
+    def stale_once(
+        conn: Any,
+        owner_user_id: str,
+        scoped_workspace_id: str,
+        name_key: str,
+        *,
+        exclude_view_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        raw_connection = getattr(conn, "_connection", conn)
+        find_connection_ids.append(id(raw_connection))
+        if len(find_connection_ids) == 1:
+            return None
+        return original_find(
+            conn,
+            owner_user_id,
+            scoped_workspace_id,
+            name_key,
+            exclude_view_id=exclude_view_id,
+        )
+
+    def record_named_unique(exc: Exception) -> bool:
+        current: BaseException | None = exc
+        while current is not None:
+            sqlstate = getattr(current, "sqlstate", None) or getattr(current, "pgcode", None)
+            diagnostics = getattr(current, "diag", None)
+            constraint_name = getattr(diagnostics, "constraint_name", None)
+            if sqlstate is not None or constraint_name is not None:
+                detected_errors.append((sqlstate, constraint_name))
+            current = current.__cause__
+        return original_detect(exc)
+
+    monkeypatch.setattr(db, "_find_workspace_source_saved_view_name_with_conn", stale_once)
+    monkeypatch.setattr(db, "_is_workspace_source_saved_view_postgres_unique_error", record_named_unique)
+
+    try:
+        with pytest.raises(CharactersRAGDBError) as exc_info:
+            with db.transaction() as outer_conn:
+                outer_conn.execute(
+                    "UPDATE workspaces SET description = ? WHERE id = ?",
+                    ("must roll back", workspace_id),
+                )
+                if operation == "create":
+                    _create(db, workspace_id, name="CONFLICT")
+                else:
+                    db.update_workspace_source_saved_view(
+                        OWNER_A,
+                        workspace_id,
+                        candidate["id"],
+                        expected_version=1,
+                        name="CONFLICT",
+                    )
+
+        assert exc_info.value.code == "source_view_name_exists"
+        assert exc_info.value.metadata == {"view_id": conflict["id"], "version": 2}
+        assert (
+            "23505",
+            "uq_workspace_source_saved_views_owner_name",
+        ) in detected_errors
+        assert len(find_connection_ids) == 2
+        assert find_connection_ids[0] != find_connection_ids[1]
+        unchanged = db.get_workspace_source_saved_view(OWNER_A, workspace_id, candidate["id"])
+        assert unchanged["name"] == "Candidate"
+        assert unchanged["version"] == 1
+        workspace = db.get_workspace(workspace_id)
+        assert workspace is not None
+        assert workspace["description"] is None
+    finally:
+        db.close_all_connections()
+        backend.get_pool().close_all()
+
+
 @pytest.mark.parametrize("operation", ["create", "update", "delete"])
 @pytest.mark.parametrize("delete_first", [False, True], ids=["mutation-first", "delete-first"])
 def test_postgres_saved_view_mutations_serialize_with_workspace_soft_delete(
@@ -432,13 +527,38 @@ def test_postgres_rls_isolates_two_principals_and_active_workspaces(
             backend.execute(f"GRANT {ident(role_name)} TO CURRENT_USER", connection=conn)
         role_created = True
 
-        with backend.transaction() as conn:
+        def set_constrained_principal(conn: Any, owner: str) -> None:
             backend.execute(f"SET LOCAL ROLE {ident(role_name)}", connection=conn)
             backend.execute(
                 "SELECT set_config('app.current_user_id', ?, true)",
-                (OWNER_B,),
+                (owner,),
                 connection=conn,
             )
+
+        def direct_insert(conn: Any, *, owner: str, workspace_id: str, name: str) -> str:
+            view_id = str(uuid4())
+            backend.execute(
+                """
+                INSERT INTO workspace_source_saved_views (
+                    id, workspace_id, owner_user_id, name, name_key, schema_version,
+                    state_json, version, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, 1, '{}', 1, ?, ?)
+                """,
+                (
+                    view_id,
+                    workspace_id,
+                    owner,
+                    name,
+                    name.casefold(),
+                    "2026-01-01T00:00:00.000Z",
+                    "2026-01-01T00:00:00.000Z",
+                ),
+                connection=conn,
+            )
+            return view_id
+
+        with backend.transaction() as conn:
+            set_constrained_principal(conn, OWNER_B)
             visible = list(
                 backend.execute(
                     "SELECT id FROM workspace_source_saved_views ORDER BY id",
@@ -455,21 +575,57 @@ def test_postgres_rls_isolates_two_principals_and_active_workspaces(
                 (owner_view["id"],),
                 connection=conn,
             )
-            with pytest.raises(Exception, match="row-level security"):
-                backend.execute(
-                    """
-                    INSERT INTO workspace_source_saved_views (
-                        id, workspace_id, owner_user_id, name, name_key, schema_version,
-                        state_json, version, created_at, updated_at
-                    ) VALUES (?, 'ws-a', ?, 'Injected', 'injected', 1, '{}', 1, ?, ?)
-                    """,
-                    (str(uuid4()), OWNER_A, "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z"),
-                    connection=conn,
-                )
 
         assert [row["id"] for row in visible] == [other_view["id"]]
         assert updated.rowcount == 0
         assert deleted.rowcount == 0
+
+        with pytest.raises(DatabaseError, match="row-level security"):
+            with backend.transaction() as conn:
+                set_constrained_principal(conn, OWNER_B)
+                direct_insert(conn, owner=OWNER_A, workspace_id="ws-a", name="Wrong owner")
+
+        with pytest.raises(DatabaseError, match="row-level security"):
+            with backend.transaction() as conn:
+                set_constrained_principal(conn, OWNER_B)
+                direct_insert(conn, owner=OWNER_B, workspace_id="ws-a", name="Wrong workspace")
+
+        with backend.transaction() as conn:
+            set_constrained_principal(conn, OWNER_A)
+            visible_a = list(
+                backend.execute(
+                    "SELECT id FROM workspace_source_saved_views ORDER BY id",
+                    connection=conn,
+                )
+            )
+            allowed_id = direct_insert(
+                conn,
+                owner=OWNER_A,
+                workspace_id="ws-a",
+                name="Allowed insert",
+            )
+            selected = list(
+                backend.execute(
+                    "SELECT id FROM workspace_source_saved_views WHERE id = ?",
+                    (allowed_id,),
+                    connection=conn,
+                )
+            )
+            allowed_update = backend.execute(
+                "UPDATE workspace_source_saved_views SET name = ?, name_key = ? WHERE id = ?",
+                ("Allowed update", "allowed update", allowed_id),
+                connection=conn,
+            )
+            allowed_delete = backend.execute(
+                "DELETE FROM workspace_source_saved_views WHERE id = ?",
+                (allowed_id,),
+                connection=conn,
+            )
+
+        assert [row["id"] for row in visible_a] == [owner_view["id"]]
+        assert selected == [{"id": allowed_id}]
+        assert allowed_update.rowcount == 1
+        assert allowed_delete.rowcount == 1
         assert owner_db.get_workspace_source_saved_view(OWNER_A, "ws-a", owner_view["id"])["id"] == owner_view["id"]
     finally:
         owner_db.close_connection()
