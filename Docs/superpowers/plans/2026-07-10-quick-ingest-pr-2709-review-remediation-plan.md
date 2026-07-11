@@ -339,7 +339,7 @@ The command must use `apps/extension/playwright.config.ts` and its global setup.
 
 Expected: PASS against the explicitly configured local WebUI/backend test environment.
 
-- [ ] **Step 6: Commit the UI regression coverage**
+- [x] **Step 6: Commit the UI regression coverage**
 
 ```bash
 git add apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx apps/extension/tests/e2e/live-ux-workflows.spec.ts apps/extension/tests/e2e/quick-ingest-workflows.spec.ts apps/extension/tests/e2e/utils/quick-ingest-options.ts
@@ -377,15 +377,15 @@ Expected: no new findings in changed code.
 
 Start the real backend and WebUI. Through the browser, upload a PDF, ingest a reachable local link, ingest `https://www.youtube.com/shorts/6-rf_YXDpPg`, then repeat the link and YouTube submissions in the same mounted app session. Verify visible progress leaves queued/0%, each first submission reaches terminal success with stored media, repeats are visibly skipped/existing, and no maximum-depth console/page error occurs. Inspect corresponding backend job status/results and Media DB entries rather than relying only on UI toasts.
 
-- [ ] **Step 4: Self-review the complete diff against current `origin/dev`**
+- [x] **Step 4: Self-review the complete diff against current `origin/dev`**
 
 Check behavior, compatibility, logging safety, exact duplicate boundaries, test quality, and accidental unrelated changes. Run `git diff --check` and inspect `git status --short` without touching the two unrelated untracked watchlist templates.
 
-- [ ] **Step 5: Update Backlog and resolve PR comments**
+- [x] **Step 5: Update Backlog and resolve PR comments**
 
 Use official Backlog MCP/CLI to check acceptance criteria/DoD, replace stale notes with real line breaks, attach plan and verification evidence, and keep status accurate. Reply to and resolve every actionable PR review thread with the implementing commit/test evidence.
 
-- [ ] **Step 6: Rebase, reverify changed surfaces, and push**
+- [x] **Step 6: Rebase, reverify changed surfaces, and push**
 
 Fetch and rebase onto latest `origin/dev`; rerun any conflict-affected focused tests; push with `--force-with-lease`. Confirm PR checks and unresolved-thread count.
 

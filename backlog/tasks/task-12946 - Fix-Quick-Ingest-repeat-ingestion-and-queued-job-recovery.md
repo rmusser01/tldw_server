@@ -4,7 +4,7 @@ title: Fix Quick Ingest repeat ingestion and queued job recovery
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-11 16:23'
+updated_date: '2026-07-11 16:27'
 labels: []
 dependencies: []
 documentation:
@@ -26,7 +26,7 @@ Investigate repeated user reports of WebUI/browser-extension Quick Ingest failur
 - [x] #4 Stale yt-dlp installations produce actionable diagnostics and current installations continue normally.
 - [x] #5 Touched persistence logs redact user-controlled URL secrets.
 - [x] #6 Focused automated verification, Bandit, and full PDF, local-link, and YouTube Shorts UAT pass outside the sandbox.
-- [ ] #7 All actionable PR review threads are resolved and the branch is current with dev.
+- [x] #7 All actionable PR review threads are resolved and the branch is current with dev.
 - [x] #8 Existing perform_analysis and summarize_checkbox declarations govern request-level LLM extraction without a new public API field, while non-API scraper consumers retain the established default order.
 <!-- AC:END -->
 
@@ -61,14 +61,24 @@ Task 5 complete at f4e6e81c33: added a thread-safe, exactly-once, nonblocking yt
 2026-07-11 renewed host-side UAT: a clean PDF run completed, but every same-mounted-session second submission reproduced Maximum update depth in @rc-component/portal before the link result rendered. Three isolated attempts disproved getContainer and stale-tracking-only fixes. Proven findings retained: returning a session to draft must clear old direct job tracking; the media worker's generic exponential idle backoff reached a 30-second ceiling (observed queued for 28 seconds before claim), so its user-facing default ceiling is reduced to 2 seconds while preserving the env override. Remaining proposed architecture change requires approval: Ingest More should call the existing replaceWithNewDraft() so the provider key/session/run refs remount instead of reusing the completed provider. Full PDF/link/YouTube repeat UAT is not yet passing; prior final summary cleared as stale.
 
 2026-07-11 approved architecture fix and fresh host-side UAT: Ingest More now calls the existing replaceWithNewDraft path, creating a new session/provider key instead of reusing completed reducer and run refs. Draft upserts also clear stale direct-job tracking. One mounted WebUI walkthrough passed PDF, RFC 9110 link, repeated RFC link, exact YouTube Short https://www.youtube.com/shorts/6-rf_YXDpPg, and repeated YouTube Short. First submissions succeeded; repeats were classified as skipped existing. pageErrors and consoleErrors were empty. PDF and YouTube jobs began within one second of creation, confirming the media worker 2-second default idle-backoff ceiling removes the observed 28-second queued-at-0-percent delay. Jobs DB: three completed 100-percent jobs with Success, Success, Skipped. Media DB: exactly three rows for PDF, RFC link, and YouTube Short. Evidence: /tmp/task12946_quick_ingest_uat_10_evidence.json and /tmp/task12946_quick_ingest_uat_10_final.png. Focused UI Vitest passed 46/46, media worker pytest passed 19/19, extension TypeScript compile passed, and Bandit reported zero findings. The focused extension Playwright test could not be completed locally after three launch attempts: two headless attempts exposed no MV3 targets and the required headful attempt timed out; repository CI uses xvfb with TLDW_E2E_EXTENSION_HEADLESS=0, so this test remains for CI verification after push.
+
+2026-07-11 closeout: rebased cleanly onto latest origin/dev, reran 46/46 UI tests, 19/19 media worker tests, and extension TypeScript compile successfully, force-pushed head 9ccf66c89a, posted UAT evidence to PR #2709, and resolved all 13 inline review threads. GitHub reports the PR mergeable; 20 checks are queued, 1 succeeded, and 2 skipped. Human Change summary remains the merge gate.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Root causes and fixes are now validated. Repeated Ingest More submissions reused the completed persisted session, provider key, reducer, and run refs; the wizard now uses replaceWithNewDraft so each new run remounts under a fresh session id, and draft transitions clear stale direct-job tracking. Backend jobs appeared queued at 0 percent because the media worker inherited a generic exponential idle backoff with a 30-second ceiling; the media worker default ceiling is now 2 seconds while preserving the environment override. Earlier fixes in this task also made duplicate outcomes exact and visible, restored transient job reattachment, honored the existing web ingestion analysis declarations without a new API field, protected URL logs, preserved Webpack watch ignores, and diagnosed stale yt-dlp versions.
+
+Fresh host-side UAT in one mounted WebUI passed PDF, RFC link and duplicate, and the exact YouTube Short https://www.youtube.com/shorts/6-rf_YXDpPg and duplicate. First submissions succeeded, repeats were skipped existing, no page or console errors occurred, jobs began within one second and reached 100 percent, and the Media DB contained exactly three unique records. Post-rebase verification passed 46 UI tests, 19 media-worker tests, TypeScript compile, Bandit with zero findings, and diff whitespace checks. All 13 PR review threads are resolved and the branch is current with dev. GitHub CI is queued. The PR is not merge-ready until the human requester writes the required Change summary explaining what changed and why; the local MV3 Playwright launcher limitation is documented and CI remains its verifier.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
