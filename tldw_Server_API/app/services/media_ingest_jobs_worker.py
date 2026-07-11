@@ -118,7 +118,7 @@ def _build_worker_config(*, worker_id: str, queue: str) -> WorkerConfig:
         renew_jitter_seconds=renew_jitter_seconds,
         renew_threshold_seconds=renew_threshold_seconds,
         backoff_base_seconds=_coerce_int(os.getenv("MEDIA_INGEST_JOBS_BACKOFF_BASE_SECONDS"), 2),
-        backoff_max_seconds=_coerce_int(os.getenv("MEDIA_INGEST_JOBS_BACKOFF_MAX_SECONDS"), 30),
+        backoff_max_seconds=_coerce_int(os.getenv("MEDIA_INGEST_JOBS_BACKOFF_MAX_SECONDS"), 2),
         retry_on_exception=True,
         retry_backoff_seconds=_coerce_int(os.getenv("MEDIA_INGEST_JOBS_RETRY_BACKOFF_SECONDS"), 10),
     )

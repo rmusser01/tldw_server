@@ -23,6 +23,18 @@ class _CollectionUpdateRecorder:
         return None
 
 
+def test_media_ingest_worker_defaults_to_responsive_idle_backoff(monkeypatch):
+    import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+
+    monkeypatch.delenv("MEDIA_INGEST_JOBS_BACKOFF_BASE_SECONDS", raising=False)
+    monkeypatch.delenv("MEDIA_INGEST_JOBS_BACKOFF_MAX_SECONDS", raising=False)
+
+    config = worker._build_worker_config(worker_id="media-worker", queue="default")
+
+    assert config.backoff_base_seconds == 2
+    assert config.backoff_max_seconds == 2
+
+
 def _install_fake_collections_db(monkeypatch, worker, recorder: _CollectionUpdateRecorder):
     class _FakeCollectionsDatabase:
         @classmethod
