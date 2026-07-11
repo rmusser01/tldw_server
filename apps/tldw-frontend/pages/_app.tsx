@@ -8,6 +8,7 @@ import dynamic from "next/dynamic"
 import { useRouter } from "next/router"
 import React from "react"
 import { BackendRecoveryUiProvider } from "@/components/Common/BackendRecoveryUiContext"
+import { PageAssistLoader } from "@/components/Common/PageAssistLoader"
 import { FirstRunGate } from "@/components/PersonaGarden/FirstRunGate"
 import { AppProviders } from "@web/components/AppProviders"
 import ErrorBoundary from "@web/components/ErrorBoundary"
@@ -398,6 +399,10 @@ export default function App({ Component, pageProps }: AppProps) {
   )
   const enableNotifications =
     authResolved && isAuthenticated && !isPublicAuthRoute && !isSetupRoute
+
+  if (!authResolved) {
+    return <PageAssistLoader label="Loading..." autoFocus={false} />
+  }
 
   const layoutContent = (
     <OptionLayout {...layoutProps}>

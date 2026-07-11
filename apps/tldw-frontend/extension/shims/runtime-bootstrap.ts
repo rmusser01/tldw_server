@@ -19,7 +19,11 @@ import {
   resolveWebUiQuickstartServerUrl,
   type BrowserSurface
 } from "@/services/tldw/browser-networking"
-import { clearRuntimeAuthOverride } from "@/services/tldw/runtime-auth-override"
+import {
+  activateCookieSessionConfig,
+  clearRuntimeAuthOverride,
+  invalidateCookieSessionConfig
+} from "@/services/tldw/runtime-auth-override"
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === "object" && value !== null
@@ -331,6 +335,7 @@ const seedTldwConfigFromRuntime = async (): Promise<void> => {
   if (typeof window === "undefined") return
 
   const storage = createSafeStorage()
+  invalidateCookieSessionConfig()
   await storage.remove(COOKIE_SESSION_CONFIG_KEY).catch(() => undefined)
 
   const payload = await fetchRuntimeConfig()
@@ -361,6 +366,7 @@ const seedTldwConfigFromRuntime = async (): Promise<void> => {
       await storage.set("tldwConfig", safeExisting)
     }
     await storage.set(COOKIE_SESSION_CONFIG_KEY, next)
+    activateCookieSessionConfig()
     clearRuntimeAuth()
     clearRuntimeAuthOverride()
     removeLegacyRuntimeSecrets()

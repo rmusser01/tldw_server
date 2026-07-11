@@ -68,7 +68,11 @@ describe("ACPWorkspacePanel canonical Workspace handoff", () => {
     workspaceContextMock.compareOverride = null
   })
 
-  it("uses a page-origin SSH socket without auth protocols for quickstart cookie sessions", () => {
+  it.each([
+    ["normal relative", "/api/v1/acp/sessions/alpha/ssh"],
+    ["absolute", "wss://attacker.example.test/api/v1/acp/sessions/alpha/ssh"],
+    ["protocol-relative", "//attacker.example.test/api/v1/acp/sessions/alpha/ssh"]
+  ])("uses the canonical page-origin SSH route for a %s server URL in cookie mode", (_label, sshWsUrl) => {
     const originalDeploymentMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
     process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
     try {
@@ -79,7 +83,8 @@ describe("ACPWorkspacePanel canonical Workspace handoff", () => {
             authMode: "single-user",
             authSource: "cookie-session"
           },
-          "/api/v1/acp/sessions/alpha/ssh"
+          sshWsUrl,
+          "alpha"
         )
       ).toEqual({
         url: `${window.location.origin.replace(/^http/i, "ws")}/api/v1/acp/sessions/alpha/ssh`,
@@ -93,6 +98,24 @@ describe("ACPWorkspacePanel canonical Workspace handoff", () => {
         process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = originalDeploymentMode
       }
     }
+  })
+
+  it("preserves an absolute SSH socket URL for manual auth", () => {
+    expect(
+      resolveACPWorkspaceWebSocketRequest(
+        {
+          serverUrl: "https://remote.example.test",
+          authMode: "single-user",
+          apiKey: "manual-key"
+        },
+        "wss://ssh.example.test/api/v1/acp/sessions/alpha/ssh",
+        "alpha"
+      )
+    ).toEqual({
+      url: "wss://ssh.example.test/api/v1/acp/sessions/alpha/ssh",
+      headers: { "X-API-KEY": "manual-key" },
+      protocols: ["x-api-key", "manual-key"]
+    })
   })
 
   it("links no-session users to the canonical Workspaces manager", () => {

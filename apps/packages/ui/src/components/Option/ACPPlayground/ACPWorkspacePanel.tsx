@@ -20,7 +20,12 @@ type WebSocketWithHeaders = new (
 
 const buildWsUrl = (baseUrl: string, path: string): string => {
   const wsBase = baseUrl.replace(/^http/, "ws").replace(/\/$/, "")
-  const url = new URL(path.startsWith("/") ? path : `/${path}`, wsBase)
+  const isOriginBearingPath =
+    /^[a-z][a-z\d+.-]*:\/\//i.test(path) || path.startsWith("//")
+  const url = new URL(
+    isOriginBearingPath ? path : path.startsWith("/") ? path : `/${path}`,
+    `${wsBase}/`
+  )
   return url.toString()
 }
 
@@ -38,7 +43,8 @@ const buildAuthProtocols = (headers: Record<string, string>): string[] | undefin
 
 export const resolveACPWorkspaceWebSocketRequest = (
   connectionConfig: TldwConfig,
-  path: string
+  path: string,
+  sessionId: string
 ): {
   url: string
   headers: Record<string, string>
@@ -46,8 +52,14 @@ export const resolveACPWorkspaceWebSocketRequest = (
 } => {
   const cookieBase = resolveCookieSessionWebSocketBase(connectionConfig)
   const headers = cookieBase ? {} : buildACPAuthHeaders(connectionConfig)
+  const resolvedPath = cookieBase
+    ? `/api/v1/acp/sessions/${encodeURIComponent(sessionId)}/ssh`
+    : path
   return {
-    url: buildWsUrl(cookieBase || resolveACPServerUrl(connectionConfig), path),
+    url: buildWsUrl(
+      cookieBase || resolveACPServerUrl(connectionConfig),
+      resolvedPath
+    ),
     headers,
     protocols: cookieBase ? undefined : buildAuthProtocols(headers)
   }
@@ -160,7 +172,11 @@ export const ACPWorkspacePanel: React.FC = () => {
         fitAddon.fit()
 
         const { url, headers, protocols } =
-          resolveACPWorkspaceWebSocketRequest(connectionConfig, sshPath)
+          resolveACPWorkspaceWebSocketRequest(
+            connectionConfig,
+            sshPath,
+            activeSessionId
+          )
         const ws = createWebSocket(url, headers, protocols)
         ws.binaryType = "arraybuffer"
 

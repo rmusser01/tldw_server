@@ -108,6 +108,7 @@ describe("runtime-bootstrap chrome shim", () => {
   })
 
   afterEach(() => {
+    vi.restoreAllMocks()
     restoreGlobal("chrome", chromeDescriptor)
     restoreGlobal("browser", browserDescriptor)
     if (originalApiUrl === undefined) {
@@ -472,6 +473,53 @@ describe("runtime-bootstrap chrome shim", () => {
     expect(JSON.stringify(readStoredValue("tldwConfig"))).not.toContain(
       "public-runtime-key"
     )
+  })
+
+  it("invalidates a stale cookie marker in memory when persistent removal fails", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    const manualConfig = {
+      authMode: "single-user" as const,
+      apiKey: "manual-device-key",
+      credentialSource: "manual" as const,
+      apiKeyPersistence: "device" as const,
+      apiKeyServerOrigin: "https://remote.example.test",
+      serverUrl: "https://remote.example.test"
+    }
+    localStorage.setItem("tldwConfig", JSON.stringify(manualConfig))
+    localStorage.setItem(
+      "tldwCookieSessionConfig",
+      JSON.stringify({
+        authMode: "single-user",
+        authSource: "cookie-session",
+        serverUrl: window.location.origin
+      })
+    )
+    const { Storage } = await import("@plasmohq/storage")
+    vi.spyOn(Storage.prototype, "remove").mockRejectedValueOnce(
+      new Error("storage unavailable")
+    )
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({ runtimeAuth: { available: false } })
+      }))
+    )
+
+    const { TldwApiClient } = await import("@/services/tldw/TldwApiClient")
+    const client = new TldwApiClient()
+    expect(await client.getConfig()).toEqual({
+      authMode: "single-user",
+      authSource: "cookie-session",
+      serverUrl: window.location.origin
+    })
+
+    await importAndAwaitBootstrap()
+    const config = await client.getConfig()
+
+    expect(config).toEqual(manualConfig)
+    expect(readStoredValue("tldwConfig")).toEqual(manualConfig)
+    expect(readStoredValue("tldwCookieSessionConfig")).not.toBeNull()
   })
 
   it("does not fetch runtime config for extension protocols", async () => {

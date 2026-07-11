@@ -15,17 +15,20 @@ vi.mock("wxt/browser", () => ({
 }))
 
 let resolveRuntimeBootstrap: (() => void) | null = null
+let rejectRuntimeBootstrap: ((reason?: unknown) => void) | null = null
 let runtimeBootstrapReady: Promise<void> = Promise.resolve()
 
 const resetRuntimeBootstrap = (deferred = false) => {
   if (!deferred) {
     runtimeBootstrapReady = Promise.resolve()
     resolveRuntimeBootstrap = null
+    rejectRuntimeBootstrap = null
     return
   }
 
-  runtimeBootstrapReady = new Promise<void>((resolve) => {
+  runtimeBootstrapReady = new Promise<void>((resolve, reject) => {
     resolveRuntimeBootstrap = resolve
+    rejectRuntimeBootstrap = reject
   })
 }
 
@@ -46,6 +49,7 @@ vi.mock("@web/lib/authStorage", async (importOriginal) => {
 })
 
 import App from "@web/pages/_app"
+import { TldwApiClient } from "@/services/tldw/TldwApiClient"
 
 const mockRouter = {
   pathname: "/media",
@@ -98,6 +102,14 @@ vi.mock("@web/components/AppProviders", () => ({
       data-enable-notifications={String(Boolean(enableNotifications))}
     >
       {children}
+    </div>
+  )
+}))
+
+vi.mock("@/components/Common/PageAssistLoader", () => ({
+  PageAssistLoader: ({ label }: { label?: string }) => (
+    <div role="status" aria-busy="true">
+      {label || "Loading…"}
     </div>
   )
 }))
@@ -171,6 +183,8 @@ const originalEnvBearer = process.env.NEXT_PUBLIC_API_BEARER
 const originalDeploymentMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
 
 beforeEach(() => {
+  localStorage.clear()
+  sessionStorage.clear()
   mockRouter.push.mockClear()
   mockRouter.replace.mockClear()
   mockRouter.prefetch.mockClear()
@@ -198,7 +212,9 @@ afterAll(() => {
 describe("App layout routing", () => {
   it("wraps non-login routes with OptionLayout", async () => {
     renderApp("/media")
-    expect(screen.getByTestId("server-readiness-gate")).toBeInTheDocument()
+    expect(
+      await screen.findByTestId("server-readiness-gate")
+    ).toBeInTheDocument()
     expect(screen.getByTestId("server-readiness-gate")).toHaveAttribute(
       "data-allow-degraded",
       "false"
@@ -212,8 +228,9 @@ describe("App layout routing", () => {
     expect(screen.getByTestId("page-content")).toBeInTheDocument()
   })
 
-  it("allows degraded server readiness on chat and research workspace routes", () => {
+  it("allows degraded server readiness on chat and research workspace routes", async () => {
     const { rerender } = renderApp("/chat")
+    await screen.findByTestId("server-readiness-gate")
     expect(screen.getByTestId("server-readiness-gate")).toHaveAttribute(
       "data-allow-degraded",
       "true"
@@ -238,8 +255,9 @@ describe("App layout routing", () => {
     )
   })
 
-  it("routes first-time chat setup through the unified setup shell", () => {
+  it("routes first-time chat setup through the unified setup shell", async () => {
     renderApp("/chat")
+    await screen.findByTestId("server-readiness-gate")
 
     expect(screen.getByTestId("server-readiness-gate")).toHaveAttribute(
       "data-allow-degraded",
@@ -255,8 +273,9 @@ describe("App layout routing", () => {
     expect(mockRouter.push).toHaveBeenCalledWith("/")
   })
 
-  it("routes first-time media setup through the unified setup shell", () => {
+  it("routes first-time media setup through the unified setup shell", async () => {
     renderApp("/media")
+    await screen.findByTestId("first-run-gate")
 
     expect(screen.getByTestId("first-run-gate")).toHaveAttribute(
       "data-bypass",
@@ -268,8 +287,9 @@ describe("App layout routing", () => {
     expect(mockRouter.push).toHaveBeenCalledWith("/")
   })
 
-  it("lets the unified setup host route bypass the generic first-run overlay", () => {
+  it("lets the unified setup host route bypass the generic first-run overlay", async () => {
     renderApp("/")
+    await screen.findByTestId("first-run-gate")
 
     expect(screen.getByTestId("first-run-gate")).toHaveAttribute(
       "data-bypass",
@@ -279,6 +299,7 @@ describe("App layout routing", () => {
 
   it("bypasses the generic first-run splash for character-chat route intent", async () => {
     renderApp("/characters")
+    await screen.findByTestId("server-readiness-gate")
 
     expect(screen.getByTestId("server-readiness-gate")).toBeInTheDocument()
     expect(screen.getByTestId("first-run-gate")).toHaveAttribute(
@@ -293,8 +314,9 @@ describe("App layout routing", () => {
     )
   })
 
-  it("bypasses the generic first-run splash for Research Workspace direct entry", () => {
+  it("bypasses the generic first-run splash for Research Workspace direct entry", async () => {
     renderApp("/research-workspace")
+    await screen.findByTestId("server-readiness-gate")
 
     expect(screen.getByTestId("server-readiness-gate")).toBeInTheDocument()
     expect(screen.getByTestId("first-run-gate")).toHaveAttribute(
@@ -308,6 +330,7 @@ describe("App layout routing", () => {
       "/",
       "/?intent=character-chat&returnTo=%2Fcharacters%3Ffrom%3Dheader-select%26create%3Dtrue"
     )
+    await screen.findByTestId("first-run-gate")
 
     expect(screen.getByTestId("first-run-gate")).toHaveAttribute(
       "data-bypass",
@@ -321,8 +344,9 @@ describe("App layout routing", () => {
     )
   })
 
-  it("skips OptionLayout for /login but keeps ServerReadinessGate mounted", () => {
+  it("skips OptionLayout for /login but keeps ServerReadinessGate mounted", async () => {
     renderApp("/login")
+    await screen.findByTestId("server-readiness-gate")
     expect(screen.getByTestId("server-readiness-gate")).toBeInTheDocument()
     expect(screen.queryByTestId("first-run-gate")).toBeNull()
     expect(screen.queryByTestId("option-layout")).toBeNull()
@@ -363,6 +387,84 @@ describe("App layout routing", () => {
     await waitFor(() => {
       expect(mockGetConfig).toHaveBeenCalled()
     })
+  })
+
+  it("does not mount config consumers until deferred bootstrap activates the real cookie client", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    localStorage.setItem(
+      "tldwConfig",
+      JSON.stringify({
+        serverUrl: "https://remote.example.test",
+        authMode: "single-user",
+        apiKey: "manual-device-key",
+        credentialSource: "manual",
+        apiKeyPersistence: "device",
+        apiKeyServerOrigin: "https://remote.example.test"
+      })
+    )
+    const client = new TldwApiClient()
+    mockGetConfig.mockImplementation(() => client.getConfig())
+    resetRuntimeBootstrap(true)
+
+    const ConfigConsumerPage = () => {
+      const [source, setSource] = React.useState("pending")
+      React.useEffect(() => {
+        void client.getConfig().then((config) => {
+          setSource(config?.authSource || "manual")
+        })
+      }, [])
+      return <div data-testid="client-auth-source">{source}</div>
+    }
+
+    render(<App Component={ConfigConsumerPage} pageProps={{}} />)
+
+    expect(screen.getByRole("status")).toHaveTextContent("Loading")
+    expect(screen.queryByTestId("app-providers")).toBeNull()
+    expect(screen.queryByTestId("client-auth-source")).toBeNull()
+
+    localStorage.setItem(
+      "tldwCookieSessionConfig",
+      JSON.stringify({
+        serverUrl: window.location.origin,
+        authMode: "single-user",
+        authSource: "cookie-session"
+      })
+    )
+    await act(async () => {
+      resolveRuntimeBootstrap?.()
+      await runtimeBootstrapReady
+    })
+
+    expect(await screen.findByTestId("client-auth-source")).toHaveTextContent(
+      "cookie-session"
+    )
+    expect(JSON.parse(String(localStorage.getItem("tldwConfig")))).toEqual(
+      expect.objectContaining({
+        serverUrl: "https://remote.example.test",
+        apiKey: "manual-device-key"
+      })
+    )
+  })
+
+  it("leaves startup loading after a rejected bootstrap and resolves auth fail closed", async () => {
+    resetRuntimeBootstrap(true)
+    currentConfig = null
+
+    renderApp("/media")
+
+    expect(screen.getByRole("status")).toHaveTextContent("Loading")
+    expect(screen.queryByTestId("app-providers")).toBeNull()
+
+    await act(async () => {
+      rejectRuntimeBootstrap?.(new Error("bootstrap unavailable"))
+      await runtimeBootstrapReady.catch(() => undefined)
+    })
+
+    expect(await screen.findByTestId("app-providers")).toBeInTheDocument()
+    expect(screen.getByTestId("option-layout")).toHaveAttribute(
+      "data-hide-header",
+      "true"
+    )
   })
 
   it("treats a probed quickstart cookie session as authenticated without an api key", async () => {

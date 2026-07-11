@@ -87,3 +87,34 @@ Static verification:
 - Temporary dependency and lint symlinks were removed and verified absent.
 
 Review-fix commit message: `fix(web): complete cookie-session client activation`.
+
+## Remaining review follow-up
+
+The remaining Task 5 findings were reproduced from base `14f64ba33c` and fixed without changing the existing UI vocabulary.
+
+- Startup now renders the existing accessible `PageAssistLoader` before `AppProviders`, `ConfigurationGuard`, readiness gates, layout, or the page component can mount. The gate opens only after runtime bootstrap and configured-auth resolution settle, including rejected-bootstrap and unauthenticated failure paths. The initial server render and client hydration both use the same loading state.
+- The startup race regression uses a real `TldwApiClient` backed by a complete manual device configuration. Its child consumer remains unmounted while bootstrap is deferred, then observes the verified cookie-session config after resolution while the manual configuration remains intact.
+- ACP workspace SSH ignores server-provided absolute and protocol-relative origins in verified cookie mode and constructs the canonical page-origin `/api/v1/acp/sessions/{id}/ssh` route. Manual auth continues to honor absolute SSH WebSocket URLs.
+- Runtime bootstrap invalidates cookie-session selection in memory before best-effort stale-marker removal. If removal fails and runtime auth is unavailable, both a new client and a client that previously cached the stale marker rehydrate the preserved manual configuration instead.
+- Speech streaming readiness now uses the shared cookie-session WebSocket resolver, which delegates to the centralized browser transport predicate. A stale cookie source marker in advanced mode therefore reaches the existing friendly missing-credentials recovery instead of the WebSocket URL builder.
+
+TDD RED evidence:
+
+- Startup: the real config-consuming child and provider tree mounted while the deferred bootstrap promise was unresolved.
+- ACP: absolute and protocol-relative cookie SSH URLs escaped the page origin; manual absolute SSH URLs were incorrectly appended to the configured server base.
+- Storage: failed stale-marker removal let a cached real client continue selecting cookie auth after runtime bootstrap was unavailable.
+- Speech: a stale advanced-mode cookie marker bypassed readiness and produced an unhandled `Not authenticated` builder rejection.
+
+Verification:
+
+```text
+Prior focused suites plus new regressions: 18 files passed; 171 tests passed.
+Background transport regression: 1 file passed; 45 tests passed.
+Focused ESLint: 0 errors; existing legacy warnings only.
+Frontend touched-path TypeScript: completed with no diagnostics.
+git diff --check: passed.
+```
+
+Bandit remains not applicable because this follow-up changes only TypeScript/TSX, tests, Backlog metadata, and this report. The temporary worktree dependency links used for test/type resolution were restored to their original tracked targets before final status checks.
+
+Remaining follow-up commit message: `fix(web): serialize cookie-session startup`.

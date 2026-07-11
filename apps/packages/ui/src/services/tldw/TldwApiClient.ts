@@ -48,7 +48,10 @@ import {
   resolveWebUiQuickstartServerUrl,
   type BrowserSurface
 } from "@/services/tldw/browser-networking"
-import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
+import {
+  getRuntimeSingleUserApiKeyOverride,
+  isCookieSessionConfigInvalidated
+} from "@/services/tldw/runtime-auth-override"
 import {
   type TldwProvidersResponse
 } from "@/services/tldw/model-provider-availability"
@@ -1734,11 +1737,12 @@ export class TldwApiClientBase {
     }
     const quickstartWebUiServerUrl = getQuickstartWebUiServerUrl()
     const envApiKey = quickstartWebUiServerUrl ? null : this.getEnvApiKey()
-    const storedCookieSession = quickstartWebUiServerUrl
-      ? await this.storage
-          .get<TldwConfig>(COOKIE_SESSION_CONFIG_KEY)
-          .catch(() => null)
-      : null
+    const storedCookieSession =
+      quickstartWebUiServerUrl && !isCookieSessionConfigInvalidated()
+        ? await this.storage
+            .get<TldwConfig>(COOKIE_SESSION_CONFIG_KEY)
+            .catch(() => null)
+        : null
     const activeCookieSession = isActiveCookieSessionConfig(
       storedCookieSession,
       quickstartWebUiServerUrl
@@ -1825,6 +1829,12 @@ export class TldwApiClientBase {
   }
 
   async getConfig(): Promise<TldwConfig | null> {
+    if (
+      isCookieSessionConfigInvalidated() &&
+      this.config?.authSource === "cookie-session"
+    ) {
+      this.config = null
+    }
     if (this.config === null) {
       await this.initialize().catch(() => null)
     }

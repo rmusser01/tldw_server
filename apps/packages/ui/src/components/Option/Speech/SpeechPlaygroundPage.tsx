@@ -58,6 +58,7 @@ import {
 } from "@/services/tts"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { buildAuthenticatedAudioWebSocketUrl } from "@/services/tldw/voice-conversation"
+import { resolveCookieSessionWebSocketBase } from "@/services/tldw/browser-websocket"
 import { copyToClipboard } from "@/utils/clipboard"
 import { estimateTtsDurationSeconds, splitMessageContent } from "@/utils/tts"
 import { markdownToText } from "@/utils/markdown-to-text"
@@ -1487,7 +1488,14 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
       config?.authMode === "multi-user"
         ? String(config?.accessToken || "").trim()
         : String(config?.apiKey || "").trim()
-    if (!token && config?.authSource !== "cookie-session") {
+    const cookieSession = Boolean(
+      resolveCookieSessionWebSocketBase({
+        serverUrl,
+        authMode: config?.authMode,
+        authSource: config?.authSource
+      })
+    )
+    if (!token && !cookieSession) {
       const classified = classifyAudioError("Missing authentication token")
       setStreamStatus("error")
       setStreamErrorSafe(classified.recovery)
