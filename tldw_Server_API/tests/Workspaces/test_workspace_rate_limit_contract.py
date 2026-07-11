@@ -48,6 +48,11 @@ def test_workspace_routes_include_expected_rbac_rate_limits() -> None:
     assert WORKSPACES_WRITE_RATE_LIMIT_RESOURCE in route_resources[("/{workspace_id}/sources/reorder", "PUT")]
     assert WORKSPACES_WRITE_RATE_LIMIT_RESOURCE in route_resources[("/{workspace_id}/sources/review-state", "PUT")]
 
+    assert WORKSPACES_READ_RATE_LIMIT_RESOURCE in route_resources[("/{workspace_id}/source-views", "GET")]
+    assert WORKSPACES_WRITE_RATE_LIMIT_RESOURCE in route_resources[("/{workspace_id}/source-views", "POST")]
+    assert WORKSPACES_WRITE_RATE_LIMIT_RESOURCE in route_resources[("/{workspace_id}/source-views/{view_id}", "PATCH")]
+    assert WORKSPACES_DELETE_RATE_LIMIT_RESOURCE in route_resources[("/{workspace_id}/source-views/{view_id}", "DELETE")]
+
     assert WORKSPACES_READ_RATE_LIMIT_RESOURCE in route_resources[("/{workspace_id}/artifacts", "GET")]
     assert WORKSPACES_WRITE_RATE_LIMIT_RESOURCE in route_resources[("/{workspace_id}/artifacts", "POST")]
     assert WORKSPACES_WRITE_RATE_LIMIT_RESOURCE in route_resources[("/{workspace_id}/artifacts/{artifact_id}", "PUT")]
