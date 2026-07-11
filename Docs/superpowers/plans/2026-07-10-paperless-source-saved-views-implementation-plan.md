@@ -23,7 +23,7 @@
 **Goal:** Add portable saved-view storage, CRUD, optimistic locking, limits, and PostgreSQL RLS.
 **Success Criteria:** SQLite/PostgreSQL schemas and owner/workspace-scoped DB methods satisfy all conflict and invalid-row contracts.
 **Tests:** New DB tests, PostgreSQL integration tests, existing RLS policy contract tests.
-**Status:** Not Started
+**Status:** Complete
 
 ## Stage 3: Typed Workspace API
 **Goal:** Expose validated CRUD routes with recoverable invalid rows and machine-readable conflicts.
@@ -207,7 +207,7 @@ git commit -m "Add canonical source saved view state (TASK-12093.2)"
 - Create: `tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_postgres.py`
 - Modify: `tldw_Server_API/tests/DB_Management/test_pg_rls_policies_contract.py`
 
-- [ ] **Step 1: Write failing SQLite CRUD/isolation tests**
+- [x] **Step 1: Write failing SQLite CRUD/isolation tests**
 
 Cover:
 
@@ -224,7 +224,7 @@ Cover:
 
 Use two owner IDs against one test database to prove isolation independently of per-user file paths. User B must be unable to probe, list, create, update, or delete views for user A's workspace even when B knows the workspace ID.
 
-- [ ] **Step 2: Run DB tests and verify RED**
+- [x] **Step 2: Run DB tests and verify RED**
 
 ```bash
 /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_db.py -q
@@ -232,7 +232,7 @@ Use two owner IDs against one test database to prove isolation independently of 
 
 Expected: FAIL because the table and methods do not exist.
 
-- [ ] **Step 3: Add portable schema and conflict types**
+- [x] **Step 3: Add portable schema and conflict types**
 
 Add constants for limits and stable codes plus a focused conflict subclass carrying `code` and safe metadata. For this RED/GREEN cycle, implement only the SQLite half: bump `_CURRENT_SCHEMA_VERSION` from 52 to 53, add `_migrate_from_v52_to_v53` to `_sqlite_linear_migration_steps`, and have it call a dedicated idempotent `_ensure_workspace_source_saved_view_schema_sqlite` helper. The normal SQLite post-migration ensure path calls it too. Add the table to fresh SQLite initialization with a named unique constraint:
 
@@ -245,17 +245,17 @@ FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
 
 Use UUID text IDs, ISO UTC text, and integer versions consistently across backends.
 
-- [ ] **Step 4: Implement scoped DB methods**
+- [x] **Step 4: Implement scoped DB methods**
 
 Implement normalization and CRUD methods that always accept `owner_user_id` and `workspace_id`. Every operation first verifies an active workspace whose `client_id` matches `owner_user_id`; every mutation performs that check while locking/serializing the workspace row in the same transaction. Enforce the state limit as `len(state_json.encode("utf-8")) <= 16 * 1024`. Use bound parameters and preflight duplicates for useful metadata. Name the unique constraint and translate only that constraint/SQLSTATE: after the failed transaction has rolled back, look up the conflicting owned row in a fresh transaction to populate `view_id` and `version`. Never log `state_json`.
 
 For this step, SQLite uses the existing immediate write transaction so workspace validation, count, duplicate preflight, and every mutation occur in the same transaction. Soft deletion retains saved-view rows but makes them inaccessible; only a physical workspace delete exercises the foreign-key cascade. Add the PostgreSQL row-lock branch only after its failing tests in Step 7.
 
-- [ ] **Step 5: Run SQLite tests and verify GREEN**
+- [x] **Step 5: Run SQLite tests and verify GREEN**
 
 Run the command from Step 2. Expected: PASS.
 
-- [ ] **Step 6: Write failing PostgreSQL schema/RLS tests**
+- [x] **Step 6: Write failing PostgreSQL schema/RLS tests**
 
 Add integration coverage for the table, named unique key, optimistic update, ordering, active workspace-owner predicates, concurrent count-limit serialization, concurrent create duplicates, two-row rename-to-same-name races, and create/update/delete races with workspace soft deletion. Add a two-principal PostgreSQL RLS test following the existing source-review RLS pattern: set `app.current_user_id` for principal A and prove principal B cannot select, create, update, delete, or directly insert a view for A's workspace. Assert fresh creation and V52 migration install the policy immediately, before any separate startup ensure, by checking `relrowsecurity`, `relforcerowsecurity`, `qual`, and `with_check`. Also execute `ensure_chacha_rls()` against PostgreSQL while the saved-view table is absent and require a successful no-op, proving the `to_regclass(...)` guard is executable rather than only textually present. Extend the RLS contract test to require an owner-and-active-workspace predicate equivalent to:
 
@@ -277,7 +277,7 @@ WITH CHECK (
 )
 ```
 
-- [ ] **Step 7: Run PostgreSQL/RLS tests and verify RED**
+- [x] **Step 7: Run PostgreSQL/RLS tests and verify RED**
 
 ```bash
 /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/DB_Management/test_pg_rls_policies_contract.py tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_postgres.py -q
@@ -285,15 +285,15 @@ WITH CHECK (
 
 Expected: RLS assertion FAIL; PostgreSQL test may SKIP locally only when the standard fixture is unavailable.
 
-- [ ] **Step 8: Implement PostgreSQL migration, locking, and RLS**
+- [x] **Step 8: Implement PostgreSQL migration, locking, and RLS**
 
 Add `_ensure_workspace_source_saved_view_schema_postgres`, the `current_version < 53` migration branch, and the normal post-migration ensure call. Every mutation first locks `SELECT id FROM workspaces WHERE id = ? AND client_id = ? AND deleted = false FOR UPDATE`; absence maps to the focused not-found path. This serializes creates, renames, deletes, and workspace deletion for the same workspace. Apply idempotent enable/force/drop/create RLS statements with both owner-and-active-workspace `USING` and `WITH CHECK` inside this schema helper's transaction immediately after table creation. Keep `build_chacha_rls_sql()` as the general startup path, but guard the saved-view policy block with `to_regclass(...)` so a missing table is a successful no-op. Do not create a separate RLS initializer.
 
-- [ ] **Step 9: Re-run PostgreSQL/RLS tests and verify GREEN/SKIP**
+- [x] **Step 9: Re-run PostgreSQL/RLS tests and verify GREEN/SKIP**
 
 Expected: contract PASS and integration PASS when PostgreSQL is available, otherwise the fixture-controlled SKIP.
 
-- [ ] **Step 10: Commit Stage 2**
+- [x] **Step 10: Commit Stage 2**
 
 ```bash
 git add tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/app/core/DB_Management/backends/pg_rls_policies.py tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_db.py tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_postgres.py tldw_Server_API/tests/DB_Management/test_pg_rls_policies_contract.py
