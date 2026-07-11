@@ -45,9 +45,12 @@ const createMemoryStorage = (): StorageBackend => {
   }
 }
 
-const getBackend = (): StorageBackend => {
-  if (typeof window !== "undefined" && window.localStorage) {
-    return window.localStorage
+const getBackend = (area: StorageOptions["area"]): StorageBackend => {
+  if (typeof window !== "undefined") {
+    if (area === "session" && window.sessionStorage) {
+      return window.sessionStorage
+    }
+    if (window.localStorage) return window.localStorage
   }
   return createMemoryStorage()
 }
@@ -137,8 +140,8 @@ export class Storage {
   private watchers = new Map<string, Set<WatchCallback>>()
 
   constructor(options: StorageOptions = {}) {
-    this.backend = getBackend()
     this.area = options.area || "local"
+    this.backend = getBackend(this.area)
     this.serde = {
       ...defaultSerde,
       ...(options.serde || {})
@@ -146,11 +149,12 @@ export class Storage {
   }
 
   private storageKey(key: string): string {
-    if (this.area === "local") return key
+    if (this.area === "local" || this.area === "session") return key
     return `plasmo-${this.area}:${key}`
   }
 
   private unscopedKey(key: string): string | null {
+    if (this.area === "session") return key
     if (this.area === "local") {
       return key.startsWith("plasmo-sync:") || key.startsWith("plasmo-session:")
         ? null

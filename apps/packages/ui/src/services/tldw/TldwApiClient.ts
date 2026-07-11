@@ -52,6 +52,10 @@ import {
   getRuntimeSingleUserApiKeyOverride,
   isCookieSessionConfigInvalidated
 } from "@/services/tldw/runtime-auth-override"
+import type {
+  ApiKeyPersistence,
+  CredentialSource
+} from "@/services/tldw/single-user-credential"
 import {
   type TldwProvidersResponse
 } from "@/services/tldw/model-provider-availability"
@@ -181,8 +185,8 @@ export interface TldwConfig {
   orgId?: number
   authMode: 'single-user' | 'multi-user'
   authSource?: "manual" | "cookie-session"
-  credentialSource?: "manual"
-  apiKeyPersistence?: "device" | "session"
+  credentialSource?: CredentialSource
+  apiKeyPersistence?: ApiKeyPersistence
   apiKeyServerOrigin?: string
 }
 

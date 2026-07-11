@@ -35,7 +35,7 @@
 - Consumes: existing `TldwConfig`, `Storage`, and WebUI storage shim.
 - Produces: `ApiKeyPersistence`, `ManualCredentialMetadata`, `normalizeServerOrigin()`, `resolveManualCredential()`, `toPersistedTldwConfig()`, `clearManualCredentials()`.
 
-- [ ] **Step 1: Write failing policy tests**
+- [x] **Step 1: Write failing policy tests**
 
 ```ts
 it("accepts a complete device credential only for its exact origin", async () => {
@@ -65,13 +65,13 @@ it("maps WebUI session storage to window.sessionStorage", async () => {
 })
 ```
 
-- [ ] **Step 2: Run tests and confirm failures**
+- [x] **Step 2: Run tests and confirm failures**
 
 Run: `cd apps && bunx vitest run packages/ui/src/services/tldw/__tests__/single-user-credential.test.ts tldw-frontend/__tests__/extension/plasmo-storage.test.ts`
 
 Expected: policy module is missing and the WebUI shim does not provide true session scope.
 
-- [ ] **Step 3: Implement the minimal policy**
+- [x] **Step 3: Implement the minimal policy**
 
 ```ts
 export type ApiKeyPersistence = "device" | "session"
@@ -103,13 +103,13 @@ export const toPersistedTldwConfig = (config: TldwConfig): TldwConfig => {
 
 Implement session-record validation with `credentialSource="manual"`, `apiKeyPersistence="session"`, and matching origin. Extend `TldwConfig` with the three optional metadata fields. Update the WebUI shim so `area: "session"` reads/writes/removes `window.sessionStorage`; preserve extension-native `browser.storage.session` behavior.
 
-- [ ] **Step 4: Run policy tests**
+- [x] **Step 4: Run policy tests**
 
 Run: `cd apps && bunx vitest run packages/ui/src/services/tldw/__tests__/single-user-credential.test.ts tldw-frontend/__tests__/extension/plasmo-storage.test.ts`
 
 Expected: all selected tests pass.
 
-- [ ] **Step 5: Commit the policy**
+- [x] **Step 5: Commit the policy**
 
 ```bash
 git add apps/packages/ui/src/services/tldw/single-user-credential.ts apps/packages/ui/src/services/tldw/TldwApiClient.ts apps/tldw-frontend/extension/shims/plasmo-storage.ts apps/packages/ui/src/services/tldw/__tests__/single-user-credential.test.ts apps/tldw-frontend/__tests__/extension/plasmo-storage.test.ts

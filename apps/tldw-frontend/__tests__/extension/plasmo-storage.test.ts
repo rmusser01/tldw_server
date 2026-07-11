@@ -5,6 +5,7 @@ import { Storage } from "@web/extension/shims/plasmo-storage"
 describe("plasmo storage web shim", () => {
   beforeEach(() => {
     localStorage.clear()
+    sessionStorage.clear()
   })
 
   afterEach(() => {
@@ -75,5 +76,15 @@ describe("plasmo storage web shim", () => {
 
     unwatchBoom()
     unwatchSibling()
+  })
+
+  it("maps the session area to window.sessionStorage", async () => {
+    const session = new Storage({ area: "session" })
+
+    await session.set("tldwManualSessionApiKey", { apiKey: "secret" })
+
+    expect(sessionStorage.getItem("tldwManualSessionApiKey")).toContain("secret")
+    expect(localStorage.getItem("tldwManualSessionApiKey")).toBeNull()
+    expect(localStorage.getItem("plasmo-session:tldwManualSessionApiKey")).toBeNull()
   })
 })
