@@ -36,6 +36,8 @@ modified_files:
 - tldw_Server_API/tests/MediaIngestion_NEW/integration/test_research_discovery_media_add.py
 - tldw_Server_API/tests/DB_Management/test_media_db_safe_metadata_search_ops.py
 - backlog/tasks/task-12950 - Implement-research-discovery-Phase-2A-PDF-Media-handoff.md
+references:
+- https://github.com/rmusser01/tldw_server/pull/2716
 ---
 
 ## Description
