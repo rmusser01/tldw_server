@@ -139,4 +139,60 @@ describe("NotificationToastBridge", () => {
     )
     vi.useRealTimers()
   })
+
+  it("does not drop multiple notification frames delivered in one React batch", async () => {
+    vi.useFakeTimers()
+    let onEvent: ((event: { event: string; id?: number; payload?: unknown }) => void) | undefined
+    mocks.subscribeNotificationsStream.mockImplementation(
+      (options: { onEvent: typeof onEvent }) => {
+        onEvent = options.onEvent
+        return vi.fn()
+      }
+    )
+    render(
+      <NotificationLifecycleProvider scopeKey="notifications:server-a:user-a">
+        <NotificationToastBridge />
+      </NotificationLifecycleProvider>
+    )
+    await act(async () => vi.advanceTimersByTimeAsync(0))
+
+    act(() => {
+      onEvent?.({ event: "notification", id: 51, payload: { notification_id: 51, title: "First" } })
+      onEvent?.({ event: "notification", id: 52, payload: { notification_id: 52, title: "Second" } })
+    })
+    await act(async () => vi.advanceTimersByTimeAsync(800))
+
+    expect(mocks.showToast).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "2 new notifications" })
+    )
+    vi.useRealTimers()
+  })
+
+  it("clears a queued toast when the lifecycle scope changes", async () => {
+    vi.useFakeTimers()
+    let onEvent: ((event: { event: string; id?: number; payload?: unknown }) => void) | undefined
+    mocks.subscribeNotificationsStream.mockImplementation(
+      (options: { onEvent: typeof onEvent }) => {
+        onEvent = options.onEvent
+        return vi.fn()
+      }
+    )
+    const view = render(
+      <NotificationLifecycleProvider scopeKey="notifications:server-a:user-a">
+        <NotificationToastBridge />
+      </NotificationLifecycleProvider>
+    )
+    await act(async () => vi.advanceTimersByTimeAsync(0))
+    act(() => onEvent?.({ event: "notification", id: 51, payload: { notification_id: 51, title: "Private" } }))
+
+    view.rerender(
+      <NotificationLifecycleProvider scopeKey="notifications:server-a:user-b">
+        <NotificationToastBridge />
+      </NotificationLifecycleProvider>
+    )
+    await act(async () => vi.advanceTimersByTimeAsync(800))
+
+    expect(mocks.showToast).not.toHaveBeenCalled()
+    vi.useRealTimers()
+  })
 })

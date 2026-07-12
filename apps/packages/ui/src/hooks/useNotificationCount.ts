@@ -5,8 +5,10 @@ import { useStorage } from "@plasmohq/storage/hook"
 
 import { toUnreadCount } from "@/utils/notifications"
 import { safeStorageSerde } from "@/utils/safe-storage"
+import { notificationRecordKeyForConfig } from "@/services/notification-runtime-scope"
 
 const ACTIVE_SCOPE_KEY = "tldw:notifications:activeScope"
+const CONFIG_KEY = "tldwConfig"
 
 type NotificationRecord = {
   state: "connecting" | "active" | "degraded" | "auth-required" | "unavailable"
@@ -21,6 +23,8 @@ const storageOptions = (key: string) => ({
 })
 
 export function useNotificationCount(): number {
+  const [config] = useStorage<unknown>(storageOptions(CONFIG_KEY), (value) => value)
+  const expectedScope = notificationRecordKeyForConfig(config)
   const [activeScope] = useStorage<string | null>(storageOptions(ACTIVE_SCOPE_KEY), (value) =>
     typeof value === "string" && value ? value : null
   )
@@ -32,6 +36,6 @@ export function useNotificationCount(): number {
   const scopeChanged = previousScope.current !== activeScope
   previousScope.current = activeScope
 
-  if (!activeScope || scopeChanged) return 0
+  if (!expectedScope || activeScope !== expectedScope || scopeChanged) return 0
   return toUnreadCount(record?.unreadCount)
 }

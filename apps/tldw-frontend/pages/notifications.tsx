@@ -50,17 +50,18 @@ export default function NotificationsPage() {
   const { show } = useToast();
   const router = useRouter();
   const {
+    scopeKey,
     state: lifecycleState,
     unreadCount: lifecycleUnreadCount,
     updatedAt: lifecycleUpdatedAt,
-    latestEvent,
-    eventSequence,
+    events,
     reportRequestError,
     reportMutationError,
   } = useNotificationLifecycle();
   const isTerminal = lifecycleState === 'auth-required' || lifecycleState === 'unavailable';
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [snoozedItems, setSnoozedItems] = useState<NotificationItem[]>([]);
+  const [loadedScopeKey, setLoadedScopeKey] = useState(scopeKey);
   const [showSnoozed, setShowSnoozed] = useState(false);
   const [unreadCount, setUnreadCount] = useState(lifecycleUnreadCount);
   const [isLoading, setIsLoading] = useState(true);
@@ -69,6 +70,9 @@ export default function NotificationsPage() {
   const inboxRetryAttemptRef = useRef(0);
   const inboxRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshInboxRef = useRef<() => Promise<void>>(async () => undefined);
+  const pageGenerationRef = useRef(0);
+  const inboxAbortRef = useRef<AbortController | null>(null);
+  const previousScopeRef = useRef(scopeKey);
   const [showPrefs, setShowPrefs] = useState(false);
   const [prefs, setPrefs] = useState<NotificationPreferences | null>(null);
   const [prefsLoading, setPrefsLoading] = useState(false);
@@ -84,21 +88,34 @@ export default function NotificationsPage() {
   const refreshInbox = useCallback(async () => {
     clearInboxRetry();
     if (isTerminal) return;
+    inboxAbortRef.current?.abort();
+    const requestAbort = new AbortController();
+    inboxAbortRef.current = requestAbort;
+    const requestGeneration = pageGenerationRef.current;
     try {
       const [list, snoozed] = await Promise.all([
-        listNotifications({ limit: NOTIFICATIONS_FETCH_LIMIT, offset: 0, include_archived: false }),
+        listNotifications({
+          limit: NOTIFICATIONS_FETCH_LIMIT,
+          offset: 0,
+          include_archived: false,
+          signal: requestAbort.signal,
+        }),
         listNotifications({
           limit: NOTIFICATIONS_FETCH_LIMIT,
           offset: 0,
           include_archived: true,
           only_snoozed: true,
+          signal: requestAbort.signal,
         }),
       ]);
+      if (requestAbort.signal.aborted || requestGeneration !== pageGenerationRef.current) return;
       setItems(list.items);
       setSnoozedItems(snoozed.items);
+      setLoadedScopeKey(scopeKey);
       setError(null);
       inboxRetryAttemptRef.current = 0;
     } catch (refreshError) {
+      if (requestAbort.signal.aborted || requestGeneration !== pageGenerationRef.current) return;
       reportRequestError(refreshError);
       const message = refreshError instanceof Error ? refreshError.message : 'Failed to load notifications';
       setError(message);
@@ -115,14 +132,16 @@ export default function NotificationsPage() {
         inboxRetryAttemptRef.current = 0;
       }
     } finally {
-      setIsLoading(false);
+      if (requestGeneration === pageGenerationRef.current) setIsLoading(false);
     }
-  }, [clearInboxRetry, isTerminal, reportRequestError]);
+  }, [clearInboxRetry, isTerminal, reportRequestError, scopeKey]);
 
   const handleSnooze = useCallback(
     async (notificationId: number, minutes: number = DEFAULT_SNOOZE_MINUTES) => {
+      const requestGeneration = pageGenerationRef.current;
       try {
         const result = await snoozeNotification(notificationId, minutes);
+        if (requestGeneration !== pageGenerationRef.current) return;
         const target = items.find((item) => item.id === notificationId);
         if (target) {
           const dismissedAt = new Date().toISOString();
@@ -145,6 +164,7 @@ export default function NotificationsPage() {
           variant: 'success',
         });
       } catch (snoozeError) {
+        if (requestGeneration !== pageGenerationRef.current) return;
         reportMutationError(snoozeError);
         const message = snoozeError instanceof Error ? snoozeError.message : 'Failed to snooze notification';
         show({
@@ -158,8 +178,10 @@ export default function NotificationsPage() {
   );
 
   const handleCancelSnooze = useCallback(async (notificationId: number) => {
+    const requestGeneration = pageGenerationRef.current;
     try {
       await cancelNotificationSnooze(notificationId);
+      if (requestGeneration !== pageGenerationRef.current) return;
       setSnoozedItems((previous) => previous.filter((item) => item.id !== notificationId));
       show({
         title: 'Snooze cancelled',
@@ -167,6 +189,7 @@ export default function NotificationsPage() {
         variant: 'success',
       });
     } catch (cancelError) {
+      if (requestGeneration !== pageGenerationRef.current) return;
       reportMutationError(cancelError);
       const message = cancelError instanceof Error ? cancelError.message : 'Failed to cancel snooze';
       show({ title: 'Cancel snooze failed', description: message, variant: 'danger' });
@@ -177,15 +200,18 @@ export default function NotificationsPage() {
     if (prefsLoading) return;
     setPrefsLoading(true);
     setPrefsError(null);
+    const requestGeneration = pageGenerationRef.current;
     try {
       const nextPrefs = await getNotificationPreferences();
+      if (requestGeneration !== pageGenerationRef.current) return;
       setPrefs(nextPrefs);
     } catch (preferenceError) {
+      if (requestGeneration !== pageGenerationRef.current) return;
       reportRequestError(preferenceError);
       setPrefs(null);
       setPrefsError('Notification preferences are currently unavailable.');
     } finally {
-      setPrefsLoading(false);
+      if (requestGeneration === pageGenerationRef.current) setPrefsLoading(false);
     }
   }, [prefsLoading, reportRequestError]);
 
@@ -200,14 +226,17 @@ export default function NotificationsPage() {
             ? { job_completed_enabled: nextValue }
             : { job_failed_enabled: nextValue };
       setPrefsSavingKey(key);
+      const requestGeneration = pageGenerationRef.current;
       try {
         const result = await updateNotificationPreferences(updated);
+        if (requestGeneration !== pageGenerationRef.current) return;
         setPrefs(result);
       } catch (preferenceError) {
+        if (requestGeneration !== pageGenerationRef.current) return;
         reportMutationError(preferenceError);
         show({ title: 'Failed to update preference', variant: 'danger' });
       } finally {
-        setPrefsSavingKey(null);
+        if (requestGeneration === pageGenerationRef.current) setPrefsSavingKey(null);
       }
     },
     [prefs, prefsSavingKey, reportMutationError, show]
@@ -226,6 +255,27 @@ export default function NotificationsPage() {
   );
 
   useEffect(() => {
+    if (previousScopeRef.current === scopeKey) return;
+    previousScopeRef.current = scopeKey;
+    pageGenerationRef.current += 1;
+    inboxAbortRef.current?.abort();
+    inboxAbortRef.current = null;
+    clearInboxRetry();
+    handledEventSequenceRef.current = 0;
+    inboxRetryAttemptRef.current = 0;
+    setItems([]);
+    setSnoozedItems([]);
+    setLoadedScopeKey(scopeKey);
+    setPrefs(null);
+    setPrefsError(null);
+    setPrefsLoading(false);
+    setPrefsSavingKey(null);
+    setShowPrefs(false);
+    setError(null);
+    setIsLoading(true);
+  }, [clearInboxRetry, scopeKey]);
+
+  useEffect(() => {
     refreshInboxRef.current = refreshInbox;
   }, [refreshInbox]);
 
@@ -235,7 +285,10 @@ export default function NotificationsPage() {
 
   useEffect(() => {
     if (isTerminal) clearInboxRetry();
-    return clearInboxRetry;
+    return () => {
+      clearInboxRetry();
+      inboxAbortRef.current?.abort();
+    };
   }, [clearInboxRetry, isTerminal]);
 
   useEffect(() => {
@@ -243,24 +296,27 @@ export default function NotificationsPage() {
   }, [lifecycleUnreadCount, lifecycleUpdatedAt]);
 
   useEffect(() => {
-    if (!latestEvent || eventSequence <= handledEventSequenceRef.current) return;
-    handledEventSequenceRef.current = eventSequence;
-    if (latestEvent.event === 'notification') {
-      const nextItem = toNotificationFromStream(latestEvent.payload);
-      if (nextItem) applyIncomingNotification(nextItem);
-      return;
+    const pendingEvents = events.filter(
+      ({ sequence }) => sequence > handledEventSequenceRef.current
+    );
+    let needsRefresh = false;
+    for (const { sequence, event } of pendingEvents) {
+      handledEventSequenceRef.current = sequence;
+      if (event.event === 'notification') {
+        const nextItem = toNotificationFromStream(event.payload);
+        if (nextItem) applyIncomingNotification(nextItem);
+      } else if (event.event === 'notifications_coalesced' || event.event === 'reset_required') {
+        needsRefresh = true;
+      }
     }
-    if (
-      latestEvent.event === 'notifications_coalesced' ||
-      latestEvent.event === 'reset_required'
-    ) {
-      void refreshInbox();
-    }
-  }, [applyIncomingNotification, eventSequence, latestEvent, refreshInbox]);
+    if (needsRefresh) void refreshInbox();
+  }, [applyIncomingNotification, events, refreshInbox]);
 
   const handleMarkRead = useCallback(async (notificationId: number) => {
+    const requestGeneration = pageGenerationRef.current;
     try {
       await markNotificationsRead([notificationId]);
+      if (requestGeneration !== pageGenerationRef.current) return;
       setItems((previous) =>
         previous.map((item) =>
           item.id === notificationId
@@ -270,6 +326,7 @@ export default function NotificationsPage() {
       );
       setUnreadCount((count) => Math.max(0, count - 1));
     } catch (markError) {
+      if (requestGeneration !== pageGenerationRef.current) return;
       reportMutationError(markError);
       const message = markError instanceof Error ? markError.message : 'Failed to mark notification as read';
       show({ title: 'Mark read failed', description: message, variant: 'danger' });
@@ -277,8 +334,10 @@ export default function NotificationsPage() {
   }, [reportMutationError, show]);
 
   const handleDismiss = useCallback(async (notificationId: number) => {
+    const requestGeneration = pageGenerationRef.current;
     try {
       await dismissNotification(notificationId);
+      if (requestGeneration !== pageGenerationRef.current) return;
       setItems((previous) => {
         const target = previous.find((item) => item.id === notificationId);
         if (target && !target.read_at && !target.dismissed_at) {
@@ -287,14 +346,17 @@ export default function NotificationsPage() {
         return previous.filter((item) => item.id !== notificationId);
       });
     } catch (dismissError) {
+      if (requestGeneration !== pageGenerationRef.current) return;
       reportMutationError(dismissError);
       const message = dismissError instanceof Error ? dismissError.message : 'Failed to dismiss notification';
       show({ title: 'Dismiss failed', description: message, variant: 'danger' });
     }
   }, [reportMutationError, show]);
 
-  const hasNotifications = items.length > 0;
-  const hasAnyNotifications = hasNotifications || snoozedItems.length > 0;
+  const scopedItems = loadedScopeKey === scopeKey ? items : [];
+  const scopedSnoozedItems = loadedScopeKey === scopeKey ? snoozedItems : [];
+  const hasNotifications = scopedItems.length > 0;
+  const hasAnyNotifications = hasNotifications || scopedSnoozedItems.length > 0;
   const unreadLabel = useMemo(() => `Unread: ${unreadCount}`, [unreadCount]);
 
   return (
@@ -390,7 +452,7 @@ export default function NotificationsPage() {
           <div className="py-8 text-center text-sm text-muted-foreground">No notifications yet.</div>
         ) : hasNotifications ? (
           <ul className="space-y-3">
-            {items.map((item) => (
+            {scopedItems.map((item) => (
               <li key={item.id} className="rounded border border-border/70 bg-card/80 p-3">
                 <div className="flex items-start justify-between gap-3">
                   <div>
@@ -459,18 +521,18 @@ export default function NotificationsPage() {
           </ul>
         ) : null}
 
-        {snoozedItems.length > 0 && (
+        {scopedSnoozedItems.length > 0 && (
           <div className="mt-6 border-t border-border pt-4">
             <button
               type="button"
               className="mb-3 text-sm font-medium text-muted-foreground hover:text-foreground"
               onClick={() => setShowSnoozed(!showSnoozed)}
             >
-              {showSnoozed ? 'Hide' : 'Show'} snoozed ({snoozedItems.length})
+              {showSnoozed ? 'Hide' : 'Show'} snoozed ({scopedSnoozedItems.length})
             </button>
             {showSnoozed && (
               <ul className="space-y-2">
-                {snoozedItems.map((item) => (
+                {scopedSnoozedItems.map((item) => (
                   <li key={item.id} className="rounded border border-border/50 bg-muted/30 p-3">
                     <div className="flex items-start justify-between gap-3">
                       <div>

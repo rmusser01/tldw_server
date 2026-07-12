@@ -35,6 +35,7 @@ export function NotificationToastBridge() {
   const pendingToastCountRef = useRef(0);
   const latestToastItemRef = useRef<NotificationItem | null>(null);
   const toastTimerRef = useRef<number | null>(null);
+  const handledEventSequenceRef = useRef(0);
 
   const flushQueuedToast = useCallback(() => {
     const burstCount = pendingToastCountRef.current;
@@ -72,28 +73,44 @@ export function NotificationToastBridge() {
     [flushQueuedToast]
   );
 
+  const clearQueuedToast = useCallback(() => {
+    if (toastTimerRef.current !== null) {
+      window.clearTimeout(toastTimerRef.current);
+    }
+    toastTimerRef.current = null;
+    pendingToastCountRef.current = 0;
+    latestToastItemRef.current = null;
+  }, []);
+
   useEffect(() => {
-    const event = lifecycle?.latestEvent;
-    if (!event || !lifecycle?.eventSequence) return;
-    if (event.event === 'notification') {
-      const nextItem = toNotificationFromStream(event.payload);
-      if (nextItem) queueToast(nextItem, 1);
-      return;
+    clearQueuedToast();
+    handledEventSequenceRef.current = 0;
+  }, [clearQueuedToast, lifecycle?.scopeKey]);
+
+  useEffect(() => {
+    const pendingEvents = (lifecycle?.events ?? []).filter(
+      ({ sequence }) => sequence > handledEventSequenceRef.current
+    );
+    for (const { sequence, event } of pendingEvents) {
+      handledEventSequenceRef.current = sequence;
+      if (event.event === 'notification') {
+        const nextItem = toNotificationFromStream(event.payload);
+        if (nextItem) queueToast(nextItem, 1);
+        continue;
+      }
+      if (event.event === 'notifications_coalesced') {
+        const payload = event.payload as Record<string, unknown> | undefined;
+        const count = Number(payload?.count ?? 0);
+        if (Number.isFinite(count) && count > 0) queueToast(null, count);
+      }
     }
-    if (event.event === 'notifications_coalesced') {
-      const payload = event.payload as Record<string, unknown> | undefined;
-      const count = Number(payload?.count ?? 0);
-      if (Number.isFinite(count) && count > 0) queueToast(null, count);
-    }
-  }, [lifecycle?.eventSequence, lifecycle?.latestEvent, queueToast]);
+  }, [lifecycle?.events, queueToast]);
 
   useEffect(() => {
     return () => {
-      if (toastTimerRef.current !== null) {
-        window.clearTimeout(toastTimerRef.current);
-      }
+      clearQueuedToast();
     };
-  }, []);
+  }, [clearQueuedToast]);
 
   return null;
 }

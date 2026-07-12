@@ -2,13 +2,16 @@
 
 import { notify } from "@/services/background-helpers"
 import {
-  buildNotificationScopeKey,
   classifyNotificationError,
   reduceNotificationLifecycle,
   type NotificationLifecycleAction,
-  type NotificationLifecycleState,
-  type NotificationScopeInput
+  type NotificationLifecycleState
 } from "@/services/notification-lifecycle"
+import {
+  notificationRecordKeyForConfig,
+  parseNotificationRuntimeConfig,
+  type NotificationRuntimeConfig
+} from "@/services/notification-runtime-scope"
 import { getUnreadCount, subscribeNotificationsStream } from "@/services/notifications"
 import type { NotificationStreamEvent } from "@/services/notifications"
 import { createSafeStorage } from "@/utils/safe-storage"
@@ -17,7 +20,7 @@ import { toUnreadCount } from "@/utils/notifications"
 const CONFIG_KEY = "tldwConfig"
 const ACTIVE_SCOPE_KEY = "tldw:notifications:activeScope"
 
-type NotificationConfig = NotificationScopeInput
+type NotificationConfig = NotificationRuntimeConfig
 type ExposedNotificationState = Exclude<NotificationLifecycleState, "idle">
 type NotificationRecord = {
   state: ExposedNotificationState
@@ -41,33 +44,6 @@ const getStorage = (): SafeStorage => {
   return storageInstance
 }
 
-const asConfig = (value: unknown): NotificationConfig | null => {
-  if (!value || typeof value !== "object") return null
-  const config = value as Record<string, unknown>
-  const serverUrl = String(config.serverUrl || "").trim()
-  const authMode = String(config.authMode || "").trim().toLowerCase()
-  if (!serverUrl || (authMode !== "single-user" && authMode !== "multi-user")) return null
-
-  const accessToken = String(config.accessToken || "").trim()
-  const apiKey = String(config.apiKey || "").trim()
-  if (authMode === "multi-user" ? !accessToken : !apiKey) return null
-
-  return {
-    serverUrl,
-    authMode,
-    orgId:
-      typeof config.orgId === "string" || typeof config.orgId === "number"
-        ? config.orgId
-        : null,
-    userId:
-      typeof config.userId === "string" || typeof config.userId === "number"
-        ? config.userId
-        : null,
-    accessToken,
-    apiKey
-  }
-}
-
 const configIdentity = (config: NotificationConfig | null): string =>
   JSON.stringify([
     config?.serverUrl ?? null,
@@ -79,7 +55,7 @@ const configIdentity = (config: NotificationConfig | null): string =>
   ])
 
 const recordKeyFor = (config: NotificationConfig): string =>
-  `tldw:${buildNotificationScopeKey(config)}`
+  notificationRecordKeyForConfig(config) as string
 
 const readRecord = (value: unknown): NotificationRecord | null => {
   if (!value || typeof value !== "object") return null
@@ -133,7 +109,7 @@ const transitionToConfig = async (
   options: { force?: boolean } = {}
 ): Promise<void> => {
   const storage = getStorage()
-  const nextConfig = asConfig(value)
+  const nextConfig = parseNotificationRuntimeConfig(value)
   if (
     !options.force &&
     nextConfig &&

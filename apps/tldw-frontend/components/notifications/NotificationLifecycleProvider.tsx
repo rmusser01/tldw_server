@@ -20,13 +20,21 @@ import {
 } from "@web/lib/api/notifications"
 
 type ExposedNotificationState = Exclude<NotificationLifecycleState, "idle">
+const MAX_BUFFERED_EVENTS = 256
+
+export type SequencedNotificationEvent = {
+  sequence: number
+  event: NotificationStreamEvent
+}
 
 export type NotificationLifecycleContextValue = {
+  scopeKey: string
   state: ExposedNotificationState
   unreadCount: number
   updatedAt: number
   latestEvent: NotificationStreamEvent | null
   eventSequence: number
+  events: SequencedNotificationEvent[]
   mutationError: unknown | null
   tryAgain: () => Promise<void>
   refreshPermissions: () => Promise<void>
@@ -37,7 +45,7 @@ export type NotificationLifecycleContextValue = {
 type NotificationRuntimeSnapshot = Omit<
   NotificationLifecycleContextValue,
   "tryAgain" | "refreshPermissions" | "reportRequestError" | "reportMutationError"
-> & { scopeKey: string }
+>
 
 type NotificationLifecycleProviderProps = {
   children: React.ReactNode
@@ -57,6 +65,7 @@ const initialSnapshot = (scopeKey: string): NotificationRuntimeSnapshot => ({
   updatedAt: Date.now(),
   latestEvent: null,
   eventSequence: 0,
+  events: [],
   mutationError: null
 })
 
@@ -121,9 +130,12 @@ export function NotificationLifecycleProvider({
   const terminalStateRef = React.useRef<"auth-required" | "unavailable" | null>(null)
   const unsubscribeRef = React.useRef<(() => void) | null>(null)
   const pollTimerRef = React.useRef<ReturnType<typeof setInterval> | null>(null)
+  const requestAbortRef = React.useRef<AbortController | null>(null)
 
   const stopWork = React.useCallback(() => {
     streamOpenRef.current = false
+    requestAbortRef.current?.abort()
+    requestAbortRef.current = null
     if (pollTimerRef.current !== null) {
       clearInterval(pollTimerRef.current)
       pollTimerRef.current = null
@@ -184,6 +196,8 @@ export function NotificationLifecycleProvider({
     terminalStateRef.current = null
     setSnapshot(initialSnapshot(scopeKey))
     if (!enabled) return
+    const requestAbort = new AbortController()
+    requestAbortRef.current = requestAbort
 
     const isCurrent = () => generation === generationRef.current
     const canBeActive = () =>
@@ -215,14 +229,18 @@ export function NotificationLifecycleProvider({
         },
         onEvent: (event) => {
           if (!isCurrent()) return
-          updateCurrent(generation, (current) => ({
-            ...current,
-            latestEvent: event,
-            eventSequence: current.eventSequence + 1,
-            unreadCount:
-              event.event === "notification" ? current.unreadCount + 1 : current.unreadCount,
-            updatedAt: Date.now()
-          }))
+          updateCurrent(generation, (current) => {
+            const sequence = current.eventSequence + 1
+            return {
+              ...current,
+              latestEvent: event,
+              eventSequence: sequence,
+              events: [...current.events, { sequence, event }].slice(-MAX_BUFFERED_EVENTS),
+              unreadCount:
+                event.event === "notification" ? current.unreadCount + 1 : current.unreadCount,
+              updatedAt: Date.now()
+            }
+          })
         }
       })
       if (!isCurrent() || terminalGenerationRef.current === generation) {
@@ -233,7 +251,7 @@ export function NotificationLifecycleProvider({
     }
 
     try {
-      const result = await getUnreadCount()
+      const result = await getUnreadCount({ signal: requestAbort.signal })
       if (!isCurrent()) return
       unreadCurrentRef.current = true
       updateCurrent(generation, (current) => ({
@@ -248,7 +266,12 @@ export function NotificationLifecycleProvider({
 
     let cursor = 0
     try {
-      const latest = await listNotifications({ limit: 1, offset: 0, include_archived: false })
+      const latest = await listNotifications({
+        limit: 1,
+        offset: 0,
+        include_archived: false,
+        signal: requestAbort.signal
+      })
       if (!isCurrent()) return
       cursor = latest.items.reduce(
         (maximum, item) => Math.max(maximum, Number(item.id) || 0),
@@ -266,7 +289,7 @@ export function NotificationLifecycleProvider({
 
     const pollNotificationState = async () => {
       try {
-        const result = await getUnreadCount()
+        const result = await getUnreadCount({ signal: requestAbort.signal })
         if (!isCurrent()) return
         unreadCurrentRef.current = true
         updateCurrent(generation, (current) => ({
@@ -288,7 +311,12 @@ export function NotificationLifecycleProvider({
 
       if (!cursorCurrentRef.current && terminalGenerationRef.current !== generation) {
         try {
-          const latest = await listNotifications({ limit: 1, offset: 0, include_archived: false })
+          const latest = await listNotifications({
+            limit: 1,
+            offset: 0,
+            include_archived: false,
+            signal: requestAbort.signal
+          })
           if (!isCurrent()) return
           const nextCursor = latest.items.reduce(
             (maximum, item) => Math.max(maximum, Number(item.id) || 0),
@@ -407,11 +435,13 @@ export function NotificationLifecycleProvider({
   const projected = snapshot.scopeKey === scopeKey ? snapshot : initialSnapshot(scopeKey)
   const value = React.useMemo<NotificationLifecycleContextValue>(
     () => ({
+      scopeKey: projected.scopeKey,
       state: projected.state,
       unreadCount: projected.unreadCount,
       updatedAt: projected.updatedAt,
       latestEvent: projected.latestEvent,
       eventSequence: projected.eventSequence,
+      events: projected.events,
       mutationError: projected.mutationError,
       tryAgain: startWork,
       refreshPermissions: startWork,

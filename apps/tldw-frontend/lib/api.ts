@@ -434,8 +434,17 @@ function recordFailure(
   }
 }
 
-function handleUnauthorized(): void {
+function handleUnauthorized(requestHeaders?: Headers): void {
   if (typeof window === 'undefined') {
+    return;
+  }
+
+  const authorization = requestHeaders?.get('Authorization')?.trim() || '';
+  const requestToken = authorization.toLowerCase().startsWith('bearer ')
+    ? authorization.slice(7).trim()
+    : null;
+  const currentToken = localStorage.getItem('access_token');
+  if (requestToken && currentToken && requestToken !== currentToken) {
     return;
   }
 
@@ -503,7 +512,7 @@ async function request<T = unknown>(
 
   if (!response.ok) {
     if (response.status === 401) {
-      handleUnauthorized();
+      handleUnauthorized(headers);
     }
 
     const errorBody = await parseErrorBody(response);

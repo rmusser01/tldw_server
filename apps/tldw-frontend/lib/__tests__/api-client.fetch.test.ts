@@ -359,6 +359,29 @@ describe("fetch-backed WebUI api client", () => {
     )
   })
 
+  it("does not clear a newer session when an old-token request returns 401", async () => {
+    let resolveResponse: ((response: Response) => void) | undefined
+    const fetchMock = vi.fn(
+      () => new Promise<Response>((resolve) => { resolveResponse = resolve })
+    )
+    vi.stubGlobal("fetch", fetchMock)
+    localStorage.setItem("access_token", "old-token")
+    localStorage.setItem("user", JSON.stringify({ username: "alice" }))
+    setWindowLocation("http://localhost:3000/chat")
+    const { apiClient } = await loadApiModule()
+
+    const request = apiClient.get("/notifications/unread-count")
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    localStorage.setItem("access_token", "new-token")
+    localStorage.setItem("user", JSON.stringify({ username: "bob" }))
+    resolveResponse?.(jsonResponse({ detail: "Expired" }, { status: 401 }))
+
+    await expect(request).rejects.toMatchObject({ status: 401 })
+    expect(localStorage.getItem("access_token")).toBe("new-token")
+    expect(localStorage.getItem("user")).toContain("bob")
+    expect(window.location.href).toBe("http://localhost:3000/chat")
+  })
+
   it("supports timeout cancellation and caller-provided abort signals", async () => {
     vi.useFakeTimers()
     const fetchMock = vi.fn((_url: string, init?: RequestInit) => {

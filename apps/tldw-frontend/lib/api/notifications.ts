@@ -11,8 +11,6 @@ import {
 } from "@/services/notifications"
 import type {
   NotificationCancelSnoozeResponse,
-  NotificationItem,
-  NotificationSeverity,
   NotificationSnoozeResponse,
   NotificationStreamEvent,
   NotificationsListResponse,
@@ -103,6 +101,7 @@ export async function listNotifications(params?: {
   offset?: number
   include_archived?: boolean
   only_snoozed?: boolean
+  signal?: AbortSignal
 }): Promise<NotificationsListResponse> {
   return apiClient.get<NotificationsListResponse>(
     `/notifications${buildNotificationsQueryShared({
@@ -111,12 +110,15 @@ export async function listNotifications(params?: {
       include_archived: params?.include_archived ?? false,
       only_snoozed: params?.only_snoozed
     })}`,
-    { withCredentials: !hasExplicitAuthHeaders() }
+    { signal: params?.signal, withCredentials: !hasExplicitAuthHeaders() }
   )
 }
 
-export async function getUnreadCount(): Promise<NotificationsUnreadCountResponse> {
+export async function getUnreadCount(options?: {
+  signal?: AbortSignal
+}): Promise<NotificationsUnreadCountResponse> {
   return apiClient.get<NotificationsUnreadCountResponse>("/notifications/unread-count", {
+    signal: options?.signal,
     withCredentials: !hasExplicitAuthHeaders()
   })
 }

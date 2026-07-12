@@ -17,11 +17,13 @@ const mocks = vi.hoisted(() => ({
   reportMutationError: vi.fn(),
   reportRequestError: vi.fn(),
   lifecycle: {
+    scopeKey: 'notifications:server-a:user-a',
     state: 'active',
     unreadCount: 2,
     updatedAt: 1,
     latestEvent: null as { event: string; id?: number; payload?: unknown } | null,
     eventSequence: 0,
+    events: [] as Array<{ sequence: number; event: { event: string; id?: number; payload?: unknown } }>,
   },
 }));
 
@@ -61,10 +63,12 @@ describe('NotificationsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.lifecycle.state = 'active';
+    mocks.lifecycle.scopeKey = 'notifications:server-a:user-a';
     mocks.lifecycle.unreadCount = 2;
     mocks.lifecycle.updatedAt = 1;
     mocks.lifecycle.latestEvent = null;
     mocks.lifecycle.eventSequence = 0;
+    mocks.lifecycle.events = [];
     mocks.getNotificationPreferences.mockResolvedValue({
       user_id: 'user-1',
       reminder_enabled: true,
@@ -144,6 +148,7 @@ describe('NotificationsPage', () => {
     mocks.lifecycle.unreadCount = 3;
     mocks.lifecycle.updatedAt = 2;
     mocks.lifecycle.eventSequence = 1;
+    mocks.lifecycle.events = [{ sequence: 1, event: mocks.lifecycle.latestEvent }];
     view.rerender(<NotificationsPage />);
 
     expect(await screen.findByText('Open the report in Deep Research.')).toBeInTheDocument();
@@ -175,9 +180,69 @@ describe('NotificationsPage', () => {
 
     mocks.lifecycle.latestEvent = { event: 'notifications_coalesced', id: 102 };
     mocks.lifecycle.eventSequence = 1;
+    mocks.lifecycle.events = [{ sequence: 1, event: mocks.lifecycle.latestEvent }];
     view.rerender(<NotificationsPage />);
 
     await waitFor(() => expect(mocks.listNotifications).toHaveBeenCalledTimes(4));
+  });
+
+  it('renders every provider event delivered in one React batch', async () => {
+    const view = render(<NotificationsPage />);
+    await screen.findByText('Job failed');
+    const first = {
+      event: 'notification', id: 102,
+      payload: { notification_id: 102, title: 'First event', message: 'First body' },
+    };
+    const second = {
+      event: 'notification', id: 103,
+      payload: { notification_id: 103, title: 'Second event', message: 'Second body' },
+    };
+    mocks.lifecycle.eventSequence = 2;
+    mocks.lifecycle.events = [
+      { sequence: 1, event: first },
+      { sequence: 2, event: second },
+    ];
+    mocks.lifecycle.latestEvent = second;
+    view.rerender(<NotificationsPage />);
+
+    expect(await screen.findByText('First body')).toBeInTheDocument();
+    expect(screen.getByText('Second body')).toBeInTheDocument();
+  });
+
+  it('clears old-account items and ignores delayed list responses after scope change', async () => {
+    let resolveOldInbox: ((value: { items: unknown[]; total: number }) => void) | undefined;
+    let resolveOldSnoozed: ((value: { items: unknown[]; total: number }) => void) | undefined;
+    mocks.listNotifications
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveOldInbox = resolve; }))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveOldSnoozed = resolve; }))
+      .mockResolvedValue({
+        items: [{
+          id: 202, kind: 'notification', title: 'New account', message: 'New body',
+          severity: 'info', created_at: '2026-07-11T00:00:00Z', read_at: null, dismissed_at: null,
+        }],
+        total: 1,
+      });
+    const view = render(<NotificationsPage />);
+    await waitFor(() => expect(mocks.listNotifications).toHaveBeenCalledTimes(2));
+
+    mocks.lifecycle.scopeKey = 'notifications:server-a:user-b';
+    mocks.lifecycle.unreadCount = 0;
+    mocks.lifecycle.updatedAt = 2;
+    view.rerender(<NotificationsPage />);
+    expect(screen.queryByText('Job failed')).not.toBeInTheDocument();
+    expect(await screen.findAllByText('New body')).not.toHaveLength(0);
+
+    resolveOldInbox?.({
+      items: [{
+        id: 101, kind: 'notification', title: 'Old account', message: 'Old body',
+        severity: 'info', created_at: '2026-07-10T00:00:00Z', read_at: null, dismissed_at: null,
+      }],
+      total: 1,
+    });
+    resolveOldSnoozed?.({ items: [], total: 0 });
+    await act(async () => Promise.resolve());
+
+    expect(screen.queryByText('Old body')).not.toBeInTheDocument();
   });
 
   it('reports list failures to the shared lifecycle', async () => {

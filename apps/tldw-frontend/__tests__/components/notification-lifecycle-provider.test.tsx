@@ -180,6 +180,23 @@ describe("NotificationLifecycleProvider", () => {
     await waitFor(() => expect(mocks.subscribeNotificationsStream).toHaveBeenCalledTimes(1))
   })
 
+  it("aborts an in-flight bootstrap before switching scopes", async () => {
+    let firstSignal: AbortSignal | undefined
+    mocks.getUnreadCount
+      .mockImplementationOnce((options?: { signal?: AbortSignal }) => {
+        firstSignal = options?.signal
+        return new Promise(() => undefined)
+      })
+      .mockResolvedValueOnce({ unread_count: 2 })
+    const view = renderProvider("notifications:server-a:user-a")
+    await waitFor(() => expect(mocks.getUnreadCount).toHaveBeenCalledTimes(1))
+
+    view.rerenderScope("notifications:server-a:user-b")
+
+    expect(firstSignal?.aborted).toBe(true)
+    await waitFor(() => expect(mocks.getUnreadCount).toHaveBeenCalledTimes(2))
+  })
+
   it("restarts auth-required work after same-principal credentials rotate", async () => {
     mocks.getUnreadCount
       .mockRejectedValueOnce(Object.assign(new Error("expired"), { status: 401 }))
@@ -443,6 +460,25 @@ describe("NotificationLifecycleProvider", () => {
     expect(view.latest().eventSequence).toBe(1)
     expect(view.latest().latestEvent).toMatchObject({ id: 11 })
     expect(view.latest().unreadCount).toBe(6)
+  })
+
+  it("retains every stream event delivered in one React batch", async () => {
+    let streamOptions: Record<string, unknown> | undefined
+    mocks.subscribeNotificationsStream.mockImplementation((options: Record<string, unknown>) => {
+      streamOptions = options
+      return vi.fn()
+    })
+    const view = renderProvider()
+    await waitFor(() => expect(mocks.subscribeNotificationsStream).toHaveBeenCalledTimes(1))
+
+    act(() => {
+      const onEvent = streamOptions?.onEvent as ((event: unknown) => void) | undefined
+      onEvent?.({ event: "notification", id: 11, payload: { notification_id: 11 } })
+      onEvent?.({ event: "notification", id: 12, payload: { notification_id: 12 } })
+    })
+
+    expect(view.latest().events.map(({ event }) => event.id)).toEqual([11, 12])
+    expect(view.latest().eventSequence).toBe(2)
   })
 
   it("classifies mutation failures once without replaying the mutation", async () => {
