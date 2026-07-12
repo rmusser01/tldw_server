@@ -18,13 +18,13 @@
 **Goal:** Preserve full session configuration and resolve named presets against a supplied snapshot.
 **Success Criteria:** First-source chunking survives every edit; configured presets match correctly.
 **Tests:** Focused `IngestWizardContext.test.tsx` cases.
-**Status:** Not Started
+**Status:** Complete
 
 ### Stage 2: Hydrated open lifecycle
 **Goal:** Capture saved presets before creating, rebasing, or rendering eligible drafts.
 **Success Criteria:** No fallback persistence during hydration; lifecycle exclusions and Ingest More boundaries hold.
 **Tests:** `QuickIngestButton.resume.test.tsx` and modal session cases.
-**Status:** Not Started
+**Status:** In Progress
 
 ### Stage 3: Provider recovery UI
 **Goal:** Add the editable provider control and recoverable redirect.
