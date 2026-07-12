@@ -229,43 +229,52 @@ const transitionToConfig = async (
     }
   }
 
+  const handleStreamEvent = async (event: NotificationStreamEvent): Promise<void> => {
+    if (!isCurrent() || terminal) return
+    if (event.event === "notification") {
+      const payload = event.payload as {
+        title?: string
+        message?: string
+      } | null
+      if (payload?.title) notify(payload.title, payload.message || "")
+
+      unreadCountWrite = unreadCountWrite
+        .catch(() => undefined)
+        .then(() => writeRecord(null, record.unreadCount + 1))
+      await unreadCountWrite
+    }
+
+    if (event.event === "notifications_coalesced") {
+      try {
+        const { unread_count } = await getUnreadCount()
+        await writeRecord(null, unread_count)
+      } catch (error) {
+        await handleTerminalError(error)
+      }
+    }
+  }
+
   try {
     const stop = subscribeNotificationsStream({
       onOpen: () => {
-        if (!terminal) void writeRecord({ type: "open" })
+        if (!terminal) {
+          void writeRecord({ type: "open" }).catch((error) => {
+            console.debug("[background] Failed to mark notification stream active:", error)
+          })
+        }
       },
       onError: (error) => {
-        void handleTerminalError(error)
+        void handleTerminalError(error).catch((writeError) => {
+          console.debug(
+            "[background] Failed to handle notification stream error:",
+            writeError
+          )
+        })
       },
-      onEvent: async (event: NotificationStreamEvent) => {
-        if (!isCurrent() || terminal) return
-        if (event.event === "notification") {
-          const payload = event.payload as {
-            title?: string
-            message?: string
-          } | null
-          if (payload?.title) notify(payload.title, payload.message || "")
-
-          unreadCountWrite = unreadCountWrite
-            .catch(() => undefined)
-            .then(() => writeRecord(null, record.unreadCount + 1))
-            .catch((error) => {
-              console.debug(
-                "[background] Failed to update unread count from notification event:",
-                error
-              )
-            })
-          await unreadCountWrite
-        }
-
-        if (event.event === "notifications_coalesced") {
-          try {
-            const { unread_count } = await getUnreadCount()
-            await writeRecord(null, unread_count)
-          } catch (error) {
-            await handleTerminalError(error)
-          }
-        }
+      onEvent: (event: NotificationStreamEvent) => {
+        void handleStreamEvent(event).catch((error) => {
+          console.debug("[background] Failed to handle notification stream event:", error)
+        })
       }
     })
     if (terminal || !isCurrent()) {
@@ -279,7 +288,9 @@ const transitionToConfig = async (
 }
 
 const handleConfigChange = (change: StorageChange): void => {
-  void transitionToConfig(change?.newValue)
+  void transitionToConfig(change?.newValue).catch((error) => {
+    console.debug("[background] Failed to update notification scope:", error)
+  })
 }
 
 const ensureConfigWatcher = (storage: SafeStorage): void => {

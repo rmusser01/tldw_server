@@ -410,13 +410,125 @@ describe("notification subscription", () => {
     const config = multiUserConfig("user-a")
 
     await notificationSubscription.startNotificationSubscription(config)
-    await Promise.all([
-      onEvent?.({ event: "notification", payload: { title: "First", message: "One" } }),
+    expect(
+      onEvent?.({ event: "notification", payload: { title: "First", message: "One" } })
+    ).toBeUndefined()
+    expect(
       onEvent?.({ event: "notification", payload: { title: "Second", message: "Two" } })
-    ])
+    ).toBeUndefined()
+    await flushAsync()
+    await flushAsync()
 
     expect((storageState.get(recordKeyFor(config)) as { unreadCount: number }).unreadCount).toBe(2)
     expect(notifyMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("dispatches stream events synchronously and contains async write failures", async () => {
+    let onEvent: ((event: NotificationStreamEvent) => void) | undefined
+    subscribeNotificationsStreamMock.mockImplementation(
+      (options: { onEvent: (event: NotificationStreamEvent) => void }) => {
+        onEvent = options.onEvent
+        return vi.fn()
+      }
+    )
+    const config = multiUserConfig("user-a")
+    const error = new Error("storage unavailable")
+    const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {})
+
+    await notificationSubscription.startNotificationSubscription(config)
+    storageMock.set.mockRejectedValueOnce(error)
+
+    expect(
+      onEvent?.({ event: "notification", payload: { title: "Queued", message: "Write" } })
+    ).toBeUndefined()
+    await flushAsync()
+
+    expect(debugSpy).toHaveBeenCalledWith(
+      "[background] Failed to handle notification stream event:",
+      error
+    )
+  })
+
+  it("contains async lifecycle writes triggered by stream errors", async () => {
+    let onError: ((error: unknown) => void) | undefined
+    subscribeNotificationsStreamMock.mockImplementation(
+      (options: { onError?: (error: unknown) => void }) => {
+        onError = options.onError
+        return vi.fn()
+      }
+    )
+    const config = multiUserConfig("user-a")
+    const error = new Error("terminal state write failed")
+    const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {})
+
+    await notificationSubscription.startNotificationSubscription(config)
+    storageMock.set.mockRejectedValueOnce(error)
+
+    expect(onError?.({ status: 403 })).toBeUndefined()
+    await flushAsync()
+
+    expect(debugSpy).toHaveBeenCalledWith(
+      "[background] Failed to handle notification stream error:",
+      error
+    )
+  })
+
+  it("contains async lifecycle writes triggered by stream open", async () => {
+    let onOpen: (() => void) | undefined
+    subscribeNotificationsStreamMock.mockImplementation(
+      (options: { onOpen?: () => void }) => {
+        onOpen = options.onOpen
+        return vi.fn()
+      }
+    )
+    const config = multiUserConfig("user-a")
+    const error = new Error("active state write failed")
+    const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {})
+
+    await notificationSubscription.startNotificationSubscription(config)
+    storageMock.set.mockRejectedValueOnce(error)
+
+    expect(onOpen?.()).toBeUndefined()
+    await flushAsync()
+
+    expect(debugSpy).toHaveBeenCalledWith(
+      "[background] Failed to mark notification stream active:",
+      error
+    )
+  })
+
+  it("contains and logs async config watcher failures", async () => {
+    subscribeNotificationsStreamMock.mockReturnValue(vi.fn())
+    const firstConfig = multiUserConfig("user-a")
+    const secondConfig = multiUserConfig("user-b")
+    const error = new Error("selector write failed")
+    const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {})
+
+    await notificationSubscription.startNotificationSubscription(firstConfig)
+    storageMock.set.mockRejectedValueOnce(error)
+    for (const watcher of watchers.get("tldwConfig") ?? []) {
+      watcher({ oldValue: firstConfig, newValue: secondConfig })
+    }
+    await flushAsync()
+
+    expect(debugSpy).toHaveBeenCalledWith(
+      "[background] Failed to update notification scope:",
+      error
+    )
+  })
+
+  it("tears down and reinstalls exactly one config watcher across stop and restart", async () => {
+    subscribeNotificationsStreamMock.mockReturnValue(vi.fn())
+    const config = multiUserConfig("user-a")
+
+    await notificationSubscription.startNotificationSubscription(config)
+    expect(watchers.get("tldwConfig")?.size).toBe(1)
+
+    notificationSubscription.stopNotificationSubscription()
+    expect(watchers.get("tldwConfig")?.size ?? 0).toBe(0)
+
+    await notificationSubscription.startNotificationSubscription(config)
+    expect(watchers.get("tldwConfig")?.size).toBe(1)
   })
 
   it("keeps idle internal-only when the active subscription stops", async () => {
