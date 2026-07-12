@@ -1,4 +1,5 @@
 import type { TldwConfig } from "@/services/tldw/TldwApiClient"
+import { isExactOriginCookieSessionConfig } from "@/services/tldw/browser-networking"
 
 export type ApiKeyPersistence = "device" | "session"
 export type CredentialSource = "manual" | "cookie-session"
@@ -92,6 +93,55 @@ export const resolveManualCredential = async (
   return isCompleteSessionRecord(record, origin)
     ? nonEmptySecret(record.apiKey)
     : null
+}
+
+export const resolveEffectiveTldwConfig = async (
+  stores: {
+    persistent: CredentialStorage
+    session: CredentialStorage
+  },
+  cookie?: {
+    cookieSession?: TldwConfig | null
+    expectedCookieOrigin?: string | null
+  }
+): Promise<TldwConfig | null> => {
+  const stored = await stores.persistent
+    .get<TldwConfig>("tldwConfig")
+    .catch(() => null)
+  const cookieSession = cookie?.cookieSession
+
+  if (
+    isExactOriginCookieSessionConfig(
+      cookieSession,
+      cookie?.expectedCookieOrigin
+    ) &&
+    cookieSession
+  ) {
+    const {
+      apiKey: _apiKey,
+      apiBearer: _apiBearer,
+      accessToken: _accessToken,
+      refreshToken: _refreshToken,
+      credentialSource: _credentialSource,
+      apiKeyPersistence: _apiKeyPersistence,
+      apiKeyServerOrigin: _apiKeyServerOrigin,
+      ...safe
+    } = cookieSession
+    return safe
+  }
+
+  if (!stored || typeof stored !== "object") return null
+
+  const effective = { ...stored }
+  const apiKey = await resolveManualCredential(effective, {
+    session: stores.session
+  })
+  if (apiKey) {
+    effective.apiKey = apiKey
+  } else if (!isCompleteDeviceCredential(effective)) {
+    delete effective.apiKey
+  }
+  return effective
 }
 
 export const toPersistedTldwConfig = (config: TldwConfig): TldwConfig => {

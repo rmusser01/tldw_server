@@ -5,6 +5,7 @@ import {
   MANUAL_SESSION_KEY,
   clearManualCredentials,
   normalizeServerOrigin,
+  resolveEffectiveTldwConfig,
   resolveManualCredential,
   toPersistedTldwConfig,
   type CredentialStorage
@@ -36,6 +37,110 @@ const deviceConfig = {
 } satisfies TldwConfig
 
 describe("manual single-user credential policy", () => {
+  it("hydrates an exact-origin session key without persisting it", async () => {
+    const persistent = new MemoryStorage()
+    const session = new MemoryStorage()
+    const config: TldwConfig = {
+      authMode: "single-user",
+      serverUrl: "https://api.example.test/path",
+      credentialSource: "manual",
+      apiKeyPersistence: "session",
+      apiKeyServerOrigin: "https://api.example.test"
+    }
+    await persistent.set("tldwConfig", config)
+    await session.set(MANUAL_SESSION_KEY, {
+      apiKey: "session-secret",
+      credentialSource: "manual",
+      apiKeyPersistence: "session",
+      apiKeyServerOrigin: "https://api.example.test"
+    })
+
+    await expect(
+      resolveEffectiveTldwConfig({ persistent, session })
+    ).resolves.toEqual({ ...config, apiKey: "session-secret" })
+    await expect(persistent.get("tldwConfig")).resolves.toEqual(config)
+
+    await session.set(MANUAL_SESSION_KEY, {
+      apiKey: "other-secret",
+      credentialSource: "manual",
+      apiKeyPersistence: "session",
+      apiKeyServerOrigin: "https://other.test"
+    })
+    await expect(
+      resolveEffectiveTldwConfig({ persistent, session })
+    ).resolves.toEqual(config)
+  })
+
+  it("prefers only an exact-origin cookie session and removes explicit auth", async () => {
+    const persistent = new MemoryStorage()
+    const session = new MemoryStorage()
+    await persistent.set("tldwConfig", deviceConfig)
+    const cookieSession: TldwConfig = {
+      authMode: "single-user",
+      authSource: "cookie-session",
+      serverUrl: "https://api.example.test",
+      apiKey: "stale-api-key",
+      apiBearer: "stale-api-bearer",
+      accessToken: "stale-access-token",
+      refreshToken: "stale-refresh-token",
+      credentialSource: "manual",
+      apiKeyPersistence: "device",
+      apiKeyServerOrigin: "https://api.example.test"
+    }
+
+    await expect(
+      resolveEffectiveTldwConfig(
+        { persistent, session },
+        { cookieSession, expectedCookieOrigin: "https://api.example.test" }
+      )
+    ).resolves.toEqual({
+      authMode: "single-user",
+      authSource: "cookie-session",
+      serverUrl: "https://api.example.test"
+    })
+
+    await expect(
+      resolveEffectiveTldwConfig(
+        { persistent, session },
+        {
+          cookieSession: {
+            ...cookieSession,
+            serverUrl: "https://other.test"
+          },
+          expectedCookieOrigin: "https://api.example.test"
+        }
+      )
+    ).resolves.toEqual(deviceConfig)
+  })
+
+  it("fails closed when credential storage is unreadable", async () => {
+    const unreadable: CredentialStorage = {
+      get: async () => {
+        throw new Error("unreadable")
+      },
+      set: async () => undefined,
+      remove: async () => undefined
+    }
+    const session = new MemoryStorage()
+
+    await expect(
+      resolveEffectiveTldwConfig({ persistent: unreadable, session })
+    ).resolves.toBeNull()
+
+    const persistent = new MemoryStorage()
+    const config: TldwConfig = {
+      authMode: "single-user",
+      serverUrl: "https://api.example.test",
+      credentialSource: "manual",
+      apiKeyPersistence: "session",
+      apiKeyServerOrigin: "https://api.example.test"
+    }
+    await persistent.set("tldwConfig", config)
+    await expect(
+      resolveEffectiveTldwConfig({ persistent, session: unreadable })
+    ).resolves.toEqual(config)
+  })
+
   it("accepts a complete device credential only for its exact origin", async () => {
     const session = new MemoryStorage()
 

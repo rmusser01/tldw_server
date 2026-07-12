@@ -25,6 +25,10 @@ export type CookieSessionBrowserTransportInput = {
   pageOrigin?: string | null
 }
 
+export type CookieSessionConfigInput = CookieSessionBrowserTransportInput & {
+  serverUrl?: string | null
+}
+
 type ResolveBrowserTransportInput = {
   surface: BrowserSurface
   deploymentMode?: string | null
@@ -78,6 +82,23 @@ export const isCookieSessionBrowserTransport = (
   input.transportMode === "quickstart" &&
   input.transportKind === "same-origin" &&
   parseHttpOrigin(input.pageOrigin) !== null
+
+export const isExactOriginCookieSessionConfig = (
+  config: CookieSessionConfigInput | null | undefined,
+  expectedOrigin?: string | null
+): boolean => {
+  const origin = parseHttpOrigin(expectedOrigin)?.origin
+  return Boolean(
+    origin &&
+      config?.serverUrl === origin &&
+      isCookieSessionBrowserTransport({
+        ...config,
+        transportMode: "quickstart",
+        transportKind: "same-origin",
+        pageOrigin: origin
+      })
+  )
+}
 
 const normalizeOrigin = (value?: string | null): string => {
   const parsed = parseHttpOrigin(value)
