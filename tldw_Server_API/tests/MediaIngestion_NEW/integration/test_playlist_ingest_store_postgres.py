@@ -101,8 +101,8 @@ def test_postgres_ready_snapshot_guard_rejects_cancelled_linked_job(pg_temp_db, 
     dsn = str(pg_temp_db["dsn"])
 
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
-        PlaylistIngestConflictError,
         PlaylistIngestStore,
+        PlaylistPreflightLeaseLostError,
     )
     from tldw_Server_API.app.core.Jobs.manager import JobManager
     from tldw_Server_API.app.core.Jobs.pg_migrations import ensure_jobs_tables_pg
@@ -134,16 +134,100 @@ def test_postgres_ready_snapshot_guard_rejects_cancelled_linked_job(pg_temp_db, 
     assert claimed is not None
     assert manager.cancel_job(int(job["id"]), reason="race") is True
 
-    with pytest.raises(PlaylistIngestConflictError, match="no longer active"):
+    with pytest.raises(PlaylistPreflightLeaseLostError) as exc_info:
         store.replace_preflight_snapshot(
             "pg-guard-owner",
             preflight.preflight_id,
             status="ready",
             items=[],
-            expected_job_id=int(job["id"]),
+            expected_job_id=int(claimed["id"]),
+            expected_lease_id=str(claimed["lease_id"]),
+            expected_worker_id=str(claimed["worker_id"]),
         )
 
+    assert exc_info.value.cancelled is True
     assert store.get_preflight("pg-guard-owner", preflight.preflight_id).status == "pending"
+
+
+def test_postgres_reclaimed_job_fences_stale_preflight_writer(pg_temp_db, monkeypatch):
+    monkeypatch.setenv("TEST_MODE", "true")
+    dsn = str(pg_temp_db["dsn"])
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestStore,
+        PlaylistPreflightLeaseLostError,
+    )
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    from tldw_Server_API.app.core.Jobs.pg_migrations import ensure_jobs_tables_pg
+
+    ensure_jobs_tables_pg(dsn)
+    manager_a = JobManager(backend="postgres", db_url=dsn, clock=_FixedClock())
+    manager_b = JobManager(backend="postgres", db_url=dsn, clock=_FixedClock())
+    store_a = PlaylistIngestStore(manager_a)
+    store_b = PlaylistIngestStore(manager_b)
+    job = manager_a.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="playlist_preflight",
+        payload={"preflight_id": "pg-stale"},
+        owner_user_id="pg-stale-owner",
+    )
+    preflight = store_a.create_preflight(
+        "pg-stale-owner",
+        source_url="https://example.com/pg-stale",
+        source_kind="playlist",
+        expires_at=NOW + timedelta(hours=1),
+        job_id=int(job["id"]),
+    )
+    stale_claim = manager_a.acquire_next_job(
+        domain="media_ingest",
+        queue="default",
+        lease_seconds=120,
+        worker_id="pg-worker-a",
+        job_type="playlist_preflight",
+    )
+    assert stale_claim is not None
+    connection = manager_a._connect()
+    try:
+        with manager_a._pg_cursor(connection) as cursor:
+            cursor.execute(
+                "UPDATE jobs SET leased_until = NOW() - INTERVAL '1 second' WHERE id = %s",
+                (int(job["id"]),),
+            )
+        connection.commit()
+    finally:
+        connection.close()
+    active_claim = manager_b.acquire_next_job(
+        domain="media_ingest",
+        queue="default",
+        lease_seconds=120,
+        worker_id="pg-worker-b",
+        job_type="playlist_preflight",
+    )
+    assert active_claim is not None
+
+    with pytest.raises(PlaylistPreflightLeaseLostError):
+        store_a.replace_preflight_snapshot(
+            "pg-stale-owner",
+            preflight.preflight_id,
+            status="ready",
+            items=[],
+            expected_job_id=int(stale_claim["id"]),
+            expected_lease_id=str(stale_claim["lease_id"]),
+            expected_worker_id=str(stale_claim["worker_id"]),
+        )
+
+    assert store_a.get_preflight("pg-stale-owner", preflight.preflight_id).status == "pending"
+    store_b.replace_preflight_snapshot(
+        "pg-stale-owner",
+        preflight.preflight_id,
+        status="ready",
+        items=[],
+        expected_job_id=int(active_claim["id"]),
+        expected_lease_id=str(active_claim["lease_id"]),
+        expected_worker_id=str(active_claim["worker_id"]),
+    )
+    assert store_b.get_preflight("pg-stale-owner", preflight.preflight_id).status == "ready"
 
 
 def test_postgres_no_cas_concurrent_events_both_persist(pg_temp_db, monkeypatch):

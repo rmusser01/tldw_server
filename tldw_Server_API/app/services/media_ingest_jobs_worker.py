@@ -36,8 +36,8 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.persistence import (
     process_document_like_item,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
-    PlaylistIngestConflictError,
     PlaylistIngestStore,
+    PlaylistPreflightLeaseLostError,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_preflight import PlaylistPreflightData
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_preflight_runner import (
@@ -358,6 +358,24 @@ def _playlist_preflight_owner(job: dict[str, Any]) -> str:
     return str(owner).strip()
 
 
+def _playlist_preflight_lease_identity(job: dict[str, Any]) -> tuple[int, str, str]:
+    job_id = job.get("id")
+    lease_id = job.get("lease_id")
+    worker_id = job.get("worker_id")
+    if (
+        type(job_id) is not int
+        or job_id < 1
+        or type(lease_id) is not str
+        or not lease_id
+        or lease_id != lease_id.strip()
+        or type(worker_id) is not str
+        or not worker_id
+        or worker_id != worker_id.strip()
+    ):
+        raise MediaIngestJobError("playlist_preflight_lease_required", retryable=False)
+    return job_id, lease_id, worker_id
+
+
 def _block_playlist_preflight(
     store: PlaylistIngestStore,
     *,
@@ -392,6 +410,49 @@ def _raise_if_playlist_preflight_cancelled(
         code="playlist_preflight_cancelled",
     )
     raise MediaIngestJobError("playlist_preflight_cancelled", retryable=False)
+
+
+def _replace_playlist_preflight_snapshot_guarded(
+    store: PlaylistIngestStore,
+    *,
+    owner_user_id: str,
+    preflight_id: str,
+    job_id: int,
+    lease_id: str,
+    worker_id: str,
+    status: str,
+    items: list[dict[str, Any]],
+    summary: dict[str, Any] | None = None,
+) -> None:
+    try:
+        store.replace_preflight_snapshot(
+            owner_user_id,
+            preflight_id,
+            status=status,
+            items=items,
+            summary=summary,
+            expected_job_id=job_id,
+            expected_lease_id=lease_id,
+            expected_worker_id=worker_id,
+        )
+    except PlaylistPreflightLeaseLostError as exc:
+        if exc.cancelled:
+            _block_playlist_preflight(
+                store,
+                owner_user_id=owner_user_id,
+                preflight_id=preflight_id,
+                code="playlist_preflight_cancelled",
+            )
+            raise MediaIngestJobError("playlist_preflight_cancelled", retryable=False) from exc
+        raise MediaIngestJobError("playlist_preflight_lease_lost", retryable=False) from exc
+    except Exception as exc:
+        _block_playlist_preflight(
+            store,
+            owner_user_id=owner_user_id,
+            preflight_id=preflight_id,
+            code="playlist_snapshot_write_failed",
+        )
+        raise MediaIngestJobError("playlist_snapshot_write_failed", retryable=False) from exc
 
 
 def _playlist_library_url_set(rows: list[dict[str, Any]]) -> set[str]:
@@ -471,7 +532,7 @@ async def _handle_playlist_preflight_job(
     jm: JobManager,
     progress: _ProgressState,
 ) -> dict[str, Any]:
-    job_id = int(job.get("id"))
+    job_id, lease_id, worker_id = _playlist_preflight_lease_identity(job)
     payload = _normalize_payload(job.get("payload"))
     owner_user_id = _playlist_preflight_owner(job)
     preflight_id = str(payload.get("preflight_id") or "").strip()
@@ -491,21 +552,23 @@ async def _handle_playlist_preflight_job(
         )
         raise MediaIngestJobError("playlist_preflight_invalid_request", retryable=False)
 
-    try:
-        store.replace_preflight_snapshot(
-            owner_user_id,
-            preflight_id,
-            status="running",
-            items=[],
-        )
-    except Exception as exc:
-        _block_playlist_preflight(
-            store,
-            owner_user_id=owner_user_id,
-            preflight_id=preflight_id,
-            code="playlist_snapshot_write_failed",
-        )
-        raise MediaIngestJobError("playlist_snapshot_write_failed", retryable=False) from exc
+    _raise_if_playlist_preflight_cancelled(
+        jm,
+        job_id,
+        store,
+        owner_user_id=owner_user_id,
+        preflight_id=preflight_id,
+    )
+    _replace_playlist_preflight_snapshot_guarded(
+        store,
+        owner_user_id=owner_user_id,
+        preflight_id=preflight_id,
+        job_id=job_id,
+        lease_id=lease_id,
+        worker_id=worker_id,
+        status="running",
+        items=[],
+    )
 
     progress.percent = 10.0
     progress.message = "inspect playlist"
@@ -586,39 +649,17 @@ async def _handle_playlist_preflight_job(
         owner_user_id=owner_user_id,
         preflight_id=preflight_id,
     )
-    try:
-        store.replace_preflight_snapshot(
-            owner_user_id,
-            preflight_id,
-            status="ready",
-            items=snapshot_items,
-            summary=summary,
-            expected_job_id=job_id,
-        )
-    except PlaylistIngestConflictError as exc:
-        if _should_cancel(jm, job_id):
-            _block_playlist_preflight(
-                store,
-                owner_user_id=owner_user_id,
-                preflight_id=preflight_id,
-                code="playlist_preflight_cancelled",
-            )
-            raise MediaIngestJobError("playlist_preflight_cancelled", retryable=False) from exc
-        _block_playlist_preflight(
-            store,
-            owner_user_id=owner_user_id,
-            preflight_id=preflight_id,
-            code="playlist_snapshot_write_failed",
-        )
-        raise MediaIngestJobError("playlist_snapshot_write_failed", retryable=False) from exc
-    except Exception as exc:
-        _block_playlist_preflight(
-            store,
-            owner_user_id=owner_user_id,
-            preflight_id=preflight_id,
-            code="playlist_snapshot_write_failed",
-        )
-        raise MediaIngestJobError("playlist_snapshot_write_failed", retryable=False) from exc
+    _replace_playlist_preflight_snapshot_guarded(
+        store,
+        owner_user_id=owner_user_id,
+        preflight_id=preflight_id,
+        job_id=job_id,
+        lease_id=lease_id,
+        worker_id=worker_id,
+        status="ready",
+        items=snapshot_items,
+        summary=summary,
+    )
 
     progress.percent = 100.0
     progress.message = "completed"

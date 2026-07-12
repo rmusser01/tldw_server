@@ -41,6 +41,14 @@ class PlaylistIngestConflictError(RuntimeError):
     """Raised when immutable or compare-and-set state has changed."""
 
 
+class PlaylistPreflightLeaseLostError(PlaylistIngestConflictError):
+    """Raised before mutation when the claimed preflight job lease is not authoritative."""
+
+    def __init__(self, *, cancelled: bool = False) -> None:
+        self.cancelled = bool(cancelled)
+        super().__init__("playlist_preflight_lease_lost")
+
+
 @dataclass(frozen=True, slots=True)
 class PlaylistPreflightRecord:
     preflight_id: str
@@ -517,9 +525,20 @@ class PlaylistIngestStore:
         summary: Mapping[str, Any] | None = None,
         error: Mapping[str, Any] | None = None,
         expected_job_id: int | None = None,
+        expected_lease_id: str | None = None,
+        expected_worker_id: str | None = None,
     ) -> PlaylistPreflightRecord:
         """Replace a mutable snapshot, optionally guarded by its active processing job."""
         owner = self._owner(owner_user_id)
+        guarded = any(value is not None for value in (expected_job_id, expected_lease_id, expected_worker_id))
+        if guarded and (
+            type(expected_job_id) is not int
+            or not isinstance(expected_lease_id, str)
+            or not expected_lease_id.strip()
+            or not isinstance(expected_worker_id, str)
+            or not expected_worker_id.strip()
+        ):
+            raise PlaylistPreflightLeaseLostError()
         occurrence_ids = [str(item.get("occurrence_id") or "").strip() for item in items]
         ordinals = [item.get("ordinal") for item in items]
         if any(not value for value in occurrence_ids) or len(set(occurrence_ids)) != len(occurrence_ids):
@@ -550,28 +569,39 @@ class PlaylistIngestStore:
             preflight_row = self._row_dict(row)
             if str(preflight_row["status"]) not in {"pending", "running"}:
                 raise PlaylistIngestConflictError("ready playlist snapshot ordering is immutable")
-            if expected_job_id is not None:
+            if guarded:
                 if preflight_row.get("job_id") != int(expected_job_id):
-                    raise PlaylistIngestConflictError("playlist preflight job no longer matches")
+                    raise PlaylistPreflightLeaseLostError()
                 active_job_query = (
                     """
-                    SELECT owner_user_id, status FROM jobs WHERE id = ?
+                    SELECT owner_user_id, status, lease_id, worker_id,
+                           (leased_until IS NOT NULL AND leased_until > NOW()) AS lease_active
+                    FROM jobs WHERE id = ?
                     FOR UPDATE
                 """
                     if self._postgres
                     else """
-                    SELECT owner_user_id, status FROM jobs WHERE id = ?
+                    SELECT owner_user_id, status, lease_id, worker_id,
+                           (leased_until IS NOT NULL AND leased_until > DATETIME('now')) AS lease_active
+                    FROM jobs WHERE id = ?
                 """
                 )
                 job_row = self._query(db, active_job_query, (int(expected_job_id),)).fetchone()
                 if job_row is None:
-                    raise PlaylistIngestConflictError("playlist preflight job is no longer active")
+                    raise PlaylistPreflightLeaseLostError()
                 active_job = self._row_dict(job_row)
+                cancelled = (
+                    str(active_job.get("owner_user_id") or "") == owner
+                    and str(active_job.get("status") or "") == "cancelled"
+                )
                 if (
                     str(active_job.get("owner_user_id") or "") != owner
                     or str(active_job.get("status") or "") != "processing"
+                    or str(active_job.get("lease_id") or "") != expected_lease_id
+                    or str(active_job.get("worker_id") or "") != expected_worker_id
+                    or not bool(active_job.get("lease_active"))
                 ):
-                    raise PlaylistIngestConflictError("playlist preflight job is no longer active")
+                    raise PlaylistPreflightLeaseLostError(cancelled=cancelled)
 
             self._query(
                 db,
@@ -1333,5 +1363,6 @@ __all__ = [
     "PlaylistItemRecord",
     "PlaylistMaterializationRecord",
     "PlaylistPage",
+    "PlaylistPreflightLeaseLostError",
     "PlaylistPreflightRecord",
 ]

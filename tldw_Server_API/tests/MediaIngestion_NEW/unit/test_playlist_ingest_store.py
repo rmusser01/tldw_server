@@ -85,7 +85,7 @@ def _seed_materialization(store, *, owner_id: str = "1", item_count: int = 2):
 
 def test_ready_snapshot_guard_rejects_cancelled_linked_job_atomically(store):
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
-        PlaylistIngestConflictError,
+        PlaylistPreflightLeaseLostError,
     )
 
     job = store._jobs.create_job(
@@ -111,17 +111,178 @@ def test_ready_snapshot_guard_rejects_cancelled_linked_job_atomically(store):
     assert claimed is not None
     assert store._jobs.cancel_job(int(job["id"]), reason="race") is True
 
-    with pytest.raises(PlaylistIngestConflictError, match="no longer active"):
+    with pytest.raises(PlaylistPreflightLeaseLostError) as exc_info:
         store.replace_preflight_snapshot(
             "1",
             preflight.preflight_id,
             status="ready",
             items=[_preflight_item("must-not-persist", 1)],
-            expected_job_id=int(job["id"]),
+            expected_job_id=int(claimed["id"]),
+            expected_lease_id=str(claimed["lease_id"]),
+            expected_worker_id=str(claimed["worker_id"]),
+        )
+
+    assert exc_info.value.cancelled is True
+    assert store.get_preflight("1", preflight.preflight_id).status == "pending"
+    assert list(store.list_preflight_items("1", preflight.preflight_id, limit=10)) == []
+
+
+def test_stale_reclaimed_worker_cannot_write_snapshot_without_lease_identity(store):
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestConflictError,
+        PlaylistPreflightLeaseLostError,
+    )
+
+    job = store._jobs.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="playlist_preflight",
+        payload={"preflight_id": "stale-guard"},
+        owner_user_id="1",
+    )
+    preflight = store.create_preflight(
+        "1",
+        source_url="https://example.com/stale-guard",
+        source_kind="playlist",
+        expires_at=NOW + timedelta(hours=1),
+        job_id=int(job["id"]),
+    )
+    stale_claim = store._jobs.acquire_next_job(
+        domain="media_ingest",
+        queue="default",
+        lease_seconds=120,
+        worker_id="worker-a",
+    )
+    assert stale_claim is not None
+    connection = store._jobs._connect()
+    try:
+        connection.execute(
+            "UPDATE jobs SET leased_until = DATETIME('now', '-1 second') WHERE id = ?",
+            (int(job["id"]),),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(PlaylistPreflightLeaseLostError):
+        store.replace_preflight_snapshot(
+            "1",
+            preflight.preflight_id,
+            status="running",
+            items=[_preflight_item("expired-item", 1)],
+            expected_job_id=int(stale_claim["id"]),
+            expected_lease_id=str(stale_claim["lease_id"]),
+            expected_worker_id=str(stale_claim["worker_id"]),
+        )
+
+    active_claim = store._jobs.acquire_next_job(
+        domain="media_ingest",
+        queue="default",
+        lease_seconds=120,
+        worker_id="worker-b",
+    )
+    assert active_claim is not None
+    assert active_claim["lease_id"] != stale_claim["lease_id"]
+
+    with pytest.raises(PlaylistIngestConflictError):
+        store.replace_preflight_snapshot(
+            "1",
+            preflight.preflight_id,
+            status="running",
+            items=[_preflight_item("stale-item", 1)],
+            expected_job_id=int(stale_claim["id"]),
         )
 
     assert store.get_preflight("1", preflight.preflight_id).status == "pending"
     assert list(store.list_preflight_items("1", preflight.preflight_id, limit=10)) == []
+
+    store.replace_preflight_snapshot(
+        "1",
+        preflight.preflight_id,
+        status="ready",
+        items=[_preflight_item("active-item", 1)],
+    )
+    assert store.get_preflight("1", preflight.preflight_id).status == "ready"
+    assert store.list_preflight_items("1", preflight.preflight_id)[0].occurrence_id == "active-item"
+
+
+def test_snapshot_guard_fences_stale_lease_and_allows_active_lease(store):
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistPreflightLeaseLostError,
+    )
+
+    job = store._jobs.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="playlist_preflight",
+        payload={"preflight_id": "lease-guard"},
+        owner_user_id="1",
+    )
+    preflight = store.create_preflight(
+        "1",
+        source_url="https://example.com/lease-guard",
+        source_kind="playlist",
+        expires_at=NOW + timedelta(hours=1),
+        job_id=int(job["id"]),
+    )
+    stale_claim = store._jobs.acquire_next_job(
+        domain="media_ingest",
+        queue="default",
+        lease_seconds=120,
+        worker_id="worker-a",
+    )
+    assert stale_claim is not None
+    connection = store._jobs._connect()
+    try:
+        connection.execute(
+            "UPDATE jobs SET leased_until = DATETIME('now', '-1 second') WHERE id = ?",
+            (int(job["id"]),),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    active_claim = store._jobs.acquire_next_job(
+        domain="media_ingest",
+        queue="default",
+        lease_seconds=120,
+        worker_id="worker-b",
+    )
+    assert active_claim is not None
+
+    with pytest.raises(PlaylistPreflightLeaseLostError):
+        store.replace_preflight_snapshot(
+            "1",
+            preflight.preflight_id,
+            status="running",
+            items=[_preflight_item("stale-item", 1)],
+            expected_job_id=int(stale_claim["id"]),
+            expected_lease_id=str(stale_claim["lease_id"]),
+            expected_worker_id=str(stale_claim["worker_id"]),
+        )
+
+    assert store.get_preflight("1", preflight.preflight_id).status == "pending"
+    assert list(store.list_preflight_items("1", preflight.preflight_id, limit=10)) == []
+
+    store.replace_preflight_snapshot(
+        "1",
+        preflight.preflight_id,
+        status="running",
+        items=[],
+        expected_job_id=int(active_claim["id"]),
+        expected_lease_id=str(active_claim["lease_id"]),
+        expected_worker_id=str(active_claim["worker_id"]),
+    )
+    store.replace_preflight_snapshot(
+        "1",
+        preflight.preflight_id,
+        status="ready",
+        items=[_preflight_item("active-item", 1)],
+        expected_job_id=int(active_claim["id"]),
+        expected_lease_id=str(active_claim["lease_id"]),
+        expected_worker_id=str(active_claim["worker_id"]),
+    )
+    assert store.get_preflight("1", preflight.preflight_id).status == "ready"
+    assert store.list_preflight_items("1", preflight.preflight_id)[0].occurrence_id == "active-item"
 
 
 def test_duplicate_policy_choices_are_explicit():
@@ -767,8 +928,8 @@ def test_postgres_snapshot_replacement_locks_mutable_unexpired_parent(store, mon
     assert locked_read.rstrip().endswith("FOR UPDATE")
 
 
-def test_postgres_ready_guard_locks_preflight_then_exact_job(store, monkeypatch):
-    queries: list[str] = []
+def test_postgres_ready_guard_locks_preflight_then_exact_active_lease(store, monkeypatch):
+    queries: list[tuple[str, tuple]] = []
 
     class _Result:
         rowcount = 1
@@ -784,12 +945,20 @@ def test_postgres_ready_guard_locks_preflight_then_exact_job(store, monkeypatch)
         assert write is True
         yield object()
 
-    def fake_query(_db, sql, _params=()):
-        queries.append(sql)
+    def fake_query(_db, sql, params=()):
+        queries.append((sql, tuple(params)))
         if "SELECT status" in sql:
             return _Result({"status": "running", "expires_at": NOW + timedelta(hours=1), "job_id": 42})
         if "SELECT owner_user_id" in sql:
-            return _Result({"owner_user_id": "1", "status": "processing"})
+            return _Result(
+                {
+                    "owner_user_id": "1",
+                    "status": "processing",
+                    "lease_id": "lease-42",
+                    "worker_id": "worker-42",
+                    "lease_active": True,
+                }
+            )
         return _Result()
 
     store._postgres = True
@@ -803,14 +972,20 @@ def test_postgres_ready_guard_locks_preflight_then_exact_job(store, monkeypatch)
         status="ready",
         items=[],
         expected_job_id=42,
+        expected_lease_id="lease-42",
+        expected_worker_id="worker-42",
     )
 
-    preflight_lock = next(index for index, query in enumerate(queries) if "SELECT status" in query)
-    job_lock = next(index for index, query in enumerate(queries) if "SELECT owner_user_id" in query)
+    preflight_lock = next(index for index, (query, _) in enumerate(queries) if "SELECT status" in query)
+    job_lock = next(index for index, (query, _) in enumerate(queries) if "SELECT owner_user_id" in query)
     assert preflight_lock < job_lock
-    assert queries[preflight_lock].rstrip().endswith("FOR UPDATE")
-    assert "WHERE id = ?" in queries[job_lock]
-    assert queries[job_lock].rstrip().endswith("FOR UPDATE")
+    assert queries[preflight_lock][0].rstrip().endswith("FOR UPDATE")
+    assert "lease_id" in queries[job_lock][0]
+    assert "worker_id" in queries[job_lock][0]
+    assert "leased_until" in queries[job_lock][0]
+    assert "WHERE id = ?" in queries[job_lock][0]
+    assert queries[job_lock][0].rstrip().endswith("FOR UPDATE")
+    assert queries[job_lock][1] == (42,)
 
 
 def test_postgres_cleanup_locks_all_expired_parents_before_child_deletes(store, monkeypatch):

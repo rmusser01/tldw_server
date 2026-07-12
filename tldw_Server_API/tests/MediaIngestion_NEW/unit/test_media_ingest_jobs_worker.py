@@ -1150,6 +1150,105 @@ def _seed_playlist_preflight_job(jm):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("lease_id", None), ("lease_id", 123), ("worker_id", " ")],
+)
+async def test_playlist_preflight_worker_rejects_missing_or_malformed_lease_before_extraction(
+    monkeypatch,
+    tmp_path,
+    field,
+    value,
+):
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
+    monkeypatch.delenv("JOBS_DB_URL", raising=False)
+
+    import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    jm = JobManager()
+    store, preflight, job = _seed_playlist_preflight_job(jm)
+    malformed_job = dict(job)
+    malformed_job[field] = value
+    runner_called = False
+
+    async def fake_runner(_url, **_kwargs):
+        nonlocal runner_called
+        runner_called = True
+        return _playlist_preflight_data([{"source_url": "https://youtu.be/lease123"}])
+
+    monkeypatch.setattr(worker, "run_playlist_preflight_process", fake_runner, raising=True)
+
+    with pytest.raises(worker.MediaIngestJobError) as exc_info:
+        await worker._handle_job(malformed_job, jm, worker._ProgressState())
+
+    assert str(exc_info.value) == "playlist_preflight_lease_required"
+    assert runner_called is False
+    assert store.get_preflight("7", preflight.preflight_id).status == "pending"
+    assert list(store.list_preflight_items("7", preflight.preflight_id, limit=10)) == []
+
+
+@pytest.mark.asyncio
+async def test_playlist_preflight_stale_worker_does_not_mutate_or_block_active_reclaim(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
+    monkeypatch.delenv("JOBS_DB_URL", raising=False)
+
+    import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    jm = JobManager()
+    store, preflight, stale_job = _seed_playlist_preflight_job(jm)
+    connection = jm._connect()
+    try:
+        connection.execute(
+            "UPDATE jobs SET leased_until = DATETIME('now', '-1 second') WHERE id = ?",
+            (int(stale_job["id"]),),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    active_job = jm.acquire_next_job(
+        domain="media_ingest",
+        queue="default",
+        lease_seconds=120,
+        worker_id="playlist-preflight-reclaimer",
+    )
+    assert active_job is not None
+    extracted = _playlist_preflight_data([{"source_url": "https://youtu.be/reclaimed123", "title": "Reclaimed"}])
+    runner_lease_ids = []
+
+    async def fake_runner(_url, **_kwargs):
+        runner_lease_ids.append(active_job["lease_id"])
+        return extracted
+
+    class _OwnerMediaDB:
+        def get_media_by_urls(self, _urls, **_kwargs):
+            return []
+
+        def close_connection(self):
+            return None
+
+    monkeypatch.setattr(worker, "run_playlist_preflight_process", fake_runner, raising=True)
+    monkeypatch.setattr(worker, "_create_db", lambda _user_id: _OwnerMediaDB(), raising=True)
+
+    with pytest.raises(worker.MediaIngestJobError) as exc_info:
+        await worker._handle_job(stale_job, jm, worker._ProgressState())
+
+    assert str(exc_info.value) == "playlist_preflight_lease_lost"
+    assert runner_lease_ids == []
+    assert store.get_preflight("7", preflight.preflight_id).status == "pending"
+    assert list(store.list_preflight_items("7", preflight.preflight_id, limit=10)) == []
+
+    result = await worker._handle_job(active_job, jm, worker._ProgressState())
+    assert result["status"] == "ready"
+    assert runner_lease_ids == [active_job["lease_id"]]
+    assert store.get_preflight("7", preflight.preflight_id).status == "ready"
+
+
+@pytest.mark.asyncio
 async def test_playlist_preflight_worker_marks_owner_library_and_snapshot_duplicates(monkeypatch, tmp_path):
     monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
     monkeypatch.delenv("JOBS_DB_URL", raising=False)
@@ -1398,6 +1497,62 @@ async def test_playlist_preflight_worker_cancellation_during_library_lookup_neve
 
     monkeypatch.setattr(worker, "run_playlist_preflight_process", fake_runner, raising=True)
     monkeypatch.setattr(worker, "_create_db", lambda _user_id: _CancellingMediaDB(), raising=True)
+
+    with pytest.raises(worker.MediaIngestJobError) as exc_info:
+        await worker._handle_job(job, jm, worker._ProgressState())
+
+    assert str(exc_info.value) == "playlist_preflight_cancelled"
+    blocked = store.get_preflight("7", preflight.preflight_id)
+    assert blocked.status == "blocked"
+    assert blocked.error == {"code": "playlist_preflight_cancelled"}
+    assert list(store.list_preflight_items("7", preflight.preflight_id, limit=10)) == []
+    assert jm.get_job(int(job["id"]))["status"] == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_playlist_preflight_atomic_ready_guard_preserves_terminal_cancellation(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
+    monkeypatch.delenv("JOBS_DB_URL", raising=False)
+
+    import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestStore,
+    )
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    jm = JobManager()
+    store, preflight, job = _seed_playlist_preflight_job(jm)
+    extracted = _playlist_preflight_data([{"source_url": "https://youtu.be/cancel-ready", "title": "Cancelled"}])
+
+    async def fake_runner(_url, **_kwargs):
+        return extracted
+
+    class _OwnerMediaDB:
+        def get_media_by_urls(self, _urls, **_kwargs):
+            return []
+
+        def close_connection(self):
+            return None
+
+    original_replace = PlaylistIngestStore.replace_preflight_snapshot
+
+    def cancel_at_ready(self, owner_user_id, preflight_id, *, status, **kwargs):
+        if status == "ready":
+            assert jm.cancel_job(int(job["id"]), reason="atomic ready race") is True
+        return original_replace(
+            self,
+            owner_user_id,
+            preflight_id,
+            status=status,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(worker, "run_playlist_preflight_process", fake_runner, raising=True)
+    monkeypatch.setattr(worker, "_create_db", lambda _user_id: _OwnerMediaDB(), raising=True)
+    monkeypatch.setattr(PlaylistIngestStore, "replace_preflight_snapshot", cancel_at_ready, raising=True)
 
     with pytest.raises(worker.MediaIngestJobError) as exc_info:
         await worker._handle_job(job, jm, worker._ProgressState())
