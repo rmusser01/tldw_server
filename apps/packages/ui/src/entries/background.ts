@@ -3976,10 +3976,12 @@ export default defineBackground({
                 status: resp.status,
                 message: formatErrorMessage(errMsg, `HTTP ${resp.status}`),
                 details: errDetails,
+                retryAfter: resp.headers.get("retry-after"),
               });
               return;
             }
             if (!resp.body) throw new Error("No response body");
+            safePost({ event: "open" });
             const reader = resp.body.getReader();
             const decoder = new TextDecoder();
             let buffer = "";

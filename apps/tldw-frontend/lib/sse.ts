@@ -22,7 +22,11 @@ const readRetryAfterSeconds = (headers: Headers): number | undefined => {
   const raw = headers.get('retry-after');
   if (!raw) return undefined;
   const seconds = Number(raw);
-  return Number.isFinite(seconds) && seconds > 0 ? seconds : undefined;
+  if (Number.isFinite(seconds) && seconds > 0) return seconds;
+  const retryAt = Date.parse(raw);
+  if (!Number.isFinite(retryAt)) return undefined;
+  const remainingMs = retryAt - Date.now();
+  return remainingMs > 0 ? Math.ceil(remainingMs / 1_000) : undefined;
 };
 
 async function openSSEStream(

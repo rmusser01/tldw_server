@@ -22,6 +22,7 @@ import {
   parseNotificationStreamEvent,
   runNotificationMutation,
   snoozeNotification,
+  subscribeNotificationsStream,
   updateNotificationPreferences
 } from "../notifications"
 
@@ -107,6 +108,21 @@ describe("notifications service", () => {
         message: "Ready"
       }
     })
+  })
+
+  it("reports stream acquisition before the first notification line", async () => {
+    mocks.bgStream.mockImplementation(async function* (options: { onOpen?: () => void }) {
+      options.onOpen?.()
+    })
+    const onOpen = vi.fn()
+
+    const unsubscribe = subscribeNotificationsStream({
+      onEvent: vi.fn(),
+      onOpen
+    })
+
+    await vi.waitFor(() => expect(onOpen).toHaveBeenCalledTimes(1))
+    unsubscribe()
   })
 
   it("retries the shared notification stream runner after an error and advances the cursor", async () => {
@@ -297,6 +313,46 @@ describe("notifications service", () => {
       await vi.advanceTimersByTimeAsync(1)
       await Promise.resolve()
       expect(readStream).toHaveBeenCalledTimes(2)
+
+      unsubscribe()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("backs off repeated graceful stream closes", async () => {
+    vi.useFakeTimers()
+    try {
+      const readStream = vi.fn(
+        async (
+          _signal: AbortSignal,
+          cursor: number,
+          _onEvent: (event: { event: string }) => void,
+          markOpen: () => void
+        ) => {
+          markOpen()
+          return cursor
+        }
+      )
+
+      const unsubscribe = createNotificationStreamSubscription({
+        reconnectDelayMs: 250,
+        reconnectJitter: 0.5,
+        onEvent: vi.fn(),
+        readStream
+      })
+
+      await Promise.resolve()
+      expect(readStream).toHaveBeenCalledTimes(1)
+
+      await vi.advanceTimersByTimeAsync(250)
+      expect(readStream).toHaveBeenCalledTimes(2)
+
+      await vi.advanceTimersByTimeAsync(250)
+      expect(readStream).toHaveBeenCalledTimes(2)
+
+      await vi.advanceTimersByTimeAsync(250)
+      expect(readStream).toHaveBeenCalledTimes(3)
 
       unsubscribe()
     } finally {

@@ -183,18 +183,14 @@ const readNotificationsStream = async (
   }
 
   let cursor = after
-  let opened = false
   try {
     for await (const line of bgStream({
       path: `/api/v1/notifications/stream${buildNotificationsQuery({ after })}` as any,
       method: "GET",
       headers,
-      abortSignal: signal
+      abortSignal: signal,
+      onOpen
     })) {
-      if (!opened) {
-        opened = true
-        onOpen()
-      }
       const event = parseNotificationStreamEvent(line)
       if (!event) continue
       onEvent(event)
@@ -246,19 +242,24 @@ export function createNotificationStreamSubscription(options: SubscribeNotificat
   const run = async (): Promise<void> => {
     while (!controller.signal.aborted) {
       try {
-        cursor = await options.readStream(controller.signal, cursor, options.onEvent, () => {
-          reconnectAttempt = 0
-          options.onOpen?.()
-        })
-        if (controller.signal.aborted) break
-        await delay(
-          nextReconnectDelay({
-            attempt: 0,
-            baseDelayMs: reconnectDelayMs,
-            maxDelayMs: maxReconnectDelayMs,
-            jitter: options.reconnectJitter ?? Math.random()
-          })
+        cursor = await options.readStream(
+          controller.signal,
+          cursor,
+          (event) => {
+            reconnectAttempt = 0
+            options.onEvent(event)
+          },
+          () => options.onOpen?.()
         )
+        if (controller.signal.aborted) break
+        const reconnectDelay = nextReconnectDelay({
+          attempt: reconnectAttempt,
+          baseDelayMs: reconnectDelayMs,
+          maxDelayMs: maxReconnectDelayMs,
+          jitter: options.reconnectJitter ?? Math.random()
+        })
+        reconnectAttempt += 1
+        await delay(reconnectDelay)
       } catch (error) {
         if (controller.signal.aborted) break
         const nextCursor =

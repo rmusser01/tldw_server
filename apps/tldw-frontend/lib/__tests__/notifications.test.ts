@@ -337,4 +337,31 @@ describe("web notifications adapter", () => {
       vi.unstubAllGlobals()
     }
   })
+
+  it("preserves an HTTP-date Retry-After as seconds", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-07-11T20:00:00.000Z"))
+    const { streamStructuredSSE } = await vi.importActual<typeof import("../sse")>("@web/lib/sse")
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(null, {
+        status: 503,
+        statusText: "Service Unavailable",
+        headers: { "Retry-After": "Sat, 11 Jul 2026 20:00:40 GMT" }
+      })
+    )
+    vi.stubGlobal("fetch", fetchMock)
+
+    try {
+      await expect(
+        streamStructuredSSE("http://example.test/api/v1/notifications/stream", {}, vi.fn())
+      ).rejects.toMatchObject({
+        name: "ApiError",
+        status: 503,
+        retryAfter: 40
+      })
+    } finally {
+      vi.unstubAllGlobals()
+      vi.useRealTimers()
+    }
+  })
 })
