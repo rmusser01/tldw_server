@@ -196,6 +196,79 @@ def test_global_quota_enforcement_handles_hashed_session_directories(tmp_path: P
     }
 
 
+def test_global_quota_combines_current_and_legacy_session_directories(
+    tmp_path: Path,
+) -> None:
+    """Current and legacy directories for one logical session share one quota."""
+    manager = SnapshotManager(storage_path=str(tmp_path / "snapshots"))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    state = workspace / "state.txt"
+    session_id = "session-with-legacy-snapshots"
+
+    state.write_text("legacy", encoding="utf-8")
+    legacy_snapshot = manager.create_snapshot(session_id, str(workspace))
+    legacy_dir = manager._legacy_snapshot_dir(session_id)
+    legacy_dir.mkdir(parents=True)
+    manager._snapshot_path(session_id, legacy_snapshot["snapshot_id"]).replace(
+        manager._legacy_snapshot_path(session_id, legacy_snapshot["snapshot_id"])
+    )
+    manager._metadata_path(session_id, legacy_snapshot["snapshot_id"]).replace(
+        manager._legacy_metadata_path(session_id, legacy_snapshot["snapshot_id"])
+    )
+    state.write_text("current", encoding="utf-8")
+    current_snapshot = manager.create_snapshot(session_id, str(workspace))
+
+    summary = manager.enforce_quota_all_sessions(max_snapshots=1, max_size_mb=256)
+
+    assert [item["snapshot_id"] for item in manager.list_snapshots(session_id)] == [
+        current_snapshot["snapshot_id"]
+    ]
+    assert summary == {
+        "scanned_sessions": 1,
+        "evicted_sessions": 1,
+        "deleted_snapshots": 1,
+    }
+
+
+def test_global_quota_size_eviction_removes_empty_hashed_directory(
+    tmp_path: Path,
+) -> None:
+    """A zero-byte quota evicts snapshots and removes the empty directory."""
+    manager = SnapshotManager(storage_path=str(tmp_path / "snapshots"))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "state.txt").write_text("content", encoding="utf-8")
+    session_id = "session-size-eviction"
+    manager.create_snapshot(session_id, str(workspace))
+    snapshot_dir = manager._snapshot_dir(session_id)
+
+    summary = manager.enforce_quota_all_sessions(max_snapshots=10, max_size_mb=0)
+
+    assert manager.list_snapshots(session_id) == []
+    assert not snapshot_dir.exists()
+    assert summary["deleted_snapshots"] == 1
+
+
+def test_global_quota_zero_count_removes_empty_hashed_directory(
+    tmp_path: Path,
+) -> None:
+    """A zero-count quota evicts snapshots and removes the empty directory."""
+    manager = SnapshotManager(storage_path=str(tmp_path / "snapshots"))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "state.txt").write_text("content", encoding="utf-8")
+    session_id = "session-count-eviction"
+    manager.create_snapshot(session_id, str(workspace))
+    snapshot_dir = manager._snapshot_dir(session_id)
+
+    summary = manager.enforce_quota_all_sessions(max_snapshots=0, max_size_mb=256)
+
+    assert manager.list_snapshots(session_id) == []
+    assert not snapshot_dir.exists()
+    assert summary["deleted_snapshots"] == 1
+
+
 def test_global_quota_preserves_metadata_when_archive_deletion_fails(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

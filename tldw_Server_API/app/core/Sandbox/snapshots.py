@@ -649,7 +649,26 @@ class SnapshotManager:
         max_size_mb: int,
     ) -> list[str]:
         """Enforce quotas without re-hashing a discovered session directory name."""
-        entries = self._quota_entries_for_directory(snapshot_dir)
+        return self._enforce_quota_for_directories(
+            [snapshot_dir],
+            max_snapshots=max_snapshots,
+            max_size_mb=max_size_mb,
+        )
+
+    def _enforce_quota_for_directories(
+        self,
+        snapshot_dirs: list[Path],
+        *,
+        max_snapshots: int,
+        max_size_mb: int,
+    ) -> list[str]:
+        """Enforce one logical session quota across current and legacy directories."""
+        entries = [
+            entry
+            for snapshot_dir in snapshot_dirs
+            for entry in self._quota_entries_for_directory(snapshot_dir)
+        ]
+        entries.sort(key=lambda entry: entry[0].get("created_at", ""), reverse=True)
         deleted: list[str] = []
         max_size_bytes = max_size_mb * 1024 * 1024
 
@@ -682,9 +701,10 @@ class SnapshotManager:
                 break
             total_size -= oldest_size
 
-        with contextlib.suppress(_SNAPSHOTS_NONCRITICAL_EXCEPTIONS):
-            if snapshot_dir.exists() and not any(snapshot_dir.iterdir()):
-                snapshot_dir.rmdir()
+        for snapshot_dir in snapshot_dirs:
+            with contextlib.suppress(_SNAPSHOTS_NONCRITICAL_EXCEPTIONS):
+                if snapshot_dir.exists() and not any(snapshot_dir.iterdir()):
+                    snapshot_dir.rmdir()
         return deleted
 
     def enforce_quota_all_sessions(
@@ -705,6 +725,8 @@ class SnapshotManager:
                 "evicted_sessions": 0,
                 "deleted_snapshots": 0,
             }
+        session_directories: dict[str, list[Path]] = {}
+        unidentified_directories: list[Path] = []
         with contextlib.suppress(_SNAPSHOTS_NONCRITICAL_EXCEPTIONS):
             for session_dir in root.iterdir():
                 if session_dir.is_symlink() or not session_dir.is_dir():
@@ -712,7 +734,6 @@ class SnapshotManager:
                 resolved_session_dir = session_dir.resolve(strict=False)
                 if resolved_session_dir.parent != root:
                     continue
-                scanned_sessions += 1
                 entries = self._quota_entries_for_directory(resolved_session_dir)
                 raw_session_id = next(
                     (
@@ -722,17 +743,37 @@ class SnapshotManager:
                     ),
                     "",
                 )
+                if raw_session_id:
+                    session_directories.setdefault(raw_session_id, []).append(
+                        resolved_session_dir
+                    )
+                else:
+                    unidentified_directories.append(resolved_session_dir)
+
+            for raw_session_id, snapshot_dirs in session_directories.items():
+                scanned_sessions += 1
                 lock_context = (
                     lock_session(raw_session_id)
-                    if lock_session is not None and raw_session_id
+                    if lock_session is not None
                     else contextlib.nullcontext()
                 )
                 with lock_context:
-                    deleted = self._enforce_quota_for_directory(
-                        resolved_session_dir,
+                    deleted = self._enforce_quota_for_directories(
+                        snapshot_dirs,
                         max_snapshots=max_snapshots,
                         max_size_mb=max_size_mb,
                     )
+                if deleted:
+                    evicted_sessions += 1
+                    deleted_snapshots += len(deleted)
+
+            for snapshot_dir in unidentified_directories:
+                scanned_sessions += 1
+                deleted = self._enforce_quota_for_directory(
+                    snapshot_dir,
+                    max_snapshots=max_snapshots,
+                    max_size_mb=max_size_mb,
+                )
                 if deleted:
                     evicted_sessions += 1
                     deleted_snapshots += len(deleted)

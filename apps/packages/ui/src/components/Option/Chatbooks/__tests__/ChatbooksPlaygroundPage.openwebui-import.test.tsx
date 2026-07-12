@@ -645,8 +645,10 @@ describe("ChatbooksPlaygroundPage OpenWebUI import mode", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Refresh" })[0])
     await waitFor(() => {
       expect(tldwClientMock.listOpenWebUIImportScopes).toHaveBeenCalledTimes(2)
+      expect(
+        screen.getByRole("switch", { name: "Manual hydration scope" })
+      ).toBeChecked()
     })
-    expect(manualSwitch).toBeChecked()
   })
 
   it("refreshes OpenWebUI import scopes when a background import job completes", async () => {
