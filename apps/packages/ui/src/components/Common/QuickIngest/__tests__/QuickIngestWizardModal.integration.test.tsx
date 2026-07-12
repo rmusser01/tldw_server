@@ -129,51 +129,61 @@ vi.mock("antd", () => ({
       </React.Fragment>
     )
   },
-  AutoComplete: ({
-    value,
-    onChange,
-    options,
-    allowClear,
-    onClear,
-    children,
-    loading,
-    notFoundContent,
-    ...props
-  }: any) => (
-    <React.Fragment>
-      <input
-        role="combobox"
-        value={value || ""}
-        onChange={(event) => onChange?.(event.target.value)}
-        {...props}
-      />
-      <div role="listbox">
-        {options?.map((option: any) => (
-          <div key={option.value} role="option" aria-selected="false">
-            {option.label}
-          </div>
-        ))}
-      </div>
-      {loading || options?.length === 0 ? (
-        <span data-testid="analysis-provider-catalog-status">
-          {notFoundContent}
-        </span>
-      ) : null}
-      {allowClear ? (
-        <button
-          type="button"
-          aria-label="Clear analysis provider"
-          onClick={() => {
-            onClear?.()
-            onChange?.("")
-          }}
-        >
-          Clear
-        </button>
-      ) : null}
-      {children ? <span hidden>{children}</span> : null}
-    </React.Fragment>
-  ),
+  AutoComplete: React.forwardRef(function AutoComplete(
+    {
+      value,
+      onChange,
+      options,
+      allowClear,
+      onClear,
+      children,
+      loading,
+      notFoundContent,
+      ...props
+    }: any,
+    ref: React.ForwardedRef<{ focus: () => void }>
+  ) {
+    const inputRef = React.useRef<HTMLInputElement>(null)
+    React.useImperativeHandle(ref, () => ({
+      focus: () => inputRef.current?.focus(),
+    }))
+    return (
+      <React.Fragment>
+        <input
+          ref={inputRef}
+          role="combobox"
+          value={value || ""}
+          onChange={(event) => onChange?.(event.target.value)}
+          {...props}
+        />
+        <div role="listbox">
+          {options?.map((option: any) => (
+            <div key={option.value} role="option" aria-selected="false">
+              {option.label}
+            </div>
+          ))}
+        </div>
+        {loading || options?.length === 0 ? (
+          <span data-testid="analysis-provider-catalog-status">
+            {notFoundContent}
+          </span>
+        ) : null}
+        {allowClear ? (
+          <button
+            type="button"
+            aria-label="Clear analysis provider"
+            onClick={() => {
+              onClear?.()
+              onChange?.("")
+            }}
+          >
+            Clear
+          </button>
+        ) : null}
+        {children ? <span hidden>{children}</span> : null}
+      </React.Fragment>
+    )
+  }),
   Segmented: ({ options, value, onChange, ...props }: any) => (
     <div role="group" {...props}>
       {options?.map((option: any) => {

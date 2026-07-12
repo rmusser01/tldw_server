@@ -1689,13 +1689,19 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
           "Choose an analysis provider before running ingest analysis."
         )
       )
-      goNext()
+      if (currentStep === 1) {
+        goNext()
+      } else {
+        goToStep(2)
+      }
       return
     }
     setAnalysisProviderWarning(null)
     skipToProcessing()
   }, [
+    currentStep,
     goNext,
+    goToStep,
     isCheckingConnection,
     isOnlineForIngest,
     presetConfig.advancedValues,
@@ -1705,11 +1711,18 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   ])
 
   useEffect(() => {
+    if (!open || !autoProcessQueued) {
+      autoProcessedRef.current = false
+    }
+  }, [autoProcessQueued, open])
+
+  useEffect(() => {
     if (
       autoProcessQueued &&
       !autoProcessedRef.current &&
       validQueueItems.length > 0 &&
-      isOnlineForIngest
+      isOnlineForIngest &&
+      !isCheckingConnection
     ) {
       autoProcessedRef.current = true
       handleQuickProcess()
@@ -1717,6 +1730,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   }, [
     autoProcessQueued,
     handleQuickProcess,
+    isCheckingConnection,
     isOnlineForIngest,
     validQueueItems.length,
   ])

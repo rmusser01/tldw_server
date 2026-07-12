@@ -15,6 +15,13 @@ const mocks = vi.hoisted(() => ({
   runtimeListeners: [] as Array<(message: any) => void>,
   modalProps: [] as any[],
   afterCancelProcessing: null as null | (() => void),
+  connectionState: {
+    phase: "connected",
+    isConnected: true,
+    isChecking: false,
+    lastError: null as string | null,
+    offlineBypass: false,
+  },
 }))
 
 vi.mock("react-i18next", () => ({
@@ -112,13 +119,7 @@ vi.mock("@/routes/route-paths", () => ({
 vi.mock("@/store/connection", () => ({
   useConnectionStore: (selector: any) =>
     selector({
-      state: {
-        phase: "connected",
-        isConnected: true,
-        isChecking: false,
-        lastError: null,
-        offlineBypass: false,
-      },
+      state: mocks.connectionState,
       checkOnce: mocks.checkConnection,
     }),
 }))
@@ -282,10 +283,17 @@ vi.mock("@/components/Common/QuickIngest/WizardConfigureStep", async () => {
       const { state, setCustomOptions } = actual.useIngestWizard()
       const helpId = "analysis-provider-help"
       const warningId = "analysis-provider-warning"
+      const inputRef = React.useRef<HTMLInputElement>(null)
+      React.useEffect(() => {
+        if (focusAnalysisProvider) {
+          inputRef.current?.focus()
+        }
+      }, [focusAnalysisProvider])
       return (
         <div data-testid="wizard-configure">
           <label htmlFor="analysis-provider">Analysis provider</label>
           <input
+            ref={inputRef}
             id="analysis-provider"
             role="combobox"
             aria-describedby={`${helpId}${analysisProviderWarning ? ` ${warningId}` : ""}`}
@@ -431,6 +439,13 @@ describe("QuickIngestWizardModal session runtime", () => {
     mocks.navigate.mockReset()
     mocks.modalProps.splice(0, mocks.modalProps.length)
     mocks.afterCancelProcessing = null
+    Object.assign(mocks.connectionState, {
+      phase: "connected",
+      isConnected: true,
+      isChecking: false,
+      lastError: null,
+      offlineBypass: false,
+    })
     mocks.cancelQuickIngestSession.mockResolvedValue({ ok: true })
     useQuickIngestSessionStore.setState({
       session: null,
@@ -697,6 +712,133 @@ describe("QuickIngestWizardModal session runtime", () => {
       currentStep: 2,
       lifecycle: "draft",
       processingState: { status: "idle" },
+    })
+  })
+
+  it.each([2, 3] as const)(
+    "routes an auto-process provider warning from persisted step %s to Configure",
+    async (currentStep) => {
+    mocks.getQuickIngestAnalysisProviderWarning.mockReturnValue("missing-provider")
+    useQuickIngestSessionStore.getState().createDraftSession({
+      currentStep,
+      queueItems: [
+        {
+          id: "queued-url-1",
+          url: "https://example.com/article",
+          detectedType: "web",
+          icon: "Globe",
+          fileSize: 0,
+          validation: { valid: true },
+        },
+      ],
+    })
+
+    render(
+      <QuickIngestWizardModal open autoProcessQueued onClose={vi.fn()} />
+    )
+
+    expect(
+      await screen.findByRole("combobox", { name: "Analysis provider" })
+    ).toHaveFocus()
+    expect(useQuickIngestSessionStore.getState().session).toMatchObject({
+      currentStep: 2,
+      lifecycle: "draft",
+      processingState: { status: "idle" },
+    })
+    expect(screen.queryByTestId("wizard-review")).not.toBeInTheDocument()
+    }
+  )
+
+  it("retries auto-process after closing and reopening a provider-blocked draft", async () => {
+    const user = userEvent.setup()
+    mocks.getQuickIngestAnalysisProviderWarning.mockImplementation(
+      ({ advancedValues }: any) =>
+        advancedValues?.api_name ? null : "missing-provider"
+    )
+    mocks.startQuickIngestSession.mockResolvedValue({
+      ok: true,
+      sessionId: "qi-reopened-provider",
+    })
+    mocks.submitQuickIngestBatch.mockResolvedValue({
+      ok: true,
+      results: [
+        {
+          id: "queued-url-1",
+          status: "ok",
+          url: "https://example.com/article",
+          type: "html",
+        },
+      ],
+    })
+    useQuickIngestSessionStore.getState().createDraftSession({
+      queueItems: [
+        {
+          id: "queued-url-1",
+          url: "https://example.com/article",
+          detectedType: "web",
+          icon: "Globe",
+          fileSize: 0,
+          validation: { valid: true },
+        },
+      ],
+    })
+
+    const { rerender } = render(
+      <QuickIngestWizardModal open autoProcessQueued onClose={vi.fn()} />
+    )
+    const provider = await screen.findByRole("combobox", {
+      name: "Analysis provider",
+    })
+    await user.type(provider, "openai")
+
+    rerender(
+      <QuickIngestWizardModal open={false} autoProcessQueued onClose={vi.fn()} />
+    )
+    rerender(
+      <QuickIngestWizardModal open autoProcessQueued onClose={vi.fn()} />
+    )
+
+    await waitFor(() => {
+      expect(mocks.startQuickIngestSession).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  it("waits for an in-flight connection check before consuming auto-process", async () => {
+    mocks.connectionState.isChecking = true
+    useQuickIngestSessionStore.getState().createDraftSession({
+      presetConfig: {
+        ...resolvePresetMap().standard,
+        advancedValues: { api_name: "openai" },
+      },
+      queueItems: [
+        {
+          id: "queued-url-1",
+          url: "https://example.com/article",
+          detectedType: "web",
+          icon: "Globe",
+          fileSize: 0,
+          validation: { valid: true },
+        },
+      ],
+    })
+    mocks.startQuickIngestSession.mockResolvedValue({
+      ok: true,
+      sessionId: "qi-after-connection-check",
+    })
+    mocks.submitQuickIngestBatch.mockResolvedValue({ ok: true, results: [] })
+
+    const { rerender } = render(
+      <QuickIngestWizardModal open autoProcessQueued onClose={vi.fn()} />
+    )
+    expect(mocks.startQuickIngestSession).not.toHaveBeenCalled()
+
+    mocks.connectionState.isChecking = false
+    rerender(
+      <QuickIngestWizardModal open autoProcessQueued onClose={vi.fn()} />
+    )
+
+    await waitFor(() => {
+      expect(mocks.startQuickIngestSession).toHaveBeenCalledTimes(1)
     })
   })
 

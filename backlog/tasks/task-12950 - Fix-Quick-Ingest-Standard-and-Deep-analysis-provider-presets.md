@@ -29,13 +29,29 @@ Target dev with a shared WebUI/browser-extension fix so the active Quick Ingest 
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Execute the approved plan in Docs/superpowers/plans/2026-07-12-quick-ingest-preset-provider-implementation.md test-first. The event host owns preset hydration/snapshots; the reducer merges every edit into full current config; the Configure step owns session-scoped provider recovery.
+Implementation and review fixes are complete. Finalize the temporary plan record, commit, push codex/fix-quick-ingest-preset-provider, open a PR targeting dev, then record the PR URL and final status.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Implemented saved-preset hydration and immutable per-open snapshots across the shared WebUI/extension Quick Ingest host.
 
+Reducer edits merge into the full session config, preserve first-source overrides, and remove explicitly cleared advanced fields.
+
+Added a session-scoped analysis-provider AutoComplete with configured suggestions, free text, clear behavior, localized help/warnings, accessible focus, and nonfatal discovery failure.
+
+Provider preflight now recovers from persisted steps 1-3, re-arms on close/reopen, waits for connection checks, and never starts a request while invalid.
+
+Live open events consume their pending request exactly once. Seeded draft opens merge named-preset rebases with open details and remount the reducer; processing/terminal sessions explicitly retain their active snapshot.
+
+Review follow-up added real Ant Design keyboard selection plus WebUI and Chrome-extension storage-backed hydration smoke coverage.
+
+Verification: focused shared Vitest 6 files/176 tests passed; extension-config QuickIngestButton 22 passed; quick-ingest-open 7 passed; Web storage adapter 10 passed; Web TypeScript passed with --incremental false; extension compile passed; touched ESLint 0 errors (94 existing warning-level findings in large test fixtures/source baseline); WebUI production build passed; Chrome extension build passed; Chrome extension provider hydration smoke passed; missing-provider Chrome smoke passed; git diff --check passed.
+
+Known WebUI browser blocker: the local Next.js dev harness produced an unrelated runtime error portal/backend overlay on /media after three attempts, intercepting Quick Ingest clicks. Per the repository three-attempt rule, no fourth run was made. The WebUI production build and the storage-backed Playwright scenario remain present for CI/a clean harness.
+
+Bandit: not applicable because the touched implementation/test/docs scope contains no Python.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

@@ -80,3 +80,65 @@ test("Quick Ingest defaults flow does not trigger a Maximum update depth render 
   await expect(page.locator("body")).not.toContainText("Runtime Error")
   expect(renderLoopErrors, "no Maximum update depth render loop").toEqual([])
 })
+
+test("Quick Ingest hydrates the saved Standard analysis provider from WebUI storage", async ({
+  page,
+}) => {
+  test.setTimeout(90_000)
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      "quickIngestPresetConfigs",
+      JSON.stringify({
+        standard: { advancedValues: { api_name: "openai" } },
+      })
+    )
+  })
+  await page.route("**/api/v1/llm/models/metadata**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ models: [], total: 0 }),
+    })
+  })
+  await page.route("**/api/v1/media?*", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        items: [],
+        pagination: {
+          page: 1,
+          results_per_page: 20,
+          total_items: 0,
+          total_pages: 0,
+        },
+      }),
+    })
+  })
+
+  await seedAuth(page)
+  await page.goto("/media", { waitUntil: "domcontentloaded" })
+  const quickIngestTrigger = page
+    .getByRole("button", { name: /^Quick Ingest$/i })
+    .or(
+      page
+        .getByTestId("first-ingest-tutorial")
+        .getByRole("button", { name: /^Ingest$/i })
+    )
+    .or(page.getByRole("button", { name: /Open Quick Ingest/i }))
+    .first()
+  await expect(quickIngestTrigger).toBeVisible({ timeout: 30_000 })
+  await quickIngestTrigger.click()
+
+  const dialog = page.getByRole("dialog", { name: /Quick Ingest/i }).first()
+  const urlInput = dialog.locator("textarea").first()
+  await urlInput.fill("https://example.com/saved-provider")
+  await dialog.getByRole("button", { name: /Add URLs/i }).click()
+  await dialog
+    .getByRole("button", { name: /Configure \d+ items/i })
+    .click()
+
+  await expect(
+    dialog.getByRole("combobox", { name: /Analysis provider/i })
+  ).toHaveValue("openai")
+})

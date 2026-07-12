@@ -137,16 +137,26 @@ export const useQuickIngestEvents = (options?: QuickIngestEventsOptions) => {
         !seed?.firstSourceAddMode
       )
       const shouldSeedNamedDraft = !currentSession && !seed?.firstSourceAddMode
+      const shouldRemountSeededDraft = Boolean(
+        currentSession?.lifecycle === "draft" && seed
+      )
       const presetMap = capturePresetSnapshot(
-        shouldRebaseCurrent || shouldSeedNamedDraft
+        shouldRebaseCurrent || shouldSeedNamedDraft || shouldRemountSeededDraft
       )
       setQuickIngestAutoProcessQueued(autoProcessQueued)
       if (currentSession) {
         preparedSessionIdRef.current = currentSession.id
         setPreparedSessionId(currentSession.id)
-        if (seed) {
-          upsertSession(seed)
+        if (seed && currentSession.lifecycle === "draft") {
+          upsertSession({
+            ...(shouldRebaseCurrent && currentSession.selectedPreset !== "custom"
+              ? buildNamedPresetSeed(presetMap, currentSession.selectedPreset)
+              : {}),
+            ...seed,
+          })
         } else {
+          // Processing and terminal sessions keep their active snapshot; a new
+          // open detail applies only to drafts.
           prepareExistingSession(presetMap)
         }
         showSession()
@@ -250,9 +260,12 @@ export const useQuickIngestEvents = (options?: QuickIngestEventsOptions) => {
   // Global event listeners for opening quick ingest
   useEffect(() => {
     const handler = (event: Event) => {
+      const pending = consumePendingQuickIngestOpen()
       openQuickIngest(
-        undefined,
-        (event as CustomEvent<QuickIngestOpenDetail>).detail
+        pending?.mode === "normal" ? pending.options : undefined,
+        pending?.mode === "normal"
+          ? pending.detail
+          : (event as CustomEvent<QuickIngestOpenDetail>).detail
       )
     }
     window.addEventListener("tldw:open-quick-ingest", handler)
@@ -344,17 +357,24 @@ export const useQuickIngestEvents = (options?: QuickIngestEventsOptions) => {
   }, [])
 
   useEffect(() => {
-    const handler = () => {
+    const handler = (event: Event) => {
+      const pending = consumePendingQuickIngestOpen()
+      const detail =
+        pending?.mode === "intro"
+          ? pending.detail
+          : (event as CustomEvent<QuickIngestOpenDetail>).detail
+      const openOptions =
+        pending?.mode === "intro"
+          ? { ...pending.options, focusTrigger: false }
+          : { focusTrigger: false }
       if (!storageAndSessionReady) {
-        rememberQuickIngestOpenRequest("intro", undefined, {
-          focusTrigger: false,
-        })
+        rememberQuickIngestOpenRequest("intro", detail, openOptions)
         if (!quickIngestSessionHydrated) {
           void rehydrateQuickIngestSession()
         }
         return
       }
-      performOpenQuickIngestIntro({ focusTrigger: false })
+      performOpenQuickIngestIntro(openOptions, detail)
     }
     window.addEventListener("tldw:open-quick-ingest-intro", handler)
     return () => {

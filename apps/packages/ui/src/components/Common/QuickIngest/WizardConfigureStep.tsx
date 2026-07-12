@@ -101,6 +101,9 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
   const [analysisProviders, setAnalysisProviders] = React.useState<string[]>([])
   const [analysisProvidersLoading, setAnalysisProvidersLoading] =
     React.useState(false)
+  const analysisProviderRef = React.useRef<
+    React.ComponentRef<typeof AutoComplete>
+  >(null)
   const [showAdvanced, setShowAdvanced] = React.useState(false)
   const chunkingMode =
     presetConfig.common.chunking_mode === "manual" ? "manual" : "auto"
@@ -139,6 +142,12 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
       : ""
   const shouldLoadAnalysisProviders =
     isStepVisible && presetConfig.common.perform_analysis
+
+  React.useEffect(() => {
+    if (focusAnalysisProvider) {
+      analysisProviderRef.current?.focus()
+    }
+  }, [focusAnalysisProvider])
 
   React.useEffect(() => {
     if (!shouldLoadAnalysisProviders) {
@@ -695,6 +704,7 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
                 {qi("analysisProvider.label", "Analysis provider")}
               </label>
               <AutoComplete
+                ref={analysisProviderRef}
                 id="quick-ingest-analysis-provider"
                 aria-label={qi("analysisProvider.label", "Analysis provider")}
                 aria-describedby={`quick-ingest-analysis-provider-help${analysisProviderWarning ? " quick-ingest-analysis-provider-warning" : ""}`}
