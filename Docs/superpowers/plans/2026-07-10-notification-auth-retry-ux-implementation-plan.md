@@ -19,7 +19,7 @@
 | Stage | Goal | Success Criteria | Status |
 | --- | --- | --- | --- |
 | 1 | Canonical authorization data | SQLite 090 and PostgreSQL fresh/backfill paths grant permissions and backfill effective role membership | Complete |
-| 2 | Shared lifecycle policy | Both transports preserve status; reads/SSE retry safely; mutations never replay automatically | Not Started |
+| 2 | Shared lifecycle policy | Both transports preserve status; reads/SSE retry safely; mutations never replay automatically | Complete |
 | 3 | Runtime adapters | Extension and WebUI expose truthful principal-scoped lifecycle state | Not Started |
 | 4 | Accessible recovery UX | Header and inbox distinguish active, degraded, auth-required, and unavailable states | Not Started |
 | 5 | Acceptance and security | Focused browser tests, Bandit, typecheck, and UAT role assertions pass | Not Started |
@@ -223,7 +223,7 @@ git commit -m "fix(authnz): persist registration role membership"
 - Modify: `apps/tldw-frontend/lib/api/notifications.ts`
 - Modify: `apps/tldw-frontend/lib/__tests__/notifications.test.ts`
 
-- [ ] **Step 1: Write lifecycle and retry tests**
+- [x] **Step 1: Write lifecycle and retry tests**
 
 Define the public contract in tests:
 
@@ -243,7 +243,7 @@ expect(classifyNotificationError({ status: 503, retryAfter: 40 })).toMatchObject
 
 Cover 408/425/429/5xx/network, other 4xx, abort, backoff cap, jitter injection, scope keys, and cursor retention.
 
-- [ ] **Step 2: Run shared tests RED**
+- [x] **Step 2: Run shared tests RED**
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
@@ -253,19 +253,19 @@ bunx vitest run -c vitest.extension.config.ts \
   ../packages/ui/src/services/__tests__/notifications.test.ts
 ```
 
-- [ ] **Step 3: Implement the pure lifecycle module**
+- [x] **Step 3: Implement the pure lifecycle module**
 
 Export only pure functions and types: `readHttpStatus`, `classifyNotificationError`, `nextReconnectDelay`, `reduceNotificationLifecycle`, and `buildNotificationScopeKey`. Reuse the normalized server/principal pattern from `chat-surface-scope.ts`.
 
-- [ ] **Step 4: Preserve direct-WebUI SSE status and expose stream-open**
+- [x] **Step 4: Preserve direct-WebUI SSE status and expose stream-open**
 
 Make `openSSEStream` throw `ApiError` with `status`. Extend `NotificationStreamReader` with an `onOpen` callback fired after a successful response/body is acquired. Never infer active state from creation of an unsubscribe handle.
 
-- [ ] **Step 5: Prove no automatic mutation replay**
+- [x] **Step 5: Prove no automatic mutation replay**
 
 Tests must show stream/read retries occur, while `markNotificationsRead`, dismiss, snooze, cancel-snooze, preference updates, and future mutations make one request per explicit call.
 
-- [ ] **Step 6: Run shared and WebUI API tests GREEN**
+- [x] **Step 6: Run shared and WebUI API tests GREEN**
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
@@ -277,7 +277,7 @@ bunx vitest run -c vitest.extension.config.ts \
   ../packages/ui/src/services/__tests__/notifications.test.ts
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
