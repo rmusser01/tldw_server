@@ -397,6 +397,37 @@ def test_text_cap_prevents_grounded_result(monkeypatch: pytest.MonkeyPatch) -> N
     asyncio.run(_run())
 
 
+def test_audio_overview_uses_audio_text_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.core.Claims_Extraction.artifact_verification import (
+        ArtifactVerificationUnit,
+        verify_generated_artifact_against_sources,
+    )
+
+    _patch_engine(monkeypatch, [VerificationStatus.VERIFIED])
+    long_audio_text = "A" * 5_000
+
+    async def _run() -> None:
+        result = await verify_generated_artifact_against_sources(
+            artifact_type="audio_overview",
+            units=[
+                ArtifactVerificationUnit(
+                    unit_id="audio:script",
+                    text=long_audio_text,
+                    claims=["The audio overview is supported by the source."],
+                )
+            ],
+            source_documents=[Document(id="source", content=long_audio_text, metadata={})],
+            generation_provider="llamacpp",
+            generation_model="local-test",
+            analyze_fn=_noop_analyze,
+        )
+
+        assert result.verdict == "grounded"
+        assert "cap_hit" not in result.metadata
+
+    asyncio.run(_run())
+
+
 def test_no_claims_preserves_truncated_unit_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
     from tldw_Server_API.app.core.Claims_Extraction import artifact_verification
     from tldw_Server_API.app.core.Claims_Extraction.artifact_verification import (

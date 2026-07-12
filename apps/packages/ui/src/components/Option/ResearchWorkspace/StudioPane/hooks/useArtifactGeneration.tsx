@@ -144,11 +144,15 @@ const isUsableGeneratedSlide = (slide: unknown): boolean => {
 }
 
 const requireUsableSlidesPresentation = (presentation: unknown): void => {
+  const presentationId =
+    isRecord(presentation) && typeof presentation.id === "string"
+      ? presentation.id.trim()
+      : ""
   const slides =
     isRecord(presentation) && Array.isArray(presentation.slides)
       ? presentation.slides
       : []
-  if (slides.length === 0 || !slides.every(isUsableGeneratedSlide)) {
+  if (!presentationId || slides.length === 0 || !slides.every(isUsableGeneratedSlide)) {
     throw new Error(SLIDES_UNUSABLE_PRESENTATION_MESSAGE)
   }
 }

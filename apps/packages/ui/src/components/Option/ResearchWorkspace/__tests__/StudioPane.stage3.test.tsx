@@ -880,6 +880,39 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
     )
   })
 
+  it("fails API-backed slides artifacts when the presentation id is missing", async () => {
+    mockGenerateSlidesFromMedia.mockResolvedValueOnce({
+      id: "",
+      title: "Slides",
+      theme: "default",
+      slides: [
+        {
+          order: 0,
+          layout: "content",
+          title: "ATP Overview",
+          content: "Cellular respiration depends on ATP transfer.",
+          speaker_notes: "Introduce ATP as the energy currency of the cell."
+        }
+      ],
+      version: 1,
+      created_at: "2026-02-18T00:00:00.000Z"
+    })
+
+    renderExpandedStudioPane()
+    fireEvent.click(screen.getByRole("button", { name: /More outputs/ }))
+    fireEvent.click(screen.getByRole("button", { name: "Slides" }))
+
+    await waitFor(() => {
+      expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
+        expect.stringMatching(/^artifact-/),
+        "failed",
+        expect.objectContaining({
+          errorMessage: expect.stringContaining("usable presentation")
+        })
+      )
+    })
+  })
+
   it("disables blocked artifact outputs from capability health", () => {
     const capabilities = buildUnknownResearchWorkspaceCapabilities()
     capabilities.capabilities.slides_generation = {

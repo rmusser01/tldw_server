@@ -38,6 +38,7 @@ _MAX_UNITS_BY_ARTIFACT = {
     "data_table": 120,
     "slides": 120,
     "audio_summary": 60,
+    "audio_overview": 60,
     "mindmap": 120,
 }
 _MAX_CLAIMS_PER_UNIT_BY_ARTIFACT = {
@@ -46,6 +47,7 @@ _MAX_CLAIMS_PER_UNIT_BY_ARTIFACT = {
     "data_table": 6,
     "slides": 8,
     "audio_summary": 10,
+    "audio_overview": 10,
     "mindmap": 6,
 }
 _MAX_TEXT_CHARS_BY_ARTIFACT = {
@@ -54,6 +56,7 @@ _MAX_TEXT_CHARS_BY_ARTIFACT = {
     "data_table": 2_000,
     "slides": 5_000,
     "audio_summary": 6_000,
+    "audio_overview": 6_000,
     "mindmap": 3_000,
 }
 
