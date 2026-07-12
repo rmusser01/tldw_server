@@ -1,16 +1,16 @@
 import asyncio
+import json
 from types import SimpleNamespace
 
 import pytest
 
 from tldw_Server_API.app.core.Audio import streaming_service
 
-
 pytestmark = pytest.mark.unit
 
 
 class DummyWebSocket:
-    def __init__(self):
+    def __init__(self, messages=None):
         self.headers = {}
         self.query_params = {}
         self.client = SimpleNamespace(host="127.0.0.1")
@@ -18,8 +18,13 @@ class DummyWebSocket:
         self.closed = False
         self.close_code = None
         self.sent_json = []
+        self.messages = list(messages or [])
+        self.receive_count = 0
 
     async def receive_text(self):
+        self.receive_count += 1
+        if self.messages:
+            return self.messages.pop(0)
         raise RuntimeError("no auth frame")
 
     async def send_json(self, payload):
@@ -35,7 +40,8 @@ class DummyWebSocket:
 
 @pytest.mark.asyncio
 async def test_audio_ws_query_token_auth_rejected_by_default(monkeypatch: pytest.MonkeyPatch):
-    from tldw_Server_API.app.core.AuthNZ import ip_allowlist, settings as auth_settings
+    from tldw_Server_API.app.core.AuthNZ import ip_allowlist
+    from tldw_Server_API.app.core.AuthNZ import settings as auth_settings
 
     ws = DummyWebSocket()
     ws.query_params = {"token": "single-user-secret"}
@@ -66,7 +72,8 @@ async def test_audio_ws_query_token_auth_rejected_by_default(monkeypatch: pytest
 
 @pytest.mark.asyncio
 async def test_audio_ws_query_token_auth_can_be_enabled_explicitly(monkeypatch: pytest.MonkeyPatch):
-    from tldw_Server_API.app.core.AuthNZ import ip_allowlist, settings as auth_settings
+    from tldw_Server_API.app.core.AuthNZ import ip_allowlist
+    from tldw_Server_API.app.core.AuthNZ import settings as auth_settings
 
     ws = DummyWebSocket()
     ws.query_params = {"token": "single-user-secret"}
@@ -93,6 +100,88 @@ async def test_audio_ws_query_token_auth_can_be_enabled_explicitly(monkeypatch: 
 
     assert (auth_ok, user_id) == (True, 1)
     assert ws.closed is False
+
+
+def _single_user_audio_settings():
+    return SimpleNamespace(
+        SINGLE_USER_API_KEY="single-user-secret",
+        SINGLE_USER_ALLOWED_IPS=[],
+        SINGLE_USER_FIXED_ID=1,
+    )
+
+
+def _configure_cookie_audio_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.core.AuthNZ import ip_allowlist
+    from tldw_Server_API.app.core.AuthNZ import settings as auth_settings
+
+    monkeypatch.setattr(streaming_service, "is_multi_user_mode", lambda: False)
+    monkeypatch.setattr(auth_settings, "get_settings", _single_user_audio_settings)
+    monkeypatch.setattr(ip_allowlist, "resolve_client_ip", lambda *_args, **_kwargs: "127.0.0.1")
+
+
+@pytest.mark.asyncio
+async def test_cookie_audio_auth_buffers_first_non_auth_application_frame(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _configure_cookie_audio_auth(monkeypatch)
+    config_frame = json.dumps({"type": "config", "sample_rate": 16000})
+    ws = DummyWebSocket([config_frame])
+    ws.state.single_user_session_id = 9
+    ws.state.user_id = 1
+
+    auth_result = await streaming_service._audio_ws_authenticate(
+        ws,
+        None,
+        endpoint_id="audio.stream.transcribe",
+        ws_path="/api/v1/audio/stream/transcribe",
+    )
+
+    assert auth_result == (True, 1)
+    assert await streaming_service.receive_audio_websocket_text(ws) == config_frame
+    assert ws.receive_count == 1
+
+
+@pytest.mark.asyncio
+async def test_valid_initial_audio_auth_takes_precedence_over_cookie(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _configure_cookie_audio_auth(monkeypatch)
+    ws = DummyWebSocket([json.dumps({"type": "auth", "token": "single-user-secret"})])
+    ws.state.single_user_session_id = 9
+    ws.state.user_id = 1
+
+    auth_result = await streaming_service._audio_ws_authenticate(
+        ws,
+        None,
+        endpoint_id="audio.stream.tts",
+        ws_path="/api/v1/audio/stream/tts",
+    )
+
+    assert auth_result == (True, 1)
+    assert ws.state.auth_principal.token_type == streaming_service.AUTH_TOKEN_TYPE_ACCESS
+    assert ws.receive_count == 1
+
+
+@pytest.mark.asyncio
+async def test_invalid_initial_audio_auth_suppresses_cookie_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _configure_cookie_audio_auth(monkeypatch)
+    ws = DummyWebSocket([json.dumps({"type": "auth", "token": "wrong"})])
+    ws.state.single_user_session_id = 9
+    ws.state.user_id = 1
+
+    auth_result = await streaming_service._audio_ws_authenticate(
+        ws,
+        None,
+        endpoint_id="audio.stream.tts.realtime",
+        ws_path="/api/v1/audio/stream/tts/realtime",
+    )
+
+    assert auth_result == (False, None)
+    assert ws.closed is True
+    assert ws.close_code == 4401
+    assert ws.receive_count == 1
 
 
 @pytest.mark.asyncio

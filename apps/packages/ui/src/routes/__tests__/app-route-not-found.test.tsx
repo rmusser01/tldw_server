@@ -66,8 +66,16 @@ vi.mock("@/services/settings/registry", async (importOriginal) => {
 
 vi.mock("~/components/Layouts/Layout", () => ({
   __esModule: true,
-  default: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="option-layout">{children}</div>
+  default: ({
+    children,
+    hideHeader
+  }: {
+    children: React.ReactNode
+    hideHeader?: boolean
+  }) => (
+    <div data-testid="option-layout" data-hide-header={String(Boolean(hideHeader))}>
+      {children}
+    </div>
   )
 }))
 
@@ -123,6 +131,16 @@ const renderRouteShell = (
   )
 
 describe("RouteShell unknown-route recovery", () => {
+  it("starts settings routes with the root header hidden", async () => {
+    renderRouteShell("options", "/settings")
+
+    expect(await screen.findByTestId("settings-route")).toBeVisible()
+    expect(screen.getByTestId("option-layout")).toHaveAttribute(
+      "data-hide-header",
+      "true"
+    )
+  })
+
   it("renders a not-found recovery panel instead of blank content", async () => {
     renderRouteShell("options", "/missing-route?foo=bar")
 

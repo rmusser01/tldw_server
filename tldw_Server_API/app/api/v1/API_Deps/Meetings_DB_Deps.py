@@ -2,12 +2,16 @@
 
 from typing import Any
 
-from fastapi import Depends, HTTPException, Query, WebSocket, status
+from fastapi import Depends, HTTPException, Query, WebSocket, WebSocketException, status
 from loguru import logger
 from starlette.requests import Request as StarletteRequest
 
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
+    cookie_websocket_rejection_code,
+    resolve_single_user_cookie_websocket,
+)
 from tldw_Server_API.app.core.DB_Management.Meetings_DB import (
     MeetingsDatabase,
     MeetingsDatabaseError,
@@ -93,34 +97,43 @@ async def get_meetings_db_for_websocket(
     token: str | None = Query(default=None),
     api_key: str | None = Query(default=None),
 ) -> MeetingsDatabase:
-    resolved_token, resolved_api_key = _extract_websocket_credentials(
-        websocket=websocket,
-        token=token,
-        api_key=api_key,
-    )
-    request = _build_request_from_websocket(websocket)
-    current_user = await get_request_user(
-        request=request,
-        api_key=resolved_api_key,
-        token=resolved_token,
-    )
-    if not current_user or current_user.id is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Unauthorized websocket client",
+    cookie_identity = await resolve_single_user_cookie_websocket(websocket)
+    if cookie_identity is not None:
+        websocket_user_id = cookie_identity.user_id
+    else:
+        cookie_close_code = cookie_websocket_rejection_code(websocket)
+        if cookie_close_code is not None:
+            raise WebSocketException(code=cookie_close_code)
+
+        resolved_token, resolved_api_key = _extract_websocket_credentials(
+            websocket=websocket,
+            token=token,
+            api_key=api_key,
         )
+        request = _build_request_from_websocket(websocket)
+        current_user = await get_request_user(
+            request=request,
+            api_key=resolved_api_key,
+            token=resolved_token,
+        )
+        if not current_user or current_user.id is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Unauthorized websocket client",
+            )
+        websocket_user_id = current_user.id
     try:
-        return MeetingsDatabase.for_user(user_id=current_user.id)
+        return MeetingsDatabase.for_user(user_id=websocket_user_id)
     except (MeetingsDatabaseError, SchemaError) as exc:
         logger.error(
             "Failed to init Meetings DB for websocket user {}: {}",
-            current_user.id,
+            websocket_user_id,
             type(exc).__name__,
         )
         raise map_db_error_to_http(exc, default_detail="Meetings DB unavailable") from exc
     except Exception as exc:
         logger.error(
             "Failed to init Meetings DB for websocket user {}: unexpected initialization error",
-            current_user.id,
+            websocket_user_id,
         )
         raise HTTPException(status_code=500, detail="Meetings DB unavailable") from exc

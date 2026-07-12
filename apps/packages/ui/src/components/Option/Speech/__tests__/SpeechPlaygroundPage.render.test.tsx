@@ -52,6 +52,7 @@ const {
   ttsProviderDataRef,
   ttsSegmentsRef,
   audioPresetControlPropsRef,
+  tldwConfigRef,
 } =
   vi.hoisted(() => ({
     invalidateQueriesMock: vi.fn(),
@@ -103,6 +104,13 @@ const {
         currentConfig: Record<string, unknown>
         onApply: (config: Record<string, unknown>, preset: any) => void
       },
+    },
+    tldwConfigRef: {
+      current: {
+        serverUrl: "http://127.0.0.1:8000",
+        authMode: "single-user",
+        apiKey: "test-key",
+      } as Record<string, unknown>,
     },
   }))
 
@@ -436,11 +444,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     getTranscriptionModels: getTranscriptionModelsMock,
     transcribeAudio: transcribeAudioMock,
     createNote: vi.fn(async () => undefined),
-    getConfig: vi.fn(async () => ({
-      serverUrl: "http://127.0.0.1:8000",
-      authMode: "single_user",
-      apiKey: "test-key",
-    })),
+    getConfig: vi.fn(async () => tldwConfigRef.current),
     createTtsJob: vi.fn(),
     streamAudioJobProgress: vi.fn(),
     getTtsJobArtifacts: vi.fn(),
@@ -504,6 +508,11 @@ describe("SpeechPlaygroundPage", () => {
       tldwTtsStreaming: false,
       responseSplitting: "punctuation",
     }
+    tldwConfigRef.current = {
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: "test-key",
+    }
     storageValues.clear()
     localStorage.clear()
     storageValues.set("speechPlaygroundMode", "roundtrip")
@@ -520,6 +529,62 @@ describe("SpeechPlaygroundPage", () => {
     expect(
       screen.getByRole("heading", { level: 1, name: "Speech Playground" })
     ).toBeInTheDocument()
+  })
+
+  it("shows the missing-token recovery for a stale advanced cookie marker", async (): Promise<void> => {
+    const originalDeploymentMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
+    tldwConfigRef.current = {
+      serverUrl: "https://api.example.test",
+      authMode: "single-user",
+      authSource: "cookie-session",
+    }
+    ttsSettingsRef.current = {
+      ...ttsSettingsRef.current,
+      ttsProvider: "tldw",
+      tldwTtsStreaming: true,
+      tldwTtsResponseFormat: "mp3",
+    }
+    inferTldwProviderFromModelMock.mockReturnValue("kokoro")
+    ttsProviderDataRef.current = {
+      ...ttsProviderDataRef.current,
+      providersInfo: {
+        providers: {
+          kokoro: {
+            provider_name: "Kokoro",
+            supports_streaming: true,
+            formats: ["mp3"],
+          },
+        },
+        voices: {
+          kokoro: [{ id: "Bella", name: "Bella" }],
+        },
+      },
+    }
+
+    try {
+      render(<SpeechPlaygroundPage lockedMode="listen" hideModeSwitcher />)
+      fireEvent.change(
+        screen.getByLabelText("Enter some text to hear it spoken."),
+        { target: { value: "Speak this sentence." } }
+      )
+      await waitFor(() => {
+        expect(screen.getByTestId("tts-play-button")).toBeEnabled()
+      })
+      fireEvent.click(screen.getByTestId("tts-play-button"))
+
+      expect(
+        await screen.findByText(
+          "Open Settings -> Speech, check the selected provider credentials, and retry."
+        )
+      ).toBeInTheDocument()
+    } finally {
+      if (originalDeploymentMode === undefined) {
+        delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+      } else {
+        process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = originalDeploymentMode
+      }
+    }
   })
 
   it("passes the resolved provider to the tldw strip when the stored provider is empty", (): void => {

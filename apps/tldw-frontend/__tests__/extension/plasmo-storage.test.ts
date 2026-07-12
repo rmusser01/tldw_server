@@ -5,6 +5,7 @@ import { Storage } from "@web/extension/shims/plasmo-storage"
 describe("plasmo storage web shim", () => {
   beforeEach(() => {
     localStorage.clear()
+    sessionStorage.clear()
   })
 
   afterEach(() => {
@@ -75,5 +76,33 @@ describe("plasmo storage web shim", () => {
 
     unwatchBoom()
     unwatchSibling()
+  })
+
+  it("maps the session area to window.sessionStorage", async () => {
+    const session = new Storage({ area: "session" })
+
+    await session.set("tldwManualSessionApiKey", { apiKey: "secret" })
+
+    expect(sessionStorage.getItem("tldwManualSessionApiKey")).toContain("secret")
+    expect(localStorage.getItem("tldwManualSessionApiKey")).toBeNull()
+    expect(localStorage.getItem("plasmo-session:tldwManualSessionApiKey")).toBeNull()
+  })
+
+  it("keeps session keys in shared memory when native session storage is unavailable", async () => {
+    vi.spyOn(window, "sessionStorage", "get").mockReturnValue(undefined as never)
+    const local = new Storage({ area: "local" })
+    const session = new Storage({ area: "session" })
+
+    await local.set("shared", "local-value")
+    await session.set("shared", "session-value")
+
+    expect(await local.get("shared")).toBe("local-value")
+    expect(await session.get("shared")).toBe("session-value")
+    expect(await new Storage({ area: "session" }).get("shared")).toBe("session-value")
+    expect(localStorage.getItem("shared")).toContain("local-value")
+    expect(localStorage.getItem("plasmo-session:shared")).toBeNull()
+    expect(JSON.stringify(localStorage)).not.toContain("session-value")
+
+    await session.remove("shared")
   })
 })

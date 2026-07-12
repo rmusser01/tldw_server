@@ -2,7 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 
 import { useACPSessionsStore } from "@/store/acp-sessions"
-import { ACPWorkspacePanel } from "../ACPWorkspacePanel"
+import {
+  ACPWorkspacePanel,
+  resolveACPWorkspaceWebSocketRequest
+} from "../ACPWorkspacePanel"
 
 const workspaceStoreMock = vi.hoisted(() => ({
   workspaceId: "workspace-alpha"
@@ -63,6 +66,56 @@ describe("ACPWorkspacePanel canonical Workspace handoff", () => {
     useACPSessionsStore.getState().reset()
     workspaceStoreMock.workspaceId = "workspace-alpha"
     workspaceContextMock.compareOverride = null
+  })
+
+  it.each([
+    ["normal relative", "/api/v1/acp/sessions/alpha/ssh"],
+    ["absolute", "wss://attacker.example.test/api/v1/acp/sessions/alpha/ssh"],
+    ["protocol-relative", "//attacker.example.test/api/v1/acp/sessions/alpha/ssh"]
+  ])("uses the canonical page-origin SSH route for a %s server URL in cookie mode", (_label, sshWsUrl) => {
+    const originalDeploymentMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    try {
+      expect(
+        resolveACPWorkspaceWebSocketRequest(
+          {
+            serverUrl: "https://remote.example.test",
+            authMode: "single-user",
+            authSource: "cookie-session"
+          },
+          sshWsUrl,
+          "alpha"
+        )
+      ).toEqual({
+        url: `${window.location.origin.replace(/^http/i, "ws")}/api/v1/acp/sessions/alpha/ssh`,
+        headers: {},
+        protocols: undefined
+      })
+    } finally {
+      if (originalDeploymentMode === undefined) {
+        delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+      } else {
+        process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = originalDeploymentMode
+      }
+    }
+  })
+
+  it("preserves an absolute SSH socket URL for manual auth", () => {
+    expect(
+      resolveACPWorkspaceWebSocketRequest(
+        {
+          serverUrl: "https://remote.example.test",
+          authMode: "single-user",
+          apiKey: "manual-key"
+        },
+        "wss://ssh.example.test/api/v1/acp/sessions/alpha/ssh",
+        "alpha"
+      )
+    ).toEqual({
+      url: "wss://ssh.example.test/api/v1/acp/sessions/alpha/ssh",
+      headers: { "X-API-KEY": "manual-key" },
+      protocols: ["x-api-key", "manual-key"]
+    })
   })
 
   it("links no-session users to the canonical Workspaces manager", () => {

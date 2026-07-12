@@ -65,7 +65,9 @@ function redactHeaders(
   if (!headers) return headers;
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(headers)) {
-    out[key] = SENSITIVE_HEADERS.has(key.toLowerCase()) ? REDACTED : value;
+    if (!SENSITIVE_HEADERS.has(key.toLowerCase())) {
+      out[key] = value;
+    }
   }
   return out;
 }

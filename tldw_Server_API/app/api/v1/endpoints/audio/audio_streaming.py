@@ -68,9 +68,14 @@ from tldw_Server_API.app.core.Audio.streaming_service import (
     CHAT_HISTORY_MAX_MESSAGES,
     _audio_ws_authenticate,
     _stream_tts_to_websocket,
+    receive_audio_websocket_text,
 )
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import resolve_byok_credentials
 from tldw_Server_API.app.core.AuthNZ.settings import is_multi_user_mode
+from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
+    cookie_websocket_rejection_code,
+    resolve_single_user_cookie_websocket,
+)
 from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async as chat_api_call_async
 from tldw_Server_API.app.core.Chat.chat_helpers import (
     get_or_create_character_context,
@@ -872,6 +877,15 @@ async def audio_chat_turn(
 ws_router = APIRouter()
 
 
+async def _preflight_audio_cookie_websocket(websocket: WebSocket) -> bool:
+    await resolve_single_user_cookie_websocket(websocket)
+    close_code = cookie_websocket_rejection_code(websocket)
+    if close_code is None:
+        return True
+    await websocket.close(code=close_code)
+    return False
+
+
 @ws_router.websocket("/stream/transcribe")
 async def websocket_transcribe(
     websocket: WebSocket, token: Optional[str] = Query(None)  # Legacy query-token auth; disabled by default.
@@ -890,6 +904,8 @@ async def websocket_transcribe(
         websocket (WebSocket): The active WebSocket connection.
         token (Optional[str]): Legacy API key or JWT query-string token, ignored unless AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH is enabled.
     """
+    if not await _preflight_audio_cookie_websocket(websocket):
+        return
     # Create a lightweight WebSocketStream for uniform metrics on outer error paths
     _outer_stream = None
     try:
@@ -1060,6 +1076,9 @@ async def websocket_transcribe(
         )
 
         class _MetricRedactingWebSocketProxy(RedactingWebSocketProxy):
+            async def receive_text(self) -> str:
+                return await receive_audio_websocket_text(self._websocket)
+
             async def send_json(self, payload: dict[str, Any]) -> None:
                 redacted_payload = apply_transcript_payload_policy(payload, policy=effective_stt_policy)
                 if str(redacted_payload.get("type", "")).strip().lower() in {
@@ -1570,6 +1589,8 @@ async def websocket_audio_chat_stream(
       - Single-user: API key via header or an initial auth message; optional IP allowlist.
       - Legacy `token` query-string auth is accepted only when AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH is enabled.
     """
+    if not await _preflight_audio_cookie_websocket(websocket):
+        return
     await websocket.accept()
 
     try:
@@ -1746,7 +1767,7 @@ async def websocket_audio_chat_stream(
 
         # Parse initial config
         try:
-            raw_cfg = await wait_for(websocket.receive_text(), timeout=15.0)
+            raw_cfg = await wait_for(receive_audio_websocket_text(websocket), timeout=15.0)
             cfg_data = json.loads(raw_cfg)
             if not isinstance(cfg_data, dict):
                 raise AudioProtocolError("bad_request", "First post-auth frame must be a JSON object")
@@ -2787,7 +2808,7 @@ async def websocket_audio_chat_stream(
             for event in protocol_decision.events:
                 await _send_stream_payload(event)
             while True:
-                raw_msg = await websocket.receive_text()
+                raw_msg = await receive_audio_websocket_text(websocket)
                 try:
                     if _outer_stream:
                         _outer_stream.mark_activity()
@@ -3032,6 +3053,8 @@ async def websocket_tts(
     - Single-user: fixed API key via header or initial auth message; optional IP allowlist.
     - Legacy `token` query-string auth is accepted only when AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH is enabled.
     """
+    if not await _preflight_audio_cookie_websocket(websocket):
+        return
     await websocket.accept()
 
     try:
@@ -3130,7 +3153,7 @@ async def websocket_tts(
 
         # Parse prompt frame
         try:
-            prompt_message = await wait_for(websocket.receive_text(), timeout=10.0)
+            prompt_message = await wait_for(receive_audio_websocket_text(websocket), timeout=10.0)
             prompt_data = json.loads(prompt_message)
         except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as exc:
             if _outer_stream:
@@ -3268,6 +3291,8 @@ async def websocket_tts_realtime(
       - JSON status/warning/error frames
       - Binary audio frames for synthesized audio
     """
+    if not await _preflight_audio_cookie_websocket(websocket):
+        return
     await websocket.accept()
 
     try:
@@ -3414,7 +3439,7 @@ async def websocket_tts_realtime(
 
         # Read initial config or text frame
         try:
-            raw_msg = await wait_for(websocket.receive_text(), timeout=10.0)
+            raw_msg = await wait_for(receive_audio_websocket_text(websocket), timeout=10.0)
             first = json.loads(raw_msg)
         except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug(f"TTS realtime WS initial frame parse failed: {exc}")
@@ -3537,7 +3562,7 @@ async def websocket_tts_realtime(
                 timeout = max(0.0, remaining)
 
             try:
-                raw_msg = await wait_for(websocket.receive_text(), timeout=timeout)
+                raw_msg = await wait_for(receive_audio_websocket_text(websocket), timeout=timeout)
             except TimeoutError:
                 if buffered_chars > 0:
                     await session.commit()

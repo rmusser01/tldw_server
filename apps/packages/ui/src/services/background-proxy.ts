@@ -3,12 +3,21 @@ import { Storage } from "@plasmohq/storage"
 import { createSafeStorage } from "@/utils/safe-storage"
 import { formatErrorMessage } from "@/utils/format-error-message"
 import {
+  isUnsafeMethod,
   parseRetryAfter,
+  readBrowserCookie,
   resolveBrowserRequestTransport,
   tldwRequest
 } from "@/services/tldw/request-core"
-import { resolveAdvancedRequestTransportGuard } from "@/services/tldw/browser-networking"
+import {
+  isCookieSessionBrowserTransport,
+  resolveAdvancedRequestTransportGuard
+} from "@/services/tldw/browser-networking"
 import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
+import {
+  resolveDirectBrowserConfig as resolveDirectConfig,
+  type DirectRuntimeStorage
+} from "@/services/tldw/direct-browser-config"
 import {
   BACKEND_UNREACHABLE_EVENT,
   type BackendUnreachableDetail
@@ -451,11 +460,6 @@ const pruneRateLimitedGetResults = () => {
   }
 }
 
-type DirectRuntimeStorage = Pick<
-  ReturnType<typeof createSafeStorage>,
-  "get" | "set"
->
-
 // Module-level single-flight for the web/direct fallback token refresh. Mirrors
 // the extension worker's `refreshInFlight`: concurrent 401s (a common pattern
 // when many components refetch on a page load) trigger exactly ONE refresh
@@ -469,9 +473,7 @@ const refreshAuthDirect = async (
   if (!webRefreshInFlight) {
     webRefreshInFlight = (async () => {
       const cfg =
-        ((await storage.get("tldwConfig").catch(() => null)) as
-          | Record<string, unknown>
-          | null) || null
+        (await resolveDirectConfig(storage)) || null
       const refreshToken = String((cfg?.refreshToken as string) || "").trim()
       // Signal failure (throw) rather than resolving silently: request-core
       // treats a resolved refreshAuth as success and would retry with the stale
@@ -488,7 +490,7 @@ const refreshAuthDirect = async (
           body: { refresh_token: refreshToken },
           noAuth: true
         },
-        { getConfig: () => storage.get("tldwConfig").catch(() => null) }
+        { getConfig: () => resolveDirectConfig(storage) }
       )
       const tokens = (resp?.ok ? resp.data : null) as
         | { access_token?: string; refresh_token?: string }
@@ -499,13 +501,10 @@ const refreshAuthDirect = async (
         )
       }
       const latest =
-        ((await storage.get("tldwConfig").catch(() => null)) as
-          | Record<string, unknown>
-          | null) ||
-        cfg ||
-        {}
+        (await resolveDirectConfig(storage)) ||
+        cfg
       await storage.set("tldwConfig", {
-        ...latest,
+        ...(latest || {}),
         accessToken: tokens.access_token,
         refreshToken:
           tokens.refresh_token ||
@@ -523,7 +522,7 @@ const refreshAuthDirect = async (
 // request-core's 401 refresh-and-retry runs in the browser (not just inside the
 // extension worker), and single-flights it across concurrent callers.
 const createDirectRuntime = (storage: DirectRuntimeStorage) => ({
-  getConfig: () => storage.get("tldwConfig").catch(() => null),
+  getConfig: () => resolveDirectConfig(storage),
   refreshAuth: () => refreshAuthDirect(storage)
 })
 
@@ -641,11 +640,11 @@ async function bgRequestImpl<
   const noAuthExplicit = Object.prototype.hasOwnProperty.call(init, "noAuth")
   let resolvedNoAuth = noAuthExplicit ? noAuth : (noAuth || isAbsoluteUrl)
   if (!noAuthExplicit && isAbsoluteUrl) {
-    const storage = createSafeStorage()
-    const cfg = (await storage.get<Record<string, unknown>>("tldwConfig").catch(() => null)) || null
+    const storage = createSafeStorage({ area: "local" })
+    const cfg = await resolveDirectConfig(storage)
     const sameOriginAbsolute = isSameOriginAbsoluteUrlForConfiguredServer(
       String(path),
-      cfg
+      cfg as unknown as Record<string, unknown>
     )
     resolvedNoAuth = noAuth || !sameOriginAbsolute
   }
@@ -714,7 +713,7 @@ async function bgRequestImpl<
     headers?: Record<string, string>
   }
   const requestDirectArrayBufferFallback = async () => {
-    const storage = createSafeStorage()
+    const storage = createSafeStorage({ area: "local" })
     return await tldwRequest(
       {
         path,
@@ -767,7 +766,7 @@ async function bgRequestImpl<
 
   // Some binary responses do not survive extension message serialization.
   if (shouldBypassBackground) {
-    const storage = createSafeStorage()
+    const storage = createSafeStorage({ area: "local" })
     const resp = await tldwRequest(
       {
         path,
@@ -967,7 +966,7 @@ async function bgRequestImpl<
   }
 
   // Fallback: direct fetch (web/dev context)
-  const storage = createSafeStorage()
+  const storage = createSafeStorage({ area: "local" })
   const resp = await tldwRequest(
     {
       path,
@@ -1079,8 +1078,8 @@ async function* bgStreamDirect<
 >(
   { path, method = 'POST' as UpperLower<M>, headers = {}, body, streamIdleTimeoutMs, abortSignal }: BgStreamInit<P, M>
 ): AsyncGenerator<string> {
-  const storage = createSafeStorage()
-  const cfg = (await storage.get<Record<string, unknown>>("tldwConfig").catch(() => null)) || null
+  const storage = createSafeStorage({ area: "local" })
+  const cfg = (await resolveDirectConfig(storage)) || null
   const normalizedPath = normalizeKnownPathQuirks(path)
   const isAbsolute = typeof normalizedPath === "string" && /^https?:/i.test(normalizedPath)
   const absolutePath = isAbsolute ? String(normalizedPath) : ""
@@ -1097,7 +1096,13 @@ async function* bgStreamDirect<
     hasConfiguredServerUrl: Boolean(cfg?.serverUrl),
     isAbsolute
   })
-  if (isAbsolute && !isAbsoluteUrlAllowlisted(absolutePath, cfg)) {
+  if (
+    isAbsolute &&
+    !isAbsoluteUrlAllowlisted(
+      absolutePath,
+      cfg as unknown as Record<string, unknown>
+    )
+  ) {
     throw new Error(ABSOLUTE_URL_BLOCK_ERROR)
   }
   if (advancedTransportGuard.isUnconfigured) {
@@ -1111,16 +1116,53 @@ async function* bgStreamDirect<
     : transport?.url ||
       `${baseUrl}${String(normalizedPath).startsWith("/") ? "" : "/"}${String(normalizedPath)}`
   const sameOriginAbsolute = isAbsolute
-    ? isSameOriginAbsoluteUrlForConfiguredServer(absolutePath, cfg)
+    ? isSameOriginAbsoluteUrlForConfiguredServer(
+        absolutePath,
+        cfg as unknown as Record<string, unknown>
+      )
     : false
   const shouldSkipAuth = isAbsolute && !sameOriginAbsolute
+  const pageOrigin =
+    typeof window === "undefined" ? null : String(window.location?.origin || "")
+  const samePageOriginAbsolute =
+    isAbsolute && pageOrigin
+      ? isSameOriginAbsoluteUrlForConfiguredServer(absolutePath, {
+          serverUrl: pageOrigin
+        })
+      : false
+  const absoluteCookieTransport =
+    isAbsolute && sameOriginAbsolute && samePageOriginAbsolute
+      ? resolveBrowserRequestTransport({
+          config: cfg,
+          path: absolutePath,
+          pageOrigin
+        })
+      : null
+  const cookieSession = isCookieSessionBrowserTransport({
+    authMode: cfg?.authMode,
+    authSource: cfg?.authSource,
+    transportMode: absoluteCookieTransport?.mode || transport?.mode,
+    transportKind: absoluteCookieTransport?.kind || transport?.kind,
+    pageOrigin
+  })
   const resolvedHeaders: Record<string, string> = { ...(headers || {}) }
   for (const k of Object.keys(resolvedHeaders)) {
     const kl = k.toLowerCase()
-    if (kl === "x-api-key" || kl === "authorization") delete resolvedHeaders[k]
+    if (
+      kl === "x-api-key" ||
+      kl === "authorization" ||
+      (cookieSession && kl === "x-csrf-token")
+    ) {
+      delete resolvedHeaders[k]
+    }
   }
 
-  if (!shouldSkipAuth && !hostedMode && cfg?.authMode === "single-user") {
+  if (cookieSession) {
+    if (!shouldSkipAuth && isUnsafeMethod(String(method))) {
+      const csrfToken = readBrowserCookie("csrf_token")
+      if (csrfToken) resolvedHeaders["X-CSRF-Token"] = csrfToken
+    }
+  } else if (!shouldSkipAuth && !hostedMode && cfg?.authMode === "single-user") {
     const runtimeApiKey = String(getRuntimeSingleUserApiKeyOverride() || "").trim()
     const key = runtimeApiKey || String(cfg?.apiKey || "").trim()
     if (!key) {
@@ -1207,9 +1249,7 @@ async function* bgStreamDirect<
         const tokens = await refreshResp.json().catch(() => null)
         if (tokens?.access_token) {
           const latestCfg =
-            (await storage
-              .get<Record<string, unknown>>("tldwConfig")
-              .catch(() => null)) || null
+            (await resolveDirectConfig(storage)) || null
           const updated = {
             ...(latestCfg || cfg || {}),
             accessToken: tokens.access_token,
@@ -1354,7 +1394,7 @@ export async function* bgStream<
   // hard-coded 5s. Time-to-first-byte over 5s is normal for large prompts, RAG,
   // or a cold local model, and a premature disconnect used to replay the whole
   // request. Reuse the stream idle-timeout budget (chat default 45s).
-  const streamStorage = createSafeStorage()
+  const streamStorage = createSafeStorage({ area: "local" })
   const streamCfg =
     (await streamStorage
       .get<Record<string, unknown>>("tldwConfig")
@@ -1676,7 +1716,7 @@ export async function bgUpload<T = any, P extends AllowedPath = AllowedPath, M e
     )
   }
 
-  const storage = createSafeStorage()
+  const storage = createSafeStorage({ area: "local" })
   const resp = await tldwRequest(
     { path, method, body: formData, timeoutMs, responseType },
     createDirectRuntime(storage)

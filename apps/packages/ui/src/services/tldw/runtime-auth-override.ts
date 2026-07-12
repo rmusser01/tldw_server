@@ -1,6 +1,7 @@
 import { isPlaceholderApiKey } from "@/utils/api-key"
 
 let runtimeSingleUserApiKey: string | null = null
+let cookieSessionConfigInvalidated = false
 
 const normalizeApiKey = (value?: string | null): string | null => {
   const normalized = String(value || "").trim()
@@ -21,3 +22,14 @@ export const getRuntimeSingleUserApiKeyOverride = (): string | null =>
 export const clearRuntimeAuthOverride = (): void => {
   runtimeSingleUserApiKey = null
 }
+
+export const invalidateCookieSessionConfig = (): void => {
+  cookieSessionConfigInvalidated = true
+}
+
+export const activateCookieSessionConfig = (): void => {
+  cookieSessionConfigInvalidated = false
+}
+
+export const isCookieSessionConfigInvalidated = (): boolean =>
+  cookieSessionConfigInvalidated

@@ -20,6 +20,7 @@
     "smoke": "node scripts/smoke.mjs",
     "e2e:login": "node scripts/playwright-login.mjs",
     "e2e:pw": "playwright test",
+    "e2e:cookie-lifecycle": "node scripts/playwright-cookie-lifecycle.mjs",
     "e2e:hosted": "NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=hosted TLDW_WEB_CMD='NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=hosted bun run dev -- -p 8080' playwright test e2e/hosted/launch-funnel.spec.ts e2e/hosted/account-billing.spec.ts --reporter=line",
     "e2e:hosted:staging": "TLDW_WEB_AUTOSTART=false NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=hosted TLDW_WEB_URL=${TLDW_STAGING_BASE_URL:?Set TLDW_STAGING_BASE_URL} playwright test e2e/hosted/staging-smoke.spec.ts --reporter=line",
     "e2e:chat-queued-requests": "playwright test e2e/workflows/chat-queued-requests.spec.ts --reporter=line",

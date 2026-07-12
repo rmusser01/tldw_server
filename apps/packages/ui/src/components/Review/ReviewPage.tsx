@@ -238,7 +238,7 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({
   // Storage scoping: per server host and auth mode to avoid cross-user leakage
   React.useEffect(() => {
     let cancelled = false
-    const storage = createSafeStorage()
+    const storage = createSafeStorage({ area: "local" })
 
     const applyScope = (cfg?: any) => {
       if (cancelled) return

@@ -15,7 +15,11 @@ from fastapi import HTTPException, Request, status
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ import User_DB_Handling
-from tldw_Server_API.app.core.AuthNZ.exceptions import InvalidTokenError, TokenExpiredError
+from tldw_Server_API.app.core.AuthNZ.exceptions import (
+    InvalidTokenError,
+    SessionRevokedException,
+    TokenExpiredError,
+)
 from tldw_Server_API.app.core.AuthNZ.ip_allowlist import (
     is_service_token_ip_allowed,
     is_single_user_ip_allowed,
@@ -29,6 +33,7 @@ from tldw_Server_API.app.core.AuthNZ.principal_model import (
 )
 from tldw_Server_API.app.core.AuthNZ.session_manager import get_session_manager
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.app.core.AuthNZ.single_user_session import validate_single_user_session
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 from tldw_Server_API.app.core.exceptions import InactiveUserError
 from tldw_Server_API.app.core.testing import env_flag_enabled
@@ -326,6 +331,8 @@ async def get_auth_principal(request: Request) -> AuthPrincipal:
     if isinstance(existing, AuthContext):
         return existing.principal
     # Prefer Bearer JWT, fall back to X-API-KEY
+    has_authorization_header = request.headers.get("Authorization") is not None
+    has_api_key_header = request.headers.get("X-API-KEY") is not None
     token = _extract_bearer_token(request)
     api_key = _extract_api_key(request)
 
@@ -350,6 +357,25 @@ async def get_auth_principal(request: Request) -> AuthPrincipal:
             token = None
 
     if not token and not api_key:
+        if not has_authorization_header and not has_api_key_header:
+            try:
+                identity = await validate_single_user_session(request)
+            except SessionRevokedException:
+                identity = None
+            if identity is not None:
+                user = User_DB_Handling.get_single_user_instance()
+                principal = _build_principal_from_user(
+                    user=user,
+                    kind="user",
+                    request=request,
+                    token_type="single_user_session",  # nosec B106
+                    subject="single_user",
+                )
+                request.state.single_user_session_id = identity.session_id
+                request.state.user_id = identity.user_id
+                request.state.auth = _build_context(principal, request)
+                request.state._auth_user = user
+                return principal
         # Align with existing 401 semantics when no credentials are provided
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

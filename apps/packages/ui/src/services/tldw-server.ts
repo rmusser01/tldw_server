@@ -6,8 +6,9 @@ import {
   resolveWebUiQuickstartServerUrl,
   type BrowserSurface
 } from "@/services/tldw/browser-networking"
+import { readTldwSetting } from "@/services/tldw-settings-storage"
 
-const storage = createSafeStorage()
+const storage = createSafeStorage({ area: "local" })
 
 // Default local tldw_server endpoint
 const DEFAULT_TLDW_URL = "http://127.0.0.1:8000"
@@ -59,7 +60,7 @@ export const DEFAULT_TLDW_API_KEY = import.meta?.env?.VITE_TLDW_API_KEY || ""
  */
 export const getStoredTldwServerURL = async (): Promise<string | null> => {
   try {
-    const url = await storage.get("tldwServerUrl")
+    const url = await readTldwSetting<string>("tldwServerUrl")
     if (typeof url === "string") {
       const trimmed = url.trim()
       if (trimmed.length > 0) {
@@ -456,7 +457,7 @@ Follow-up question: {question}
 `
 
 export const getPageShareUrl = async () => {
-  const pageShareUrl = await storage.get("pageShareUrl")
+  const pageShareUrl = await readTldwSetting<string>("pageShareUrl")
   if (!pageShareUrl || typeof pageShareUrl !== "string" || pageShareUrl.length === 0) {
     return DEFAULT_PAGE_SHARE_URL
   }
@@ -468,7 +469,7 @@ export const setPageShareUrl = async (pageShareUrl: string) => {
 }
 
 export const systemPromptForNonRag = async () => {
-  const prompt = await storage.get("systemPromptForNonRag")
+  const prompt = await readTldwSetting<string>("systemPromptForNonRag")
   if (typeof prompt !== "string" || prompt.length === 0) {
     return undefined
   }
@@ -480,7 +481,7 @@ export const setSystemPromptForNonRag = async (prompt: string) => {
 }
 
 export const systemPromptForNonRagOption = async () => {
-  const prompt = await storage.get("systemPromptForNonRagOption")
+  const prompt = await readTldwSetting<string>("systemPromptForNonRagOption")
   if (typeof prompt !== "string" || prompt.length === 0) {
     return undefined
   }
@@ -492,8 +493,8 @@ export const setSystemPromptForNonRagOption = async (prompt: string) => {
 }
 
 export const promptForRag = async () => {
-  const prompt = await storage.get("systemPromptForRag")
-  const questionPrompt = await storage.get("questionPromptForRag")
+  const prompt = await readTldwSetting<string>("systemPromptForRag")
+  const questionPrompt = await readTldwSetting<string>("questionPromptForRag")
 
   let ragPrompt = typeof prompt === "string" ? prompt : undefined
   let ragQuestionPrompt = typeof questionPrompt === "string" ? questionPrompt : undefined

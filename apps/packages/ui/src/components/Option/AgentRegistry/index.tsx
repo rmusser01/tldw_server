@@ -14,8 +14,8 @@ import {
 import { Badge as DSBadge } from "@/components/ui/primitives"
 import { RecoveryCallout, buildCapabilityState } from "@/components/ui/state"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
-import { ACPRestClient } from "@/services/acp/client"
-import { buildACPAuthHeaders, buildACPClientConfig } from "@/services/acp/connection"
+import { ACPRestClient, fetchACPRequest } from "@/services/acp/client"
+import { buildACPClientConfig } from "@/services/acp/connection"
 import {
   normalizeACPExecutionHealthSummary,
   normalizeACPHealthStatus,
@@ -28,7 +28,6 @@ import type {
   ACPSupportState,
   ACPVerificationLevel
 } from "@/services/acp/types"
-import { resolveBrowserRequestTransport } from "@/services/tldw/request-core"
 import { DESIGN_SYSTEM_STATES, getDesignSystemState, type DesignSystemStateKey } from "@/design-system"
 import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 
@@ -210,14 +209,6 @@ export const AgentRegistryPage: React.FC = () => {
     [connectionConfig]
   )
 
-  const getACPHeaders = useCallback(
-    (transport: { mode: string }) =>
-      transport.mode === "hosted"
-        ? { "Content-Type": "application/json" }
-        : buildACPAuthHeaders(connectionConfig, { includeContentType: true }),
-    [connectionConfig]
-  )
-
   const fetchAgents = useCallback(async () => {
     if (!restClient) return
     setLoading(true)
@@ -247,11 +238,10 @@ export const AgentRegistryPage: React.FC = () => {
     if (!connectionConfig) return
     setHealthLoading(true)
     try {
-      const transport = resolveBrowserRequestTransport({
-        config: connectionConfig,
-        path: "/api/v1/acp/health"
-      })
-      const res = await fetch(transport.url, { headers: getACPHeaders(transport) })
+      const res = await fetchACPRequest(
+        buildACPClientConfig(connectionConfig),
+        "/api/v1/acp/health"
+      )
       if (res.ok) {
         setHealth(normalizeACPHealthStatus(await res.json()))
         setHealthFailure(null)
@@ -270,17 +260,16 @@ export const AgentRegistryPage: React.FC = () => {
     } finally {
       setHealthLoading(false)
     }
-  }, [connectionConfig, getACPHeaders])
+  }, [connectionConfig])
 
   const fetchExecutionHealth = useCallback(async () => {
     if (!connectionConfig) return
     setExecutionHealthLoading(true)
     try {
-      const transport = resolveBrowserRequestTransport({
-        config: connectionConfig,
-        path: ACP_EXECUTION_HEALTH_SUMMARY_PATH
-      })
-      const res = await fetch(transport.url, { headers: getACPHeaders(transport) })
+      const res = await fetchACPRequest(
+        buildACPClientConfig(connectionConfig),
+        ACP_EXECUTION_HEALTH_SUMMARY_PATH
+      )
       if (res.ok) {
         setExecutionHealth(
           normalizeACPExecutionHealthSummary(await res.json())
@@ -303,7 +292,7 @@ export const AgentRegistryPage: React.FC = () => {
     } finally {
       setExecutionHealthLoading(false)
     }
-  }, [connectionConfig, getACPHeaders])
+  }, [connectionConfig])
 
   useEffect(() => {
     if (!connectionConfig) return

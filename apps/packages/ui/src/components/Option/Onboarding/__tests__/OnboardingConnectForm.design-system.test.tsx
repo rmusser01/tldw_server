@@ -90,6 +90,7 @@ type RenderConnectionFormOptions = {
   validationResult?: MockValidationResult
   connectedState?: Partial<MockConnectionState>
   testConnectionRejects?: Error
+  initialConfig?: Record<string, unknown> | null
 }
 
 type MockButtonProps = Omit<
@@ -151,6 +152,7 @@ const renderConnectionForm = async (options: RenderConnectionFormOptions = {}) =
   vi.resetModules()
   let connectionState = createIdleConnectionState()
   const validationResult = options.validationResult ?? { success: true }
+  const validateApiKey = vi.fn().mockResolvedValue(validationResult)
   const setConfigPartial = vi.fn().mockResolvedValue(undefined)
   const testConnectionFromOnboarding = vi.fn().mockImplementation(async () => {
     if (options.testConnectionRejects) {
@@ -292,6 +294,29 @@ const renderConnectionForm = async (options: RenderConnectionFormOptions = {}) =
         ))}
       </select>
     ),
+    Checkbox: ({
+      children,
+      checked,
+      disabled,
+      onChange
+    }: {
+      children?: React.ReactNode
+      checked?: boolean
+      disabled?: boolean
+      onChange?: (event: { target: { checked: boolean } }) => void
+    }) => (
+      <label>
+        <input
+          type="checkbox"
+          checked={checked}
+          disabled={disabled}
+          onChange={(event) =>
+            onChange?.({ target: { checked: event.currentTarget.checked } })
+          }
+        />
+        {children}
+      </label>
+    ),
     Tooltip: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
     message: {
       success: vi.fn(),
@@ -314,11 +339,17 @@ const renderConnectionForm = async (options: RenderConnectionFormOptions = {}) =
 
   vi.doMock("@/services/tldw/TldwApiClient", () => ({
     tldwClient: {
-      getConfig: vi.fn().mockResolvedValue({
-        serverUrl: "http://127.0.0.1:8000",
-        authMode: "single-user",
-        apiKey: "test-api-key"
-      })
+      getConfig: vi.fn().mockResolvedValue(
+        Object.prototype.hasOwnProperty.call(options, "initialConfig")
+          ? options.initialConfig
+          : {
+              serverUrl: "http://127.0.0.1:8000",
+              authMode: "single-user",
+              apiKey: "test-api-key",
+              credentialSource: "manual",
+              apiKeyPersistence: "device"
+            }
+      )
     }
   }))
 
@@ -463,12 +494,18 @@ const renderConnectionForm = async (options: RenderConnectionFormOptions = {}) =
     trackOnboardingFirstIngestSuccess: vi.fn().mockResolvedValue(undefined)
   }))
 
-  vi.doMock("../validation", () => ({
-    validateApiKey: vi.fn().mockResolvedValue(validationResult),
-    validateMultiUserAuth: vi.fn(),
-    validateMagicLinkAuth: vi.fn(),
-    categorizeConnectionError: vi.fn().mockReturnValue(null)
-  }))
+  vi.doMock("../validation", async () => {
+    const actual = await vi.importActual<typeof import("../validation")>(
+      "../validation"
+    )
+    return {
+      ...actual,
+      validateApiKey,
+      validateMultiUserAuth: vi.fn(),
+      validateMagicLinkAuth: vi.fn(),
+      categorizeConnectionError: vi.fn().mockReturnValue(null)
+    }
+  })
 
   const { OnboardingConnectForm } = await import("../OnboardingConnectForm")
 
@@ -477,6 +514,8 @@ const renderConnectionForm = async (options: RenderConnectionFormOptions = {}) =
       <OnboardingConnectForm />
     </MemoryRouter>
   )
+
+  return { testConnectionFromOnboarding, validateApiKey }
 }
 
 const waitForConnectButton = async () => {
@@ -494,7 +533,7 @@ describe("setup onboarding design-system state wiring", () => {
     setupRouteMocks.optionLayout.mockClear()
   })
 
-  it("frames setup in a setup-only shell with the canonical setup-required action", async () => {
+  it("frames the setup chooser and WebUI wizard in a setup-only shell", async () => {
     const { default: OptionSetup } = await import("@/routes/option-setup")
 
     render(
@@ -507,17 +546,13 @@ describe("setup onboarding design-system state wiring", () => {
       hideHeader: true,
       hideSidebar: true
     })
-    expect(
-      screen.getByText(getDesignSystemState("setup_required").label)
-    ).toBeInTheDocument()
-    expect(
-      screen.getByRole("button", { name: /continue setup/i })
-    ).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Mock unified setup" })).toBeInTheDocument()
+    expect(screen.getByText("Choose where to set up tldw")).toBeInTheDocument()
+    expect(screen.queryByTestId("unified-setup-shell")).not.toBeInTheDocument()
 
-    const setupShell = screen.getByTestId("unified-setup-shell")
-    fireEvent.click(screen.getByRole("button", { name: "Continue setup" }))
-    expect(setupShell).toHaveFocus()
+    fireEvent.click(screen.getByRole("button", { name: "Set up in WebUI" }))
+
+    expect(await screen.findByTestId("unified-setup-shell")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Mock unified setup" })).toBeInTheDocument()
     expect(screen.queryByTestId("chat-header-theme-toggle")).not.toBeInTheDocument()
     expect(screen.queryByRole("navigation")).not.toBeInTheDocument()
   })
@@ -563,5 +598,95 @@ describe("setup onboarding design-system state wiring", () => {
     await waitFor(() => {
       expect(screen.getByText(getDesignSystemState("ready").label)).toBeInTheDocument()
     })
+  })
+
+  it("defaults remember on for a new manual single-user setup", async () => {
+    await renderConnectionForm({ initialConfig: null })
+
+    expect(
+      await screen.findByRole("checkbox", { name: "Remember on this device" })
+    ).toBeChecked()
+    expect(
+      screen.getByText(/stores this api key in this browser/i)
+    ).toBeInTheDocument()
+  })
+
+  it("clears a freshly entered API key when the unsaved server origin changes", async () => {
+    await renderConnectionForm({ initialConfig: null })
+    const serverInput = await screen.findByTestId("onboarding-server-url")
+    const apiKeyInput = await screen.findByTestId("onboarding-api-key")
+
+    fireEvent.change(serverInput, {
+      target: { value: "https://first.example.test/api" }
+    })
+    fireEvent.change(apiKeyInput, { target: { value: "origin-bound-key" } })
+    expect(apiKeyInput).toHaveValue("origin-bound-key")
+
+    fireEvent.change(serverInput, {
+      target: { value: "https://second.example.test/api" }
+    })
+
+    expect(apiKeyInput).toHaveValue("")
+  })
+
+  it("clears a key entered before the first server origin is selected", async () => {
+    await renderConnectionForm({ initialConfig: null })
+    const serverInput = await screen.findByTestId("onboarding-server-url")
+    const apiKeyInput = await screen.findByTestId("onboarding-api-key")
+
+    fireEvent.change(apiKeyInput, { target: { value: "unbound-key" } })
+    fireEvent.change(serverInput, {
+      target: { value: "https://first.example.test/api" }
+    })
+
+    expect(apiKeyInput).toHaveValue("")
+  })
+
+  it("shows session-only copy when remember is unchecked", async () => {
+    await renderConnectionForm({ initialConfig: null })
+
+    fireEvent.click(
+      await screen.findByRole("checkbox", { name: "Remember on this device" })
+    )
+
+    expect(
+      screen.getByText("Keep signed in until this browser closes.")
+    ).toBeInTheDocument()
+  })
+
+  it("hides browser-readable key controls for an active cookie session", async () => {
+    await renderConnectionForm({
+      initialConfig: {
+        serverUrl: "http://127.0.0.1:8080",
+        authMode: "single-user",
+        authSource: "cookie-session"
+      }
+    })
+
+    expect(
+      await screen.findByText("Connected securely through this WebUI.")
+    ).toBeInTheDocument()
+    expect(screen.queryByTestId("onboarding-api-key")).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("checkbox", { name: "Remember on this device" })
+    ).not.toBeInTheDocument()
+  })
+
+  it("connects an active cookie session without validating or persisting a manual key", async () => {
+    const { testConnectionFromOnboarding, validateApiKey } =
+      await renderConnectionForm({
+        initialConfig: {
+          serverUrl: "http://127.0.0.1:8080",
+          authMode: "single-user",
+          authSource: "cookie-session"
+        }
+      })
+
+    fireEvent.click(await waitForConnectButton())
+
+    await waitFor(() => {
+      expect(testConnectionFromOnboarding).toHaveBeenCalledTimes(1)
+    })
+    expect(validateApiKey).not.toHaveBeenCalled()
   })
 })

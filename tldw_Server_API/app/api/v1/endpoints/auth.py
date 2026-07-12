@@ -48,6 +48,8 @@ from tldw_Server_API.app.api.v1.schemas.auth_schemas import (
     RegisterRequest,
     RegistrationResponse,
     SessionResponse,
+    SingleUserSessionLogoutResponse,
+    SingleUserSessionResponse,
     TokenResponse,
 )
 from tldw_Server_API.app.core.Audit.unified_audit_service import (
@@ -59,6 +61,7 @@ from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
 from tldw_Server_API.app.core.AuthNZ.auth_governor import get_auth_governor
 from tldw_Server_API.app.core.AuthNZ.csrf_protection import (
     global_settings as _csrf_globals,
+    resolve_effective_csrf_enabled,
 )
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, is_postgres_backend
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
@@ -69,6 +72,7 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import (
     InvalidTokenError,
     RegistrationError,
     SessionError,
+    SessionRevokedException,
     TokenExpiredError,
     WeakPasswordError,
 )
@@ -84,6 +88,12 @@ from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.identity_provider_repo import IdentityProviderRepo
 from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager
 from tldw_Server_API.app.core.AuthNZ.settings import Settings, get_profile, get_settings
+from tldw_Server_API.app.core.AuthNZ.single_user_session import (
+    clear_single_user_session_cookie,
+    mint_single_user_session,
+    set_single_user_session_cookie,
+    validate_single_user_session,
+)
 from tldw_Server_API.app.core.AuthNZ.token_blacklist import get_token_blacklist
 from tldw_Server_API.app.core.Resource_Governance.governor import MemoryResourceGovernor, RGRequest
 from tldw_Server_API.app.core.Resource_Governance.policy_loader import default_policy_loader
@@ -1203,6 +1213,116 @@ class MFALoginRequest(BaseModel):
 class LogoutRequest(BaseModel):
     """Request for logout."""
     all_devices: bool = Field(default=False, description="Logout from all devices")
+
+
+@router.post(
+    "/single-user/session",
+    dependencies=[Depends(check_auth_rate_limit)],
+    response_model=SingleUserSessionResponse,
+)
+async def create_single_user_cookie_session(
+    request: Request,
+    response: Response,
+    principal: AuthPrincipal = Depends(get_auth_principal),
+    session_manager: SessionManager = Depends(get_session_manager_dep),
+) -> SingleUserSessionResponse:
+    """Mint or reuse an opaque session for an explicit single-user API key."""
+    settings = get_settings()
+    if settings.AUTH_MODE != "single_user":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    raw_api_key = request.headers.get("X-API-KEY")
+    if not isinstance(raw_api_key, str) or not raw_api_key.strip():
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="An explicit X-API-KEY is required",
+        )
+    if principal.token_type != "api_key" or principal.subject != "single_user":  # nosec B105
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
+    if not resolve_effective_csrf_enabled():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Cookie sessions require CSRF protection",
+        )
+    response.headers["Cache-Control"] = "no-store"
+
+    try:
+        identity = await validate_single_user_session(
+            request,
+            session_manager,
+            strict=True,
+        )
+    except SessionRevokedException:
+        # A revoked cookie is stale authentication state; replace it with the
+        # fresh session authorized by the explicit API key on this request.
+        identity = None
+    except SessionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to validate the current session",
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    if identity is not None:
+        return SingleUserSessionResponse(authenticated=True, expires_at=identity.expires_at)
+
+    try:
+        minted = await mint_single_user_session(request, session_manager)
+    except SessionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to create a single-user session",
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    set_single_user_session_cookie(response, minted)
+    return SingleUserSessionResponse(authenticated=True, expires_at=minted.identity.expires_at)
+
+
+@router.delete(
+    "/single-user/session",
+    dependencies=[Depends(check_auth_rate_limit)],
+    response_model=SingleUserSessionLogoutResponse,
+)
+async def delete_single_user_cookie_session(
+    request: Request,
+    response: Response,
+    session_manager: SessionManager = Depends(get_session_manager_dep),
+) -> SingleUserSessionLogoutResponse:
+    """Revoke exactly the current opaque single-user session and clear its cookie."""
+    if get_settings().AUTH_MODE != "single_user":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    try:
+        identity = await validate_single_user_session(
+            request,
+            session_manager,
+            strict=True,
+        )
+    except SessionRevokedException:
+        # Already-revoked cookies are an expected logout retry. Continue so
+        # the browser receives the same idempotent cookie-clearing response.
+        identity = None
+    except SessionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to validate the current session",
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    try:
+        if identity is not None:
+            await session_manager.revoke_session(
+                session_id=identity.session_id,
+                revoked_by=identity.user_id,
+                reason="Single-user cookie logout",
+            )
+    except SessionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to revoke the current session",
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+
+    response.headers["Cache-Control"] = "no-store"
+    clear_single_user_session_cookie(response)
+    return SingleUserSessionLogoutResponse(authenticated=False)
 
 
 #######################################################################################################################

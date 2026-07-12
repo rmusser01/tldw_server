@@ -8,6 +8,7 @@ import dynamic from "next/dynamic"
 import { useRouter } from "next/router"
 import React from "react"
 import { BackendRecoveryUiProvider } from "@/components/Common/BackendRecoveryUiContext"
+import { PageAssistLoader } from "@/components/Common/PageAssistLoader"
 import { FirstRunGate } from "@/components/PersonaGarden/FirstRunGate"
 import { AppProviders } from "@web/components/AppProviders"
 import ErrorBoundary from "@web/components/ErrorBoundary"
@@ -16,6 +17,7 @@ import { ServerReadinessGate } from "@web/components/networking/ServerReadinessG
 import {
   getRuntimeApiBearer,
   getRuntimeApiKey,
+  hasActiveCookieSessionAuth,
   hasEnvApiAuth
 } from "@web/lib/authStorage"
 import { loadTldwAuth, loadTldwClient } from "@web/lib/configured-auth-state"
@@ -190,7 +192,8 @@ const getConfiguredAuthState = async (): Promise<ConfiguredAuthState> => {
       hasConfig: true,
       authMode: "single-user",
       isAuthenticated:
-        typeof config.apiKey === "string" && config.apiKey.trim().length > 0
+        hasActiveCookieSessionAuth(config) ||
+        (typeof config.apiKey === "string" && config.apiKey.trim().length > 0)
     }
   } catch {
     return {
@@ -396,6 +399,10 @@ export default function App({ Component, pageProps }: AppProps) {
   )
   const enableNotifications =
     authResolved && isAuthenticated && !isPublicAuthRoute && !isSetupRoute
+
+  if (!authResolved) {
+    return <PageAssistLoader label="Loading..." autoFocus={false} />
+  }
 
   const layoutContent = (
     <OptionLayout {...layoutProps}>

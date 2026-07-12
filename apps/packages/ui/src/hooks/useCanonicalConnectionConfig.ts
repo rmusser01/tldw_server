@@ -70,7 +70,8 @@ const normalizeConnectionConfig = (
   apiKey: config?.apiKey ?? fallback.apiKey,
   accessToken: config?.accessToken ?? fallback.accessToken,
   refreshToken: config?.refreshToken ?? fallback.refreshToken,
-  orgId: typeof config?.orgId === "number" ? config.orgId : fallback.orgId
+  orgId: typeof config?.orgId === "number" ? config.orgId : fallback.orgId,
+  authSource: config?.authSource ?? fallback.authSource
 })
 
 export const useCanonicalConnectionConfig = (): {

@@ -23,12 +23,14 @@ async function loadApiHelpers() {
 describe("shouldIncludeBrowserCredentials", () => {
   const originalApiKey = process.env.NEXT_PUBLIC_X_API_KEY
   const originalApiBearer = process.env.NEXT_PUBLIC_API_BEARER
+  const originalDeploymentMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
 
   beforeEach(() => {
     localStorage.clear()
     clearRuntimeAuth()
     delete process.env.NEXT_PUBLIC_X_API_KEY
     delete process.env.NEXT_PUBLIC_API_BEARER
+    delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
   })
 
   afterEach(() => {
@@ -43,6 +45,11 @@ describe("shouldIncludeBrowserCredentials", () => {
       delete process.env.NEXT_PUBLIC_API_BEARER
     } else {
       process.env.NEXT_PUBLIC_API_BEARER = originalApiBearer
+    }
+    if (originalDeploymentMode === undefined) {
+      delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+    } else {
+      process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = originalDeploymentMode
     }
   })
 
@@ -83,6 +90,15 @@ describe("shouldIncludeBrowserCredentials", () => {
     process.env.NEXT_PUBLIC_X_API_KEY = "   "
     process.env.NEXT_PUBLIC_API_BEARER = "  Bearer env-token  "
 
+    expect(hasEnvApiAuth()).toBe(true)
+  })
+
+  it("ignores the public api key in quickstart while preserving advanced env auth", () => {
+    process.env.NEXT_PUBLIC_X_API_KEY = "stale-public-key"
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    expect(hasEnvApiAuth()).toBe(false)
+
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
     expect(hasEnvApiAuth()).toBe(true)
   })
 

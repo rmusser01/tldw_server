@@ -5,6 +5,7 @@ import type { ApiSendResponse } from "@/services/api-send"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import {
   buildBrowserHttpBase,
+  isCookieSessionBrowserTransport,
   resolveAdvancedRequestTransportGuard,
   resolveBrowserTransport,
   type BrowserSurface
@@ -42,6 +43,23 @@ export type BrowserRequestTransport = {
   url: string
 }
 
+export const readBrowserCookie = (name: string): string | null => {
+  if (typeof document === "undefined") return null
+  const prefix = `${encodeURIComponent(name)}=`
+  for (const part of String(document.cookie || "").split(";")) {
+    const cookie = part.trim()
+    if (!cookie.startsWith(prefix)) continue
+    try {
+      return decodeURIComponent(cookie.slice(prefix.length))
+    } catch {
+      return null
+    }
+  }
+  return null
+}
+
+export const isUnsafeMethod = (method: string): boolean =>
+  !new Set(["GET", "HEAD", "OPTIONS", "TRACE"]).has(method.toUpperCase())
 const REQUEST_LOG_PREFIX = "[tldw:request]"
 const malformedConfigServerUrlWarnings = new Set<string>()
 const malformedAllowlistEntryWarnings = new Set<string>()
@@ -291,6 +309,29 @@ export const tldwRequest = async (
   })
   const sameOriginAbsoluteUrl =
     isAbsolute && isSameOriginAbsoluteUrlForConfiguredServer(absolutePath, cfg)
+  const pageOrigin =
+    typeof window === "undefined" ? null : String(window.location?.origin || "")
+  const samePageOriginAbsoluteUrl =
+    isAbsolute && pageOrigin
+      ? isSameOriginAbsoluteUrlForConfiguredServer(absolutePath, {
+          serverUrl: pageOrigin
+        })
+      : false
+  const absoluteCookieTransport =
+    isAbsolute && sameOriginAbsoluteUrl && samePageOriginAbsoluteUrl
+      ? resolveBrowserRequestTransport({
+          config: cfg,
+          path: absolutePath,
+          pageOrigin
+        })
+      : null
+  const cookieSession = isCookieSessionBrowserTransport({
+    authMode: cfg?.authMode,
+    authSource: cfg?.authSource,
+    transportMode: absoluteCookieTransport?.mode || transport?.mode,
+    transportKind: absoluteCookieTransport?.kind || transport?.kind,
+    pageOrigin
+  })
   if (
     isAbsolute &&
     !sameOriginAbsoluteUrl &&
@@ -335,7 +376,22 @@ export const tldwRequest = async (
   if (body != null && !hasContentType && typeof body !== "string" && !isBinaryBody(body)) {
     h["Content-Type"] = "application/json"
   }
-  if (!shouldSkipAuth) {
+  if (cookieSession) {
+    for (const k of Object.keys(h)) {
+      const kl = k.toLowerCase()
+      if (
+        kl === "x-api-key" ||
+        kl === "authorization" ||
+        kl === "x-csrf-token"
+      ) {
+        delete h[k]
+      }
+    }
+    if (!shouldSkipAuth && isUnsafeMethod(method)) {
+      const csrfToken = readBrowserCookie("csrf_token")
+      if (csrfToken) h["X-CSRF-Token"] = csrfToken
+    }
+  } else if (!shouldSkipAuth) {
     for (const k of Object.keys(h)) {
       const kl = k.toLowerCase()
       if (kl === "x-api-key" || kl === "authorization") delete h[k]
@@ -420,7 +476,8 @@ export const tldwRequest = async (
       method,
       headers: h,
       body: resolvedBody,
-      signal: controller.signal
+      signal: controller.signal,
+      ...(cookieSession ? { credentials: "same-origin" as const } : {})
     })
     // Headers have arrived; fetch() resolves before the body is read. Re-arm the
     // timeout so the body read below is bounded too — otherwise a server that

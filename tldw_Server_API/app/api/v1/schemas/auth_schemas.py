@@ -213,6 +213,18 @@ class MagicLinkVerifyRequest(BaseModel):
 #
 # Response Schemas
 
+class SingleUserSessionResponse(BaseModel):
+    """Opaque single-user cookie-session status returned after minting."""
+
+    authenticated: bool = Field(..., description="Whether the session is authenticated")
+    expires_at: datetime = Field(..., description="Opaque session expiry timestamp")
+
+
+class SingleUserSessionLogoutResponse(BaseModel):
+    """Single-user cookie-session logout result."""
+
+    authenticated: bool = Field(..., description="Whether a session remains authenticated")
+
 class TokenResponse(BaseModel):
     """JWT token response"""
     access_token: str = Field(..., description="JWT access token")

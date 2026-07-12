@@ -15,6 +15,20 @@ export type BrowserNetworkingIssue = {
   pageOrigin: string
 }
 
+export const COOKIE_SESSION_CONFIG_KEY = "tldwCookieSessionConfig"
+
+export type CookieSessionBrowserTransportInput = {
+  authMode?: unknown
+  authSource?: unknown
+  transportMode?: unknown
+  transportKind?: unknown
+  pageOrigin?: string | null
+}
+
+export type CookieSessionConfigInput = CookieSessionBrowserTransportInput & {
+  serverUrl?: string | null
+}
+
 type ResolveBrowserTransportInput = {
   surface: BrowserSurface
   deploymentMode?: string | null
@@ -58,6 +72,32 @@ const parseHttpOrigin = (value?: string | null): URL | null => {
   } catch {
     return null
   }
+}
+
+export const isCookieSessionBrowserTransport = (
+  input: CookieSessionBrowserTransportInput
+): boolean =>
+  input.authMode === "single-user" &&
+  input.authSource === "cookie-session" &&
+  input.transportMode === "quickstart" &&
+  input.transportKind === "same-origin" &&
+  parseHttpOrigin(input.pageOrigin) !== null
+
+export const isExactOriginCookieSessionConfig = (
+  config: CookieSessionConfigInput | null | undefined,
+  expectedOrigin?: string | null
+): boolean => {
+  const origin = parseHttpOrigin(expectedOrigin)?.origin
+  return Boolean(
+    origin &&
+      config?.serverUrl === origin &&
+      isCookieSessionBrowserTransport({
+        ...config,
+        transportMode: "quickstart",
+        transportKind: "same-origin",
+        pageOrigin: origin
+      })
+  )
 }
 
 const normalizeOrigin = (value?: string | null): string => {

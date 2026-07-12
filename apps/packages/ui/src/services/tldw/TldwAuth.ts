@@ -201,7 +201,19 @@ export class TldwAuthService {
    */
   async logout(): Promise<void> {
     const config = await tldwClient.getConfig()
-    if (!config || config.authMode !== 'multi-user') {
+    if (!config) {
+      return
+    }
+    if (config.authMode === 'single-user') {
+      if (config.authSource === 'cookie-session') {
+        await bgRequest<any>({
+          path: '/api/v1/auth/single-user/session',
+          method: 'DELETE'
+        })
+        await tldwClient.clearCookieSingleUserSession()
+        return
+      }
+      await tldwClient.clearManualSingleUserCredentials()
       return
     }
 
@@ -371,6 +383,7 @@ export class TldwAuthService {
       const response = await fetch(validationUrl, {
         method: 'GET',
         headers: { 'X-API-KEY': apiKey },
+        credentials: 'omit',
         signal: controller.signal
       })
 
@@ -456,7 +469,7 @@ export class TldwAuthService {
     }
 
     if (config.authMode === 'single-user') {
-      return !!config.apiKey
+      return config.authSource === 'cookie-session' || !!config.apiKey
     } else if (config.authMode === 'multi-user') {
       return !!config.accessToken
     }

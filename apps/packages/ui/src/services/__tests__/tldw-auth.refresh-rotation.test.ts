@@ -5,13 +5,15 @@ import { TldwAuthService } from "../tldw/TldwAuth"
 const mocks = vi.hoisted(() => ({
   getConfig: vi.fn(),
   updateConfig: vi.fn(),
+  clearManualSingleUserCredentials: vi.fn(),
   bgRequest: vi.fn()
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     getConfig: mocks.getConfig,
-    updateConfig: mocks.updateConfig
+    updateConfig: mocks.updateConfig,
+    clearManualSingleUserCredentials: mocks.clearManualSingleUserCredentials
   }
 }))
 
@@ -31,6 +33,7 @@ describe("TldwAuthService refresh token rotation", () => {
   beforeEach(() => {
     mocks.getConfig.mockReset()
     mocks.updateConfig.mockReset()
+    mocks.clearManualSingleUserCredentials.mockReset()
     mocks.bgRequest.mockReset()
 
     mocks.getConfig.mockResolvedValue({
@@ -40,6 +43,7 @@ describe("TldwAuthService refresh token rotation", () => {
       refreshToken: "old-refresh"
     })
     mocks.updateConfig.mockResolvedValue(undefined)
+    mocks.clearManualSingleUserCredentials.mockResolvedValue(undefined)
     mocks.bgRequest.mockResolvedValue({
       access_token: "new-access",
       refresh_token: "new-refresh",
@@ -88,5 +92,22 @@ describe("TldwAuthService refresh token rotation", () => {
       accessToken: "new-access",
       refreshToken: "newer-refresh"
     })
+  })
+
+  it("clears manual single-user credentials on logout", async () => {
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "https://api.example.test",
+      authMode: "single-user",
+      apiKey: "secret",
+      credentialSource: "manual",
+      apiKeyPersistence: "device",
+      apiKeyServerOrigin: "https://api.example.test"
+    })
+    const auth = new TldwAuthService()
+
+    await auth.logout()
+
+    expect(mocks.clearManualSingleUserCredentials).toHaveBeenCalledOnce()
+    expect(mocks.bgRequest).not.toHaveBeenCalled()
   })
 })

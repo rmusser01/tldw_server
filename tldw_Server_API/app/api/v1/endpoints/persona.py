@@ -128,6 +128,10 @@ from tldw_Server_API.app.core.AuthNZ.api_key_manager import (
     normalize_scope,
 )
 from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError, InvalidTokenError, TokenExpiredError
+from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
+    cookie_websocket_rejection_code,
+    resolve_single_user_cookie_websocket,
+)
 from tldw_Server_API.app.core.AuthNZ.ip_allowlist import resolve_client_ip
 from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
@@ -3835,6 +3839,13 @@ async def _resolve_authenticated_user_id(
             return None, True, False
 
     if not credentials_supplied:
+        cookie_identity = await resolve_single_user_cookie_websocket(ws)
+        if cookie_identity is not None:
+            _set_auth_context(method="single_user_session", api_key_scopes=set())
+            return str(cookie_identity.user_id), True, True
+        if cookie_websocket_rejection_code(ws) is not None:
+            _clear_auth_context()
+            return None, True, False
         _clear_auth_context()
         return None, False, False
     if not user_id:
@@ -7991,7 +8002,7 @@ async def persona_stream(
             auth_message = "Authentication failed" if credentials_supplied else "Authentication required"
             logger.info(f"persona stream rejected: {auth_message}")
             with contextlib.suppress(RuntimeError, OSError):
-                await ws.close(code=1008)
+                await ws.close(code=cookie_websocket_rejection_code(ws) or 4401)
             return
 
         # Wrap socket for lifecycle and metrics; keep domain payloads unchanged

@@ -4,6 +4,7 @@ import {
   connectionUiReducer,
   initialConnectionUiState,
 } from "../OnboardingConnectForm"
+import { shouldClearManualApiKeyForServerChange } from "../validation"
 
 describe("OnboardingConnectForm connection UI gate", () => {
   it("keeps stale store results ignored while a candidate connection is only validating auth", () => {
@@ -54,5 +55,26 @@ describe("OnboardingConnectForm connection UI gate", () => {
 
     expect(failed.progress.serverReachable).toBe("error")
     expect(failed.progress.authentication).toBe("error")
+  })
+
+  it("clears a populated API key only for a different valid origin", () => {
+    expect(
+      shouldClearManualApiKeyForServerChange(
+        "https://old.example.test/path",
+        "https://new.example.test/path"
+      )
+    ).toBe(true)
+    expect(
+      shouldClearManualApiKeyForServerChange(
+        "https://old.example.test/path",
+        "https://old.example.test/other/"
+      )
+    ).toBe(false)
+    expect(
+      shouldClearManualApiKeyForServerChange(
+        "https://old.example.test/path",
+        "not-yet-valid"
+      )
+    ).toBe(false)
   })
 })

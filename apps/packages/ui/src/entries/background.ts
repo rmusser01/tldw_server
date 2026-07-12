@@ -6,6 +6,7 @@ import { tldwAuth } from "@/services/tldw/TldwAuth";
 import { tldwModels } from "@/services/tldw";
 import { apiSend } from "@/services/api-send";
 import { tldwRequest } from "@/services/tldw/request-core";
+import { resolveEffectiveTldwConfig } from "@/services/tldw/single-user-credential";
 import {
   getProcessPathForType,
   getProcessPathForUrl,
@@ -372,7 +373,13 @@ const warmModels = async (
 
 export default defineBackground({
   main() {
-    const storage = createSafeStorage();
+    const storage = createSafeStorage({ area: "local" });
+    const sessionStorage = createSafeStorage({ area: "session" });
+    const getEffectiveConfig = () =>
+      resolveEffectiveTldwConfig({
+        persistent: storage,
+        session: sessionStorage,
+      });
     let handleRuntimeMessageRef:
       | ((message: any, sender: any) => Promise<any>)
       | null = null;
@@ -1190,7 +1197,7 @@ export default defineBackground({
         fileFieldName,
         responseType,
       } = payload || {};
-      const cfg = await storage.get<any>("tldwConfig");
+      const cfg = await getEffectiveConfig();
       const absoluteAccess = evaluateAbsoluteUrlAccess(path, cfg);
       const isAbsolute = absoluteAccess.isAbsolute;
       // Mirror the request-path guard: refuse cross-origin absolute URLs that
@@ -1392,7 +1399,7 @@ export default defineBackground({
         // (not pre-fetch once), because the config may not be seeded yet when
         // runTldwRequest is first invoked, but may be available on retry.
         getConfig: async () => {
-          return await storage.get<any>("tldwConfig");
+          return await getEffectiveConfig();
         },
         refreshAuth: async () => {
           if (!refreshInFlight) {
@@ -2283,7 +2290,7 @@ export default defineBackground({
 
     const replayPendingAuthSessions = async () => {
       if (pendingAuthReplay.size === 0) return;
-      const cfg = await storage.get<any>("tldwConfig");
+      const cfg = await getEffectiveConfig();
       if (!hasUsableAuthConfig(cfg)) return;
       for (const funnelId of Array.from(pendingAuthReplay)) {
         pendingAuthReplay.delete(funnelId);
@@ -3361,7 +3368,7 @@ export default defineBackground({
         const onMsg = async (msg: any) => {
           try {
             if (msg?.action === "connect") {
-              const cfg = await storage.get<any>("tldwConfig");
+              const cfg = await getEffectiveConfig();
               if (!cfg?.serverUrl)
                 throw new Error("tldw server not configured");
               const base = cfg.serverUrl
@@ -3830,7 +3837,7 @@ export default defineBackground({
         };
         const onMsg = async (msg: any) => {
           try {
-            const cfg = await storage.get<any>("tldwConfig");
+            const cfg = await getEffectiveConfig();
             if (!cfg?.serverUrl) throw new Error("tldw server not configured");
             const baseUrl = String(cfg.serverUrl).replace(/\/$/, "");
             const path = msg.path as string;
@@ -3936,7 +3943,7 @@ export default defineBackground({
               } catch (error) {
                 logBackgroundError("refresh auth (stream)", error);
               }
-              const updated = await storage.get<any>("tldwConfig");
+              const updated = await getEffectiveConfig();
               if (updated?.accessToken)
                 headers["Authorization"] = `Bearer ${updated.accessToken}`;
               const retryController = new AbortController();

@@ -8,7 +8,7 @@ import os
 import pytest
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
-from tldw_Server_API.app.core.AuthNZ.exceptions import InvalidSessionError
+from tldw_Server_API.app.core.AuthNZ.exceptions import InvalidSessionError, SessionError
 from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService
 from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager
 from tldw_Server_API.app.core.AuthNZ.settings import Settings, reset_settings
@@ -110,6 +110,25 @@ class StubConn:
     async def execute(self, *args, **kwargs):
         self.updated = True
         return None
+
+
+@pytest.mark.asyncio
+async def test_validate_session_strict_surfaces_infrastructure_failure():
+    manager = object.__new__(SessionManager)
+    manager._initialized = True
+    manager.redis_client = None
+    manager._token_hash_candidates = types.MethodType(
+        lambda self, token: [f"h:{token}"], manager
+    )
+
+    async def fail_pool(self):
+        raise RuntimeError("session store unavailable")
+
+    manager._ensure_db_pool = types.MethodType(fail_pool, manager)
+
+    assert await manager.validate_session("opaque-token") is None
+    with pytest.raises(SessionError, match="Failed to validate session"):
+        await manager.validate_session("opaque-token", raise_on_error=True)
 
 
 @pytest.mark.asyncio

@@ -1183,13 +1183,25 @@ class MCPServer:
             auth_token: Optional authentication token
         """
         connection_id = f"ws_{client_id or 'anonymous'}_{datetime.now().timestamp()}"
-        user_id = None
+        websocket_state = getattr(websocket, "state", None)
+        cookie_session_id = getattr(websocket_state, "single_user_session_id", None)
+        user_id = (
+            str(getattr(websocket_state, "user_id", "") or "")
+            if cookie_session_id is not None
+            else None
+        ) or None
         stable_session_id = _normalize_optional_text(mcp_session_id)
         workspace_key = _normalize_optional_text(workspace_id)
         cwd_key = _normalize_optional_text(cwd)
 
         controller = get_ip_access_controller()
         metadata: dict[str, Any] = {}
+        if user_id is not None:
+            principal = getattr(websocket_state, "auth_principal", None)
+            metadata["auth_via"] = "single_user_session"
+            metadata["single_user_session_id"] = cookie_session_id
+            metadata["roles"] = list(getattr(principal, "roles", []) or [])
+            metadata["permissions"] = list(getattr(principal, "permissions", []) or [])
         forwarded_for = websocket.headers.get("x-forwarded-for") or websocket.headers.get("X-Forwarded-For")
         real_ip = websocket.headers.get("x-real-ip") or websocket.headers.get("X-Real-IP")
         raw_remote_ip = None

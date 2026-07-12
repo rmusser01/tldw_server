@@ -7,8 +7,8 @@ import { Bot, MessageSquare, Wrench, Terminal } from "lucide-react"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
 import { useMobile } from "@/hooks/useMediaQuery"
 import { useACPSession } from "@/hooks/useACPSession"
-import { ACPRestClient } from "@/services/acp/client"
-import { buildACPClientConfig, buildACPAuthHeaders } from "@/services/acp/connection"
+import { ACPRestClient, fetchACPRequest } from "@/services/acp/client"
+import { buildACPClientConfig } from "@/services/acp/connection"
 import { useACPSessionsStore } from "@/store/acp-sessions"
 import type { ACPPermissionTier } from "@/services/acp/types"
 import { ACPPlaygroundHeader } from "./ACPPlaygroundHeader"
@@ -132,11 +132,9 @@ export const ACPPlayground: React.FC = () => {
     queryKey: ["acp", "health", acpServerUrl],
     queryFn: async () => {
       try {
-        const resp = await fetch(
-          `${connectionConfig!.serverUrl}/api/v1/acp/health`,
-          {
-            headers: buildACPAuthHeaders(connectionConfig),
-          }
+        const resp = await fetchACPRequest(
+          buildACPClientConfig(connectionConfig),
+          "/api/v1/acp/health"
         )
         let payload: unknown = null
         try {

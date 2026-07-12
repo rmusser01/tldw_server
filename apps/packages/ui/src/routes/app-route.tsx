@@ -547,7 +547,16 @@ export const RouteShell = ({
   // OptionLayout will become nested pass-through wrappers that can communicate
   // overrides (like hideHeader) up to this root shell.
   const wrappedContent = kind === "options"
-    ? <OptionLayout>{routesContent}</OptionLayout>
+    ? (
+      <OptionLayout
+        hideHeader={
+          location.pathname === "/settings" ||
+          location.pathname.startsWith("/settings/")
+        }
+      >
+        {routesContent}
+      </OptionLayout>
+    )
     : routesContent  // sidepanel has its own layout
 
   return (

@@ -2,6 +2,8 @@ type TldwClientLike = {
   getConfig: () => Promise<
     | {
         authMode?: unknown
+        authSource?: unknown
+        serverUrl?: unknown
         accessToken?: unknown
         apiKey?: unknown
       }

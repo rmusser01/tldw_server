@@ -538,7 +538,7 @@ const getPersistedServerUrl = async (): Promise<string | null> => {
   }
 
   try {
-    const storage = createSafeStorage()
+    const storage = createSafeStorage({ area: "local" })
     const cfg = await storage.get<TldwConfig>("tldwConfig")
     const quickstartWebUiServerUrl = getQuickstartWebUiServerUrl()
     if (quickstartWebUiServerUrl) {
@@ -1129,6 +1129,7 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
 
   async restartOnboarding() {
     const prev = get().state
+    await tldwClient.clearManualSingleUserCredentials()
     await setFirstRunCompleteFlag(false)
     set({
       state: {

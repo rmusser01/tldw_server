@@ -68,6 +68,10 @@ from tldw_Server_API.app.core.AuthNZ.ip_allowlist import is_single_user_ip_allow
 from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
 from tldw_Server_API.app.core.AuthNZ.session_manager import get_session_manager
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings as get_auth_settings
+from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
+    cookie_websocket_rejection_code,
+    resolve_single_user_cookie_websocket,
+)
 from tldw_Server_API.app.core.Streaming.streams import WebSocketStream
 from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime
 from tldw_Server_API.app.core.Agent_Client_Protocol.consumers.checkpoint_consumer import CheckpointConsumer
@@ -1217,10 +1221,15 @@ async def acp_session_stream(
     - Or via Authorization header: Bearer <token>
     """
     # Authenticate
-    user_id = await _authenticate_ws(websocket, token=token, api_key=api_key, required_scope="write")
+    cookie_identity = await resolve_single_user_cookie_websocket(websocket)
+    user_id = (
+        cookie_identity.user_id
+        if cookie_identity is not None
+        else await _authenticate_ws(websocket, token=token, api_key=api_key, required_scope="write")
+    )
     if user_id is None:
         with contextlib.suppress(_ACP_ENDPOINT_NONCRITICAL_EXCEPTIONS):
-            await websocket.close(code=4401)
+            await websocket.close(code=cookie_websocket_rejection_code(websocket) or 4401)
         return
 
     try:
@@ -1361,10 +1370,15 @@ async def acp_session_ssh(
     api_key: str | None = Query(None),
 ) -> None:
     """WebSocket SSH proxy for an ACP sandbox session."""
-    user_id = await _authenticate_ws(websocket, token=token, api_key=api_key, required_scope="write")
+    cookie_identity = await resolve_single_user_cookie_websocket(websocket)
+    user_id = (
+        cookie_identity.user_id
+        if cookie_identity is not None
+        else await _authenticate_ws(websocket, token=token, api_key=api_key, required_scope="write")
+    )
     if user_id is None:
         with contextlib.suppress(_ACP_ENDPOINT_NONCRITICAL_EXCEPTIONS):
-            await websocket.close(code=4401)
+            await websocket.close(code=cookie_websocket_rejection_code(websocket) or 4401)
         return
 
     try:

@@ -62,6 +62,25 @@ class EventType(str, Enum):
 ########################################################################################################################
 # Event Broadcaster
 
+
+def prompt_studio_connection_scope(
+    user_id: str,
+    project_id: Optional[int] = None,
+    *,
+    client_id: Optional[str] = None,
+) -> str:
+    """Build a collision-free connection scope for one Prompt Studio user."""
+    owner = str(user_id).strip()
+    if not owner:
+        raise ValueError("Prompt Studio connection scope requires a user ID")
+    if client_id is not None:
+        channel = ["client", str(client_id)]
+    elif project_id is not None:
+        channel = ["project", int(project_id)]
+    else:
+        channel = ["global"]
+    return json.dumps(["prompt-studio", owner, *channel], separators=(",", ":"))
+
 class EventBroadcaster:
     """Broadcasts events to connected WebSocket clients."""
 
@@ -76,6 +95,7 @@ class EventBroadcaster:
         self.connection_manager = connection_manager
         self.db = db
         self.client_id = db.client_id
+        self.user_id = str(getattr(db, "user_id", "") or "").strip() or None
 
         # Track subscriptions
         self.subscriptions: dict[str, set[str]] = {}
@@ -100,6 +120,9 @@ class EventBroadcaster:
             client_ids: Specific clients to broadcast to (None = all)
             project_id: Associated project ID
         """
+        if project_id is None:
+            project_id = self._resolve_project_id(data)
+
         event = {
             "type": event_type.value,
             "data": data,
@@ -113,12 +136,25 @@ class EventBroadcaster:
         # Convert to JSON
         message = json.dumps(event)
 
-        # Broadcast to specified clients or all
+        if self.user_id is None:
+            logger.warning("Prompt Studio event dropped because its database has no user scope")
+            return
+
+        # Every target includes the authenticated owner. Project events also
+        # reach the owner's global stream, but never another user's stream.
         if client_ids:
             for client_id in client_ids:
-                await self.connection_manager.broadcast_to_client(client_id, message)
+                scope = prompt_studio_connection_scope(
+                    self.user_id,
+                    client_id=client_id,
+                )
+                await self.connection_manager.broadcast_to_client(scope, message)
         else:
-            await self.connection_manager.broadcast_to_all(message)
+            scopes = [prompt_studio_connection_scope(self.user_id)]
+            if project_id is not None:
+                scopes.append(prompt_studio_connection_scope(self.user_id, project_id))
+            for scope in scopes:
+                await self.connection_manager.broadcast_to_client(scope, message)
 
         logger.debug(f"Broadcast {event_type.value} to {client_ids or 'all'}")
         # Optional metrics per WS message
@@ -419,6 +455,35 @@ class EventBroadcaster:
 
     ####################################################################################################################
     # Helper Methods
+
+    def _resolve_project_id(self, data: dict[str, Any]) -> Optional[int]:
+        """Resolve the owning project for event payloads that only carry an entity ID."""
+        raw_project_id = data.get("project_id")
+        if raw_project_id is not None:
+            try:
+                return int(raw_project_id)
+            except (TypeError, ValueError):
+                return None
+
+        lookups = (
+            ("evaluation_id", "get_evaluation"),
+            ("optimization_id", "get_optimization"),
+        )
+        for id_key, getter_name in lookups:
+            entity_id = data.get(id_key)
+            getter = getattr(self.db, getter_name, None)
+            if entity_id is None or not callable(getter):
+                continue
+            try:
+                entity = getter(int(entity_id))
+                if entity and entity.get("project_id") is not None:
+                    return int(entity["project_id"])
+            except (DatabaseError, KeyError, TypeError, ValueError):
+                logger.warning(
+                    "Prompt Studio event project lookup failed for {}",
+                    id_key,
+                )
+        return None
 
     async def _get_project_for_job(self, job: dict[str, Any]) -> Optional[int]:
         """

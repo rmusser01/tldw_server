@@ -66,6 +66,10 @@ from tldw_Server_API.app.core.AuthNZ.permissions import (
     WORKFLOWS_RUNS_READ,
 )
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
+    cookie_websocket_rejection_code,
+    resolve_single_user_cookie_websocket,
+)
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.DB_Manager import (
     create_workflows_database,
@@ -4747,29 +4751,38 @@ async def workflows_ws(
     types: Optional[list[str]] = Query(None),
     db: WorkflowsDatabase = Depends(_get_db),
 ):
+    cookie_identity = await resolve_single_user_cookie_websocket(websocket)
+    authenticated_user_id: str | None = (
+        str(cookie_identity.user_id) if cookie_identity is not None else None
+    )
     # Extract token: prefer query param; fallback to Authorization header
     if not token:
         auth_hdr = websocket.headers.get("authorization") or websocket.headers.get("Authorization")
         if auth_hdr and auth_hdr.lower().startswith("bearer "):
             token = auth_hdr.split(" ", 1)[1].strip()
-    if not token:
-        # Force test client to error on connect
-        raise RuntimeError("Authentication required")
+    if not token and authenticated_user_id is None:
+        await websocket.close(code=cookie_websocket_rejection_code(websocket) or 4401)
+        return
 
     # Verify token
-    try:
-        jwtm = get_jwt_manager()
-        token_data = jwtm.verify_token(token)
-    except _WORKFLOWS_NONCRITICAL_EXCEPTIONS:
-        raise RuntimeError("Invalid token") from None
+    if authenticated_user_id is None:
+        try:
+            jwtm = get_jwt_manager()
+            token_data = jwtm.verify_token(token)
+            authenticated_user_id = str(token_data.sub)
+        except _WORKFLOWS_NONCRITICAL_EXCEPTIONS:
+            await websocket.close(code=4401)
+            return
 
     # Run-level authorization: owner or admin
     run = db.get_run(run_id)
     if not run:
-        raise RuntimeError("Run not found")
+        await websocket.close(code=4404)
+        return
     # Enforce run-level ownership: subject must match creator
-    if str(token_data.sub) != str(run.user_id):
-        raise RuntimeError("Forbidden")
+    if authenticated_user_id != str(run.user_id):
+        await websocket.close(code=4403)
+        return
 
     await websocket.accept()
     # Wrap for metrics and activity tracking; keep domain frames unchanged
