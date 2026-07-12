@@ -29,6 +29,7 @@ import {
   waitForIngestDocumentJob,
   withDefaultDocumentDecision,
 } from "@/services/chat-document-processing"
+import i18n from "i18next"
 
 const makeUploadedFile = (
   overrides: Partial<UploadedFile> = {},
@@ -313,6 +314,21 @@ describe("chat document processing service", () => {
     expect(result.blockedFiles[0]?.processingRecoveryActions).toEqual([])
   })
 
+  it("does not suggest a recovery mode when its capability is missing", async () => {
+    const result = await prepareChatDocumentAttachmentsForSend({
+      files: [
+        makeUploadedFile({
+          processingMode: "add_to_chat",
+          processingCapabilities: {
+            add_to_chat: { available: false, status: "unavailable" }
+          }
+        })
+      ]
+    })
+
+    expect(result.blockedFiles[0]?.processingRecoveryActions).toEqual([])
+  })
+
   it("applies default and explicit document processing decisions", () => {
     const file = makeUploadedFile({
       processingCapabilities: {
@@ -548,6 +564,21 @@ describe("chat document processing service", () => {
       jobId: 77,
       status: "completed",
     })
+  })
+
+  it("localizes invalid ingest job errors", async () => {
+    const translate = vi
+      .spyOn(i18n, "t")
+      .mockReturnValue("Localized invalid ingest job" as never)
+
+    await expect(waitForIngestDocumentJob("invalid")).rejects.toThrow(
+      "Localized invalid ingest job"
+    )
+    expect(translate).toHaveBeenCalledWith(
+      "playground:documentProcessing.invalidIngestJobId",
+      "Ingest job returned an invalid job id."
+    )
+    translate.mockRestore()
   })
 
   it("cancels local drafts and active ingest jobs", async () => {

@@ -3,7 +3,9 @@ from __future__ import annotations
 import os
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Iterator
 
 import pytest
 
@@ -192,6 +194,70 @@ def test_global_quota_enforcement_handles_hashed_session_directories(tmp_path: P
         "evicted_sessions": 1,
         "deleted_snapshots": 2,
     }
+
+
+def test_global_quota_preserves_metadata_when_archive_deletion_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A failed archive unlink must keep its metadata tracked for a later retry."""
+    manager = SnapshotManager(storage_path=str(tmp_path / "snapshots"))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    state = workspace / "state.txt"
+    session_id = "session-partial-delete"
+
+    for value in ("v1", "v2"):
+        state.write_text(value, encoding="utf-8")
+        manager.create_snapshot(session_id, str(workspace))
+
+    oldest = manager.list_snapshots(session_id)[-1]
+    snapshot_id = str(oldest["snapshot_id"])
+    archive_path = manager._snapshot_path(session_id, snapshot_id)
+    metadata_path = manager._metadata_path(session_id, snapshot_id)
+    original_unlink = Path.unlink
+
+    def _fail_oldest_archive(path: Path, *args: object, **kwargs: object) -> None:
+        if path == archive_path:
+            raise PermissionError("archive is busy")
+        original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", _fail_oldest_archive)
+
+    deleted = manager._enforce_quota_for_directory(
+        manager._snapshot_dir(session_id),
+        max_snapshots=1,
+        max_size_mb=256,
+    )
+
+    assert deleted == []
+    assert archive_path.exists()
+    assert metadata_path.exists()
+    assert len(manager.list_snapshots(session_id)) == 2
+
+
+def test_global_quota_uses_raw_session_lock_from_metadata(tmp_path: Path) -> None:
+    """Maintenance must coordinate through the logical session lock domain."""
+    manager = SnapshotManager(storage_path=str(tmp_path / "snapshots"))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "state.txt").write_text("v1", encoding="utf-8")
+    session_id = "session-lock-domain"
+    manager.create_snapshot(session_id, str(workspace))
+    locked_sessions: list[str] = []
+
+    @contextmanager
+    def _lock_session(raw_session_id: str) -> Iterator[None]:
+        locked_sessions.append(raw_session_id)
+        yield
+
+    manager.enforce_quota_all_sessions(
+        max_snapshots=1,
+        max_size_mb=256,
+        lock_session=_lock_session,
+    )
+
+    assert locked_sessions == [session_id]
 
 
 def test_create_snapshot_is_serialized_per_session(

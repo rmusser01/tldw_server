@@ -1,11 +1,15 @@
 ---
 id: TASK-12948
 title: Replay PR 2702 delta onto latest dev
-status: Done
+status: In Progress
+assignee: []
+created_date: ''
+updated_date: '2026-07-12 04:34'
 labels:
-- release
-- rebase
-- review
+  - release
+  - rebase
+  - review
+dependencies: []
 priority: high
 ---
 
@@ -26,9 +30,9 @@ Create a fresh dev-targeted branch from current origin/dev, replay only the PR #
 
 ## Implementation Notes
 
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Created codex/pr-2702-dev-rebase directly from origin/dev at d28c16bfa3 and replayed the eight PR #2702-specific commits in order. Git reported no textual conflicts. Semantic overlap with newer dev was limited to pyproject.toml; the newer dev dependency changes remain intact and the branch changes only the package version to 0.1.40. Net delta: 35 files, branch ancestry 0 behind / 8 commits ahead of origin/dev. Verification: focused frontend Vitest 53/53 passed; focused backend pytest 69/69 passed; frontend extension compile passed; changed extension Playwright test discovered; workflow YAML and stable concurrency assertion passed; Bandit reported zero findings; git diff --check passed; release metadata is consistently 0.1.40. Full frontend typecheck reports a pre-existing origin/dev error in untouched QuickIngestWizardModal.tsx (Modal styles overflowY typing); no unrelated fix is included.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+<!-- SECTION:NOTES:BEGIN -->
+Created codex/pr-2702-dev-rebase from origin/dev d28c16bfa3 and replayed the eight PR #2702-specific commits while preserving newer dev changes. Independent review fixes snapshot partial-deletion accounting and shared locking; abortable duplicate/stale document preparation in Playground and sidepanel; strict recovery capability checks; accurate processing/cancelled summaries; and localized ingest errors. The suggested GitHub Actions queue: max finding was rejected because GitHub Actions concurrency does not support that key. Fresh validation: 68 frontend tests and 71 backend tests passed; extension compile, Playwright discovery, workflow validation, Bandit zero findings, and git diff checks passed. Full WebUI typecheck still reports only the pre-existing untouched QuickIngestWizardModal.tsx overflowY type error. Branch is 0 behind origin/dev.
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

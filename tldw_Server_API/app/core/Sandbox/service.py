@@ -544,6 +544,7 @@ class SandboxService:
             snapshot_summary = self._snapshots.enforce_quota_all_sessions(
                 max_snapshots=self._effective_snapshot_max_count(),
                 max_size_mb=self._effective_snapshot_max_size_mb(),
+                lock_session=self._snapshot_storage_lock,
             )
 
         duration_ms = max(0.0, (time.monotonic() - start) * 1000.0)
@@ -2558,16 +2559,27 @@ class SandboxService:
         return ws
 
     @contextlib.contextmanager
-    def _workspace_operation_lock(self, session_id: str, workspace_root: str | None = None):
+    def _snapshot_storage_lock(
+        self,
+        session_id: str,
+        workspace_root: str | None = None,
+    ):
+        """Serialize snapshot storage operations across threads and processes."""
         sid = str(session_id or "").strip()
         with self._snapshot_lock(sid):
             lock_path = self._workspace_operation_lock_path(sid, workspace_root)
             lock_handle = _acquire_workspace_file_lock(lock_path)
             try:
-                ws = self._resolve_workspace_operation_root(sid, workspace_root)
-                yield ws
+                yield
             finally:
                 _release_workspace_file_lock(lock_handle)
+
+    @contextlib.contextmanager
+    def _workspace_operation_lock(self, session_id: str, workspace_root: str | None = None):
+        sid = str(session_id or "").strip()
+        with self._snapshot_storage_lock(sid, workspace_root):
+            ws = self._resolve_workspace_operation_root(sid, workspace_root)
+            yield ws
 
     @contextlib.asynccontextmanager
     async def async_workspace_operation_lock(self, session_id: str, workspace_root: str | None = None):

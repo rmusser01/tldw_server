@@ -12,6 +12,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable, ContextManager
 
 from loguru import logger
 
@@ -652,27 +653,33 @@ class SnapshotManager:
         deleted: list[str] = []
         max_size_bytes = max_size_mb * 1024 * 1024
 
-        def delete_oldest() -> None:
-            metadata, archive_path, metadata_path = entries.pop()
+        def delete_oldest() -> bool:
+            metadata, archive_path, metadata_path = entries[-1]
             snapshot_id = str(metadata.get("snapshot_id") or "")
-            removed = False
-            for path in (archive_path, metadata_path):
-                try:
-                    if path.exists():
-                        path.unlink()
-                        removed = True
-                except _SNAPSHOTS_NONCRITICAL_EXCEPTIONS as exc:
-                    logger.warning(f"Failed to delete snapshot file {path}: {exc}")
-            if removed and snapshot_id:
+            try:
+                archive_path.unlink()
+            except _SNAPSHOTS_NONCRITICAL_EXCEPTIONS as exc:
+                logger.warning(f"Failed to delete snapshot archive {archive_path}: {exc}")
+                return False
+
+            entries.pop()
+            try:
+                metadata_path.unlink(missing_ok=True)
+            except _SNAPSHOTS_NONCRITICAL_EXCEPTIONS as exc:
+                logger.warning(f"Failed to delete snapshot metadata {metadata_path}: {exc}")
+            if snapshot_id:
                 deleted.append(snapshot_id)
+            return True
 
         while len(entries) > max_snapshots:
-            delete_oldest()
+            if not delete_oldest():
+                break
 
         total_size = sum(entry[0].get("size_bytes", 0) for entry in entries)
         while total_size > max_size_bytes and entries:
             oldest_size = entries[-1][0].get("size_bytes", 0)
-            delete_oldest()
+            if not delete_oldest():
+                break
             total_size -= oldest_size
 
         with contextlib.suppress(_SNAPSHOTS_NONCRITICAL_EXCEPTIONS):
@@ -685,6 +692,7 @@ class SnapshotManager:
         *,
         max_snapshots: int = 10,
         max_size_mb: int = 256,
+        lock_session: Callable[[str], ContextManager[None]] | None = None,
     ) -> dict[str, int]:
         """Enforce snapshot quotas for all session snapshot directories."""
         scanned_sessions = 0
@@ -705,11 +713,26 @@ class SnapshotManager:
                 if resolved_session_dir.parent != root:
                     continue
                 scanned_sessions += 1
-                deleted = self._enforce_quota_for_directory(
-                    resolved_session_dir,
-                    max_snapshots=max_snapshots,
-                    max_size_mb=max_size_mb,
+                entries = self._quota_entries_for_directory(resolved_session_dir)
+                raw_session_id = next(
+                    (
+                        str(metadata.get("session_id") or "").strip()
+                        for metadata, _archive_path, _metadata_path in entries
+                        if str(metadata.get("session_id") or "").strip()
+                    ),
+                    "",
                 )
+                lock_context = (
+                    lock_session(raw_session_id)
+                    if lock_session is not None and raw_session_id
+                    else contextlib.nullcontext()
+                )
+                with lock_context:
+                    deleted = self._enforce_quota_for_directory(
+                        resolved_session_dir,
+                        max_snapshots=max_snapshots,
+                        max_size_mb=max_size_mb,
+                    )
                 if deleted:
                     evicted_sessions += 1
                     deleted_snapshots += len(deleted)

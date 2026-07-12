@@ -54,6 +54,7 @@ type PrepareDependencies = {
   ingestDocument?: (file: UploadedFile) => Promise<IngestDocumentResult>
   waitForIngestJob?: (
     jobId: string | number,
+    options?: { signal?: AbortSignal },
   ) => Promise<IngestDocumentResult>
 }
 
@@ -62,6 +63,7 @@ export type PrepareChatDocumentAttachmentsInput = PrepareDependencies & {
   historyId?: string
   sessionId?: string
   maxDirectChatTokens?: number
+  signal?: AbortSignal
 }
 
 export type PreparedChatDocumentAttachments = {
@@ -139,6 +141,46 @@ const processingModeUnavailableReason = (): string =>
     "playground:documentProcessing.modeUnavailable",
     "This processing mode is unavailable."
   )
+
+const invalidIngestJobIdReason = (): string =>
+  i18n.t(
+    "playground:documentProcessing.invalidIngestJobId",
+    "Ingest job returned an invalid job id."
+  )
+
+const ingestCancelledReason = (): string =>
+  i18n.t(
+    "playground:documentProcessing.ingestCancelled",
+    "Document ingest was cancelled."
+  )
+
+const ingestTimeoutReason = (): string =>
+  i18n.t(
+    "playground:documentProcessing.ingestTimeout",
+    "Document ingest timed out."
+  )
+
+const ingestFailedReason = (): string =>
+  i18n.t(
+    "playground:documentProcessing.ingestFailed",
+    "Document ingest failed."
+  )
+
+const ingestMissingMediaReason = (): string =>
+  i18n.t(
+    "playground:documentProcessing.ingestMissingMediaId",
+    "Ingest completed without a media id."
+  )
+
+const abortError = (): Error => {
+  const error = new Error(ingestCancelledReason())
+  error.name = "AbortError"
+  return error
+}
+
+const throwIfAborted = (signal?: AbortSignal): void => {
+  if (signal?.aborted) throw abortError()
+}
 
 const unsupportedDocumentReason = (): string => {
   const fallback = "This document type is unsupported."
@@ -377,6 +419,13 @@ export const buildIngestIdempotencyKey = async ({
 }): Promise<string> =>
   `chat-document-ingest:${historyId || sessionId || "draft"}:${await computeDocumentFileFingerprint(file)}`
 
+export const documentProcessingSelectionKey = (files: UploadedFile[]): string =>
+  files
+    .map((file) =>
+      [file.id, file.processingMode ?? "", file.size, file.uploadedAt].join(":")
+    )
+    .join("|")
+
 export const processDocumentForChat = async (
   file: UploadedFile,
 ): Promise<ProcessedDocumentText> => {
@@ -466,17 +515,21 @@ export const ingestDocumentToLibrary = async (
 
 export const waitForIngestDocumentJob = async (
   jobId: string | number,
-  options: { timeoutMs?: number; pollIntervalMs?: number } = {},
+  options: {
+    timeoutMs?: number
+    pollIntervalMs?: number
+    signal?: AbortSignal
+  } = {},
 ): Promise<IngestDocumentResult> => {
   const normalizedJobId = Number(jobId)
   if (!Number.isFinite(normalizedJobId) || normalizedJobId <= 0) {
-    throw new Error("Ingest job returned an invalid job id.")
+    throw new Error(invalidIngestJobIdReason())
   }
   const terminal = await pollSingleIngestJob({
     jobId: Math.trunc(normalizedJobId),
     timeoutMs: options.timeoutMs || DIRECT_INGEST_TIMEOUT_MS,
     pollIntervalMs: options.pollIntervalMs,
-    isCancelled: () => false,
+    isCancelled: () => Boolean(options.signal?.aborted),
     onCancel: () => undefined,
     fetchJob: async (id) => {
       try {
@@ -492,14 +545,19 @@ export const waitForIngestDocumentJob = async (
       }
     },
   })
+  throwIfAborted(options.signal)
   if (terminal.terminalStatus !== "completed") {
-    throw new Error(
-      terminal.error || `Ingest ${terminal.terminalStatus || "failed"}.`,
-    )
+    const fallback =
+      terminal.terminalStatus === "cancelled"
+        ? ingestCancelledReason()
+        : terminal.terminalStatus === "timeout"
+          ? ingestTimeoutReason()
+          : ingestFailedReason()
+    throw new Error(terminal.error || fallback)
   }
   const mediaId = extractCompletedIngestJobMediaId(terminal.data)
   if (mediaId == null) {
-    throw new Error("Ingest completed without a media id.")
+    throw new Error(ingestMissingMediaReason())
   }
   return {
     mediaId,
@@ -518,6 +576,7 @@ export const prepareChatDocumentAttachmentsForSend = async ({
   ingestDocument = (file) =>
     ingestDocumentToLibrary(file, { historyId, sessionId }),
   waitForIngestJob = waitForIngestDocumentJob,
+  signal,
 }: PrepareChatDocumentAttachmentsInput): Promise<PreparedChatDocumentAttachments> => {
   const contextFiles: UploadedFile[] = []
   const failedFiles: UploadedFile[] = []
@@ -527,19 +586,20 @@ export const prepareChatDocumentAttachmentsForSend = async ({
   const chatSnippets: string[] = []
 
   for (const file of files) {
+    throwIfAborted(signal)
     const mode = file.processingMode || "add_to_chat"
     const capability = file.processingCapabilities?.[mode]
     if (capability && !capability.available) {
       const recoveryActions: DocumentProcessingRecoveryAction[] = []
       if (
         mode !== "add_to_chat" &&
-        file.processingCapabilities?.add_to_chat?.available !== false
+        file.processingCapabilities?.add_to_chat?.available === true
       ) {
         recoveryActions.push("switch_to_add_to_chat")
       }
       if (
         mode !== "ingest_to_library" &&
-        file.processingCapabilities?.ingest_to_library?.available !== false
+        file.processingCapabilities?.ingest_to_library?.available === true
       ) {
         recoveryActions.push("switch_to_ingest")
       }
@@ -567,7 +627,10 @@ export const prepareChatDocumentAttachmentsForSend = async ({
             !TERMINAL_RETRY_STATUSES.has(status)
           ) {
             const pendingResult = result
-            const completedResult = await waitForIngestJob(result.jobId)
+            const completedResult = signal
+              ? await waitForIngestJob(result.jobId, { signal })
+              : await waitForIngestJob(result.jobId)
+            throwIfAborted(signal)
             result = {
               ...completedResult,
               batchId: pendingResult.batchId ?? completedResult.batchId,
@@ -575,7 +638,7 @@ export const prepareChatDocumentAttachmentsForSend = async ({
           }
         }
         if (result.mediaId == null) {
-          throw new Error("Ingest completed without a media id.")
+          throw new Error(ingestMissingMediaReason())
         }
         ragMediaIds.push(result.mediaId)
         processedFiles.push({
@@ -596,6 +659,7 @@ export const prepareChatDocumentAttachmentsForSend = async ({
         mode === "ocr_pages" || isPdf(file)
           ? await processPdf(file, { enableOcr: mode === "ocr_pages" })
           : await processDocument(file)
+      throwIfAborted(signal)
       const tokenEstimate = estimateDirectChatTokens(result.content)
       if (tokenEstimate > maxDirectChatTokens) {
         const blockedFile: UploadedFile = {
@@ -627,6 +691,12 @@ export const prepareChatDocumentAttachmentsForSend = async ({
       chatSnippets.push(result.content)
       processedFiles.push(readyFile)
     } catch (error) {
+      if (
+        signal?.aborted ||
+        (error instanceof Error && error.name === "AbortError")
+      ) {
+        throw abortError()
+      }
       const failedFile: UploadedFile = {
         ...file,
         processingMode: mode,

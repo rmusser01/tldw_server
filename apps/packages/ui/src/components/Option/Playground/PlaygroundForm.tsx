@@ -3146,7 +3146,7 @@ export const PlaygroundForm = ({
     [setMessages],
   );
 
-  const { submitForm, submitFormRef } = usePlaygroundSubmit({
+  const { submitForm, submitFormRef, isPreparingDocuments } = usePlaygroundSubmit({
     form,
     isSending,
     isConnectionReady,
@@ -4813,6 +4813,7 @@ export const PlaygroundForm = ({
       isProMode={isProMode}
       isMobileViewport={isMobileViewport}
       isSending={isSending}
+      isPreparingDocuments={isPreparingDocuments}
       isConnectionReady={isConnectionReady}
       sendWhenEnter={sendWhenEnter}
       onSendWhenEnterChange={setSendWhenEnter}

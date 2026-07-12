@@ -7,6 +7,8 @@ import { usePlaygroundSubmit } from "../hooks/usePlaygroundSubmit"
 const prepareChatDocumentAttachmentsForSend = vi.hoisted(() => vi.fn())
 
 vi.mock("@/services/chat-document-processing", () => ({
+  documentProcessingSelectionKey: (files: UploadedFile[]) =>
+    files.map((file) => file.id).join("|"),
   prepareChatDocumentAttachmentsForSend
 }))
 
@@ -378,5 +380,94 @@ describe("Playground document processing submit", () => {
       "reserved-user-message",
       blockedMetadata
     )
+  })
+
+  it("ignores duplicate submits while document preparation is pending", async () => {
+    let resolvePreparation: (value: any) => void = () => undefined
+    prepareChatDocumentAttachmentsForSend.mockReturnValue(
+      new Promise((resolve) => {
+        resolvePreparation = resolve
+      })
+    )
+    const sendMessage = vi.fn(async () => ({ status: "submitted" }))
+    const { result } = renderHook(() =>
+      usePlaygroundSubmit(baseDeps({ sendMessage }) as any)
+    )
+
+    act(() => {
+      result.current.submitForm()
+      result.current.submitForm()
+    })
+
+    await waitFor(() =>
+      expect(prepareChatDocumentAttachmentsForSend).toHaveBeenCalledTimes(1)
+    )
+
+    await act(async () => {
+      resolvePreparation({
+        contextFiles: [],
+        failedFiles: [],
+        blockedFiles: [],
+        recoveryActions: [],
+        requestOverrides: {
+          contextFiles: [],
+          uploadedFiles: [],
+          ragMediaIds: [42],
+          fileRetrievalEnabled: true
+        },
+        turnMetadata: { status: "ready", files: [] }
+      })
+      await Promise.resolve()
+    })
+
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1))
+  })
+
+  it("aborts pending preparation when the selected attachments change", async () => {
+    let resolvePreparation: (value: any) => void = () => undefined
+    let preparationSignal: AbortSignal | undefined
+    prepareChatDocumentAttachmentsForSend.mockImplementation((options: any) => {
+      preparationSignal = options.signal
+      return new Promise((resolve) => {
+        resolvePreparation = resolve
+      })
+    })
+    const sendMessage = vi.fn(async () => ({ status: "submitted" }))
+    const { result, rerender } = renderHook(
+      ({ files }) =>
+        usePlaygroundSubmit(
+          baseDeps({ uploadedFiles: files, sendMessage }) as any
+        ),
+      { initialProps: { files: [makeFile()] } }
+    )
+
+    act(() => {
+      result.current.submitForm()
+    })
+    await waitFor(() =>
+      expect(prepareChatDocumentAttachmentsForSend).toHaveBeenCalledTimes(1)
+    )
+
+    rerender({ files: [] })
+    expect(preparationSignal?.aborted).toBe(true)
+
+    await act(async () => {
+      resolvePreparation({
+        contextFiles: [],
+        failedFiles: [],
+        blockedFiles: [],
+        recoveryActions: [],
+        requestOverrides: {
+          contextFiles: [],
+          uploadedFiles: [],
+          ragMediaIds: [42],
+          fileRetrievalEnabled: true
+        },
+        turnMetadata: { status: "ready", files: [] }
+      })
+      await Promise.resolve()
+    })
+
+    expect(sendMessage).not.toHaveBeenCalled()
   })
 })
