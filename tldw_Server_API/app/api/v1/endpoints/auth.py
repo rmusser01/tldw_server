@@ -48,6 +48,8 @@ from tldw_Server_API.app.api.v1.schemas.auth_schemas import (
     RegisterRequest,
     RegistrationResponse,
     SessionResponse,
+    SingleUserSessionLogoutResponse,
+    SingleUserSessionResponse,
     TokenResponse,
 )
 from tldw_Server_API.app.core.Audit.unified_audit_service import (
@@ -1216,13 +1218,14 @@ class LogoutRequest(BaseModel):
 @router.post(
     "/single-user/session",
     dependencies=[Depends(check_auth_rate_limit)],
+    response_model=SingleUserSessionResponse,
 )
 async def create_single_user_cookie_session(
     request: Request,
     response: Response,
     principal: AuthPrincipal = Depends(get_auth_principal),
     session_manager: SessionManager = Depends(get_session_manager_dep),
-) -> dict[str, Any]:
+) -> SingleUserSessionResponse:
     """Mint or reuse an opaque session for an explicit single-user API key."""
     settings = get_settings()
     if settings.AUTH_MODE != "single_user":
@@ -1259,7 +1262,7 @@ async def create_single_user_cookie_session(
             headers={"Cache-Control": "no-store"},
         ) from exc
     if identity is not None:
-        return {"authenticated": True, "expires_at": identity.expires_at}
+        return SingleUserSessionResponse(authenticated=True, expires_at=identity.expires_at)
 
     try:
         minted = await mint_single_user_session(request, session_manager)
@@ -1270,18 +1273,19 @@ async def create_single_user_cookie_session(
             headers={"Cache-Control": "no-store"},
         ) from exc
     set_single_user_session_cookie(response, minted)
-    return {"authenticated": True, "expires_at": minted.identity.expires_at}
+    return SingleUserSessionResponse(authenticated=True, expires_at=minted.identity.expires_at)
 
 
 @router.delete(
     "/single-user/session",
     dependencies=[Depends(check_auth_rate_limit)],
+    response_model=SingleUserSessionLogoutResponse,
 )
 async def delete_single_user_cookie_session(
     request: Request,
     response: Response,
     session_manager: SessionManager = Depends(get_session_manager_dep),
-) -> dict[str, bool]:
+) -> SingleUserSessionLogoutResponse:
     """Revoke exactly the current opaque single-user session and clear its cookie."""
     if get_settings().AUTH_MODE != "single_user":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
@@ -1318,7 +1322,7 @@ async def delete_single_user_cookie_session(
 
     response.headers["Cache-Control"] = "no-store"
     clear_single_user_session_cookie(response)
-    return {"authenticated": False}
+    return SingleUserSessionLogoutResponse(authenticated=False)
 
 
 #######################################################################################################################

@@ -18,6 +18,8 @@ from tldw_Server_API.app.core.AuthNZ.single_user_session import (
     validate_single_user_session,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _request(*, cookie: str | None = None) -> Request:
     headers = [(b"user-agent", b"test-browser")]

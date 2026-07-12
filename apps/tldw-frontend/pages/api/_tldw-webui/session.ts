@@ -82,14 +82,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return;
   }
 
-  const policy = resolveRuntimeAuthPolicy(req);
-  if (!policy.available) {
-    res.status(503).end();
+  if (!isExactSameOrigin(req) || !hasAcceptableFetchMetadata(req)) {
+    res.status(403).end();
     return;
   }
 
-  if (!isExactSameOrigin(req) || !hasAcceptableFetchMetadata(req)) {
-    res.status(403).end();
+  const policy = resolveRuntimeAuthPolicy(req);
+  if (!policy.available) {
+    res.status(503).end();
     return;
   }
 
@@ -101,8 +101,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     headers['User-Agent'] = req.headers['user-agent'];
   }
 
+  let backend: Response | undefined;
   try {
-    const backend = await fetch(`${policy.internalApiOrigin}${SESSION_PATH}`, {
+    backend = await fetch(`${policy.internalApiOrigin}${SESSION_PATH}`, {
       method: 'POST',
       headers,
       redirect: 'manual',
@@ -115,5 +116,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     res.status(backend.status).end();
   } catch (error) {
     res.status(isTimeout(error) ? 504 : 502).end();
+  } finally {
+    await backend?.body?.cancel().catch(() => undefined);
   }
 }

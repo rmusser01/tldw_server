@@ -161,7 +161,7 @@ const saveManualConnection = async (
   if ((await rememberControl.isChecked()) !== remember) {
     await rememberControl.click()
   }
-  await page.getByRole("button", { name: "Save", exact: true }).click()
+  await page.getByRole("button", { name: /^save$/i }).click()
   await expect
     .poll(() =>
       page.evaluate(

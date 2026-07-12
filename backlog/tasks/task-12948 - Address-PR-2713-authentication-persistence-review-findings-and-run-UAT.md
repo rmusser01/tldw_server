@@ -4,7 +4,7 @@ title: Address PR 2713 authentication persistence review findings and run UAT
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-07-12 14:03'
+updated_date: '2026-07-12 15:37'
 labels: []
 dependencies: []
 references:
@@ -50,10 +50,6 @@ Final base: origin/dev dc25171a8335ba1e0a4924788847eb1fb197b1c8. Final review fi
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Addressed every review finding for PR 2713. Same-origin single-user WebUI auth now uses persistent HttpOnly sessions without exposing the API key; remote manual connections support explicit device/session persistence; all transports resolve origin-bound effective auth; logout is strict, idempotent, no-store, and fail-safe on backend uncertainty; secret clearing and bootstrap scrubbing are truthful and canonical; onboarding and Settings recover correctly for cookie-only state; production lifecycle suites are required in frontend CI. Final WebUI, loaded-extension, and cookie UAT all pass on the rebased branch.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

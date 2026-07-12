@@ -97,19 +97,27 @@ vi.mock("antd", () => {
         children,
         label,
         name,
-        rules
+        rules,
+        initialValue
       }: {
         children?: React.ReactNode
         label?: React.ReactNode
         name?: string
         rules?: unknown[]
+        initialValue?: unknown
       }) => {
         formItemSpy({ label, name, rules })
         const testId =
           typeof label === "string"
             ? `form-item-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`
             : "form-item"
-        return <div data-testid={testId}>{children}</div>
+        const controlledChild =
+          name === "rememberApiKey" && React.isValidElement(children)
+            ? React.cloneElement(children as React.ReactElement<{ checked?: boolean }>, {
+                checked: Boolean(initialValue)
+              })
+            : children
+        return <div data-testid={testId}>{controlledChild}</div>
       }
     },
     Checkbox: ({

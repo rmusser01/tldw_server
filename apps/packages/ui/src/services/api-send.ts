@@ -2,10 +2,7 @@ import { browser } from 'wxt/browser'
 import { createSafeStorage } from '@/utils/safe-storage'
 import { tldwRequest } from '@/services/tldw/request-core'
 import type { PathOrUrl, AllowedMethodFor, UpperLower } from '@/services/tldw/openapi-guard'
-import { COOKIE_SESSION_CONFIG_KEY } from '@/services/tldw/browser-networking'
-import { isCookieSessionConfigInvalidated } from '@/services/tldw/runtime-auth-override'
-import { resolveEffectiveTldwConfig } from '@/services/tldw/single-user-credential'
-import type { TldwConfig } from '@/services/tldw/TldwApiClient'
+import { resolveDirectBrowserConfig as resolveDirectConfig } from '@/services/tldw/direct-browser-config'
 
 export interface ApiSendPayload<P extends PathOrUrl = PathOrUrl, M extends AllowedMethodFor<P> = AllowedMethodFor<P>> {
   path: P
@@ -32,42 +29,6 @@ const isSafeFallbackMethod = (method?: string): boolean => {
 }
 
 const inFlightGetRequests = new Map<string, Promise<ApiSendResponse<unknown>>>()
-
-const resolveDirectConfig = async (
-  persistent: ReturnType<typeof createSafeStorage>
-) => {
-  let cookie:
-    | { cookieSession?: TldwConfig | null; expectedCookieOrigin?: string | null }
-    | undefined
-  if (!isCookieSessionConfigInvalidated() && typeof window !== 'undefined') {
-    const protocol = String(window.location?.protocol || '').toLowerCase()
-    const deploymentMode = String(
-      typeof process !== 'undefined'
-        ? process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE || ''
-        : ''
-    ).trim()
-    const expectedCookieOrigin = String(window.location?.origin || '').trim()
-    if (
-      (protocol === 'http:' || protocol === 'https:') &&
-      deploymentMode === 'quickstart' &&
-      expectedCookieOrigin
-    ) {
-      cookie = {
-        cookieSession: await persistent
-          .get<TldwConfig>(COOKIE_SESSION_CONFIG_KEY)
-          .catch(() => null),
-        expectedCookieOrigin
-      }
-    }
-  }
-  return await resolveEffectiveTldwConfig(
-    {
-      persistent,
-      session: createSafeStorage({ area: 'session' })
-    },
-    cookie
-  )
-}
 
 const normalizeHeaders = (
   headers?: Record<string, string>

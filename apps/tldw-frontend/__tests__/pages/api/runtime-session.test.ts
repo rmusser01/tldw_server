@@ -239,6 +239,27 @@ describe('WebUI runtime session bootstrap API', () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
+  it('rejects cross-origin requests before revealing runtime policy availability', async () => {
+    process.env.AUTH_MODE = 'multi_user';
+
+    const res = await callRoute({ headers: { origin: 'http://attacker.test' } });
+
+    expect(res.statusCode).toBe(403);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('cancels the unused backend response body', async () => {
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    const backend = backendResponse();
+    Object.defineProperty(backend, 'body', { value: { cancel } });
+    mockFetch.mockResolvedValue(backend);
+
+    const res = await callRoute();
+
+    expect(res.statusCode).toBe(200);
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
   it('accepts an exact HTTPS origin when the direct request socket is encrypted', async () => {
     const res = await callRoute({
       encrypted: true,
@@ -311,14 +332,14 @@ describe('WebUI runtime session bootstrap API', () => {
   );
 
   it.each([
-    ['non-loopback host', { headers: { host: 'webui.example.test' } }],
-    ['untrusted peer', { remoteAddress: '203.0.113.10' }],
-    ['missing peer', { remoteAddress: null }],
-    ['forwarding headers', { headers: { 'x-forwarded-for': '127.0.0.1' } }],
-  ])('fails closed for %s', async (_name, requestOptions) => {
+    ['non-loopback host', { headers: { host: 'webui.example.test' } }, 403],
+    ['untrusted peer', { remoteAddress: '203.0.113.10' }, 503],
+    ['missing peer', { remoteAddress: null }, 503],
+    ['forwarding headers', { headers: { 'x-forwarded-for': '127.0.0.1' } }, 503],
+  ])('fails closed for %s', async (_name, requestOptions, expectedStatus) => {
     const res = await callRoute(requestOptions);
 
-    expect(res.statusCode).toBe(503);
+    expect(res.statusCode).toBe(expectedStatus);
     expect(res.body).toBeUndefined();
     expect(mockFetch).not.toHaveBeenCalled();
   });

@@ -45,14 +45,29 @@ const createMemoryStorage = (): StorageBackend => {
   }
 }
 
+const sessionFallbackMemoryStorage = createMemoryStorage()
+
 const getBackend = (area: StorageOptions["area"]): StorageBackend => {
   if (typeof window !== "undefined") {
-    if (area === "session" && window.sessionStorage) {
-      return window.sessionStorage
+    if (area === "session") {
+      try {
+        if (window.sessionStorage) {
+          return window.sessionStorage
+        }
+      } catch {
+        // Fall back to shared in-memory session storage below.
+      }
+      return sessionFallbackMemoryStorage
     }
-    if (window.localStorage) return window.localStorage
+    try {
+      if (window.localStorage) {
+        return window.localStorage
+      }
+    } catch {
+      // Fall through to isolated memory storage.
+    }
   }
-  return createMemoryStorage()
+  return area === "session" ? sessionFallbackMemoryStorage : createMemoryStorage()
 }
 
 const defaultSerde: Required<SerdeOptions> = {

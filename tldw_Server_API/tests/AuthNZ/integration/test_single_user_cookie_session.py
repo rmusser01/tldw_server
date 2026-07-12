@@ -5,6 +5,10 @@ import pytest_asyncio
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.endpoints import auth as auth_endpoints
+from tldw_Server_API.app.api.v1.schemas.auth_schemas import (
+    SingleUserSessionLogoutResponse,
+    SingleUserSessionResponse,
+)
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_auth_rate_limit
 from tldw_Server_API.app.core.Audit.unified_audit_service import shutdown_audit_service
 from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
@@ -74,6 +78,22 @@ def test_single_user_session_routes_use_auth_rate_limit(method):
         dependency.dependency is check_auth_rate_limit
         for dependency in route.dependencies
     )
+
+
+@pytest.mark.parametrize("method", ["POST", "DELETE"])
+def test_single_user_session_routes_declare_response_models(method):
+    route = next(
+        route
+        for route in auth_endpoints.router.routes
+        if route.path.endswith("/single-user/session") and method in route.methods
+    )
+
+    expected = (
+        SingleUserSessionResponse
+        if method == "POST"
+        else SingleUserSessionLogoutResponse
+    )
+    assert route.response_model is expected
 
 
 def test_mint_returns_no_token_and_sets_exact_cookie(single_user_cookie_client):

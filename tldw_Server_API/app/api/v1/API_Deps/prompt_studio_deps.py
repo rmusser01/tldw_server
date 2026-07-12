@@ -122,7 +122,9 @@ def _get_or_create_prompt_studio_db(user_id: str, client_id: str) -> PromptStudi
         # Check cache first
         if cache_key in _db_instances_cache:
             logger.debug("Using cached PromptStudioDatabase for user {}", user_id)
-            return _db_instances_cache[cache_key]
+            cached_instance = _db_instances_cache[cache_key]
+            cached_instance.user_id = str(user_id)
+            return cached_instance
 
         # Create new instance
         try:
@@ -131,6 +133,7 @@ def _get_or_create_prompt_studio_db(user_id: str, client_id: str) -> PromptStudi
                 db_path=db_path,
                 backend=backend,
             )
+            db_instance.user_id = str(user_id)
             _db_instances_cache[cache_key] = db_instance
             logger.info("Created new PromptStudioDatabase instance for user {}", user_id)
             return db_instance

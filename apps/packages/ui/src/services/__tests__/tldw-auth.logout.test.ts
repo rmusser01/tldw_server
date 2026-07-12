@@ -83,4 +83,15 @@ describe("TldwAuthService single-user logout", () => {
     expect(mocks.bgRequest).not.toHaveBeenCalled()
     expect(mocks.clearCookieSingleUserSession).not.toHaveBeenCalled()
   })
+
+  it("treats an active cookie session as authenticated without a readable key", async () => {
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: window.location.origin,
+      authMode: "single-user",
+      authSource: "cookie-session"
+    })
+    const auth = new TldwAuthService()
+
+    await expect(auth.isAuthenticated()).resolves.toBe(true)
+  })
 })

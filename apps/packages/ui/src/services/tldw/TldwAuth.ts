@@ -469,7 +469,7 @@ export class TldwAuthService {
     }
 
     if (config.authMode === 'single-user') {
-      return !!config.apiKey
+      return config.authSource === 'cookie-session' || !!config.apiKey
     } else if (config.authMode === 'multi-user') {
       return !!config.accessToken
     }

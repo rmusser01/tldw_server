@@ -8,7 +8,6 @@ import hashlib
 import hmac
 import os
 import secrets
-import sys
 from typing import Callable, Optional
 
 #
@@ -62,7 +61,7 @@ def resolve_effective_csrf_enabled() -> bool:
         configured = bool(is_truthy(raw.strip().lower()))
     if configured is not None:
         return bool(configured)
-    if is_test_mode() or "pytest" in sys.modules:
+    if is_test_mode():
         return False
     return get_settings().AUTH_MODE in {"single_user", "multi_user"}
 

@@ -4777,7 +4777,8 @@ async def workflows_ws(
     # Run-level authorization: owner or admin
     run = db.get_run(run_id)
     if not run:
-        raise RuntimeError("Run not found")
+        await websocket.close(code=4404)
+        return
     # Enforce run-level ownership: subject must match creator
     if authenticated_user_id != str(run.user_id):
         await websocket.close(code=4403)

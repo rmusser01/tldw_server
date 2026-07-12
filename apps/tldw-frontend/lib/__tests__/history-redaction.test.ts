@@ -27,7 +27,11 @@ describe('request history redaction', () => {
       timestamp: new Date().toISOString(),
       requestHeaders: {
         authorization: 'Bearer XYZ',
+        cookie: 'session=COOKIE-123',
+        'proxy-authorization': 'Basic PROXY-456',
+        'set-cookie': 'refresh=SET-COOKIE-789',
         'x-api-key': 'APIKEY-abc',
+        'x-auth-token': 'AUTH-TOKEN-def',
         'x-csrf-token': 'csrf-123',
         'x-tldw-org-id': 'org-9',
         'content-type': 'application/json',
@@ -37,13 +41,21 @@ describe('request history redaction', () => {
     const raw = localStorage.getItem(KEY) || '';
     // Distinctive secret values must not appear anywhere in the stored blob.
     expect(raw).not.toContain('Bearer XYZ');
+    expect(raw).not.toContain('COOKIE-123');
+    expect(raw).not.toContain('PROXY-456');
+    expect(raw).not.toContain('SET-COOKIE-789');
     expect(raw).not.toContain('APIKEY-abc');
+    expect(raw).not.toContain('AUTH-TOKEN-def');
     expect(raw).not.toContain('csrf-123');
     expect(raw).not.toContain('org-9');
 
     const [item] = getRequestHistory();
     expect(item.requestHeaders).not.toHaveProperty('authorization');
+    expect(item.requestHeaders).not.toHaveProperty('cookie');
+    expect(item.requestHeaders).not.toHaveProperty('proxy-authorization');
+    expect(item.requestHeaders).not.toHaveProperty('set-cookie');
     expect(item.requestHeaders).not.toHaveProperty('x-api-key');
+    expect(item.requestHeaders).not.toHaveProperty('x-auth-token');
     expect(item.requestHeaders).not.toHaveProperty('x-csrf-token');
     expect(item.requestHeaders).not.toHaveProperty('x-tldw-org-id');
     // Non-sensitive headers are preserved for debugging value.

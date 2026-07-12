@@ -35,30 +35,10 @@ vi.mock("@/services/tldw/request-core", async () => {
 
 vi.mock("@/utils/safe-storage", () => ({
   createSafeStorage: (options?: { area?: string }) => ({
-    get: async (...args: unknown[]) => {
-      const value = await (options?.area === "session"
+    get: async (...args: unknown[]) =>
+      await (options?.area === "session"
         ? (mocks.sessionStorageGet as (...args: unknown[]) => unknown)(...args)
-        : (mocks.storageGet as (...args: unknown[]) => unknown)(...args))
-      if (
-        options?.area !== "session" &&
-        args[0] === "tldwConfig" &&
-        value &&
-        typeof value === "object" &&
-        (value as any).authMode === "single-user" &&
-        typeof (value as any).apiKey === "string" &&
-        typeof (value as any).serverUrl === "string" &&
-        !(value as any).credentialSource
-      ) {
-        const serverOrigin = new URL(String((value as any).serverUrl)).origin
-        return {
-          ...(value as Record<string, unknown>),
-          credentialSource: "manual",
-          apiKeyPersistence: "device",
-          apiKeyServerOrigin: serverOrigin
-        }
-      }
-      return value
-    },
+        : (mocks.storageGet as (...args: unknown[]) => unknown)(...args)),
     set: (...args: unknown[]) =>
       (mocks.storageSet as (...args: unknown[]) => unknown)(...args)
   })
@@ -132,7 +112,10 @@ describe("background proxy fallback safety", () => {
         return {
           serverUrl: "https://api.example.com",
           authMode: "single-user",
-          apiKey: "test-key-not-placeholder"
+          apiKey: "test-key-not-placeholder",
+          credentialSource: "manual",
+          apiKeyPersistence: "device",
+          apiKeyServerOrigin: "https://api.example.com"
         }
       }
       return null
@@ -163,7 +146,10 @@ describe("background proxy fallback safety", () => {
         return {
           serverUrl: "https://api.example.com",
           authMode: "single-user",
-          apiKey: "test-key-not-placeholder"
+          apiKey: "test-key-not-placeholder",
+          credentialSource: "manual",
+          apiKeyPersistence: "device",
+          apiKeyServerOrigin: "https://api.example.com"
         }
       }
       return null
@@ -1087,7 +1073,10 @@ describe("background proxy fallback safety", () => {
         return {
           serverUrl: "http://127.0.0.1:8000",
           authMode: "single-user",
-          apiKey: "not-a-real-key"
+          apiKey: "not-a-real-key",
+          credentialSource: "manual",
+          apiKeyPersistence: "device",
+          apiKeyServerOrigin: "http://127.0.0.1:8000"
         }
       }
       return null
@@ -1157,7 +1146,10 @@ describe("background proxy fallback safety", () => {
         return {
           serverUrl: "http://127.0.0.1:8000",
           authMode: "single-user",
-          apiKey: "not-a-real-key"
+          apiKey: "not-a-real-key",
+          credentialSource: "manual",
+          apiKeyPersistence: "device",
+          apiKeyServerOrigin: "http://127.0.0.1:8000"
         }
       }
       return null
@@ -1203,6 +1195,9 @@ describe("background proxy fallback safety", () => {
           serverUrl: "http://127.0.0.1:8000",
           authMode: "single-user",
           apiKey: "not-a-real-key",
+          credentialSource: "manual",
+          apiKeyPersistence: "device",
+          apiKeyServerOrigin: "http://127.0.0.1:8000",
           // Small idle timeout so the connection window is easy to advance past.
           streamIdleTimeoutMs: 1000
         }
@@ -1271,7 +1266,10 @@ describe("background proxy fallback safety", () => {
         return {
           serverUrl: "http://127.0.0.1:8000",
           authMode: "single-user",
-          apiKey: "test-key-not-placeholder"
+          apiKey: "test-key-not-placeholder",
+          credentialSource: "manual",
+          apiKeyPersistence: "device",
+          apiKeyServerOrigin: "http://127.0.0.1:8000"
         }
       }
       return null
@@ -1421,7 +1419,10 @@ describe("background proxy fallback safety", () => {
         return {
           serverUrl: "http://127.0.0.1:8000",
           authMode: "single-user",
-          apiKey: "test-key-not-placeholder"
+          apiKey: "test-key-not-placeholder",
+          credentialSource: "manual",
+          apiKeyPersistence: "device",
+          apiKeyServerOrigin: "http://127.0.0.1:8000"
         }
       }
       return null
@@ -1525,7 +1526,10 @@ describe("background proxy fallback safety", () => {
         return {
           serverUrl: "https://api.example.com",
           authMode: "single-user",
-          apiKey: "test-key-not-placeholder"
+          apiKey: "test-key-not-placeholder",
+          credentialSource: "manual",
+          apiKeyPersistence: "device",
+          apiKeyServerOrigin: "https://api.example.com"
         }
       }
       return null
@@ -1566,8 +1570,11 @@ describe("background proxy fallback safety", () => {
         return {
           serverUrl: "https://api.example.com",
           authMode: "single-user",
-          authSource: "cookie-session",
-          apiKey: "test-key-not-placeholder"
+          authSource: "manual",
+          apiKey: "test-key-not-placeholder",
+          credentialSource: "manual",
+          apiKeyPersistence: "device",
+          apiKeyServerOrigin: "https://api.example.com"
         }
       }
       return null
@@ -1662,7 +1669,10 @@ describe("background proxy fallback safety", () => {
         return {
           serverUrl: "https://api.example.com",
           authMode: "single-user",
-          apiKey: "persisted-stream-key"
+          apiKey: "persisted-stream-key",
+          credentialSource: "manual",
+          apiKeyPersistence: "device",
+          apiKeyServerOrigin: "https://api.example.com"
         }
       }
       return null
@@ -2004,7 +2014,10 @@ describe("background proxy fallback safety", () => {
         return {
           serverUrl: "http://127.0.0.1:8000",
           authMode: "single-user",
-          apiKey: "test-key-not-placeholder"
+          apiKey: "test-key-not-placeholder",
+          credentialSource: "manual",
+          apiKeyPersistence: "device",
+          apiKeyServerOrigin: "http://127.0.0.1:8000"
         }
       }
       return null

@@ -62,9 +62,14 @@ from tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps import (
     PromptStudioDatabase,
     get_prompt_studio_db,
     get_prompt_studio_user,
+    require_project_access,
 )
+from tldw_Server_API.app.api.v1.endpoints.agent_client_protocol import _authenticate_ws
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.jobs_adapter import (
     PromptStudioJobsAdapter,
+)
+from tldw_Server_API.app.core.Prompt_Management.prompt_studio.event_broadcaster import (
+    prompt_studio_connection_scope,
 )
 from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
     cookie_websocket_rejection_code,
@@ -166,6 +171,32 @@ class ConnectionManager:
 
         logger.info(f"WebSocket connected for client {client_id}")
         return True
+
+    def rebind(
+        self,
+        websocket: WebSocket,
+        client_id: str,
+        user_context: Optional[dict] = None,
+    ) -> None:
+        """Move an accepted connection to a newly authorized scope."""
+        with self._connections_lock:
+            metadata = self.connection_metadata.get(websocket)
+            if metadata:
+                previous_id = metadata["client_id"]
+                previous_connections = self.active_connections.get(previous_id)
+                if previous_connections is not None:
+                    previous_connections.discard(websocket)
+                    if not previous_connections:
+                        self.active_connections.pop(previous_id, None)
+            self.active_connections.setdefault(client_id, set()).add(websocket)
+            self.connection_metadata[websocket] = {
+                "client_id": client_id,
+                "user_context": user_context,
+                "connected_at": (metadata or {}).get(
+                    "connected_at",
+                    datetime.utcnow().isoformat(),
+                ),
+            }
 
     def disconnect(self, websocket: WebSocket):
         """
@@ -459,23 +490,91 @@ async def _accept_prompt_studio_websocket_if_needed(websocket: WebSocket) -> Non
         await websocket.accept()
 
 
-async def _allow_prompt_studio_cookie_websocket(websocket: WebSocket) -> bool:
-    await resolve_single_user_cookie_websocket(websocket)
+async def _allow_prompt_studio_cookie_websocket(
+    websocket: WebSocket,
+    *,
+    token: str | None = None,
+    api_key: str | None = None,
+) -> str | None:
+    identity = await resolve_single_user_cookie_websocket(websocket)
+    if identity is not None:
+        return str(identity.user_id)
     close_code = cookie_websocket_rejection_code(websocket)
-    if close_code is None:
+    if close_code is not None:
+        await websocket.close(code=close_code)
+        return None
+    effective_api_key = api_key
+    if not effective_api_key:
+        headers = getattr(websocket, "headers", {})
+        effective_api_key = headers.get("x-api-key") or headers.get("X-API-KEY")
+    user_id = await _authenticate_ws(
+        websocket,
+        token=token,
+        api_key=effective_api_key,
+        required_scope="read",
+    )
+    if user_id is not None:
+        return str(user_id)
+    await websocket.close(code=4401)
+    return None
+
+
+def _prompt_studio_websocket_user_context(
+    websocket: WebSocket,
+    user_id: str,
+) -> dict:
+    """Build the user context required by Prompt Studio DB and access checks."""
+    principal = getattr(getattr(websocket, "state", None), "auth_principal", None)
+    return {
+        "user_id": user_id,
+        "client_id": "websocket",
+        "is_authenticated": True,
+        "is_admin": bool(getattr(principal, "is_admin", False)),
+        "permissions": list(getattr(principal, "permissions", []) or []),
+    }
+
+
+async def _authorize_prompt_studio_project(
+    websocket: WebSocket,
+    user_context: dict,
+    project_id: int,
+) -> bool:
+    """Authorize one project before binding a WebSocket to its event scope."""
+    try:
+        db = await get_prompt_studio_db(user_context)
+        await require_project_access(project_id, user_context, db)
         return True
-    await websocket.close(code=close_code)
-    return False
+    except HTTPException as exc:
+        await websocket.close(code=4404 if exc.status_code == 404 else 4403)
+        return False
+
 
 @router.websocket("")
-async def websocket_endpoint_base(websocket: WebSocket):
+async def websocket_endpoint_base(
+    websocket: WebSocket,
+    token: str | None = Query(None),
+    api_key: str | None = Query(None),
+    project_id: int | None = Query(None),
+):
     """
     Base WebSocket endpoint for real-time updates.
 
     Args:
         websocket: WebSocket connection
     """
-    if not await _allow_prompt_studio_cookie_websocket(websocket):
+    user_id = await _allow_prompt_studio_cookie_websocket(
+        websocket,
+        token=token,
+        api_key=api_key,
+    )
+    if user_id is None:
+        return
+    user_context = _prompt_studio_websocket_user_context(websocket, user_id)
+    if project_id is not None and not await _authorize_prompt_studio_project(
+        websocket,
+        user_context,
+        project_id,
+    ):
         return
     # Wrap socket for lifecycle metrics; keep domain payloads unchanged
     stream = WebSocketStream(
@@ -488,7 +587,12 @@ async def websocket_endpoint_base(websocket: WebSocket):
     if not await _guard_prompt_studio_websocket_start(websocket, "prompt_studio.websocket"):
         return
     # Accept via manager first to avoid double-accept issues
-    if not await connection_manager.connect(websocket, "global"):
+    connection_scope = prompt_studio_connection_scope(user_id, project_id)
+    if not await connection_manager.connect(
+        websocket,
+        connection_scope,
+        user_context,
+    ):
         return
     await stream.start()
 
@@ -501,12 +605,33 @@ async def websocket_endpoint_base(websocket: WebSocket):
 
             # Handle subscription requests
             if data.get("type") == "subscribe":
-                project_id = data.get("project_id")
-                if project_id:
-                    await stream.send_json({
-                        "type": "subscribed",
-                        "project_id": project_id
-                    })
+                requested_project_id = data.get("project_id")
+                if requested_project_id is None:
+                    project_id = None
+                else:
+                    try:
+                        requested_project_id = int(requested_project_id)
+                    except (TypeError, ValueError):
+                        await stream.ws.close(code=4400)
+                        connection_manager.disconnect(websocket)
+                        return
+                    if not await _authorize_prompt_studio_project(
+                        websocket,
+                        user_context,
+                        requested_project_id,
+                    ):
+                        connection_manager.disconnect(websocket)
+                        return
+                    project_id = requested_project_id
+                connection_manager.rebind(
+                    websocket,
+                    prompt_studio_connection_scope(user_id, project_id),
+                    user_context,
+                )
+                await stream.send_json({
+                    "type": "subscribed",
+                    "project_id": project_id
+                })
             elif data.get("type") == "subscribe_job":
                 # Register interest in a job; no explicit ack required by tests
                 pass
@@ -518,11 +643,13 @@ async def websocket_endpoint_base(websocket: WebSocket):
         # Pass the actual websocket to ensure proper cleanup
         connection_manager.disconnect(websocket)
 
+
 @router.websocket("/{project_id}")
 async def websocket_endpoint(
     websocket: WebSocket,
     project_id: int,
-    db: PromptStudioDatabase = Depends(get_prompt_studio_db)
+    token: str | None = Query(None),
+    api_key: str | None = Query(None),
 ):
     """
     WebSocket endpoint for real-time updates on a project.
@@ -530,9 +657,20 @@ async def websocket_endpoint(
     Args:
         websocket: WebSocket connection
         project_id: Project ID to subscribe to
-        db: Database instance
     """
-    if not await _allow_prompt_studio_cookie_websocket(websocket):
+    user_id = await _allow_prompt_studio_cookie_websocket(
+        websocket,
+        token=token,
+        api_key=api_key,
+    )
+    if user_id is None:
+        return
+    user_context = _prompt_studio_websocket_user_context(websocket, user_id)
+    if not await _authorize_prompt_studio_project(
+        websocket,
+        user_context,
+        project_id,
+    ):
         return
     stream = WebSocketStream(
         websocket,
@@ -543,7 +681,11 @@ async def websocket_endpoint(
     )
     if not await _guard_prompt_studio_websocket_start(websocket, "prompt_studio.websocket"):
         return
-    if not await connection_manager.connect(websocket, str(project_id)):
+    if not await connection_manager.connect(
+        websocket,
+        prompt_studio_connection_scope(user_id, project_id),
+        user_context,
+    ):
         return
     await stream.start()
 

@@ -221,13 +221,15 @@ export const TldwConnectionSettings = ({
           >
             <Input.Password placeholder={t('settings:tldw.fields.apiKey.placeholder', 'Enter your API key')} />
           </Form.Item>
-          <Form.Item name="rememberApiKey" valuePropName="checked">
+          <Form.Item
+            name="rememberApiKey"
+            valuePropName="checked"
+            initialValue={rememberApiKey}
+          >
             <Checkbox
-              checked={rememberApiKey}
               onChange={(event) => {
                 const nextValue = event.target.checked
                 setRememberApiKey(nextValue)
-                form.setFieldValue('rememberApiKey', nextValue)
               }}
             >
               {t(

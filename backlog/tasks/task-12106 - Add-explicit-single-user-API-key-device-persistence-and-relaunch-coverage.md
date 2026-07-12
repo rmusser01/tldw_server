@@ -4,7 +4,7 @@ title: Add explicit single-user API key device persistence and relaunch coverage
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-07-12 01:46'
+updated_date: '2026-07-12 15:37'
 labels: []
 dependencies:
   - TASK-12108
@@ -64,10 +64,6 @@ Verification correction: the final explicit TypeScript exit-code capture reports
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Completed explicit manual remote single-user API-key persistence without relying on browser password managers. New setups default Remember on this device enabled; device credentials are origin-bound and stored in WebUI local storage or extension-local storage, while unchecked credentials use session storage and clear on full browser restart. Same-origin quickstart auth remains server-held behind HttpOnly sessions and never enters manual browser-readable storage. Added WebUI hard-reload/profile-reopen and extension same-installation/profile-reopen regression coverage for both device and session choices. Packaged extension verification also fixed Vite locale bootstrap and Settings root-shell remount blockers. Final evidence: Chrome extension production build; packaged Settings smoke 1/1; extension lifecycle 2/2; WebUI lifecycle 2/2; focused unit suites 96/96 plus migration/persistence suite 15/15; scoped ESLint 0 errors; diff and artifact secret-marker checks clean. Known unrelated baseline: QuickIngestWizardModal.tsx:1813 TypeScript overflowY type error. Bandit not applicable to this TypeScript/TSX/Markdown-only task.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

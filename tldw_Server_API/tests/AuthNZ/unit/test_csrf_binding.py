@@ -120,6 +120,21 @@ def test_effective_csrf_environment_override_drives_resolution(monkeypatch):
     reset_settings()
 
 
+def test_pytest_import_alone_does_not_disable_effective_csrf(monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ import csrf_protection
+
+    monkeypatch.delenv("CSRF_ENABLED", raising=False)
+    monkeypatch.setattr(csrf_protection, "global_settings", {})
+    monkeypatch.setattr(csrf_protection, "is_test_mode", lambda: False)
+    monkeypatch.setattr(
+        csrf_protection,
+        "get_settings",
+        lambda: types.SimpleNamespace(AUTH_MODE="single_user"),
+    )
+
+    assert csrf_protection.resolve_effective_csrf_enabled() is True
+
+
 @pytest.mark.asyncio
 async def test_csrf_binding_resolves_single_user_cookie_before_dependencies(monkeypatch):
     from fastapi import FastAPI
