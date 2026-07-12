@@ -499,8 +499,12 @@ marks `redelivery_to_changed_config=true`.
 The test endpoint is persisted but does not create a Jobs job. In one AuthNZ
 transaction it creates a `webhook.test` event with a new command ID and a
 `kind=test` delivery row using the current registration/configuration versions.
-The endpoint then invokes the same bounded `DeliveryAttemptExecutor` used by the
-Jobs worker and waits for exactly one attempt.
+The service generates the test-attempt token before that transaction and commits
+the delivery directly in `processing` with token, attempt number one, and
+`started_at`. There is no committed `pending` test state and therefore no gap in
+which the row lacks both a recovery token and a Jobs job. After commit, the
+endpoint invokes the same bounded `DeliveryAttemptExecutor` used by the Jobs
+worker and waits for exactly one attempt.
 
 The executor owns deterministic payload bytes, signature headers, final
 configuration checks, central egress I/O, and bounded attempt metadata. The Jobs
@@ -512,8 +516,12 @@ Test requires completed migration and an available encryption key but does not
 require worker heartbeat. It is allowed while the registration is inactive,
 sets `X-TLDW-Webhook-Test: true`, and retains its event/delivery metadata under
 normal 30-day terminal retention. If the API process dies after marking a test
-attempt `processing`, recovery marks the stale test delivery `dead` with reason
-`test_attempt_interrupted`; it does not retry an operator's test implicitly.
+attempt `processing` but before committing a terminal result, recovery marks the
+row `dead` with reason `test_attempt_interrupted`; it does not retry an
+operator's test implicitly. A test is stale after the maximum 30-second request
+timeout plus a 90-second recovery margin. Recovery conditionally matches the
+test-attempt token so a late completion cannot overwrite a recovered terminal
+row.
 
 ### Cross-Database Enqueue Handshake
 
@@ -542,10 +550,10 @@ transaction participant.
 
 | Delivery state | Writer | Meaning and allowed next states |
 | --- | --- | --- |
-| `pending` | event producer or test service | Durable row exists but has no enqueue claim; automatic/manual work moves to `enqueue_claimed`, while test work moves directly to `processing`; terminal lifecycle or expiry transitions are also allowed |
+| `pending` | event producer | Durable automatic/manual row exists but has no enqueue claim; next is `enqueue_claimed`, a terminal lifecycle state, or `dead` on expiry; test rows are never committed in this state |
 | `enqueue_claimed` | reconciler | A claim token/expiry owns the enqueue handshake; next is `queued`, back to `pending` after safe recovery, or a terminal lifecycle state |
 | `queued` | reconciler | One Jobs ID is attached; next is `processing`, `canceled`, `superseded`, or `dead` on expiry |
-| `processing` | worker or synchronous test executor | One Jobs-leased attempt or one test-attempt token passed the final pre-I/O checks; next is `succeeded`, `retry_wait` for Jobs work only, `dead`, or a terminal lifecycle state observed before I/O |
+| `processing` | worker or synchronous test service | One Jobs-leased attempt or one committed test-attempt token owns execution; the executor still performs final pre-I/O checks; next is `succeeded`, `retry_wait` for Jobs work only, `dead`, or a terminal lifecycle state observed before I/O |
 | `retry_wait` | worker | Attempt metadata is recorded and Jobs owns the next availability time; next is `processing`, `canceled`, `superseded`, or `dead` |
 | `succeeded` | worker | Receiver returned 2xx; terminal |
 | `dead` | worker or expiry reconciler | Nonretryable response, exhausted retries, or `delivery_expired`; terminal |
