@@ -72,6 +72,23 @@ def _parse_user_metadata(raw_metadata: Any) -> dict[str, Any]:
     return {}
 
 
+async def _lock_user_for_role_change(db, *, user_id: int, is_pg: bool) -> None:
+    """Verify and serialize the target user before replacing role membership."""
+    if is_pg:
+        row = await db.fetchrow(
+            "SELECT id FROM users WHERE id = $1 FOR UPDATE",
+            user_id,
+        )
+    else:
+        cursor = await db.execute(
+            "SELECT id FROM users WHERE id = ?",
+            (user_id,),
+        )
+        row = await cursor.fetchone()
+    if not row:
+        raise UserNotFoundError(f"User {user_id}")
+
+
 async def _sync_system_role_membership(
     db,
     *,
@@ -354,6 +371,8 @@ async def update_user(
             param_count += 1
             updates.append(f"role = ${param_count}" if is_pg else "role = ?")
             params.append(request.role)
+            if request.role != "admin":
+                updates.append("is_superuser = FALSE" if is_pg else "is_superuser = 0")
 
         if request.is_active is not None:
             param_count += 1
@@ -388,6 +407,11 @@ async def update_user(
             )
 
         if request.role is not None:
+            await _lock_user_for_role_change(
+                db,
+                user_id=user_id,
+                is_pg=is_pg,
+            )
             await _sync_system_role_membership(
                 db,
                 user_id=user_id,
