@@ -4079,6 +4079,27 @@ class ContentMetadataHandler:
         return formatted_content
 
     @staticmethod
+    def _parse_metadata_envelope(content: str) -> Optional[tuple[dict[str, Any], str]]:
+        """Parse a canonical leading metadata envelope and return its body."""
+        envelope = content.lstrip()
+        if not envelope.startswith(ContentMetadataHandler.METADATA_START):
+            return None
+
+        metadata_text = envelope[len(ContentMetadataHandler.METADATA_START):].lstrip()
+        try:
+            metadata, metadata_end = json.JSONDecoder().raw_decode(metadata_text)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(metadata, dict):
+            return None
+
+        remainder = metadata_text[metadata_end:].lstrip()
+        if not remainder.startswith(ContentMetadataHandler.METADATA_END):
+            return None
+        clean_content = remainder[len(ContentMetadataHandler.METADATA_END):].strip()
+        return metadata, clean_content
+
+    @staticmethod
     def extract_metadata(content: str) -> tuple[dict[str, Any], str]:
         """
         Extract metadata and content separately.
@@ -4089,16 +4110,8 @@ class ContentMetadataHandler:
         Returns:
             Tuple of (metadata dict, clean content)
         """
-        try:
-            metadata_start = content.index(ContentMetadataHandler.METADATA_START) + len(
-                ContentMetadataHandler.METADATA_START)
-            metadata_end = content.index(ContentMetadataHandler.METADATA_END)
-            metadata_json = content[metadata_start:metadata_end].strip()
-            metadata = json.loads(metadata_json)
-            clean_content = content[metadata_end + len(ContentMetadataHandler.METADATA_END):].strip()
-            return metadata, clean_content
-        except (ValueError, json.JSONDecodeError):
-            return {}, content
+        parsed = ContentMetadataHandler._parse_metadata_envelope(content)
+        return parsed if parsed is not None else ({}, content)
 
     @staticmethod
     def has_metadata(content: str) -> bool:
@@ -4111,8 +4124,7 @@ class ContentMetadataHandler:
         Returns:
             bool: True if metadata is present
         """
-        return (ContentMetadataHandler.METADATA_START in content and
-                ContentMetadataHandler.METADATA_END in content)
+        return ContentMetadataHandler._parse_metadata_envelope(content) is not None
 
     @staticmethod
     def strip_metadata(content: str) -> str:
@@ -4125,11 +4137,8 @@ class ContentMetadataHandler:
         Returns:
             Content without metadata
         """
-        try:
-            metadata_end = content.index(ContentMetadataHandler.METADATA_END)
-            return content[metadata_end + len(ContentMetadataHandler.METADATA_END):].strip()
-        except ValueError:
-            return content
+        parsed = ContentMetadataHandler._parse_metadata_envelope(content)
+        return parsed[1] if parsed is not None else content
 
     @staticmethod
     def get_content_hash(content: str) -> str:

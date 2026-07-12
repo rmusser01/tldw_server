@@ -146,6 +146,11 @@ async def test_store_persistent_skips_articles_without_body_content(monkeypatch)
                 "extraction_successful": True,
             },
             {
+                "url": "https://example.com/literal-markers",
+                "content": "Documentation mentions [METADATA] and [/METADATA]",
+                "extraction_successful": True,
+            },
+            {
                 "url": "https://example.com/missing",
                 "content": None,
                 "extraction_successful": True,
@@ -165,6 +170,11 @@ async def test_store_persistent_skips_articles_without_body_content(monkeypatch)
                 "content": '[METADATA]{"url":"https://example.com/envelope"}[/METADATA]\n  ',
                 "extraction_successful": True,
             },
+            {
+                "url": "https://example.com/crafted-envelope",
+                "content": '[METADATA]{"note":"[/METADATA]"}[/METADATA]\n ',
+                "extraction_successful": True,
+            },
         ],
     }
 
@@ -179,13 +189,15 @@ async def test_store_persistent_skips_articles_without_body_content(monkeypatch)
     )
 
     assert persisted["status"] == "persist-ok"
-    assert persisted["stored_articles"] == 1
-    assert persisted["media_ids"] == [1]
-    assert len(fake_db.calls) == 1
+    assert persisted["stored_articles"] == 2
+    assert persisted["media_ids"] == [1, 2]
+    assert len(fake_db.calls) == 2
     assert "Actual body content" in fake_db.calls[0]["content"]
+    assert "Documentation mentions [METADATA] and [/METADATA]" in fake_db.calls[1]["content"]
     assert persisted["errors"] == [
         "No extracted content: https://example.com/missing",
         "No extracted content: https://example.com/non-string",
         "No extracted content: https://example.com/blank",
         "No extracted content: https://example.com/envelope",
+        "No extracted content: https://example.com/crafted-envelope",
     ]
