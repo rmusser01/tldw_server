@@ -70,6 +70,28 @@ const resolveExtensionId = async (context: BrowserContext): Promise<string> => {
   return match[1]
 }
 
+const setExtensionLocalStorage = async (
+  context: BrowserContext,
+  values: Record<string, unknown>
+): Promise<void> => {
+  const worker = context.serviceWorkers()[0]
+  if (!worker) throw new Error("Extension service worker is unavailable")
+  await worker.evaluate(
+    (storageValues) =>
+      new Promise<void>((resolve, reject) => {
+        chrome.storage.local.set(storageValues, () => {
+          const error = chrome.runtime.lastError
+          if (error) {
+            reject(new Error(error.message))
+            return
+          }
+          resolve()
+        })
+      }),
+    values
+  )
+}
+
 const launchExtension = async (
   userDataDir: string,
   extensionPath: string
@@ -92,25 +114,19 @@ const launchExtension = async (
       "--crash-dumps-dir=/tmp"
     ]
   })
-  const extensionId = await resolveExtensionId(context)
-  const worker = context.serviceWorkers()[0]
-  if (worker) {
-    await worker.evaluate(
-      () =>
-        new Promise<void>((resolve) => {
-          chrome.storage.local.set(
-            {
-              __e2eSeeded: true,
-              __tldw_first_run_complete: true,
-              tldw_skip_landing_hub: true
-            },
-            () => resolve()
-          )
-        })
-    )
+  try {
+    const extensionId = await resolveExtensionId(context)
+    await setExtensionLocalStorage(context, {
+      __e2eSeeded: true,
+      __tldw_first_run_complete: true,
+      tldw_skip_landing_hub: true
+    })
+    const page = context.pages()[0] || (await context.newPage())
+    return { context, page, extensionId }
+  } catch (error) {
+    await context.close().catch(() => undefined)
+    throw error
   }
-  const page = context.pages()[0] || (await context.newPage())
-  return { context, page, extensionId }
 }
 
 const openSettings = async (page: Page, extensionId: string): Promise<void> => {
@@ -191,28 +207,20 @@ const extensionStorageValue = async (
     { storageArea: area, storageKey: key }
   )
 
+const normalizeExtensionStorageValue = (value: unknown): unknown =>
+  typeof value === "string" ? JSON.parse(value) : value
+
 const seedLegacyDeviceConfig = async (
   context: BrowserContext,
   serverUrl: string
 ): Promise<void> => {
-  const worker = context.serviceWorkers()[0]
-  if (!worker) throw new Error("Extension service worker is unavailable")
-  await worker.evaluate(
-    ({ url, apiKey }) =>
-      new Promise<void>((resolve) => {
-        chrome.storage.local.set(
-          {
-            tldwConfig: {
-              authMode: "single-user",
-              serverUrl: url,
-              apiKey
-            }
-          },
-          () => resolve()
-        )
-      }),
-    { url: serverUrl, apiKey: MANUAL_API_KEY }
-  )
+  await setExtensionLocalStorage(context, {
+    tldwConfig: {
+      authMode: "single-user",
+      serverUrl,
+      apiKey: MANUAL_API_KEY
+    }
+  })
 }
 
 const hasAuthenticatedMediaListRequest = (
@@ -395,8 +403,8 @@ test.describe.serial("manual extension API-key persistence", () => {
         page.getByText("Add your credentials to use Media", { exact: true })
       ).toHaveCount(0)
       expect(
-        JSON.parse(
-          String(await extensionStorageValue(page, "local", "tldwConfig"))
+        normalizeExtensionStorageValue(
+          await extensionStorageValue(page, "local", "tldwConfig")
         )
       ).toEqual(expectedConfig)
 
@@ -411,8 +419,8 @@ test.describe.serial("manual extension API-key persistence", () => {
         page.getByText("Add your credentials to use Media", { exact: true })
       ).toHaveCount(0)
       expect(
-        JSON.parse(
-          String(await extensionStorageValue(page, "local", "tldwConfig"))
+        normalizeExtensionStorageValue(
+          await extensionStorageValue(page, "local", "tldwConfig")
         )
       ).toEqual(expectedConfig)
     } finally {
