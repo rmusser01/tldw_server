@@ -430,6 +430,8 @@ class AddMediaForm(ChunkingOptions, AudioVideoOptions, PdfOptions):
     # --- Input Sources ---
     # Note: 'files' is handled separately by FastAPI's File() parameter
     urls: Optional[list[str]] = Field(None, description="List of URLs of the media items to add")
+    research_discovery_id: Optional[str] = Field(None, max_length=128)
+    research_discovery_selections: Optional[str] = Field(None, max_length=8192)
 
     # --- Common Optional Fields ---
     title: Optional[str] = Field(None, max_length=500, description="Optional title (max 500 chars)")

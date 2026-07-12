@@ -195,17 +195,17 @@ git commit -m "feat(research): resolve discovery PDF selections for Media"
 - Test: `tldw_Server_API/tests/MediaIngestion_NEW/unit/test_research_discovery_handoff.py`
 - Test: `tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_add_deps_error_mapping.py`
 
-- [ ] Write failing tests for paired discovery fields, JSON shape, non-empty ids, duplicate pairs, max five, `media_type=pdf`, URLs/files exclusion, and cookie rejection.
-- [ ] Prove existing PDF parser/OCR/chunking/analysis/collection/embedding fields remain accepted.
-- [ ] Add two optional form fields and matching `Form(...)` dependency parameters.
+- [x] Write failing tests for paired discovery fields, JSON shape, non-empty ids, duplicate pairs, max five, `media_type=pdf`, URLs/files exclusion, and cookie rejection.
+- [x] Prove existing PDF parser/OCR/chunking/analysis/collection/embedding fields remain accepted.
+- [x] Add two optional form fields and matching `Form(...)` dependency parameters.
 
 ```python
 research_discovery_id: str | None = Field(None, max_length=128)
 research_discovery_selections: str | None = Field(None, max_length=8192)
 ```
 
-- [ ] In `research_discovery_handoff.py`, implement only JSON parsing, mode detection, and request validation helpers. Use `json.loads`; return stable 422 errors for malformed selections and 400 errors for conflicting source/credential inputs.
-- [ ] Run the unit tests.
+- [x] In `research_discovery_handoff.py`, implement only JSON parsing, mode detection, and request validation helpers. Use `json.loads`; return stable 422 errors for malformed selections and 400 errors for conflicting source/credential inputs.
+- [x] Run the unit tests.
 
 ### Task 5: Branch inside `/media/add`
 
