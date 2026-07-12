@@ -21,6 +21,8 @@ const WEB_URL = (process.env.TLDW_WEB_URL || "http://localhost:8080").replace(
 )
 const API_URL = `http://127.0.0.1:${API_PORT}`
 const SESSION_COOKIE_NAME = "tldw_single_user_session"
+const PRESERVED_REMOTE_URL = "http://127.0.0.1:65534"
+const PRESERVED_REMOTE_API_KEY = "preserved-remote-device-key"
 
 const repoRoot = path.resolve(__dirname, "..", "..", "..")
 const lifecycleScript = path.join(
@@ -154,6 +156,10 @@ const withPersistentBrowser = async <T>(
     headless: true,
     baseURL: WEB_URL,
     locale: "en-US",
+  })
+  await context.addInitScript(() => {
+    localStorage.setItem("__tldw_first_run_complete", "true")
+    localStorage.setItem("assistant_setup_dismissed", "true")
   })
   const page = context.pages()[0] || (await context.newPage())
   try {
@@ -374,8 +380,13 @@ test.describe.serial("single-user HttpOnly cookie lifecycle", () => {
     await withPersistentBrowser(profile, async (context, page) => {
       page.on("request", (request) => observedBrowserUrls.push(request.url()))
       page.on("websocket", (socket) => observedBrowserUrls.push(socket.url()))
-      await page.goto(`${WEB_URL}/chat`, { waitUntil: "domcontentloaded" })
+      await page.goto(`${WEB_URL}/settings/chat`, {
+        waitUntil: "domcontentloaded",
+      })
       await expectCookieAuthentication(page)
+      await expect(
+        page.getByRole("radio", { name: /split brief/i })
+      ).toBeVisible({ timeout: 60_000 })
 
       const runtimeConfig = await page.evaluate(async () =>
         fetch("/api/_tldw-webui/runtime-config", {
@@ -424,18 +435,73 @@ test.describe.serial("single-user HttpOnly cookie lifecycle", () => {
         )?.value
       ).toBe(originalCookieValue)
       expect(await browserSecretInventory(page)).toEqual([])
+
+      await page.evaluate(
+        ({ apiKey, serverUrl }) => {
+          localStorage.setItem(
+            "tldwConfig",
+            JSON.stringify({
+              serverUrl,
+              authMode: "single-user",
+              authSource: "manual",
+              credentialSource: "manual",
+              apiKeyPersistence: "device",
+              apiKeyServerOrigin: serverUrl,
+              apiKey,
+            })
+          )
+        },
+        {
+          apiKey: PRESERVED_REMOTE_API_KEY,
+          serverUrl: PRESERVED_REMOTE_URL,
+        }
+      )
     })
 
     await withPersistentBrowser(profile, async (context, page) => {
       page.on("request", (request) => observedBrowserUrls.push(request.url()))
       page.on("websocket", (socket) => observedBrowserUrls.push(socket.url()))
-      await page.goto(`${WEB_URL}/chat`, { waitUntil: "domcontentloaded" })
+      await page.goto(`${WEB_URL}/settings/chat`, {
+        waitUntil: "domcontentloaded",
+      })
       await expectCookieAuthentication(page)
+      await expect(
+        page.getByRole("radio", { name: /split brief/i })
+      ).toBeVisible({ timeout: 60_000 })
       expect(
         (await context.cookies()).find(
           (cookie) => cookie.name === SESSION_COOKIE_NAME
         )?.value
       ).toBe(originalCookieValue)
+
+      expect(
+        await page.evaluate(() =>
+          JSON.parse(localStorage.getItem("tldwConfig") || "null")
+        )
+      ).toEqual({
+        serverUrl: PRESERVED_REMOTE_URL,
+        authMode: "single-user",
+        authSource: "manual",
+        credentialSource: "manual",
+        apiKeyPersistence: "device",
+        apiKeyServerOrigin: PRESERVED_REMOTE_URL,
+        apiKey: PRESERVED_REMOTE_API_KEY,
+      })
+
+      const profilePatch = page.waitForResponse(
+        (response) =>
+          response.request().method() === "PATCH" &&
+          new URL(response.url()).pathname === "/api/v1/users/me/profile"
+      )
+      await page.getByRole("radio", { name: /split brief/i }).click()
+      const profilePatchResponse = await profilePatch
+      expect(profilePatchResponse.status()).toBe(200)
+      const profilePatchHeaders = await profilePatchResponse
+        .request()
+        .allHeaders()
+      expect(profilePatchHeaders["x-csrf-token"]).toBeTruthy()
+      expect(profilePatchHeaders["x-api-key"]).toBeUndefined()
+      expect(profilePatchHeaders.authorization).toBeUndefined()
 
       await page.goto(`${WEB_URL}/api/_tldw-webui/runtime-config`, {
         waitUntil: "load",
@@ -480,20 +546,36 @@ test.describe.serial("single-user HttpOnly cookie lifecycle", () => {
           ?.slice("csrf_token=".length)
       )
       expect(csrfToken).toBeTruthy()
-      const logoutStatus = await page.evaluate(async (token) => {
+      const logout = await page.evaluate(async (token) => {
         const response = await fetch("/api/v1/auth/single-user/session", {
           method: "DELETE",
           credentials: "same-origin",
           headers: { "X-CSRF-Token": token || "" },
         })
-        return response.status
+        return {
+          status: response.status,
+          cacheControl: response.headers.get("cache-control"),
+        }
       }, csrfToken)
-      expect(logoutStatus).toBe(200)
+      expect(logout).toEqual({ status: 200, cacheControl: "no-store" })
       expect(
         (await context.cookies()).some(
           (cookie) => cookie.name === SESSION_COOKIE_NAME
         )
       ).toBe(false)
+      expect(
+        await page.evaluate(() =>
+          JSON.parse(localStorage.getItem("tldwConfig") || "null")
+        )
+      ).toEqual({
+        serverUrl: PRESERVED_REMOTE_URL,
+        authMode: "single-user",
+        authSource: "manual",
+        credentialSource: "manual",
+        apiKeyPersistence: "device",
+        apiKeyServerOrigin: PRESERVED_REMOTE_URL,
+        apiKey: PRESERVED_REMOTE_API_KEY,
+      })
 
       await context.addCookies([
         {
@@ -507,15 +589,50 @@ test.describe.serial("single-user HttpOnly cookie lifecycle", () => {
           expires: Date.now() / 1000 + 30 * 24 * 60 * 60,
         },
       ])
-      expect(
-        await page.evaluate(async () =>
-          fetch("/api/v1/auth/sessions", {
+      const staleSession = await page.evaluate(async (token) => {
+        const protectedResponse = await fetch("/api/v1/auth/sessions", {
             credentials: "same-origin",
             cache: "no-store",
-          }).then((response) => response.status)
+          })
+        const logoutResponse = await fetch(
+          "/api/v1/auth/single-user/session",
+          {
+            method: "DELETE",
+            credentials: "same-origin",
+            headers: { "X-CSRF-Token": token || "" },
+          }
         )
-      ).toBe(401)
-      await context.clearCookies()
+        return {
+          protectedStatus: protectedResponse.status,
+          logoutStatus: logoutResponse.status,
+          cacheControl: logoutResponse.headers.get("cache-control"),
+        }
+      }, csrfToken)
+      expect(staleSession).toEqual({
+        protectedStatus: 401,
+        logoutStatus: 200,
+        cacheControl: "no-store",
+      })
+      expect(
+        (await context.cookies()).some(
+          (cookie) => cookie.name === SESSION_COOKIE_NAME
+        )
+      ).toBe(false)
+
+      const repeatedLogout = await page.evaluate(async () => {
+        const response = await fetch("/api/v1/auth/single-user/session", {
+          method: "DELETE",
+          credentials: "same-origin",
+        })
+        return {
+          status: response.status,
+          cacheControl: response.headers.get("cache-control"),
+        }
+      })
+      expect(repeatedLogout).toEqual({
+        status: 200,
+        cacheControl: "no-store",
+      })
     })
 
     let reprovisionedCookieValue = ""
@@ -539,6 +656,7 @@ test.describe.serial("single-user HttpOnly cookie lifecycle", () => {
           }).then((response) => response.status)
         )
       ).toBe(401)
+      await page.evaluate(() => localStorage.removeItem("tldwConfig"))
       expect(await browserSecretInventory(page)).toEqual([])
     })
 
