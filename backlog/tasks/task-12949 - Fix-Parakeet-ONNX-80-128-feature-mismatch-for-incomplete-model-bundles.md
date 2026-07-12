@@ -1,7 +1,7 @@
 ---
 id: TASK-12949
 title: Fix Parakeet ONNX 80/128 feature mismatch for incomplete model bundles
-status: Done
+status: In Progress
 labels:
 - bug
 - audio
@@ -42,6 +42,7 @@ Require the Parakeet ONNX model metadata needed by onnx-asr, refresh incomplete 
 - Verification: focused suite 34 passed, 3 skipped; Ruff passed on production and tests; Bandit JSON reported 0 results and 0 errors; git diff --check passed; real cached INT8 encoder reported a 128-feature match.
 - Independent code review found no critical production issues. The cache-repair test was strengthened to prove the refreshed bundle completes loading, and dynamic feature axes are covered.
 - PR #2715 is a draft pending the repository-required human-written Change summary.
+Review follow-up reopened: rebase PR #2715 onto latest dev, inspect all review threads and GitHub Actions checks, address verified issues, rerun validation, and update the PR.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -52,7 +53,7 @@ Fixed the Parakeet ONNX 80/128 feature mismatch at model-load time. The loader n
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [x] #1 Acceptance criteria completed
+- [ ] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
