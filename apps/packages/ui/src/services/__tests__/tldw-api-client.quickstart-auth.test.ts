@@ -7,7 +7,8 @@ const mocks = vi.hoisted(() => ({
   tldwRequest: vi.fn(),
   storage: new Map<string, unknown>(),
   sessionStorage: new Map<string, unknown>(),
-  storageRemoveError: null as Error | null
+  storageRemoveError: null as Error | null,
+  envApiKey: vi.fn<() => string | null>()
 }))
 
 vi.mock("@/services/background-proxy", () => ({
@@ -50,33 +51,19 @@ import {
   isCookieSessionConfigInvalidated
 } from "@/services/tldw/runtime-auth-override"
 
-const originalDeploymentMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
-const originalApiUrl = process.env.NEXT_PUBLIC_API_URL
-const originalPublicApiKey = process.env.NEXT_PUBLIC_X_API_KEY
-
-const restoreEnv = () => {
-  if (originalDeploymentMode === undefined) {
-    delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
-  } else {
-    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = originalDeploymentMode
-  }
-
-  if (originalApiUrl === undefined) {
-    delete process.env.NEXT_PUBLIC_API_URL
-  } else {
-    process.env.NEXT_PUBLIC_API_URL = originalApiUrl
-  }
-
-  if (originalPublicApiKey === undefined) {
-    delete process.env.NEXT_PUBLIC_X_API_KEY
-  } else {
-    process.env.NEXT_PUBLIC_X_API_KEY = originalPublicApiKey
-  }
-}
-
 describe("TldwApiClient quickstart auth bootstrap", () => {
   beforeEach(() => {
-    restoreEnv()
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", undefined)
+    vi.stubEnv("NEXT_PUBLIC_API_URL", undefined)
+    vi.stubEnv("NEXT_PUBLIC_X_API_KEY", undefined)
+    vi.stubEnv("VITE_TLDW_API_KEY", undefined)
+    vi.stubEnv("VITE_TLDW_DEFAULT_API_KEY", undefined)
+    mocks.envApiKey.mockReset()
+    mocks.envApiKey.mockReturnValue(null)
+    vi.spyOn(
+      TldwApiClient.prototype as any,
+      "getEnvApiKey"
+    ).mockImplementation(() => mocks.envApiKey())
     mocks.bgRequest.mockReset()
     mocks.bgUpload.mockReset()
     mocks.bgStream.mockReset()
@@ -90,7 +77,8 @@ describe("TldwApiClient quickstart auth bootstrap", () => {
   })
 
   afterEach(() => {
-    restoreEnv()
+    vi.restoreAllMocks()
+    vi.unstubAllEnvs()
     window.localStorage.clear()
     activateCookieSessionConfig()
     clearRuntimeAuthOverride()
@@ -322,6 +310,8 @@ describe("TldwApiClient quickstart auth bootstrap", () => {
       apiKeyServerOrigin: "https://api.example.test"
     }
     expect(mocks.storage.get("tldwConfig")).toEqual(migratedConfig)
+    await client.initialize()
+    expect(mocks.storage.get("tldwConfig")).toEqual(migratedConfig)
     await expect(client.ensureConfigForRequest(true)).resolves.toEqual(
       migratedConfig
     )
@@ -424,7 +414,7 @@ describe("TldwApiClient quickstart auth bootstrap", () => {
   })
 
   it("uses an active environment key after scrubbing a legacy key", async () => {
-    process.env.NEXT_PUBLIC_X_API_KEY = "active-environment-key"
+    mocks.envApiKey.mockReturnValue("active-environment-key")
     mocks.storage.set("tldwConfig", {
       authMode: "single-user",
       serverUrl: "https://api.example.test/path",
