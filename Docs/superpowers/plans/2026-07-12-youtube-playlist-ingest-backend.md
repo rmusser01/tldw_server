@@ -57,7 +57,7 @@
 
 ### Task 1: Add contract models and Jobs migrations
 
-- [ ] **Step 1: Write failing migration and schema tests**
+- [x] **Step 1: Write failing migration and schema tests**
 
 Add table assertions to `tldw_Server_API/tests/Jobs/test_jobs_migrations_sqlite.py` and `test_jobs_migrations_postgres.py`. Add model-validation tests to `test_playlist_ingest_store.py` proving duplicate policies are explicit and `file_reattach_required` is rejected as a server state.
 
@@ -77,23 +77,23 @@ def test_run_state_rejects_client_only_file_reattach_state():
         RunItemSnapshot(occurrence_id="occ-1", ordinal=1, state="file_reattach_required")
 ```
 
-- [ ] **Step 2: Run the tests and verify RED**
+- [x] **Step 2: Run the tests and verify RED**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Jobs/test_jobs_migrations_sqlite.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_store.py -q`
 
 Expected: FAIL because the tables and `media_playlist_ingest` schemas do not exist.
 
-- [ ] **Step 3: Add the minimum portable schema**
+- [x] **Step 3: Add the minimum portable schema**
 
 Define Pydantic enums/models in `media_playlist_ingest.py`. Add matching `CREATE TABLE IF NOT EXISTS` DDL to both Jobs migration modules. Store bounded display metadata and patches as JSON, but keep owner, status, ordinal, occurrence ID, normalized source ID, job ID, attempt, event ID, and expiry as indexed columns. Add uniqueness constraints for `(preflight_id, ordinal)`, occurrence IDs, `(run_id, occurrence_id)`, and `(run_id, occurrence_id, attempt)` job mappings.
 
-- [ ] **Step 4: Run SQLite and PostgreSQL migration tests**
+- [x] **Step 4: Run SQLite and PostgreSQL migration tests**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Jobs/test_jobs_migrations_sqlite.py tldw_Server_API/tests/Jobs/test_jobs_migrations_postgres.py -q`
 
 Expected: PASS (PostgreSQL test skips only through its existing fixture when unavailable).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/api/v1/schemas/media_playlist_ingest.py tldw_Server_API/app/core/Jobs/migrations.py tldw_Server_API/app/core/Jobs/pg_migrations.py tldw_Server_API/tests/Jobs tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_store.py

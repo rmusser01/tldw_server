@@ -13,6 +13,14 @@ references:
 - Docs/superpowers/specs/2026-07-12-youtube-playlist-per-item-ingest-design.md
 documentation:
 - Docs/superpowers/plans/2026-07-12-youtube-playlist-ingest-backend.md
+modified_files:
+- Docs/superpowers/plans/2026-07-12-youtube-playlist-ingest-backend.md
+- tldw_Server_API/app/api/v1/schemas/media_playlist_ingest.py
+- tldw_Server_API/app/core/Jobs/migrations.py
+- tldw_Server_API/app/core/Jobs/pg_migrations.py
+- tldw_Server_API/tests/Jobs/test_jobs_migrations_sqlite.py
+- tldw_Server_API/tests/Jobs/test_jobs_migrations_postgres.py
+- tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_store.py
 ---
 
 ## Description
