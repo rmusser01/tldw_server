@@ -9,6 +9,10 @@ import {
 import { getApiBearer, getApiKey } from "@web/lib/authStorage"
 import { getApiBaseUrl } from "@web/lib/api"
 import {
+  AUTH_CREDENTIALS_CHANGED_EVENT,
+  type AuthCredentialsChangedDetail
+} from "@web/lib/auth-events"
+import {
   getUnreadCount,
   listNotifications,
   subscribeNotificationsStream,
@@ -26,12 +30,13 @@ export type NotificationLifecycleContextValue = {
   mutationError: unknown | null
   tryAgain: () => Promise<void>
   refreshPermissions: () => Promise<void>
+  reportRequestError: (error: unknown) => void
   reportMutationError: (error: unknown) => void
 }
 
 type NotificationRuntimeSnapshot = Omit<
   NotificationLifecycleContextValue,
-  "tryAgain" | "refreshPermissions" | "reportMutationError"
+  "tryAgain" | "refreshPermissions" | "reportRequestError" | "reportMutationError"
 > & { scopeKey: string }
 
 type NotificationLifecycleProviderProps = {
@@ -305,6 +310,52 @@ export function NotificationLifecycleProvider({
     }
   }, [startWork, stopWork])
 
+  React.useEffect(() => {
+    if (typeof window === "undefined") return
+
+    const stopForRemovedCredentials = () => {
+      generationRef.current += 1
+      stopWork()
+      terminalGenerationRef.current = generationRef.current
+      unreadCurrentRef.current = false
+      cursorCurrentRef.current = false
+      setSnapshot({
+        ...initialSnapshot(scopeKey),
+        state: "auth-required"
+      })
+    }
+    const onCredentialsChanged = (event: Event) => {
+      const detail = (event as CustomEvent<AuthCredentialsChangedDetail>).detail
+      if (detail?.authenticated) {
+        void startWork()
+      } else {
+        stopForRemovedCredentials()
+      }
+    }
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== "access_token") return
+      if (event.newValue) {
+        void startWork()
+      } else {
+        stopForRemovedCredentials()
+      }
+    }
+
+    window.addEventListener(AUTH_CREDENTIALS_CHANGED_EVENT, onCredentialsChanged)
+    window.addEventListener("storage", onStorage)
+    return () => {
+      window.removeEventListener(AUTH_CREDENTIALS_CHANGED_EVENT, onCredentialsChanged)
+      window.removeEventListener("storage", onStorage)
+    }
+  }, [scopeKey, startWork, stopWork])
+
+  const reportRequestError = React.useCallback(
+    (error: unknown) => {
+      applyFailure(error, generationRef.current)
+    },
+    [applyFailure]
+  )
+
   const reportMutationError = React.useCallback(
     (error: unknown) => {
       const generation = generationRef.current
@@ -330,9 +381,10 @@ export function NotificationLifecycleProvider({
       mutationError: projected.mutationError,
       tryAgain: startWork,
       refreshPermissions: startWork,
+      reportRequestError,
       reportMutationError
     }),
-    [projected, reportMutationError, startWork]
+    [projected, reportMutationError, reportRequestError, startWork]
   )
 
   return (

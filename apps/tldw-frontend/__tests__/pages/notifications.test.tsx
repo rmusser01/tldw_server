@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 const mocks = vi.hoisted(() => ({
@@ -14,6 +14,15 @@ const mocks = vi.hoisted(() => ({
   snoozeNotification: vi.fn(),
   subscribeNotificationsStream: vi.fn(),
   showToast: vi.fn(),
+  reportMutationError: vi.fn(),
+  reportRequestError: vi.fn(),
+  lifecycle: {
+    state: 'active',
+    unreadCount: 2,
+    updatedAt: 1,
+    latestEvent: null as { event: string; id?: number; payload?: unknown } | null,
+    eventSequence: 0,
+  },
 }));
 
 vi.mock('next/router', () => ({
@@ -38,11 +47,24 @@ vi.mock('@web/components/ui/ToastProvider', () => ({
   useToast: () => ({ show: mocks.showToast }),
 }));
 
+vi.mock('@web/components/notifications/NotificationLifecycleProvider', () => ({
+  useNotificationLifecycle: () => ({
+    ...mocks.lifecycle,
+    reportMutationError: mocks.reportMutationError,
+    reportRequestError: mocks.reportRequestError,
+  }),
+}));
+
 import NotificationsPage from '@web/pages/notifications';
 
 describe('NotificationsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.lifecycle.state = 'active';
+    mocks.lifecycle.unreadCount = 2;
+    mocks.lifecycle.updatedAt = 1;
+    mocks.lifecycle.latestEvent = null;
+    mocks.lifecycle.eventSequence = 0;
     mocks.getNotificationPreferences.mockResolvedValue({
       user_id: 'user-1',
       reminder_enabled: true,
@@ -102,18 +124,12 @@ describe('NotificationsPage', () => {
     expect(screen.getByText('Unread: 1')).toBeInTheDocument();
   });
 
-  it('updates the inbox from stream events without showing a duplicate toast', async () => {
-    let onEvent: ((event: { event: string; id?: number; payload?: unknown }) => void) | null = null;
-    mocks.subscribeNotificationsStream.mockImplementation((options: { onEvent: typeof onEvent }) => {
-      onEvent = options.onEvent;
-      return () => {};
-    });
-
-    render(<NotificationsPage />);
+  it('updates the inbox from provider-owned stream events without showing a duplicate toast', async () => {
+    const view = render(<NotificationsPage />);
 
     expect(await screen.findByText('Unread: 2')).toBeInTheDocument();
 
-    onEvent?.({
+    mocks.lifecycle.latestEvent = {
       event: 'notification',
       id: 102,
       payload: {
@@ -124,10 +140,78 @@ describe('NotificationsPage', () => {
         severity: 'info',
         created_at: '2026-03-08T01:00:00Z',
       },
-    });
+    };
+    mocks.lifecycle.unreadCount = 3;
+    mocks.lifecycle.updatedAt = 2;
+    mocks.lifecycle.eventSequence = 1;
+    view.rerender(<NotificationsPage />);
 
     expect(await screen.findByText('Open the report in Deep Research.')).toBeInTheDocument();
+    expect(screen.getByText('Unread: 3')).toBeInTheDocument();
     expect(mocks.showToast).not.toHaveBeenCalled();
+  });
+
+  it('does not create an inbox poll or a second notification stream', async () => {
+    vi.useFakeTimers();
+    render(<NotificationsPage />);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(mocks.listNotifications).toHaveBeenCalledTimes(2);
+    expect(mocks.subscribeNotificationsStream).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(mocks.listNotifications).toHaveBeenCalledTimes(2);
+    expect(mocks.subscribeNotificationsStream).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it('refreshes page-specific lists after a provider coalescing event', async () => {
+    const view = render(<NotificationsPage />);
+    await waitFor(() => expect(mocks.listNotifications).toHaveBeenCalledTimes(2));
+
+    mocks.lifecycle.latestEvent = { event: 'notifications_coalesced', id: 102 };
+    mocks.lifecycle.eventSequence = 1;
+    view.rerender(<NotificationsPage />);
+
+    await waitFor(() => expect(mocks.listNotifications).toHaveBeenCalledTimes(4));
+  });
+
+  it('reports list failures to the shared lifecycle', async () => {
+    const failure = Object.assign(new Error('forbidden'), { status: 403 });
+    mocks.listNotifications.mockRejectedValue(failure);
+
+    render(<NotificationsPage />);
+
+    await waitFor(() => expect(mocks.reportRequestError).toHaveBeenCalledWith(failure));
+    expect(mocks.reportRequestError).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a failed mutation once without replaying it', async () => {
+    const user = userEvent.setup();
+    const failure = Object.assign(new Error('offline'), { status: 503 });
+    mocks.markNotificationsRead.mockRejectedValue(failure);
+    render(<NotificationsPage />);
+
+    await user.click(await screen.findByRole('button', { name: 'Mark read' }));
+
+    await waitFor(() => expect(mocks.reportMutationError).toHaveBeenCalledWith(failure));
+    expect(mocks.markNotificationsRead).toHaveBeenCalledTimes(1);
+    expect(mocks.reportMutationError).toHaveBeenCalledTimes(1);
+  });
+
+  it('suppresses page requests and actions while lifecycle state is terminal', async () => {
+    mocks.lifecycle.state = 'unavailable';
+    render(<NotificationsPage />);
+    await act(async () => Promise.resolve());
+
+    expect(mocks.listNotifications).not.toHaveBeenCalled();
+    expect(mocks.getUnreadCount).not.toHaveBeenCalled();
+    expect(mocks.subscribeNotificationsStream).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Refresh' })).toBeDisabled();
   });
 
   it('shows snoozed notifications instead of the empty state when only snoozed items remain', async () => {

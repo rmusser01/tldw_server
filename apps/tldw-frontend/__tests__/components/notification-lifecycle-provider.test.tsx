@@ -29,6 +29,7 @@ import {
   useNotificationLifecycle,
   type NotificationLifecycleContextValue
 } from "@web/components/notifications/NotificationLifecycleProvider"
+import { AUTH_CREDENTIALS_CHANGED_EVENT } from "@web/lib/auth-events"
 
 function Probe({ onValue }: { onValue: (value: NotificationLifecycleContextValue) => void }) {
   const value = useNotificationLifecycle()
@@ -171,6 +172,45 @@ describe("NotificationLifecycleProvider", () => {
 
     await act(async () => resolveNext?.({ unread_count: 2 }))
     await waitFor(() => expect(mocks.subscribeNotificationsStream).toHaveBeenCalledTimes(1))
+  })
+
+  it("restarts auth-required work after same-principal credentials rotate", async () => {
+    mocks.getUnreadCount
+      .mockRejectedValueOnce(Object.assign(new Error("expired"), { status: 401 }))
+      .mockResolvedValueOnce({ unread_count: 3 })
+    const view = renderProvider("notifications:server-a:user-a")
+    await waitFor(() => expect(view.latest().state).toBe("auth-required"))
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent(AUTH_CREDENTIALS_CHANGED_EVENT, {
+          detail: { authenticated: true }
+        })
+      )
+    })
+
+    await waitFor(() => expect(mocks.subscribeNotificationsStream).toHaveBeenCalledTimes(1))
+    expect(mocks.getUnreadCount).toHaveBeenCalledTimes(2)
+    expect(view.latest().unreadCount).toBe(3)
+  })
+
+  it("stops and clears scoped work when credentials are removed", async () => {
+    const unsubscribe = vi.fn()
+    mocks.subscribeNotificationsStream.mockReturnValue(unsubscribe)
+    const view = renderProvider()
+    await waitFor(() => expect(mocks.subscribeNotificationsStream).toHaveBeenCalledTimes(1))
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent(AUTH_CREDENTIALS_CHANGED_EVENT, {
+          detail: { authenticated: false }
+        })
+      )
+    })
+
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
+    expect(view.latest().state).toBe("auth-required")
+    expect(view.latest().unreadCount).toBe(0)
   })
 
   it("shows transient stream failures as degraded and recovers only on onOpen", async () => {

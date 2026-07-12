@@ -1,23 +1,20 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/router';
+import { useNotificationLifecycle } from '@web/components/notifications/NotificationLifecycleProvider';
 import { useToast } from '@web/components/ui/ToastProvider';
 import {
   cancelNotificationSnooze,
   dismissNotification,
-  getUnreadCount,
   getNotificationPreferences,
   updateNotificationPreferences,
   listNotifications,
   markNotificationsRead,
   NotificationItem,
   NotificationPreferences,
-  NotificationStreamEvent,
   snoozeNotification,
-  subscribeNotificationsStream,
 } from '@web/lib/api/notifications';
 import { formatRelativeTime } from '@web/lib/utils';
 
-const POLL_INTERVAL_MS = 30_000;
 const DEFAULT_SNOOZE_MINUTES = 15;
 const NOTIFICATIONS_FETCH_LIMIT = 100;
 type PreferenceKey = 'reminder_enabled' | 'job_completed_enabled' | 'job_failed_enabled';
@@ -51,13 +48,23 @@ function toNotificationFromStream(payload: unknown): NotificationItem | null {
 export default function NotificationsPage() {
   const { show } = useToast();
   const router = useRouter();
+  const {
+    state: lifecycleState,
+    unreadCount: lifecycleUnreadCount,
+    updatedAt: lifecycleUpdatedAt,
+    latestEvent,
+    eventSequence,
+    reportRequestError,
+    reportMutationError,
+  } = useNotificationLifecycle();
+  const isTerminal = lifecycleState === 'auth-required' || lifecycleState === 'unavailable';
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [snoozedItems, setSnoozedItems] = useState<NotificationItem[]>([]);
   const [showSnoozed, setShowSnoozed] = useState(false);
-  const [unreadCount, setUnreadCount] = useState(0);
+  const [unreadCount, setUnreadCount] = useState(lifecycleUnreadCount);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const cursorRef = useRef(0);
+  const handledEventSequenceRef = useRef(0);
   const [showPrefs, setShowPrefs] = useState(false);
   const [prefs, setPrefs] = useState<NotificationPreferences | null>(null);
   const [prefsLoading, setPrefsLoading] = useState(false);
@@ -65,8 +72,9 @@ export default function NotificationsPage() {
   const [prefsSavingKey, setPrefsSavingKey] = useState<PreferenceKey | null>(null);
 
   const refreshInbox = useCallback(async () => {
+    if (isTerminal) return;
     try {
-      const [list, snoozed, unread] = await Promise.all([
+      const [list, snoozed] = await Promise.all([
         listNotifications({ limit: NOTIFICATIONS_FETCH_LIMIT, offset: 0, include_archived: false }),
         listNotifications({
           limit: NOTIFICATIONS_FETCH_LIMIT,
@@ -74,21 +82,18 @@ export default function NotificationsPage() {
           include_archived: true,
           only_snoozed: true,
         }),
-        getUnreadCount(),
       ]);
       setItems(list.items);
       setSnoozedItems(snoozed.items);
-      setUnreadCount(unread.unread_count);
-      const maxSeen = list.items.reduce((maxId, item) => Math.max(maxId, item.id), cursorRef.current);
-      cursorRef.current = maxSeen;
       setError(null);
     } catch (refreshError) {
+      reportRequestError(refreshError);
       const message = refreshError instanceof Error ? refreshError.message : 'Failed to load notifications';
       setError(message);
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [isTerminal, reportRequestError]);
 
   const handleSnooze = useCallback(
     async (notificationId: number, minutes: number = DEFAULT_SNOOZE_MINUTES) => {
@@ -116,6 +121,7 @@ export default function NotificationsPage() {
           variant: 'success',
         });
       } catch (snoozeError) {
+        reportMutationError(snoozeError);
         const message = snoozeError instanceof Error ? snoozeError.message : 'Failed to snooze notification';
         show({
           title: 'Snooze failed',
@@ -124,7 +130,7 @@ export default function NotificationsPage() {
         });
       }
     },
-    [items, show]
+    [items, reportMutationError, show]
   );
 
   const handleCancelSnooze = useCallback(async (notificationId: number) => {
@@ -137,10 +143,11 @@ export default function NotificationsPage() {
         variant: 'success',
       });
     } catch (cancelError) {
+      reportMutationError(cancelError);
       const message = cancelError instanceof Error ? cancelError.message : 'Failed to cancel snooze';
       show({ title: 'Cancel snooze failed', description: message, variant: 'danger' });
     }
-  }, [show]);
+  }, [reportMutationError, show]);
 
   const loadPrefs = useCallback(async () => {
     if (prefsLoading) return;
@@ -149,13 +156,14 @@ export default function NotificationsPage() {
     try {
       const nextPrefs = await getNotificationPreferences();
       setPrefs(nextPrefs);
-    } catch {
+    } catch (preferenceError) {
+      reportRequestError(preferenceError);
       setPrefs(null);
       setPrefsError('Notification preferences are currently unavailable.');
     } finally {
       setPrefsLoading(false);
     }
-  }, [prefsLoading]);
+  }, [prefsLoading, reportRequestError]);
 
   const togglePref = useCallback(
     async (key: PreferenceKey) => {
@@ -171,13 +179,14 @@ export default function NotificationsPage() {
       try {
         const result = await updateNotificationPreferences(updated);
         setPrefs(result);
-      } catch {
+      } catch (preferenceError) {
+        reportMutationError(preferenceError);
         show({ title: 'Failed to update preference', variant: 'danger' });
       } finally {
         setPrefsSavingKey(null);
       }
     },
-    [prefs, prefsSavingKey, show]
+    [prefs, prefsSavingKey, reportMutationError, show]
   );
 
   const applyIncomingNotification = useCallback(
@@ -188,8 +197,6 @@ export default function NotificationsPage() {
         }
         return [incoming, ...previous].slice(0, 200);
       });
-      setUnreadCount((count) => count + 1);
-      cursorRef.current = Math.max(cursorRef.current, incoming.id);
     },
     []
   );
@@ -199,42 +206,24 @@ export default function NotificationsPage() {
   }, [refreshInbox]);
 
   useEffect(() => {
-    const intervalId = window.setInterval(() => {
-      void refreshInbox();
-    }, POLL_INTERVAL_MS);
-    return () => window.clearInterval(intervalId);
-  }, [refreshInbox]);
+    setUnreadCount(lifecycleUnreadCount);
+  }, [lifecycleUnreadCount, lifecycleUpdatedAt]);
 
   useEffect(() => {
-    const unsubscribe = subscribeNotificationsStream({
-      after: cursorRef.current,
-      onEvent: (event: NotificationStreamEvent) => {
-        if (typeof event.id === 'number' && Number.isFinite(event.id)) {
-          cursorRef.current = Math.max(cursorRef.current, event.id);
-        }
-        if (event.event === 'notification') {
-          const nextItem = toNotificationFromStream(event.payload);
-          if (nextItem) {
-            applyIncomingNotification(nextItem);
-          }
-          return;
-        }
-        if (event.event === 'notifications_coalesced') {
-          void refreshInbox();
-          return;
-        }
-        if (event.event === 'reset_required') {
-          void refreshInbox();
-        }
-      },
-      onError: () => {
-        // Polling remains active as a fallback path.
-      },
-    });
-    return () => {
-      unsubscribe();
-    };
-  }, [applyIncomingNotification, refreshInbox]);
+    if (!latestEvent || eventSequence <= handledEventSequenceRef.current) return;
+    handledEventSequenceRef.current = eventSequence;
+    if (latestEvent.event === 'notification') {
+      const nextItem = toNotificationFromStream(latestEvent.payload);
+      if (nextItem) applyIncomingNotification(nextItem);
+      return;
+    }
+    if (
+      latestEvent.event === 'notifications_coalesced' ||
+      latestEvent.event === 'reset_required'
+    ) {
+      void refreshInbox();
+    }
+  }, [applyIncomingNotification, eventSequence, latestEvent, refreshInbox]);
 
   const handleMarkRead = useCallback(async (notificationId: number) => {
     try {
@@ -248,10 +237,11 @@ export default function NotificationsPage() {
       );
       setUnreadCount((count) => Math.max(0, count - 1));
     } catch (markError) {
+      reportMutationError(markError);
       const message = markError instanceof Error ? markError.message : 'Failed to mark notification as read';
       show({ title: 'Mark read failed', description: message, variant: 'danger' });
     }
-  }, [show]);
+  }, [reportMutationError, show]);
 
   const handleDismiss = useCallback(async (notificationId: number) => {
     try {
@@ -264,10 +254,11 @@ export default function NotificationsPage() {
         return previous.filter((item) => item.id !== notificationId);
       });
     } catch (dismissError) {
+      reportMutationError(dismissError);
       const message = dismissError instanceof Error ? dismissError.message : 'Failed to dismiss notification';
       show({ title: 'Dismiss failed', description: message, variant: 'danger' });
     }
-  }, [show]);
+  }, [reportMutationError, show]);
 
   const hasNotifications = items.length > 0;
   const hasAnyNotifications = hasNotifications || snoozedItems.length > 0;
@@ -285,6 +276,7 @@ export default function NotificationsPage() {
             <button
               type="button"
               className="rounded border border-border px-3 py-2 text-sm font-medium hover:bg-muted"
+              disabled={isTerminal}
               onClick={() => void refreshInbox()}
             >
               Refresh
@@ -292,6 +284,7 @@ export default function NotificationsPage() {
             <button
               type="button"
               className="rounded border border-border px-3 py-2 text-sm font-medium hover:bg-muted"
+              disabled={isTerminal}
               onClick={() => {
                 const nextShowPrefs = !showPrefs;
                 setShowPrefs(nextShowPrefs);
@@ -337,7 +330,7 @@ export default function NotificationsPage() {
                     <input
                       type="checkbox"
                       checked={prefs[key]}
-                      disabled={prefsSavingKey !== null}
+                      disabled={isTerminal || prefsSavingKey !== null}
                       onChange={() => void togglePref(key)}
                       className="mt-1 h-4 w-4 rounded border-border disabled:cursor-not-allowed disabled:opacity-50"
                     />
@@ -380,6 +373,7 @@ export default function NotificationsPage() {
                     <button
                       type="button"
                       className="rounded border border-primary/30 bg-primary/10 px-2 py-1 text-xs font-medium text-primary hover:bg-primary/20"
+                      disabled={isTerminal}
                       onClick={async () => {
                         if (!item.read_at) {
                           try { await handleMarkRead(item.id) } catch {}
@@ -404,6 +398,7 @@ export default function NotificationsPage() {
                     <button
                       type="button"
                       className="rounded border border-border px-2 py-1 text-xs font-medium hover:bg-muted"
+                      disabled={isTerminal}
                       onClick={() => void handleMarkRead(item.id)}
                     >
                       Mark read
@@ -412,6 +407,7 @@ export default function NotificationsPage() {
                   <button
                     type="button"
                     className="rounded border border-border px-2 py-1 text-xs font-medium hover:bg-muted"
+                    disabled={isTerminal}
                     onClick={() => void handleSnooze(item.id, DEFAULT_SNOOZE_MINUTES)}
                   >
                     Snooze {DEFAULT_SNOOZE_MINUTES}m
@@ -419,6 +415,7 @@ export default function NotificationsPage() {
                   <button
                     type="button"
                     className="rounded border border-border px-2 py-1 text-xs font-medium hover:bg-muted"
+                    disabled={isTerminal}
                     onClick={() => void handleDismiss(item.id)}
                   >
                     Dismiss
@@ -456,6 +453,7 @@ export default function NotificationsPage() {
                       <button
                         type="button"
                         className="rounded border border-border px-2 py-1 text-xs font-medium hover:bg-muted"
+                        disabled={isTerminal}
                         onClick={() => void handleCancelSnooze(item.id)}
                       >
                         Cancel snooze
