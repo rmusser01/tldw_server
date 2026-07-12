@@ -556,6 +556,15 @@ describe('WebLayout /chat scroll contract', () => {
     expect(getUnreadCountMock).not.toHaveBeenCalled();
   });
 
+  it('lets the notification provider own live production scope resolution', () => {
+    const source = readFileSync(webLayoutSourcePath, 'utf8');
+
+    expect(source).toContain(
+      '<NotificationLifecycleProvider enabled={enabled && !demoEnabled}>'
+    );
+    expect(source).not.toContain('<NotificationLifecycleProvider scopeKey={scopeKey}');
+  });
+
   it('passes openResetKey when the shared ChatSidebar feature is enabled', () => {
     featureFlagState.showChatSidebar = true;
 

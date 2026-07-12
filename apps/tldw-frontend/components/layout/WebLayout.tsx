@@ -54,7 +54,6 @@ import {
 import { useBackendRecoveryUi } from '@/components/Common/BackendRecoveryUiContext';
 import { BackendUnavailableModalGate } from '@web/components/layout/BackendUnavailableModalGate';
 import {
-  buildWebNotificationScopeKey,
   NotificationLifecycleProvider,
   useNotificationLifecycle,
 } from '@web/components/notifications/NotificationLifecycleProvider';
@@ -768,9 +767,8 @@ function NotificationRuntimeOwner({
   enabled: boolean;
 }) {
   const { demoEnabled } = useDemoMode();
-  const scopeKey = buildWebNotificationScopeKey();
   return (
-    <NotificationLifecycleProvider scopeKey={scopeKey} enabled={enabled && !demoEnabled}>
+    <NotificationLifecycleProvider enabled={enabled && !demoEnabled}>
       <NotificationToastBridge />
       {children}
     </NotificationLifecycleProvider>

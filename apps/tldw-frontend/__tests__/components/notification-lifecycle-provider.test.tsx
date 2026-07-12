@@ -63,10 +63,16 @@ const renderProvider = (scopeKey = "notifications:server-a:user-a") => {
   }
 }
 
+const jwtFor = (subject: string): string => {
+  const payload = window.btoa(JSON.stringify({ sub: subject }))
+  return `eyJhbGciOiJub25lIn0.${payload.replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "")}.signature`
+}
+
 describe("NotificationLifecycleProvider", () => {
   beforeEach(() => {
     vi.useRealTimers()
     vi.clearAllMocks()
+    window.localStorage.clear()
     mocks.getUnreadCount.mockResolvedValue({ unread_count: 5 })
     mocks.listNotifications.mockResolvedValue({
       items: [{ id: 10, title: "Existing" }],
@@ -255,6 +261,37 @@ describe("NotificationLifecycleProvider", () => {
     expect(mocks.getUnreadCount).toHaveBeenCalledTimes(1)
     expect(mocks.subscribeNotificationsStream).not.toHaveBeenCalled()
     expect(view.latest().state).toBe("unavailable")
+  })
+
+  it("clears unavailable state and restarts after a cross-tab principal change", async () => {
+    window.localStorage.setItem("access_token", jwtFor("user-a"))
+    mocks.getUnreadCount
+      .mockRejectedValueOnce(Object.assign(new Error("forbidden"), { status: 403 }))
+      .mockResolvedValueOnce({ unread_count: 2 })
+    let latest: NotificationLifecycleContextValue | null = null
+    render(
+      <NotificationLifecycleProvider>
+        <Probe onValue={(value) => { latest = value }} />
+      </NotificationLifecycleProvider>
+    )
+    await waitFor(() => expect(latest?.state).toBe("unavailable"))
+
+    const nextToken = jwtFor("user-b")
+    act(() => {
+      window.localStorage.setItem("access_token", nextToken)
+      window.dispatchEvent(
+        new StorageEvent("storage", {
+          key: "access_token",
+          oldValue: jwtFor("user-a"),
+          newValue: nextToken
+        })
+      )
+    })
+
+    expect(latest?.state).toBe("connecting")
+    expect(latest?.unreadCount).toBe(0)
+    await waitFor(() => expect(mocks.subscribeNotificationsStream).toHaveBeenCalledTimes(1))
+    expect(mocks.getUnreadCount).toHaveBeenCalledTimes(2)
   })
 
   it("shows transient stream failures as degraded and recovers only on onOpen", async () => {

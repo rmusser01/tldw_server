@@ -106,7 +106,10 @@ export function NotificationLifecycleProvider({
   pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
   scopeKey: suppliedScopeKey
 }: NotificationLifecycleProviderProps) {
-  const scopeKey = suppliedScopeKey || buildWebNotificationScopeKey()
+  const [liveScopeKey, setLiveScopeKey] = React.useState(() =>
+    suppliedScopeKey ?? buildWebNotificationScopeKey()
+  )
+  const scopeKey = suppliedScopeKey ?? liveScopeKey
   const [snapshot, setSnapshot] = React.useState<NotificationRuntimeSnapshot>(() =>
     initialSnapshot(scopeKey)
   )
@@ -328,32 +331,54 @@ export function NotificationLifecycleProvider({
         state: "auth-required"
       })
     }
-    const shouldPreserveUnavailable = () =>
-      terminalStateRef.current === "unavailable" &&
-      (suppliedScopeKey !== undefined || buildWebNotificationScopeKey() === scopeKey)
+    const resetForChangedScope = (): boolean => {
+      if (suppliedScopeKey !== undefined) return false
+      const nextScopeKey = buildWebNotificationScopeKey()
+      if (nextScopeKey === scopeKey) return false
+      generationRef.current += 1
+      stopWork()
+      terminalGenerationRef.current = null
+      terminalStateRef.current = null
+      unreadCurrentRef.current = false
+      cursorCurrentRef.current = false
+      setSnapshot(initialSnapshot(nextScopeKey))
+      setLiveScopeKey(nextScopeKey)
+      return true
+    }
     const onCredentialsChanged = (event: Event) => {
       const detail = (event as CustomEvent<AuthCredentialsChangedDetail>).detail
       if (detail?.authenticated) {
-        if (shouldPreserveUnavailable()) return
+        if (resetForChangedScope()) return
+        if (terminalStateRef.current === "unavailable") return
         void startWork()
       } else {
         stopForRemovedCredentials()
       }
     }
     const onStorage = (event: StorageEvent) => {
+      if (event.key === "tldwConfig") {
+        resetForChangedScope()
+        return
+      }
       if (event.key !== "access_token") return
       if (event.newValue) {
-        if (shouldPreserveUnavailable()) return
+        if (resetForChangedScope()) return
+        if (terminalStateRef.current === "unavailable") return
         void startWork()
       } else {
         stopForRemovedCredentials()
       }
     }
+    const onConfigUpdated = () => {
+      resetForChangedScope()
+    }
 
     window.addEventListener(AUTH_CREDENTIALS_CHANGED_EVENT, onCredentialsChanged)
+    window.addEventListener("tldw:config-updated", onConfigUpdated)
     window.addEventListener("storage", onStorage)
     return () => {
       window.removeEventListener(AUTH_CREDENTIALS_CHANGED_EVENT, onCredentialsChanged)
+      window.removeEventListener("tldw:config-updated", onConfigUpdated)
       window.removeEventListener("storage", onStorage)
     }
   }, [scopeKey, startWork, stopWork, suppliedScopeKey])
