@@ -2479,14 +2479,17 @@ def extract_article_with_pipeline(
         strategy: Optional[str],
     ) -> dict[str, Any]:
         summary = result.get("summary")
-        if result.get("extraction_successful") and jsonld_summary and (
-            not isinstance(summary, str) or not summary.strip()
+        if (
+            result.get("extraction_successful")
+            and jsonld_summary
+            and (not isinstance(summary, str) or not summary.strip())
         ):
             result["summary"] = jsonld_summary
         final = _attach_trace(result, trace, strategy, order)
         if _should_clear_caches("end"):
             clear_extraction_caches()
         return final
+
     for strategy in unknown:
         trace.append(_trace_entry(strategy, "skipped", "unknown_strategy"))
 
@@ -4085,7 +4088,7 @@ class ContentMetadataHandler:
         if not envelope.startswith(ContentMetadataHandler.METADATA_START):
             return None
 
-        metadata_text = envelope[len(ContentMetadataHandler.METADATA_START):].lstrip()
+        metadata_text = envelope[len(ContentMetadataHandler.METADATA_START) :].lstrip()
         try:
             metadata, metadata_end = json.JSONDecoder().raw_decode(metadata_text)
         except (json.JSONDecodeError, RecursionError):
@@ -4096,7 +4099,7 @@ class ContentMetadataHandler:
         remainder = metadata_text[metadata_end:].lstrip()
         if not remainder.startswith(ContentMetadataHandler.METADATA_END):
             return None
-        clean_content = remainder[len(ContentMetadataHandler.METADATA_END):].strip()
+        clean_content = remainder[len(ContentMetadataHandler.METADATA_END) :].strip()
         return metadata, clean_content
 
     @staticmethod
