@@ -56,6 +56,7 @@ Follow Docs/superpowers/plans/2026-07-12-youtube-playlist-ingest-backend.md sequ
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Task 2: implemented the owner-scoped PlaylistIngestStore and signed ordinal cursor contract using the injected JobManager connection helpers. Added atomic snapshot/materialization/run/event/cleanup operations, compare-and-set item transitions, and one-query normalized Media DB URL batch lookup. Verification: focused suite 59 passed/1 existing jobs-suite-only PostgreSQL skip; property tests cover 42 generated cases; Ruff/compileall/diff-check clean on touched scope; Bandit reported zero findings.
+Task 2 review follow-up: replaced materialization metadata blacklisting with an explicit seven-field compact display allowlist; made expired preflights, materializations, runs, pages, events, cursors, snapshot replacement, event append, and CAS transitions fail closed; rejected nonfuture expiry at all resource creation seams; and added a PostgreSQL-only `FOR UPDATE` locked mutable snapshot read with a separate SQLite-safe query literal. RED: compact 1/1 failed, expiry 5/5 failed, PG lock 1/1 failed. GREEN: combined Task 1+2 verification 94 passed/3 existing jobs-suite-policy skips; Ruff/compileall/diff-check passed; Bandit zero findings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

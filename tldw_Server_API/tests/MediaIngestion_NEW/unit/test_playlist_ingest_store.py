@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -7,8 +8,14 @@ NOW = datetime(2026, 7, 12, 12, 0, tzinfo=timezone.utc)
 
 
 class _FixedClock:
+    def __init__(self) -> None:
+        self.current = NOW
+
     def now_utc(self) -> datetime:
-        return NOW
+        return self.current
+
+    def advance(self, delta: timedelta) -> None:
+        self.current += delta
 
 
 @pytest.fixture()
@@ -19,8 +26,11 @@ def store(tmp_path, monkeypatch):
     )
     from tldw_Server_API.app.core.Jobs.manager import JobManager
 
-    manager = JobManager(db_path=tmp_path / "playlist-jobs.db", clock=_FixedClock())
-    return PlaylistIngestStore(manager)
+    clock = _FixedClock()
+    manager = JobManager(db_path=tmp_path / "playlist-jobs.db", clock=clock)
+    playlist_store = PlaylistIngestStore(manager)
+    playlist_store.test_clock = clock
+    return playlist_store
 
 
 def _preflight_item(
@@ -302,7 +312,7 @@ def test_materialization_rejects_expired_snapshot(store):
         "1",
         source_url="https://www.youtube.com/playlist?list=PL-expired",
         source_kind="youtube_playlist",
-        expires_at=NOW - timedelta(seconds=1),
+        expires_at=NOW + timedelta(hours=1),
     )
     store.replace_preflight_snapshot(
         "1",
@@ -310,6 +320,7 @@ def test_materialization_rejects_expired_snapshot(store):
         status="ready",
         items=[_preflight_item("occ-expired", 1)],
     )
+    store.test_clock.advance(timedelta(hours=2))
 
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
         PlaylistIngestNotFoundError,
@@ -323,7 +334,7 @@ def test_materialization_rejects_expired_snapshot(store):
         )
 
 
-def test_materialization_copies_identity_but_not_review_policy(store):
+def test_materialization_keeps_only_compact_display_metadata(store):
     ready = store.create_preflight(
         "1",
         source_url="https://www.youtube.com/playlist?list=PL-policy",
@@ -341,8 +352,19 @@ def test_materialization_copies_identity_but_not_review_policy(store):
                 2,
                 display_metadata={
                     "title": "Video 2",
+                    "channel_or_uploader": "Channel",
+                    "duration_seconds": 123,
+                    "published_at": "2026-01-02T03:04:05Z",
+                    "thumbnail_url": "https://example.com/thumb.jpg",
+                    "playlist_id": "PL-policy",
+                    "playlist_title": "Policy playlist",
                     "duplicate_policy": "overwrite",
                     "metadata_patch": {"title": "Changed"},
+                    "duplicate_evidence": {"matched_by": "url"},
+                    "review_required": True,
+                    "library_match_id": 42,
+                    "media_id": 42,
+                    "arbitrary": "must not survive",
                 },
             ),
         ],
@@ -357,8 +379,15 @@ def test_materialization_copies_identity_but_not_review_policy(store):
 
     assert item.occurrence_id == "occ-2"
     assert item.source_url.endswith("v=2")
-    assert "duplicate_policy" not in item.display_metadata
-    assert "metadata_patch" not in item.display_metadata
+    assert item.display_metadata == {
+        "title": "Video 2",
+        "channel_or_uploader": "Channel",
+        "duration_seconds": 123,
+        "published_at": "2026-01-02T03:04:05Z",
+        "thumbnail_url": "https://example.com/thumb.jpg",
+        "playlist_id": "PL-policy",
+        "playlist_title": "Policy playlist",
+    }
 
 
 def test_materialization_rejects_duplicate_or_unknown_selection(store):
@@ -493,6 +522,115 @@ def test_event_replay_and_version_bump_are_atomic(store):
     assert len(store.list_run_events("1", run.run_id)) == 1
 
 
+def test_expired_resource_reads_pages_events_and_old_cursor_fail_closed(store):
+    ready = _seed_preflight(store, item_count=2)
+    cursor = store.list_preflight_items("1", ready.preflight_id, limit=1).next_cursor
+    materialized = store.create_materialization(
+        "1",
+        preflight_id=ready.preflight_id,
+        occurrence_ids=["occ-1", "occ-2"],
+        expires_at=NOW + timedelta(hours=1),
+    )
+    run = store.create_run(
+        "1",
+        materialization_ids=[materialized.id],
+        expires_at=NOW + timedelta(hours=1),
+    )
+    store.append_run_event("1", run.run_id, event_type="created", expected_version=1)
+    store.test_clock.advance(timedelta(hours=2))
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestNotFoundError,
+    )
+
+    operations = [
+        lambda: store.get_preflight("1", ready.preflight_id),
+        lambda: store.list_preflight_items("1", ready.preflight_id),
+        lambda: store.list_preflight_items("1", ready.preflight_id, limit=1, cursor=cursor),
+        lambda: store.get_materialization("1", materialized.id),
+        lambda: store.list_materialization_items("1", materialized.id),
+        lambda: store.get_run("1", run.run_id),
+        lambda: store.list_run_items("1", run.run_id),
+        lambda: store.list_run_events("1", run.run_id),
+    ]
+    for operation in operations:
+        with pytest.raises(PlaylistIngestNotFoundError, match="playlist resource not found"):
+            operation()
+
+
+def test_expired_resources_reject_snapshot_event_and_cas_mutations(store):
+    pending = store.create_preflight(
+        "1",
+        source_url="https://example.com/pending",
+        source_kind="playlist",
+        expires_at=NOW + timedelta(hours=1),
+    )
+    materialized = _seed_materialization(store, item_count=1)
+    run = store.create_run(
+        "1",
+        materialization_ids=[materialized.id],
+        expires_at=NOW + timedelta(hours=1),
+    )
+    store.test_clock.advance(timedelta(hours=2))
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestNotFoundError,
+    )
+
+    operations = [
+        lambda: store.replace_preflight_snapshot(
+            "1",
+            pending.preflight_id,
+            status="ready",
+            items=[_preflight_item("late-occ", 1)],
+        ),
+        lambda: store.append_run_event("1", run.run_id, event_type="late", expected_version=1),
+        lambda: store.compare_and_set_run_item_state(
+            "1",
+            run.run_id,
+            "occ-1",
+            expected_state="staged",
+            new_state="running",
+        ),
+    ]
+    for operation in operations:
+        with pytest.raises(PlaylistIngestNotFoundError, match="playlist resource not found"):
+            operation()
+
+
+def test_create_preflight_rejects_nonfuture_expiry(store):
+    with pytest.raises(ValueError, match="expires_at must be in the future"):
+        store.create_preflight(
+            "1",
+            source_url="https://example.com/expired-preflight",
+            source_kind="playlist",
+            expires_at=NOW,
+        )
+
+
+def test_create_materialization_rejects_nonfuture_expiry(store):
+    ready = _seed_preflight(store, item_count=1)
+
+    with pytest.raises(ValueError, match="expires_at must be in the future"):
+        store.create_materialization(
+            "1",
+            preflight_id=ready.preflight_id,
+            occurrence_ids=["occ-1"],
+            expires_at=NOW,
+        )
+
+
+def test_create_run_rejects_nonfuture_expiry(store):
+    materialized = _seed_materialization(store, item_count=1)
+
+    with pytest.raises(ValueError, match="expires_at must be in the future"):
+        store.create_run(
+            "1",
+            materialization_ids=[materialized.id],
+            expires_at=NOW,
+        )
+
+
 def test_compare_and_set_run_item_transition_rejects_stale_state(store):
     materialized = _seed_materialization(store, item_count=1)
     run = store.create_run("1", materialization_ids=[materialized.id])
@@ -514,21 +652,62 @@ def test_compare_and_set_run_item_transition_rejects_stale_state(store):
     assert store.list_run_items("1", run.run_id)[0].state == "running"
 
 
+def test_postgres_snapshot_replacement_locks_mutable_unexpired_parent(store, monkeypatch):
+    queries: list[str] = []
+
+    class _Result:
+        rowcount = 1
+
+        def __init__(self, row=None):
+            self.row = row
+
+        def fetchone(self):
+            return self.row
+
+    @contextmanager
+    def fake_connection(*, write):
+        assert write is True
+        yield object()
+
+    def fake_query(_db, sql, _params=()):
+        queries.append(sql)
+        if "SELECT status" in sql:
+            return _Result({"status": "pending", "expires_at": NOW + timedelta(hours=1)})
+        return _Result()
+
+    store._postgres = True
+    monkeypatch.setattr(store, "_connection", fake_connection)
+    monkeypatch.setattr(store, "_query", fake_query)
+    monkeypatch.setattr(store, "get_preflight", lambda *_args: object())
+
+    store.replace_preflight_snapshot(
+        "1",
+        "preflight-id",
+        status="ready",
+        items=[],
+    )
+
+    locked_read = next(query for query in queries if "SELECT status" in query)
+    assert "expires_at" in locked_read
+    assert locked_read.rstrip().endswith("FOR UPDATE")
+
+
 def test_cleanup_expired_is_owner_safe(store):
     expired = store.create_preflight(
         "1",
         source_url="https://example.com/expired",
         source_kind="url",
-        expires_at=NOW - timedelta(seconds=1),
+        expires_at=NOW + timedelta(hours=1),
     )
-    other_owner = store.create_preflight(
+    store.create_preflight(
         "2",
         source_url="https://example.com/other",
         source_kind="url",
-        expires_at=NOW - timedelta(seconds=1),
+        expires_at=NOW + timedelta(hours=1),
     )
+    store.test_clock.advance(timedelta(hours=2))
 
-    deleted = store.cleanup_expired("1", now=NOW)
+    deleted = store.cleanup_expired("1", now=store.test_clock.now_utc())
 
     assert deleted["preflights"] == 1
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
@@ -537,4 +716,4 @@ def test_cleanup_expired_is_owner_safe(store):
 
     with pytest.raises(PlaylistIngestNotFoundError):
         store.get_preflight("1", expired.preflight_id)
-    assert store.get_preflight("2", other_owner.preflight_id).preflight_id == other_owner.preflight_id
+    assert store.cleanup_expired("2", now=store.test_clock.now_utc())["preflights"] == 1

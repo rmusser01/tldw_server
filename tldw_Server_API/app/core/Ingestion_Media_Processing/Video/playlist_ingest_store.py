@@ -20,6 +20,17 @@ _CURSOR_ORDER = "ordinal_asc"
 _MAX_CURSOR_LENGTH = 4096
 _MAX_CURSOR_PAYLOAD = 2048
 _MAX_PAGE_SIZE = 500
+_COMPACT_DISPLAY_METADATA_FIELDS = frozenset(
+    {
+        "title",
+        "channel_or_uploader",
+        "duration_seconds",
+        "published_at",
+        "thumbnail_url",
+        "playlist_id",
+        "playlist_title",
+    }
+)
 
 
 class PlaylistIngestNotFoundError(LookupError):
@@ -186,6 +197,12 @@ class PlaylistIngestStore:
         normalized = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
         normalized = normalized.astimezone(timezone.utc)
         return normalized if self._postgres else normalized.isoformat()
+
+    def _future_expiry(self, value: datetime, *, now: datetime) -> datetime:
+        normalized = self._datetime(value)
+        if normalized <= now:
+            raise ValueError("expires_at must be in the future")
+        return normalized
 
     def _json_value(self, value: Any) -> Any:
         if value is None:
@@ -451,6 +468,7 @@ class PlaylistIngestStore:
         owner = self._owner(owner_user_id)
         preflight_id = str(uuid4())
         now = self._now()
+        expires = self._future_expiry(expires_at, now=now)
         with self._connection(write=True) as db:
             self._query(
                 db,
@@ -469,7 +487,7 @@ class PlaylistIngestStore:
                     job_id,
                     self._db_datetime(now),
                     self._db_datetime(now),
-                    self._db_datetime(expires_at),
+                    self._db_datetime(expires),
                 ),
             )
         return self.get_preflight(owner, preflight_id)
@@ -480,8 +498,11 @@ class PlaylistIngestStore:
         with self._connection(write=False) as db:
             row = self._query(
                 db,
-                "SELECT * FROM playlist_preflights WHERE owner_user_id = ? AND preflight_id = ?",
-                (owner, str(preflight_id)),
+                """
+                SELECT * FROM playlist_preflights
+                WHERE owner_user_id = ? AND preflight_id = ? AND expires_at > ?
+                """,
+                (owner, str(preflight_id), self._db_datetime(self._now())),
             ).fetchone()
         if row is None:
             raise self._not_found()
@@ -508,10 +529,21 @@ class PlaylistIngestStore:
 
         now = self._now()
         with self._connection(write=True) as db:
+            if self._postgres:
+                mutable_preflight_query = """
+                    SELECT status, expires_at FROM playlist_preflights
+                    WHERE owner_user_id = ? AND preflight_id = ? AND expires_at > ?
+                    FOR UPDATE
+                """
+            else:
+                mutable_preflight_query = """
+                    SELECT status, expires_at FROM playlist_preflights
+                    WHERE owner_user_id = ? AND preflight_id = ? AND expires_at > ?
+                """
             row = self._query(
                 db,
-                "SELECT status FROM playlist_preflights WHERE owner_user_id = ? AND preflight_id = ?",
-                (owner, str(preflight_id)),
+                mutable_preflight_query,
+                (owner, str(preflight_id), self._db_datetime(now)),
             ).fetchone()
             if row is None:
                 raise self._not_found()
@@ -591,8 +623,11 @@ class PlaylistIngestStore:
         with self._connection(write=False) as db:
             exists = self._query(
                 db,
-                f"SELECT 1 FROM {parent_table} WHERE owner_user_id = ? AND {parent_id_column} = ?",  # nosec B608
-                (owner, resource_id),
+                f"""
+                SELECT 1 FROM {parent_table}
+                WHERE owner_user_id = ? AND {parent_id_column} = ? AND expires_at > ?
+                """,  # nosec B608
+                (owner, resource_id, self._db_datetime(self._now())),
             ).fetchone()
             if exists is None:
                 raise self._not_found()
@@ -658,6 +693,7 @@ class PlaylistIngestStore:
 
         materialization_id = str(uuid4())
         now = self._now()
+        requested_expiry = self._future_expiry(expires_at, now=now) if expires_at is not None else None
         with self._connection(write=True) as db:
             preflight = self._query(
                 db,
@@ -688,7 +724,7 @@ class PlaylistIngestStore:
                 raise ValueError("selected occurrence_id does not have an authoritative source URL")
 
             preflight_expiry = self._datetime(self._row_dict(preflight)["expires_at"])
-            materialization_expiry = expires_at or preflight_expiry
+            materialization_expiry = requested_expiry or preflight_expiry
             self._query(
                 db,
                 """
@@ -708,9 +744,12 @@ class PlaylistIngestStore:
             )
             for row in rows:
                 data = self._row_dict(row)
-                display = self._json_dict(data.get("display_metadata_json")) or {}
-                display.pop("duplicate_policy", None)
-                display.pop("metadata_patch", None)
+                source_display = self._json_dict(data.get("display_metadata_json")) or {}
+                display = {
+                    key: source_display[key]
+                    for key in _COMPACT_DISPLAY_METADATA_FIELDS
+                    if key in source_display
+                }
                 self._query(
                     db,
                     """
@@ -742,8 +781,11 @@ class PlaylistIngestStore:
         with self._connection(write=False) as db:
             row = self._query(
                 db,
-                "SELECT * FROM playlist_materializations WHERE owner_user_id = ? AND materialization_id = ?",
-                (owner, str(materialization_id)),
+                """
+                SELECT * FROM playlist_materializations
+                WHERE owner_user_id = ? AND materialization_id = ? AND expires_at > ?
+                """,
+                (owner, str(materialization_id), self._db_datetime(self._now())),
             ).fetchone()
         if row is None:
             raise self._not_found()
@@ -791,7 +833,7 @@ class PlaylistIngestStore:
 
         run_id = str(uuid4())
         now = self._now()
-        expires = expires_at or now + timedelta(days=7)
+        expires = self._future_expiry(expires_at, now=now) if expires_at is not None else now + timedelta(days=7)
         copied: list[dict[str, Any]] = []
         with self._connection(write=True) as db:
             for materialization_id in materializations:
@@ -876,8 +918,11 @@ class PlaylistIngestStore:
         with self._connection(write=False) as db:
             row = self._query(
                 db,
-                "SELECT * FROM media_ingest_runs WHERE owner_user_id = ? AND run_id = ?",
-                (owner, str(run_id)),
+                """
+                SELECT * FROM media_ingest_runs
+                WHERE owner_user_id = ? AND run_id = ? AND expires_at > ?
+                """,
+                (owner, str(run_id), self._db_datetime(self._now())),
             ).fetchone()
         if row is None:
             raise self._not_found()
@@ -927,8 +972,11 @@ class PlaylistIngestStore:
         with self._connection(write=True) as db:
             row = self._query(
                 db,
-                "SELECT version FROM media_ingest_runs WHERE owner_user_id = ? AND run_id = ?",
-                (owner, str(run_id)),
+                """
+                SELECT version FROM media_ingest_runs
+                WHERE owner_user_id = ? AND run_id = ? AND expires_at > ?
+                """,
+                (owner, str(run_id), self._db_datetime(now)),
             ).fetchone()
             if row is None:
                 raise self._not_found()
@@ -999,8 +1047,11 @@ class PlaylistIngestStore:
         with self._connection(write=False) as db:
             exists = self._query(
                 db,
-                "SELECT 1 FROM media_ingest_runs WHERE owner_user_id = ? AND run_id = ?",
-                (owner, str(run_id)),
+                """
+                SELECT 1 FROM media_ingest_runs
+                WHERE owner_user_id = ? AND run_id = ? AND expires_at > ?
+                """,
+                (owner, str(run_id), self._db_datetime(self._now())),
             ).fetchone()
             if exists is None:
                 raise self._not_found()
@@ -1033,8 +1084,11 @@ class PlaylistIngestStore:
         with self._connection(write=True) as db:
             exists = self._query(
                 db,
-                "SELECT 1 FROM media_ingest_runs WHERE owner_user_id = ? AND run_id = ?",
-                (owner, str(run_id)),
+                """
+                SELECT 1 FROM media_ingest_runs
+                WHERE owner_user_id = ? AND run_id = ? AND expires_at > ?
+                """,
+                (owner, str(run_id), self._db_datetime(self._now())),
             ).fetchone()
             if exists is None:
                 raise self._not_found()
