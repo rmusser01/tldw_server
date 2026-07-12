@@ -20,7 +20,7 @@
 | --- | --- | --- | --- |
 | 1 | Canonical authorization data | SQLite 090 and PostgreSQL fresh/backfill paths grant permissions and backfill effective role membership | Complete |
 | 2 | Shared lifecycle policy | Both transports preserve status; reads/SSE retry safely; mutations never replay automatically | Complete |
-| 3 | Runtime adapters | Extension and WebUI expose truthful principal-scoped lifecycle state | Not Started |
+| 3 | Runtime adapters | Extension and WebUI expose truthful principal-scoped lifecycle state | Complete |
 | 4 | Accessible recovery UX | Header and inbox distinguish active, degraded, auth-required, and unavailable states | Not Started |
 | 5 | Acceptance and security | Focused browser tests, Bandit, typecheck, and UAT role assertions pass | Not Started |
 
@@ -298,11 +298,11 @@ git commit -m "fix(notifications): classify terminal and transient failures"
 - Modify: `apps/tldw-frontend/components/notifications/NotificationToastBridge.tsx`
 - Modify: `apps/tldw-frontend/__tests__/components/notification-toast-bridge.test.tsx`
 
-- [ ] **Step 1: Write extension adapter tests RED**
+- [x] **Step 1: Write extension adapter tests RED**
 
 Assert server/principal-scoped keys, synchronous clearing before account switch render, `connecting -> active` only on `onOpen`, 401 stop/restart after auth success, 403 stop until explicit retry, and no passive polling.
 
-- [ ] **Step 2: Run extension adapter tests and verify RED**
+- [x] **Step 2: Run extension adapter tests and verify RED**
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
@@ -314,15 +314,15 @@ bunx vitest run -c vitest.extension.config.ts \
 
 Expected: FAIL on missing scoped lifecycle state and restart behavior.
 
-- [ ] **Step 3: Implement the extension adapter**
+- [x] **Step 3: Implement the extension adapter**
 
 Store `{state, unreadCount, updatedAt}` under the scoped key. Logout and server/principal changes abort first, clear the rendered selector, then start the new scope. Keep `idle` internal-only.
 
-- [ ] **Step 4: Write WebUI provider tests**
+- [x] **Step 4: Write WebUI provider tests**
 
 Cover the 30-second layout poll, toast bootstrap, terminal suppression, transient recovery, explicit permission retry, auth recovery, and mutation errors. Use fake timers and assert no repeated 401/403 requests.
 
-- [ ] **Step 5: Run WebUI provider tests and verify RED**
+- [x] **Step 5: Run WebUI provider tests and verify RED**
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
@@ -335,11 +335,11 @@ bunx vitest run \
 
 Expected: FAIL because no WebUI lifecycle provider coordinates these initiators.
 
-- [ ] **Step 6: Implement the WebUI provider and wire consumers**
+- [x] **Step 6: Implement the WebUI provider and wire consumers**
 
 `WebLayout` owns the provider. The toast bridge and inbox consume it; they must not create independent retry loops. A successful explicit permission refresh or `Try again` may leave unavailable; time alone may not.
 
-- [ ] **Step 7: Run adapter tests GREEN**
+- [x] **Step 7: Run adapter tests GREEN**
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
@@ -353,13 +353,24 @@ bunx vitest run -c vitest.extension.config.ts \
   ../packages/ui/src/hooks/__tests__/useNotificationCount.test.tsx
 ```
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
 git add apps/packages/ui/src/entries/shared/notification-subscription.ts apps/packages/ui/src/entries/shared/__tests__/notification-subscription.test.ts apps/packages/ui/src/hooks/useNotificationCount.ts apps/packages/ui/src/hooks/__tests__/useNotificationCount.test.tsx apps/tldw-frontend/components/notifications/NotificationLifecycleProvider.tsx apps/tldw-frontend/__tests__/components/notification-lifecycle-provider.test.tsx apps/tldw-frontend/components/layout/WebLayout.tsx apps/tldw-frontend/components/notifications/NotificationToastBridge.tsx apps/tldw-frontend/__tests__/components/notification-toast-bridge.test.tsx
 git commit -m "fix(notifications): scope lifecycle by server and principal"
 ```
+
+Task 4 completed through commits `848b103417` through `5a0b547bd8`. The extension
+uses config-derived principal/server scope validation before rendering counts. The
+WebUI provider owns one abortable bootstrap/poll/stream lifecycle, exposes a bounded
+sequenced event queue, and resets consumers with a lifecycle epoch on same-scope
+restart or credential stop. The inbox consumes provider events without another
+stream or unread poll, retries only idempotent list reads, and generation-guards all
+page state across account changes. Final verification passed 84 WebUI tests, 24
+extension tests, extension TypeScript compile, touched-file lint, and diff hygiene.
+Full WebUI typecheck retained only the unchanged `QuickIngestWizardModal.tsx:1813`
+`overflowY` baseline from `origin/dev`. Final spec and code-quality reviews approved.
 
 ## Task 5: Build Accessible Header and Inbox Recovery States
 
