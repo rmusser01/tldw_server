@@ -219,8 +219,8 @@ CREATE TABLE IF NOT EXISTS playlist_preflights (
   source_kind TEXT NOT NULL,
   playlist_id TEXT,
   job_id INTEGER,
-  summary_json TEXT,
-  error_json TEXT,
+  summary_json TEXT CHECK (summary_json IS NULL OR json_valid(summary_json)),
+  error_json TEXT CHECK (error_json IS NULL OR json_valid(error_json)),
   created_at TEXT NOT NULL DEFAULT (DATETIME('now')),
   updated_at TEXT NOT NULL DEFAULT (DATETIME('now')),
   expires_at TEXT NOT NULL
@@ -244,13 +244,11 @@ CREATE TABLE IF NOT EXISTS playlist_preflight_items (
   duplicate_status TEXT NOT NULL,
   duplicate_of_occurrence_id TEXT,
   selected_by_default INTEGER NOT NULL DEFAULT 1 CHECK (selected_by_default IN (0, 1)),
-  display_metadata_json TEXT,
+  display_metadata_json TEXT CHECK (display_metadata_json IS NULL OR json_valid(display_metadata_json)),
   UNIQUE (preflight_id, ordinal)
 );
 CREATE INDEX IF NOT EXISTS idx_playlist_preflight_items_owner_source
   ON playlist_preflight_items(owner_user_id, normalized_source_id);
-CREATE INDEX IF NOT EXISTS idx_playlist_preflight_items_preflight_ordinal
-  ON playlist_preflight_items(preflight_id, ordinal);
 
 -- Owner-bound queue records copied from a completed preflight
 CREATE TABLE IF NOT EXISTS playlist_materializations (
@@ -276,7 +274,7 @@ CREATE TABLE IF NOT EXISTS playlist_materialization_items (
   source_url TEXT NOT NULL,
   normalized_source_id TEXT,
   source_kind TEXT NOT NULL,
-  display_metadata_json TEXT,
+  display_metadata_json TEXT CHECK (display_metadata_json IS NULL OR json_valid(display_metadata_json)),
   UNIQUE (materialization_id, ordinal),
   UNIQUE (materialization_id, occurrence_id)
 );
@@ -291,9 +289,9 @@ CREATE TABLE IF NOT EXISTS media_ingest_runs (
   owner_user_id TEXT NOT NULL,
   status TEXT NOT NULL,
   collection_id INTEGER,
-  processing_options_json TEXT,
-  playlist_summaries_json TEXT,
-  batch_ids_json TEXT,
+  processing_options_json TEXT CHECK (processing_options_json IS NULL OR json_valid(processing_options_json)),
+  playlist_summaries_json TEXT CHECK (playlist_summaries_json IS NULL OR json_valid(playlist_summaries_json)),
+  batch_ids_json TEXT CHECK (batch_ids_json IS NULL OR json_valid(batch_ids_json)),
   version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
   created_at TEXT NOT NULL DEFAULT (DATETIME('now')),
   updated_at TEXT NOT NULL DEFAULT (DATETIME('now')),
@@ -314,11 +312,23 @@ CREATE TABLE IF NOT EXISTS media_ingest_run_items (
   source_url TEXT,
   normalized_source_id TEXT,
   source_kind TEXT,
-  display_metadata_json TEXT,
-  duplicate_policy TEXT,
-  metadata_patch_json TEXT,
-  state TEXT NOT NULL,
-  outcome TEXT,
+  display_metadata_json TEXT CHECK (display_metadata_json IS NULL OR json_valid(display_metadata_json)),
+  duplicate_policy TEXT CHECK (
+    duplicate_policy IS NULL OR duplicate_policy IN ('skip','include_existing','update_metadata_only','overwrite')
+  ),
+  metadata_patch_json TEXT CHECK (metadata_patch_json IS NULL OR json_valid(metadata_patch_json)),
+  state TEXT NOT NULL CHECK (
+    state IN (
+      'staged','preparing','awaiting_upload','submit_pending','queued','running',
+      'cancellation_requested','status_unavailable','terminal'
+    )
+  ),
+  outcome TEXT CHECK (
+    outcome IS NULL OR outcome IN (
+      'completed','included_existing','metadata_updated','skipped_existing',
+      'submit_failed','processing_failed','metadata_update_failed','cancelled'
+    )
+  ),
   job_id INTEGER,
   batch_id TEXT,
   attempt INTEGER NOT NULL DEFAULT 1 CHECK (attempt >= 1),
@@ -334,17 +344,17 @@ CREATE TABLE IF NOT EXISTS media_ingest_run_items (
   updated_at TEXT NOT NULL DEFAULT (DATETIME('now')),
   UNIQUE (run_id, ordinal),
   UNIQUE (run_id, occurrence_id),
-  UNIQUE (run_id, occurrence_id, attempt)
+  UNIQUE (run_id, occurrence_id, attempt),
+  CHECK (
+    (state = 'terminal' AND outcome IS NOT NULL)
+    OR (state <> 'terminal' AND outcome IS NULL)
+  )
 );
 CREATE INDEX IF NOT EXISTS idx_media_ingest_run_items_owner_state
   ON media_ingest_run_items(owner_user_id, state);
-CREATE INDEX IF NOT EXISTS idx_media_ingest_run_items_run_ordinal
-  ON media_ingest_run_items(run_id, ordinal);
 CREATE INDEX IF NOT EXISTS idx_media_ingest_run_items_source
   ON media_ingest_run_items(normalized_source_id);
 CREATE INDEX IF NOT EXISTS idx_media_ingest_run_items_job ON media_ingest_run_items(job_id);
-CREATE INDEX IF NOT EXISTS idx_media_ingest_run_items_attempt
-  ON media_ingest_run_items(run_id, occurrence_id, attempt);
 
 CREATE TABLE IF NOT EXISTS media_ingest_run_events (
   event_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -354,12 +364,27 @@ CREATE TABLE IF NOT EXISTS media_ingest_run_events (
   job_id INTEGER,
   batch_id TEXT,
   event_type TEXT NOT NULL,
-  state TEXT,
-  outcome TEXT,
+  state TEXT CHECK (
+    state IS NULL OR state IN (
+      'staged','preparing','awaiting_upload','submit_pending','queued','running',
+      'cancellation_requested','status_unavailable','terminal'
+    )
+  ),
+  outcome TEXT CHECK (
+    outcome IS NULL OR outcome IN (
+      'completed','included_existing','metadata_updated','skipped_existing',
+      'submit_failed','processing_failed','metadata_update_failed','cancelled'
+    )
+  ),
   progress_percent REAL CHECK (progress_percent IS NULL OR (progress_percent >= 0 AND progress_percent <= 100)),
   progress_message TEXT,
-  attrs_json TEXT,
-  occurred_at TEXT NOT NULL DEFAULT (DATETIME('now'))
+  attrs_json TEXT CHECK (attrs_json IS NULL OR json_valid(attrs_json)),
+  occurred_at TEXT NOT NULL DEFAULT (DATETIME('now')),
+  CHECK (
+    (state IS NULL AND outcome IS NULL)
+    OR (state IS NOT NULL AND state = 'terminal' AND outcome IS NOT NULL)
+    OR (state IS NOT NULL AND state <> 'terminal' AND outcome IS NULL)
+  )
 );
 CREATE INDEX IF NOT EXISTS idx_media_ingest_run_events_owner_run_event
   ON media_ingest_run_events(owner_user_id, run_id, event_id);

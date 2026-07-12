@@ -214,8 +214,6 @@ CREATE TABLE IF NOT EXISTS playlist_preflight_items (
 );
 CREATE INDEX IF NOT EXISTS idx_playlist_preflight_items_owner_source
   ON playlist_preflight_items(owner_user_id, normalized_source_id);
-CREATE INDEX IF NOT EXISTS idx_playlist_preflight_items_preflight_ordinal
-  ON playlist_preflight_items(preflight_id, ordinal);
 
 -- Owner-bound queue records copied from a completed preflight
 CREATE TABLE IF NOT EXISTS playlist_materializations (
@@ -280,10 +278,22 @@ CREATE TABLE IF NOT EXISTS media_ingest_run_items (
   normalized_source_id TEXT,
   source_kind TEXT,
   display_metadata_json JSONB,
-  duplicate_policy TEXT,
+  duplicate_policy TEXT CHECK (
+    duplicate_policy IS NULL OR duplicate_policy IN ('skip','include_existing','update_metadata_only','overwrite')
+  ),
   metadata_patch_json JSONB,
-  state TEXT NOT NULL,
-  outcome TEXT,
+  state TEXT NOT NULL CHECK (
+    state IN (
+      'staged','preparing','awaiting_upload','submit_pending','queued','running',
+      'cancellation_requested','status_unavailable','terminal'
+    )
+  ),
+  outcome TEXT CHECK (
+    outcome IS NULL OR outcome IN (
+      'completed','included_existing','metadata_updated','skipped_existing',
+      'submit_failed','processing_failed','metadata_update_failed','cancelled'
+    )
+  ),
   job_id BIGINT,
   batch_id TEXT,
   attempt INTEGER NOT NULL DEFAULT 1 CHECK (attempt >= 1),
@@ -299,17 +309,17 @@ CREATE TABLE IF NOT EXISTS media_ingest_run_items (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (run_id, ordinal),
   UNIQUE (run_id, occurrence_id),
-  UNIQUE (run_id, occurrence_id, attempt)
+  UNIQUE (run_id, occurrence_id, attempt),
+  CHECK (
+    (state = 'terminal' AND outcome IS NOT NULL)
+    OR (state <> 'terminal' AND outcome IS NULL)
+  )
 );
 CREATE INDEX IF NOT EXISTS idx_media_ingest_run_items_owner_state
   ON media_ingest_run_items(owner_user_id, state);
-CREATE INDEX IF NOT EXISTS idx_media_ingest_run_items_run_ordinal
-  ON media_ingest_run_items(run_id, ordinal);
 CREATE INDEX IF NOT EXISTS idx_media_ingest_run_items_source
   ON media_ingest_run_items(normalized_source_id);
 CREATE INDEX IF NOT EXISTS idx_media_ingest_run_items_job ON media_ingest_run_items(job_id);
-CREATE INDEX IF NOT EXISTS idx_media_ingest_run_items_attempt
-  ON media_ingest_run_items(run_id, occurrence_id, attempt);
 
 CREATE TABLE IF NOT EXISTS media_ingest_run_events (
   event_id BIGSERIAL PRIMARY KEY,
@@ -319,12 +329,27 @@ CREATE TABLE IF NOT EXISTS media_ingest_run_events (
   job_id BIGINT,
   batch_id TEXT,
   event_type TEXT NOT NULL,
-  state TEXT,
-  outcome TEXT,
+  state TEXT CHECK (
+    state IS NULL OR state IN (
+      'staged','preparing','awaiting_upload','submit_pending','queued','running',
+      'cancellation_requested','status_unavailable','terminal'
+    )
+  ),
+  outcome TEXT CHECK (
+    outcome IS NULL OR outcome IN (
+      'completed','included_existing','metadata_updated','skipped_existing',
+      'submit_failed','processing_failed','metadata_update_failed','cancelled'
+    )
+  ),
   progress_percent REAL CHECK (progress_percent IS NULL OR (progress_percent >= 0 AND progress_percent <= 100)),
   progress_message TEXT,
   attrs_json JSONB,
-  occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CHECK (
+    (state IS NULL AND outcome IS NULL)
+    OR (state IS NOT NULL AND state = 'terminal' AND outcome IS NOT NULL)
+    OR (state IS NOT NULL AND state <> 'terminal' AND outcome IS NULL)
+  )
 );
 CREATE INDEX IF NOT EXISTS idx_media_ingest_run_events_owner_run_event
   ON media_ingest_run_events(owner_user_id, run_id, event_id);
