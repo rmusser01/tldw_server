@@ -732,14 +732,20 @@ async def test_fallback_results_keep_only_selected_provider_config(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "error_type",
+    ("error_type", "store_unavailable"),
     [
-        sqlite3.OperationalError,
-        sqlite3.DatabaseError,
+        (sqlite3.OperationalError, True),
+        (sqlite3.InterfaceError, True),
+        (sqlite3.ProgrammingError, False),
     ],
 )
 @pytest.mark.parametrize("failure_site", ["user_repository", "membership"])
-async def test_real_sqlite_store_errors_are_typed(monkeypatch, error_type, failure_site):
+async def test_sqlite_errors_respect_operational_boundary(
+    monkeypatch,
+    error_type,
+    store_unavailable,
+    failure_site,
+):
     from tldw_Server_API.app.core.AuthNZ import byok_runtime
 
     class _AbsentUserRepo:
@@ -759,19 +765,42 @@ async def test_real_sqlite_store_errors_are_typed(monkeypatch, error_type, failu
     monkeypatch.setattr(byok_runtime, "is_byok_enabled", lambda: True)
     monkeypatch.setattr(byok_runtime, "is_provider_allowlisted", lambda _provider: True)
 
-    with pytest.raises(byok_runtime.ByokResolutionError) as exc_info:
-        await byok_runtime.resolve_byok_credentials("OpenAI", user_id=1)
-
-    assert exc_info.value.code == "credential_store_unavailable"
-    assert exc_info.value.provider == "openai"
-    assert "do-not-leak" not in str(exc_info.value)
+    if store_unavailable:
+        with pytest.raises(byok_runtime.ByokResolutionError) as exc_info:
+            await byok_runtime.resolve_byok_credentials("OpenAI", user_id=1)
+        assert exc_info.value.code == "credential_store_unavailable"
+        assert exc_info.value.provider == "openai"
+        assert "do-not-leak" not in str(exc_info.value)
+    else:
+        with pytest.raises(error_type, match="do-not-leak"):
+            await byok_runtime.resolve_byok_credentials("OpenAI", user_id=1)
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error_type", "store_unavailable"),
+    [
+        pytest.param("ConnectionPoolExhaustedError", True, id="pool-exhausted"),
+        pytest.param("DatabaseLockError", True, id="database-locked"),
+        pytest.param("DatabaseError", False, id="unbounded-database-error"),
+    ],
+)
 @pytest.mark.parametrize("failure_site", ["user_repository", "membership"])
-async def test_authnz_database_errors_are_typed(monkeypatch, failure_site):
+async def test_authnz_database_errors_respect_operational_boundary(
+    monkeypatch,
+    error_type,
+    store_unavailable,
+    failure_site,
+):
     from tldw_Server_API.app.core.AuthNZ import byok_runtime
-    from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError
+    from tldw_Server_API.app.core.AuthNZ import exceptions as authnz_exceptions
+
+    exception_type = getattr(authnz_exceptions, error_type)
+
+    def _error():
+        if error_type == "DatabaseError":
+            return exception_type("unbounded database error with secret=do-not-leak")
+        return exception_type()
 
     class _AbsentUserRepo:
         async def fetch_secret_for_user(self, user_id: int, provider: str):
@@ -779,36 +808,48 @@ async def test_authnz_database_errors_are_typed(monkeypatch, failure_site):
 
     async def _get_user_repo():
         if failure_site == "user_repository":
-            raise DatabaseError("authnz failure with secret=do-not-leak")
+            raise _error()
         return _AbsentUserRepo()
 
     async def _list_memberships(user_id: int):
-        raise DatabaseError("authnz membership failure with secret=do-not-leak")
+        raise _error()
 
     monkeypatch.setattr(byok_runtime, "_get_user_repo", _get_user_repo)
     monkeypatch.setattr(byok_runtime, "list_memberships_for_user", _list_memberships)
     monkeypatch.setattr(byok_runtime, "is_byok_enabled", lambda: True)
     monkeypatch.setattr(byok_runtime, "is_provider_allowlisted", lambda _provider: True)
 
-    with pytest.raises(byok_runtime.ByokResolutionError) as exc_info:
-        await byok_runtime.resolve_byok_credentials("openai", user_id=1)
-
-    assert exc_info.value.code == "credential_store_unavailable"
-    assert exc_info.value.provider == "openai"
-    assert "do-not-leak" not in str(exc_info.value)
+    if store_unavailable:
+        with pytest.raises(byok_runtime.ByokResolutionError) as exc_info:
+            await byok_runtime.resolve_byok_credentials("openai", user_id=1)
+        assert exc_info.value.code == "credential_store_unavailable"
+        assert exc_info.value.provider == "openai"
+    else:
+        with pytest.raises(exception_type, match="do-not-leak"):
+            await byok_runtime.resolve_byok_credentials("openai", user_id=1)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("backend", ["aiosqlite", "asyncpg"])
-async def test_optional_backend_database_errors_are_typed(monkeypatch, backend):
+@pytest.mark.parametrize(
+    ("error_name", "store_unavailable"),
+    [
+        ("OperationalError", True),
+        ("InterfaceError", True),
+        ("ProgrammingError", False),
+    ],
+)
+async def test_aiosqlite_errors_respect_operational_boundary(
+    monkeypatch,
+    error_name,
+    store_unavailable,
+):
     from tldw_Server_API.app.core.AuthNZ import byok_runtime
 
-    if backend == "aiosqlite":
-        module = pytest.importorskip("aiosqlite")
-        error = module.OperationalError("aiosqlite secret=do-not-leak")
-    else:
-        module = pytest.importorskip("asyncpg")
-        error = module.PostgresError("asyncpg secret=do-not-leak")
+    module = pytest.importorskip("aiosqlite")
+    error_type = getattr(module, error_name, None)
+    if error_type is None:
+        pytest.skip(f"installed aiosqlite has no {error_name}")
+    error = error_type("aiosqlite failure with secret=do-not-leak")
 
     async def _get_user_repo():
         raise error
@@ -817,11 +858,53 @@ async def test_optional_backend_database_errors_are_typed(monkeypatch, backend):
     monkeypatch.setattr(byok_runtime, "is_byok_enabled", lambda: True)
     monkeypatch.setattr(byok_runtime, "is_provider_allowlisted", lambda _provider: True)
 
-    with pytest.raises(byok_runtime.ByokResolutionError) as exc_info:
-        await byok_runtime.resolve_byok_credentials("openai", user_id=1)
+    if store_unavailable:
+        with pytest.raises(byok_runtime.ByokResolutionError) as exc_info:
+            await byok_runtime.resolve_byok_credentials("openai", user_id=1)
+        assert exc_info.value.code == "credential_store_unavailable"
+        assert "do-not-leak" not in str(exc_info.value)
+    else:
+        with pytest.raises(error_type, match="do-not-leak"):
+            await byok_runtime.resolve_byok_credentials("openai", user_id=1)
 
-    assert exc_info.value.code == "credential_store_unavailable"
-    assert "do-not-leak" not in str(exc_info.value)
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error_name", "store_unavailable"),
+    [
+        ("InterfaceError", True),
+        ("PostgresConnectionError", True),
+        ("CannotConnectNowError", True),
+        ("TooManyConnectionsError", True),
+        ("PostgresSyntaxError", False),
+    ],
+)
+async def test_asyncpg_errors_respect_operational_boundary(
+    monkeypatch,
+    error_name,
+    store_unavailable,
+):
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+
+    module = pytest.importorskip("asyncpg")
+    error_type = getattr(module, error_name)
+    error = error_type("asyncpg failure with secret=do-not-leak")
+
+    async def _get_user_repo():
+        raise error
+
+    monkeypatch.setattr(byok_runtime, "_get_user_repo", _get_user_repo)
+    monkeypatch.setattr(byok_runtime, "is_byok_enabled", lambda: True)
+    monkeypatch.setattr(byok_runtime, "is_provider_allowlisted", lambda _provider: True)
+
+    if store_unavailable:
+        with pytest.raises(byok_runtime.ByokResolutionError) as exc_info:
+            await byok_runtime.resolve_byok_credentials("openai", user_id=1)
+        assert exc_info.value.code == "credential_store_unavailable"
+        assert "do-not-leak" not in str(exc_info.value)
+    else:
+        with pytest.raises(error_type, match="do-not-leak"):
+            await byok_runtime.resolve_byok_credentials("openai", user_id=1)
 
 
 @pytest.mark.asyncio

@@ -14,7 +14,6 @@ from enum import Enum
 from typing import Any, Callable
 from weakref import WeakKeyDictionary
 
-import aiosqlite
 import asyncpg
 from loguru import logger
 
@@ -32,7 +31,11 @@ from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
     validate_credential_fields,
 )
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
-from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError as AuthNZDatabaseError
+from tldw_Server_API.app.core.AuthNZ.exceptions import (
+    ConnectionPoolExhaustedError,
+    DatabaseError as AuthNZDatabaseError,
+    DatabaseLockError,
+)
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import list_memberships_for_user
 from tldw_Server_API.app.core.AuthNZ.repos.org_provider_secrets_repo import (
     AuthnzOrgProviderSecretsRepo,
@@ -174,11 +177,15 @@ _BYOK_RUNTIME_NONCRITICAL_EXCEPTIONS = (
     UnicodeDecodeError,
     ValueError,
 )
-_BYOK_CREDENTIAL_STORE_EXCEPTIONS = (
-    sqlite3.Error,
-    aiosqlite.Error,
-    asyncpg.PostgresError,
-    AuthNZDatabaseError,
+_DIRECT_CREDENTIAL_STORE_UNAVAILABLE_EXCEPTIONS = (
+    sqlite3.OperationalError,
+    sqlite3.InterfaceError,
+    asyncpg.InterfaceError,
+    asyncpg.PostgresConnectionError,
+    asyncpg.CannotConnectNowError,
+    asyncpg.TooManyConnectionsError,
+    ConnectionPoolExhaustedError,
+    DatabaseLockError,
     OSError,
     TimeoutError,
 )
@@ -190,6 +197,20 @@ _BYOK_OAUTH_TRANSPORT_EXCEPTIONS = (
     TimeoutError,
 )
 _CREDENTIAL_FIELDS_MISSING = object()
+
+
+def _is_credential_store_unavailable(exc: Exception) -> bool:
+    """Return whether an exception represents an operational store outage."""
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, _DIRECT_CREDENTIAL_STORE_UNAVAILABLE_EXCEPTIONS):
+            return True
+        if not isinstance(current, AuthNZDatabaseError):
+            return False
+        current = current.__cause__
+    return False
 
 
 def _last_used_throttle_seconds() -> int:
@@ -939,7 +960,9 @@ async def _persist_user_payload_update(
             created_by=user_id,
             updated_by=user_id,
         )
-    except _BYOK_CREDENTIAL_STORE_EXCEPTIONS:
+    except Exception as exc:
+        if not _is_credential_store_unavailable(exc):
+            raise
         logger.warning(
             "BYOK payload persist failed for user_id={} provider={}",
             user_id,
@@ -974,7 +997,9 @@ async def _resolve_openai_user_payload(
         async with _openai_oauth_refresh_lock(user_id=user_id, provider=_OPENAI_PROVIDER):
             try:
                 latest_row = await user_repo.fetch_secret_for_user(int(user_id), _OPENAI_PROVIDER)
-            except _BYOK_CREDENTIAL_STORE_EXCEPTIONS:
+            except Exception as exc:
+                if not _is_credential_store_unavailable(exc):
+                    raise
                 logger.debug(
                     "BYOK user reload before OAuth refresh failed for user_id={} provider={}",
                     user_id,
@@ -1186,7 +1211,9 @@ async def resolve_byok_credentials(
     try:
         user_repo = await _get_user_repo()
         user_row = await user_repo.fetch_secret_for_user(int(user_id), provider_norm)
-    except _BYOK_CREDENTIAL_STORE_EXCEPTIONS:
+    except Exception as exc:
+        if not _is_credential_store_unavailable(exc):
+            raise
         logger.debug(
             "BYOK user lookup failed for user_id={} provider={}",
             user_id,
@@ -1280,7 +1307,9 @@ async def resolve_byok_credentials(
                 team_ids = [m.get("team_id") for m in memberships if m.get("team_id") is not None]
             if org_ids is None:
                 org_ids = sorted({m.get("org_id") for m in memberships if m.get("org_id") is not None})
-        except _BYOK_CREDENTIAL_STORE_EXCEPTIONS:
+        except Exception as exc:
+            if not _is_credential_store_unavailable(exc):
+                raise
             logger.debug("BYOK membership lookup failed for user_id={}", user_id)
             raise ByokResolutionError("credential_store_unavailable", provider_norm) from None
 
@@ -1293,7 +1322,9 @@ async def resolve_byok_credentials(
     if team_ids or org_ids:
         try:
             shared_repo = await _get_org_repo()
-        except _BYOK_CREDENTIAL_STORE_EXCEPTIONS:
+        except Exception as exc:
+            if not _is_credential_store_unavailable(exc):
+                raise
             logger.debug("BYOK shared repo init failed for provider={}", provider_norm)
             raise ByokResolutionError("credential_store_unavailable", provider_norm) from None
 
@@ -1302,7 +1333,9 @@ async def resolve_byok_credentials(
         for team_id in sorted({int(tid) for tid in team_ids if tid is not None}):
             try:
                 row = await shared_repo.fetch_secret("team", int(team_id), provider_norm)
-            except _BYOK_CREDENTIAL_STORE_EXCEPTIONS:
+            except Exception as exc:
+                if not _is_credential_store_unavailable(exc):
+                    raise
                 logger.debug(
                     "BYOK team lookup failed for team_id={} provider={}",
                     team_id,
@@ -1359,7 +1392,9 @@ async def resolve_byok_credentials(
         for org_id in sorted({int(oid) for oid in org_ids if oid is not None}):
             try:
                 row = await shared_repo.fetch_secret("org", int(org_id), provider_norm)
-            except _BYOK_CREDENTIAL_STORE_EXCEPTIONS:
+            except Exception as exc:
+                if not _is_credential_store_unavailable(exc):
+                    raise
                 logger.debug(
                     "BYOK org lookup failed for org_id={} provider={}",
                     org_id,
