@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import multiprocessing
 import time
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from typing import Any
 
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Video import playlist_preflight
@@ -24,10 +26,19 @@ _SAFE_CHILD_ERROR_CODES = frozenset(
         "playlist_preflight_failed",
         "playlist_preflight_invalid_request",
         "playlist_preflight_invalid_result",
+        "playlist_preflight_result_too_large",
         "playlist_preflight_timeout",
         "playlist_too_large",
     }
 )
+_MAX_PAYLOAD_BYTES = 4 * 1024 * 1024
+_MAX_ITEM_COUNT = 500
+_MAX_IDENTITY_URL_LENGTH = 8192
+_MAX_IDENTITY_TEXT_LENGTH = 8192
+_MAX_SHORT_TEXT_LENGTH = 512
+_MAX_DISPLAY_TEXT_LENGTH = 2000
+_MAX_WARNING_COUNT = 100
+_MAX_WARNING_LENGTH = 1000
 
 
 def _child_error_code(exc: Exception) -> str:
@@ -36,17 +47,36 @@ def _child_error_code(exc: Exception) -> str:
 
 
 def _playlist_preflight_child(send_connection: Any, url: str, max_items: int) -> None:
-    """Extract one playlist and send exactly one JSON-native result mapping."""
+    """Extract one playlist and send exactly one bounded JSON byte message."""
     try:
         result = playlist_preflight.extract_playlist_preflight(url, max_items=max_items)
         payload: dict[str, Any] = {"status": "ok", "result": result.to_dict()}
     except Exception as exc:  # noqa: BLE001 - child failures must cross the pipe as safe codes
         payload = {"status": "error", "code": _child_error_code(exc)}
     try:
-        send_connection.send(payload)
+        try:
+            encoded = json.dumps(
+                payload,
+                ensure_ascii=False,
+                allow_nan=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        except (TypeError, ValueError, UnicodeError):
+            encoded = b'{"status":"error","code":"playlist_preflight_failed"}'
+        if len(encoded) > _MAX_PAYLOAD_BYTES:
+            encoded = b'{"status":"error","code":"playlist_preflight_result_too_large"}'
+        send_connection.send_bytes(encoded)
     finally:
         with contextlib.suppress(Exception):
             send_connection.close()
+
+
+def _raise_too_large() -> None:
+    raise PlaylistPreflightProcessError("playlist_preflight_result_too_large")
+
+
+def _clip_display_text(value: str | None, *, max_length: int = _MAX_DISPLAY_TEXT_LENGTH) -> str | None:
+    return value[:max_length] if value is not None else None
 
 
 def _validated_preflight_result(payload: Any, *, max_items: int) -> PlaylistPreflightData:
@@ -81,9 +111,23 @@ def _validated_preflight_result(payload: Any, *, max_items: int) -> PlaylistPref
         or any(type(warning) is not str for warning in warnings)
     ):
         raise PlaylistPreflightProcessError("playlist_preflight_invalid_result")
+    if len(items_raw) > _MAX_ITEM_COUNT:
+        _raise_too_large()
+    if len(result["source_url"]) > _MAX_IDENTITY_URL_LENGTH:
+        _raise_too_large()
+    if len(result["source_kind"]) > _MAX_SHORT_TEXT_LENGTH:
+        _raise_too_large()
+    if len(warnings) > _MAX_WARNING_COUNT:
+        warnings = warnings[:_MAX_WARNING_COUNT]
+    warnings = [warning[:_MAX_WARNING_LENGTH] for warning in warnings]
     nullable_strings = ("playlist_id", "playlist_title", "video_id")
     if any(result.get(key) is not None and type(result.get(key)) is not str for key in nullable_strings):
         raise PlaylistPreflightProcessError("playlist_preflight_invalid_result")
+    for key in ("playlist_id", "video_id"):
+        value = result.get(key)
+        if value is not None and len(value) > _MAX_SHORT_TEXT_LENGTH:
+            _raise_too_large()
+    result["playlist_title"] = _clip_display_text(result.get("playlist_title"))
     count_keys = ("item_count", "selected_count", "duplicate_count")
     if any(type(result.get(key)) is not int or int(result[key]) < 0 for key in count_keys):
         raise PlaylistPreflightProcessError("playlist_preflight_invalid_result")
@@ -101,6 +145,10 @@ def _validated_preflight_result(payload: Any, *, max_items: int) -> PlaylistPref
                 raise ValueError
             if type(normalized_item.source_url) is not str or type(normalized_item.source_kind) is not str:
                 raise ValueError
+            if len(normalized_item.source_url) > _MAX_IDENTITY_URL_LENGTH:
+                _raise_too_large()
+            if len(normalized_item.source_kind) > _MAX_SHORT_TEXT_LENGTH:
+                _raise_too_large()
             if type(normalized_item.availability) is not str or not normalized_item.availability:
                 raise ValueError
             optional_strings = (
@@ -112,6 +160,16 @@ def _validated_preflight_result(payload: Any, *, max_items: int) -> PlaylistPref
             )
             if any(value is not None and type(value) is not str for value in optional_strings):
                 raise ValueError
+            if (
+                normalized_item.normalized_source_id is not None
+                and len(normalized_item.normalized_source_id) > _MAX_IDENTITY_TEXT_LENGTH
+            ):
+                _raise_too_large()
+            if (
+                normalized_item.thumbnail_url is not None
+                and len(normalized_item.thumbnail_url) > _MAX_IDENTITY_URL_LENGTH
+            ):
+                _raise_too_large()
             if normalized_item.duration_seconds is not None and type(normalized_item.duration_seconds) is not int:
                 raise ValueError
             if normalized_item.duplicate_of_ordinal is not None and (
@@ -128,6 +186,12 @@ def _validated_preflight_result(payload: Any, *, max_items: int) -> PlaylistPref
                 raise ValueError
             if type(normalized_item.selected) is not bool:
                 raise ValueError
+            normalized_item = replace(
+                normalized_item,
+                title=_clip_display_text(normalized_item.title),
+                speaker=_clip_display_text(normalized_item.speaker),
+                published_at=_clip_display_text(normalized_item.published_at),
+            )
             items.append(normalized_item)
     except (TypeError, ValueError) as exc:
         raise PlaylistPreflightProcessError("playlist_preflight_invalid_result") from exc
@@ -148,6 +212,24 @@ def _validated_preflight_result(payload: Any, *, max_items: int) -> PlaylistPref
         warnings=list(warnings),
         items=items,
     )
+
+
+def _strict_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON key")
+        result[key] = value
+    return result
+
+
+def _decode_child_message(encoded: bytes) -> Any:
+    if type(encoded) is not bytes:
+        raise PlaylistPreflightProcessError("playlist_preflight_invalid_result")
+    try:
+        return json.loads(encoded.decode("utf-8"), object_pairs_hook=_strict_json_object)
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError, ValueError) as exc:
+        raise PlaylistPreflightProcessError("playlist_preflight_invalid_result") from exc
 
 
 def _terminate_child(process: Any, *, join_timeout_seconds: float) -> None:
@@ -209,7 +291,13 @@ async def run_playlist_preflight_process(
                 if should_cancel:
                     raise PlaylistPreflightProcessError("playlist_preflight_cancelled")
             if recv_connection.poll(0):
-                message = recv_connection.recv()
+                try:
+                    encoded = recv_connection.recv_bytes(_MAX_PAYLOAD_BYTES)
+                except EOFError as exc:
+                    raise PlaylistPreflightProcessError("playlist_preflight_invalid_result") from exc
+                except OSError as exc:
+                    raise PlaylistPreflightProcessError("playlist_preflight_result_too_large") from exc
+                message = _decode_child_message(encoded)
                 break
             if not process.is_alive():
                 raise PlaylistPreflightProcessError("playlist_preflight_invalid_result")
@@ -219,8 +307,17 @@ async def run_playlist_preflight_process(
             await asyncio.sleep(min(max(0.001, poll_interval_seconds), remaining))
 
         process.join(timeout=join_timeout_seconds)
-        if process.is_alive() or recv_connection.poll(0):
+        if process.is_alive():
             raise PlaylistPreflightProcessError("playlist_preflight_invalid_result")
+        if recv_connection.poll(0):
+            try:
+                recv_connection.recv_bytes(_MAX_PAYLOAD_BYTES)
+            except EOFError:
+                pass
+            except OSError as exc:
+                raise PlaylistPreflightProcessError("playlist_preflight_invalid_result") from exc
+            else:
+                raise PlaylistPreflightProcessError("playlist_preflight_invalid_result")
         if not isinstance(message, Mapping):
             raise PlaylistPreflightProcessError("playlist_preflight_invalid_result")
         if set(message) == {"status", "code"} and message.get("status") == "error":

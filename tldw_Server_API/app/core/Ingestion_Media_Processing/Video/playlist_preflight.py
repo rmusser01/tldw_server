@@ -83,6 +83,8 @@ _YTDLP_UNAVAILABLE_TITLES = {
     "[Deleted video]": "deleted",
     "[Private video]": "private",
 }
+_MAX_DISPLAY_TEXT_LENGTH = 2000
+_MAX_IDENTITY_URL_LENGTH = 8192
 
 
 def _is_duplicate_status(value: str | None) -> bool:
@@ -219,6 +221,17 @@ def _string_or_none(value: Any) -> str | None:
     return text or None
 
 
+def _display_text_or_none(value: Any) -> str | None:
+    text = _string_or_none(value)
+    return text[:_MAX_DISPLAY_TEXT_LENGTH] if text is not None else None
+
+
+def _bounded_identity_url(value: str | None) -> str | None:
+    if value is not None and len(value) > _MAX_IDENTITY_URL_LENGTH:
+        raise PlaylistPreflightProcessError("playlist_preflight_result_too_large")
+    return value
+
+
 def _source_url_from_entry(
     entry: dict[str, Any],
     *,
@@ -246,10 +259,10 @@ def normalize_preflight_items(raw_items: list[dict[str, Any]]) -> list[PlaylistP
 
     for index, raw in enumerate(raw_items):
         ordinal = int(raw.get("ordinal") or index + 1)
-        source_url = _source_url_from_entry(raw) or ""
+        source_url = _bounded_identity_url(_source_url_from_entry(raw)) or ""
         source_kind = str(raw.get("source_kind") or "generic_url")
         normalized_source_id = _string_or_none(raw.get("normalized_source_id"))
-        normalized_title = _string_or_none(raw.get("title"))
+        normalized_title = _display_text_or_none(raw.get("title"))
         upstream_availability = str(raw.get("availability") or "").strip().lower()
         if upstream_availability in {"", "unknown"} and normalized_title in _YTDLP_UNAVAILABLE_TITLES:
             upstream_availability = _YTDLP_UNAVAILABLE_TITLES[normalized_title]
@@ -270,9 +283,7 @@ def normalize_preflight_items(raw_items: list[dict[str, Any]]) -> list[PlaylistP
         availability = (
             upstream_availability
             if explicitly_unavailable
-            else "available"
-            if has_source
-            else upstream_availability or "unavailable"
+            else "available" if has_source else upstream_availability or "unavailable"
         )
         if not has_source:
             source_url = ""
@@ -290,10 +301,10 @@ def normalize_preflight_items(raw_items: list[dict[str, Any]]) -> list[PlaylistP
                 source_kind=source_kind,
                 availability=availability,
                 title=normalized_title,
-                speaker=_string_or_none(raw.get("speaker") or raw.get("channel") or raw.get("uploader")),
+                speaker=_display_text_or_none(raw.get("speaker") or raw.get("channel") or raw.get("uploader")),
                 duration_seconds=_coerce_duration(raw.get("duration") or raw.get("duration_seconds")),
-                published_at=_string_or_none(raw.get("published_at") or raw.get("upload_date")),
-                thumbnail_url=_string_or_none(raw.get("thumbnail") or raw.get("thumbnail_url")),
+                published_at=_display_text_or_none(raw.get("published_at") or raw.get("upload_date")),
+                thumbnail_url=_bounded_identity_url(_string_or_none(raw.get("thumbnail") or raw.get("thumbnail_url"))),
                 duplicate_status=duplicate_status,
                 duplicate_of_ordinal=duplicate_of,
                 selected=duplicate_status == "new" and has_source,
@@ -405,7 +416,7 @@ def extract_playlist_preflight(
         source_url=url,
         source_kind=classified.source_kind,
         playlist_id=_string_or_none(info.get("id")) or classified.playlist_id,
-        playlist_title=_string_or_none(info.get("title")),
+        playlist_title=_display_text_or_none(info.get("title")),
         video_id=classified.video_id,
         item_count=len(items),
         selected_count=selected_count,

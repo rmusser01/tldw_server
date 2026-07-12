@@ -1,3 +1,4 @@
+import json
 from collections import deque
 
 import pytest
@@ -67,6 +68,12 @@ def test_preflight_item_without_source_is_not_selected():
     assert items[0].source_url == ""
     assert items[0].duplicate_status == "unknown"
     assert items[0].selected is False
+
+
+def test_preflight_clips_display_only_metadata():
+    items = normalize_preflight_items([{"source_url": "https://youtu.be/abc123", "title": "x" * 3000}])
+
+    assert items[0].title == "x" * 2000
 
 
 def test_extract_playlist_preflight_rejects_single_video_url():
@@ -375,14 +382,20 @@ def test_duplicate_policy_action_does_not_skip_unknown_items():
 
 class _FakeRecvConnection:
     def __init__(self, messages=()):
-        self.messages = deque(messages)
+        self.messages = deque(
+            message if isinstance(message, bytes) else json.dumps(message, separators=(",", ":")).encode("utf-8")
+            for message in messages
+        )
         self.closed = False
 
     def poll(self, _timeout=0.0):
         return bool(self.messages)
 
-    def recv(self):
-        return self.messages.popleft()
+    def recv_bytes(self, maxlength=None):
+        message = self.messages.popleft()
+        if maxlength is not None and len(message) > maxlength:
+            raise OSError("bad message length")
+        return message
 
     def close(self):
         self.closed = True
@@ -393,7 +406,7 @@ class _FakeSendConnection:
         self.recv = recv
         self.closed = False
 
-    def send(self, payload):
+    def send_bytes(self, payload):
         self.recv.messages.append(payload)
 
     def close(self):
@@ -560,6 +573,18 @@ async def test_process_runner_process_creation_failure_closes_pipe_with_safe_err
 
 
 @pytest.mark.asyncio
+async def test_process_runner_real_spawn_preserves_single_safe_child_error():
+    with pytest.raises(playlist_preflight_runner.PlaylistPreflightProcessError) as exc_info:
+        await playlist_preflight_runner.run_playlist_preflight_process(
+            "https://example.com/not-a-playlist",
+            max_items=1,
+            timeout_seconds=5,
+        )
+
+    assert exc_info.value.code == "not_playlist_url"
+
+
+@pytest.mark.asyncio
 async def test_process_runner_child_exit_without_payload_is_invalid_and_cleans_up():
     context = _FakeSpawnContext(run_target=False, exit_without_target=True)
 
@@ -629,13 +654,16 @@ async def test_process_runner_cancel_check_failure_is_safe_and_terminates_child(
         (["not-a-mapping"]),
         ([{"status": "ok", "result": []}]),
         ([{"status": "ok", "result": {}}, {"status": "error", "code": "second"}]),
+        ([b'{"status":"error","status":"ok","code":"not_playlist_url"}']),
     ],
 )
 async def test_process_runner_rejects_malformed_or_multiple_child_payloads(messages):
     context = _FakeSpawnContext(messages=messages, run_target=False, exit_without_target=True)
     context.process = None
 
-    with pytest.raises(playlist_preflight_runner.PlaylistPreflightProcessError, match="playlist_preflight_invalid_result"):
+    with pytest.raises(
+        playlist_preflight_runner.PlaylistPreflightProcessError, match="playlist_preflight_invalid_result"
+    ):
         await playlist_preflight_runner.run_playlist_preflight_process(
             "https://www.youtube.com/playlist?list=PLtest",
             max_items=10,
@@ -680,3 +708,81 @@ async def test_process_runner_rejects_inconsistent_child_counts():
             timeout_seconds=1,
             mp_context=context,
         )
+
+
+@pytest.mark.parametrize("field", ["source_url", "thumbnail_url"])
+def test_process_runner_rejects_oversized_identity_url(field):
+    extracted = PlaylistPreflightData(
+        source_url="https://www.youtube.com/playlist?list=PLtest",
+        source_kind="youtube_playlist",
+        playlist_id="PLtest",
+        playlist_title="Conference",
+        video_id=None,
+        item_count=1,
+        selected_count=1,
+        duplicate_count=0,
+        warnings=[],
+        items=normalize_preflight_items([{"source_url": "https://youtu.be/abc123"}]),
+    )
+    payload = extracted.to_dict()
+    payload["items"][0][field] = "https://example.com/" + ("x" * 8193)
+
+    with pytest.raises(playlist_preflight_runner.PlaylistPreflightProcessError) as exc_info:
+        playlist_preflight_runner._validated_preflight_result(
+            {"status": "ok", "result": payload},
+            max_items=10,
+        )
+
+    assert exc_info.value.code == "playlist_preflight_result_too_large"
+
+
+def test_process_runner_clips_display_metadata_and_warning_limits():
+    extracted = PlaylistPreflightData(
+        source_url="https://www.youtube.com/playlist?list=PLtest",
+        source_kind="youtube_playlist",
+        playlist_id="PLtest",
+        playlist_title="p" * 3000,
+        video_id=None,
+        item_count=1,
+        selected_count=1,
+        duplicate_count=0,
+        warnings=["w" * 1500 for _ in range(101)],
+        items=normalize_preflight_items(
+            [
+                {
+                    "source_url": "https://youtu.be/abc123",
+                    "title": "t" * 3000,
+                    "uploader": "u" * 3000,
+                }
+            ]
+        ),
+    )
+
+    validated = playlist_preflight_runner._validated_preflight_result(
+        {"status": "ok", "result": extracted.to_dict()},
+        max_items=10,
+    )
+
+    assert validated.playlist_title == "p" * 2000
+    assert validated.items[0].title == "t" * 2000
+    assert validated.items[0].speaker == "u" * 2000
+    assert validated.warnings == ["w" * 1000 for _ in range(100)]
+
+
+@pytest.mark.asyncio
+async def test_process_runner_rejects_payload_over_aggregate_byte_limit():
+    context = _FakeSpawnContext(
+        messages=[b"x" * ((4 * 1024 * 1024) + 1)],
+        run_target=False,
+        exit_without_target=True,
+    )
+
+    with pytest.raises(playlist_preflight_runner.PlaylistPreflightProcessError) as exc_info:
+        await playlist_preflight_runner.run_playlist_preflight_process(
+            "https://www.youtube.com/playlist?list=PLtest",
+            max_items=10,
+            timeout_seconds=1,
+            mp_context=context,
+        )
+
+    assert exc_info.value.code == "playlist_preflight_result_too_large"

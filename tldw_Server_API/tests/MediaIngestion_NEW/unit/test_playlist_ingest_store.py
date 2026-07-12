@@ -83,6 +83,47 @@ def _seed_materialization(store, *, owner_id: str = "1", item_count: int = 2):
     )
 
 
+def test_ready_snapshot_guard_rejects_cancelled_linked_job_atomically(store):
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestConflictError,
+    )
+
+    job = store._jobs.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="playlist_preflight",
+        payload={"preflight_id": "guarded"},
+        owner_user_id="1",
+    )
+    preflight = store.create_preflight(
+        "1",
+        source_url="https://example.com/guarded",
+        source_kind="playlist",
+        expires_at=NOW + timedelta(hours=1),
+        job_id=int(job["id"]),
+    )
+    claimed = store._jobs.acquire_next_job(
+        domain="media_ingest",
+        queue="default",
+        lease_seconds=120,
+        worker_id="guard-test",
+    )
+    assert claimed is not None
+    assert store._jobs.cancel_job(int(job["id"]), reason="race") is True
+
+    with pytest.raises(PlaylistIngestConflictError, match="no longer active"):
+        store.replace_preflight_snapshot(
+            "1",
+            preflight.preflight_id,
+            status="ready",
+            items=[_preflight_item("must-not-persist", 1)],
+            expected_job_id=int(job["id"]),
+        )
+
+    assert store.get_preflight("1", preflight.preflight_id).status == "pending"
+    assert list(store.list_preflight_items("1", preflight.preflight_id, limit=10)) == []
+
+
 def test_duplicate_policy_choices_are_explicit():
     from tldw_Server_API.app.api.v1.schemas.media_playlist_ingest import DuplicatePolicy
 
@@ -488,8 +529,7 @@ def test_cursor_rejects_noncanonical_base64_and_wrong_signature_length(store):
     alias = next(
         signature_segment[:-1] + character
         for character in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
-        if character != signature_segment[-1]
-        and decoded(signature_segment[:-1] + character) == signature_bytes
+        if character != signature_segment[-1] and decoded(signature_segment[:-1] + character) == signature_bytes
     )
     short_signature = base64.urlsafe_b64encode(signature_bytes[:-1]).decode("ascii").rstrip("=")
     invalid = [
@@ -725,6 +765,52 @@ def test_postgres_snapshot_replacement_locks_mutable_unexpired_parent(store, mon
     locked_read = next(query for query in queries if "SELECT status" in query)
     assert "expires_at" in locked_read
     assert locked_read.rstrip().endswith("FOR UPDATE")
+
+
+def test_postgres_ready_guard_locks_preflight_then_exact_job(store, monkeypatch):
+    queries: list[str] = []
+
+    class _Result:
+        rowcount = 1
+
+        def __init__(self, row=None):
+            self.row = row
+
+        def fetchone(self):
+            return self.row
+
+    @contextmanager
+    def fake_connection(*, write):
+        assert write is True
+        yield object()
+
+    def fake_query(_db, sql, _params=()):
+        queries.append(sql)
+        if "SELECT status" in sql:
+            return _Result({"status": "running", "expires_at": NOW + timedelta(hours=1), "job_id": 42})
+        if "SELECT owner_user_id" in sql:
+            return _Result({"owner_user_id": "1", "status": "processing"})
+        return _Result()
+
+    store._postgres = True
+    monkeypatch.setattr(store, "_connection", fake_connection)
+    monkeypatch.setattr(store, "_query", fake_query)
+    monkeypatch.setattr(store, "get_preflight", lambda *_args: object())
+
+    store.replace_preflight_snapshot(
+        "1",
+        "preflight-id",
+        status="ready",
+        items=[],
+        expected_job_id=42,
+    )
+
+    preflight_lock = next(index for index, query in enumerate(queries) if "SELECT status" in query)
+    job_lock = next(index for index, query in enumerate(queries) if "SELECT owner_user_id" in query)
+    assert preflight_lock < job_lock
+    assert queries[preflight_lock].rstrip().endswith("FOR UPDATE")
+    assert "WHERE id = ?" in queries[job_lock]
+    assert queries[job_lock].rstrip().endswith("FOR UPDATE")
 
 
 def test_postgres_cleanup_locks_all_expired_parents_before_child_deletes(store, monkeypatch):

@@ -36,6 +36,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.persistence import (
     process_document_like_item,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+    PlaylistIngestConflictError,
     PlaylistIngestStore,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_preflight import PlaylistPreflightData
@@ -374,12 +375,27 @@ def _block_playlist_preflight(
         )
 
 
+def _raise_if_playlist_preflight_cancelled(
+    jm: JobManager,
+    job_id: int,
+    store: PlaylistIngestStore,
+    *,
+    owner_user_id: str,
+    preflight_id: str,
+) -> None:
+    if not _should_cancel(jm, job_id):
+        return
+    _block_playlist_preflight(
+        store,
+        owner_user_id=owner_user_id,
+        preflight_id=preflight_id,
+        code="playlist_preflight_cancelled",
+    )
+    raise MediaIngestJobError("playlist_preflight_cancelled", retryable=False)
+
+
 def _playlist_library_url_set(rows: list[dict[str, Any]]) -> set[str]:
-    return {
-        candidate
-        for row in rows
-        for candidate in media_dedupe_url_candidates(str(row.get("url") or ""))
-    }
+    return {candidate for row in rows for candidate in media_dedupe_url_candidates(str(row.get("url") or ""))}
 
 
 def _playlist_snapshot(
@@ -442,8 +458,7 @@ def _playlist_snapshot(
         "ingestible_count": sum(item["availability"] == "available" for item in snapshot_items),
         "unavailable_count": sum(item["availability"] != "available" for item in snapshot_items),
         "duplicate_count": sum(
-            item["duplicate_status"] in {"duplicate_existing", "duplicate_in_batch"}
-            for item in snapshot_items
+            item["duplicate_status"] in {"duplicate_existing", "duplicate_in_batch"} for item in snapshot_items
         ),
         "selected_count": sum(bool(item["selected_by_default"]) for item in snapshot_items),
         "warnings": warnings,
@@ -520,6 +535,14 @@ async def _handle_playlist_preflight_job(
         )
         raise MediaIngestJobError("playlist_preflight_failed", retryable=False) from exc
 
+    _raise_if_playlist_preflight_cancelled(
+        jm,
+        job_id,
+        store,
+        owner_user_id=owner_user_id,
+        preflight_id=preflight_id,
+    )
+
     progress.percent = 70.0
     progress.message = "check library"
     jm.update_job_progress(job_id, progress_percent=progress.percent, progress_message=progress.message)
@@ -531,9 +554,7 @@ async def _handle_playlist_preflight_job(
         media_db = _create_db(owner_user_id)
         lookup_urls = list(
             dict.fromkeys(
-                item.source_url
-                for item in extracted.items
-                if item.availability == "available" and item.source_url
+                item.source_url for item in extracted.items if item.availability == "available" and item.source_url
             )
         )
         library_rows = get_media_by_urls(media_db, lookup_urls)
@@ -545,10 +566,25 @@ async def _handle_playlist_preflight_job(
             with contextlib.suppress(Exception):
                 media_db.close_connection()
 
+    _raise_if_playlist_preflight_cancelled(
+        jm,
+        job_id,
+        store,
+        owner_user_id=owner_user_id,
+        preflight_id=preflight_id,
+    )
+
     snapshot_items, summary = _playlist_snapshot(
         extracted,
         library_rows=library_rows,
         library_lookup_failed=library_lookup_failed,
+    )
+    _raise_if_playlist_preflight_cancelled(
+        jm,
+        job_id,
+        store,
+        owner_user_id=owner_user_id,
+        preflight_id=preflight_id,
     )
     try:
         store.replace_preflight_snapshot(
@@ -557,7 +593,24 @@ async def _handle_playlist_preflight_job(
             status="ready",
             items=snapshot_items,
             summary=summary,
+            expected_job_id=job_id,
         )
+    except PlaylistIngestConflictError as exc:
+        if _should_cancel(jm, job_id):
+            _block_playlist_preflight(
+                store,
+                owner_user_id=owner_user_id,
+                preflight_id=preflight_id,
+                code="playlist_preflight_cancelled",
+            )
+            raise MediaIngestJobError("playlist_preflight_cancelled", retryable=False) from exc
+        _block_playlist_preflight(
+            store,
+            owner_user_id=owner_user_id,
+            preflight_id=preflight_id,
+            code="playlist_snapshot_write_failed",
+        )
+        raise MediaIngestJobError("playlist_snapshot_write_failed", retryable=False) from exc
     except Exception as exc:
         _block_playlist_preflight(
             store,

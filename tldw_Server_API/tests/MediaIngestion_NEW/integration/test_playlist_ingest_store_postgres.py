@@ -96,6 +96,56 @@ def test_playlist_store_postgres_matches_sqlite_contract(pg_temp_db, monkeypatch
     assert store.get_run("pg-owner", run.run_id).version == 2
 
 
+def test_postgres_ready_snapshot_guard_rejects_cancelled_linked_job(pg_temp_db, monkeypatch):
+    monkeypatch.setenv("TEST_MODE", "true")
+    dsn = str(pg_temp_db["dsn"])
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestConflictError,
+        PlaylistIngestStore,
+    )
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    from tldw_Server_API.app.core.Jobs.pg_migrations import ensure_jobs_tables_pg
+
+    ensure_jobs_tables_pg(dsn)
+    manager = JobManager(backend="postgres", db_url=dsn, clock=_FixedClock())
+    store = PlaylistIngestStore(manager)
+    job = manager.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="playlist_preflight",
+        payload={"preflight_id": "guarded"},
+        owner_user_id="pg-guard-owner",
+    )
+    preflight = store.create_preflight(
+        "pg-guard-owner",
+        source_url="https://example.com/guarded",
+        source_kind="playlist",
+        expires_at=NOW + timedelta(hours=1),
+        job_id=int(job["id"]),
+    )
+    claimed = manager.acquire_next_job(
+        domain="media_ingest",
+        queue="default",
+        lease_seconds=120,
+        worker_id="pg-guard-test",
+        job_type="playlist_preflight",
+    )
+    assert claimed is not None
+    assert manager.cancel_job(int(job["id"]), reason="race") is True
+
+    with pytest.raises(PlaylistIngestConflictError, match="no longer active"):
+        store.replace_preflight_snapshot(
+            "pg-guard-owner",
+            preflight.preflight_id,
+            status="ready",
+            items=[],
+            expected_job_id=int(job["id"]),
+        )
+
+    assert store.get_preflight("pg-guard-owner", preflight.preflight_id).status == "pending"
+
+
 def test_postgres_no_cas_concurrent_events_both_persist(pg_temp_db, monkeypatch):
     monkeypatch.setenv("TEST_MODE", "true")
     dsn = str(pg_temp_db["dsn"])
@@ -143,7 +193,9 @@ def test_postgres_no_cas_concurrent_events_both_persist(pg_temp_db, monkeypatch)
         events = list(pool.map(append, range(2)))
 
     assert len(seed.list_run_events("pg-events-owner", run.run_id)) == 2
-    assert sorted(event.event_id for event in events) == [event.event_id for event in seed.list_run_events("pg-events-owner", run.run_id)]
+    assert sorted(event.event_id for event in events) == [
+        event.event_id for event in seed.list_run_events("pg-events-owner", run.run_id)
+    ]
     assert seed.get_run("pg-events-owner", run.run_id).version == 3
 
 
@@ -281,7 +333,9 @@ def test_postgres_cleanup_race_leaves_no_orphan_children(pg_temp_db, monkeypatch
                 "media_ingest_run_items",
                 "media_ingest_run_events",
             ):
-                cursor.execute(f"SELECT COUNT(*) AS count FROM {table} WHERE owner_user_id = %s", ("pg-cleanup-owner",))  # nosec B608
+                cursor.execute(
+                    f"SELECT COUNT(*) AS count FROM {table} WHERE owner_user_id = %s", ("pg-cleanup-owner",)
+                )  # nosec B608
                 assert cursor.fetchone()["count"] == 0
     finally:
         connection.close()

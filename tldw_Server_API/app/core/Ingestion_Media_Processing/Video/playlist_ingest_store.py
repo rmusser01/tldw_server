@@ -316,9 +316,7 @@ class PlaylistIngestStore:
             duplicate_status=data.get("duplicate_status"),
             duplicate_of_occurrence_id=data.get("duplicate_of_occurrence_id"),
             selected_by_default=(
-                bool(data["selected_by_default"])
-                if data.get("selected_by_default") is not None
-                else None
+                bool(data["selected_by_default"]) if data.get("selected_by_default") is not None else None
             ),
         )
 
@@ -358,9 +356,7 @@ class PlaylistIngestStore:
             job_id=int(data["job_id"]) if data.get("job_id") is not None else None,
             batch_id=data.get("batch_id"),
             attempt=int(data["attempt"]),
-            progress_percent=(
-                float(data["progress_percent"]) if data.get("progress_percent") is not None else None
-            ),
+            progress_percent=(float(data["progress_percent"]) if data.get("progress_percent") is not None else None),
             progress_message=data.get("progress_message"),
             retryable=bool(data["retryable"]),
             media_id=int(data["media_id"]) if data.get("media_id") is not None else None,
@@ -378,9 +374,7 @@ class PlaylistIngestStore:
             event_type=str(data["event_type"]),
             state=data.get("state"),
             outcome=data.get("outcome"),
-            progress_percent=(
-                float(data["progress_percent"]) if data.get("progress_percent") is not None else None
-            ),
+            progress_percent=(float(data["progress_percent"]) if data.get("progress_percent") is not None else None),
             progress_message=data.get("progress_message"),
             attrs=cls._json_dict(data.get("attrs_json")) or {},
             occurred_at=cls._datetime(data["occurred_at"]),
@@ -522,8 +516,9 @@ class PlaylistIngestStore:
         items: Sequence[Mapping[str, Any]],
         summary: Mapping[str, Any] | None = None,
         error: Mapping[str, Any] | None = None,
+        expected_job_id: int | None = None,
     ) -> PlaylistPreflightRecord:
-        """Replace inspection items and status atomically while the snapshot is mutable."""
+        """Replace a mutable snapshot, optionally guarded by its active processing job."""
         owner = self._owner(owner_user_id)
         occurrence_ids = [str(item.get("occurrence_id") or "").strip() for item in items]
         ordinals = [item.get("ordinal") for item in items]
@@ -536,13 +531,13 @@ class PlaylistIngestStore:
         with self._connection(write=True) as db:
             if self._postgres:
                 mutable_preflight_query = """
-                    SELECT status, expires_at FROM playlist_preflights
+                    SELECT status, expires_at, job_id FROM playlist_preflights
                     WHERE owner_user_id = ? AND preflight_id = ? AND expires_at > ?
                     FOR UPDATE
                 """
             else:
                 mutable_preflight_query = """
-                    SELECT status, expires_at FROM playlist_preflights
+                    SELECT status, expires_at, job_id FROM playlist_preflights
                     WHERE owner_user_id = ? AND preflight_id = ? AND expires_at > ?
                 """
             row = self._query(
@@ -552,8 +547,31 @@ class PlaylistIngestStore:
             ).fetchone()
             if row is None:
                 raise self._not_found()
-            if str(self._row_dict(row)["status"]) not in {"pending", "running"}:
+            preflight_row = self._row_dict(row)
+            if str(preflight_row["status"]) not in {"pending", "running"}:
                 raise PlaylistIngestConflictError("ready playlist snapshot ordering is immutable")
+            if expected_job_id is not None:
+                if preflight_row.get("job_id") != int(expected_job_id):
+                    raise PlaylistIngestConflictError("playlist preflight job no longer matches")
+                active_job_query = (
+                    """
+                    SELECT owner_user_id, status FROM jobs WHERE id = ?
+                    FOR UPDATE
+                """
+                    if self._postgres
+                    else """
+                    SELECT owner_user_id, status FROM jobs WHERE id = ?
+                """
+                )
+                job_row = self._query(db, active_job_query, (int(expected_job_id),)).fetchone()
+                if job_row is None:
+                    raise PlaylistIngestConflictError("playlist preflight job is no longer active")
+                active_job = self._row_dict(job_row)
+                if (
+                    str(active_job.get("owner_user_id") or "") != owner
+                    or str(active_job.get("status") or "") != "processing"
+                ):
+                    raise PlaylistIngestConflictError("playlist preflight job is no longer active")
 
             self._query(
                 db,
@@ -619,12 +637,16 @@ class PlaylistIngestStore:
         converter: Any,
     ) -> PlaylistPage[Any]:
         page_limit = self._page_limit(limit)
-        last_ordinal = self._decode_cursor(
-            cursor,
-            owner=owner,
-            kind=kind,
-            resource_id=resource_id,
-        ) if cursor else 0
+        last_ordinal = (
+            self._decode_cursor(
+                cursor,
+                owner=owner,
+                kind=kind,
+                resource_id=resource_id,
+            )
+            if cursor
+            else 0
+        )
         with self._connection(write=False) as db:
             exists = self._query(
                 db,
@@ -751,9 +773,7 @@ class PlaylistIngestStore:
                 data = self._row_dict(row)
                 source_display = self._json_dict(data.get("display_metadata_json")) or {}
                 display = {
-                    key: source_display[key]
-                    for key in _COMPACT_DISPLAY_METADATA_FIELDS
-                    if key in source_display
+                    key: source_display[key] for key in _COMPACT_DISPLAY_METADATA_FIELDS if key in source_display
                 }
                 self._query(
                     db,
@@ -882,9 +902,11 @@ class PlaylistIngestStore:
                     owner,
                     collection_id,
                     self._json_value(dict(processing_options)) if processing_options is not None else None,
-                    self._json_value([dict(item) for item in playlist_summaries])
-                    if playlist_summaries is not None
-                    else None,
+                    (
+                        self._json_value([dict(item) for item in playlist_summaries])
+                        if playlist_summaries is not None
+                        else None
+                    ),
                     self._json_value([]),
                     self._db_datetime(now),
                     self._db_datetime(now),
@@ -1035,9 +1057,7 @@ class PlaylistIngestStore:
                 ),
             )
             event_id = (
-                int(self._row_dict(inserted.fetchone())["event_id"])
-                if self._postgres
-                else int(inserted.lastrowid)
+                int(self._row_dict(inserted.fetchone())["event_id"]) if self._postgres else int(inserted.lastrowid)
             )
             event_row = self._query(
                 db,
@@ -1165,10 +1185,7 @@ class PlaylistIngestStore:
                     (owner, cutoff),
                 ).fetchall()
                 preflight_ids = [str(self._row_dict(row)["preflight_id"]) for row in preflight_rows]
-                materialization_ids = [
-                    str(self._row_dict(row)["materialization_id"])
-                    for row in materialization_rows
-                ]
+                materialization_ids = [str(self._row_dict(row)["materialization_id"]) for row in materialization_rows]
                 run_ids = [str(self._row_dict(row)["run_id"]) for row in run_rows]
 
                 if run_ids:

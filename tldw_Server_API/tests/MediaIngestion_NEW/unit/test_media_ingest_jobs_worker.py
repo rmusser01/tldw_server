@@ -1108,32 +1108,45 @@ def _playlist_preflight_data(raw_items):
 
 def _seed_playlist_preflight_job(jm):
     from datetime import timedelta
+    from unittest.mock import patch
+    from uuid import uuid4
 
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store as store_module
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
         PlaylistIngestStore,
     )
 
     store = PlaylistIngestStore(jm)
-    record = store.create_preflight(
-        "7",
-        source_url="https://www.youtube.com/playlist?list=PLworker",
-        source_kind="youtube_playlist",
-        expires_at=store._now() + timedelta(hours=1),
-        playlist_id="PLworker",
-    )
+    preflight_id = str(uuid4())
     job = jm.create_job(
         domain="media_ingest",
         queue="default",
         job_type="playlist_preflight",
         payload={
-            "preflight_id": record.preflight_id,
+            "preflight_id": preflight_id,
             "source_url": "https://attacker.invalid/ignored?token=secret",
             "max_items": 10,
             "timeout_seconds": 5,
         },
         owner_user_id="7",
     )
-    return store, record, job
+    with patch.object(store_module, "uuid4", return_value=preflight_id):
+        record = store.create_preflight(
+            "7",
+            source_url="https://www.youtube.com/playlist?list=PLworker",
+            source_kind="youtube_playlist",
+            expires_at=store._now() + timedelta(hours=1),
+            playlist_id="PLworker",
+            job_id=int(job["id"]),
+        )
+    claimed = jm.acquire_next_job(
+        domain="media_ingest",
+        queue="default",
+        lease_seconds=120,
+        worker_id="playlist-preflight-test-worker",
+    )
+    assert claimed is not None
+    return store, record, claimed
 
 
 @pytest.mark.asyncio
@@ -1322,34 +1335,79 @@ async def test_playlist_preflight_worker_excludes_explicit_unavailable_entries_f
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error_code",
+    ["playlist_too_large", "playlist_preflight_result_too_large"],
+)
 async def test_playlist_preflight_worker_configured_limit_failure_blocks_without_partial_snapshot(
+    monkeypatch,
+    tmp_path,
+    error_code,
+):
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
+    monkeypatch.delenv("JOBS_DB_URL", raising=False)
+
+    import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_preflight import (
+        PlaylistPreflightProcessError,
+    )
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    jm = JobManager()
+    store, preflight, job = _seed_playlist_preflight_job(jm)
+
+    async def too_large(_url, **_kwargs):
+        raise PlaylistPreflightProcessError(error_code)
+
+    monkeypatch.setattr(worker, "run_playlist_preflight_process", too_large, raising=True)
+
+    with pytest.raises(worker.MediaIngestJobError, match=error_code):
+        await worker._handle_job(jm.get_job(int(job["id"])), jm, worker._ProgressState())
+
+    blocked = store.get_preflight("7", preflight.preflight_id)
+    assert blocked.status == "blocked"
+    assert blocked.error == {"code": error_code}
+    assert list(store.list_preflight_items("7", preflight.preflight_id, limit=10)) == []
+
+
+@pytest.mark.asyncio
+async def test_playlist_preflight_worker_cancellation_during_library_lookup_never_marks_ready(
     monkeypatch,
     tmp_path,
 ):
     monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
     monkeypatch.delenv("JOBS_DB_URL", raising=False)
 
-    from tldw_Server_API.app.core.Jobs.manager import JobManager
-    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_preflight import (
-        PlaylistPreflightProcessError,
-    )
     import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
 
     jm = JobManager()
     store, preflight, job = _seed_playlist_preflight_job(jm)
+    extracted = _playlist_preflight_data([{"source_url": "https://youtu.be/race123", "title": "Race"}])
 
-    async def too_large(_url, **_kwargs):
-        raise PlaylistPreflightProcessError("playlist_too_large")
+    async def fake_runner(_url, **_kwargs):
+        return extracted
 
-    monkeypatch.setattr(worker, "run_playlist_preflight_process", too_large, raising=True)
+    class _CancellingMediaDB:
+        def get_media_by_urls(self, _urls, **_kwargs):
+            assert jm.cancel_job(int(job["id"]), reason="test cancellation race") is True
+            return []
 
-    with pytest.raises(worker.MediaIngestJobError, match="playlist_too_large"):
-        await worker._handle_job(jm.get_job(int(job["id"])), jm, worker._ProgressState())
+        def close_connection(self):
+            return None
 
+    monkeypatch.setattr(worker, "run_playlist_preflight_process", fake_runner, raising=True)
+    monkeypatch.setattr(worker, "_create_db", lambda _user_id: _CancellingMediaDB(), raising=True)
+
+    with pytest.raises(worker.MediaIngestJobError) as exc_info:
+        await worker._handle_job(job, jm, worker._ProgressState())
+
+    assert str(exc_info.value) == "playlist_preflight_cancelled"
     blocked = store.get_preflight("7", preflight.preflight_id)
     assert blocked.status == "blocked"
-    assert blocked.error == {"code": "playlist_too_large"}
+    assert blocked.error == {"code": "playlist_preflight_cancelled"}
     assert list(store.list_preflight_items("7", preflight.preflight_id, limit=10)) == []
+    assert jm.get_job(int(job["id"]))["status"] == "cancelled"
 
 
 @pytest.mark.asyncio
