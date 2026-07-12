@@ -8,6 +8,7 @@ labels:
 - quick-ingest
 documentation:
 - Docs/superpowers/specs/2026-07-12-quick-ingest-preset-provider-design.md
+- Docs/superpowers/plans/2026-07-12-quick-ingest-preset-provider-implementation.md
 ---
 
 ## Description
@@ -24,6 +25,12 @@ Target dev with a shared WebUI/browser-extension fix so the active Quick Ingest 
 - [ ] #4 Focused unit/integration tests cover WebUI/extension shared behavior and pass.
 - [ ] #5 A pull request targets dev.
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Execute the approved plan in Docs/superpowers/plans/2026-07-12-quick-ingest-preset-provider-implementation.md test-first. The event host owns preset hydration/snapshots; the reducer merges every edit into full current config; the Configure step owns session-scoped provider recovery.
+<!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 
