@@ -126,7 +126,7 @@ Never copy another provider section, API key, authorization header, cookie, toke
 
 **Tests:** AuthNZ unit/SQLite, Chat service boundary, summarization, and embedding tests.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 1: Make BYOK resolution outcomes explicit and fail closed
 
@@ -135,25 +135,25 @@ Never copy another provider section, API key, authorization header, cookie, toke
 - Modify: `tldw_Server_API/tests/AuthNZ_Unit/test_byok_runtime.py`
 - Modify: `tldw_Server_API/tests/AuthNZ_SQLite/test_byok_runtime_sqlite.py`
 
-- [ ] **Step 1: Write failing resolver tests**
+- [x] **Step 1: Write failing resolver tests**
 
 Add tests for user/team/org/server precedence, explicit absence, decrypt failure, user/team/org repository outage, membership lookup outage, invalid active scope, redacted repr, and scoped config exclusion. Assert only absence advances precedence; operational/invalid states raise sanitized typed exceptions.
 
-- [ ] **Step 2: Run the tests and verify red**
+- [x] **Step 2: Run the tests and verify red**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/AuthNZ_Unit/test_byok_runtime.py tldw_Server_API/tests/AuthNZ_SQLite/test_byok_runtime_sqlite.py -q`
 
 Expected: FAIL on missing typed exceptions and current swallowed lookup/decrypt errors.
 
-- [ ] **Step 3: Implement the minimal typed contract**
+- [x] **Step 3: Implement the minimal typed contract**
 
 Add `ByokResolutionError(code, provider)`, subclasses/codes for `invalid_provider_credentials`, `credential_store_unavailable`, and `credential_scope_revoked`, plus an `ABSENT`/`RESOLVED` status on the non-secret resolution object. Replace broad catches that assign `None` with typed raises; retain `None` only for a successful not-found query. Override `ResolvedByokCredentials.__repr__` and narrow `_build_app_config` to the explicit allowlist above. Server-default and local-provider results must also receive the scrubbed selected-provider configuration so models, endpoints, and timeouts continue to work while the API key exists only in `api_key`. Add an explicit `trusted_base_url_override: bool | None` resolver argument: `None` preserves legacy request-derived authority, while the shared runtime always passes a server-derived boolean and the provider allowlist/egress validator still applies.
 
-- [ ] **Step 4: Run focused tests and refactor**
+- [x] **Step 4: Run focused tests and refactor**
 
 Run the Step 2 command. Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/AuthNZ/byok_runtime.py tldw_Server_API/tests/AuthNZ_Unit/test_byok_runtime.py tldw_Server_API/tests/AuthNZ_SQLite/test_byok_runtime_sqlite.py
