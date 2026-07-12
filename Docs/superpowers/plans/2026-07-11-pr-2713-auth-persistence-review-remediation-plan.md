@@ -17,11 +17,11 @@
 - Modify: `apps/packages/ui/src/services/tldw/browser-networking.ts`
 - Test: `apps/packages/ui/src/services/tldw/__tests__/single-user-credential.test.ts`
 
-- [ ] Add failing tests that require exact-origin session hydration, exact-origin cookie preference, explicit removal of API/Bearer fields from cookie configs, and fail-closed storage errors.
-- [ ] Run `bunx vitest run src/services/tldw/__tests__/single-user-credential.test.ts --maxWorkers=1` from `apps/packages/ui`; confirm the new cases fail because no shared resolver exists.
-- [ ] Export the existing cookie-config validator and implement the minimal storage-injected effective resolver without new persistence formats or dependencies.
-- [ ] Re-run the focused test and confirm all cases pass.
-- [ ] Run `git diff --check` and commit `fix(web): centralize effective auth configuration`.
+- [x] Add failing tests that require exact-origin session hydration, exact-origin cookie preference, explicit removal of API/Bearer fields from cookie configs, and fail-closed storage errors.
+- [x] Run `bunx vitest run src/services/tldw/__tests__/single-user-credential.test.ts --maxWorkers=1` from `apps/packages/ui`; confirm the new cases fail because no shared resolver exists.
+- [x] Export the existing cookie-config validator and implement the minimal storage-injected effective resolver without new persistence formats or dependencies.
+- [x] Re-run the focused test and confirm all cases pass.
+- [x] Run `git diff --check` and commit `fix(web): centralize effective auth configuration`.
 
 ### Task 2: Use the resolver in WebUI and extension transports
 
@@ -41,14 +41,14 @@
 - Test: `apps/tldw-frontend/e2e/manual-api-key-persistence.spec.ts`
 - Test: `apps/tldw-frontend/e2e/extension-api-key-persistence.spec.ts`
 
-- [ ] Add failing direct-runtime tests proving a verified cookie marker overrides a preserved remote key and adds CSRF on POST/PATCH; add direct `bgUpload` and `bgStream` cases proving origin-bound session hydration without writing the key to persistent storage.
-- [ ] Add failing `apiSend` direct-fallback tests for the same cookie/session resolution contract.
-- [ ] Add failing worker-level tests proving session-only credentials authenticate ordinary requests, uploads, HTTP streams, STT WebSocket first-frame auth, and background-init OpenAPI requests without local persistence. Seed a cookie marker and prove extension contexts ignore it.
-- [ ] Add the authenticated WebUI and extension lifecycle assertions now, before implementation, and run them to confirm the production request paths fail even though form/storage hydration succeeds.
-- [ ] Run the focused Vitest and Playwright files and confirm failures occur at local-only config reads.
-- [ ] Replace credential-bearing local-only reads with the shared resolver; pass cookie eligibility only from an HTTP(S) same-origin quickstart WebUI.
-- [ ] Re-run the focused suites, then the changed shared-UI test matrix.
-- [ ] Run scoped ESLint on changed TypeScript files and commit `fix(web): hydrate effective auth across transports`.
+- [x] Add failing direct-runtime tests proving a verified cookie marker overrides a preserved remote key and adds CSRF on POST/PATCH; add direct `bgUpload` and `bgStream` cases proving origin-bound session hydration without writing the key to persistent storage.
+- [x] Add failing `apiSend` direct-fallback tests for the same cookie/session resolution contract.
+- [x] Add failing worker-level tests proving session-only credentials authenticate ordinary requests, uploads, HTTP streams, STT WebSocket first-frame auth, and background-init OpenAPI requests without local persistence. Seed a cookie marker and prove extension contexts ignore it.
+- [x] Add the authenticated WebUI and extension lifecycle assertions now, before implementation, and run them to confirm the production request paths fail even though form/storage hydration succeeds.
+- [x] Run the focused Vitest and Playwright files and confirm failures occur at local-only config reads.
+- [x] Replace credential-bearing local-only reads with the shared resolver; pass cookie eligibility only from an HTTP(S) same-origin quickstart WebUI.
+- [x] Re-run the focused suites, then the changed shared-UI test matrix.
+- [x] Run scoped ESLint on changed TypeScript files and commit `fix(web): hydrate effective auth across transports`.
 
 ### Task 3: Idempotent cookie logout and truthful secret clearing
 
@@ -61,14 +61,14 @@
 - Test: `apps/packages/ui/src/services/__tests__/tldw-auth.api-key-validation.test.ts`
 - Test: `apps/packages/ui/src/services/tldw/__tests__/single-user-credential.test.ts`
 
-- [ ] Add failing backend tests for active, missing, and stale-cookie DELETE responses, exact-session revocation, cookie clearing, and `Cache-Control: no-store` on POST/DELETE.
-- [ ] Add failing client tests proving cookie logout uses the effective WebUI runtime with CSRF, removes/invalidates the marker only after success, rehydrates the preserved manual connection, and preserves cookie state on network error.
-- [ ] Add failing clear-policy tests proving persistent read/write and session remove failures are surfaced while both stores are attempted.
-- [ ] Run the focused pytest and Vitest cases and confirm expected failures.
-- [ ] Remove the mandatory principal dependency from DELETE, validate/revoke only an active canonical session, always clear the cookie, and set no-store.
-- [ ] Wire client cookie logout and implement truthful two-store clearing with the smallest existing APIs.
-- [ ] Re-run focused tests and Bandit over the changed Python endpoint.
-- [ ] Commit `fix(auth): make single-user logout idempotent`.
+- [x] Add failing backend tests for active, missing, stale, and infrastructure-failure DELETE responses, exact-session revocation, cookie clearing, and `Cache-Control: no-store` on POST/DELETE.
+- [x] Add failing client tests proving cookie logout uses the effective WebUI runtime with CSRF, removes/invalidates the marker only after success, rehydrates the preserved manual connection even when marker removal fails, and preserves cookie state on network error.
+- [x] Add failing clear-policy tests proving persistent read/write and session remove failures are surfaced while both stores are attempted.
+- [x] Run the focused pytest and Vitest cases and confirm expected failures.
+- [x] Remove the mandatory principal dependency from DELETE, strictly validate/revoke only an active canonical session, clear the cookie only after safe completion, and set no-store.
+- [x] Wire client cookie logout and implement truthful two-store clearing with the smallest existing APIs.
+- [x] Re-run focused tests and Bandit over the changed Python authentication scope.
+- [x] Commit Task 3 and both review follow-ups (`05962a3802`, `8d8e960f47`, `3dfeb52393`).
 
 ### Task 4: Harden successful-bootstrap secret scrubbing
 
