@@ -31,7 +31,7 @@
 
 **Tests:** Contract inspection plus focused baseline tests.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 1: Create the implementation workspace
 
@@ -42,7 +42,7 @@
 - Read: `tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py`
 - Read: `tldw_Server_API/app/core/Ingestion_Media_Processing/download_utils.py`
 
-- [ ] Use `superpowers:using-git-worktrees` to create a clean worktree without altering the dirty existing worktree. If native worktree setup is unavailable, first verify the fallback directory is ignored, then use:
+- [x] Use `superpowers:using-git-worktrees` to create a clean worktree without altering the dirty existing worktree. If native worktree setup is unavailable, first verify the fallback directory is ignored, then use:
 
 ```bash
 git fetch origin dev
@@ -51,13 +51,13 @@ git worktree add .worktrees/codex-research-discovery-phase2a-pdf \
   -b codex/research-discovery-phase2a-pdf origin/dev
 ```
 
-- [ ] Create a separate Backlog implementation task linked to this plan and the spec before code edits.
+- [x] Create a separate Backlog implementation task linked to this plan and the spec before code edits.
 
-- [ ] Confirm `/media/add` still owns `MEDIA_CREATE`, rate limiting, quota, billing, Media DB, authenticated-user, and usage-log dependencies.
+- [x] Confirm `/media/add` still owns `MEDIA_CREATE`, rate limiting, quota, billing, Media DB, authenticated-user, and usage-log dependencies.
 
-- [ ] Confirm `AddMediaForm.media_type` is required, normal ingestion requires URLs/files, `download_url_async` owns redirect-aware egress and streamed byte enforcement, and Media DB exposes URL and safe-metadata identifier lookup.
+- [x] Confirm `AddMediaForm.media_type` is required, normal ingestion requires URLs/files, `download_url_async` owns redirect-aware egress and streamed byte enforcement, and Media DB exposes URL and safe-metadata identifier lookup.
 
-- [ ] Run the baseline suite.
+- [x] Run the baseline suite.
 
 ```bash
 source .venv/bin/activate && python -m pytest -q \
@@ -77,7 +77,7 @@ Expected: PASS. Stop and revise the plan if any route or pipeline assumption is 
 
 **Tests:** Eligibility, ownership, expiry, malformed snapshots, unsupported candidates, bounds, and order.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 2: Correct existing eligibility semantics
 
@@ -89,10 +89,10 @@ Expected: PASS. Stop and revise the plan if any route or pipeline assumption is 
 - Test: `tldw_Server_API/tests/Research/test_research_discovery_service.py`
 - Test: `tldw_Server_API/tests/Research/test_research_discovery_endpoint.py`
 
-- [ ] Write failing tests proving that only stable PDFs are eligible and the first eligible candidate by `(rank, candidate_id)` is recommended.
-- [ ] Include ineligible coverage for HTML, landing pages, repository files, metadata-only, redacted, re-resolution-required, and URL-less candidates.
-- [ ] Run the focused tests and confirm they fail under the current `any(candidate.safe_url)` behavior.
-- [ ] Add one helper after `DiscoveryOACandidate` and reuse it in identity construction and OA enrichment.
+- [x] Write failing tests proving that only stable PDFs are eligible and the first eligible candidate by `(rank, candidate_id)` is recommended.
+- [x] Include ineligible coverage for HTML, landing pages, repository files, metadata-only, redacted, re-resolution-required, and URL-less candidates.
+- [x] Run the focused tests and confirm they fail under the current `any(candidate.safe_url)` behavior.
+- [x] Add one helper after `DiscoveryOACandidate` and reuse it in identity construction and OA enrichment.
 
 ```python
 PHASE2A_MEDIA_HANDOFF_TYPES = frozenset({"pdf"})
@@ -107,8 +107,8 @@ def is_phase2a_media_handoff_candidate(candidate: DiscoveryOACandidate) -> bool:
     )
 ```
 
-- [ ] Set `recommended_candidate_id` from the first eligible candidate and `ingest_eligible` from whether it exists; add no response fields.
-- [ ] Run the focused Research tests and commit.
+- [x] Set `recommended_candidate_id` from the first eligible candidate and `ingest_eligible` from whether it exists; add no response fields.
+- [x] Run the focused Research tests and commit.
 
 ```bash
 source .venv/bin/activate && python -m pytest -q \
@@ -130,9 +130,9 @@ git commit -m "fix(research): align discovery eligibility with PDF handoff"
 - Create: `tldw_Server_API/app/core/Research/discovery/selection.py`
 - Create: `tldw_Server_API/tests/Research/test_research_discovery_selection.py`
 
-- [ ] Write failing tests for valid ordered resolution and rejection of missing/expired/foreign snapshots, malformed payloads, missing or duplicate pairs, pair mismatches, unsupported candidates, and more than five selections.
-- [ ] Use the same `research_discovery_snapshot_unavailable` error for missing, expired, and foreign snapshots.
-- [ ] Implement one frozen descriptor and one function; do not add a class hierarchy, protocol, factory, or enum.
+- [x] Write failing tests for valid ordered resolution and rejection of missing/expired/foreign snapshots, malformed payloads, missing or duplicate pairs, pair mismatches, unsupported candidates, and more than five selections.
+- [x] Use the same `research_discovery_snapshot_unavailable` error for missing, expired, and foreign snapshots.
+- [x] Implement one frozen descriptor and one function; do not add a class hierarchy, protocol, factory, or enum.
 
 ```python
 @dataclass(frozen=True)
@@ -140,13 +140,17 @@ class ResolvedDiscoverySelection:
     result_id: str
     candidate_id: str
     fingerprint: str
+    candidate_type: str
     url: str
+    canonical_url: str | None
     title: str
     authors: tuple[str, ...]
     identifiers: dict[str, str]
+    source_id: str
     provider: str
     access_status: str | None
     license_hint: str | None
+    safe_metadata: dict[str, Any]
 
 
 def resolve_discovery_selections(
@@ -159,10 +163,10 @@ def resolve_discovery_selections(
     ...
 ```
 
-- [ ] Derive the production DB path with `DatabasePaths.get_research_sessions_db_path(owner_user_id)` when no test DB is supplied.
-- [ ] Read only server-owned `snapshot.response_json["results"]`; client values are selectors, never metadata authority.
-- [ ] Build identifiers from DOI, PMID, PMCID, arXiv id, and safe provider ids.
-- [ ] Run the new tests and commit.
+- [x] Derive the production DB path with `DatabasePaths.get_research_sessions_db_path(owner_user_id)` when no test DB is supplied.
+- [x] Read only server-owned `snapshot.response_json["results"]`; client values are selectors, never metadata authority.
+- [x] Build identifiers from DOI, PMID, PMCID, arXiv id, and safe provider ids.
+- [x] Run the new tests and commit.
 
 ```bash
 source .venv/bin/activate && python -m pytest -q \
@@ -180,7 +184,7 @@ git commit -m "feat(research): resolve discovery PDF selections for Media"
 
 **Tests:** Form parsing, route integration, dependency preservation, and absence of a Research ingest route.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 4: Add discovery form fields and Media validation
 
