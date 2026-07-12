@@ -51,6 +51,7 @@ export default function NotificationsPage() {
   const router = useRouter();
   const {
     scopeKey,
+    lifecycleEpoch,
     state: lifecycleState,
     unreadCount: lifecycleUnreadCount,
     updatedAt: lifecycleUpdatedAt,
@@ -294,6 +295,10 @@ export default function NotificationsPage() {
   useEffect(() => {
     setUnreadCount(lifecycleUnreadCount);
   }, [lifecycleUnreadCount, lifecycleUpdatedAt]);
+
+  useEffect(() => {
+    handledEventSequenceRef.current = 0;
+  }, [lifecycleEpoch]);
 
   useEffect(() => {
     const pendingEvents = events.filter(

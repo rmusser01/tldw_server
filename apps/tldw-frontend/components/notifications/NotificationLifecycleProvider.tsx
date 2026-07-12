@@ -29,6 +29,7 @@ export type SequencedNotificationEvent = {
 
 export type NotificationLifecycleContextValue = {
   scopeKey: string
+  lifecycleEpoch: number
   state: ExposedNotificationState
   unreadCount: number
   updatedAt: number
@@ -58,8 +59,9 @@ const DEFAULT_POLL_INTERVAL_MS = 30_000
 const NotificationLifecycleContext =
   React.createContext<NotificationLifecycleContextValue | null>(null)
 
-const initialSnapshot = (scopeKey: string): NotificationRuntimeSnapshot => ({
+const initialSnapshot = (scopeKey: string, lifecycleEpoch: number): NotificationRuntimeSnapshot => ({
   scopeKey,
+  lifecycleEpoch,
   state: "connecting",
   unreadCount: 0,
   updatedAt: Date.now(),
@@ -120,8 +122,9 @@ export function NotificationLifecycleProvider({
   )
   const scopeKey = suppliedScopeKey ?? liveScopeKey
   const [snapshot, setSnapshot] = React.useState<NotificationRuntimeSnapshot>(() =>
-    initialSnapshot(scopeKey)
+    initialSnapshot(scopeKey, 0)
   )
+  const lifecycleEpochRef = React.useRef(0)
   const generationRef = React.useRef(0)
   const streamOpenRef = React.useRef(false)
   const unreadCurrentRef = React.useRef(false)
@@ -189,12 +192,13 @@ export function NotificationLifecycleProvider({
 
   const startWork = React.useCallback(async (): Promise<void> => {
     const generation = ++generationRef.current
+    const lifecycleEpoch = ++lifecycleEpochRef.current
     stopWork()
     unreadCurrentRef.current = false
     cursorCurrentRef.current = false
     terminalGenerationRef.current = null
     terminalStateRef.current = null
-    setSnapshot(initialSnapshot(scopeKey))
+    setSnapshot(initialSnapshot(scopeKey, lifecycleEpoch))
     if (!enabled) return
     const requestAbort = new AbortController()
     requestAbortRef.current = requestAbort
@@ -355,7 +359,7 @@ export function NotificationLifecycleProvider({
       unreadCurrentRef.current = false
       cursorCurrentRef.current = false
       setSnapshot({
-        ...initialSnapshot(scopeKey),
+        ...initialSnapshot(scopeKey, ++lifecycleEpochRef.current),
         state: "auth-required"
       })
     }
@@ -369,7 +373,7 @@ export function NotificationLifecycleProvider({
       terminalStateRef.current = null
       unreadCurrentRef.current = false
       cursorCurrentRef.current = false
-      setSnapshot(initialSnapshot(nextScopeKey))
+      setSnapshot(initialSnapshot(nextScopeKey, ++lifecycleEpochRef.current))
       setLiveScopeKey(nextScopeKey)
       return true
     }
@@ -432,10 +436,14 @@ export function NotificationLifecycleProvider({
     [applyFailure, updateCurrent]
   )
 
-  const projected = snapshot.scopeKey === scopeKey ? snapshot : initialSnapshot(scopeKey)
+  const projected =
+    snapshot.scopeKey === scopeKey
+      ? snapshot
+      : initialSnapshot(scopeKey, lifecycleEpochRef.current)
   const value = React.useMemo<NotificationLifecycleContextValue>(
     () => ({
       scopeKey: projected.scopeKey,
+      lifecycleEpoch: projected.lifecycleEpoch,
       state: projected.state,
       unreadCount: projected.unreadCount,
       updatedAt: projected.updatedAt,

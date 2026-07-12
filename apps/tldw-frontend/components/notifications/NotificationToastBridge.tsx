@@ -85,7 +85,7 @@ export function NotificationToastBridge() {
   useEffect(() => {
     clearQueuedToast();
     handledEventSequenceRef.current = 0;
-  }, [clearQueuedToast, lifecycle?.scopeKey]);
+  }, [clearQueuedToast, lifecycle?.lifecycleEpoch]);
 
   useEffect(() => {
     const pendingEvents = (lifecycle?.events ?? []).filter(

@@ -382,6 +382,28 @@ describe("fetch-backed WebUI api client", () => {
     expect(window.location.href).toBe("http://localhost:3000/chat")
   })
 
+  it("does not clear a JWT login established after a non-bearer request started", async () => {
+    let resolveResponse: ((response: Response) => void) | undefined
+    vi.stubGlobal("fetch", vi.fn(
+      () => new Promise<Response>((resolve) => { resolveResponse = resolve })
+    ))
+    setWindowLocation("http://localhost:3000/chat")
+    const { apiClient } = await loadApiModule()
+
+    const request = apiClient.get("/notifications/unread-count", {
+      headers: { "X-API-KEY": "old-api-key" },
+      withCredentials: false
+    })
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1))
+    localStorage.setItem("access_token", "new-login-token")
+    localStorage.setItem("user", JSON.stringify({ username: "bob" }))
+    resolveResponse?.(jsonResponse({ detail: "Unauthorized" }, { status: 401 }))
+
+    await expect(request).rejects.toMatchObject({ status: 401 })
+    expect(localStorage.getItem("access_token")).toBe("new-login-token")
+    expect(localStorage.getItem("user")).toContain("bob")
+  })
+
   it("supports timeout cancellation and caller-provided abort signals", async () => {
     vi.useFakeTimers()
     const fetchMock = vi.fn((_url: string, init?: RequestInit) => {

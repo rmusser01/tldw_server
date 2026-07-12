@@ -434,7 +434,10 @@ function recordFailure(
   }
 }
 
-function handleUnauthorized(requestHeaders?: Headers): void {
+function handleUnauthorized(
+  requestHeaders: Headers | undefined,
+  sessionTokenAtStart: string | null
+): void {
   if (typeof window === 'undefined') {
     return;
   }
@@ -444,6 +447,9 @@ function handleUnauthorized(requestHeaders?: Headers): void {
     ? authorization.slice(7).trim()
     : null;
   const currentToken = localStorage.getItem('access_token');
+  if (currentToken !== sessionTokenAtStart) {
+    return;
+  }
   if (requestToken && currentToken && requestToken !== currentToken) {
     return;
   }
@@ -478,6 +484,8 @@ async function request<T = unknown>(
   const baseURL = config.baseURL ?? api.defaults.baseURL;
   const requestUrl = joinUrl(baseURL, url, config.params);
   const metadata = { start: Date.now() };
+  const sessionTokenAtStart =
+    typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
 
   applyBrowserHeaders(headers, method);
 
@@ -512,7 +520,7 @@ async function request<T = unknown>(
 
   if (!response.ok) {
     if (response.status === 401) {
-      handleUnauthorized(headers);
+      handleUnauthorized(headers, sessionTokenAtStart);
     }
 
     const errorBody = await parseErrorBody(response);

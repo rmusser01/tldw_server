@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   reportRequestError: vi.fn(),
   lifecycle: {
     scopeKey: 'notifications:server-a:user-a',
+    lifecycleEpoch: 1,
     state: 'active',
     unreadCount: 2,
     updatedAt: 1,
@@ -64,6 +65,7 @@ describe('NotificationsPage', () => {
     vi.clearAllMocks();
     mocks.lifecycle.state = 'active';
     mocks.lifecycle.scopeKey = 'notifications:server-a:user-a';
+    mocks.lifecycle.lifecycleEpoch = 1;
     mocks.lifecycle.unreadCount = 2;
     mocks.lifecycle.updatedAt = 1;
     mocks.lifecycle.latestEvent = null;
@@ -207,6 +209,28 @@ describe('NotificationsPage', () => {
 
     expect(await screen.findByText('First body')).toBeInTheDocument();
     expect(screen.getByText('Second body')).toBeInTheDocument();
+  });
+
+  it('accepts sequence one again after a same-scope lifecycle restart', async () => {
+    const view = render(<NotificationsPage />);
+    await screen.findByText('Job failed');
+    mocks.lifecycle.eventSequence = 1;
+    mocks.lifecycle.events = [{
+      sequence: 1,
+      event: { event: 'notification', id: 102, payload: { notification_id: 102, message: 'Before restart' } },
+    }];
+    view.rerender(<NotificationsPage />);
+    expect(await screen.findByText('Before restart')).toBeInTheDocument();
+
+    mocks.lifecycle.lifecycleEpoch = 2;
+    mocks.lifecycle.eventSequence = 1;
+    mocks.lifecycle.events = [{
+      sequence: 1,
+      event: { event: 'notification', id: 103, payload: { notification_id: 103, message: 'After restart' } },
+    }];
+    view.rerender(<NotificationsPage />);
+
+    expect(await screen.findByText('After restart')).toBeInTheDocument();
   });
 
   it('clears old-account items and ignores delayed list responses after scope change', async () => {

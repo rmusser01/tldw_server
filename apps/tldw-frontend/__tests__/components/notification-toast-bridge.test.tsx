@@ -31,6 +31,7 @@ vi.mock("@web/components/ui/ToastProvider", () => ({
 
 import { NotificationLifecycleProvider } from "@web/components/notifications/NotificationLifecycleProvider"
 import { NotificationToastBridge } from "@web/components/notifications/NotificationToastBridge"
+import { AUTH_CREDENTIALS_CHANGED_EVENT } from "@web/lib/auth-events"
 
 describe("NotificationToastBridge", () => {
   beforeEach(() => {
@@ -190,6 +191,31 @@ describe("NotificationToastBridge", () => {
         <NotificationToastBridge />
       </NotificationLifecycleProvider>
     )
+    await act(async () => vi.advanceTimersByTimeAsync(800))
+
+    expect(mocks.showToast).not.toHaveBeenCalled()
+    vi.useRealTimers()
+  })
+
+  it("clears a queued toast when credentials are removed without a scope change", async () => {
+    vi.useFakeTimers()
+    let onEvent: ((event: { event: string; id?: number; payload?: unknown }) => void) | undefined
+    mocks.subscribeNotificationsStream.mockImplementation(
+      (options: { onEvent: typeof onEvent }) => {
+        onEvent = options.onEvent
+        return vi.fn()
+      }
+    )
+    render(
+      <NotificationLifecycleProvider scopeKey="notifications:server-a:user-a">
+        <NotificationToastBridge />
+      </NotificationLifecycleProvider>
+    )
+    await act(async () => vi.advanceTimersByTimeAsync(0))
+    act(() => onEvent?.({ event: "notification", id: 51, payload: { notification_id: 51, title: "Private" } }))
+    act(() => window.dispatchEvent(new CustomEvent(AUTH_CREDENTIALS_CHANGED_EVENT, {
+      detail: { authenticated: false }
+    })))
     await act(async () => vi.advanceTimersByTimeAsync(800))
 
     expect(mocks.showToast).not.toHaveBeenCalled()
