@@ -109,6 +109,58 @@ describe("background proxy web token refresh", () => {
     }
   )
 
+  it.each(["POST", "PATCH"])(
+    "keeps exact page-origin absolute %s requests on cookie auth",
+    async (method) => {
+      process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+      document.cookie = "csrf_token=absolute-csrf; Path=/"
+      mocks.store = {
+        tldwConfig: {
+          serverUrl: "https://remote.example.test",
+          authMode: "single-user",
+          authSource: "manual",
+          apiKey: "preserved-remote-key",
+          credentialSource: "manual",
+          apiKeyPersistence: "device",
+          apiKeyServerOrigin: "https://remote.example.test"
+        },
+        tldwCookieSessionConfig: {
+          serverUrl: window.location.origin,
+          authMode: "single-user",
+          authSource: "cookie-session"
+        }
+      }
+      const fetchSpy = vi.fn(async () =>
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      )
+      vi.stubGlobal("fetch", fetchSpy as any)
+
+      const { bgRequest } = await importProxy()
+      await bgRequest({
+        path: `${window.location.origin}/api/v1/notes/search/` as any,
+        method: method as "POST",
+        headers: {
+          "X-API-KEY": "stale-key",
+          Authorization: "Bearer stale-token",
+          "X-CSRF-Token": "stale-csrf"
+        },
+        body: { q: "absolute-cookie" },
+        preferDirect: true
+      })
+
+      const headers = new Headers(fetchSpy.mock.calls[0]?.[1]?.headers)
+      expect(headers.get("X-CSRF-Token")).toBe("absolute-csrf")
+      expect(headers.has("X-API-KEY")).toBe(false)
+      expect(headers.has("Authorization")).toBe(false)
+      expect(mocks.store.tldwConfig).toMatchObject({
+        apiKey: "preserved-remote-key"
+      })
+    }
+  )
+
   afterEach(() => {
     if (originalDeploymentMode === undefined) {
       delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE

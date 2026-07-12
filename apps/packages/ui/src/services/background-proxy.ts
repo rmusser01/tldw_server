@@ -3,12 +3,15 @@ import { Storage } from "@plasmohq/storage"
 import { createSafeStorage } from "@/utils/safe-storage"
 import { formatErrorMessage } from "@/utils/format-error-message"
 import {
+  isUnsafeMethod,
   parseRetryAfter,
+  readBrowserCookie,
   resolveBrowserRequestTransport,
   tldwRequest
 } from "@/services/tldw/request-core"
 import {
   COOKIE_SESSION_CONFIG_KEY,
+  isCookieSessionBrowserTransport,
   resolveAdvancedRequestTransportGuard
 } from "@/services/tldw/browser-networking"
 import {
@@ -679,10 +682,10 @@ async function bgRequestImpl<
   let resolvedNoAuth = noAuthExplicit ? noAuth : (noAuth || isAbsoluteUrl)
   if (!noAuthExplicit && isAbsoluteUrl) {
     const storage = createSafeStorage({ area: "local" })
-    const cfg = (await storage.get<Record<string, unknown>>("tldwConfig").catch(() => null)) || null
+    const cfg = await resolveDirectConfig(storage)
     const sameOriginAbsolute = isSameOriginAbsoluteUrlForConfiguredServer(
       String(path),
-      cfg
+      cfg as unknown as Record<string, unknown>
     )
     resolvedNoAuth = noAuth || !sameOriginAbsolute
   }
@@ -1160,13 +1163,47 @@ async function* bgStreamDirect<
       )
     : false
   const shouldSkipAuth = isAbsolute && !sameOriginAbsolute
+  const pageOrigin =
+    typeof window === "undefined" ? null : String(window.location?.origin || "")
+  const samePageOriginAbsolute =
+    isAbsolute && pageOrigin
+      ? isSameOriginAbsoluteUrlForConfiguredServer(absolutePath, {
+          serverUrl: pageOrigin
+        })
+      : false
+  const absoluteCookieTransport =
+    isAbsolute && sameOriginAbsolute && samePageOriginAbsolute
+      ? resolveBrowserRequestTransport({
+          config: cfg,
+          path: absolutePath,
+          pageOrigin
+        })
+      : null
+  const cookieSession = isCookieSessionBrowserTransport({
+    authMode: cfg?.authMode,
+    authSource: cfg?.authSource,
+    transportMode: absoluteCookieTransport?.mode || transport?.mode,
+    transportKind: absoluteCookieTransport?.kind || transport?.kind,
+    pageOrigin
+  })
   const resolvedHeaders: Record<string, string> = { ...(headers || {}) }
   for (const k of Object.keys(resolvedHeaders)) {
     const kl = k.toLowerCase()
-    if (kl === "x-api-key" || kl === "authorization") delete resolvedHeaders[k]
+    if (
+      kl === "x-api-key" ||
+      kl === "authorization" ||
+      (cookieSession && kl === "x-csrf-token")
+    ) {
+      delete resolvedHeaders[k]
+    }
   }
 
-  if (!shouldSkipAuth && !hostedMode && cfg?.authMode === "single-user") {
+  if (cookieSession) {
+    if (!shouldSkipAuth && isUnsafeMethod(String(method))) {
+      const csrfToken = readBrowserCookie("csrf_token")
+      if (csrfToken) resolvedHeaders["X-CSRF-Token"] = csrfToken
+    }
+  } else if (!shouldSkipAuth && !hostedMode && cfg?.authMode === "single-user") {
     const runtimeApiKey = String(getRuntimeSingleUserApiKeyOverride() || "").trim()
     const key = runtimeApiKey || String(cfg?.apiKey || "").trim()
     if (!key) {

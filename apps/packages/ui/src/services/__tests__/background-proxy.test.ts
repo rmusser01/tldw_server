@@ -858,6 +858,73 @@ describe("background proxy fallback safety", () => {
     }
   })
 
+  it.each(["POST", "PATCH"])(
+    "uses cookie auth with current CSRF for direct %s streams",
+    async (method) => {
+      const previousMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+      process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+      document.cookie = "csrf_token=stream-csrf; Path=/"
+      mocks.sendMessage.mockResolvedValue({ ok: false })
+      mocks.storageGet.mockImplementation(async (key: string) => {
+        if (key === "tldwConfig") {
+          return {
+            serverUrl: "https://remote.example.test",
+            authMode: "single-user",
+            authSource: "manual",
+            apiKey: "preserved-remote-key",
+            credentialSource: "manual",
+            apiKeyPersistence: "device",
+            apiKeyServerOrigin: "https://remote.example.test"
+          }
+        }
+        if (key === "tldwCookieSessionConfig") {
+          return {
+            serverUrl: window.location.origin,
+            authMode: "single-user",
+            authSource: "cookie-session"
+          }
+        }
+        return null
+      })
+      const fetchSpy = vi.fn(async () =>
+        new Response("data: [DONE]\n\n", {
+          status: 200,
+          headers: { "content-type": "text/event-stream" }
+        })
+      )
+      vi.stubGlobal("fetch", fetchSpy as any)
+
+      try {
+        const { bgStream } = await importProxy()
+        for await (const _chunk of bgStream({
+          path: "/api/v1/chat/completions",
+          method: method as "POST",
+          headers: {
+            "X-API-KEY": "stale-key",
+            Authorization: "Bearer stale-token",
+            "X-CSRF-Token": "stale-csrf"
+          },
+          body: { stream: true }
+        })) {
+          // no-op
+        }
+
+        const headers = new Headers(fetchSpy.mock.calls[0]?.[1]?.headers)
+        expect(headers.get("X-CSRF-Token")).toBe("stream-csrf")
+        expect(headers.has("X-API-KEY")).toBe(false)
+        expect(headers.has("Authorization")).toBe(false)
+      } finally {
+        vi.unstubAllGlobals()
+        document.cookie = "csrf_token=; Max-Age=0; Path=/"
+        if (previousMode === undefined) {
+          delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+        } else {
+          process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = previousMode
+        }
+      }
+    }
+  )
+
   it("appends multiple named files for direct-preferred uploads", async () => {
     mocks.tldwRequest.mockResolvedValue({
       ok: true,

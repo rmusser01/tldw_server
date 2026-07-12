@@ -307,16 +307,31 @@ export const tldwRequest = async (
     hasConfiguredServerUrl: Boolean(cfg?.serverUrl),
     isAbsolute
   })
+  const sameOriginAbsoluteUrl =
+    isAbsolute && isSameOriginAbsoluteUrlForConfiguredServer(absolutePath, cfg)
+  const pageOrigin =
+    typeof window === "undefined" ? null : String(window.location?.origin || "")
+  const samePageOriginAbsoluteUrl =
+    isAbsolute && pageOrigin
+      ? isSameOriginAbsoluteUrlForConfiguredServer(absolutePath, {
+          serverUrl: pageOrigin
+        })
+      : false
+  const absoluteCookieTransport =
+    isAbsolute && sameOriginAbsoluteUrl && samePageOriginAbsoluteUrl
+      ? resolveBrowserRequestTransport({
+          config: cfg,
+          path: absolutePath,
+          pageOrigin
+        })
+      : null
   const cookieSession = isCookieSessionBrowserTransport({
     authMode: cfg?.authMode,
     authSource: cfg?.authSource,
-    transportMode: transport?.mode,
-    transportKind: transport?.kind,
-    pageOrigin:
-      typeof window === "undefined" ? null : String(window.location?.origin || "")
+    transportMode: absoluteCookieTransport?.mode || transport?.mode,
+    transportKind: absoluteCookieTransport?.kind || transport?.kind,
+    pageOrigin
   })
-  const sameOriginAbsoluteUrl =
-    isAbsolute && isSameOriginAbsoluteUrlForConfiguredServer(absolutePath, cfg)
   if (
     isAbsolute &&
     !sameOriginAbsoluteUrl &&
