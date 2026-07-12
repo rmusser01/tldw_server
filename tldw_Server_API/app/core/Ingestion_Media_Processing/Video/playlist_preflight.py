@@ -23,6 +23,7 @@ class PlaylistPreflightItemData:
     source_url: str
     normalized_source_id: str | None
     source_kind: str
+    availability: str
     title: str | None
     speaker: str | None
     duration_seconds: int | None
@@ -66,6 +67,18 @@ class PlaylistPreflightProcessError(RuntimeError):
     def __init__(self, code: str) -> None:
         self.code = str(code)
         super().__init__(self.code)
+
+
+_NON_INGESTIBLE_AVAILABILITIES = frozenset(
+    {
+        "deleted",
+        "needs_auth",
+        "premium_only",
+        "private",
+        "subscriber_only",
+        "unavailable",
+    }
+)
 
 
 def _is_duplicate_status(value: str | None) -> bool:
@@ -232,6 +245,8 @@ def normalize_preflight_items(raw_items: list[dict[str, Any]]) -> list[PlaylistP
         source_url = _source_url_from_entry(raw) or ""
         source_kind = str(raw.get("source_kind") or "generic_url")
         normalized_source_id = _string_or_none(raw.get("normalized_source_id"))
+        upstream_availability = str(raw.get("availability") or "").strip().lower()
+        explicitly_unavailable = upstream_availability in _NON_INGESTIBLE_AVAILABILITIES
 
         if source_url:
             try:
@@ -244,8 +259,17 @@ def normalize_preflight_items(raw_items: list[dict[str, Any]]) -> list[PlaylistP
             except ValueError:
                 normalized_source_id = normalized_source_id or f"url:{source_url}"
 
-        has_source = bool(source_url)
-        dedupe_key = normalized_source_id or source_url
+        has_source = bool(source_url) and not explicitly_unavailable
+        availability = (
+            upstream_availability
+            if explicitly_unavailable
+            else "available"
+            if has_source
+            else upstream_availability or "unavailable"
+        )
+        if not has_source:
+            source_url = ""
+        dedupe_key = (normalized_source_id or source_url) if has_source else ""
         duplicate_of = seen.get(dedupe_key)
         duplicate_status = "unknown" if not has_source else "duplicate_in_batch" if duplicate_of is not None else "new"
         if duplicate_of is None and dedupe_key:
@@ -257,6 +281,7 @@ def normalize_preflight_items(raw_items: list[dict[str, Any]]) -> list[PlaylistP
                 source_url=source_url,
                 normalized_source_id=normalized_source_id,
                 source_kind=source_kind,
+                availability=availability,
                 title=_string_or_none(raw.get("title")),
                 speaker=_string_or_none(raw.get("speaker") or raw.get("channel") or raw.get("uploader")),
                 duration_seconds=_coerce_duration(raw.get("duration") or raw.get("duration_seconds")),

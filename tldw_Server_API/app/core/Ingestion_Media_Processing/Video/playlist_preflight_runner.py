@@ -101,6 +101,8 @@ def _validated_preflight_result(payload: Any, *, max_items: int) -> PlaylistPref
                 raise ValueError
             if type(normalized_item.source_url) is not str or type(normalized_item.source_kind) is not str:
                 raise ValueError
+            if type(normalized_item.availability) is not str or not normalized_item.availability:
+                raise ValueError
             optional_strings = (
                 normalized_item.normalized_source_id,
                 normalized_item.title,

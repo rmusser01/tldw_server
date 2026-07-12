@@ -397,7 +397,7 @@ def _playlist_snapshot(
         source_key = item.normalized_source_id or item.source_url
         occurrence_index = occurrence_counts.get(source_key, 0) + 1
         occurrence_counts[source_key] = occurrence_index
-        available = bool(item.source_url)
+        available = item.availability == "available" and bool(item.source_url)
         duplicate_status = item.duplicate_status if available else "unknown"
         if available and duplicate_status == "new":
             if library_lookup_failed:
@@ -415,10 +415,10 @@ def _playlist_snapshot(
                 "occurrence_id": occurrence_ids[index],
                 "ordinal": item.ordinal,
                 "occurrence_index_for_source": occurrence_index,
-                "source_url": item.source_url or None,
+                "source_url": item.source_url if available else None,
                 "normalized_source_id": item.normalized_source_id,
                 "source_kind": item.source_kind,
-                "availability": "available" if available else "unavailable",
+                "availability": item.availability if not available else "available",
                 "duplicate_status": duplicate_status,
                 "duplicate_of_occurrence_id": duplicate_of_occurrence_id,
                 "selected_by_default": selected,
@@ -440,7 +440,7 @@ def _playlist_snapshot(
     summary = {
         "loaded_count": len(snapshot_items),
         "ingestible_count": sum(item["availability"] == "available" for item in snapshot_items),
-        "unavailable_count": sum(item["availability"] == "unavailable" for item in snapshot_items),
+        "unavailable_count": sum(item["availability"] != "available" for item in snapshot_items),
         "duplicate_count": sum(
             item["duplicate_status"] in {"duplicate_existing", "duplicate_in_batch"}
             for item in snapshot_items
@@ -529,7 +529,13 @@ async def _handle_playlist_preflight_job(
     media_db = None
     try:
         media_db = _create_db(owner_user_id)
-        lookup_urls = list(dict.fromkeys(item.source_url for item in extracted.items if item.source_url))
+        lookup_urls = list(
+            dict.fromkeys(
+                item.source_url
+                for item in extracted.items
+                if item.availability == "available" and item.source_url
+            )
+        )
         library_rows = get_media_by_urls(media_db, lookup_urls)
     except Exception:
         library_lookup_failed = True

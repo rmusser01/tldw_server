@@ -215,6 +215,84 @@ def test_extract_playlist_preflight_warns_and_deselects_entry_without_source():
 
 
 @pytest.mark.parametrize(
+    "availability",
+    ["private", "unavailable", "needs_auth", "premium_only", "subscriber_only"],
+)
+def test_explicit_unavailable_playlist_entry_with_source_remains_visible_and_nonselectable(availability):
+    class FakeYoutubeDL:
+        def __init__(self, _opts):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def extract_info(self, _url, *, download):
+            assert download is False
+            return {
+                "id": "PLtest",
+                "entries": [
+                    {
+                        "id": "private123",
+                        "webpage_url": "https://www.youtube.com/watch?v=private123",
+                        "title": "Restricted talk",
+                        "availability": availability,
+                    }
+                ],
+            }
+
+    result = extract_playlist_preflight(
+        "https://www.youtube.com/playlist?list=PLtest",
+        max_items=10,
+        youtube_dl_cls=FakeYoutubeDL,
+    )
+
+    assert result.item_count == 1
+    assert result.items[0].title == "Restricted talk"
+    assert result.items[0].availability == availability
+    assert result.items[0].source_url == ""
+    assert result.items[0].duplicate_status == "unknown"
+    assert result.items[0].selected is False
+
+
+@pytest.mark.parametrize("availability", ["public", "unlisted", None])
+def test_accessible_playlist_entry_availability_remains_ingestible(availability):
+    item = {
+        "id": "public123",
+        "source_url": "https://www.youtube.com/watch?v=public123",
+        "title": "Accessible talk",
+    }
+    if availability is not None:
+        item["availability"] = availability
+
+    normalized = normalize_preflight_items([item])
+
+    assert normalized[0].availability == "available"
+    assert normalized[0].source_url == "https://www.youtube.com/watch?v=public123"
+    assert normalized[0].duplicate_status == "new"
+    assert normalized[0].selected is True
+
+
+def test_deleted_missing_source_entry_remains_visible_in_ordinal_order():
+    items = normalize_preflight_items(
+        [
+            {"source_url": "https://youtu.be/first123", "title": "First"},
+            {"title": "Deleted video", "availability": "deleted"},
+            {"source_url": "https://youtu.be/last123", "title": "Last"},
+        ]
+    )
+
+    assert [item.ordinal for item in items] == [1, 2, 3]
+    assert items[1].title == "Deleted video"
+    assert items[1].availability == "deleted"
+    assert items[1].source_url == ""
+    assert items[1].duplicate_status == "unknown"
+    assert items[1].selected is False
+
+
+@pytest.mark.parametrize(
     ("policy", "expected_status", "expected_submit"),
     [
         ("skip", "skipped_existing", False),
@@ -437,6 +515,28 @@ async def test_process_runner_process_creation_failure_closes_pipe_with_safe_err
 
     assert context.recv.closed is True
     assert context.send.closed is True
+
+
+@pytest.mark.asyncio
+async def test_process_runner_child_exit_without_payload_is_invalid_and_cleans_up():
+    context = _FakeSpawnContext(run_target=False, exit_without_target=True)
+
+    with pytest.raises(
+        playlist_preflight_runner.PlaylistPreflightProcessError,
+        match="playlist_preflight_invalid_result",
+    ) as exc_info:
+        await playlist_preflight_runner.run_playlist_preflight_process(
+            "https://www.youtube.com/playlist?list=PLtest&token=secret",
+            max_items=10,
+            timeout_seconds=1,
+            mp_context=context,
+        )
+
+    assert "secret" not in str(exc_info.value)
+    assert context.recv.closed is True
+    assert context.send.closed is True
+    assert context.process.join_calls
+    assert context.process.closed is True
 
 
 @pytest.mark.asyncio

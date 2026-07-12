@@ -1252,6 +1252,67 @@ async def test_playlist_preflight_worker_library_lookup_failure_records_unknown_
 
 
 @pytest.mark.asyncio
+async def test_playlist_preflight_worker_excludes_explicit_unavailable_entries_from_enrichment(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
+    monkeypatch.delenv("JOBS_DB_URL", raising=False)
+
+    import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    jm = JobManager()
+    store, preflight, job = _seed_playlist_preflight_job(jm)
+    extracted = _playlist_preflight_data(
+        [
+            {
+                "source_url": "https://youtu.be/private123",
+                "title": "Private entry with an ID",
+                "availability": "private",
+            },
+            {"source_url": "https://youtu.be/public123", "title": "Public entry"},
+        ]
+    )
+
+    async def fake_runner(_url, **_kwargs):
+        return extracted
+
+    class _OwnerMediaDB:
+        def __init__(self):
+            self.lookup_urls = None
+
+        def get_media_by_urls(self, urls, **_kwargs):
+            self.lookup_urls = list(urls)
+            return []
+
+        def close_connection(self):
+            return None
+
+    media_db = _OwnerMediaDB()
+    monkeypatch.setattr(worker, "run_playlist_preflight_process", fake_runner, raising=True)
+    monkeypatch.setattr(worker, "_create_db", lambda _user_id: media_db, raising=True)
+
+    result = await worker._handle_job(jm.get_job(int(job["id"])), jm, worker._ProgressState())
+
+    assert media_db.lookup_urls == ["https://www.youtube.com/watch?v=public123"]
+    assert result["loaded_count"] == 2
+    assert result["ingestible_count"] == 1
+    assert result["unavailable_count"] == 1
+    assert result["duplicate_count"] == 0
+    assert result["selected_count"] == 1
+    items = list(store.list_preflight_items("7", preflight.preflight_id, limit=10))
+    assert [item.ordinal for item in items] == [1, 2]
+    assert items[0].availability == "private"
+    assert items[0].source_url is None
+    assert items[0].duplicate_status == "unknown"
+    assert items[0].selected_by_default is False
+    assert items[1].availability == "available"
+    assert items[1].duplicate_status == "new"
+    assert items[1].selected_by_default is True
+
+
+@pytest.mark.asyncio
 async def test_playlist_preflight_worker_configured_limit_failure_blocks_without_partial_snapshot(
     monkeypatch,
     tmp_path,
