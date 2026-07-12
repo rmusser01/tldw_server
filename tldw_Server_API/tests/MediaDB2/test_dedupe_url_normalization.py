@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import sqlite3
+
 from tldw_Server_API.app.core.DB_Management.media_db.dedupe_urls import (
     media_dedupe_url_candidates,
     normalize_media_dedupe_url,
@@ -106,9 +109,34 @@ def test_get_media_by_urls_normalizes_candidates_in_one_query(memory_db_factory,
     assert {row["id"] for row in fetched} == {first_id, second_id}
     assert len(queries) == 1
     query, params = queries[0]
-    assert " IN (" in query
-    assert query.count("?") == len(params)
-    assert "https://example.com/first?a=1&b=2" in params
+    assert len(params) == 1
+    assert "https://example.com/first?a=1&b=2" in json.loads(params[0])
+
+
+def test_get_media_by_urls_handles_500_variant_inputs_with_one_parameter(
+    memory_db_factory,
+    monkeypatch,
+) -> None:
+    db = memory_db_factory("get-media-by-urls-limit-client")
+    connection = db.get_connection()
+    previous_limit = connection.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, 999)
+    original_execute = db.execute_query
+    queries: list[tuple[str, tuple]] = []
+
+    def counting_execute(query, params=()):
+        queries.append((query, tuple(params)))
+        return original_execute(query, params)
+
+    monkeypatch.setattr(db, "execute_query", counting_execute)
+    urls = [f"https://EXAMPLE.com/video/{index}?utm_source=batch" for index in range(500)]
+    try:
+        assert db.get_media_by_urls(urls) == []
+    finally:
+        connection.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, previous_limit)
+
+    assert len(queries) == 1
+    assert len(queries[0][1]) == 1
+    assert len(json.loads(queries[0][1][0])) == 1_000
 
 
 def test_get_media_by_urls_empty_input_avoids_query(memory_db_factory, monkeypatch) -> None:

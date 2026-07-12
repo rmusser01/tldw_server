@@ -1,3 +1,5 @@
+import base64
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
@@ -473,6 +475,39 @@ def test_malformed_or_oversized_cursor_fails_closed(store, cursor):
         store.list_preflight_items("1", ready.preflight_id, limit=1, cursor=cursor)
 
 
+def test_cursor_rejects_noncanonical_base64_and_wrong_signature_length(store):
+    ready = _seed_preflight(store, item_count=2)
+    cursor = store.list_preflight_items("1", ready.preflight_id, limit=1).next_cursor
+    assert cursor is not None
+    payload_segment, signature_segment = cursor.split(".")
+
+    def decoded(segment: str) -> bytes:
+        return base64.urlsafe_b64decode(segment + "=" * (-len(segment) % 4))
+
+    signature_bytes = decoded(signature_segment)
+    alias = next(
+        signature_segment[:-1] + character
+        for character in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+        if character != signature_segment[-1]
+        and decoded(signature_segment[:-1] + character) == signature_bytes
+    )
+    short_signature = base64.urlsafe_b64encode(signature_bytes[:-1]).decode("ascii").rstrip("=")
+    invalid = [
+        f"{payload_segment}=.{signature_segment}",
+        f"{payload_segment}.{signature_segment}=",
+        f"{payload_segment}.{alias}",
+        f"{payload_segment}.{short_signature}",
+    ]
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestNotFoundError,
+    )
+
+    for candidate in invalid:
+        with pytest.raises(PlaylistIngestNotFoundError, match="playlist resource not found"):
+            store.list_preflight_items("1", ready.preflight_id, limit=1, cursor=candidate)
+
+
 def test_run_creation_copies_materialized_items_in_one_manifest(store):
     materialized = _seed_materialization(store)
 
@@ -692,7 +727,109 @@ def test_postgres_snapshot_replacement_locks_mutable_unexpired_parent(store, mon
     assert locked_read.rstrip().endswith("FOR UPDATE")
 
 
+def test_postgres_cleanup_locks_all_expired_parents_before_child_deletes(store, monkeypatch):
+    queries: list[tuple[str, tuple]] = []
+
+    class _Result:
+        rowcount = 1
+
+        def __init__(self, rows=()):
+            self.rows = rows
+
+        def fetchall(self):
+            return list(self.rows)
+
+    @contextmanager
+    def fake_connection(*, write):
+        assert write is True
+        yield object()
+
+    def fake_query(_db, sql, params=()):
+        queries.append((sql, tuple(params)))
+        if "SELECT preflight_id" in sql:
+            return _Result([{"preflight_id": "pf-1"}])
+        if "SELECT materialization_id" in sql:
+            return _Result([{"materialization_id": "mat-1"}])
+        if "SELECT run_id" in sql:
+            return _Result([{"run_id": "run-1"}])
+        return _Result()
+
+    store._postgres = True
+    monkeypatch.setattr(store, "_connection", fake_connection)
+    monkeypatch.setattr(store, "_query", fake_query)
+
+    store.cleanup_expired("owner-1", now=NOW)
+
+    locked = [index for index, (sql, _params) in enumerate(queries) if "FOR UPDATE" in sql]
+    first_delete = next(index for index, (sql, _params) in enumerate(queries) if "DELETE FROM" in sql)
+    assert len(locked) == 3
+    assert max(locked) < first_delete
+    assert all("owner-1" not in sql for sql, _params in queries)
+
+
+def test_postgres_event_append_locks_run_before_versioning(store, monkeypatch):
+    queries: list[str] = []
+
+    class _Result:
+        rowcount = 1
+        lastrowid = 1
+
+        def __init__(self, row=None):
+            self.row = row
+
+        def fetchone(self):
+            return self.row
+
+    @contextmanager
+    def fake_connection(*, write):
+        assert write is True
+        yield object()
+
+    def fake_query(_db, sql, _params=()):
+        queries.append(sql)
+        if "SELECT version" in sql:
+            return _Result({"version": 1})
+        if "RETURNING event_id" in sql:
+            return _Result({"event_id": 1})
+        if "SELECT * FROM media_ingest_run_events" in sql:
+            return _Result({"event_id": 1})
+        return _Result()
+
+    store._postgres = True
+    monkeypatch.setattr(store, "_connection", fake_connection)
+    monkeypatch.setattr(store, "_query", fake_query)
+    monkeypatch.setattr(store, "_event_record", lambda row: row)
+
+    store.append_run_event("owner-1", "run-1", event_type="progress")
+
+    locked_read = next(query for query in queries if "SELECT version" in query)
+    assert locked_read.rstrip().endswith("FOR UPDATE")
+
+
+def test_no_cas_event_appends_both_persist_with_monotonic_versions(store):
+    materialized = _seed_materialization(store, item_count=1)
+    run = store.create_run("1", materialization_ids=[materialized.id])
+
+    def append(index: int):
+        return store.append_run_event("1", run.run_id, event_type=f"event-{index}")
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        events = list(pool.map(append, range(2)))
+
+    replay = store.list_run_events("1", run.run_id)
+    assert len(events) == 2
+    assert [event.event_id for event in replay] == sorted(event.event_id for event in events)
+    assert store.get_run("1", run.run_id).version == 3
+
+
 def test_cleanup_expired_is_owner_safe(store):
+    materialized = _seed_materialization(store, item_count=1)
+    run = store.create_run(
+        "1",
+        materialization_ids=[materialized.id],
+        expires_at=NOW + timedelta(hours=1),
+    )
+    store.append_run_event("1", run.run_id, event_type="before-expiry")
     expired = store.create_preflight(
         "1",
         source_url="https://example.com/expired",
@@ -709,7 +846,18 @@ def test_cleanup_expired_is_owner_safe(store):
 
     deleted = store.cleanup_expired("1", now=store.test_clock.now_utc())
 
-    assert deleted["preflights"] == 1
+    assert deleted == {"preflights": 2, "materializations": 1, "runs": 1}
+    connection = store._jobs._connect()
+    try:
+        for table in (
+            "playlist_preflight_items",
+            "playlist_materialization_items",
+            "media_ingest_run_items",
+            "media_ingest_run_events",
+        ):
+            assert connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0  # nosec B608
+    finally:
+        connection.close()
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
         PlaylistIngestNotFoundError,
     )

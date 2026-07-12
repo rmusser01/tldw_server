@@ -396,8 +396,13 @@ class PlaylistIngestStore:
 
     @staticmethod
     def _b64decode(segment: str) -> bytes:
+        if not segment or "=" in segment:
+            raise ValueError("noncanonical base64url segment")
         padding = "=" * (-len(segment) % 4)
-        return base64.b64decode(segment + padding, altchars=b"-_", validate=True)
+        decoded = base64.b64decode(segment + padding, altchars=b"-_", validate=True)
+        if base64.urlsafe_b64encode(decoded).decode("ascii").rstrip("=") != segment:
+            raise ValueError("noncanonical base64url segment")
+        return decoded
 
     def _encode_cursor(self, *, owner: str, kind: str, resource_id: str, last_ordinal: int) -> str:
         payload = {
@@ -419,7 +424,7 @@ class PlaylistIngestStore:
             payload_segment, signature_segment = cursor.split(".")
             raw = self._b64decode(payload_segment)
             signature = self._b64decode(signature_segment)
-            if len(raw) > _MAX_CURSOR_PAYLOAD:
+            if len(raw) > _MAX_CURSOR_PAYLOAD or len(signature) != hashlib.sha256().digest_size:
                 raise ValueError
             expected = hmac.new(self._cursor_key, raw, hashlib.sha256).digest()
             if not hmac.compare_digest(signature, expected):
@@ -970,12 +975,20 @@ class PlaylistIngestStore:
         owner = self._owner(owner_user_id)
         now = self._now()
         with self._connection(write=True) as db:
+            if self._postgres:
+                run_version_query = """
+                    SELECT version FROM media_ingest_runs
+                    WHERE owner_user_id = ? AND run_id = ? AND expires_at > ?
+                    FOR UPDATE
+                """
+            else:
+                run_version_query = """
+                    SELECT version FROM media_ingest_runs
+                    WHERE owner_user_id = ? AND run_id = ? AND expires_at > ?
+                """
             row = self._query(
                 db,
-                """
-                SELECT version FROM media_ingest_runs
-                WHERE owner_user_id = ? AND run_id = ? AND expires_at > ?
-                """,
+                run_version_query,
                 (owner, str(run_id), self._db_datetime(now)),
             ).fetchone()
             if row is None:
@@ -1123,6 +1136,114 @@ class PlaylistIngestStore:
         owner = self._owner(owner_user_id)
         cutoff = self._db_datetime(now or self._now())
         with self._connection(write=True) as db:
+            if self._postgres:
+                preflight_rows = self._query(
+                    db,
+                    """
+                    SELECT preflight_id FROM playlist_preflights
+                    WHERE owner_user_id = ? AND expires_at <= ?
+                    ORDER BY preflight_id FOR UPDATE
+                    """,
+                    (owner, cutoff),
+                ).fetchall()
+                materialization_rows = self._query(
+                    db,
+                    """
+                    SELECT materialization_id FROM playlist_materializations
+                    WHERE owner_user_id = ? AND expires_at <= ?
+                    ORDER BY materialization_id FOR UPDATE
+                    """,
+                    (owner, cutoff),
+                ).fetchall()
+                run_rows = self._query(
+                    db,
+                    """
+                    SELECT run_id FROM media_ingest_runs
+                    WHERE owner_user_id = ? AND expires_at <= ?
+                    ORDER BY run_id FOR UPDATE
+                    """,
+                    (owner, cutoff),
+                ).fetchall()
+                preflight_ids = [str(self._row_dict(row)["preflight_id"]) for row in preflight_rows]
+                materialization_ids = [
+                    str(self._row_dict(row)["materialization_id"])
+                    for row in materialization_rows
+                ]
+                run_ids = [str(self._row_dict(row)["run_id"]) for row in run_rows]
+
+                if run_ids:
+                    self._query(
+                        db,
+                        """
+                        DELETE FROM media_ingest_run_events
+                        WHERE owner_user_id = ? AND run_id = ANY(?)
+                        """,
+                        (owner, run_ids),
+                    )
+                    self._query(
+                        db,
+                        """
+                        DELETE FROM media_ingest_run_items
+                        WHERE owner_user_id = ? AND run_id = ANY(?)
+                        """,
+                        (owner, run_ids),
+                    )
+                    runs = self._query(
+                        db,
+                        """
+                        DELETE FROM media_ingest_runs
+                        WHERE owner_user_id = ? AND run_id = ANY(?)
+                        """,
+                        (owner, run_ids),
+                    ).rowcount
+                else:
+                    runs = 0
+
+                if materialization_ids:
+                    self._query(
+                        db,
+                        """
+                        DELETE FROM playlist_materialization_items
+                        WHERE owner_user_id = ? AND materialization_id = ANY(?)
+                        """,
+                        (owner, materialization_ids),
+                    )
+                    materializations = self._query(
+                        db,
+                        """
+                        DELETE FROM playlist_materializations
+                        WHERE owner_user_id = ? AND materialization_id = ANY(?)
+                        """,
+                        (owner, materialization_ids),
+                    ).rowcount
+                else:
+                    materializations = 0
+
+                if preflight_ids:
+                    self._query(
+                        db,
+                        """
+                        DELETE FROM playlist_preflight_items
+                        WHERE owner_user_id = ? AND preflight_id = ANY(?)
+                        """,
+                        (owner, preflight_ids),
+                    )
+                    preflights = self._query(
+                        db,
+                        """
+                        DELETE FROM playlist_preflights
+                        WHERE owner_user_id = ? AND preflight_id = ANY(?)
+                        """,
+                        (owner, preflight_ids),
+                    ).rowcount
+                else:
+                    preflights = 0
+                return {
+                    "preflights": int(preflights),
+                    "materializations": int(materializations),
+                    "runs": int(runs),
+                }
+
             self._query(
                 db,
                 """
