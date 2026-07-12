@@ -746,7 +746,6 @@ class SnapshotManager:
                 "deleted_snapshots": 0,
             }
         session_directories: dict[str, list[Path]] = {}
-        unidentified_directories: list[Path] = []
         with contextlib.suppress(_SNAPSHOTS_NONCRITICAL_EXCEPTIONS):
             for session_dir in root.iterdir():
                 if session_dir.is_symlink() or not session_dir.is_dir():
@@ -767,8 +766,6 @@ class SnapshotManager:
                     session_directories.setdefault(raw_session_id, []).append(
                         resolved_session_dir
                     )
-                else:
-                    unidentified_directories.append(resolved_session_dir)
 
             for raw_session_id, snapshot_dirs in session_directories.items():
                 scanned_sessions += 1
@@ -787,16 +784,6 @@ class SnapshotManager:
                     evicted_sessions += 1
                     deleted_snapshots += len(deleted)
 
-            for snapshot_dir in unidentified_directories:
-                scanned_sessions += 1
-                deleted = self._enforce_quota_for_directory(
-                    snapshot_dir,
-                    max_snapshots=max_snapshots,
-                    max_size_mb=max_size_mb,
-                )
-                if deleted:
-                    evicted_sessions += 1
-                    deleted_snapshots += len(deleted)
         return {
             "scanned_sessions": int(scanned_sessions),
             "evicted_sessions": int(evicted_sessions),

@@ -4,7 +4,7 @@ title: Replay PR 2702 delta onto latest dev
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-12 04:34'
+updated_date: '2026-07-12 04:52'
 labels:
   - release
   - rebase
@@ -31,13 +31,13 @@ Create a fresh dev-targeted branch from current origin/dev, replay only the PR #
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Created codex/pr-2702-dev-rebase from origin/dev d28c16bfa3 and replayed the eight PR #2702-specific commits while preserving newer dev changes. Independent review fixes snapshot partial-deletion accounting and shared locking; abortable duplicate/stale document preparation in Playground and sidepanel; strict recovery capability checks; accurate processing/cancelled summaries; and localized ingest errors. The suggested GitHub Actions queue: max finding was rejected because GitHub Actions concurrency does not support that key. Fresh validation: 68 frontend tests and 71 backend tests passed; extension compile, Playwright discovery, workflow validation, Bandit zero findings, and git diff checks passed. Full WebUI typecheck still reports only the pre-existing untouched QuickIngestWizardModal.tsx overflowY type error. Branch is 0 behind origin/dev.
+Created codex/pr-2702-dev-rebase from origin/dev d28c16bfa3 and replayed the eight PR #2702-specific commits while preserving newer dev changes. Six tracking/review commits bring the branch to 14 commits and 43 changed files relative to dev. Independent and GitHub review fixes cover snapshot archive-first deletion, logical-session quota aggregation across current/legacy directories, shared maintenance locking, deferral of unidentified snapshot directories that cannot be safely locked, SQLite draft read/connection behavior, abortable duplicate/stale document preparation, strict recovery capability checks, accurate localized statuses/errors, and narrow test corrections. GitHub Actions queue: max was rejected because the concurrency schema does not support it. Fresh validation: 69 frontend tests and 78 backend tests passed; extension compile, Playwright discovery, workflow validation, Bandit zero findings, and git diff checks passed. Full WebUI typecheck still reports only the pre-existing untouched QuickIngestWizardModal.tsx overflowY type error. Branch is 0 behind origin/dev.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Created PR #2712 targeting dev from the latest origin/dev, replayed only the eight PR #2702-specific commits, preserved all newer dev changes, and made no correction branch or PR against main. The final net delta was validated with 53 frontend tests, 69 backend tests, extension compile, E2E discovery, workflow parsing/concurrency checks, Bandit with zero findings, and git diff checks. The only full-typecheck issue is an existing origin/dev error in an untouched QuickIngest file and is intentionally excluded.
+PR #2712 targets dev from current origin/dev and contains only the PR #2702 replay plus validated review fixes; no main-targeted correction exists. The final branch is 0 behind dev, with 8 replayed commits plus 6 tracking/review commits across 43 files. Validation passed for 69 focused frontend tests, 78 focused backend tests, extension TypeScript compile, Playwright discovery, workflow parsing/concurrency, Bandit, and diff checks. The only full WebUI typecheck failure is the pre-existing untouched QuickIngestWizardModal.tsx overflowY typing issue.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

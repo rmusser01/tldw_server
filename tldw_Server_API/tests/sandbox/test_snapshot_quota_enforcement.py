@@ -377,6 +377,30 @@ def test_global_quota_uses_raw_session_lock_from_metadata(tmp_path: Path) -> Non
     assert locked_sessions == [session_id]
 
 
+def test_global_quota_defers_unidentified_directory_without_deleting(
+    tmp_path: Path,
+) -> None:
+    """Maintenance must not evict outside a known session lock domain."""
+    manager = SnapshotManager(storage_path=str(tmp_path / "snapshots"))
+    unidentified_dir = manager.storage_path / "session_id_unidentified"
+    unidentified_dir.mkdir()
+    archive_path = unidentified_dir / "snapshot.tar.gz"
+    archive_path.write_bytes(b"snapshot")
+    (unidentified_dir / "snapshot.meta.json").write_text(
+        '{"snapshot_id":"snapshot","created_at":"2026-07-09T00:00:00Z"}',
+        encoding="utf-8",
+    )
+
+    summary = manager.enforce_quota_all_sessions(max_snapshots=0, max_size_mb=0)
+
+    assert archive_path.exists()
+    assert summary == {
+        "scanned_sessions": 0,
+        "evicted_sessions": 0,
+        "deleted_snapshots": 0,
+    }
+
+
 def test_create_snapshot_is_serialized_per_session(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
