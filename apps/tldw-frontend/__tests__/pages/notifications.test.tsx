@@ -190,6 +190,32 @@ describe('NotificationsPage', () => {
     expect(mocks.reportRequestError).toHaveBeenCalledTimes(1);
   });
 
+  it('retries a transient page-list bootstrap with bounded backoff', async () => {
+    vi.useFakeTimers();
+    const transient = Object.assign(new Error('offline'), { status: 503 });
+    mocks.listNotifications
+      .mockRejectedValueOnce(transient)
+      .mockResolvedValue({ items: [], total: 0 });
+    render(<NotificationsPage />);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(mocks.reportRequestError).toHaveBeenCalledWith(transient);
+    expect(mocks.listNotifications).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_199);
+    });
+    expect(mocks.listNotifications).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(mocks.listNotifications).toHaveBeenCalledTimes(4);
+    vi.useRealTimers();
+  });
+
   it('reports a failed mutation once without replaying it', async () => {
     const user = userEvent.setup();
     const failure = Object.assign(new Error('offline'), { status: 503 });

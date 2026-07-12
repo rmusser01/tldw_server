@@ -32,6 +32,7 @@ let watchedStorage: SafeStorage | null = null
 let unsubscribe: (() => void) | null = null
 let currentConfig: NotificationConfig | null = null
 let currentScopeKey: string | null = null
+let currentLifecycleState: NotificationLifecycleState = "idle"
 let generation = 0
 let activeScopeWrite: Promise<void> | null = null
 
@@ -141,10 +142,21 @@ const transitionToConfig = async (
   ) {
     return
   }
+  if (
+    !options.force &&
+    nextConfig &&
+    currentConfig &&
+    recordKeyFor(nextConfig) === recordKeyFor(currentConfig) &&
+    currentLifecycleState === "unavailable"
+  ) {
+    currentConfig = nextConfig
+    return
+  }
 
   const activeGeneration = ++generation
   stopStream()
   currentConfig = nextConfig
+  currentLifecycleState = "idle"
   const cleared = clearActiveScope(storage)
   if (!nextConfig) {
     await cleared
@@ -176,6 +188,7 @@ const transitionToConfig = async (
     if (!isCurrent()) return
     if (action) lifecycleState = reduceNotificationLifecycle(lifecycleState, action)
     if (lifecycleState === "idle") return
+    currentLifecycleState = lifecycleState
     record = {
       state: lifecycleState,
       unreadCount: toUnreadCount(unreadCount),
@@ -325,6 +338,7 @@ export function stopNotificationSubscription(): void {
   generation += 1
   stopStream()
   currentConfig = null
+  currentLifecycleState = "idle"
   const storage = storageInstance ?? createSafeStorage({ area: "local" })
   void clearActiveScope(storage)
   if (watchedStorage) {

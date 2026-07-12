@@ -213,6 +213,27 @@ describe("NotificationLifecycleProvider", () => {
     expect(view.latest().unreadCount).toBe(0)
   })
 
+  it("does not restart unavailable work after same-principal credentials rotate", async () => {
+    mocks.getUnreadCount.mockRejectedValue(
+      Object.assign(new Error("forbidden"), { status: 403 })
+    )
+    const view = renderProvider("notifications:server-a:user-a")
+    await waitFor(() => expect(view.latest().state).toBe("unavailable"))
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent(AUTH_CREDENTIALS_CHANGED_EVENT, {
+          detail: { authenticated: true }
+        })
+      )
+    })
+    await act(async () => Promise.resolve())
+
+    expect(mocks.getUnreadCount).toHaveBeenCalledTimes(1)
+    expect(mocks.subscribeNotificationsStream).not.toHaveBeenCalled()
+    expect(view.latest().state).toBe("unavailable")
+  })
+
   it("shows transient stream failures as degraded and recovers only on onOpen", async () => {
     let streamOptions: Record<string, unknown> | undefined
     mocks.subscribeNotificationsStream.mockImplementation((options: Record<string, unknown>) => {

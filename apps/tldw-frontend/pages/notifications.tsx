@@ -14,6 +14,7 @@ import {
   snoozeNotification,
 } from '@web/lib/api/notifications';
 import { formatRelativeTime } from '@web/lib/utils';
+import { classifyNotificationError } from '@/services/notification-lifecycle';
 
 const DEFAULT_SNOOZE_MINUTES = 15;
 const NOTIFICATIONS_FETCH_LIMIT = 100;
@@ -65,13 +66,23 @@ export default function NotificationsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const handledEventSequenceRef = useRef(0);
+  const inboxRetryAttemptRef = useRef(0);
+  const inboxRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refreshInboxRef = useRef<() => Promise<void>>(async () => undefined);
   const [showPrefs, setShowPrefs] = useState(false);
   const [prefs, setPrefs] = useState<NotificationPreferences | null>(null);
   const [prefsLoading, setPrefsLoading] = useState(false);
   const [prefsError, setPrefsError] = useState<string | null>(null);
   const [prefsSavingKey, setPrefsSavingKey] = useState<PreferenceKey | null>(null);
 
+  const clearInboxRetry = useCallback(() => {
+    if (inboxRetryTimerRef.current === null) return;
+    clearTimeout(inboxRetryTimerRef.current);
+    inboxRetryTimerRef.current = null;
+  }, []);
+
   const refreshInbox = useCallback(async () => {
+    clearInboxRetry();
     if (isTerminal) return;
     try {
       const [list, snoozed] = await Promise.all([
@@ -86,14 +97,27 @@ export default function NotificationsPage() {
       setItems(list.items);
       setSnoozedItems(snoozed.items);
       setError(null);
+      inboxRetryAttemptRef.current = 0;
     } catch (refreshError) {
       reportRequestError(refreshError);
       const message = refreshError instanceof Error ? refreshError.message : 'Failed to load notifications';
       setError(message);
+      const classification = classifyNotificationError(refreshError, {
+        attempt: inboxRetryAttemptRef.current,
+      });
+      if (classification.kind === 'retry') {
+        inboxRetryAttemptRef.current += 1;
+        inboxRetryTimerRef.current = setTimeout(() => {
+          inboxRetryTimerRef.current = null;
+          void refreshInboxRef.current();
+        }, classification.delayMs);
+      } else {
+        inboxRetryAttemptRef.current = 0;
+      }
     } finally {
       setIsLoading(false);
     }
-  }, [isTerminal, reportRequestError]);
+  }, [clearInboxRetry, isTerminal, reportRequestError]);
 
   const handleSnooze = useCallback(
     async (notificationId: number, minutes: number = DEFAULT_SNOOZE_MINUTES) => {
@@ -202,8 +226,17 @@ export default function NotificationsPage() {
   );
 
   useEffect(() => {
+    refreshInboxRef.current = refreshInbox;
+  }, [refreshInbox]);
+
+  useEffect(() => {
     void refreshInbox();
   }, [refreshInbox]);
+
+  useEffect(() => {
+    if (isTerminal) clearInboxRetry();
+    return clearInboxRetry;
+  }, [clearInboxRetry, isTerminal]);
 
   useEffect(() => {
     setUnreadCount(lifecycleUnreadCount);

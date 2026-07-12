@@ -115,6 +115,7 @@ export function NotificationLifecycleProvider({
   const unreadCurrentRef = React.useRef(false)
   const cursorCurrentRef = React.useRef(false)
   const terminalGenerationRef = React.useRef<number | null>(null)
+  const terminalStateRef = React.useRef<"auth-required" | "unavailable" | null>(null)
   const unsubscribeRef = React.useRef<(() => void) | null>(null)
   const pollTimerRef = React.useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -158,6 +159,7 @@ export function NotificationLifecycleProvider({
       terminalGenerationRef.current = generation
       stopWork()
       const action = classification.kind === "auth-required" ? "auth-required" : "unavailable"
+      terminalStateRef.current = action
       updateCurrent(generation, (current) => ({
         ...current,
         state: reduceNotificationLifecycle(current.state, {
@@ -176,6 +178,7 @@ export function NotificationLifecycleProvider({
     unreadCurrentRef.current = false
     cursorCurrentRef.current = false
     terminalGenerationRef.current = null
+    terminalStateRef.current = null
     setSnapshot(initialSnapshot(scopeKey))
     if (!enabled) return
 
@@ -317,6 +320,7 @@ export function NotificationLifecycleProvider({
       generationRef.current += 1
       stopWork()
       terminalGenerationRef.current = generationRef.current
+      terminalStateRef.current = "auth-required"
       unreadCurrentRef.current = false
       cursorCurrentRef.current = false
       setSnapshot({
@@ -327,6 +331,7 @@ export function NotificationLifecycleProvider({
     const onCredentialsChanged = (event: Event) => {
       const detail = (event as CustomEvent<AuthCredentialsChangedDetail>).detail
       if (detail?.authenticated) {
+        if (terminalStateRef.current === "unavailable") return
         void startWork()
       } else {
         stopForRemovedCredentials()

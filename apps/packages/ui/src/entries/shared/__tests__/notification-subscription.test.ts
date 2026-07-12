@@ -338,6 +338,37 @@ describe("notification subscription", () => {
     expect(subscribeNotificationsStreamMock).toHaveBeenCalledTimes(2)
   })
 
+  it("keeps 403 unavailable stopped across same-principal token rotation", async () => {
+    let onError: ((error: unknown) => void) | undefined
+    subscribeNotificationsStreamMock.mockImplementation(
+      (options: { onError?: (error: unknown) => void }) => {
+        onError = options.onError
+        return vi.fn()
+      }
+    )
+    const restrictedConfig = multiUserConfig("restricted-user", "first-token")
+    const rotatedConfig = multiUserConfig("restricted-user", "rotated-token")
+
+    await notificationSubscription.startNotificationSubscription(restrictedConfig)
+    onError?.({ status: 403 })
+    await flushAsync()
+
+    for (const watcher of watchers.get("tldwConfig") ?? []) {
+      watcher({ oldValue: restrictedConfig, newValue: rotatedConfig })
+    }
+    await flushAsync()
+
+    expect(getUnreadCountMock).toHaveBeenCalledTimes(1)
+    expect(subscribeNotificationsStreamMock).toHaveBeenCalledTimes(1)
+    expect((storageState.get(recordKeyFor(rotatedConfig)) as { state: string }).state).toBe(
+      "unavailable"
+    )
+
+    await notificationSubscription.retryNotificationSubscription()
+    expect(getUnreadCountMock).toHaveBeenCalledTimes(2)
+    expect(subscribeNotificationsStreamMock).toHaveBeenCalledTimes(2)
+  })
+
   it("classifies a terminal initial count failure without starting or polling the stream", async () => {
     vi.useFakeTimers()
     getUnreadCountMock.mockRejectedValue({ status: 401 })
