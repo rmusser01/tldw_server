@@ -10,7 +10,7 @@ ResearchWorkspaceArtifactType = Literal["audio_overview", "data_table", "mindmap
 
 class ResearchWorkspaceArtifactGenerateRequest(BaseModel):
     artifact_type: ResearchWorkspaceArtifactType
-    media_ids: list[int] = Field(..., min_length=1)
+    media_ids: list[int] = Field(..., min_length=1, max_length=50)
     model: str = Field(..., min_length=1)
     api_provider: str | None = None
     claims_verification_provider: str | None = Field(None, description="Optional Claims verification LLM provider override")

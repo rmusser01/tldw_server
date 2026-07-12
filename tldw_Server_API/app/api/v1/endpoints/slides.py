@@ -70,6 +70,7 @@ from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDat
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     MediaDbSession,
+    get_document_version,
     get_latest_transcription,
 )
 from tldw_Server_API.app.core.Jobs.manager import JobManager

@@ -415,7 +415,7 @@ async def verify_generated_artifact_against_sources(
                 ArtifactUnitResult(
                     unit_id=unit.unit_id,
                     verdict="needs_revision",
-                    metadata={"reason": "no_claims"},
+                    metadata={**unit.metadata, "reason": "no_claims"},
                 )
                 for unit in clean_units
             ],
@@ -450,16 +450,22 @@ async def verify_generated_artifact_against_sources(
         unit_claim_ids[unit_id].append(claim_id)
         unit_statuses[unit_id].append(_coerce_status(getattr(item, "status", VerificationStatus.UNVERIFIED)))
 
-    unit_results = [
-        ArtifactUnitResult(
-            unit_id=unit.unit_id,
-            verdict=_status_verdict(unit_statuses.get(unit.unit_id, [])),
-            claim_ids=unit_claim_ids.get(unit.unit_id, []),
-            statuses=[status.value for status in unit_statuses.get(unit.unit_id, [])],
-            metadata=unit.metadata,
+    unit_results: list[ArtifactUnitResult] = []
+    for unit in clean_units:
+        unit_verdict = _status_verdict(unit_statuses.get(unit.unit_id, []))
+        if unit_verdict == "grounded" and (
+            unit.metadata.get("text_truncated") or unit.metadata.get("claims_truncated")
+        ):
+            unit_verdict = "needs_revision"
+        unit_results.append(
+            ArtifactUnitResult(
+                unit_id=unit.unit_id,
+                verdict=unit_verdict,
+                claim_ids=unit_claim_ids.get(unit.unit_id, []),
+                statuses=[status.value for status in unit_statuses.get(unit.unit_id, [])],
+                metadata=unit.metadata,
+            )
         )
-        for unit in clean_units
-    ]
     report = generate_verification_report(
         verifications,
         query=query,

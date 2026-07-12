@@ -171,44 +171,6 @@ def _parse_scheduler_settings_envelope(raw: Any) -> dict[str, Any]:
     return {}
 
 
-def _truncate_test_mode_flashcard_text(text: str, limit: int = 220) -> str:
-    normalized = " ".join(str(text or "").split()).strip()
-    if len(normalized) <= limit:
-        return normalized
-    return f"{normalized[: limit - 1].rstrip()}…"
-
-
-def _build_test_mode_flashcards(payload: FlashcardGenerateRequest) -> list[dict[str, Any]]:
-    normalized_text = _truncate_test_mode_flashcard_text(payload.text) or "Workspace study aid coverage."
-    card_type = str(payload.card_type or "basic").strip().lower() or "basic"
-    if card_type not in ("basic", "basic_reverse", "cloze"):
-        card_type = "basic"
-
-    tags = [str(topic).strip() for topic in (payload.focus_topics or []) if str(topic).strip()]
-    if not tags:
-        tags = ["workspace", "study"]
-
-    cards: list[dict[str, Any]] = []
-    for index in range(max(1, int(payload.num_cards or 1))):
-        if card_type == "cloze":
-            front = f"{{{{c1::Study point {index + 1}}}}}: {normalized_text}"
-            back = f"Study point {index + 1}"
-        else:
-            front = f"What study point {index + 1} should you remember?"
-            back = normalized_text
-
-        cards.append(
-            {
-                "front": front,
-                "back": back,
-                "tags": tags,
-                "model_type": card_type,
-                "notes": "Deterministic test-mode flashcard.",
-            }
-        )
-    return cards
-
-
 def _build_flashcard_verification_units(cards: list[dict[str, Any]]) -> list[ArtifactVerificationUnit]:
     units: list[ArtifactVerificationUnit] = []
     for index, card in enumerate(cards, start=1):
@@ -2634,6 +2596,11 @@ async def generate_flashcards(payload: FlashcardGenerateRequest):
             generated_cards = _normalize_generated_flashcards(raw_flashcards, payload)
         except FlashcardGenerationPlanError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if not generated_cards:
+            raise HTTPException(
+                status_code=422,
+                detail="Flashcard generation returned no usable cards",
+            )
 
         claim_verification = await verify_generated_artifact_against_sources(
             artifact_type="flashcards",

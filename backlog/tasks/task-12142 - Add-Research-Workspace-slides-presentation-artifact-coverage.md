@@ -38,8 +38,6 @@ Added a focused Research Workspace StudioPane regression test for generated Slid
 Added one focused Vitest case to StudioPane.stage3.test.tsx for generated slides artifacts retaining presentationId, presentationVersion, and generated content. Verification: focused StudioPane suite passed 21/21; combined Research Workspace/Flashcards/Quiz focused suite passed 59/59; narrowed coverage run for StudioPane/index.tsx and useArtifactGeneration.tsx passed 21/21 and reported 53.29% statements on that touched slice. git diff --check passed. Bandit N/A: frontend TypeScript test-only change.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed

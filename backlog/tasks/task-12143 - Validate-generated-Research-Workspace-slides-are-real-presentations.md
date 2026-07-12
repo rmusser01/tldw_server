@@ -38,8 +38,6 @@ Implemented Research Workspace slides validation on both frontend and backend. F
 Slides artifacts now fail closed unless the Slides API returns a real persisted presentation with meaningful slide content. Markdown fallback text and placeholder slides such as invalid or slides go here no longer complete as valid Research Workspace slide artifacts. Verification passed: frontend focused vitest suite 6 files and 107 tests; backend slides generator pytest 12 tests; Bandit on slides_generator.py with 0 findings; git diff --check; full-app FastAPI plus llama.cpp validation generated and exported a structured 8-slide JSON presentation with 0 placeholder failures.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed

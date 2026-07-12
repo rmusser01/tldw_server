@@ -2234,7 +2234,6 @@ def test_slides_generate_from_media_stores_grounded_claim_verification(
         slides_ep,
         "_verify_slides_against_source",
         fake_verify,
-        raising=False,
     )
 
     resp = client.post(
@@ -2335,7 +2334,6 @@ def test_slides_generate_from_media_rejects_needs_revision_before_persist(
         slides_ep,
         "_verify_slides_against_source",
         fake_verify,
-        raising=False,
     )
 
     resp = client.post(
@@ -2371,7 +2369,6 @@ def test_slides_generate_from_document_media_uses_document_content(
         lambda db_instance, media_id, version_number=None, include_content=True: {
             "content": "Document body content for slide generation."
         },
-        raising=False,
     )
     monkeypatch.setattr(
         "tldw_Server_API.app.core.Slides.slides_generator.perform_chat_api_call",

@@ -5,6 +5,7 @@ import { fetchTldwVoiceCatalog } from "@/services/tldw/audio-voices"
 import { inferTldwProviderFromModel } from "@/services/tts-provider"
 import { StudioPane, estimateGenerationSeconds } from "../StudioPane"
 import { buildUnknownResearchWorkspaceCapabilities } from "../research-workspace-capabilities"
+import { createGroundedClaimVerification } from "./studio-test-fixtures"
 
 const {
   mockRagSearch,
@@ -518,16 +519,7 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
       artifact_type: "audio_overview",
       content: "Audio script",
       data: {},
-      claim_verification: {
-        verdict: "grounded",
-        metadata: {
-          generation_provider: "openai",
-          generation_model: "gpt-4o-mini",
-          verification_provider: "openai",
-          verification_model: "gpt-4o-mini",
-          verification_llm_is_default: true
-        }
-      }
+      claim_verification: createGroundedClaimVerification()
     })
     mockSynthesizeSpeech.mockResolvedValue(new ArrayBuffer(8))
     mockGenerateSlidesFromMedia.mockResolvedValue({

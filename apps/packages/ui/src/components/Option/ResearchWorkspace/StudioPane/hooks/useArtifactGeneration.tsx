@@ -272,7 +272,6 @@ type GenerationResult = {
   totalTokens?: number
   totalCostUsd?: number
   data?: Record<string, unknown>
-  producerMetadata?: GeneratedArtifact["producerMetadata"]
   sourceCoverage?: ArtifactSourceCoverage
 }
 
@@ -1172,11 +1171,7 @@ const finalizeGenerationResult = (
       return normalized
     }
     case "slides": {
-      const normalized = requireUsableTextResult(type, result, "slide")
-      if (!normalized.presentationId) {
-        throw new Error(SLIDES_UNUSABLE_PRESENTATION_MESSAGE)
-      }
-      return normalized
+      return requireUsableTextResult(type, result, "slide")
     }
     case "quiz": {
       const normalized = requireUsableTextResult(type, result, "quiz")
@@ -1709,28 +1704,30 @@ async function generateQuizFromMedia(
     }
   )
 
-  const questions = normalizeGeneratedQuizQuestions(
-    generatedQuiz.questions.map((question) => ({
-      question_type: question.question_type,
-      question_text: question.question_text,
-      options: normalizeQuizQuestionOptions(question),
-      correct_answer: normalizeQuizQuestionAnswer(question),
-      explanation: question.explanation
-    }))
-  ).slice(0, 20)
-  if (!questions.length) {
+  const questionPairs = generatedQuiz.questions
+    .flatMap((sourceQuestion) => {
+      const [question] = normalizeGeneratedQuizQuestions([
+        {
+          question_type: sourceQuestion.question_type,
+          question_text: sourceQuestion.question_text,
+          options: normalizeQuizQuestionOptions(sourceQuestion),
+          correct_answer: normalizeQuizQuestionAnswer(sourceQuestion),
+          explanation: sourceQuestion.explanation
+        }
+      ])
+      return question ? [{ question, sourceQuestion }] : []
+    })
+    .slice(0, 20)
+  if (!questionPairs.length) {
     throw new Error("Quiz generation returned no usable questions")
   }
 
-  const limitedQuestions = questions.map((question, index) => ({
+  const limitedQuestions = questionPairs.map(({ question, sourceQuestion }) => ({
     question: question.questionText,
     options: question.options,
     answer: question.correctAnswer,
     explanation: question.explanation,
-    sourceMediaId: resolveQuizQuestionSourceMediaId(
-      generatedQuiz.questions[index],
-      uniqueMediaIds
-    )
+    sourceMediaId: resolveQuizQuestionSourceMediaId(sourceQuestion, uniqueMediaIds)
   }))
   const content = formatQuizQuestionsContent(
     limitedQuestions.map((question) => ({

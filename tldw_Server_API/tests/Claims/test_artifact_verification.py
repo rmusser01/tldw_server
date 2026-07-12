@@ -111,6 +111,7 @@ def test_verification_fails_without_selected_source_documents() -> None:
         (VerificationStatus.VERIFIED, "grounded"),
         (VerificationStatus.UNVERIFIED, "needs_revision"),
         (VerificationStatus.CONTESTED, "needs_revision"),
+        (VerificationStatus.MISLEADING, "needs_revision"),
         (VerificationStatus.REFUTED, "failed"),
         (VerificationStatus.HALLUCINATION, "failed"),
         (VerificationStatus.NUMERICAL_ERROR, "failed"),
@@ -390,7 +391,40 @@ def test_text_cap_prevents_grounded_result(monkeypatch: pytest.MonkeyPatch) -> N
 
         assert result.verdict == "needs_revision"
         assert "text" in result.metadata["cap_hit"]
+        assert result.unit_results[0].verdict == "needs_revision"
         assert result.unit_results[0].metadata["text_truncated"] is True
+
+    asyncio.run(_run())
+
+
+def test_no_claims_preserves_truncated_unit_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.core.Claims_Extraction import artifact_verification
+    from tldw_Server_API.app.core.Claims_Extraction.artifact_verification import (
+        ArtifactVerificationUnit,
+        verify_generated_artifact_against_sources,
+    )
+
+    monkeypatch.setattr(artifact_verification, "_MAX_TEXT_CHARS_BY_ARTIFACT", {"quiz": 12})
+
+    async def _run() -> None:
+        result = await verify_generated_artifact_against_sources(
+            artifact_type="quiz",
+            units=[
+                ArtifactVerificationUnit(
+                    unit_id="quiz:q1",
+                    text="This generated question text exceeds the configured cap.",
+                    claims=[],
+                )
+            ],
+            source_documents=[Document(id="source", content="Source text", metadata={})],
+            generation_provider="llamacpp",
+            generation_model="local-test",
+            analyze_fn=_noop_analyze,
+        )
+
+        assert result.unit_results[0].metadata["reason"] == "no_claims"
+        assert result.unit_results[0].metadata["text_truncated"] is True
+        assert result.unit_results[0].metadata["original_text_length"] > 12
 
     asyncio.run(_run())
 

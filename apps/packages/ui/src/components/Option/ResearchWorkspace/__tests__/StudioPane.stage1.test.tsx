@@ -5,6 +5,7 @@ import { Modal } from "antd"
 import type { AudioGenerationSettings, WorkspaceSource } from "@/types/workspace"
 import { StudioPane } from "../StudioPane"
 import { buildUnknownResearchWorkspaceCapabilities } from "../research-workspace-capabilities"
+import { createGroundedClaimVerification } from "./studio-test-fixtures"
 
 const {
   mockAddArtifact,
@@ -438,16 +439,7 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
       artifact_type: "audio_overview",
       content: "Audio script",
       data: {},
-      claim_verification: {
-        verdict: "grounded",
-        metadata: {
-          generation_provider: "openai",
-          generation_model: "gpt-4o-mini",
-          verification_provider: "openai",
-          verification_model: "gpt-4o-mini",
-          verification_llm_is_default: true
-        }
-      }
+      claim_verification: createGroundedClaimVerification()
     })
     mockSynthesizeSpeech.mockResolvedValue(new ArrayBuffer(8))
     mockGenerateSlidesFromMedia.mockResolvedValue({
@@ -1439,7 +1431,7 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     expect(mockRagSearch).not.toHaveBeenCalled()
   })
 
-  it("does not complete slides artifacts from markdown fallback text", async () => {
+  it("completes slides artifacts from usable markdown fallback text", async () => {
     mockGenerateSlidesFromMedia.mockRejectedValue(new Error("Slides API unavailable"))
     mockGetMediaDetails.mockResolvedValue({
       source: { title: "DSPy Prompting Talk" },
@@ -1471,19 +1463,13 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     expect(slidesRequest.messages?.[1]?.content).toContain("Project Falcon")
     expect(slidesRequest.messages?.[1]?.content).toContain("March 2026")
     expect(mockRagSearch).not.toHaveBeenCalled()
-    await waitFor(() => {
-      expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
-        expect.stringMatching(/^artifact-/),
-        "failed",
-        expect.objectContaining({
-          errorMessage: expect.stringContaining("usable presentation")
-        })
-      )
-    })
-    expect(mockUpdateArtifactStatus).not.toHaveBeenCalledWith(
-      expect.any(String),
+    expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
+      expect.stringMatching(/^artifact-/),
       "completed",
-      expect.objectContaining({ content: expect.stringContaining("# Project Falcon") })
+      expect.objectContaining({
+        content: expect.stringContaining("# Project Falcon"),
+        presentationId: undefined
+      })
     )
   })
 
@@ -1861,16 +1847,7 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
       artifact_type: "audio_overview",
       content: "Audio script",
       data: {},
-      claim_verification: {
-        verdict: "grounded",
-        metadata: {
-          generation_provider: "openai",
-          generation_model: "gpt-4o-mini",
-          verification_provider: "openai",
-          verification_model: "gpt-4o-mini",
-          verification_llm_is_default: true
-        }
-      }
+      claim_verification: createGroundedClaimVerification()
     })
 
     renderStudioPane()

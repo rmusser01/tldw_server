@@ -8,6 +8,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.services import quiz_generator
 from tldw_Server_API.app.services.quiz_generator import (
+    QuizClaimVerificationError,
     _build_test_mode_questions,
     _normalize_questions,
     generate_quiz_from_sources,
@@ -697,6 +698,7 @@ async def test_generate_quiz_from_sources_rejects_failed_claim_verification_befo
         prompt: str,
         model: str | None = None,
         api_provider: str | None = None,
+        **_kwargs,
     ) -> dict[str, object]:
         return {
             "questions": [
@@ -741,7 +743,6 @@ async def test_generate_quiz_from_sources_rejects_failed_claim_verification_befo
         quiz_generator,
         "_verify_quiz_questions_against_sources",
         fake_verify,
-        raising=False,
     )
     monkeypatch.setattr(quiz_generator, "_persist_generated_quiz", fail_persist)
 
@@ -791,6 +792,7 @@ async def test_generate_quiz_from_sources_rejects_needs_revision_claim_verificat
         prompt: str,
         model: str | None = None,
         api_provider: str | None = None,
+        **_kwargs,
     ) -> dict[str, object]:
         return {
             "questions": [
@@ -828,7 +830,6 @@ async def test_generate_quiz_from_sources_rejects_needs_revision_claim_verificat
         quiz_generator,
         "_verify_quiz_questions_against_sources",
         fake_verify,
-        raising=False,
     )
     monkeypatch.setattr(quiz_generator, "_persist_generated_quiz", fail_persist)
 

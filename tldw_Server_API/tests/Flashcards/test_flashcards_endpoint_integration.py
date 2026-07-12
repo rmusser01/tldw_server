@@ -123,6 +123,32 @@ def client_with_flashcards_db(flashcards_db: CharactersRAGDB):
     TestConfig.reset_settings()
 
 
+@pytest.fixture
+def grounded_claim_verifier(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.core.Claims_Extraction.artifact_verification import (
+        ArtifactVerificationResult,
+    )
+
+    async def fake_verify(**kwargs: Any) -> ArtifactVerificationResult:
+        return ArtifactVerificationResult(
+            verdict="grounded",
+            report={"total_claims": 1, "claims": [{"status": "verified"}]},
+            unit_results=[],
+            metadata={
+                "generation_provider": kwargs["generation_provider"],
+                "verification_provider": kwargs["verification_provider"]
+                or kwargs["generation_provider"],
+                "verification_llm_is_default": kwargs["verification_provider"] is None,
+            },
+        )
+
+    monkeypatch.setattr(
+        flashcards_endpoint,
+        "verify_generated_artifact_against_sources",
+        fake_verify,
+    )
+
+
 def test_export_apkg_basic_integration(client_with_flashcards_db: TestClient):
     # Create deck
     r = client_with_flashcards_db.post("/api/v1/flashcards/decks", json={"name": "DeckOne", "description": "d1"}, headers=AUTH_HEADERS)
@@ -1616,7 +1642,6 @@ def test_generate_flashcards_endpoint_returns_generated_cards(
     monkeypatch.setattr(
         "tldw_Server_API.app.api.v1.endpoints.flashcards.verify_generated_artifact_against_sources",
         fake_verify,
-        raising=False,
     )
 
     response = client_with_flashcards_db.post(
@@ -1635,6 +1660,39 @@ def test_generate_flashcards_endpoint_returns_generated_cards(
     assert payload["flashcards"][0]["front"] == "ATP stands for?"
     assert payload["flashcards"][1]["tags"] == ["biology", "metabolism"]
     assert payload["claim_verification"]["verdict"] == "grounded"
+
+
+def test_generate_flashcards_endpoint_rejects_empty_output_before_verification(
+    client_with_flashcards_db: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    verifier_called = False
+
+    async def fake_generate_adapter(config: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+        return {"flashcards": []}
+
+    async def fake_verify(**kwargs: Any) -> None:
+        nonlocal verifier_called
+        verifier_called = True
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.flashcards.run_flashcard_generate_adapter",
+        fake_generate_adapter,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.flashcards.verify_generated_artifact_against_sources",
+        fake_verify,
+    )
+
+    response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/generate",
+        json={"text": "Cell respiration summary", "num_cards": 1, "card_type": "basic"},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Flashcard generation returned no usable cards"
+    assert verifier_called is False
 
 
 def test_generate_flashcards_endpoint_returns_422_when_claim_verification_fails(
@@ -1668,7 +1726,6 @@ def test_generate_flashcards_endpoint_returns_422_when_claim_verification_fails(
     monkeypatch.setattr(
         "tldw_Server_API.app.api.v1.endpoints.flashcards.verify_generated_artifact_against_sources",
         fake_verify,
-        raising=False,
     )
 
     response = client_with_flashcards_db.post(
@@ -1718,7 +1775,6 @@ def test_generate_flashcards_endpoint_returns_422_when_claim_verification_needs_
     monkeypatch.setattr(
         "tldw_Server_API.app.api.v1.endpoints.flashcards.verify_generated_artifact_against_sources",
         fake_verify,
-        raising=False,
     )
 
     response = client_with_flashcards_db.post(
@@ -1777,7 +1833,6 @@ def test_generate_flashcards_endpoint_uses_claims_verification_provider_override
     monkeypatch.setattr(
         "tldw_Server_API.app.api.v1.endpoints.flashcards.verify_generated_artifact_against_sources",
         fake_verify,
-        raising=False,
     )
 
     response = client_with_flashcards_db.post(
@@ -1807,6 +1862,7 @@ def test_generate_flashcards_endpoint_uses_claims_verification_provider_override
 def test_generate_flashcards_uses_legacy_defaults(
     client_with_flashcards_db: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    grounded_claim_verifier: None,
 ) -> None:
     async def fake_generate_adapter(config: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
         assert config["num_cards"] == 10
@@ -1838,6 +1894,7 @@ def test_generate_flashcards_uses_legacy_defaults(
 def test_generate_flashcards_coerces_legacy_num_cards_string(
     client_with_flashcards_db: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    grounded_claim_verifier: None,
 ) -> None:
     async def fake_generate_adapter(config: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
         assert config["num_cards"] == 5
@@ -1869,6 +1926,7 @@ def test_generate_flashcards_coerces_legacy_num_cards_string(
 def test_generate_flashcards_accepts_mixed_card_plan(
     client_with_flashcards_db: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    grounded_claim_verifier: None,
 ) -> None:
     async def fake_generate_adapter(config: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
         assert config["num_cards"] == 4
@@ -1956,6 +2014,7 @@ def test_generate_flashcards_rejects_planned_output_count_mismatch(
 def test_generate_flashcards_skips_junk_rows_before_planned_type_validation(
     client_with_flashcards_db: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    grounded_claim_verifier: None,
 ) -> None:
     async def fake_generate_adapter(config: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -2029,6 +2088,7 @@ def test_generate_flashcards_rejects_planned_output_without_valid_generation_typ
 def test_generate_flashcards_test_mode_supports_card_plan(
     client_with_flashcards_db: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    grounded_claim_verifier: None,
 ) -> None:
     async def fake_generate_adapter(config: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
         return {"error": "LLM provider is required", "flashcards": [], "count": 0}
@@ -2051,7 +2111,7 @@ def test_generate_flashcards_test_mode_supports_card_plan(
         headers=AUTH_HEADERS,
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     cards = response.json()["flashcards"]
     assert [card["generation_type"] for card in cards] == ["basic", "true_false"]
     assert cards[1]["model_type"] == "basic"
@@ -2131,7 +2191,6 @@ def test_generate_flashcards_endpoint_uses_default_provider_when_omitted(
     monkeypatch.setattr(
         "tldw_Server_API.app.api.v1.endpoints.flashcards.verify_generated_artifact_against_sources",
         fake_verify,
-        raising=False,
     )
 
     response = client_with_flashcards_db.post(

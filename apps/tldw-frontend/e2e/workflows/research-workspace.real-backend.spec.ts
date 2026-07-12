@@ -714,16 +714,12 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
         const powerStoredAuth = await powerPage.evaluate(() => {
           const raw = localStorage.getItem("tldwConfig")
           const legacyApiKey = localStorage.getItem("apiKey")
-          const runtimeSessionApiKey = sessionStorage.getItem(
-            "tldwRuntimeSessionSingleUserApiKey"
-          )
           if (!raw) {
             return {
               authMode: null,
               raw: null,
               tldwConfigApiKey: null,
-              legacyApiKey,
-              runtimeSessionApiKey
+              legacyApiKey
             }
           }
           try {
@@ -734,25 +730,22 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
               raw,
               tldwConfigApiKey:
                 typeof parsed?.apiKey === "string" ? parsed.apiKey : null,
-              legacyApiKey,
-              runtimeSessionApiKey
+              legacyApiKey
             }
           } catch {
             return {
               authMode: null,
               raw,
               tldwConfigApiKey: null,
-              legacyApiKey,
-              runtimeSessionApiKey
+              legacyApiKey
             }
           }
         })
         expect(powerStoredAuth.authMode).toBe("single-user")
-        expect(
-          powerStoredAuth.tldwConfigApiKey === TEST_CONFIG.apiKey ||
-            powerStoredAuth.runtimeSessionApiKey === TEST_CONFIG.apiKey ||
-            powerStoredAuth.legacyApiKey === TEST_CONFIG.apiKey
-        ).toBe(true)
+        expect([
+          powerStoredAuth.tldwConfigApiKey,
+          powerStoredAuth.legacyApiKey
+        ]).toContain(TEST_CONFIG.apiKey)
       } finally {
         powerDiagnostics.dispose()
       }

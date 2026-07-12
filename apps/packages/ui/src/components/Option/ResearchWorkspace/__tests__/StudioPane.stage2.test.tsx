@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { Modal } from "antd"
 import type { WorkspaceSource } from "@/types/workspace"
 import { StudioPane } from "../StudioPane"
+import { createGroundedClaimVerification } from "./studio-test-fixtures"
 const {
   mockScheduleWorkspaceUndoAction,
   mockUndoWorkspaceAction,
@@ -491,16 +492,7 @@ describe("StudioPane Stage 2 workflows", () => {
       artifact_type: "mindmap",
       content: "```mermaid\nmindmap\n  root((Workspace))\n    Findings\n```",
       data: { mermaid: "mindmap\n  root((Workspace))\n    Findings" },
-      claim_verification: {
-        verdict: "grounded",
-        metadata: {
-          generation_provider: "openai",
-          generation_model: "gpt-4o-mini",
-          verification_provider: "openai",
-          verification_model: "gpt-4o-mini",
-          verification_llm_is_default: true
-        }
-      }
+      claim_verification: createGroundedClaimVerification()
     })
     mockGetChatModels.mockResolvedValue([])
     mockCreateDeck.mockResolvedValue({ id: 1, name: "Workspace Flashcards" })
@@ -768,6 +760,81 @@ describe("StudioPane Stage 2 workflows", () => {
         })
       })
     )
+  })
+
+  it("keeps quiz source citations aligned after filtering unusable questions", async () => {
+    workspaceStoreState.selectedSourceIds = ["source-1", "source-2"]
+    workspaceStoreState.getSelectedMediaIds = () => [101, 202]
+    workspaceStoreState.sources = [
+      {
+        id: "source-1",
+        mediaId: 101,
+        title: "DSPy Prompting Talk",
+        type: "video",
+        status: "ready",
+        addedAt: new Date("2026-02-18T00:00:00.000Z")
+      },
+      {
+        id: "source-2",
+        mediaId: 202,
+        title: "E2E DB Media",
+        type: "document",
+        status: "ready",
+        addedAt: new Date("2026-02-18T00:00:00.000Z")
+      }
+    ] as WorkspaceSource[]
+    mockGenerateQuiz.mockResolvedValue({
+      quiz: {
+        id: 11,
+        name: "Workspace Quiz",
+        total_questions: 3,
+        deleted: false,
+        client_id: "test",
+        version: 1
+      },
+      questions: [
+        {
+          question_type: "multiple_choice",
+          question_text: "Which source describes the prompting talk?",
+          options: ["The talk", "The document"],
+          correct_answer: 0,
+          source_citations: [{ source_type: "media", source_id: "101", media_id: 101 }]
+        },
+        {
+          question_type: "multiple_choice",
+          question_text: "question goes here",
+          options: ["Option A", "Option B"],
+          correct_answer: 0,
+          source_citations: [{ source_type: "media", source_id: "101", media_id: 101 }]
+        },
+        {
+          question_type: "multiple_choice",
+          question_text: "Which source is the E2E DB media?",
+          options: ["The talk", "The document"],
+          correct_answer: 1,
+          source_citations: [{ source_type: "media", source_id: "202", media_id: 202 }]
+        }
+      ],
+      claim_verification: { verdict: "grounded" }
+    })
+
+    renderStudioPane()
+    fireEvent.click(screen.getByRole("button", { name: "Quiz" }))
+
+    await waitFor(() => {
+      expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
+        expect.stringMatching(/^artifact-/),
+        "completed",
+        expect.objectContaining({
+          data: expect.objectContaining({
+            questions: [
+              expect.objectContaining({ sourceMediaId: 101 }),
+              expect.objectContaining({ sourceMediaId: 202 })
+            ]
+          })
+        })
+      )
+    })
   })
 
   it("fails quiz artifacts when generated questions are placeholder-only", async () => {
@@ -1607,16 +1674,7 @@ describe("StudioPane Stage 2 workflows", () => {
       data: {
         mermaid: "mindmap\n  root((Workspace Research))\n    Prompting\n      DSPy\n    Documents\n      E2E DB Media"
       },
-      claim_verification: {
-        verdict: "grounded",
-        metadata: {
-          generation_provider: "openai",
-          generation_model: "gpt-4o-mini",
-          verification_provider: "openai",
-          verification_model: "gpt-4o-mini",
-          verification_llm_is_default: true
-        }
-      }
+      claim_verification: createGroundedClaimVerification()
     })
     mockGetChatModels.mockResolvedValue([
       {
@@ -1812,16 +1870,7 @@ describe("StudioPane Stage 2 workflows", () => {
       content:
         "| Source | Fact |\n|---|---|\n| DSPy Prompting Talk | Prompt optimization |\n| E2E DB Media | Hello world |",
       data: {},
-      claim_verification: {
-        verdict: "grounded",
-        metadata: {
-          generation_provider: "openai",
-          generation_model: "gpt-4o-mini",
-          verification_provider: "openai",
-          verification_model: "gpt-4o-mini",
-          verification_llm_is_default: true
-        }
-      }
+      claim_verification: createGroundedClaimVerification()
     })
 
     renderStudioPane()

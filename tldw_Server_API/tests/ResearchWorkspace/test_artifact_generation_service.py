@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from tldw_Server_API.app.core.Claims_Extraction.artifact_verification import (
     ArtifactVerificationResult,
@@ -10,6 +11,28 @@ from tldw_Server_API.app.core.Research_Workspace.artifact_generation import (
     ResearchWorkspaceArtifactVerificationError,
     generate_research_workspace_artifact,
 )
+from tldw_Server_API.app.api.v1.schemas.research_workspace_artifacts import (
+    ResearchWorkspaceArtifactGenerateRequest,
+)
+
+
+def test_research_workspace_artifact_request_accepts_at_most_fifty_media_ids():
+    request = ResearchWorkspaceArtifactGenerateRequest(
+        artifact_type="mindmap",
+        media_ids=list(range(1, 51)),
+        model="test-model",
+    )
+
+    assert len(request.media_ids) == 50
+
+
+def test_research_workspace_artifact_request_rejects_more_than_fifty_media_ids():
+    with pytest.raises(ValidationError):
+        ResearchWorkspaceArtifactGenerateRequest(
+            artifact_type="mindmap",
+            media_ids=list(range(1, 52)),
+            model="test-model",
+        )
 
 
 @pytest.mark.asyncio
