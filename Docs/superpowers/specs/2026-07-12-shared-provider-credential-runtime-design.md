@@ -12,7 +12,7 @@ The current RAG semantic cache compounds the problem. It stores generated answer
 
 ## Goals
 
-- Give Chat and every LLM-backed RAG stage the same credential precedence and fail-closed behavior.
+- Give Chat and every provider-backed RAG stage, including query-time embeddings, the same credential precedence and fail-closed behavior.
 - Consolidate runtime credential orchestration without creating a RAG-specific credential store or hidden global/request-local state.
 - Support user, active team, active organization, and server-default credentials, including OpenAI OAuth refresh and authorized provider configuration overrides.
 - Keep secrets out of client payloads, serialized RAG requests, checkpoints, jobs, caches, responses, logs, metrics, and exception text.
@@ -22,7 +22,7 @@ The current RAG semantic cache compounds the problem. It stores generated answer
 
 ## Non-goals
 
-- Migrating every non-Chat, non-RAG credential consumer in the same change. Evaluation, audio, character chat, embeddings, and other consumers can adopt the generic runtime incrementally.
+- Migrating every non-Chat, non-RAG credential consumer in the same change. Evaluation, audio, character chat, offline ingestion/indexing embeddings, and other consumers can adopt the generic runtime incrementally. Provider-backed embeddings invoked inside a RAG request are in scope.
 - Rewriting the full RAG LLM stack onto a new asynchronous gateway.
 - Changing provider-selection policy, provider health policy, model routing, or RAG retrieval algorithms.
 - Exposing credential source or credential diagnostics in public Knowledge QA response metadata.
@@ -56,9 +56,9 @@ New RAG checkpoints bind the trusted owner and selected server-derived scope ide
 
 ### Safe provider-call handle
 
-The runtime returns a slotted, deliberately non-serializable provider-call handle. It contains the explicit API key and a defensive provider-scoped configuration copy required by the chosen adapter. Its representation is always redacted, it has no dataclass/Pydantic serialization path, and secret-bearing fields are not included in equality diagnostics.
+The runtime returns a slotted, deliberately non-serializable provider-call handle. It contains the explicit API key and a defensive provider-scoped configuration copy required by the chosen adapter. Its representation is always redacted, it has no dataclass/Pydantic serialization path, and secret-bearing fields are not included in equality diagnostics. It explicitly rejects pickle/state reduction and shallow/deep copy rather than relying on slots alone. Checkpoint, job, cache, and Pydantic serializers must reject the handle instead of traversing or stringifying it.
 
-The underlying `ResolvedByokCredentials` representation is also redacted. The provider-scoped configuration excludes unrelated provider sections and unrelated provider credentials. It preserves only the selected provider settings needed for model defaults, timeouts, authorized endpoint overrides, organization/project identifiers, and equivalent adapter behavior.
+The underlying `ResolvedByokCredentials` representation is also redacted. The provider-scoped configuration excludes unrelated provider sections and unrelated provider credentials. It preserves only the selected provider settings needed for model defaults, authorized endpoint overrides, organization/project identifiers, and equivalent adapter behavior, plus an explicit allowlist of shared non-secret transport policy required by adapters. That shared allowlist covers deployment-controlled proxy/egress behavior, TLS and CA settings, redirect policy, and timeout/retry settings where those are already supported. Secret-bearing shared sections and unrelated provider configuration are never copied. Tests must prove both that required deployment controls survive and that unrelated secrets do not.
 
 ### Explicit resolution marker
 
@@ -131,12 +131,23 @@ The implementation caller inventory must cover at least these RAG modules and an
 - `evidence_accumulator.py`
 - `evidence_chains.py`
 - `media_search.py`
+- `advanced_retrieval.py`
+- `agentic_execution.py`
+- `database_retrievers.py`
+- `tldw_Server_API/app/core/Embeddings/async_embeddings.py`
+- `tldw_Server_API/app/core/Embeddings/Embeddings_Server/Embeddings_Create.py`
 
 Agentic execution, adaptive reruns, evidence accumulation, and post-generation repair receive the original execution runtime. They must not create a new implicit server-config path.
 
+### Provider-backed RAG embeddings
+
+Query-vector generation is part of the authenticated RAG execution when it uses a hosted provider. HyDE vectorization, advanced retrieval, database retrievers, unified-pipeline query embedding, and agentic provider embeddings resolve their effective embedding provider through the same runtime. They receive an embedding-scoped call handle and the same explicit no-config-fallback marker; they may not silently reload a server key or fail over on credential/authentication errors.
+
+Local embedding models and precomputed stored vectors require no credential handle. Offline ingestion and index-building embeddings remain outside this task. If a query-time embedding is required for final retrieval and its configured credential fails, the request fails with the credential error. If an optional retrieval expansion can safely omit that embedding path, it may degrade only under the documented auxiliary-stage policy and must lower the corresponding trust/coverage metadata.
+
 ### Legacy summarization compatibility
 
-Extend the shared summarization adapter path with optional explicit provider-call configuration and the no-config-fallback marker. Existing callers that do not provide these arguments retain current behavior. RAG-bound callbacks pass the explicit key/configuration and interpret returned `Error:` values as failures, so unsuccessful calls do not record credential use.
+Extend the shared summarization adapter path with optional explicit provider-call configuration, the no-config-fallback marker, and a typed internal failure contract for runtime-bound calls. Existing callers that do not provide these arguments retain current string-return behavior. Runtime-bound Chat/RAG callbacks receive typed results or sanitized typed exceptions; they do not infer failure by matching an `Error:` prefix. The legacy boundary may translate typed failures back to its historical error strings for callers that have not migrated, but raw provider bodies and exception text must not cross that boundary. Partial streaming output followed by failure remains a failure and is never converted into an apparently successful string.
 
 This compatibility extension is deliberately narrower than replacing the legacy summarization library.
 
@@ -164,7 +175,7 @@ This increases LLM use for repeated questions but guarantees that provider, mode
 5. Concurrent callers await the same resolution task.
 6. The runtime returns an explicit, provider-scoped call handle.
 7. The adapter uses the handle and is forbidden from independently loading a key.
-8. A successful non-stream response or first valid provider stream content records use once.
+8. A successful non-stream response, first valid provider stream content, or a clean upstream completion signal for a valid empty response records use once. Iterator creation, connection establishment, and keepalive frames do not record use.
 9. OpenAI OAuth authentication failure before output triggers one shared forced refresh and retry.
 10. Completion/cancellation releases runtime-held secret references.
 
@@ -198,14 +209,19 @@ Streaming endpoints emit sanitized NDJSON error events such as:
 
 ```json
 {
+  "schema_version": 1,
   "type": "error",
   "code": "provider_authentication_failed",
+  "upstream_dispatched": true,
+  "output_emitted": false,
   "allow_non_stream_fallback": false,
   "message": "The selected provider credentials could not be authenticated."
 }
 ```
 
-`allow_non_stream_fallback` is true only when the transport can establish that streaming is unsupported or failed before upstream dispatch. Provider timeout, disconnect after dispatch, partial output, credential errors, and provider configuration errors do not replay because replay can duplicate work and charges.
+Terminal stream events use one typed, versioned schema shared by backend response models and frontend parsing. Unknown schema versions fail closed with no replay. `allow_non_stream_fallback` is true only when the transport can establish that streaming is unsupported or failed before upstream dispatch. Provider timeout, disconnect after dispatch, partial output, credential errors, and provider configuration errors do not replay because replay can duplicate work and charges.
+
+Every terminal stream event carries bounded boolean `upstream_dispatched` and `output_emitted` state sufficient for the server and client to make the replay decision without inference. A clean empty upstream response emits an explicit `complete` event with `upstream_dispatched: true` and `output_emitted: false`, records successful credential use, and does not trigger a non-stream replay. An error event permits replay only when it has `upstream_dispatched: false`, `output_emitted: false`, and the literal boolean `allow_non_stream_fallback: true` for a certified pre-dispatch transport/capability failure. Missing, malformed, unknown, or internally inconsistent fields are treated as no fallback.
 
 Credential exceptions bypass broad RAG handlers that currently append raw exception strings. Logs, metrics, result errors, background failures, and browser events use bounded safe codes. Provider names may be recorded; credential source remains server-side only. Upstream response bodies, endpoints, key hints, user identifiers in metric labels, and credential-derived data are excluded.
 
@@ -216,8 +232,10 @@ When an auxiliary LLM stage degrades, safe trust metadata records that the featu
 Knowledge QA handles structured stream errors directly:
 
 - `allow_non_stream_fallback: false` ends the search and shows the mapped provider/configuration guidance.
+- An absent, malformed, or unknown fallback field is handled identically to `false`; fallback requires `allow_non_stream_fallback === true`.
 - Confirmed pre-dispatch stream capability/transport failures may call the standard endpoint.
 - Provider timeouts, post-dispatch disconnects, and partial streams do not replay.
+- A clean explicit completion with no content is a completed request and does not replay.
 - Provider HTTP 502/503 errors do not clear the user's tldw session.
 
 No provider credential is added to the Knowledge QA request body or browser storage.
@@ -226,6 +244,7 @@ No provider credential is added to the Knowledge QA request body or browser stor
 
 - Credential handles are non-serializable and redacted in representations.
 - Explicit call configuration is provider-scoped and defensively copied.
+- Shared transport policy is copied only through an explicit non-secret allowlist; provider adapters retain required proxy, TLS/CA, redirect, egress, and timeout controls.
 - Secrets never enter RAG payloads, cache entries, checkpoints, job payloads, response metadata, logs, metric labels, or exception messages.
 - Credential-source metrics remain bounded to normalized provider, source category, result code, and operation.
 - Base-URL overrides retain existing allowlist and trusted-principal requirements and are revalidated for deferred work.
@@ -245,8 +264,8 @@ Use TDD and deterministic synchronization primitives.
 - Cancelling one waiter does not cancel shared resolution.
 - Forced refresh wins over slower original resolution.
 - Concurrent OAuth failures perform one refresh.
-- Safe handles reject serialization and redact representations.
-- Provider-scoped configuration excludes unrelated credentials.
+- Safe handles reject pickle/state reduction, shallow/deep copy, Pydantic serialization, and checkpoint/job/cache persistence.
+- Provider-scoped configuration excludes unrelated credentials while retaining allowlisted shared transport policy.
 - Trusted background scopes and base-URL authority are revalidated.
 - Typed resolver outcomes distinguish absence from store/decryption/authorization failures.
 - New checkpoint ownership is enforced; owner mismatch fails and legacy ownerless checkpoints remain server-context only.
@@ -264,11 +283,14 @@ Use TDD and deterministic synchronization primitives.
 ### RAG behavior
 
 - Standard, streaming, agentic, and batch/resume generation use BYOK with a fallback resolver that fails if called.
+- Hosted query-time embedding paths use the runtime; local embeddings remain unchanged and offline ingestion/indexing is unaffected.
 - Focused component tests cover every LLM stage family in the caller inventory.
 - Different providers in one request resolve independently.
 - Auxiliary failures degrade safely and lower verification/trust state.
 - Final generation failures surface structured terminal errors.
 - Streaming errors expose only safe bounded fields.
+- Empty successful streams record use, emit explicit completion, and never replay; missing/unknown fallback flags fail closed.
+- Runtime-bound legacy summarization paths surface typed sanitized failures, including errors after partial stream output.
 - Background membership revocation fails closed; system work retains server defaults.
 
 ### Cache and frontend
@@ -278,7 +300,7 @@ Use TDD and deterministic synchronization primitives.
 - New cache payloads contain no answer.
 - Failed regeneration cannot reveal a cached answer.
 - Frontend skips standard-search fallback for terminal errors and post-dispatch failures.
-- Confirmed pre-dispatch transport/capability failures retain fallback.
+- Confirmed pre-dispatch transport/capability failures retain fallback only when the structured flag is the literal boolean `true`.
 - Provider 502/503 responses do not clear the application session.
 
 ### Security gates
@@ -295,5 +317,15 @@ Use TDD and deterministic synchronization primitives.
 - Legacy summarization callers retain config fallback unless they provide the explicit-resolution marker.
 - Existing persisted RAG caches remain readable for documents; cached answers are deliberately ignored.
 - Other BYOK consumers can migrate to the generic runtime incrementally without changing the credential store.
+
+Implementation is split into dependency-ordered, reviewable subplans under TASK-12112:
+
+1. Shared runtime and adapter boundary: typed resolution outcomes, safe handles, scoped configuration, explicit fallback marker, and deterministic unit/security tests.
+2. Chat migration: router, selected provider, permitted health failover, OAuth refresh, streaming lifecycle, and status mapping.
+3. RAG execution migration: final/auxiliary LLM stages plus provider-backed query-time embeddings across standard, streaming, agentic, and deferred paths.
+4. Persistence and client corrections: retrieval-only semantic cache, checkpoint owner/scope binding, stream completion/replay contract, and Knowledge QA handling.
+5. Integration gate: run cross-surface regression/security tests and verify that no migrated authenticated path can reach implicit server credentials after an explicit missing/invalid runtime result.
+
+Intermediate commits may land on the feature branch, but the behavior must not be released or partially enabled until the integration gate passes. Optional runtime arguments preserve compatibility for unmigrated internal callers; migrated authenticated Chat/RAG entry points always create and propagate the runtime.
 
 Before merge, the human requester must provide the repository-required human-written Change summary explaining both what changed and why these implementation choices were made.
