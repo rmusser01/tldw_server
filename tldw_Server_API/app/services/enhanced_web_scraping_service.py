@@ -774,7 +774,7 @@ class WebScrapingService:
                 content_text = article.get("content")
                 body_text = (
                     ContentMetadataHandler.strip_metadata(content_text)
-                    if isinstance(content_text, str) and ContentMetadataHandler.has_metadata(content_text)
+                    if isinstance(content_text, str)
                     else content_text
                 )
                 if not isinstance(body_text, str) or not body_text.strip():

@@ -4,6 +4,7 @@ from contextlib import contextmanager
 import pytest
 
 import tldw_Server_API.app.services.enhanced_web_scraping_service as enhanced_svc_mod
+from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import ContentMetadataHandler
 from tldw_Server_API.app.services.enhanced_web_scraping_service import WebScrapingService
 
 
@@ -30,6 +31,15 @@ class _FakeDB:
 
     def close_connection(self):
         self.closed = True
+
+
+@pytest.mark.unit
+def test_content_metadata_handler_falls_back_for_deeply_nested_envelope():
+    nested_value = "[" * 2000 + "0" + "]" * 2000
+    content = f'[METADATA]{{"value":{nested_value}}}[/METADATA]'
+
+    assert ContentMetadataHandler.has_metadata(content) is False
+    assert ContentMetadataHandler.strip_metadata(content) == content
 
 
 @pytest.mark.unit

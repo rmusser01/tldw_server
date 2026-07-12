@@ -4088,7 +4088,7 @@ class ContentMetadataHandler:
         metadata_text = envelope[len(ContentMetadataHandler.METADATA_START):].lstrip()
         try:
             metadata, metadata_end = json.JSONDecoder().raw_decode(metadata_text)
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, RecursionError):
             return None
         if not isinstance(metadata, dict):
             return None
