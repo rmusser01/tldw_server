@@ -771,6 +771,18 @@ class WebScrapingService:
                     errors.append(error_msg)
                     continue
 
+                content_text = article.get("content")
+                body_text = (
+                    ContentMetadataHandler.strip_metadata(content_text)
+                    if isinstance(content_text, str) and ContentMetadataHandler.has_metadata(content_text)
+                    else content_text
+                )
+                if not isinstance(body_text, str) or not body_text.strip():
+                    error_msg = f"No extracted content: {article.get('url', 'Unknown URL')}"
+                    logger.warning(error_msg)
+                    errors.append(error_msg)
+                    continue
+
                 try:
                     # Prepare data for database
                     {
@@ -810,7 +822,7 @@ class WebScrapingService:
 
                     content_with_metadata = ContentMetadataHandler.format_content_with_metadata(
                         url=article.get("url", ""),
-                        content=article.get("content", ""),
+                        content=content_text,
                         pipeline=article.get("method", "enhanced"),
                         additional_metadata={
                             "date": article.get("date", ""),

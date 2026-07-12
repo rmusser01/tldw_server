@@ -106,3 +106,86 @@ async def test_store_persistent_persists_crawl_metadata_when_available(monkeypat
     assert safe_metadata["crawl_depth"] == 2
     assert safe_metadata["crawl_parent_url"] == "https://example.com"
     assert safe_metadata["crawl_score"] == pytest.approx(0.75)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_store_persistent_skips_articles_without_body_content(monkeypatch):
+    service = WebScrapingService()
+    fake_db = _FakeDB()
+
+    @contextmanager
+    def _fake_managed_media_database(*args, **kwargs):  # noqa: ARG001
+        try:
+            yield fake_db
+        finally:
+            fake_db.close_connection()
+
+    monkeypatch.setattr(
+        enhanced_svc_mod,
+        "get_user_media_db_path",
+        lambda _: "/tmp/test-media.db",  # nosec B108
+    )
+    monkeypatch.setattr(
+        enhanced_svc_mod,
+        "managed_media_database",
+        _fake_managed_media_database,
+    )
+    monkeypatch.setattr(
+        enhanced_svc_mod,
+        "get_metrics_registry",
+        lambda: _MetricsStub(),
+    )
+
+    result = {
+        "method": "Individual URLs",
+        "articles": [
+            {
+                "url": "https://example.com/valid",
+                "content": "Actual body content",
+                "extraction_successful": True,
+            },
+            {
+                "url": "https://example.com/missing",
+                "content": None,
+                "extraction_successful": True,
+            },
+            {
+                "url": "https://example.com/non-string",
+                "content": 42,
+                "extraction_successful": True,
+            },
+            {
+                "url": "https://example.com/blank",
+                "content": "  \n",
+                "extraction_successful": True,
+            },
+            {
+                "url": "https://example.com/envelope",
+                "content": '[METADATA]{"url":"https://example.com/envelope"}[/METADATA]\n  ',
+                "extraction_successful": True,
+            },
+        ],
+    }
+
+    persisted = await service._store_persistent(
+        result=result,
+        keywords="",
+        user_id=7,
+        perform_chunking=False,
+        chunking_mode=None,
+        auto_chunking_goal="balanced",
+        auto_chunking_use_llm=False,
+    )
+
+    assert persisted["status"] == "persist-ok"
+    assert persisted["stored_articles"] == 1
+    assert persisted["media_ids"] == [1]
+    assert len(fake_db.calls) == 1
+    assert "Actual body content" in fake_db.calls[0]["content"]
+    assert persisted["errors"] == [
+        "No extracted content: https://example.com/missing",
+        "No extracted content: https://example.com/non-string",
+        "No extracted content: https://example.com/blank",
+        "No extracted content: https://example.com/envelope",
+    ]
