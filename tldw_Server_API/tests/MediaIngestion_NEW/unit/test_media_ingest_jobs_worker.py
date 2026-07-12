@@ -1083,3 +1083,229 @@ async def test_media_ingest_schedule_embeddings_retries_conflict_without_marking
     assert captured["processed"] == (db, 73)
     assert captured["kwargs"]["user_id"] == "22"
     assert db.errors == []
+
+
+def _playlist_preflight_data(raw_items):
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_preflight import (
+        PlaylistPreflightData,
+        normalize_preflight_items,
+    )
+
+    items = normalize_preflight_items(raw_items)
+    return PlaylistPreflightData(
+        source_url="https://www.youtube.com/playlist?list=PLworker",
+        source_kind="youtube_playlist",
+        playlist_id="PLworker",
+        playlist_title="Worker playlist",
+        video_id=None,
+        item_count=len(items),
+        selected_count=sum(item.selected for item in items),
+        duplicate_count=sum(item.duplicate_status != "new" for item in items),
+        warnings=[],
+        items=items,
+    )
+
+
+def _seed_playlist_preflight_job(jm):
+    from datetime import timedelta
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestStore,
+    )
+
+    store = PlaylistIngestStore(jm)
+    record = store.create_preflight(
+        "7",
+        source_url="https://www.youtube.com/playlist?list=PLworker",
+        source_kind="youtube_playlist",
+        expires_at=store._now() + timedelta(hours=1),
+        playlist_id="PLworker",
+    )
+    job = jm.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="playlist_preflight",
+        payload={
+            "preflight_id": record.preflight_id,
+            "source_url": "https://attacker.invalid/ignored?token=secret",
+            "max_items": 10,
+            "timeout_seconds": 5,
+        },
+        owner_user_id="7",
+    )
+    return store, record, job
+
+
+@pytest.mark.asyncio
+async def test_playlist_preflight_worker_marks_owner_library_and_snapshot_duplicates(monkeypatch, tmp_path):
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
+    monkeypatch.delenv("JOBS_DB_URL", raising=False)
+
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+
+    jm = JobManager()
+    store, preflight, job = _seed_playlist_preflight_job(jm)
+    extracted = _playlist_preflight_data(
+        [
+            {"source_url": "https://youtu.be/abc123", "title": "Existing"},
+            {"source_url": "https://www.youtube.com/watch?v=abc123", "title": "Repeated"},
+            {"source_url": "https://youtu.be/def456", "title": "New"},
+            {"title": "Private or deleted"},
+        ]
+    )
+    runner_calls = []
+
+    async def fake_runner(url, **kwargs):
+        runner_calls.append((url, kwargs))
+        return extracted
+
+    class _OwnerMediaDB:
+        def __init__(self):
+            self.closed = False
+
+        def get_media_by_urls(self, urls, **_kwargs):
+            assert urls == [
+                "https://www.youtube.com/watch?v=abc123",
+                "https://www.youtube.com/watch?v=def456",
+            ]
+            return [{"id": 91, "url": "https://www.youtube.com/watch?v=abc123"}]
+
+        def close_connection(self):
+            self.closed = True
+
+    media_db = _OwnerMediaDB()
+    monkeypatch.setattr(worker, "run_playlist_preflight_process", fake_runner, raising=True)
+    monkeypatch.setattr(worker, "_create_db", lambda user_id: media_db if user_id == "7" else None, raising=True)
+
+    result = await worker._handle_job(jm.get_job(int(job["id"])), jm, worker._ProgressState())
+
+    assert runner_calls[0][0] == preflight.source_url
+    assert result["status"] == "ready"
+    ready = store.get_preflight("7", preflight.preflight_id)
+    assert ready.status == "ready"
+    assert ready.summary == {
+        "loaded_count": 4,
+        "ingestible_count": 3,
+        "unavailable_count": 1,
+        "duplicate_count": 2,
+        "selected_count": 1,
+        "warnings": [],
+    }
+    items = list(store.list_preflight_items("7", preflight.preflight_id, limit=10))
+    assert [item.duplicate_status for item in items] == [
+        "duplicate_existing",
+        "duplicate_in_batch",
+        "new",
+        "unknown",
+    ]
+    assert items[0].selected_by_default is False
+    assert items[1].selected_by_default is False
+    assert items[1].duplicate_of_occurrence_id == items[0].occurrence_id
+    assert items[2].selected_by_default is True
+    assert items[3].availability == "unavailable"
+    assert items[3].selected_by_default is False
+    assert len({item.occurrence_id for item in items}) == 4
+    assert all(item.occurrence_id not in {"abc123", "def456"} for item in items)
+    assert media_db.closed is True
+
+
+@pytest.mark.asyncio
+async def test_playlist_preflight_worker_library_lookup_failure_records_unknown_warning(monkeypatch, tmp_path):
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
+    monkeypatch.delenv("JOBS_DB_URL", raising=False)
+
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+
+    jm = JobManager()
+    store, preflight, job = _seed_playlist_preflight_job(jm)
+    extracted = _playlist_preflight_data(
+        [
+            {"source_url": "https://youtu.be/abc123", "title": "Unresolved"},
+            {"source_url": "https://youtu.be/abc123", "title": "Known repeat"},
+        ]
+    )
+
+    async def fake_runner(_url, **_kwargs):
+        return extracted
+
+    class _FailingMediaDB:
+        def get_media_by_urls(self, _urls, **_kwargs):
+            raise RuntimeError("database path /private/secret owner token=do-not-leak")
+
+        def close_connection(self):
+            return None
+
+    monkeypatch.setattr(worker, "run_playlist_preflight_process", fake_runner, raising=True)
+    monkeypatch.setattr(worker, "_create_db", lambda _user_id: _FailingMediaDB(), raising=True)
+
+    result = await worker._handle_job(jm.get_job(int(job["id"])), jm, worker._ProgressState())
+
+    assert result["status"] == "ready"
+    ready = store.get_preflight("7", preflight.preflight_id)
+    assert ready.summary["warnings"] == [{"code": "library_lookup_failed"}]
+    assert ready.summary["selected_count"] == 0
+    items = list(store.list_preflight_items("7", preflight.preflight_id, limit=10))
+    assert [item.duplicate_status for item in items] == ["unknown", "duplicate_in_batch"]
+    assert all(item.selected_by_default is False for item in items)
+
+
+@pytest.mark.asyncio
+async def test_playlist_preflight_worker_configured_limit_failure_blocks_without_partial_snapshot(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
+    monkeypatch.delenv("JOBS_DB_URL", raising=False)
+
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_preflight import (
+        PlaylistPreflightProcessError,
+    )
+    import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+
+    jm = JobManager()
+    store, preflight, job = _seed_playlist_preflight_job(jm)
+
+    async def too_large(_url, **_kwargs):
+        raise PlaylistPreflightProcessError("playlist_too_large")
+
+    monkeypatch.setattr(worker, "run_playlist_preflight_process", too_large, raising=True)
+
+    with pytest.raises(worker.MediaIngestJobError, match="playlist_too_large"):
+        await worker._handle_job(jm.get_job(int(job["id"])), jm, worker._ProgressState())
+
+    blocked = store.get_preflight("7", preflight.preflight_id)
+    assert blocked.status == "blocked"
+    assert blocked.error == {"code": "playlist_too_large"}
+    assert list(store.list_preflight_items("7", preflight.preflight_id, limit=10)) == []
+
+
+@pytest.mark.asyncio
+async def test_playlist_preflight_worker_unexpected_extraction_failure_blocks_with_safe_error(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
+    monkeypatch.delenv("JOBS_DB_URL", raising=False)
+
+    import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    jm = JobManager()
+    store, preflight, job = _seed_playlist_preflight_job(jm)
+
+    async def unexpected_failure(_url, **_kwargs):
+        raise RuntimeError("private URL token=do-not-expose")
+
+    monkeypatch.setattr(worker, "run_playlist_preflight_process", unexpected_failure, raising=True)
+
+    with pytest.raises(worker.MediaIngestJobError) as exc_info:
+        await worker._handle_job(jm.get_job(int(job["id"])), jm, worker._ProgressState())
+
+    assert str(exc_info.value) == "playlist_preflight_failed"
+    blocked = store.get_preflight("7", preflight.preflight_id)
+    assert blocked.status == "blocked"
+    assert blocked.error == {"code": "playlist_preflight_failed"}
+    assert "do-not-expose" not in str(exc_info.value)

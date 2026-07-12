@@ -9,6 +9,7 @@ import shutil
 import tempfile
 from dataclasses import dataclass
 from typing import Any
+from uuid import uuid4
 
 from loguru import logger
 
@@ -18,16 +19,29 @@ from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.DB_Manager import mark_media_as_processed
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-from tldw_Server_API.app.core.DB_Management.media_db.api import create_media_database, get_media_by_id
+from tldw_Server_API.app.core.DB_Management.media_db.api import (
+    create_media_database,
+    get_media_by_id,
+    get_media_by_urls,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.dedupe_urls import media_dedupe_url_candidates
 from tldw_Server_API.app.core.DB_Management.media_db.errors import ConflictError
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
-    async_resolve_chunking_options_and_plan,
     apply_chunking_template_if_any,
-    prepare_chunking_options_dict,
+    async_resolve_chunking_options_and_plan,
+    prepare_chunking_options_dict,  # noqa: F401 - retained worker monkeypatch seam
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.persistence import (
     process_batch_media,
     process_document_like_item,
+)
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+    PlaylistIngestStore,
+)
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_preflight import PlaylistPreflightData
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_preflight_runner import (
+    PlaylistPreflightProcessError,
+    run_playlist_preflight_process,
 )
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
@@ -35,6 +49,7 @@ from tldw_Server_API.app.core.Workspaces.status_projection import derive_workspa
 
 _MEDIA_DOMAIN = "media_ingest"
 _MEDIA_JOB_TYPE = "media_ingest_item"
+_PLAYLIST_PREFLIGHT_JOB_TYPE = "playlist_preflight"
 _WORKSPACE_SOURCE_JOB_TYPE = "workspace_source_ingest"
 _SECRET_QUERY_RE = re.compile(r"(?i)([?&](?:token|apikey|api_key|access_key|signature|sig|password|key)=)[^&\s,;]+")
 _SECRET_ASSIGNMENT_RE = re.compile(
@@ -335,6 +350,223 @@ def _create_db(user_id: str):
     return create_media_database(client_id=f"media_ingest_worker:{user_id}", db_path=str(db_path))
 
 
+def _playlist_preflight_owner(job: dict[str, Any]) -> str:
+    owner = job.get("owner_user_id")
+    if owner is None or not str(owner).strip():
+        raise MediaIngestJobError("playlist_preflight_owner_required", retryable=False)
+    return str(owner).strip()
+
+
+def _block_playlist_preflight(
+    store: PlaylistIngestStore,
+    *,
+    owner_user_id: str,
+    preflight_id: str,
+    code: str,
+) -> None:
+    with contextlib.suppress(Exception):
+        store.replace_preflight_snapshot(
+            owner_user_id,
+            preflight_id,
+            status="blocked",
+            items=[],
+            error={"code": code},
+        )
+
+
+def _playlist_library_url_set(rows: list[dict[str, Any]]) -> set[str]:
+    return {
+        candidate
+        for row in rows
+        for candidate in media_dedupe_url_candidates(str(row.get("url") or ""))
+    }
+
+
+def _playlist_snapshot(
+    extracted: PlaylistPreflightData,
+    *,
+    library_rows: list[dict[str, Any]],
+    library_lookup_failed: bool,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    occurrence_ids = [str(uuid4()) for _ in extracted.items]
+    library_urls = _playlist_library_url_set(library_rows)
+    occurrence_counts: dict[str, int] = {}
+    snapshot_items: list[dict[str, Any]] = []
+
+    for index, item in enumerate(extracted.items):
+        source_key = item.normalized_source_id or item.source_url
+        occurrence_index = occurrence_counts.get(source_key, 0) + 1
+        occurrence_counts[source_key] = occurrence_index
+        available = bool(item.source_url)
+        duplicate_status = item.duplicate_status if available else "unknown"
+        if available and duplicate_status == "new":
+            if library_lookup_failed:
+                duplicate_status = "unknown"
+            elif set(media_dedupe_url_candidates(item.source_url)) & library_urls:
+                duplicate_status = "duplicate_existing"
+        duplicate_of_occurrence_id = None
+        if item.duplicate_of_ordinal is not None:
+            duplicate_index = item.duplicate_of_ordinal - 1
+            if 0 <= duplicate_index < len(occurrence_ids):
+                duplicate_of_occurrence_id = occurrence_ids[duplicate_index]
+        selected = available and duplicate_status == "new"
+        snapshot_items.append(
+            {
+                "occurrence_id": occurrence_ids[index],
+                "ordinal": item.ordinal,
+                "occurrence_index_for_source": occurrence_index,
+                "source_url": item.source_url or None,
+                "normalized_source_id": item.normalized_source_id,
+                "source_kind": item.source_kind,
+                "availability": "available" if available else "unavailable",
+                "duplicate_status": duplicate_status,
+                "duplicate_of_occurrence_id": duplicate_of_occurrence_id,
+                "selected_by_default": selected,
+                "display_metadata": {
+                    "title": item.title,
+                    "channel_or_uploader": item.speaker,
+                    "duration_seconds": item.duration_seconds,
+                    "published_at": item.published_at,
+                    "thumbnail_url": item.thumbnail_url,
+                    "playlist_id": extracted.playlist_id,
+                    "playlist_title": extracted.playlist_title,
+                },
+            }
+        )
+
+    warnings: list[Any] = list(extracted.warnings)
+    if library_lookup_failed:
+        warnings.append({"code": "library_lookup_failed"})
+    summary = {
+        "loaded_count": len(snapshot_items),
+        "ingestible_count": sum(item["availability"] == "available" for item in snapshot_items),
+        "unavailable_count": sum(item["availability"] == "unavailable" for item in snapshot_items),
+        "duplicate_count": sum(
+            item["duplicate_status"] in {"duplicate_existing", "duplicate_in_batch"}
+            for item in snapshot_items
+        ),
+        "selected_count": sum(bool(item["selected_by_default"]) for item in snapshot_items),
+        "warnings": warnings,
+    }
+    return snapshot_items, summary
+
+
+async def _handle_playlist_preflight_job(
+    job: dict[str, Any],
+    jm: JobManager,
+    progress: _ProgressState,
+) -> dict[str, Any]:
+    job_id = int(job.get("id"))
+    payload = _normalize_payload(job.get("payload"))
+    owner_user_id = _playlist_preflight_owner(job)
+    preflight_id = str(payload.get("preflight_id") or "").strip()
+    if not preflight_id:
+        raise MediaIngestJobError("playlist_preflight_id_required", retryable=False)
+
+    store = PlaylistIngestStore(jm)
+    preflight = store.get_preflight(owner_user_id, preflight_id)
+    max_items = _coerce_int(payload.get("max_items"), 100)
+    timeout_seconds = _coerce_int(payload.get("timeout_seconds"), 20)
+    if not 1 <= max_items <= 500 or not 1 <= timeout_seconds <= 60:
+        _block_playlist_preflight(
+            store,
+            owner_user_id=owner_user_id,
+            preflight_id=preflight_id,
+            code="playlist_preflight_invalid_request",
+        )
+        raise MediaIngestJobError("playlist_preflight_invalid_request", retryable=False)
+
+    try:
+        store.replace_preflight_snapshot(
+            owner_user_id,
+            preflight_id,
+            status="running",
+            items=[],
+        )
+    except Exception as exc:
+        _block_playlist_preflight(
+            store,
+            owner_user_id=owner_user_id,
+            preflight_id=preflight_id,
+            code="playlist_snapshot_write_failed",
+        )
+        raise MediaIngestJobError("playlist_snapshot_write_failed", retryable=False) from exc
+
+    progress.percent = 10.0
+    progress.message = "inspect playlist"
+    jm.update_job_progress(job_id, progress_percent=progress.percent, progress_message=progress.message)
+
+    try:
+        extracted = await run_playlist_preflight_process(
+            preflight.source_url,
+            max_items=max_items,
+            timeout_seconds=timeout_seconds,
+            cancel_check=lambda: _should_cancel(jm, job_id),
+        )
+    except PlaylistPreflightProcessError as exc:
+        _block_playlist_preflight(
+            store,
+            owner_user_id=owner_user_id,
+            preflight_id=preflight_id,
+            code=exc.code,
+        )
+        raise MediaIngestJobError(exc.code, retryable=False) from exc
+    except Exception as exc:
+        _block_playlist_preflight(
+            store,
+            owner_user_id=owner_user_id,
+            preflight_id=preflight_id,
+            code="playlist_preflight_failed",
+        )
+        raise MediaIngestJobError("playlist_preflight_failed", retryable=False) from exc
+
+    progress.percent = 70.0
+    progress.message = "check library"
+    jm.update_job_progress(job_id, progress_percent=progress.percent, progress_message=progress.message)
+
+    library_rows: list[dict[str, Any]] = []
+    library_lookup_failed = False
+    media_db = None
+    try:
+        media_db = _create_db(owner_user_id)
+        lookup_urls = list(dict.fromkeys(item.source_url for item in extracted.items if item.source_url))
+        library_rows = get_media_by_urls(media_db, lookup_urls)
+    except Exception:
+        library_lookup_failed = True
+        logger.warning("Playlist preflight library lookup failed for resource {}", preflight_id)
+    finally:
+        if media_db is not None:
+            with contextlib.suppress(Exception):
+                media_db.close_connection()
+
+    snapshot_items, summary = _playlist_snapshot(
+        extracted,
+        library_rows=library_rows,
+        library_lookup_failed=library_lookup_failed,
+    )
+    try:
+        store.replace_preflight_snapshot(
+            owner_user_id,
+            preflight_id,
+            status="ready",
+            items=snapshot_items,
+            summary=summary,
+        )
+    except Exception as exc:
+        _block_playlist_preflight(
+            store,
+            owner_user_id=owner_user_id,
+            preflight_id=preflight_id,
+            code="playlist_snapshot_write_failed",
+        )
+        raise MediaIngestJobError("playlist_snapshot_write_failed", retryable=False) from exc
+
+    progress.percent = 100.0
+    progress.message = "completed"
+    jm.update_job_progress(job_id, progress_percent=progress.percent, progress_message=progress.message)
+    return {"status": "ready", "preflight_id": preflight_id, **summary}
+
+
 async def _schedule_embeddings(
     *,
     media_id: int,
@@ -455,6 +687,8 @@ async def _handle_job(job: dict[str, Any], jm: JobManager, progress: _ProgressSt
     latest_job_id = str(job_id)
     payload = _normalize_payload(job.get("payload"))
     job_type = str(job.get("job_type") or "").lower()
+    if job_type == _PLAYLIST_PREFLIGHT_JOB_TYPE:
+        return await _handle_playlist_preflight_job(job, jm, progress)
     if job_type == _WORKSPACE_SOURCE_JOB_TYPE:
         return await _handle_workspace_source_job(job, jm, progress)
     if job_type != _MEDIA_JOB_TYPE:

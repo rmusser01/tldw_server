@@ -29,6 +29,11 @@ modified_files:
 - tldw_Server_API/tests/MediaIngestion_NEW/integration/test_playlist_ingest_store_postgres.py
 - tldw_Server_API/tests/MediaIngestion_NEW/property/test_playlist_ingest_properties.py
 - tldw_Server_API/tests/MediaDB2/test_dedupe_url_normalization.py
+- tldw_Server_API/app/core/Ingestion_Media_Processing/Video/playlist_preflight.py
+- tldw_Server_API/app/core/Ingestion_Media_Processing/Video/playlist_preflight_runner.py
+- tldw_Server_API/app/services/media_ingest_jobs_worker.py
+- tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_preflight.py
+- tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest_jobs_worker.py
 ---
 
 ## Description
@@ -58,6 +63,7 @@ Follow Docs/superpowers/plans/2026-07-12-youtube-playlist-ingest-backend.md sequ
 Task 2: implemented the owner-scoped PlaylistIngestStore and signed ordinal cursor contract using the injected JobManager connection helpers. Added atomic snapshot/materialization/run/event/cleanup operations, compare-and-set item transitions, and one-query normalized Media DB URL batch lookup. Verification: focused suite 59 passed/1 existing jobs-suite-only PostgreSQL skip; property tests cover 42 generated cases; Ruff/compileall/diff-check clean on touched scope; Bandit reported zero findings.
 Task 2 review follow-up: replaced materialization metadata blacklisting with an explicit seven-field compact display allowlist; made expired preflights, materializations, runs, pages, events, cursors, snapshot replacement, event append, and CAS transitions fail closed; rejected nonfuture expiry at all resource creation seams; and added a PostgreSQL-only `FOR UPDATE` locked mutable snapshot read with a separate SQLite-safe query literal. RED: compact 1/1 failed, expiry 5/5 failed, PG lock 1/1 failed. GREEN: combined Task 1+2 verification 94 passed/3 existing jobs-suite-policy skips; Ruff/compileall/diff-check passed; Bandit zero findings.
 Task 2 code-quality follow-up: hardened PostgreSQL concurrency by locking exact expired preflight/materialization/run parents before cleanup child deletes and locking the run row before event version allocation; added real PostgreSQL concurrent-event and cleanup-race coverage with orphan assertions. Replaced bulk URL placeholder expansion with one-bind SQLite json_each(?) and PostgreSQL ANY(?) lookup, including the 500-input boundary. Cursor decoding now requires canonical unpadded base64url segments and an exact 32-byte HMAC-SHA256 signature. RED captured independently for cleanup locking, event locking, URL bind limits, and cursor aliases. GREEN: combined Task 1+2 suite 99 passed/5 environment-policy PostgreSQL skips; focused follow-up groups 7 passed; Ruff, compileall, and diff-check clean; Bandit zero findings.
+Task 3: added a spawned bounded playlist preflight runner with a strict JSON-native one-message protocol, timeout/cancellation terminate-join-kill cleanup, safe errors, and a configured_limit + 1 hard ceiling. Extended the owner-scoped media Jobs worker with atomic running/ready/blocked snapshots, bulk library enrichment, opaque occurrence IDs, duplicate precedence, recomputed counts, and fail-closed lookup warnings. TDD RED: runner 7 failed/13 deselected; worker 3 failed/16 deselected; protocol follow-ups covered inconsistent counts, cancel-check leakage, unexpected extraction failures, and process-construction cleanup. GREEN: focused suite 43 passed and Task 1+2 regression suite 112 passed. Ruff, compileall, diff-check, and Bandit passed; Bandit reported zero findings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

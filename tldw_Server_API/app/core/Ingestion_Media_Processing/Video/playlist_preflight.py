@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
+from itertools import islice
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
@@ -56,6 +58,14 @@ class DuplicatePolicyAction:
     planned_status: str
     should_submit_job: bool
     force_overwrite: bool
+
+
+class PlaylistPreflightProcessError(RuntimeError):
+    """Safe typed failure from playlist extraction or its child process."""
+
+    def __init__(self, code: str) -> None:
+        self.code = str(code)
+        super().__init__(self.code)
 
 
 def _is_duplicate_status(value: str | None) -> bool:
@@ -313,6 +323,8 @@ def extract_playlist_preflight(
     max_items: int = 100,
     youtube_dl_cls: type | None = None,
 ) -> PlaylistPreflightData:
+    if type(max_items) is not int or max_items < 1:
+        raise PlaylistPreflightProcessError("playlist_preflight_invalid_request")
     classified = classify_playlist_url(url)
     if not classified.is_playlist:
         raise ValueError("not_playlist_url")
@@ -324,6 +336,7 @@ def extract_playlist_preflight(
         "skip_download": True,
         "extract_flat": True,
         "noplaylist": False,
+        "playlistend": max_items + 1,
     }
 
     with ydl_cls(ydl_opts) as ydl:
@@ -332,15 +345,15 @@ def extract_playlist_preflight(
     if not isinstance(info, dict):
         raise ValueError("playlist_metadata_unavailable")
 
-    entries = [entry for entry in (info.get("entries") or []) if isinstance(entry, dict)]
+    entries = list(islice(iter(info.get("entries") or ()), max_items + 1))
     warnings: list[str] = []
     if len(entries) > max_items:
-        warnings.append(f"Playlist truncated to {max_items} items.")
-    limited_entries = entries[:max_items]
+        raise PlaylistPreflightProcessError("playlist_too_large")
 
     raw_items: list[dict[str, Any]] = []
     assume_youtube_entries = classified.source_kind.startswith("youtube")
-    for index, entry in enumerate(limited_entries, start=1):
+    for index, raw_entry in enumerate(entries, start=1):
+        entry = dict(raw_entry) if isinstance(raw_entry, Mapping) else {}
         raw_item = dict(entry)
         raw_item["ordinal"] = index
         source_url = _source_url_from_entry(
