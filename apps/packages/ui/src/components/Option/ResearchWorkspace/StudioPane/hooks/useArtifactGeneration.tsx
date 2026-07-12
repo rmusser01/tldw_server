@@ -3374,6 +3374,7 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
               abortSignal: activeAbort.signal
             })
             break
+          }
           case "video_overview":
           case "infographic": {
             const mediaRuntime = await resolveStudioChatRuntime()
