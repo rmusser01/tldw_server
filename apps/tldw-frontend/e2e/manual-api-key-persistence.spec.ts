@@ -98,6 +98,20 @@ const expectProductionRagRequest = async (
   ).toBe(false)
 }
 
+const hasAuthenticatedMediaListRequest = (
+  fixture: ManualApiKeyFixture,
+  offset: number
+): boolean =>
+  fixture
+    .requests()
+    .slice(offset)
+    .some(
+      (request) =>
+        request.method === "GET" &&
+        request.path === "/api/v1/media" &&
+        request.authenticated === true
+    )
+
 test.describe.serial("manual WebUI API-key persistence", () => {
   let fixture: ManualApiKeyFixture
 
@@ -177,16 +191,11 @@ test.describe.serial("manual WebUI API-key persistence", () => {
         { serverUrl: fixture.url, apiKey: MANUAL_API_KEY }
       )
 
+      const initialRequestOffset = fixture.requests().length
       await page.goto(`${WEB_URL}/media`, { waitUntil: "domcontentloaded" })
       await expect
         .poll(() =>
-          fixture
-            .requests()
-            .some(
-              (request) =>
-                request.path.startsWith("/api/v1/media") &&
-                request.authenticated
-            )
+          hasAuthenticatedMediaListRequest(fixture, initialRequestOffset)
         )
         .toBe(true)
       await expect(
@@ -201,16 +210,7 @@ test.describe.serial("manual WebUI API-key persistence", () => {
       const requestOffset = fixture.requests().length
       await page.reload({ waitUntil: "domcontentloaded" })
       await expect
-        .poll(() =>
-          fixture
-            .requests()
-            .slice(requestOffset)
-            .some(
-              (request) =>
-                request.path.startsWith("/api/v1/media") &&
-                request.authenticated
-            )
-        )
+        .poll(() => hasAuthenticatedMediaListRequest(fixture, requestOffset))
         .toBe(true)
       await expect(
         page.getByText("Add your credentials to use Media", { exact: true })
