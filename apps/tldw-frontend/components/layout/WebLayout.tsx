@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useState, useContext, useEffect, useCallback } from 'react';
+import React, { lazy, Suspense, useState, useContext, useCallback } from 'react';
 
 import { Drawer, Tooltip } from 'antd';
 import { EraserIcon, XIcon } from 'lucide-react';
@@ -53,7 +53,12 @@ import {
 } from '@/services/request-events';
 import { useBackendRecoveryUi } from '@/components/Common/BackendRecoveryUiContext';
 import { BackendUnavailableModalGate } from '@web/components/layout/BackendUnavailableModalGate';
-import { getUnreadCount } from '@web/lib/api/notifications';
+import {
+  buildWebNotificationScopeKey,
+  NotificationLifecycleProvider,
+  useNotificationLifecycle,
+} from '@web/components/notifications/NotificationLifecycleProvider';
+import { NotificationToastBridge } from '@web/components/notifications/NotificationToastBridge';
 import { CommandPalette } from '@/components/Common/CommandPalette';
 import {
   useConnectionActions,
@@ -116,25 +121,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   const isMobileViewport = useMobile();
   useServerOnline();
 
-  // Notification unread count for header bell
-  const [notificationCount, setNotificationCount] = useState(0);
-  useEffect(() => {
-    if (demoEnabled || hideHeader) return;
-    let cancelled = false;
-    const poll = () => {
-      getUnreadCount()
-        .then((res) => {
-          if (!cancelled) setNotificationCount(res?.unread_count ?? 0);
-        })
-        .catch(() => {});
-    };
-    poll();
-    const id = setInterval(poll, 30_000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, [demoEnabled, hideHeader]);
+  const { unreadCount: notificationCount } = useNotificationLifecycle();
   const handleOpenNotifications = useCallback(() => navigate('/notifications'), [navigate]);
   const location = useLocation();
   const historyId = useStoreMessageOption((state) => state.historyId);
@@ -756,16 +743,37 @@ function RootLayoutShell({
     }
   }, [location.pathname, overrides?.sourcePath]);
 
+  const notificationsEnabled = !effectiveHideHeader;
+
   return (
     <DemoModeProvider>
-      <LayoutShellContext.Provider value={{ inShell: true, setOverrides }}>
-        <OptionLayoutInner
-          {...props}
-          hideHeader={effectiveHideHeader}
-          hideSidebar={effectiveHideSidebar}
-        />
-      </LayoutShellContext.Provider>
+      <NotificationRuntimeOwner enabled={notificationsEnabled}>
+        <LayoutShellContext.Provider value={{ inShell: true, setOverrides }}>
+          <OptionLayoutInner
+            {...props}
+            hideHeader={effectiveHideHeader}
+            hideSidebar={effectiveHideSidebar}
+          />
+        </LayoutShellContext.Provider>
+      </NotificationRuntimeOwner>
     </DemoModeProvider>
+  );
+}
+
+function NotificationRuntimeOwner({
+  children,
+  enabled,
+}: {
+  children: React.ReactNode;
+  enabled: boolean;
+}) {
+  const { demoEnabled } = useDemoMode();
+  const scopeKey = buildWebNotificationScopeKey();
+  return (
+    <NotificationLifecycleProvider scopeKey={scopeKey} enabled={enabled && !demoEnabled}>
+      <NotificationToastBridge />
+      {children}
+    </NotificationLifecycleProvider>
   );
 }
 

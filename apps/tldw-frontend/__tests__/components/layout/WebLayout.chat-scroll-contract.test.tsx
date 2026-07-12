@@ -323,6 +323,21 @@ vi.mock('@web/components/layout/BackendUnavailableModalGate', () => ({
 
 vi.mock('@web/lib/api/notifications', () => ({
   getUnreadCount: (...args: unknown[]) => getUnreadCountMock(...args),
+  listNotifications: vi.fn(async () => ({ items: [], total: 0 })),
+  subscribeNotificationsStream: vi.fn(() => () => undefined),
+}));
+
+vi.mock('@web/lib/api', () => ({
+  getApiBaseUrl: () => 'https://api.example.test/api/v1',
+}));
+
+vi.mock('@web/lib/authStorage', () => ({
+  getApiBearer: () => null,
+  getApiKey: () => 'test-api-key',
+}));
+
+vi.mock('@web/components/ui/ToastProvider', () => ({
+  useToast: () => ({ show: vi.fn() }),
 }));
 
 vi.mock('@/components/Common/CommandPalette', () => ({
