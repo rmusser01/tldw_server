@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
+from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
     build_secret_payload,
@@ -1061,3 +1063,112 @@ async def test_openai_oauth_transport_errors_use_api_key_or_fail_typed(
             await byok_runtime.resolve_byok_credentials("openai", user_id=1)
         assert exc_info.value.code == "invalid_provider_credentials"
         assert "do-not-leak" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_openai_oauth_reload_missing_after_lock_fails_without_resurrection(monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+
+    stale_token = "stale-token-must-not-leak"
+    monkeypatch.setenv("BYOK_ENCRYPTION_KEY", _b64_key(b"k"))
+    monkeypatch.setenv("OPENAI_OAUTH_ENABLED", "true")
+    monkeypatch.setenv("OPENAI_OAUTH_CLIENT_ID", "client-id")
+    monkeypatch.setenv("OPENAI_OAUTH_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("OPENAI_OAUTH_TOKEN_URL", "https://oauth.example/token")
+    monkeypatch.setenv("OPENAI_OAUTH_REFRESH_SKEW_SECONDS", "120")
+    reset_settings()
+
+    row = _encrypted_row(
+        {
+            "credential_version": 2,
+            "active_auth_source": "oauth",
+            "credentials": {
+                "oauth": {
+                    "access_token": stale_token,
+                    "refresh_token": "refresh-token-race",
+                    "expires_at": (datetime.now(timezone.utc) + timedelta(seconds=30)).isoformat(),
+                }
+            },
+        }
+    )
+    row["metadata"] = None
+    row["key_hint"] = "oauth"
+
+    initial_fetch_complete = asyncio.Event()
+    reload_waiting = asyncio.Event()
+    credential_revoked = asyncio.Event()
+    calls = {"fetch": 0, "http": 0, "upsert": 0, "touch": 0, "fallback": 0}
+
+    class _FakeUserRepo:
+        async def fetch_secret_for_user(self, user_id: int, provider: str):
+            calls["fetch"] += 1
+            if calls["fetch"] == 1:
+                initial_fetch_complete.set()
+                return row
+            reload_waiting.set()
+            await credential_revoked.wait()
+            return None
+
+        async def upsert_secret(self, **kwargs):
+            calls["upsert"] += 1
+            return {"updated_at": kwargs["updated_at"]}
+
+        async def touch_last_used(self, user_id: int, provider: str, updated_at: datetime):
+            calls["touch"] += 1
+
+    class _FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"access_token": "resurrected-token", "expires_in": 3600}
+
+        async def aclose(self):
+            return None
+
+    async def _get_user_repo():
+        return _FakeUserRepo()
+
+    async def _http_afetch(*args, **kwargs):
+        calls["http"] += 1
+        return _FakeResponse()
+
+    def _fallback(provider: str):
+        calls["fallback"] += 1
+        return "server-key-must-not-be-used"
+
+    monkeypatch.setattr(byok_runtime, "_get_user_repo", _get_user_repo)
+    monkeypatch.setattr(byok_runtime, "_http_afetch", _http_afetch)
+    monkeypatch.setattr(byok_runtime, "is_byok_enabled", lambda: True)
+    monkeypatch.setattr(byok_runtime, "is_provider_allowlisted", lambda _provider: True)
+
+    captured_logs: list[str] = []
+    sink_id = logger.add(lambda message: captured_logs.append(str(message)), level="DEBUG")
+    resolution_task = asyncio.create_task(
+        byok_runtime.resolve_byok_credentials(
+            "openai",
+            user_id=1,
+            fallback_resolver=_fallback,
+        )
+    )
+    await initial_fetch_complete.wait()
+    await reload_waiting.wait()
+    credential_revoked.set()
+    try:
+        with pytest.raises(byok_runtime.ByokResolutionError) as exc_info:
+            await resolution_task
+    finally:
+        logger.remove(sink_id)
+
+    assert exc_info.value.code == "invalid_provider_credentials"
+    assert exc_info.value.provider == "openai"
+    assert stale_token not in str(exc_info.value)
+    assert stale_token not in repr(exc_info.value)
+    assert stale_token not in "".join(captured_logs)
+    assert calls == {
+        "fetch": 2,
+        "http": 0,
+        "upsert": 0,
+        "touch": 0,
+        "fallback": 0,
+    }

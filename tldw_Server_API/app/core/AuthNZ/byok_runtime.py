@@ -1010,11 +1010,14 @@ async def _resolve_openai_user_payload(
                     _OPENAI_PROVIDER,
                 ) from None
 
-            if latest_row:
-                latest_payload = _extract_payload(latest_row, _OPENAI_PROVIDER)
-                if latest_payload:
-                    row = latest_row
-                    merged_payload = _coerce_openai_payload_v2(latest_payload)
+            if latest_row is None:
+                raise ByokResolutionError(
+                    "invalid_provider_credentials",
+                    _OPENAI_PROVIDER,
+                )
+            latest_payload = _extract_payload(latest_row, _OPENAI_PROVIDER)
+            row = latest_row
+            merged_payload = _coerce_openai_payload_v2(latest_payload)
 
             now = datetime.now(timezone.utc)
             runtime_api_key = _extract_runtime_api_key(merged_payload)
