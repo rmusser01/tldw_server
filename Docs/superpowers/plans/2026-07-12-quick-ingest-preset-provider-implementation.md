@@ -36,13 +36,13 @@
 **Goal:** Prove shared behavior under WebUI and extension adapters.
 **Success Criteria:** Focused suites, typechecks, adapter smoke, lint, and targeted browser harnesses pass.
 **Tests:** Commands in Task 4.
-**Status:** In Progress
+**Status:** Complete
 
 ### Stage 5: Review and delivery
 **Goal:** Review, finalize Backlog, commit, push, and open the PR to `dev`.
 **Success Criteria:** No blockers and fresh verification is recorded.
 **Tests:** Fresh focused rerun and `git diff --check`.
-**Status:** Not Started
+**Status:** In Progress
 
 ---
 
