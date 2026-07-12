@@ -1,8 +1,8 @@
 # Chatbooks Post-Merge Backup And Import UX Review
 
-Date: 2026-07-09  
-Build reviewed: `origin/dev` at `440478b6cb`  
-Plan: `Docs/superpowers/plans/2026-07-09-chatbooks-post-merge-uat-remediation-plan.md`  
+Date: 2026-07-09
+Build reviewed: `origin/dev` at `440478b6cb`
+Plan: `Docs/superpowers/plans/2026-07-09-chatbooks-post-merge-uat-remediation-plan.md`
 Scope: WebUI and packaged-extension backup, download, archive preview, restore, job status, and recovery.
 
 ## Verdict
