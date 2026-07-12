@@ -84,14 +84,9 @@ const expectProductionRagRequest = async (
     return
   }
 
-  await expect
-    .poll(() =>
-      fixture
-        .requests()
-        .slice(requestOffset)
-        .some((request) => !request.authenticated)
-    )
-    .toBe(true)
+  await expect(
+    page.getByText("RAG: needs attention", { exact: true })
+  ).toBeVisible()
   expect(
     fixture
       .requests()
