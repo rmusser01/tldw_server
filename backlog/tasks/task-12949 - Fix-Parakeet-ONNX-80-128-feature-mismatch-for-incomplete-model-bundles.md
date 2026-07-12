@@ -32,6 +32,12 @@ Require the Parakeet ONNX model metadata needed by onnx-asr, refresh incomplete 
 - [ ] #5 Bandit reports no new findings in the touched Python scope.
 <!-- AC:END -->
 
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Docs/superpowers/plans/2026-07-12-parakeet-onnx-bundle-metadata-plan.md
+<!-- SECTION:PLAN:END -->
+
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
