@@ -14,6 +14,9 @@ references:
 modified_files:
 - apps/packages/ui/src/services/tldw/TldwApiClient.ts
 - apps/packages/ui/src/services/__tests__/tldw-api-client.quickstart-auth.test.ts
+- apps/tldw-frontend/e2e/helpers/manual-api-key-fixture.ts
+- apps/tldw-frontend/e2e/manual-api-key-persistence.spec.ts
+- apps/tldw-frontend/e2e/extension-api-key-persistence.spec.ts
 documentation:
 - Docs/superpowers/specs/2026-07-12-legacy-api-key-refresh-migration-design.md
 ---
@@ -32,6 +35,12 @@ Latest dev scrubs pre-migration single-user tldwConfig records that contain a va
 - [ ] #4 Cookie, environment, and runtime auth replacements still supersede and scrub incompatible stored keys.
 - [ ] #5 Unit and browser regression tests cover the migration and fail-closed cases.
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Docs/superpowers/plans/2026-07-12-legacy-api-key-refresh-migration-implementation-plan.md
+<!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 
