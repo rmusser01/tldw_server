@@ -2,16 +2,14 @@
 Unit and integration tests for Parakeet ONNX transcription implementation.
 """
 
-import pytest
-import numpy as np
-import tempfile
-import os
+import json
 import sys
 import types
 from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock, call
-import soundfile as sf
-import json
+from unittest.mock import MagicMock, patch
+
+import numpy as np
+import pytest
 
 pytestmark = pytest.mark.unit
 
@@ -92,9 +90,9 @@ class TestParakeetONNX:
         """Test that the ONNX module can be imported."""
         try:
             from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_ONNX import (
-                transcribe_with_parakeet_onnx,
+                ParakeetONNXTokenizer,
                 load_parakeet_onnx_model,
-                ParakeetONNXTokenizer
+                transcribe_with_parakeet_onnx,
             )
             assert transcribe_with_parakeet_onnx is not None
             assert load_parakeet_onnx_model is not None
@@ -107,7 +105,7 @@ class TestParakeetONNX:
         """Test ONNX model loading."""
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_ONNX import (
             load_parakeet_onnx_model,
-            unload_onnx_models
+            unload_onnx_models,
         )
 
         mock_ort_session.return_value = mock_onnx_session
@@ -131,7 +129,9 @@ class TestParakeetONNX:
         mock_onnx_session,
         monkeypatch,
     ):
-        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Transcription_Parakeet_ONNX as onnx_mod
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
+            Audio_Transcription_Parakeet_ONNX as onnx_mod,
+        )
 
         monkeypatch.setattr(
             onnx_mod,
@@ -165,7 +165,9 @@ class TestParakeetONNX:
         mock_onnx_session,
         monkeypatch,
     ):
-        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Transcription_Parakeet_ONNX as onnx_mod
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
+            Audio_Transcription_Parakeet_ONNX as onnx_mod,
+        )
 
         monkeypatch.setattr(
             onnx_mod,
@@ -200,7 +202,9 @@ class TestParakeetONNX:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Downloads must include vocab/config/external-data sidecars, not only .onnx graphs."""
-        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Transcription_Parakeet_ONNX as onnx_mod
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
+            Audio_Transcription_Parakeet_ONNX as onnx_mod,
+        )
 
         monkeypatch.setattr(
             onnx_mod,
@@ -227,6 +231,210 @@ class TestParakeetONNX:
         'tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.'
         'Audio_Transcription_Parakeet_ONNX.snapshot_download'
     )
+    def test_loader_refreshes_remote_cache_missing_config(
+        self,
+        mock_download: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A stale remote cache with vocab but no config must refresh its sidecars."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
+            Audio_Transcription_Parakeet_ONNX as onnx_mod,
+        )
+
+        model_id = "org/custom-parakeet-onnx"
+        model_dir = tmp_path / ".cache" / "parakeet_onnx" / "org_custom-parakeet-onnx_default"
+        model_dir.mkdir(parents=True)
+        for filename in (
+            "decoder_joint-model.int8.onnx",
+            "encoder-model.int8.onnx",
+            "nemo128.onnx",
+        ):
+            (model_dir / filename).write_bytes(b"placeholder")
+        (model_dir / "vocab.txt").write_text("<unk> 0\n<blk> 1\n", encoding="utf-8")
+
+        monkeypatch.setattr(onnx_mod.Path, "home", classmethod(lambda cls: tmp_path))
+        monkeypatch.setattr(
+            onnx_mod,
+            "get_stt_config",
+            lambda: {"parakeet_onnx_model_id": model_id},
+            raising=True,
+        )
+        load_model = MagicMock(return_value=MagicMock())
+        monkeypatch.setitem(sys.modules, "onnx_asr", types.SimpleNamespace(load_model=load_model))
+        onnx_mod.unload_onnx_models()
+
+        onnx_mod.load_parakeet_onnx_model(model_path=None, device="cpu")
+
+        mock_download.assert_called_once()
+        assert "config.json" in mock_download.call_args.kwargs["allow_patterns"]
+
+    @patch(
+        'tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.'
+        'Audio_Transcription_Parakeet_ONNX.snapshot_download'
+    )
+    def test_loader_rejects_local_bundle_missing_config(
+        self,
+        mock_download: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """An explicit local bundle without config must fail before onnx-asr loads."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
+            Audio_Transcription_Parakeet_ONNX as onnx_mod,
+        )
+
+        for filename in (
+            "decoder_joint-model.int8.onnx",
+            "encoder-model.int8.onnx",
+            "nemo128.onnx",
+        ):
+            (tmp_path / filename).write_bytes(b"placeholder")
+        (tmp_path / "vocab.txt").write_text("<unk> 0\n<blk> 1\n", encoding="utf-8")
+        load_model = MagicMock(return_value=MagicMock())
+        monkeypatch.setitem(sys.modules, "onnx_asr", types.SimpleNamespace(load_model=load_model))
+        onnx_mod.unload_onnx_models()
+        messages: list[str] = []
+        sink_id = onnx_mod.logger.add(messages.append, level="ERROR", format="{message}")
+
+        try:
+            session, tokenizer = onnx_mod.load_parakeet_onnx_model(
+                model_path=str(tmp_path),
+                device="cpu",
+            )
+        finally:
+            onnx_mod.logger.remove(sink_id)
+
+        assert session is None
+        assert tokenizer is None
+        load_model.assert_not_called()
+        mock_download.assert_not_called()
+        assert any("config.json" in message and str(tmp_path) in message for message in messages)
+
+    @pytest.mark.parametrize(
+        "config_text",
+        (
+            "{",
+            "[]",
+            "{}",
+            json.dumps({"features_size": True}),
+            json.dumps({"features_size": "128"}),
+            json.dumps({"features_size": 128.0}),
+            json.dumps({"features_size": 0}),
+            json.dumps({"features_size": -1}),
+        ),
+        ids=(
+            "malformed-json",
+            "non-object",
+            "missing-features-size",
+            "boolean",
+            "string",
+            "float",
+            "zero",
+            "negative",
+        ),
+    )
+    def test_loader_rejects_invalid_bundle_config(
+        self,
+        config_text: str,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Invalid feature metadata must fail closed before onnx-asr loads."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
+            Audio_Transcription_Parakeet_ONNX as onnx_mod,
+        )
+
+        for filename in (
+            "decoder_joint-model.int8.onnx",
+            "encoder-model.int8.onnx",
+            "nemo128.onnx",
+        ):
+            (tmp_path / filename).write_bytes(b"placeholder")
+        (tmp_path / "vocab.txt").write_text("<unk> 0\n<blk> 1\n", encoding="utf-8")
+        (tmp_path / "config.json").write_text(config_text, encoding="utf-8")
+        load_model = MagicMock(return_value=MagicMock())
+        monkeypatch.setitem(sys.modules, "onnx_asr", types.SimpleNamespace(load_model=load_model))
+        onnx_mod.unload_onnx_models()
+        messages: list[str] = []
+        sink_id = onnx_mod.logger.add(messages.append, level="ERROR", format="{message}")
+
+        try:
+            session, tokenizer = onnx_mod.load_parakeet_onnx_model(
+                model_path=str(tmp_path),
+                device="cpu",
+            )
+        finally:
+            onnx_mod.logger.remove(sink_id)
+
+        assert session is None
+        assert tokenizer is None
+        load_model.assert_not_called()
+        assert any(str(tmp_path) in message for message in messages)
+
+    @pytest.mark.parametrize(
+        ("quantized", "encoder_filename"),
+        (
+            (True, "encoder-model.int8.onnx"),
+            (False, "encoder-model.onnx"),
+        ),
+        ids=("int8", "unquantized"),
+    )
+    @patch("onnxruntime.InferenceSession")
+    def test_loader_rejects_config_encoder_feature_mismatch(
+        self,
+        mock_ort_session: MagicMock,
+        quantized: bool,
+        encoder_filename: str,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The selected encoder feature axis must match config.json."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
+            Audio_Transcription_Parakeet_ONNX as onnx_mod,
+        )
+
+        suffix = ".int8" if quantized else ""
+        for filename in (
+            f"decoder_joint-model{suffix}.onnx",
+            f"encoder-model{suffix}.onnx",
+            "nemo128.onnx",
+        ):
+            (tmp_path / filename).write_bytes(b"placeholder")
+        (tmp_path / "vocab.txt").write_text("<unk> 0\n<blk> 1\n", encoding="utf-8")
+        (tmp_path / "config.json").write_text(
+            json.dumps({"model_type": "nemo-conformer-tdt", "features_size": 80}),
+            encoding="utf-8",
+        )
+        encoder_input = types.SimpleNamespace(name="audio_signal", shape=[None, 128, None])
+        mock_ort_session.return_value.get_inputs.return_value = [encoder_input]
+        load_model = MagicMock(return_value=MagicMock())
+        monkeypatch.setitem(sys.modules, "onnx_asr", types.SimpleNamespace(load_model=load_model))
+        onnx_mod.unload_onnx_models()
+        messages: list[str] = []
+        sink_id = onnx_mod.logger.add(messages.append, level="ERROR", format="{message}")
+
+        try:
+            session, tokenizer = onnx_mod.load_parakeet_onnx_model(
+                model_path=str(tmp_path),
+                device="cpu",
+            )
+        finally:
+            onnx_mod.logger.remove(sink_id)
+
+        assert session is None
+        assert tokenizer is None
+        load_model.assert_not_called()
+        assert Path(mock_ort_session.call_args.args[0]) == tmp_path / encoder_filename
+        assert any(
+            str(tmp_path) in message and "80" in message and "128" in message
+            for message in messages
+        )
+
+    @patch(
+        'tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.'
+        'Audio_Transcription_Parakeet_ONNX.snapshot_download'
+    )
     def test_loader_does_not_download_existing_local_parakeet_bundle_missing_vocab(
         self,
         mock_download: MagicMock,
@@ -234,7 +442,9 @@ class TestParakeetONNX:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Existing local artifact directories should never be reused as HF repo ids."""
-        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Transcription_Parakeet_ONNX as onnx_mod
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
+            Audio_Transcription_Parakeet_ONNX as onnx_mod,
+        )
 
         for filename in (
             "decoder_joint-model.int8.onnx",
@@ -256,13 +466,17 @@ class TestParakeetONNX:
         assert tokenizer is None
         mock_download.assert_not_called()
 
+    @patch("onnxruntime.InferenceSession")
     def test_loader_uses_upstream_onnx_asr_for_parakeet_tdt_export(
         self,
+        mock_ort_session: MagicMock,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A Parakeet TDT export should use upstream onnx-asr instead of local decoder code."""
-        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Transcription_Parakeet_ONNX as onnx_mod
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
+            Audio_Transcription_Parakeet_ONNX as onnx_mod,
+        )
 
         for filename in (
             "decoder_joint-model.onnx",
@@ -273,6 +487,19 @@ class TestParakeetONNX:
         ):
             (tmp_path / filename).write_bytes(b"placeholder")
         (tmp_path / "vocab.txt").write_text("<unk> 0\nhello 1\n<blk> 2\n", encoding="utf-8")
+        (tmp_path / "config.json").write_text(
+            json.dumps(
+                {
+                    "model_type": "nemo-conformer-tdt",
+                    "features_size": 128,
+                    "subsampling_factor": 8,
+                }
+            ),
+            encoding="utf-8",
+        )
+        mock_ort_session.return_value.get_inputs.return_value = [
+            types.SimpleNamespace(name="audio_signal", shape=[None, 128, None])
+        ]
         upstream_model = MagicMock()
         load_model = MagicMock(return_value=upstream_model)
         monkeypatch.setitem(sys.modules, "onnx_asr", types.SimpleNamespace(load_model=load_model))
@@ -328,13 +555,17 @@ class TestParakeetONNX:
         assert result == "[No speech detected]"
         upstream_model.recognize.assert_not_called()
 
+    @patch("onnxruntime.InferenceSession")
     def test_loader_fails_closed_when_onnx_asr_missing_for_parakeet_bundle(
         self,
+        mock_ort_session: MagicMock,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A Parakeet TDT bundle without onnx-asr should not fall back to generic ONNX inference."""
-        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Transcription_Parakeet_ONNX as onnx_mod
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
+            Audio_Transcription_Parakeet_ONNX as onnx_mod,
+        )
 
         for filename in (
             "decoder_joint-model.int8.onnx",
@@ -343,6 +574,13 @@ class TestParakeetONNX:
         ):
             (tmp_path / filename).write_bytes(b"placeholder")
         (tmp_path / "vocab.txt").write_text("<unk> 0\nhello 1\n<blk> 2\n", encoding="utf-8")
+        (tmp_path / "config.json").write_text(
+            json.dumps({"model_type": "nemo-conformer-tdt", "features_size": 128}),
+            encoding="utf-8",
+        )
+        mock_ort_session.return_value.get_inputs.return_value = [
+            types.SimpleNamespace(name="audio_signal", shape=[None, 128, None])
+        ]
         monkeypatch.setattr(onnx_mod, "_resolve_onnx_asr_load_model", lambda: None, raising=False)
         onnx_mod.unload_onnx_models()
 
@@ -355,7 +593,7 @@ class TestParakeetONNX:
     def test_transcribe_simple(self, mock_load_model, sample_audio_data, mock_onnx_session, mock_tokenizer):
         """Test simple transcription without chunking."""
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_ONNX import (
-            transcribe_with_parakeet_onnx
+            transcribe_with_parakeet_onnx,
         )
 
         audio_data, sample_rate = sample_audio_data
@@ -379,7 +617,7 @@ class TestParakeetONNX:
     def test_transcribe_provides_waveforms_lens_for_raw_waveform_export(self, mock_load_model, sample_audio_data):
         """Raw waveform ONNX exports should receive both waveforms and waveforms_lens."""
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_ONNX import (
-            transcribe_with_parakeet_onnx
+            transcribe_with_parakeet_onnx,
         )
 
         audio_data, sample_rate = sample_audio_data
@@ -420,7 +658,7 @@ class TestParakeetONNX:
     def test_chunked_transcribe_provides_waveforms_lens_for_raw_waveform_export(self, mock_load_model):
         """Chunked raw waveform ONNX exports should receive per-chunk waveforms_lens."""
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_ONNX import (
-            transcribe_with_parakeet_onnx
+            transcribe_with_parakeet_onnx,
         )
 
         sample_rate = 16000
@@ -470,7 +708,7 @@ class TestParakeetONNX:
     ) -> None:
         """Upstream bundle chunking should use the single-session middle trim."""
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_ONNX import (
-            transcribe_with_parakeet_onnx
+            transcribe_with_parakeet_onnx,
         )
 
         class FakeUpstreamBundle:
@@ -510,7 +748,7 @@ class TestParakeetONNX:
 
         """Test ParakeetONNXTokenizer functionality."""
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_ONNX import (
-            ParakeetONNXTokenizer
+            ParakeetONNXTokenizer,
         )
 
         # Create tokenizer with test vocab
@@ -539,7 +777,7 @@ class TestParakeetONNX:
     def test_transcribe_with_chunking(self, mock_load_model, mock_onnx_session, mock_tokenizer):
         """Test transcription with chunking."""
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_ONNX import (
-            transcribe_with_parakeet_onnx
+            transcribe_with_parakeet_onnx,
         )
 
         # Generate long audio
@@ -586,7 +824,7 @@ class TestParakeetONNX:
     def test_error_handling(self, mock_load_model, sample_audio_data):
         """Test error handling during transcription."""
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_ONNX import (
-            transcribe_with_parakeet_onnx
+            transcribe_with_parakeet_onnx,
         )
 
         audio_data, sample_rate = sample_audio_data
@@ -613,7 +851,7 @@ class TestParakeetONNX:
     ):
         """Audio file load failures should not expose local paths."""
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_ONNX import (
-            transcribe_with_parakeet_onnx
+            transcribe_with_parakeet_onnx,
         )
 
         mock_load_model.return_value = (mock_onnx_session, mock_tokenizer)
@@ -635,7 +873,7 @@ class TestParakeetONNX:
     ):
         """Inference failures should not expose ONNX runtime details."""
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_ONNX import (
-            transcribe_with_parakeet_onnx
+            transcribe_with_parakeet_onnx,
         )
 
         audio_data, sample_rate = sample_audio_data
@@ -654,7 +892,7 @@ class TestParakeetONNX:
     def test_custom_model_path(self, mock_load_model, sample_audio_data, mock_onnx_session, mock_tokenizer):
         """Test using custom model path."""
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_ONNX import (
-            transcribe_with_parakeet_onnx
+            transcribe_with_parakeet_onnx,
         )
 
         audio_data, sample_rate = sample_audio_data
@@ -692,8 +930,8 @@ class TestParakeetONNXIntegration:
     def test_integration_with_nemo_module(self, mock_transcribe, mock_load_onnx_model):
         """Test integration with Nemo module."""
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo import (
-            transcribe_with_parakeet,
             _model_cache,
+            transcribe_with_parakeet,
         )
 
         _model_cache.clear()

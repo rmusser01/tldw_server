@@ -48,6 +48,7 @@ _PARAKEET_ONNX_ALLOW_PATTERNS = [
     "vocab.txt",
     "config.json",
 ]
+_PARAKEET_ONNX_REQUIRED_SIDECARS = ("vocab.txt", "config.json")
 _PARAKEET_ONNX_SILENCE_ABS_THRESHOLD = 1e-6
 
 logger = logger
@@ -478,29 +479,26 @@ def _select_graph_path(model_dir: Path, candidates: list[str]) -> Path | None:
     return None
 
 
-def _resolve_parakeet_tdt_bundle_paths(model_dir: Path) -> dict[str, Path] | None:
+def _resolve_parakeet_tdt_bundle_paths(
+    model_dir: Path,
+    quantization: str | None,
+) -> dict[str, Path] | None:
     """Resolve the multi-graph Parakeet TDT ONNX export layout when present."""
     preprocessor_path = _select_graph_path(model_dir, ["nemo128.onnx", "nemo80.onnx"])
-    encoder_path = _select_graph_path(model_dir, ["encoder-model.int8.onnx", "encoder-model.onnx"])
-    decoder_joint_path = _select_graph_path(
-        model_dir,
-        ["decoder_joint-model.int8.onnx", "decoder_joint-model.onnx"],
-    )
+    suffix = ".int8" if quantization == "int8" else ""
+    encoder_path = _existing_path(model_dir / f"encoder-model{suffix}.onnx")
+    decoder_joint_path = _existing_path(model_dir / f"decoder_joint-model{suffix}.onnx")
     vocab_path = _existing_path(model_dir / "vocab.txt")
+    config_path = _existing_path(model_dir / "config.json")
 
-    if preprocessor_path and encoder_path and decoder_joint_path and vocab_path:
+    if preprocessor_path and encoder_path and decoder_joint_path and vocab_path and config_path:
         return {
             "preprocessor": preprocessor_path,
             "encoder": encoder_path,
             "decoder_joint": decoder_joint_path,
             "vocab": vocab_path,
+            "config": config_path,
         }
-    if preprocessor_path and encoder_path and decoder_joint_path:
-        logger.error(
-            "Parakeet ONNX multi-graph export found in {} but vocab.txt is missing; "
-            "cannot decode tokens safely.",
-            model_dir,
-        )
     return None
 
 
@@ -533,6 +531,77 @@ def _has_parakeet_tdt_graphs(model_dir: Path) -> bool:
         and _select_graph_path(model_dir, ["encoder-model.int8.onnx", "encoder-model.onnx"])
         and _select_graph_path(model_dir, ["decoder_joint-model.int8.onnx", "decoder_joint-model.onnx"])
     )
+
+
+def _load_parakeet_features_size(config_path: Path, model_dir: Path) -> int | None:
+    """Read the positive integer feature count required by onnx-asr."""
+    try:
+        with config_path.open("rt", encoding="utf-8") as config_file:
+            config = json.load(config_file)
+    except (OSError, TypeError, ValueError):
+        config = None
+
+    if config is None:
+        logger.error("Invalid Parakeet ONNX config in {}: unreadable or malformed JSON", model_dir)
+        return None
+
+    if not isinstance(config, dict):
+        logger.error("Invalid Parakeet ONNX config in {}: expected a JSON object", model_dir)
+        return None
+
+    features_size = config.get("features_size")
+    if isinstance(features_size, bool) or not isinstance(features_size, int) or features_size <= 0:
+        logger.error(
+            "Invalid Parakeet ONNX config in {}: features_size must be a positive integer",
+            model_dir,
+        )
+        return None
+    return features_size
+
+
+def _encoder_features_match_config(
+    runtime: Any,
+    encoder_path: Path,
+    session_options: Any,
+    providers: list[str],
+    configured_features: int,
+    model_dir: Path,
+) -> bool:
+    """Validate a static encoder feature axis before loading onnx-asr."""
+    try:
+        encoder_session = runtime.InferenceSession(
+            str(encoder_path),
+            sess_options=session_options,
+            providers=providers,
+        )
+        audio_input = next(
+            (input_meta for input_meta in encoder_session.get_inputs() if _onnx_input_name(input_meta) == "audio_signal"),
+            None,
+        )
+    except Exception as exc:
+        logger.exception("Failed to inspect Parakeet ONNX encoder in {}: {}", model_dir, exc)
+        return False
+
+    if audio_input is None:
+        logger.error("Invalid Parakeet ONNX encoder in {}: audio_signal input is missing", model_dir)
+        return False
+
+    shape = getattr(audio_input, "shape", None)
+    declared_features = shape[1] if isinstance(shape, (list, tuple)) and len(shape) > 1 else None
+    if (
+        isinstance(declared_features, int)
+        and not isinstance(declared_features, bool)
+        and declared_features > 0
+        and declared_features != configured_features
+    ):
+        logger.error(
+            "Parakeet ONNX feature mismatch in {}: config features_size={} but encoder expects {}",
+            model_dir,
+            configured_features,
+            declared_features,
+        )
+        return False
+    return True
 
 
 def _middle_trimmed_chunk_text(text: str, chunk_duration: float, overlap_duration: float) -> str:
@@ -618,7 +687,10 @@ def load_parakeet_onnx_model(model_path: Optional[str] = None, device: str = 'cp
             # Limit download to model artifacts and required decoding sidecars.
             # Existing caches may have only the ONNX graphs from older builds, so
             # call snapshot_download when required sidecars are missing too.
-            if not model_dir.exists() or not (model_dir / "vocab.txt").exists():
+            if not model_dir.exists() or any(
+                not (model_dir / sidecar).exists()
+                for sidecar in _PARAKEET_ONNX_REQUIRED_SIDECARS
+            ):
                 download_fn(
                     repo_id=model_path,
                     local_dir=str(model_dir),
@@ -642,8 +714,22 @@ def load_parakeet_onnx_model(model_path: Optional[str] = None, device: str = 'cp
         session_options = _runtime.SessionOptions()
         session_options.graph_optimization_level = _runtime.GraphOptimizationLevel.ORT_ENABLE_ALL
 
-        bundle_paths = _resolve_parakeet_tdt_bundle_paths(model_dir)
+        quantization = _resolve_parakeet_tdt_quantization(model_dir)
+        bundle_paths = _resolve_parakeet_tdt_bundle_paths(model_dir, quantization)
         if bundle_paths is not None:
+            features_size = _load_parakeet_features_size(bundle_paths["config"], model_dir)
+            if features_size is None:
+                return None, None
+            if not _encoder_features_match_config(
+                _runtime,
+                bundle_paths["encoder"],
+                session_options,
+                providers,
+                features_size,
+                model_dir,
+            ):
+                return None, None
+
             load_onnx_asr_model = _resolve_onnx_asr_load_model()
             if load_onnx_asr_model is None:
                 logger.error(
@@ -657,7 +743,6 @@ def load_parakeet_onnx_model(model_path: Optional[str] = None, device: str = 'cp
                 "Loading Parakeet TDT ONNX graph bundle through upstream onnx-asr from: {}",
                 model_dir,
             )
-            quantization = _resolve_parakeet_tdt_quantization(model_dir)
             upstream_model = load_onnx_asr_model(
                 "nemo-conformer-tdt",
                 path=model_dir,
@@ -672,11 +757,22 @@ def load_parakeet_onnx_model(model_path: Optional[str] = None, device: str = 'cp
             logger.info("Successfully loaded Parakeet TDT ONNX graph bundle through onnx-asr")
             return session, tokenizer
         if _has_parakeet_tdt_graphs(model_dir):
-            logger.error(
-                "Parakeet ONNX TDT graph bundle found in {} but vocab.txt is missing. "
-                "Add vocab.txt beside the ONNX graphs or use the upstream Hugging Face repo id.",
-                model_dir,
-            )
+            missing_sidecars = [
+                sidecar
+                for sidecar in _PARAKEET_ONNX_REQUIRED_SIDECARS
+                if not (model_dir / sidecar).exists()
+            ]
+            if missing_sidecars:
+                logger.error(
+                    "Parakeet ONNX TDT graph bundle in {} is missing required sidecar(s): {}",
+                    model_dir,
+                    ", ".join(missing_sidecars),
+                )
+            else:
+                logger.error(
+                    "Parakeet ONNX TDT graph bundle in {} lacks a compatible encoder/decoder graph pair",
+                    model_dir,
+                )
             return None, None
 
         # Find ONNX files
