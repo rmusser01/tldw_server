@@ -21,7 +21,7 @@
 | 1 | Canonical authorization data | SQLite 090 and PostgreSQL fresh/backfill paths grant permissions and backfill effective role membership | Complete |
 | 2 | Shared lifecycle policy | Both transports preserve status; reads/SSE retry safely; mutations never replay automatically | Complete |
 | 3 | Runtime adapters | Extension and WebUI expose truthful principal-scoped lifecycle state | Complete |
-| 4 | Accessible recovery UX | Header and inbox distinguish active, degraded, auth-required, and unavailable states | Not Started |
+| 4 | Accessible recovery UX | Header and inbox distinguish active, degraded, auth-required, and unavailable states | Complete |
 | 5 | Acceptance and security | Focused browser tests, Bandit, typecheck, and UAT role assertions pass | Not Started |
 
 ## File Responsibilities
@@ -381,7 +381,7 @@ Full WebUI typecheck retained only the unchanged `QuickIngestWizardModal.tsx:181
 - Modify: `apps/tldw-frontend/pages/notifications.tsx`
 - Modify: `apps/tldw-frontend/__tests__/pages/notifications.test.tsx`
 
-- [ ] **Step 1: Write failing header accessibility tests**
+- [x] **Step 1: Write failing header accessibility tests**
 
 Assert:
 
@@ -394,7 +394,7 @@ Assert:
 - one polite announcement per state transition; and
 - explicit `Try again` makes exactly one request.
 
-- [ ] **Step 2: Run header accessibility tests and verify RED**
+- [x] **Step 2: Run header accessibility tests and verify RED**
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
@@ -405,15 +405,15 @@ bunx vitest run -c vitest.extension.config.ts \
 
 Expected: FAIL because the header accepts only a count/callback and has no lifecycle UI.
 
-- [ ] **Step 3: Implement the status button and popover**
+- [x] **Step 3: Implement the status button and popover**
 
 Use existing Ant Design/Lucide primitives. Do not add repeated toasts. Use `Bell` for active and the existing Lucide unavailable/status icon where appropriate. Keep copy free of RBAC terminology.
 
-- [ ] **Step 4: Write inbox state tests**
+- [x] **Step 4: Write inbox state tests**
 
 Direct `/notifications` navigation must render auth-required, unavailable, and degraded states. Suppress mutations that cannot succeed. Transient mutation errors remain inline and expose explicit retry.
 
-- [ ] **Step 5: Run inbox tests and verify RED**
+- [x] **Step 5: Run inbox tests and verify RED**
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
@@ -423,11 +423,11 @@ bunx vitest run __tests__/pages/notifications.test.tsx
 
 Expected: FAIL on missing lifecycle states and explicit retry behavior.
 
-- [ ] **Step 6: Implement inbox states and explicit retries**
+- [x] **Step 6: Implement inbox states and explicit retries**
 
 Consume `NotificationLifecycleProvider`; do not introduce another timer or stream owner.
 
-- [ ] **Step 7: Run component tests and typecheck GREEN**
+- [x] **Step 7: Run component tests and typecheck GREEN**
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
@@ -439,13 +439,24 @@ bunx vitest run -c vitest.extension.config.ts \
 bun run typecheck
 ```
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
 git add apps/packages/ui/src/components/Layouts/ChatHeader.tsx apps/packages/ui/src/components/Layouts/Header.tsx apps/packages/ui/src/components/Layouts/__tests__/ChatHeader.notifications.test.tsx apps/tldw-frontend/pages/notifications.tsx apps/tldw-frontend/__tests__/pages/notifications.test.tsx
 git commit -m "fix(webui): expose notification recovery states"
 ```
+
+Task 5 completed through `7b172cf995`. The shared header suppresses internal
+idle state, exposes state-specific names/icons and a keyboard-operable nonmodal
+dialog with predictable focus, and registers all new copy with i18next. The
+inbox marks degraded counts stale, exits terminal loading, opens the existing
+sign-in flow for 401, and uses scope/generation-bound explicit mutation retries
+with visible progress and cross-account concurrency guards. Final verification
+passed 102 WebUI tests, 24 extension lifecycle tests, extension TypeScript
+compile, touched-file lint, and diff hygiene. Full WebUI typecheck retained only
+the unchanged `QuickIngestWizardModal.tsx:1813` `overflowY` baseline. Final spec
+and code-quality re-reviews approved.
 
 ## Task 6: Add Browser Acceptance Coverage
 
