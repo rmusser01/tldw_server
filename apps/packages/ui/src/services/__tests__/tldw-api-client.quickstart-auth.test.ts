@@ -45,6 +45,8 @@ vi.mock("@/utils/safe-storage", () => ({
 import { TldwApiClient } from "@/services/tldw/TldwApiClient"
 import {
   activateCookieSessionConfig,
+  clearRuntimeAuthOverride,
+  setRuntimeSingleUserApiKeyOverride,
   isCookieSessionConfigInvalidated
 } from "@/services/tldw/runtime-auth-override"
 
@@ -84,12 +86,14 @@ describe("TldwApiClient quickstart auth bootstrap", () => {
     mocks.storageRemoveError = null
     window.localStorage.clear()
     activateCookieSessionConfig()
+    clearRuntimeAuthOverride()
   })
 
   afterEach(() => {
     restoreEnv()
     window.localStorage.clear()
     activateCookieSessionConfig()
+    clearRuntimeAuthOverride()
   })
 
   it("does not persist the public quickstart api key", async () => {
@@ -299,19 +303,182 @@ describe("TldwApiClient quickstart auth bootstrap", () => {
     )
   })
 
-  it("scrubs an ambiguous legacy persistent key instead of migrating it", async () => {
-    mocks.storage.set("tldwConfig", {
+  it("migrates an eligible pre-metadata key to an origin-bound device credential", async () => {
+    const legacyConfig = {
       authMode: "single-user",
       serverUrl: "https://api.example.test/path",
-      apiKey: "ambiguous-secret"
+      apiKey: "legacy-device-secret"
+    }
+    mocks.storage.set("tldwConfig", legacyConfig)
+    const client = new TldwApiClient()
+
+    await client.initialize()
+
+    const migratedConfig = {
+      ...legacyConfig,
+      authSource: "manual",
+      credentialSource: "manual",
+      apiKeyPersistence: "device",
+      apiKeyServerOrigin: "https://api.example.test"
+    }
+    expect(mocks.storage.get("tldwConfig")).toEqual(migratedConfig)
+    await expect(client.ensureConfigForRequest(true)).resolves.toEqual(
+      migratedConfig
+    )
+  })
+
+  it.each([
+    { property: "credentialSource" },
+    { property: "apiKeyPersistence" },
+    { property: "apiKeyServerOrigin" }
+  ])("scrubs a legacy key when $property is present but empty", async ({
+    property
+  }) => {
+    mocks.storage.set("tldwConfig", {
+      authMode: "single-user",
+      authSource: "manual",
+      serverUrl: "https://api.example.test/path",
+      apiKey: "legacy-device-secret",
+      [property]: ""
     })
     const client = new TldwApiClient()
 
     await client.initialize()
 
     expect(mocks.storage.get("tldwConfig")).not.toHaveProperty("apiKey")
-    expect(mocks.sessionStorage.has("tldwManualSessionApiKey")).toBe(false)
     await expect(client.getConfig()).resolves.not.toHaveProperty("apiKey")
+  })
+
+  it.each([
+    {
+      caseName: "an empty auth source",
+      deploymentMode: undefined,
+      config: {
+        authSource: "",
+        serverUrl: "https://api.example.test/path",
+        apiKey: "legacy-device-secret"
+      }
+    },
+    {
+      caseName: "a cookie-session auth source",
+      deploymentMode: undefined,
+      config: {
+        authSource: "cookie-session",
+        serverUrl: "https://api.example.test/path",
+        apiKey: "legacy-device-secret"
+      }
+    },
+    {
+      caseName: "a placeholder API key",
+      deploymentMode: undefined,
+      config: {
+        authSource: "manual",
+        serverUrl: "https://api.example.test/path",
+        apiKey: "REPLACE-ME"
+      }
+    },
+    {
+      caseName: "an invalid server origin",
+      deploymentMode: undefined,
+      config: {
+        authSource: "manual",
+        serverUrl: "not a URL",
+        apiKey: "legacy-device-secret"
+      }
+    },
+    {
+      caseName: "hosted mode",
+      deploymentMode: "hosted",
+      config: {
+        authSource: "manual",
+        serverUrl: "https://api.example.test/path",
+        apiKey: "legacy-device-secret"
+      }
+    },
+    {
+      caseName: "same-origin quickstart mode",
+      deploymentMode: "quickstart",
+      config: {
+        authSource: "manual",
+        serverUrl: window.location.origin,
+        apiKey: "legacy-device-secret"
+      }
+    }
+  ])("scrubs a legacy key with $caseName", async ({
+    deploymentMode,
+    config
+  }) => {
+    if (deploymentMode) {
+      process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = deploymentMode
+    }
+    mocks.storage.set("tldwConfig", {
+      authMode: "single-user",
+      ...config
+    })
+    const client = new TldwApiClient()
+
+    await client.initialize()
+
+    expect(mocks.storage.get("tldwConfig")).not.toHaveProperty("apiKey")
+    await expect(client.getConfig()).resolves.not.toHaveProperty("apiKey")
+  })
+
+  it("uses an active environment key after scrubbing a legacy key", async () => {
+    process.env.NEXT_PUBLIC_X_API_KEY = "active-environment-key"
+    mocks.storage.set("tldwConfig", {
+      authMode: "single-user",
+      serverUrl: "https://api.example.test/path",
+      apiKey: "legacy-device-secret"
+    })
+    const client = new TldwApiClient()
+
+    await client.initialize()
+
+    expect(mocks.storage.get("tldwConfig")).not.toHaveProperty("apiKey")
+    await expect(client.ensureConfigForRequest(true)).resolves.toMatchObject({
+      apiKey: "active-environment-key"
+    })
+  })
+
+  it("uses an active runtime key after scrubbing a legacy key", async () => {
+    setRuntimeSingleUserApiKeyOverride("active-runtime-key")
+    mocks.storage.set("tldwConfig", {
+      authMode: "single-user",
+      serverUrl: "https://api.example.test/path",
+      apiKey: "legacy-device-secret"
+    })
+    const client = new TldwApiClient()
+
+    await client.initialize()
+
+    expect(mocks.storage.get("tldwConfig")).not.toHaveProperty("apiKey")
+    await expect(client.ensureConfigForRequest(true)).resolves.toMatchObject({
+      apiKey: "active-runtime-key"
+    })
+  })
+
+  it("uses an active quickstart cookie session after scrubbing a legacy key", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    mocks.storage.set("tldwConfig", {
+      authMode: "single-user",
+      serverUrl: "https://api.example.test/path",
+      apiKey: "legacy-device-secret"
+    })
+    mocks.storage.set("tldwCookieSessionConfig", {
+      authMode: "single-user",
+      authSource: "cookie-session",
+      serverUrl: window.location.origin
+    })
+    const client = new TldwApiClient()
+
+    await client.initialize()
+
+    expect(mocks.storage.get("tldwConfig")).not.toHaveProperty("apiKey")
+    await expect(client.ensureConfigForRequest(true)).resolves.toEqual({
+      authMode: "single-user",
+      authSource: "cookie-session",
+      serverUrl: window.location.origin
+    })
   })
 
   it("migrates a confidently manual legacy key to complete device metadata", async () => {
@@ -327,6 +494,7 @@ describe("TldwApiClient quickstart auth bootstrap", () => {
 
     expect(mocks.storage.get("tldwConfig")).toMatchObject({
       apiKey: "legacy-manual-secret",
+      authSource: "manual",
       credentialSource: "manual",
       apiKeyPersistence: "device",
       apiKeyServerOrigin: "https://api.example.test"
