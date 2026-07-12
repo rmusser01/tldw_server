@@ -1,19 +1,41 @@
 ---
 id: TASK-12950
 title: Implement research discovery Phase 2A PDF Media handoff
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-07-12 20:20'
+updated_date: 2026-07-12 20:45
 labels:
-  - research
-  - media
-  - ingestion
-  - security
+- research
+- media
+- ingestion
+- security
 dependencies: []
 documentation:
-  - >-
-    Docs/superpowers/specs/2026-06-20-research-source-discovery-chokepoint-design.md
+- Docs/superpowers/specs/2026-06-20-research-source-discovery-chokepoint-design.md
+modified_files:
+- Docs/superpowers/specs/2026-06-20-research-source-discovery-chokepoint-design.md
+- Docs/superpowers/plans/2026-07-12-research-discovery-phase2a-pdf-media-handoff.md
+- tldw_Server_API/app/core/Research/discovery/models.py
+- tldw_Server_API/app/core/Research/discovery/identity.py
+- tldw_Server_API/app/core/Research/discovery/service.py
+- tldw_Server_API/app/core/Research/discovery/selection.py
+- tldw_Server_API/app/api/v1/schemas/media_request_models.py
+- tldw_Server_API/app/api/v1/API_Deps/media_add_deps.py
+- tldw_Server_API/app/api/v1/endpoints/media/add.py
+- tldw_Server_API/app/core/Ingestion_Media_Processing/download_utils.py
+- tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py
+- tldw_Server_API/app/core/Ingestion_Media_Processing/research_discovery_handoff.py
+- tldw_Server_API/app/core/DB_Management/media_db/runtime/safe_metadata_search_ops.py
+- tldw_Server_API/tests/Research/test_research_discovery_identity.py
+- tldw_Server_API/tests/Research/test_research_discovery_service.py
+- tldw_Server_API/tests/Research/test_research_discovery_selection.py
+- tldw_Server_API/tests/Media/test_json_url_download.py
+- tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_add_deps_error_mapping.py
+- tldw_Server_API/tests/MediaIngestion_NEW/unit/test_research_discovery_handoff.py
+- tldw_Server_API/tests/MediaIngestion_NEW/integration/test_research_discovery_media_add.py
+- tldw_Server_API/tests/DB_Management/test_media_db_safe_metadata_search_ops.py
+- backlog/tasks/task-12950 - Implement-research-discovery-Phase-2A-PDF-Media-handoff.md
 ---
 
 ## Description
@@ -31,7 +53,7 @@ Implement the approved Phase 2A PDF-only handoff from persisted Research Discove
 - [x] #5 Media performs pre-download URL/identifier duplicate lookup and reuses existing race-safe URL/content persistence duplicate handling.
 - [x] #6 PDF egress, redirect, MIME, and streamed byte limits are enforced through existing Media download and processing paths.
 - [x] #7 Responses retain the existing results envelope with stable per-selection outcomes and input order.
-- [ ] #8 Focused tests, compile checks, diff checks, and Bandit pass with no new findings.
+- [x] #8 Focused tests, compile checks, diff checks, and Bandit pass with no new findings.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -43,24 +65,13 @@ Docs/superpowers/plans/2026-07-12-research-discovery-phase2a-pdf-media-handoff.m
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Implementation worktree: /Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/research-discovery-phase2a-pdf
-Branch: codex/research-discovery-phase2a-pdf, based on fetched origin/dev at 30db8bcfd7 plus planning commit 621c6a01db.
-
-Stage 1 contract gate complete: /media/add dependencies remain intact; AddMediaForm.media_type remains required; normal persistence still requires URLs/files; download_url_async owns egress and streamed limits; Media DB exposes URL and safe-metadata lookup.
-
-Baseline verification: 53 passed, 4 warnings in 11.92s for Research discovery identity/service, JSON URL download, and media form dependency tests. The first sandboxed attempt could not create a temp file; the exact suite passed outside the read-only sandbox.
-
-Task-ID correction: the stale planning worktree assigned TASK-12110, which collided with an unrelated latest-dev task. The duplicate record was removed and this implementation is tracked by TASK-12950.
-
-Stage 2 complete: stable-PDF eligibility plus owner-scoped snapshot resolution with five-item bounds, ordered output, fingerprint/candidate identity revalidation, sanitized identifiers/metadata, and no Media side effects. Verification: Black clean; 87 Research discovery tests passed with 5 warnings. Self-review added candidate type, canonical URL, source provenance, and safe metadata to the descriptor and corrected provider-ID-only fingerprint reconstruction.
-
-Stages 3-4 complete. /media/add now accepts paired discovery references, rejects competing sources/cookies, resolves owner-scoped server snapshots, preflights URL and normalized identifier duplicates, blocks known restricted access, and calls existing Media persistence once for remaining PDFs with strict 50 MiB/application-pdf constraints and trusted metadata. Ordered outcomes and stable safe errors remain in the existing results envelope; no Research ingestion route was added. Regression verification: 157 focused Research/Media tests passed with 9 warnings; final integration additions pass 12 tests.
+Implementation completed on branch codex/research-discovery-phase2a-pdf. Research remains snapshot-resolution only; the existing /api/v1/media/add and Media pipeline own duplicate lookup, egress, the 50 MiB/application-pdf limits, parsing, persistence, and ordered outcomes. Independent review found five issues, all fixed in 719faaab01: overwrite bypass, client title/author authority, media_id hydration, nested provider-ID matching, and all-success warning status. Re-review found no actionable issues. Final verification: 169 passed, 7 skipped, 1 xpassed across 177 collected tests in 63.08s; compileall and git diff --check passed; boundary scan found no Research ingest endpoint or HTML path; Bandit found 0 issues across 11,048 LOC. Phase 2B HTML, new queues/workers, idempotency storage, and plugin abstractions remain deferred.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implementation in progress.
+Implemented the Phase 2A PDF-only Research Discovery handoff through the existing /api/v1/media/add chokepoint. Research resolves owner-scoped server snapshots; Media validates selector-only requests, preflights URL and identifier duplicates, enforces existing egress/MIME/50 MiB limits, processes PDFs through the existing ingestion pipeline, persists trusted snapshot metadata, and returns ordered stable outcomes. Review hardening rejects overwrite and client bibliographic overrides, hydrates metadata-search matches, supports nested provider-ID dedupe, and returns HTTP 200 for all-success outcomes. Phase 2B HTML ingestion remains deferred.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
@@ -69,10 +80,10 @@ Implementation in progress.
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

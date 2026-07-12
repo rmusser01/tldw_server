@@ -307,11 +307,11 @@ git commit -m "feat(media): ingest bounded discovery PDF selections"
 
 **Tests:** Focused suite, compile check, route scan, diff check, and Bandit.
 
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 8: Final verification
 
-- [ ] Run the complete focused suite.
+- [x] Run the complete focused suite.
 
 ```bash
 source .venv/bin/activate && python -m pytest -q \
@@ -323,10 +323,13 @@ source .venv/bin/activate && python -m pytest -q \
   tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_add_deps_error_mapping.py \
   tldw_Server_API/tests/MediaIngestion_NEW/unit/test_research_discovery_handoff.py \
   tldw_Server_API/tests/MediaIngestion_NEW/integration/test_research_discovery_media_add.py \
-  tldw_Server_API/tests/Media_Ingestion_Modification/test_add_media_endpoint.py
+  tldw_Server_API/tests/Media_Ingestion_Modification/test_add_media_endpoint.py \
+  tldw_Server_API/tests/DB_Management/test_media_db_safe_metadata_search_ops.py
 ```
 
-- [ ] Compile, scan boundaries, and check the diff.
+Result: 169 passed, 7 skipped, 1 xpassed across 177 collected tests.
+
+- [x] Compile, scan boundaries, and check the diff.
 
 ```bash
 source .venv/bin/activate && python -m compileall -q \
@@ -339,7 +342,7 @@ rg -n "research/discovery/ingest|html_full_text" \
 git diff --check
 ```
 
-- [ ] Run Bandit on touched application scope.
+- [x] Run Bandit on touched application scope.
 
 ```bash
 source .venv/bin/activate && python -m bandit -r \
@@ -350,12 +353,17 @@ source .venv/bin/activate && python -m bandit -r \
   tldw_Server_API/app/core/Ingestion_Media_Processing/research_discovery_handoff.py \
   tldw_Server_API/app/core/Ingestion_Media_Processing/download_utils.py \
   tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py \
+  tldw_Server_API/app/core/DB_Management/media_db/runtime/safe_metadata_search_ops.py \
   -f json -o /tmp/bandit_research_discovery_phase2a_pdf.json
 ```
 
-- [ ] Confirm Research only resolves selections; Media owns duplicate lookup, egress, limits, parsing, persistence, and outcomes; `/media/add` is the only public Phase 2A handoff; and no new idempotency table, HTML path, queue, worker, or plugin abstraction exists.
-- [ ] Update the implementation Backlog task with files, commits, test and Bandit results, limitations, and the Phase 2B deferral.
-- [ ] Request code review, address validated findings, rerun verification, and commit final documentation/task updates.
+Result: 0 findings across 11,048 application LOC.
+
+- [x] Confirm Research only resolves selections; Media owns duplicate lookup, egress, limits, parsing, persistence, and outcomes; `/media/add` is the only public Phase 2A handoff; and no new idempotency table, HTML path, queue, worker, or plugin abstraction exists.
+- [x] Update the implementation Backlog task with files, commits, test and Bandit results, limitations, and the Phase 2B deferral.
+- [x] Request code review, address validated findings, rerun verification, and commit final documentation/task updates.
+
+Independent review found and the implementation corrected five issues: overwrite could bypass duplicate preflight, client title/author could override snapshot metadata, identifier search rows were not hydrated, default-spaced nested provider IDs were not matched, and warning-backed successful creation returned HTTP 207. The reviewer found no actionable issues after the fixes.
 
 ```bash
 git add Docs/superpowers/specs/2026-06-20-research-source-discovery-chokepoint-design.md \
