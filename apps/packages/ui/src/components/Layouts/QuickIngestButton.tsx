@@ -390,7 +390,6 @@ export function QuickIngestButton({ className }: QuickIngestButtonProps) {
   const {
     quickIngestOpen,
     quickIngestReady,
-    hasQuickIngestSession,
     quickIngestAutoProcessQueued,
     presetMap,
     openRevision,

@@ -905,7 +905,9 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     goNext,
   } = useIngestWizard()
   const { currentStep, queueItems, processingState, presetConfig, results } = state
-  const [quickProcessWarning, setQuickProcessWarning] = useState<string | null>(null)
+  const [analysisProviderWarning, setAnalysisProviderWarning] = useState<
+    string | null
+  >(null)
   const connectionState = useConnectionStore((store) => store.state)
   const checkConnection = useConnectionStore((store) => store.checkOnce)
   const activeSessionIdRef = useRef<string | null>(null)
@@ -989,15 +991,15 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   }, [checkConnection])
 
   useEffect(() => {
-    if (!quickProcessWarning) return
-    const analysisProviderWarning = getQuickIngestAnalysisProviderWarning({
+    if (!analysisProviderWarning) return
+    const providerWarning = getQuickIngestAnalysisProviderWarning({
       common: presetConfig.common,
       advancedValues: presetConfig.advancedValues,
     })
-    if (!analysisProviderWarning) {
-      setQuickProcessWarning(null)
+    if (!providerWarning) {
+      setAnalysisProviderWarning(null)
     }
-  }, [presetConfig.advancedValues, presetConfig.common, quickProcessWarning])
+  }, [analysisProviderWarning, presetConfig.advancedValues, presetConfig.common])
 
   useEffect(() => {
     resultsRef.current = results
@@ -1063,17 +1065,6 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
 
   // Auto-process on mount if autoProcessQueued is set and there are queued items
   const autoProcessedRef = useRef(false)
-  useEffect(() => {
-    if (
-      autoProcessQueued &&
-      !autoProcessedRef.current &&
-      validQueueItems.length > 0 &&
-      isOnlineForIngest
-    ) {
-      autoProcessedRef.current = true
-      skipToProcessing()
-    }
-  }, [autoProcessQueued, isOnlineForIngest, skipToProcessing, validQueueItems.length])
 
   // Whether processing is actively running
   const isProcessingActive = processingState.status === "running"
@@ -1490,12 +1481,17 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       )
       if (cancelRequestedRef.current) return
 
-      const analysisProviderWarning = getQuickIngestAnalysisProviderWarning({
+      const providerWarning = getQuickIngestAnalysisProviderWarning({
         common: requestPayload.common,
         advancedValues: requestPayload.advancedValues,
       })
-      if (analysisProviderWarning) {
-        setQuickProcessWarning(analysisProviderWarning)
+      if (providerWarning) {
+        setAnalysisProviderWarning(
+          qi(
+            "analysisProvider.required",
+            "Choose an analysis provider before running ingest analysis."
+          )
+        )
         updateProcessingState({
           status: "idle",
           perItemProgress: [],
@@ -1506,7 +1502,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         activeSessionIdRef.current = null
         restore()
         showSession()
-        goToStep(1)
+        goToStep(2)
         return
       }
 
@@ -1608,6 +1604,8 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     restore,
     showSession,
     markProcessingTracking,
+    qi,
+    updateProcessingState,
     validQueueItems,
   ])
 
@@ -1680,22 +1678,47 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   // Quick-process callback for AddContentStep (skip to processing with defaults)
   const handleQuickProcess = useCallback(() => {
     if (!isOnlineForIngest || isCheckingConnection) return
-    const analysisProviderWarning = getQuickIngestAnalysisProviderWarning({
+    const providerWarning = getQuickIngestAnalysisProviderWarning({
       common: presetConfig.common,
       advancedValues: presetConfig.advancedValues,
     })
-    if (analysisProviderWarning) {
-      setQuickProcessWarning(analysisProviderWarning)
+    if (providerWarning) {
+      setAnalysisProviderWarning(
+        qi(
+          "analysisProvider.required",
+          "Choose an analysis provider before running ingest analysis."
+        )
+      )
+      goNext()
       return
     }
-    setQuickProcessWarning(null)
+    setAnalysisProviderWarning(null)
     skipToProcessing()
   }, [
+    goNext,
     isCheckingConnection,
     isOnlineForIngest,
     presetConfig.advancedValues,
     presetConfig.common,
+    qi,
     skipToProcessing,
+  ])
+
+  useEffect(() => {
+    if (
+      autoProcessQueued &&
+      !autoProcessedRef.current &&
+      validQueueItems.length > 0 &&
+      isOnlineForIngest
+    ) {
+      autoProcessedRef.current = true
+      handleQuickProcess()
+    }
+  }, [
+    autoProcessQueued,
+    handleQuickProcess,
+    isOnlineForIngest,
+    validQueueItems.length,
   ])
 
   // Navigation callbacks for WizardResultsStep CTAs
@@ -1755,13 +1778,14 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
             connectionRecoveryMessage={connectionRecoveryMessage}
             onRetryConnection={handleRetryConnection}
             onQuickProcess={handleQuickProcess}
-            quickProcessWarning={quickProcessWarning}
           />
         )
       case 2:
         return (
           <WizardConfigureStep
             isStepVisible={open && !state.isMinimized && currentStep === 2}
+            analysisProviderWarning={analysisProviderWarning}
+            focusAnalysisProvider={Boolean(analysisProviderWarning)}
           />
         )
       case 3:
@@ -1804,7 +1828,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     isOnlineForIngest,
     onClose,
     open,
-    quickProcessWarning,
+    analysisProviderWarning,
     state.isMinimized,
   ])
 

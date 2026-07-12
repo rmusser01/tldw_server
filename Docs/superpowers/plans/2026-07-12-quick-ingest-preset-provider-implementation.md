@@ -30,13 +30,13 @@
 **Goal:** Add the editable provider control and recoverable redirect.
 **Success Criteria:** Missing providers focus Configure with localized accessible feedback and no request.
 **Tests:** Configure/modal integration and session cases.
-**Status:** In Progress
+**Status:** Complete
 
 ### Stage 4: Runtime verification
 **Goal:** Prove shared behavior under WebUI and extension adapters.
 **Success Criteria:** Focused suites, typechecks, adapter smoke, lint, and targeted browser harnesses pass.
 **Tests:** Commands in Task 4.
-**Status:** Not Started
+**Status:** In Progress
 
 ### Stage 5: Review and delivery
 **Goal:** Review, finalize Backlog, commit, push, and open the PR to `dev`.

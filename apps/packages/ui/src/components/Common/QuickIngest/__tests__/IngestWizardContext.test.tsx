@@ -90,7 +90,7 @@ function TestHarness() {
       <button onClick={goBack}>goBack</button>
       <button onClick={() => goToStep(1)}>goToStep1</button>
       <button onClick={() => goToStep(3)}>goToStep3</button>
-      <button onClick={() => goToStep(5 as 5)}>goToStep5</button>
+      <button onClick={() => goToStep(5)}>goToStep5</button>
       <button
         onClick={() =>
           setQueueItems([

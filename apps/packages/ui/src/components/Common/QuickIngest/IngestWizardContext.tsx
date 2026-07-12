@@ -377,7 +377,7 @@ const reducer = (
         },
       }
 
-    case "UPDATE_ITEM_PROGRESS":
+    case "UPDATE_ITEM_PROGRESS": {
       const existingProgressItem = state.processingState.perItemProgress.find(
         (p) => p.id === action.progress.id
       )
@@ -400,6 +400,7 @@ const reducer = (
           ),
         },
       }
+    }
 
     case "UPDATE_PROCESSING_STATE":
       if (

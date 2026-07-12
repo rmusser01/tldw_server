@@ -11,6 +11,9 @@ import userEvent from "@testing-library/user-event"
 const getTranscriptionModelsMock = vi.hoisted(() =>
   vi.fn().mockResolvedValue({ all_models: [] })
 )
+const getProvidersStatusMock = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({ providers: [], any_configured: false })
+)
 
 const capabilityMocks = vi.hoisted(() => ({
   useServerCapabilities: vi.fn(),
@@ -126,6 +129,51 @@ vi.mock("antd", () => ({
       </React.Fragment>
     )
   },
+  AutoComplete: ({
+    value,
+    onChange,
+    options,
+    allowClear,
+    onClear,
+    children,
+    loading,
+    notFoundContent,
+    ...props
+  }: any) => (
+    <React.Fragment>
+      <input
+        role="combobox"
+        value={value || ""}
+        onChange={(event) => onChange?.(event.target.value)}
+        {...props}
+      />
+      <div role="listbox">
+        {options?.map((option: any) => (
+          <div key={option.value} role="option" aria-selected="false">
+            {option.label}
+          </div>
+        ))}
+      </div>
+      {loading || options?.length === 0 ? (
+        <span data-testid="analysis-provider-catalog-status">
+          {notFoundContent}
+        </span>
+      ) : null}
+      {allowClear ? (
+        <button
+          type="button"
+          aria-label="Clear analysis provider"
+          onClick={() => {
+            onClear?.()
+            onChange?.("")
+          }}
+        >
+          Clear
+        </button>
+      ) : null}
+      {children ? <span hidden>{children}</span> : null}
+    </React.Fragment>
+  ),
   Segmented: ({ options, value, onChange, ...props }: any) => (
     <div role="group" {...props}>
       {options?.map((option: any) => {
@@ -310,7 +358,7 @@ vi.mock(
         </div>
       )
     },
-    default: ({ onFilesAdded, autoFocus }: any) => {
+    default: function MockFileDropZone({ onFilesAdded, autoFocus }: any) {
       const ref = React.useRef<HTMLDivElement>(null)
       React.useEffect(() => {
         if (autoFocus) ref.current?.focus()
@@ -353,6 +401,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: vi.fn().mockResolvedValue(undefined),
     getTranscriptionModels: getTranscriptionModelsMock,
+    getProvidersStatus: getProvidersStatusMock,
   },
 }))
 
@@ -369,6 +418,10 @@ let uuidCounter = 0
 beforeEach(() => {
   uuidCounter = 0
   getTranscriptionModelsMock.mockReset().mockResolvedValue({ all_models: [] })
+  getProvidersStatusMock.mockReset().mockResolvedValue({
+    providers: [],
+    any_configured: false,
+  })
   capabilityMocks.useServerCapabilities.mockReset()
   capabilityMocks.useServerCapabilities.mockReturnValue({
     capabilities: { ffmpegAvailable: true },
@@ -396,6 +449,7 @@ import { ReviewStep } from "@/components/Common/QuickIngest/ReviewStep"
 import { ProcessingStep } from "@/components/Common/QuickIngest/ProcessingStep"
 import { WizardResultsStep } from "@/components/Common/QuickIngest/WizardResultsStep"
 import { useQuickIngestSessionStore } from "@/store/quick-ingest-session"
+import { resolvePresetMap } from "@/components/Common/QuickIngest/presets"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -429,6 +483,8 @@ const InnerWizardContent: React.FC<{
   isCheckingConnection?: boolean
   onRetryConnection?: () => void
   onQuickProcess?: () => void
+  analysisProviderWarning?: string | null
+  focusAnalysisProvider?: boolean
 }> = ({
   onClose,
   isStepVisible = true,
@@ -437,6 +493,8 @@ const InnerWizardContent: React.FC<{
   isCheckingConnection,
   onRetryConnection,
   onQuickProcess,
+  analysisProviderWarning,
+  focusAnalysisProvider,
 }) => {
   const ctx = useIngestWizard()
   const { currentStep } = ctx.state
@@ -462,7 +520,11 @@ const InnerWizardContent: React.FC<{
         />
       )}
       {currentStep === 2 && (
-        <WizardConfigureStep isStepVisible={isStepVisible} />
+        <WizardConfigureStep
+          isStepVisible={isStepVisible}
+          analysisProviderWarning={analysisProviderWarning}
+          focusAnalysisProvider={focusAnalysisProvider}
+        />
       )}
       {currentStep === 3 && (
         <ReviewStep
@@ -487,6 +549,8 @@ const WizardTestHarness: React.FC<{
   onRetryConnection?: () => void
   onQuickProcess?: () => void
   initialState?: Partial<IngestWizardState>
+  analysisProviderWarning?: string | null
+  focusAnalysisProvider?: boolean
 }> = ({
   onClose,
   isOnlineForIngest,
@@ -495,6 +559,8 @@ const WizardTestHarness: React.FC<{
   onRetryConnection,
   onQuickProcess,
   initialState,
+  analysisProviderWarning,
+  focusAnalysisProvider,
 }) => {
   return (
     <IngestWizardProvider initialState={initialState}>
@@ -506,6 +572,8 @@ const WizardTestHarness: React.FC<{
         isCheckingConnection={isCheckingConnection}
         onRetryConnection={onRetryConnection}
         onQuickProcess={onQuickProcess}
+        analysisProviderWarning={analysisProviderWarning}
+        focusAnalysisProvider={focusAnalysisProvider}
       />
     </IngestWizardProvider>
   )
@@ -846,6 +914,106 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
     expect(
       screen.getByRole("button", { name: /deep preset/i })
     ).toBeTruthy()
+  })
+
+  it("Step 2 — offers configured providers and accepts session-scoped free text", async () => {
+    getProvidersStatusMock.mockResolvedValue({
+      providers: [
+        { name: " openai ", configured: true, requires_api_key: true },
+        { name: "openai", configured: true, requires_api_key: true },
+        { name: "anthropic", configured: false, requires_api_key: true },
+        { name: "ollama", configured: true, requires_api_key: false },
+        { name: " ", configured: true, requires_api_key: false },
+      ],
+      any_configured: true,
+    })
+    const user = userEvent.setup()
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        initialState={{
+          currentStep: 2,
+          highestStep: 2,
+          selectedPreset: "standard",
+          customBasePreset: "standard",
+          presetConfig: resolvePresetMap().standard,
+        }}
+      />
+    )
+
+    const provider = await screen.findByRole("combobox", {
+      name: "Analysis provider",
+    })
+    await waitFor(() => expect(getProvidersStatusMock).toHaveBeenCalledTimes(1))
+    expect(screen.getAllByRole("option", { name: "openai" })).toHaveLength(1)
+    expect(screen.getByRole("option", { name: "ollama" })).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: "anthropic" })).toBeNull()
+
+    await user.type(provider, "custom-local")
+    await user.keyboard("{Enter}")
+
+    expect(ctxRef?.state.presetConfig.advancedValues?.api_name).toBe(
+      "custom-local"
+    )
+
+    await user.click(screen.getByRole("button", { name: "Clear analysis provider" }))
+    expect(ctxRef?.state.presetConfig.advancedValues?.api_name).toBeUndefined()
+  })
+
+  it("Step 2 — focuses and describes the localized provider warning", async () => {
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        initialState={{
+          currentStep: 2,
+          highestStep: 2,
+          selectedPreset: "standard",
+          customBasePreset: "standard",
+          presetConfig: resolvePresetMap().standard,
+        }}
+        analysisProviderWarning="Choose an analysis provider before running ingest analysis."
+        focusAnalysisProvider
+      />
+    )
+
+    const provider = await screen.findByRole("combobox", {
+      name: "Analysis provider",
+    })
+    const warning = screen.getByRole("alert")
+
+    expect(provider).toHaveFocus()
+    expect(provider).toHaveAttribute("aria-describedby")
+    expect(provider.getAttribute("aria-describedby")).toContain(warning.id)
+    expect(warning).toHaveAttribute("aria-live", "assertive")
+    expect(warning).toHaveTextContent(
+      "Choose an analysis provider before running ingest analysis."
+    )
+  })
+
+  it("Step 2 — remains editable when provider discovery fails", async () => {
+    getProvidersStatusMock.mockRejectedValue(new Error("catalog unavailable"))
+    const user = userEvent.setup()
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        initialState={{
+          currentStep: 2,
+          highestStep: 2,
+          selectedPreset: "standard",
+          customBasePreset: "standard",
+          presetConfig: resolvePresetMap().standard,
+        }}
+      />
+    )
+
+    const provider = await screen.findByRole("combobox", {
+      name: "Analysis provider",
+    })
+    await user.type(provider, "local-provider")
+
+    expect(ctxRef?.state.presetConfig.advancedValues?.api_name).toBe(
+      "local-provider"
+    )
   })
 
   // -------------------------------------------------------------------------
