@@ -83,6 +83,7 @@ describe("WizardConfigureStep Ant Design provider selection", () => {
     const provider = screen.getByRole("combobox", {
       name: "Analysis provider",
     })
+    expect(provider.closest(".ant-select")).toHaveClass("w-full")
     await user.click(provider)
     await screen.findByRole("option", { name: "openai" })
     fireEvent.keyDown(provider, {

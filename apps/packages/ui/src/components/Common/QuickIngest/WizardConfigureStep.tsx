@@ -174,7 +174,8 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
         if (!cancelled) {
           setAnalysisProviders(providers)
         }
-      } catch {
+      } catch (error) {
+        console.warn("[QuickIngest] Failed to load analysis providers", error)
         if (!cancelled) {
           setAnalysisProviders([])
         }
@@ -706,6 +707,7 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
               <AutoComplete
                 ref={analysisProviderRef}
                 id="quick-ingest-analysis-provider"
+                className="w-full"
                 aria-label={qi("analysisProvider.label", "Analysis provider")}
                 aria-describedby={`quick-ingest-analysis-provider-help${analysisProviderWarning ? " quick-ingest-analysis-provider-warning" : ""}`}
                 aria-invalid={analysisProviderWarning ? true : undefined}

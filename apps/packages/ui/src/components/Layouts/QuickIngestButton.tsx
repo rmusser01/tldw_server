@@ -51,6 +51,7 @@ export const useQuickIngestEvents = (options?: QuickIngestEventsOptions) => {
   const [capturedPresetMap, setCapturedPresetMap] = useState<PresetMap>(() =>
     resolvePresetMap()
   )
+  const capturedPresetMapRef = useRef(capturedPresetMap)
   const [openRevision, setOpenRevision] = useState(0)
   const [preparedSessionId, setPreparedSessionId] = useState<string | null>(null)
   const preparedSessionIdRef = useRef<string | null>(null)
@@ -78,10 +79,12 @@ export const useQuickIngestEvents = (options?: QuickIngestEventsOptions) => {
     (!quickIngestOpen || preparedSessionId === session?.id)
 
   const capturePresetSnapshot = useCallback((incrementRevision = true) => {
-    setCapturedPresetMap(resolvedPresetMap)
-    if (incrementRevision) {
-      setOpenRevision((revision) => revision + 1)
+    if (!incrementRevision) {
+      return capturedPresetMapRef.current
     }
+    capturedPresetMapRef.current = resolvedPresetMap
+    setCapturedPresetMap(resolvedPresetMap)
+    setOpenRevision((revision) => revision + 1)
     return resolvedPresetMap
   }, [resolvedPresetMap])
 
@@ -334,7 +337,6 @@ export const useQuickIngestEvents = (options?: QuickIngestEventsOptions) => {
   }, [
     capturePresetSnapshot,
     prepareExistingSession,
-    preparedSessionId,
     session,
     storageAndSessionReady,
   ])

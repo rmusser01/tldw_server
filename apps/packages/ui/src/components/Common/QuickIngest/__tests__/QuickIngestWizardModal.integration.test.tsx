@@ -1001,29 +1001,41 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
   })
 
   it("Step 2 — remains editable when provider discovery fails", async () => {
-    getProvidersStatusMock.mockRejectedValue(new Error("catalog unavailable"))
+    const catalogError = new Error("catalog unavailable")
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    getProvidersStatusMock.mockRejectedValue(catalogError)
     const user = userEvent.setup()
-    render(
-      <WizardTestHarness
-        onClose={onClose}
-        initialState={{
-          currentStep: 2,
-          highestStep: 2,
-          selectedPreset: "standard",
-          customBasePreset: "standard",
-          presetConfig: resolvePresetMap().standard,
-        }}
-      />
-    )
+    try {
+      render(
+        <WizardTestHarness
+          onClose={onClose}
+          initialState={{
+            currentStep: 2,
+            highestStep: 2,
+            selectedPreset: "standard",
+            customBasePreset: "standard",
+            presetConfig: resolvePresetMap().standard,
+          }}
+        />
+      )
 
-    const provider = await screen.findByRole("combobox", {
-      name: "Analysis provider",
-    })
-    await user.type(provider, "local-provider")
+      const provider = await screen.findByRole("combobox", {
+        name: "Analysis provider",
+      })
+      await waitFor(() => {
+        expect(warn).toHaveBeenCalledWith(
+          "[QuickIngest] Failed to load analysis providers",
+          catalogError
+        )
+      })
+      await user.type(provider, "local-provider")
 
-    expect(ctxRef?.state.presetConfig.advancedValues?.api_name).toBe(
-      "local-provider"
-    )
+      expect(ctxRef?.state.presetConfig.advancedValues?.api_name).toBe(
+        "local-provider"
+      )
+    } finally {
+      warn.mockRestore()
+    }
   })
 
   // -------------------------------------------------------------------------

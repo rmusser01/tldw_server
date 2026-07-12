@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { act, render, screen } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import {
@@ -71,18 +71,23 @@ vi.mock("@/components/Common/QuickIngestWizardModal", () => ({
     onClose,
     openRevision,
     createNewDraft,
+    presetMap,
   }: {
     open: boolean
     autoProcessQueued?: boolean
     onClose: () => void
     openRevision?: number
     createNewDraft?: () => void
+    presetMap?: ReturnType<typeof resolvePresetMap>
   }) => (
     <div
       data-testid="quick-ingest-modal-mock"
       data-open={open ? "true" : "false"}
       data-auto-process={autoProcessQueued ? "true" : "false"}
       data-open-revision={String(openRevision ?? "")}
+      data-standard-provider={String(
+        presetMap?.standard.advancedValues?.api_name ?? ""
+      )}
     >
       <button type="button" onClick={onClose}>
         close-modal
@@ -227,6 +232,46 @@ describe("QuickIngestButton resume behavior", () => {
       useQuickIngestSessionStore.getState().session?.presetConfig.advancedValues
         ?.api_name
     ).toBe("openai")
+  })
+
+  it("keeps the captured preset map when reopening an excluded session", async () => {
+    const user = userEvent.setup()
+    presetStorage.value = resolvePresetMap({
+      standard: {
+        ...resolvePresetMap().standard,
+        advancedValues: { api_name: "openai" },
+      },
+    })
+    useQuickIngestSessionStore.getState().upsertSession({
+      ...createEmptyQuickIngestSession(),
+      lifecycle: "draft",
+      visibility: "visible",
+    })
+    const { rerender } = render(<QuickIngestButton />)
+
+    const modal = screen.getByTestId("quick-ingest-modal-mock")
+    await waitFor(() => {
+      expect(modal).toHaveAttribute("data-standard-provider", "openai")
+    })
+    const capturedRevision = modal.getAttribute("data-open-revision")
+    await user.click(screen.getByText("close-modal"))
+    act(() => {
+      useQuickIngestSessionStore.getState().upsertSession({
+        lifecycle: "processing",
+      })
+    })
+
+    presetStorage.value = resolvePresetMap({
+      standard: {
+        ...resolvePresetMap().standard,
+        advancedValues: { api_name: "anthropic" },
+      },
+    })
+    rerender(<QuickIngestButton />)
+    await user.click(screen.getByTestId("open-quick-ingest"))
+
+    expect(modal).toHaveAttribute("data-open-revision", capturedRevision)
+    expect(modal).toHaveAttribute("data-standard-provider", "openai")
   })
 
   it("rebases and seeds an existing named draft in one playlist open", () => {

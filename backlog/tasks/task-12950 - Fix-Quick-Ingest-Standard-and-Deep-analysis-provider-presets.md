@@ -28,7 +28,7 @@ Target dev with a shared WebUI/browser-extension fix so the active Quick Ingest 
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Implementation and review fixes are complete. Finalize the temporary plan record, commit, push codex/fix-quick-ingest-preset-provider, open a PR targeting dev, then record the PR URL and final status.
+Implementation and PR review follow-up are complete on https://github.com/rmusser01/tldw_server/pull/2717.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -40,23 +40,27 @@ Reducer edits merge into the full session config, preserve first-source override
 
 Added a session-scoped analysis-provider AutoComplete with configured suggestions, free text, clear behavior, localized help/warnings, accessible focus, and nonfatal discovery failure.
 
-Provider preflight now recovers from persisted steps 1-3, re-arms on close/reopen, waits for connection checks, and never starts a request while invalid.
+Provider preflight recovers from persisted steps 1-3, re-arms on close/reopen, waits for connection checks, and never starts a request while invalid.
 
-Live open events consume their pending request exactly once. Seeded draft opens merge named-preset rebases with open details and remount the reducer; processing/terminal sessions explicitly retain their active snapshot.
+Live open events consume their pending request exactly once. Seeded draft opens merge named-preset rebases with open details and remount the reducer; processing/terminal sessions retain their active snapshot.
 
-Review follow-up added real Ant Design keyboard selection plus WebUI and Chrome-extension storage-backed hydration smoke coverage.
+Initial review follow-up added real Ant Design keyboard selection plus WebUI and Chrome-extension storage-backed hydration smoke coverage.
 
-Verification: focused shared Vitest 6 files/176 tests passed; extension-config QuickIngestButton 22 passed; quick-ingest-open 7 passed; Web storage adapter 10 passed; Web TypeScript passed with --incremental false; extension compile passed; touched ESLint 0 errors (94 existing warning-level findings in large test fixtures/source baseline); WebUI production build passed; Chrome extension build passed; Chrome extension provider hydration smoke passed; missing-provider Chrome smoke passed; git diff --check passed.
+PR #2717 review follow-up addressed all four remaining threads: captured preset maps now change only with revision/remount boundaries; provider-catalog failures emit a diagnostic warning while remaining nonfatal; the real AutoComplete is full width; and the redundant preparedSessionId effect dependency was removed.
 
-Known WebUI browser blocker: the local Next.js dev harness produced an unrelated runtime error portal/backend overlay on /media after three attempts, intercepting Quick Ingest clicks. Per the repository three-attempt rule, no fourth run was made. The WebUI production build and the storage-backed Playwright scenario remain present for CI/a clean harness.
+Fresh verification after PR feedback: focused shared Vitest 6 files/177 tests passed; extension-config QuickIngestButton 23 passed; Web TypeScript passed with --incremental false; extension compile passed; touched ESLint 0 errors (35 existing warning-level findings in large test fixtures); WebUI production build passed with 152 routes and token sync; Chrome extension production build passed with token sync; git diff --check passed.
 
-Bandit: not applicable because the touched implementation/test/docs scope contains no Python.
+GitHub Actions had no actionable failure logs during the audit; all first-party checks were queued, while CodeRabbit passed/skipped review and Cubic was external/skipped.
+
+Known WebUI browser blocker from initial delivery remains: the local Next.js dev harness produced an unrelated runtime error portal/backend overlay on /media after three attempts. The WebUI production build and storage-backed Playwright scenario are present for CI/a clean harness.
+
+Bandit is not applicable because the touched follow-up scope contains no Python.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Fixed Quick Ingest Standard/Deep provider failures across the shared WebUI/browser-extension UI. Saved preset maps are hydrated before draft creation, captured per open, and merged losslessly through edits. The Configure step now exposes an accessible session-only provider selector and invalid runs recover there without starting requests. Review hardening covers pending-event consumption, seeded draft remount/rebase behavior, processing/terminal snapshot preservation, persisted-step redirects, reopen retries, and connection checks. PR: https://github.com/rmusser01/tldw_server/pull/2717. Human-authored Change summary remains required before merge.
+Fixed Quick Ingest Standard/Deep provider failures across the shared WebUI/browser-extension UI and addressed every review thread on PR #2717. Saved preset maps are hydrated and captured per open, excluded sessions cannot silently swap reducer preset bases, provider discovery failures are diagnostic but nonfatal, and the provider control is accessible and full width. All focused tests, typechecks, lint, and production builds pass. PR: https://github.com/rmusser01/tldw_server/pull/2717. A human-authored Change summary remains required before merge.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
