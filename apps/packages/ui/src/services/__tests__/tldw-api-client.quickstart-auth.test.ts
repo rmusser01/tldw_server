@@ -39,6 +39,10 @@ vi.mock("@/utils/safe-storage", () => ({
 }))
 
 import { TldwApiClient } from "@/services/tldw/TldwApiClient"
+import {
+  activateCookieSessionConfig,
+  isCookieSessionConfigInvalidated
+} from "@/services/tldw/runtime-auth-override"
 
 const originalDeploymentMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
 const originalApiUrl = process.env.NEXT_PUBLIC_API_URL
@@ -74,11 +78,13 @@ describe("TldwApiClient quickstart auth bootstrap", () => {
     mocks.storage.clear()
     mocks.sessionStorage.clear()
     window.localStorage.clear()
+    activateCookieSessionConfig()
   })
 
   afterEach(() => {
     restoreEnv()
     window.localStorage.clear()
+    activateCookieSessionConfig()
   })
 
   it("does not persist the public quickstart api key", async () => {
@@ -179,6 +185,34 @@ describe("TldwApiClient quickstart auth bootstrap", () => {
     expect(mocks.sessionStorage.get("tldwManualSessionApiKey")).toEqual(
       manualSession
     )
+  })
+
+  it("removes the cookie marker and rehydrates the preserved manual connection", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    const manualConfig = {
+      authMode: "single-user" as const,
+      authSource: "manual" as const,
+      serverUrl: "https://remote.example.test/path",
+      apiKey: "manual-key",
+      credentialSource: "manual" as const,
+      apiKeyPersistence: "device" as const,
+      apiKeyServerOrigin: "https://remote.example.test"
+    }
+    mocks.storage.set("tldwConfig", manualConfig)
+    mocks.storage.set("tldwCookieSessionConfig", {
+      authMode: "single-user",
+      authSource: "cookie-session",
+      serverUrl: window.location.origin
+    })
+    const client = new TldwApiClient()
+    await client.initialize()
+
+    await client.clearCookieSingleUserSession()
+
+    expect(mocks.storage.has("tldwCookieSessionConfig")).toBe(false)
+    expect(isCookieSessionConfigInvalidated()).toBe(true)
+    await expect(client.getConfig()).resolves.toEqual(manualConfig)
+    expect(mocks.storage.get("tldwConfig")).toEqual(manualConfig)
   })
 
   it("removes a mismatched manual session credential while cookie auth is active", async () => {

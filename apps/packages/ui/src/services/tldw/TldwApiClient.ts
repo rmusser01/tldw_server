@@ -50,6 +50,7 @@ import {
 } from "@/services/tldw/browser-networking"
 import {
   getRuntimeSingleUserApiKeyOverride,
+  invalidateCookieSessionConfig,
   isCookieSessionConfigInvalidated
 } from "@/services/tldw/runtime-auth-override"
 import type {
@@ -2015,6 +2016,14 @@ export class TldwApiClientBase {
         null
       this.applyConfigState()
     }
+  }
+
+  async clearCookieSingleUserSession(): Promise<void> {
+    await this.storage.remove(COOKIE_SESSION_CONFIG_KEY)
+    invalidateCookieSessionConfig()
+    this.config = null
+    await this.initialize()
+    this.publishConfigUpdated()
   }
 
   async getConfig(): Promise<TldwConfig | null> {

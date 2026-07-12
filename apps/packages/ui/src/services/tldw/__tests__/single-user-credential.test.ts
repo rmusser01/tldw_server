@@ -246,6 +246,60 @@ describe("manual single-user credential policy", () => {
     expect(await session.get(MANUAL_SESSION_KEY)).toBeUndefined()
   })
 
+  it("surfaces a persistent read failure after attempting session clearing", async () => {
+    const persistent: CredentialStorage = {
+      get: async () => {
+        throw new Error("persistent read unavailable")
+      },
+      set: async () => undefined,
+      remove: async () => undefined
+    }
+    const session = new MemoryStorage()
+    await session.set(MANUAL_SESSION_KEY, { apiKey: "session-secret" })
+
+    await expect(clearManualCredentials(persistent, session)).rejects.toThrow(
+      "persistent read unavailable"
+    )
+    expect(await session.get(MANUAL_SESSION_KEY)).toBeUndefined()
+  })
+
+  it("surfaces a persistent sanitize failure after clearing session storage", async () => {
+    const persistent: CredentialStorage = {
+      get: async () => deviceConfig,
+      set: async () => {
+        throw new Error("persistent sanitize unavailable")
+      },
+      remove: async () => undefined
+    }
+    const session = new MemoryStorage()
+    await session.set(MANUAL_SESSION_KEY, { apiKey: "session-secret" })
+
+    await expect(clearManualCredentials(persistent, session)).rejects.toThrow(
+      "persistent sanitize unavailable"
+    )
+    expect(await session.get(MANUAL_SESSION_KEY)).toBeUndefined()
+  })
+
+  it("surfaces session removal failure after sanitizing persistent storage", async () => {
+    const persistent = new MemoryStorage()
+    await persistent.set("tldwConfig", deviceConfig)
+    const session: CredentialStorage = {
+      get: async () => ({ apiKey: "session-secret" }),
+      set: async () => undefined,
+      remove: async () => {
+        throw new Error("session remove unavailable")
+      }
+    }
+
+    await expect(clearManualCredentials(persistent, session)).rejects.toThrow(
+      "session remove unavailable"
+    )
+    expect(await persistent.get<TldwConfig>("tldwConfig")).toEqual({
+      authMode: "single-user",
+      serverUrl: "https://api.example.test/v1"
+    })
+  })
+
   it("normalizes only HTTP server origins", () => {
     expect(normalizeServerOrigin("https://API.example.test/path")).toBe(
       "https://api.example.test"

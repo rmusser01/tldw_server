@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from tldw_Server_API.app.core.Audit.unified_audit_service import shutdown_audit_service
 from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
 from tldw_Server_API.app.core.AuthNZ.initialize import bootstrap_single_user_profile
+from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager
 from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
 from tldw_Server_API.app.core.DB_Management.Users_DB import reset_users_db
@@ -64,6 +65,7 @@ def test_mint_returns_no_token_and_sets_exact_cookie(single_user_cookie_client):
     response = _mint(client, api_key)
 
     assert response.status_code == 200
+    assert "no-store" in response.headers["cache-control"]
     assert set(response.json()) == {"authenticated", "expires_at"}
     cookie = response.headers["set-cookie"]
     assert "tldw_single_user_session=" in cookie
@@ -113,6 +115,7 @@ def test_valid_cookie_session_is_reused_on_mint(single_user_cookie_client):
     second = _mint(client, api_key)
 
     assert second.status_code == 200
+    assert "no-store" in second.headers["cache-control"]
     assert second.json()["expires_at"] == first.json()["expires_at"]
     assert client.cookies["tldw_single_user_session"] == cookie_before
 
@@ -126,8 +129,19 @@ def test_csrf_disabled_refuses_cookie_mint(single_user_cookie_client, monkeypatc
     assert response.status_code == 503
 
 
-def test_logout_revokes_only_current_cookie_session(single_user_cookie_client):
+def test_logout_revokes_only_current_cookie_session(
+    single_user_cookie_client,
+    monkeypatch,
+):
     client, api_key = single_user_cookie_client
+    revoke_calls: list[int] = []
+    original_revoke = SessionManager.revoke_session
+
+    async def tracked_revoke(self, session_id, *args, **kwargs):
+        revoke_calls.append(session_id)
+        return await original_revoke(self, session_id, *args, **kwargs)
+
+    monkeypatch.setattr(SessionManager, "revoke_session", tracked_revoke)
     first = _mint(client, api_key)
     assert first.status_code == 200
     first_cookie = client.cookies["tldw_single_user_session"]
@@ -148,8 +162,10 @@ def test_logout_revokes_only_current_cookie_session(single_user_cookie_client):
     )
     assert logout.status_code == 200
     assert logout.json() == {"authenticated": False}
+    assert "no-store" in logout.headers["cache-control"]
     assert "tldw_single_user_session=" in logout.headers["set-cookie"]
     assert "Max-Age=0" in logout.headers["set-cookie"]
+    assert len(revoke_calls) == 1
 
     client.cookies.clear()
     client.cookies.set("tldw_single_user_session", first_cookie, path="/api")
@@ -158,3 +174,81 @@ def test_logout_revokes_only_current_cookie_session(single_user_cookie_client):
     client.cookies.clear()
     client.cookies.set("tldw_single_user_session", second_cookie, path="/api")
     assert client.get("/api/v1/auth/sessions").status_code == 200
+
+    client.cookies.clear()
+    client.get("/api/v1/health")
+    unbound_csrf = client.cookies["csrf_token"]
+    client.cookies.set("tldw_single_user_session", first_cookie, path="/api")
+    stale_logout = client.delete(
+        "/api/v1/auth/single-user/session",
+        headers={"X-CSRF-Token": unbound_csrf},
+    )
+
+    assert stale_logout.status_code == 200
+    assert stale_logout.json() == {"authenticated": False}
+    assert "no-store" in stale_logout.headers["cache-control"]
+    assert "Max-Age=0" in stale_logout.headers["set-cookie"]
+    assert len(revoke_calls) == 1
+
+    client.cookies.clear()
+    client.cookies.set("tldw_single_user_session", second_cookie, path="/api")
+    assert client.get("/api/v1/auth/sessions").status_code == 200
+
+
+def test_logout_without_cookie_is_idempotent(single_user_cookie_client):
+    client, _ = single_user_cookie_client
+    client.cookies.clear()
+
+    response = client.delete("/api/v1/auth/single-user/session")
+
+    assert response.status_code == 200
+    assert response.json() == {"authenticated": False}
+    assert "no-store" in response.headers["cache-control"]
+    assert "tldw_single_user_session=" in response.headers["set-cookie"]
+    assert "Max-Age=0" in response.headers["set-cookie"]
+
+
+def test_logout_with_invalid_cookie_is_idempotent(
+    single_user_cookie_client,
+    monkeypatch,
+):
+    client, _ = single_user_cookie_client
+    revoke_calls: list[int] = []
+    original_revoke = SessionManager.revoke_session
+
+    async def tracked_revoke(self, session_id, *args, **kwargs):
+        revoke_calls.append(session_id)
+        return await original_revoke(self, session_id, *args, **kwargs)
+
+    monkeypatch.setattr(SessionManager, "revoke_session", tracked_revoke)
+    client.cookies.clear()
+    client.get("/api/v1/health")
+    csrf_token = client.cookies["csrf_token"]
+    client.cookies.set("tldw_single_user_session", "invalid-cookie", path="/api")
+
+    response = client.delete(
+        "/api/v1/auth/single-user/session",
+        headers={"X-CSRF-Token": csrf_token},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"authenticated": False}
+    assert "no-store" in response.headers["cache-control"]
+    assert "Max-Age=0" in response.headers["set-cookie"]
+    assert revoke_calls == []
+
+
+def test_single_user_session_logout_unavailable_in_multi_user_mode(
+    single_user_cookie_client,
+    monkeypatch,
+):
+    client, _ = single_user_cookie_client
+    client.cookies.clear()
+    monkeypatch.setenv("AUTH_MODE", "multi_user")
+    reset_settings()
+
+    response = client.delete("/api/v1/auth/single-user/session")
+
+    # CSRF middleware rejects the state-changing request before the
+    # single-user-only route can conceal itself with a 404.
+    assert response.status_code == 403

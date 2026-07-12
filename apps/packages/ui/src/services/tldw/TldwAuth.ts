@@ -205,6 +205,14 @@ export class TldwAuthService {
       return
     }
     if (config.authMode === 'single-user') {
+      if (config.authSource === 'cookie-session') {
+        await bgRequest<any>({
+          path: '/api/v1/auth/single-user/session',
+          method: 'DELETE'
+        })
+        await tldwClient.clearCookieSingleUserSession()
+        return
+      }
       await tldwClient.clearManualSingleUserCredentials()
       return
     }

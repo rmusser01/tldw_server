@@ -70,6 +70,7 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import (
     InvalidTokenError,
     RegistrationError,
     SessionError,
+    SessionRevokedException,
     TokenExpiredError,
     WeakPasswordError,
 )
@@ -1236,6 +1237,7 @@ async def create_single_user_cookie_session(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Cookie sessions require CSRF protection",
         )
+    response.headers["Cache-Control"] = "no-store"
 
     identity = await validate_single_user_session(request, session_manager)
     if identity is not None:
@@ -1250,22 +1252,24 @@ async def create_single_user_cookie_session(
 async def delete_single_user_cookie_session(
     request: Request,
     response: Response,
-    principal: AuthPrincipal = Depends(get_auth_principal),
     session_manager: SessionManager = Depends(get_session_manager_dep),
 ) -> dict[str, bool]:
     """Revoke exactly the current opaque single-user session and clear its cookie."""
-    session_id = getattr(request.state, "single_user_session_id", None)
-    if principal.token_type != "single_user_session" or not isinstance(session_id, int):  # nosec B105
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="A valid single-user cookie session is required",
-        )
-    await session_manager.revoke_session(
-        session_id=session_id,
-        revoked_by=principal.user_id,
-        reason="Single-user cookie logout",
-    )
+    if get_settings().AUTH_MODE != "single_user":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    response.headers["Cache-Control"] = "no-store"
     clear_single_user_session_cookie(response)
+    try:
+        identity = await validate_single_user_session(request, session_manager)
+    except SessionRevokedException:
+        identity = None
+    if identity is not None:
+        await session_manager.revoke_session(
+            session_id=identity.session_id,
+            revoked_by=identity.user_id,
+            reason="Single-user cookie logout",
+        )
     return {"authenticated": False}
 
 

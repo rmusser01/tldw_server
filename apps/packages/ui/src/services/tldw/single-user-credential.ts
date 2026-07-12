@@ -154,16 +154,32 @@ export const clearManualCredentials = async (
   persistent: CredentialStorage,
   session: CredentialStorage
 ): Promise<void> => {
-  const stored = await persistent.get<TldwConfig>("tldwConfig").catch(() => null)
-  await session.remove(MANUAL_SESSION_KEY).catch(() => undefined)
-  if (!stored) return
+  let stored: TldwConfig | null | undefined
+  const failures: unknown[] = []
+  try {
+    stored = await persistent.get<TldwConfig>("tldwConfig")
+  } catch (error) {
+    failures.push(error)
+  }
+  try {
+    await session.remove(MANUAL_SESSION_KEY)
+  } catch (error) {
+    failures.push(error)
+  }
 
-  const {
-    apiKey: _apiKey,
-    credentialSource: _credentialSource,
-    apiKeyPersistence: _apiKeyPersistence,
-    apiKeyServerOrigin: _apiKeyServerOrigin,
-    ...connection
-  } = stored
-  await persistent.set("tldwConfig", connection as TldwConfig)
+  if (stored) {
+    const {
+      apiKey: _apiKey,
+      credentialSource: _credentialSource,
+      apiKeyPersistence: _apiKeyPersistence,
+      apiKeyServerOrigin: _apiKeyServerOrigin,
+      ...connection
+    } = stored
+    try {
+      await persistent.set("tldwConfig", connection as TldwConfig)
+    } catch (error) {
+      failures.push(error)
+    }
+  }
+  if (failures.length) throw failures[0]
 }
