@@ -231,13 +231,132 @@ class TestParakeetONNX:
         'tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.'
         'Audio_Transcription_Parakeet_ONNX.snapshot_download'
     )
-    def test_loader_refreshes_remote_cache_missing_config(
+    @pytest.mark.parametrize(
+        "missing_filename",
+        ("config.json", "encoder-model.int8.onnx"),
+        ids=("config", "encoder-graph"),
+    )
+    def test_loader_refreshes_incomplete_remote_tdt_cache(
         self,
+        mock_download: MagicMock,
+        missing_filename: str,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A stale remote TDT cache must refresh missing metadata or graphs."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
+            Audio_Transcription_Parakeet_ONNX as onnx_mod,
+        )
+
+        model_id = "org/custom-parakeet-onnx"
+        model_dir = tmp_path / ".cache" / "parakeet_onnx" / "org_custom-parakeet-onnx_default"
+        model_dir.mkdir(parents=True)
+        for filename in (
+            "decoder_joint-model.int8.onnx",
+            "encoder-model.int8.onnx",
+            "nemo128.onnx",
+        ):
+            if filename != missing_filename:
+                (model_dir / filename).write_bytes(b"placeholder")
+        (model_dir / "vocab.txt").write_text("<unk> 0\n<blk> 1\n", encoding="utf-8")
+        if missing_filename != "config.json":
+            (model_dir / "config.json").write_text(
+                json.dumps({"model_type": "nemo-conformer-tdt", "features_size": 128}),
+                encoding="utf-8",
+            )
+
+        monkeypatch.setattr(onnx_mod.Path, "home", classmethod(lambda cls: tmp_path))
+        monkeypatch.setattr(
+            onnx_mod,
+            "get_stt_config",
+            lambda: {"parakeet_onnx_model_id": model_id},
+            raising=True,
+        )
+        load_model = MagicMock(return_value=MagicMock())
+        monkeypatch.setitem(sys.modules, "onnx_asr", types.SimpleNamespace(load_model=load_model))
+        onnx_mod.unload_onnx_models()
+
+        def populate_missing_artifact(**kwargs) -> None:
+            (model_dir / "config.json").write_text(
+                json.dumps({"model_type": "nemo-conformer-tdt", "features_size": 128}),
+                encoding="utf-8",
+            )
+            (model_dir / "encoder-model.int8.onnx").write_bytes(b"placeholder")
+
+        mock_download.side_effect = populate_missing_artifact
+        encoder_input = types.SimpleNamespace(name="audio_signal", shape=[None, 128, None])
+        with patch("onnxruntime.InferenceSession") as mock_ort_session:
+            mock_ort_session.return_value.get_inputs.return_value = [encoder_input]
+            session, tokenizer = onnx_mod.load_parakeet_onnx_model(
+                model_path=None,
+                device="cpu",
+            )
+
+        mock_download.assert_called_once()
+        assert "config.json" in mock_download.call_args.kwargs["allow_patterns"]
+        assert isinstance(session, onnx_mod.ParakeetOnnxAsrRuntime)
+        assert tokenizer is not None
+        load_model.assert_called_once()
+
+    @patch(
+        'tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.'
+        'Audio_Transcription_Parakeet_ONNX.snapshot_download'
+    )
+    @patch("onnxruntime.InferenceSession")
+    def test_loader_rejects_remote_tdt_cache_when_repair_remains_incomplete(
+        self,
+        mock_ort_session: MagicMock,
         mock_download: MagicMock,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """A stale remote cache with vocab but no config must refresh its sidecars."""
+        """An incomplete TDT repair must not fall through to single-graph loading."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
+            Audio_Transcription_Parakeet_ONNX as onnx_mod,
+        )
+
+        model_id = "org/custom-parakeet-onnx"
+        model_dir = tmp_path / ".cache" / "parakeet_onnx" / "org_custom-parakeet-onnx_default"
+        model_dir.mkdir(parents=True)
+        for filename in ("decoder_joint-model.int8.onnx", "nemo128.onnx"):
+            (model_dir / filename).write_bytes(b"placeholder")
+        (model_dir / "vocab.txt").write_text("<unk> 0\n<blk> 1\n", encoding="utf-8")
+        (model_dir / "config.json").write_text(
+            json.dumps({"model_type": "nemo-conformer-tdt", "features_size": 128}),
+            encoding="utf-8",
+        )
+
+        monkeypatch.setattr(onnx_mod.Path, "home", classmethod(lambda cls: tmp_path))
+        mock_ort_session.return_value.get_inputs.return_value = [
+            types.SimpleNamespace(name="audio_signal", shape=[None, 128, None])
+        ]
+        onnx_mod.unload_onnx_models()
+
+        session, tokenizer = onnx_mod.load_parakeet_onnx_model(
+            model_path=model_id,
+            device="cpu",
+        )
+
+        assert session is None
+        assert tokenizer is None
+        mock_download.assert_called_once()
+        mock_ort_session.assert_not_called()
+
+    @patch(
+        'tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.'
+        'Audio_Transcription_Parakeet_ONNX.snapshot_download'
+    )
+    @patch("onnxruntime.InferenceSession")
+    @pytest.mark.parametrize("failure_site", ("encoder", "decoder"))
+    def test_loader_repairs_remote_cache_once_after_external_data_failure(
+        self,
+        mock_ort_session: MagicMock,
+        mock_download: MagicMock,
+        failure_site: str,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A remote bundle load failure should trigger one cache repair and retry."""
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
             Audio_Transcription_Parakeet_ONNX as onnx_mod,
         )
@@ -252,38 +371,38 @@ class TestParakeetONNX:
         ):
             (model_dir / filename).write_bytes(b"placeholder")
         (model_dir / "vocab.txt").write_text("<unk> 0\n<blk> 1\n", encoding="utf-8")
+        (model_dir / "config.json").write_text(
+            json.dumps({"model_type": "nemo-conformer-tdt", "features_size": 128}),
+            encoding="utf-8",
+        )
 
         monkeypatch.setattr(onnx_mod.Path, "home", classmethod(lambda cls: tmp_path))
-        monkeypatch.setattr(
-            onnx_mod,
-            "get_stt_config",
-            lambda: {"parakeet_onnx_model_id": model_id},
-            raising=True,
-        )
-        load_model = MagicMock(return_value=MagicMock())
+        encoder_input = types.SimpleNamespace(name="audio_signal", shape=[None, 128, None])
+        encoder_session = MagicMock()
+        encoder_session.get_inputs.return_value = [encoder_input]
+        if failure_site == "encoder":
+            mock_ort_session.side_effect = (
+                RuntimeError("encoder external data is missing"),
+                encoder_session,
+            )
+            load_model = MagicMock(return_value=MagicMock())
+        else:
+            mock_ort_session.return_value = encoder_session
+            load_model = MagicMock(
+                side_effect=(RuntimeError("decoder external data is missing"), MagicMock())
+            )
         monkeypatch.setitem(sys.modules, "onnx_asr", types.SimpleNamespace(load_model=load_model))
         onnx_mod.unload_onnx_models()
 
-        def populate_config(**kwargs) -> None:
-            (model_dir / "config.json").write_text(
-                json.dumps({"model_type": "nemo-conformer-tdt", "features_size": 128}),
-                encoding="utf-8",
-            )
+        session, tokenizer = onnx_mod.load_parakeet_onnx_model(
+            model_path=model_id,
+            device="cpu",
+        )
 
-        mock_download.side_effect = populate_config
-        encoder_input = types.SimpleNamespace(name="audio_signal", shape=[None, 128, None])
-        with patch("onnxruntime.InferenceSession") as mock_ort_session:
-            mock_ort_session.return_value.get_inputs.return_value = [encoder_input]
-            session, tokenizer = onnx_mod.load_parakeet_onnx_model(
-                model_path=None,
-                device="cpu",
-            )
-
-        mock_download.assert_called_once()
-        assert "config.json" in mock_download.call_args.kwargs["allow_patterns"]
         assert isinstance(session, onnx_mod.ParakeetOnnxAsrRuntime)
         assert tokenizer is not None
-        load_model.assert_called_once()
+        mock_download.assert_called_once()
+        assert load_model.call_count == (1 if failure_site == "encoder" else 2)
 
     @patch(
         'tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.'
@@ -326,6 +445,32 @@ class TestParakeetONNX:
         load_model.assert_not_called()
         mock_download.assert_not_called()
         assert any("config.json" in message and str(tmp_path) in message for message in messages)
+
+    @patch(
+        'tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.'
+        'Audio_Transcription_Parakeet_ONNX.snapshot_download'
+    )
+    def test_loader_does_not_download_missing_explicit_local_path(
+        self,
+        mock_download: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """A nonexistent absolute local path must not be treated as a Hub repo ID."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
+            Audio_Transcription_Parakeet_ONNX as onnx_mod,
+        )
+
+        missing_model_dir = tmp_path / "missing-parakeet-model"
+        onnx_mod.unload_onnx_models()
+
+        session, tokenizer = onnx_mod.load_parakeet_onnx_model(
+            model_path=str(missing_model_dir),
+            device="cpu",
+        )
+
+        assert session is None
+        assert tokenizer is None
+        mock_download.assert_not_called()
 
     @pytest.mark.parametrize(
         "config_text",
@@ -523,7 +668,7 @@ class TestParakeetONNX:
         monkeypatch.setitem(sys.modules, "onnx_asr", types.SimpleNamespace(load_model=load_model))
         onnx_mod.unload_onnx_models()
 
-        session, tokenizer = onnx_mod.load_parakeet_onnx_model(model_path=str(tmp_path), device='cpu')
+        session, tokenizer = onnx_mod.load_parakeet_onnx_model(model_path=str(tmp_path), device='cuda')
 
         assert tokenizer is not None
         assert isinstance(session, onnx_mod.ParakeetOnnxAsrRuntime)
@@ -532,8 +677,9 @@ class TestParakeetONNX:
         assert args == ("nemo-conformer-tdt",)
         assert kwargs["path"] == tmp_path
         assert kwargs["quantization"] == "int8"
-        assert kwargs["providers"] == ["CPUExecutionProvider"]
+        assert kwargs["providers"] == ["CUDAExecutionProvider", "CPUExecutionProvider"]
         assert kwargs["preprocessor_config"] == {"use_numpy_preprocessors": True}
+        assert mock_ort_session.call_args.kwargs["providers"] == ["CPUExecutionProvider"]
 
     def test_upstream_onnx_asr_runtime_transcribes_with_recognize(
         self,

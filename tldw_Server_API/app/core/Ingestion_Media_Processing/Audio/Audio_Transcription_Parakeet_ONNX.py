@@ -17,7 +17,7 @@
 
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, Callable, Optional, Union
 
 import numpy as np
@@ -533,6 +533,46 @@ def _has_parakeet_tdt_graphs(model_dir: Path) -> bool:
     )
 
 
+def _remote_parakeet_cache_needs_refresh(model_dir: Path) -> bool:
+    """Return whether a remote cache lacks required metadata or TDT graphs."""
+    if any(
+        not (model_dir / sidecar).exists()
+        for sidecar in _PARAKEET_ONNX_REQUIRED_SIDECARS
+    ):
+        return True
+
+    try:
+        with (model_dir / "config.json").open("rt", encoding="utf-8") as config_file:
+            config = json.load(config_file)
+    except (OSError, TypeError, ValueError):
+        return True
+
+    if not isinstance(config, dict) or config.get("model_type") != "nemo-conformer-tdt":
+        return False
+
+    quantization = _resolve_parakeet_tdt_quantization(model_dir)
+    return _resolve_parakeet_tdt_bundle_paths(model_dir, quantization) is None
+
+
+def _config_declares_parakeet_tdt(model_dir: Path) -> bool:
+    """Return whether config.json identifies an onnx-asr Parakeet TDT bundle."""
+    try:
+        with (model_dir / "config.json").open("rt", encoding="utf-8") as config_file:
+            config = json.load(config_file)
+    except (OSError, TypeError, ValueError):
+        return False
+    return isinstance(config, dict) and config.get("model_type") == "nemo-conformer-tdt"
+
+
+def _is_explicit_local_model_path(model_path: str) -> bool:
+    """Recognize unambiguous local paths without requiring them to exist."""
+    return bool(
+        Path(model_path).expanduser().is_absolute()
+        or PureWindowsPath(model_path).is_absolute()
+        or model_path.startswith(("./", "../", ".\\", "..\\", "~/", "~\\"))
+    )
+
+
 def _load_parakeet_features_size(config_path: Path, model_dir: Path) -> int | None:
     """Read the positive integer feature count required by onnx-asr."""
     try:
@@ -563,16 +603,15 @@ def _encoder_features_match_config(
     runtime: Any,
     encoder_path: Path,
     session_options: Any,
-    providers: list[str],
     configured_features: int,
     model_dir: Path,
 ) -> bool:
-    """Validate a static encoder feature axis before loading onnx-asr."""
+    """Validate a static encoder feature axis with a CPU-only metadata session."""
     try:
         encoder_session = runtime.InferenceSession(
             str(encoder_path),
             sess_options=session_options,
-            providers=providers,
+            providers=["CPUExecutionProvider"],
         )
         audio_input = next(
             (input_meta for input_meta in encoder_session.get_inputs() if _onnx_input_name(input_meta) == "audio_signal"),
@@ -668,12 +707,20 @@ def load_parakeet_onnx_model(model_path: Optional[str] = None, device: str = 'cp
 
     try:
         # Check if it's a local path or HuggingFace repo
-        model_dir = Path(model_path)
+        model_dir = Path(model_path).expanduser()
 
         download_fn = _resolve_snapshot_download()
 
         is_existing_local_dir = model_dir.exists() and model_dir.is_dir()
-        if not is_existing_local_dir and download_fn:
+        is_explicit_local_path = _is_explicit_local_model_path(model_path)
+        is_local_model = is_existing_local_dir or is_explicit_local_path
+        if is_explicit_local_path and not is_existing_local_dir:
+            logger.error("Local Parakeet ONNX model directory does not exist: {}", model_dir)
+            return None, None
+
+        remote_model_id = None if is_local_model or not download_fn else model_path
+        repair_attempted = False
+        if not is_local_model and download_fn:
             # Download from HuggingFace
             logger.info(f"Downloading ONNX model from HuggingFace: {model_path}")
             cache_dir = Path.home() / '.cache' / 'parakeet_onnx'
@@ -684,19 +731,16 @@ def load_parakeet_onnx_model(model_path: Optional[str] = None, device: str = 'cp
             )
             model_dir = cache_dir / f"{model_path.replace('/', '_')}_{revision_token}"
 
-            # Limit download to model artifacts and required decoding sidecars.
-            # Existing caches may have only the ONNX graphs from older builds, so
-            # call snapshot_download when required sidecars are missing too.
-            if not model_dir.exists() or any(
-                not (model_dir / sidecar).exists()
-                for sidecar in _PARAKEET_ONNX_REQUIRED_SIDECARS
-            ):
+            # Existing caches may contain only part of a TDT graph bundle from an
+            # interrupted or older download, so refresh any incomplete bundle.
+            if not model_dir.exists() or _remote_parakeet_cache_needs_refresh(model_dir):
                 download_fn(
                     repo_id=model_path,
                     local_dir=str(model_dir),
                     revision=revision,
                     allow_patterns=_PARAKEET_ONNX_ALLOW_PATTERNS,
                 )  # nosec B615
+                repair_attempted = True
 
         # Set up providers
         providers = []
@@ -714,20 +758,31 @@ def load_parakeet_onnx_model(model_path: Optional[str] = None, device: str = 'cp
         session_options = _runtime.SessionOptions()
         session_options.graph_optimization_level = _runtime.GraphOptimizationLevel.ORT_ENABLE_ALL
 
-        quantization = _resolve_parakeet_tdt_quantization(model_dir)
-        bundle_paths = _resolve_parakeet_tdt_bundle_paths(model_dir, quantization)
-        if bundle_paths is not None:
+        for _attempt in range(2):
+            quantization = _resolve_parakeet_tdt_quantization(model_dir)
+            bundle_paths = _resolve_parakeet_tdt_bundle_paths(model_dir, quantization)
+            if bundle_paths is None:
+                break
+
             features_size = _load_parakeet_features_size(bundle_paths["config"], model_dir)
-            if features_size is None:
-                return None, None
-            if not _encoder_features_match_config(
+            encoder_matches = features_size is not None and _encoder_features_match_config(
                 _runtime,
                 bundle_paths["encoder"],
                 session_options,
-                providers,
                 features_size,
                 model_dir,
-            ):
+            )
+            if not encoder_matches:
+                if remote_model_id is not None and not repair_attempted:
+                    logger.warning("Refreshing remote Parakeet ONNX cache after validation failure")
+                    download_fn(
+                        repo_id=remote_model_id,
+                        local_dir=str(model_dir),
+                        revision=revision,
+                        allow_patterns=_PARAKEET_ONNX_ALLOW_PATTERNS,
+                    )  # nosec B615
+                    repair_attempted = True
+                    continue
                 return None, None
 
             load_onnx_asr_model = _resolve_onnx_asr_load_model()
@@ -743,19 +798,36 @@ def load_parakeet_onnx_model(model_path: Optional[str] = None, device: str = 'cp
                 "Loading Parakeet TDT ONNX graph bundle through upstream onnx-asr from: {}",
                 model_dir,
             )
-            upstream_model = load_onnx_asr_model(
-                "nemo-conformer-tdt",
-                path=model_dir,
-                quantization=quantization,
-                sess_options=session_options,
-                providers=providers,
-                preprocessor_config={"use_numpy_preprocessors": True},
-            )
+            try:
+                upstream_model = load_onnx_asr_model(
+                    "nemo-conformer-tdt",
+                    path=model_dir,
+                    quantization=quantization,
+                    sess_options=session_options,
+                    providers=providers,
+                    preprocessor_config={"use_numpy_preprocessors": True},
+                )
+            except Exception:
+                if remote_model_id is not None and not repair_attempted:
+                    logger.warning("Refreshing remote Parakeet ONNX cache after model load failure")
+                    download_fn(
+                        repo_id=remote_model_id,
+                        local_dir=str(model_dir),
+                        revision=revision,
+                        allow_patterns=_PARAKEET_ONNX_ALLOW_PATTERNS,
+                    )  # nosec B615
+                    repair_attempted = True
+                    continue
+                raise
+
             tokenizer = ParakeetONNXTokenizer(bundle_paths["vocab"])
             session = ParakeetOnnxAsrRuntime(upstream_model)
             _onnx_model_cache[cache_key] = (session, tokenizer)
             logger.info("Successfully loaded Parakeet TDT ONNX graph bundle through onnx-asr")
             return session, tokenizer
+        if _config_declares_parakeet_tdt(model_dir):
+            logger.error("Parakeet ONNX TDT graph bundle in {} remains incomplete", model_dir)
+            return None, None
         if _has_parakeet_tdt_graphs(model_dir):
             missing_sidecars = [
                 sidecar
