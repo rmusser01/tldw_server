@@ -90,12 +90,12 @@
 - Modify: `apps/tldw-frontend/e2e/single-user-cookie-lifecycle.spec.ts`
 - Modify: `.github/workflows/frontend-required.yml`
 
-- [ ] Extend the fixture with an authenticated protected endpoint and request counters that distinguish missing/wrong credentials.
-- [ ] Finalize the WebUI lifecycle assertions added in Task 2: call the protected endpoint after hard reload and profile reopen; session mode must authenticate before close and fail after reopen.
-- [ ] Finalize the extension lifecycle assertions added in Task 2: call the same endpoint through the production background request path after reload/reopen.
-- [ ] Extend cookie lifecycle coverage with an unsafe production-path mutation, preserved remote metadata, client logout, and stale-cookie idempotency.
-- [ ] Add the production extension build and three lifecycle suites to the security-relevant branch of `frontend-required`.
-- [ ] Re-run all three suites and commit `test(auth): gate persistence lifecycle requests`.
+- [x] Extend the fixture with an authenticated protected endpoint and request counters that distinguish missing/wrong credentials.
+- [x] Finalize the WebUI lifecycle assertions added in Task 2: call the protected endpoint after hard reload and profile reopen; session mode must authenticate before close and fail after reopen.
+- [x] Finalize the extension lifecycle assertions added in Task 2: call the same endpoint through the production background request path after reload/reopen.
+- [x] Extend cookie lifecycle coverage with an unsafe production-path mutation, preserved remote metadata, production client logout, status reset/manual rehydration, and stale-cookie idempotency.
+- [x] Add the production extension build and three lifecycle suites to the frontend-changed branch of `frontend-required` because the existing security classifier omits frontend auth paths.
+- [x] Re-run all three suites and commit Task 5 plus review follow-ups (`494e55268c`, `a112b604b0`, `b2154bcce1`).
 
 ### Task 6: Full verification and UAT
 
