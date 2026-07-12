@@ -53,7 +53,7 @@
 
 **Tests:** SQLite/PostgreSQL migration tests, repository unit tests, Hypothesis pagination/identity tests.
 
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 1: Add contract models and Jobs migrations
 
@@ -102,7 +102,7 @@ git commit -m "feat: add playlist ingest persistence schema (TASK-12110)"
 
 ### Task 2: Implement the focused repository and cursor contract
 
-- [ ] **Step 1: Write failing repository tests**
+- [x] **Step 1: Write failing repository tests**
 
 Cover creation, owner isolation, ready-only materialization, selected occurrence copying, immutable ordering, cursor tampering, expiry, event replay, compare-and-set state transitions, and one-query Media DB lookup of normalized URL candidates.
 
@@ -119,19 +119,19 @@ def test_materialization_copies_identity_but_not_review_policy(store):
     assert "metadata_patch" not in item.display_metadata
 ```
 
-- [ ] **Step 2: Run the repository tests and verify RED**
+- [x] **Step 2: Run the repository tests and verify RED**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_store.py tldw_Server_API/tests/MediaDB2/test_dedupe_url_normalization.py -q`
 
 Expected: FAIL because `PlaylistIngestStore` is missing.
 
-- [ ] **Step 3: Implement `PlaylistIngestStore`**
+- [x] **Step 3: Implement `PlaylistIngestStore`**
 
 Accept the existing `JobManager` and use its package-owned `_connect`/`_pg_cursor` helpers so backend/DSN selection is not duplicated. The playlist store itself must not open the Media DB or AuthNZ DB. Every public method requires `owner_user_id`. Use one transaction for snapshot replacement, materialization copying, run creation, event append/version bump, and cleanup. Sign opaque cursors with `AuthNZ.crypto_utils.derive_hmac_key()` and bind them to owner, resource, ordering, and last ordinal.
 
 In the same red/green cycle, add `get_media_by_urls(urls)` through `media_lookup_repository.py` → `media_db/api.py` → `runtime/query_ops.py` → `MediaDatabase`. Normalize all URL candidates and execute one parameterized query against the already owner-specific Media DB. This helper is shared by preflight duplicate enrichment and Start Processing validation.
 
-- [ ] **Step 4: Add and run property tests**
+- [x] **Step 4: Add and run property tests**
 
 For arbitrary unique occurrence lists and page sizes, concatenated pages must equal the source ordering exactly once. Invalid owner/cursor pairs must never disclose whether a resource exists.
 
@@ -139,7 +139,7 @@ Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/MediaI
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Ingestion_Media_Processing/Video/playlist_ingest_store.py tldw_Server_API/app/core/DB_Management/media_db/repositories/media_lookup_repository.py tldw_Server_API/app/core/DB_Management/media_db/api.py tldw_Server_API/app/core/DB_Management/media_db/runtime/query_ops.py tldw_Server_API/app/core/DB_Management/media_db/media_database_impl.py tldw_Server_API/tests/MediaDB2/test_dedupe_url_normalization.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_store.py tldw_Server_API/tests/MediaIngestion_NEW/integration/test_playlist_ingest_store_postgres.py tldw_Server_API/tests/MediaIngestion_NEW/property/test_playlist_ingest_properties.py
@@ -154,7 +154,7 @@ git commit -m "feat: persist playlist ingest resources (TASK-12110)"
 
 **Tests:** Runner process tests, worker tests, endpoint tests, configured-limit-plus-one tests.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 3: Add the bounded preflight child-process runner
 
