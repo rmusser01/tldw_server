@@ -52,6 +52,8 @@ Interactive factories derive identity, memberships, active scopes, and base-URL 
 
 Deferred executions persist only a trusted owner identifier and selected scope identifiers. Workers build a fresh runtime and revalidate current membership and base-URL authority before resolving credentials. Captured team/org identifiers are intersected with current memberships so revocation after enqueue takes effect. System-owned executions with no trusted owner retain server-default behavior.
 
+New RAG checkpoints bind the trusted owner and selected server-derived scope identifiers to checkpoint metadata. Resume endpoints verify that the current principal owns the checkpoint or has an existing explicit administrative authorization, then revalidate current memberships before constructing a runtime. A checkpoint with an owner mismatch returns 403. Legacy checkpoints with no trusted owner remain system-context checkpoints and may use only legacy server defaults; they are never implicitly rebound to the user who happens to resume them.
+
 ### Safe provider-call handle
 
 The runtime returns a slotted, deliberately non-serializable provider-call handle. It contains the explicit API key and a defensive provider-scoped configuration copy required by the chosen adapter. Its representation is always redacted, it has no dataclass/Pydantic serialization path, and secret-bearing fields are not included in equality diagnostics.
@@ -78,6 +80,8 @@ Credential precedence matches Chat's intended contract:
 4. server default.
 
 An absent credential proceeds to the next level. A configured credential that cannot be decrypted, validated, refreshed, or authenticated fails closed. A secrets-store query failure also fails closed rather than silently charging the server key.
+
+The resolver contract must represent these outcomes explicitly rather than collapsing them into `None` or an empty credential. Planning should define typed result states and/or exceptions for at least: absent at the current precedence level, resolved, invalid/decryption failed, credential store unavailable, and scope authorization revoked. Only the explicit absent state advances to the next precedence level. Existing repository/decryption catches that currently convert operational failures into absence must be narrowed to preserve this distinction.
 
 Credential and authentication failures never trigger provider failover. Provider failover remains available only for existing permitted health/upstream failure classes. Auxiliary RAG stages preserve their existing heuristic or skip fallbacks, but they do not retry with another provider or server key. Chat and final RAG generation return a structured terminal error.
 
@@ -167,11 +171,12 @@ This increases LLM use for repeated questions but guarantees that provider, mode
 ### Deferred execution
 
 1. The job stores trusted owner/scope identifiers but no credentials.
-2. At execution, the worker revalidates current ownership, membership, and base-URL authority.
-3. The worker constructs a new runtime and resolves current credentials.
-4. Revoked membership, invalid credentials, or unavailable secret storage fails closed.
-5. System-owned work without a trusted owner uses legacy server defaults.
-6. Job failures persist only sanitized codes/messages.
+2. Checkpoint/job resume verifies owner binding; legacy ownerless checkpoints remain server-context only.
+3. At execution, the worker revalidates current ownership, membership, and base-URL authority.
+4. The worker constructs a new runtime and resolves current credentials.
+5. Revoked membership, invalid credentials, or unavailable secret storage fails closed.
+6. System-owned work without a trusted owner uses legacy server defaults.
+7. Job failures persist only sanitized codes/messages.
 
 ## Error contract
 
@@ -243,6 +248,8 @@ Use TDD and deterministic synchronization primitives.
 - Safe handles reject serialization and redact representations.
 - Provider-scoped configuration excludes unrelated credentials.
 - Trusted background scopes and base-URL authority are revalidated.
+- Typed resolver outcomes distinguish absence from store/decryption/authorization failures.
+- New checkpoint ownership is enforced; owner mismatch fails and legacy ownerless checkpoints remain server-context only.
 - Cleanup releases runtime references on completion and cancellation.
 
 ### Chat parity
@@ -290,4 +297,3 @@ Use TDD and deterministic synchronization primitives.
 - Other BYOK consumers can migrate to the generic runtime incrementally without changing the credential store.
 
 Before merge, the human requester must provide the repository-required human-written Change summary explaining both what changed and why these implementation choices were made.
-

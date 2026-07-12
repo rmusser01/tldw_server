@@ -2,8 +2,14 @@
 id: TASK-12112
 title: Consolidate provider credential runtime for Chat and Knowledge QA
 status: In Progress
+assignee: []
+created_date: ''
+updated_date: '2026-07-12 20:51'
+labels: []
+dependencies: []
 documentation:
-- Docs/superpowers/specs/2026-07-12-shared-provider-credential-runtime-design.md
+  - >-
+    Docs/superpowers/specs/2026-07-12-shared-provider-credential-runtime-design.md
 ---
 
 ## Description
@@ -14,7 +20,7 @@ Design and implement a shared execution-scoped provider credential runtime used 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Approved design specification is written, reviewed, and linked from this task.
+- [x] #1 Approved design specification is written, reviewed, and linked from this task.
 - [ ] #2 Chat and all RAG LLM call paths use the shared credential runtime with explicit no-fallback semantics.
 - [ ] #3 Invalid credentials, credential-store failures, and revoked background scope fail closed.
 - [ ] #4 RAG semantic cache reuses documents but never cached generated answers.
@@ -24,13 +30,20 @@ Design and implement a shared execution-scoped provider credential runtime used 
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-2026-07-12: Brainstorming completed and the approved design was written. Spec review is pending before implementation planning.
+2026-07-12: Brainstorming completed and the approved design was written at Docs/superpowers/specs/2026-07-12-shared-provider-credential-runtime-design.md.
+2026-07-12: Independent spec review approved the complete design with no remaining issues or recommendations.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+
+<!-- SECTION:FINAL_SUMMARY:END -->
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
 
