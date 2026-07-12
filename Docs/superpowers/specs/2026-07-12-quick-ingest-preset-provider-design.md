@@ -48,7 +48,9 @@ On each closed-to-open transition, the modal will capture one resolved preset
 map snapshot. Changes made in Settings while the modal is open do not mutate
 the active run. Reopening captures the new settings. An explicit open revision
 will remount/rebase the provider only when the session is an idle draft and its
-selected preset is non-custom.
+selected preset is non-custom. Workflow-seeded first-source drafts are excluded
+from rebasing: their persisted `FIRST_SOURCE_QUICK_PRESET_CONFIG` intentionally
+enables chunking even though the normal Quick preset does not.
 
 The provider's reducer will resolve initial non-custom state, preset switches,
 custom-option matching, and reset behavior against the supplied map. Custom
@@ -113,6 +115,8 @@ Focused tests will prove:
 - delayed preset storage hydration blocks initialization and auto-processing;
 - closing, changing preset settings, and reopening rebases only an idle,
   non-custom draft;
+- a first-source Quick seed retains its mandatory chunking override after
+  storage hydration and reopen;
 - processing/reattached and completed sessions retain their persisted config;
 - clearing a custom provider, persisting/rehydrating, and changing another
   option does not resurrect the provider;
