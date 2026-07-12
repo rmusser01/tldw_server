@@ -4,12 +4,14 @@ title: Consolidate provider credential runtime for Chat and Knowledge QA
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-12 22:24'
+updated_date: '2026-07-12 22:49'
 labels: []
 dependencies: []
 documentation:
   - >-
     Docs/superpowers/specs/2026-07-12-shared-provider-credential-runtime-design.md
+  - >-
+    Docs/superpowers/plans/2026-07-12-shared-provider-credential-runtime-implementation-plan.md
 ---
 
 ## Description
@@ -28,6 +30,12 @@ Design and implement a shared execution-scoped provider credential runtime used 
 - [ ] #6 Chat and all provider-backed RAG call paths, including query-time hosted embeddings, use the shared credential runtime with explicit no-fallback semantics.
 <!-- AC:END -->
 
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Docs/superpowers/plans/2026-07-12-shared-provider-credential-runtime-implementation-plan.md
+<!-- SECTION:PLAN:END -->
+
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
@@ -39,6 +47,10 @@ Design and implement a shared execution-scoped provider credential runtime used 
 2026-07-12: Adversarial review found six hardening gaps. The design now covers query-time hosted embeddings, typed legacy-adapter failures, explicit empty-stream completion and fail-closed replay fields, concrete serialization barriers, allowlisted shared transport policy, and phased integration gates. Independent re-review pending.
 
 2026-07-12: Final independent re-review approved the amended design with no blocking issues. Planning must include a shared backend/frontend contract fixture for schema-version handling and malformed terminal stream-event combinations.
+
+2026-07-12: Written-spec approval received. Added one implementation plan with five dependency-ordered stages: shared runtime/boundaries, Chat migration, RAG plus query embeddings, persistence/client contract, and integration/security gate.
+
+2026-07-12: Independent plan-document review approved the complete implementation plan with no remaining issues or recommendations after adding explicit revalidation of base-URL override authority on resume and exact auxiliary-stage test paths.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
