@@ -166,6 +166,45 @@ describe("notification subscription", () => {
     expect(subscribeNotificationsStreamMock).toHaveBeenCalledTimes(1)
   })
 
+  it("prevents a delayed old selector clear from overwriting the new active scope", async () => {
+    let releaseOldClear: (() => void) | undefined
+    let delayFirstSelectorWrite = true
+    storageMock.set.mockImplementation((key: string, value: unknown) => {
+      const applyWrite = () => {
+        const oldValue = storageState.get(key)
+        storageState.set(key, value)
+        for (const watcher of watchers.get(key) ?? []) {
+          watcher({ oldValue, newValue: value })
+        }
+      }
+      if (key === ACTIVE_SCOPE_KEY && delayFirstSelectorWrite) {
+        delayFirstSelectorWrite = false
+        return new Promise<void>((resolve) => {
+          releaseOldClear = () => {
+            applyWrite()
+            resolve()
+          }
+        })
+      }
+      applyWrite()
+      return Promise.resolve()
+    })
+    subscribeNotificationsStreamMock.mockReturnValue(vi.fn())
+    const firstConfig = multiUserConfig("user-a")
+    const secondConfig = multiUserConfig("user-b")
+
+    const firstStart = notificationSubscription.startNotificationSubscription(firstConfig)
+    await flushAsync()
+    const secondStart = notificationSubscription.startNotificationSubscription(secondConfig)
+    await flushAsync()
+
+    releaseOldClear?.()
+    await Promise.all([firstStart, secondStart])
+    await flushAsync()
+
+    expect(storageState.get(ACTIVE_SCOPE_KEY)).toBe(recordKeyFor(secondConfig))
+  })
+
   it("aborts and clears the rendered selector before starting a switched principal scope", async () => {
     subscribeNotificationsStreamMock.mockImplementation(() => {
       operationOrder.push("subscribe")

@@ -33,6 +33,7 @@ let unsubscribe: (() => void) | null = null
 let currentConfig: NotificationConfig | null = null
 let currentScopeKey: string | null = null
 let generation = 0
+let activeScopeWrite: Promise<void> | null = null
 
 const getStorage = (): SafeStorage => {
   storageInstance ??= createSafeStorage({ area: "local" })
@@ -104,9 +105,26 @@ const stopStream = (): void => {
   stop?.()
 }
 
+const writeActiveScope = (storage: SafeStorage, scopeKey: string | null): Promise<void> => {
+  const previousWrite = activeScopeWrite
+  const write = previousWrite
+    ? previousWrite.catch(() => undefined).then(() => storage.set(ACTIVE_SCOPE_KEY, scopeKey))
+    : storage.set(ACTIVE_SCOPE_KEY, scopeKey)
+  activeScopeWrite = write
+  void write.then(
+    () => {
+      if (activeScopeWrite === write) activeScopeWrite = null
+    },
+    () => {
+      if (activeScopeWrite === write) activeScopeWrite = null
+    }
+  )
+  return write
+}
+
 const clearActiveScope = (storage: SafeStorage): Promise<void> => {
   currentScopeKey = null
-  return storage.set(ACTIVE_SCOPE_KEY, null)
+  return writeActiveScope(storage, null)
 }
 
 const transitionToConfig = async (
@@ -166,7 +184,7 @@ const transitionToConfig = async (
     await storage.set(scopeKey, record)
   }
 
-  await storage.set(ACTIVE_SCOPE_KEY, scopeKey)
+  await writeActiveScope(storage, scopeKey)
   await writeRecord({ type: "start" })
   if (!isCurrent()) return
 
