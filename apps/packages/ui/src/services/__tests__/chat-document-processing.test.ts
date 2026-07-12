@@ -465,16 +465,36 @@ describe("chat document processing service", () => {
 
     expect(result.blockedFiles[0]).toMatchObject({
       processingStatus: "blocked",
-      processingRecoveryActions: [
-        "use_chat_scoped_retrieval",
-        "switch_to_ingest",
-      ],
+      processingRecoveryActions: ["use_chat_scoped_retrieval"],
     })
-    expect(result.recoveryActions).toEqual([
+    expect(result.recoveryActions).toEqual(["use_chat_scoped_retrieval"])
+    expect(result.requestOverrides).toBeUndefined()
+  })
+
+  it("offers ingest recovery for overflow only when explicitly available", async () => {
+    const deps = makeDeps()
+    deps.processDocument.mockResolvedValueOnce({ content: "word ".repeat(50) })
+
+    const result = await prepareChatDocumentAttachmentsForSend({
+      files: [
+        makeUploadedFile({
+          processingMode: "add_to_chat",
+          processingCapabilities: {
+            add_to_chat: { available: true, status: "available" },
+            ingest_to_library: { available: true, status: "available" },
+          },
+        }),
+      ],
+      maxDirectChatTokens: 10,
+      processDocument: deps.processDocument,
+      processPdf: deps.processPdf,
+      ingestDocument: deps.ingestDocument,
+    })
+
+    expect(result.blockedFiles[0]?.processingRecoveryActions).toEqual([
       "use_chat_scoped_retrieval",
       "switch_to_ingest",
     ])
-    expect(result.requestOverrides).toBeUndefined()
   })
 
   it("waits for accepted ingest jobs before building retrieval overrides", async () => {

@@ -547,13 +547,13 @@ export const waitForIngestDocumentJob = async (
   })
   throwIfAborted(options.signal)
   if (terminal.terminalStatus !== "completed") {
-    const fallback =
-      terminal.terminalStatus === "cancelled"
-        ? ingestCancelledReason()
-        : terminal.terminalStatus === "timeout"
-          ? ingestTimeoutReason()
-          : ingestFailedReason()
-    throw new Error(terminal.error || fallback)
+    if (terminal.terminalStatus === "cancelled") {
+      throw new Error(ingestCancelledReason())
+    }
+    if (terminal.terminalStatus === "timeout") {
+      throw new Error(ingestTimeoutReason())
+    }
+    throw new Error(terminal.error || ingestFailedReason())
   }
   const mediaId = extractCompletedIngestJobMediaId(terminal.data)
   if (mediaId == null) {
@@ -662,16 +662,21 @@ export const prepareChatDocumentAttachmentsForSend = async ({
       throwIfAborted(signal)
       const tokenEstimate = estimateDirectChatTokens(result.content)
       if (tokenEstimate > maxDirectChatTokens) {
+        const recoveryActions: DocumentProcessingRecoveryAction[] = [
+          "use_chat_scoped_retrieval",
+        ]
+        if (
+          file.processingCapabilities?.ingest_to_library?.available === true
+        ) {
+          recoveryActions.push("switch_to_ingest")
+        }
         const blockedFile: UploadedFile = {
           ...file,
           processingMode: mode,
           processingStatus: "blocked",
           processingTokenEstimate: tokenEstimate,
           processingBlockedReason: directChatTooLargeReason(tokenEstimate),
-          processingRecoveryActions: [
-            "use_chat_scoped_retrieval",
-            "switch_to_ingest",
-          ],
+          processingRecoveryActions: recoveryActions,
         }
         blockedFiles.push(blockedFile)
         processedFiles.push(blockedFile)

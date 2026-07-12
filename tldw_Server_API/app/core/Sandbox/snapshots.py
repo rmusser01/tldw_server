@@ -483,22 +483,36 @@ class SnapshotManager:
             True if deletion was successful or snapshot didn't exist.
         """
         deleted = False
+        archive_deletion_failed = False
+        path_pairs = {
+            (
+                self._snapshot_path(session_id, snapshot_id),
+                self._metadata_path(session_id, snapshot_id),
+            ),
+            (
+                self._legacy_snapshot_path(session_id, snapshot_id),
+                self._legacy_metadata_path(session_id, snapshot_id),
+            ),
+        }
 
-        for snapshot_path in {self._snapshot_path(session_id, snapshot_id), self._legacy_snapshot_path(session_id, snapshot_id)}:
+        for snapshot_path, metadata_path in path_pairs:
             try:
                 if snapshot_path.exists():
                     snapshot_path.unlink()
                     deleted = True
             except _SNAPSHOTS_NONCRITICAL_EXCEPTIONS as e:
                 logger.warning(f"Failed to delete snapshot archive {snapshot_id}: {e}")
-
-        for metadata_path in {self._metadata_path(session_id, snapshot_id), self._legacy_metadata_path(session_id, snapshot_id)}:
+                archive_deletion_failed = True
+                continue
             try:
                 if metadata_path.exists():
                     metadata_path.unlink()
                     deleted = True
             except _SNAPSHOTS_NONCRITICAL_EXCEPTIONS as e:
                 logger.warning(f"Failed to delete snapshot metadata {snapshot_id}: {e}")
+
+        if archive_deletion_failed:
+            return False
 
         # Clean up empty session snapshot directory
         try:
@@ -601,20 +615,26 @@ class SnapshotManager:
 
         # Delete by count (keep newest)
         while len(snapshots) > max_snapshots:
-            oldest = snapshots.pop()  # List is sorted newest first
+            oldest = snapshots[-1]  # List is sorted newest first
             snap_id = oldest.get("snapshot_id")
             if snap_id and self.delete_snapshot(session_id, snap_id):
+                snapshots.pop()
                 deleted.append(snap_id)
+            else:
+                break
 
         # Delete by size (remove oldest until under limit)
         total_size = sum(s.get("size_bytes", 0) for s in snapshots)
         while total_size > max_size_bytes and snapshots:
-            oldest = snapshots.pop()
+            oldest = snapshots[-1]
             snap_id = oldest.get("snapshot_id")
             snap_size = oldest.get("size_bytes", 0)
             if snap_id and self.delete_snapshot(session_id, snap_id):
+                snapshots.pop()
                 deleted.append(snap_id)
                 total_size -= snap_size
+            else:
+                break
 
         return deleted
 

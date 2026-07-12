@@ -97,6 +97,50 @@ def test_create_snapshot_enforces_count_quota_immediately(
     assert snap3["snapshot_id"] in ids
 
 
+def test_create_snapshot_quota_preserves_metadata_when_archive_is_busy(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Immediate quota enforcement must fail closed on archive deletion errors."""
+    _configure_sqlite_store(monkeypatch, tmp_path)
+    monkeypatch.setenv("SANDBOX_SNAPSHOT_MAX_COUNT", "1")
+    monkeypatch.setenv("SANDBOX_SNAPSHOT_MAX_SIZE_MB", "256")
+    if hasattr(app_settings, "SANDBOX_SNAPSHOT_MAX_COUNT"):
+        monkeypatch.setattr(app_settings, "SANDBOX_SNAPSHOT_MAX_COUNT", 1)
+
+    svc = SandboxService()
+    session = svc.create_session(
+        user_id="user-snap-busy",
+        spec=SessionSpec(runtime=RuntimeType.docker, base_image="python:3.11-slim"),
+        spec_version="1.0",
+        idem_key=None,
+        raw_body={"spec_version": "1.0", "runtime": "docker"},
+    )
+    ws = svc.get_session_workspace_path(session.id)
+    assert ws is not None
+    state = Path(str(ws)) / "state.txt"
+    state.write_text("v1", encoding="utf-8")
+    first = svc.create_snapshot(session.id)
+    archive_path = svc._snapshots._snapshot_path(session.id, first["snapshot_id"])
+    metadata_path = svc._snapshots._metadata_path(session.id, first["snapshot_id"])
+    original_unlink = Path.unlink
+
+    def _fail_first_archive(path: Path, *args: object, **kwargs: object) -> None:
+        if path == archive_path:
+            raise PermissionError("archive is busy")
+        original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", _fail_first_archive)
+    state.write_text("v2", encoding="utf-8")
+
+    result = svc.create_snapshot(session.id)
+
+    assert "evicted_snapshot_ids" not in result
+    assert archive_path.exists()
+    assert metadata_path.exists()
+    assert len(svc.list_snapshots(session.id)) == 2
+
+
 def test_create_snapshot_enforces_size_quota_under_large_snapshots(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
