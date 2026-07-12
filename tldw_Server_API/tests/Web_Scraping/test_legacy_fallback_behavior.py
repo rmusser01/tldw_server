@@ -480,6 +480,114 @@ async def test_fallback_persist_uses_media_repository_api(monkeypatch, tmp_path)
 
 
 @pytest.mark.unit
+@pytest.mark.asyncio
+async def test_fallback_persist_skips_articles_without_body_content(monkeypatch, tmp_path):
+    _force_fallback(monkeypatch)
+
+    class _FakeDbNoLegacyInsert:
+        def __init__(self):
+            self.closed = False
+
+        def close_connection(self):
+            self.closed = True
+
+    class _FakeRepo:
+        def __init__(self):
+            self.calls = []
+
+        def add_media_with_keywords(self, **kwargs):
+            self.calls.append(kwargs)
+            return 71, "repo-71", "stored"
+
+    fake_db = _FakeDbNoLegacyInsert()
+    fake_repo = _FakeRepo()
+
+    @contextmanager
+    def _fake_managed_media_database(*args, **kwargs):  # noqa: ARG001
+        try:
+            yield fake_db
+        finally:
+            fake_db.close_connection()
+
+    async def fake_scrape_and_summarize_multiple(**kwargs):
+        return [
+            {
+                "url": "https://example.com/valid",
+                "title": "Valid",
+                "content": "Article body",
+                "extraction_successful": True,
+            },
+            {
+                "url": "https://example.com/none",
+                "content": None,
+                "extraction_successful": True,
+            },
+            {
+                "url": "https://example.com/number",
+                "content": 42,
+                "extraction_successful": True,
+            },
+            {
+                "url": "https://example.com/whitespace",
+                "content": "  \n",
+                "extraction_successful": True,
+            },
+            {
+                "url": "https://example.com/envelope",
+                "content": '[METADATA]{"url":"https://example.com/envelope"}[/METADATA]\n  ',
+                "extraction_successful": True,
+            },
+        ]
+
+    monkeypatch.setattr(
+        ws_service,
+        "scrape_and_summarize_multiple",
+        fake_scrape_and_summarize_multiple,
+        raising=True,
+    )
+    monkeypatch.setattr(
+        ws_service,
+        "managed_media_database",
+        _fake_managed_media_database,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        ws_service,
+        "get_user_media_db_path",
+        lambda _user_id: str(tmp_path / "fallback-media.db"),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        ws_service,
+        "get_media_repository",
+        lambda db: fake_repo,
+        raising=False,
+    )
+
+    result = await ws_service.process_web_scraping_task(
+        **_base_kwargs(
+            scrape_method="Individual URLs",
+            url_input="https://example.com/valid",
+            mode="persist",
+            user_id=1,
+            perform_chunking=False,
+        )
+    )
+
+    assert result["status"] == "persist-ok"
+    assert result["media_ids"] == [71]
+    assert result["total_articles"] == 5
+    assert len(fake_repo.calls) == 1
+    assert fake_repo.calls[0]["url"] == "https://example.com/valid"
+    assert result["errors"] == [
+        "No extracted content: https://example.com/none",
+        "No extracted content: https://example.com/number",
+        "No extracted content: https://example.com/whitespace",
+        "No extracted content: https://example.com/envelope",
+    ]
+
+
+@pytest.mark.unit
 def test_process_web_scraping_endpoint_fallback_contract_error_for_url_level_controls(
     client_user_only, monkeypatch
 ):
