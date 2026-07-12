@@ -63,6 +63,11 @@ import {
   isDbMessageDuplicate,
 } from "./QuickIngest/constants"
 import { isQuickIngestPlaylistPreflightDetail } from "@/utils/quick-ingest-open"
+import {
+  DEFAULT_PRESET,
+  DEFAULT_PRESETS,
+  type PresetMap,
+} from "./QuickIngest/presets"
 
 // ---------------------------------------------------------------------------
 // Props
@@ -73,6 +78,9 @@ type QuickIngestWizardModalProps = {
   onClose: () => void
   /** When true, automatically skip to processing on mount (compat with old modal). */
   autoProcessQueued?: boolean
+  presetMap?: PresetMap
+  openRevision?: number
+  createNewDraft?: () => QuickIngestSessionRecord
 }
 
 type QuickIngestEntryType = "auto" | "html" | "pdf" | "document" | "audio" | "video"
@@ -132,7 +140,7 @@ const QUICK_INGEST_MODAL_STYLES = {
   body: {
     padding: "0 16px 16px",
     maxHeight: "calc(100vh - 180px)",
-    overflowY: "auto",
+    overflowY: "auto" as const,
   },
 }
 
@@ -897,7 +905,9 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     goNext,
   } = useIngestWizard()
   const { currentStep, queueItems, processingState, presetConfig, results } = state
-  const [quickProcessWarning, setQuickProcessWarning] = useState<string | null>(null)
+  const [analysisProviderWarning, setAnalysisProviderWarning] = useState<
+    string | null
+  >(null)
   const connectionState = useConnectionStore((store) => store.state)
   const checkConnection = useConnectionStore((store) => store.checkOnce)
   const activeSessionIdRef = useRef<string | null>(null)
@@ -981,15 +991,15 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   }, [checkConnection])
 
   useEffect(() => {
-    if (!quickProcessWarning) return
-    const analysisProviderWarning = getQuickIngestAnalysisProviderWarning({
+    if (!analysisProviderWarning) return
+    const providerWarning = getQuickIngestAnalysisProviderWarning({
       common: presetConfig.common,
       advancedValues: presetConfig.advancedValues,
     })
-    if (!analysisProviderWarning) {
-      setQuickProcessWarning(null)
+    if (!providerWarning) {
+      setAnalysisProviderWarning(null)
     }
-  }, [presetConfig.advancedValues, presetConfig.common, quickProcessWarning])
+  }, [analysisProviderWarning, presetConfig.advancedValues, presetConfig.common])
 
   useEffect(() => {
     resultsRef.current = results
@@ -1055,17 +1065,6 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
 
   // Auto-process on mount if autoProcessQueued is set and there are queued items
   const autoProcessedRef = useRef(false)
-  useEffect(() => {
-    if (
-      autoProcessQueued &&
-      !autoProcessedRef.current &&
-      validQueueItems.length > 0 &&
-      isOnlineForIngest
-    ) {
-      autoProcessedRef.current = true
-      skipToProcessing()
-    }
-  }, [autoProcessQueued, isOnlineForIngest, skipToProcessing, validQueueItems.length])
 
   // Whether processing is actively running
   const isProcessingActive = processingState.status === "running"
@@ -1482,12 +1481,17 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       )
       if (cancelRequestedRef.current) return
 
-      const analysisProviderWarning = getQuickIngestAnalysisProviderWarning({
+      const providerWarning = getQuickIngestAnalysisProviderWarning({
         common: requestPayload.common,
         advancedValues: requestPayload.advancedValues,
       })
-      if (analysisProviderWarning) {
-        setQuickProcessWarning(analysisProviderWarning)
+      if (providerWarning) {
+        setAnalysisProviderWarning(
+          qi(
+            "analysisProvider.required",
+            "Choose an analysis provider before running ingest analysis."
+          )
+        )
         updateProcessingState({
           status: "idle",
           perItemProgress: [],
@@ -1498,7 +1502,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         activeSessionIdRef.current = null
         restore()
         showSession()
-        goToStep(1)
+        goToStep(2)
         return
       }
 
@@ -1600,6 +1604,8 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     restore,
     showSession,
     markProcessingTracking,
+    qi,
+    updateProcessingState,
     validQueueItems,
   ])
 
@@ -1672,22 +1678,61 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   // Quick-process callback for AddContentStep (skip to processing with defaults)
   const handleQuickProcess = useCallback(() => {
     if (!isOnlineForIngest || isCheckingConnection) return
-    const analysisProviderWarning = getQuickIngestAnalysisProviderWarning({
+    const providerWarning = getQuickIngestAnalysisProviderWarning({
       common: presetConfig.common,
       advancedValues: presetConfig.advancedValues,
     })
-    if (analysisProviderWarning) {
-      setQuickProcessWarning(analysisProviderWarning)
+    if (providerWarning) {
+      setAnalysisProviderWarning(
+        qi(
+          "analysisProvider.required",
+          "Choose an analysis provider before running ingest analysis."
+        )
+      )
+      if (currentStep === 1) {
+        goNext()
+      } else {
+        goToStep(2)
+      }
       return
     }
-    setQuickProcessWarning(null)
+    setAnalysisProviderWarning(null)
     skipToProcessing()
   }, [
+    currentStep,
+    goNext,
+    goToStep,
     isCheckingConnection,
     isOnlineForIngest,
     presetConfig.advancedValues,
     presetConfig.common,
+    qi,
     skipToProcessing,
+  ])
+
+  useEffect(() => {
+    if (!open || !autoProcessQueued) {
+      autoProcessedRef.current = false
+    }
+  }, [autoProcessQueued, open])
+
+  useEffect(() => {
+    if (
+      autoProcessQueued &&
+      !autoProcessedRef.current &&
+      validQueueItems.length > 0 &&
+      isOnlineForIngest &&
+      !isCheckingConnection
+    ) {
+      autoProcessedRef.current = true
+      handleQuickProcess()
+    }
+  }, [
+    autoProcessQueued,
+    handleQuickProcess,
+    isCheckingConnection,
+    isOnlineForIngest,
+    validQueueItems.length,
   ])
 
   // Navigation callbacks for WizardResultsStep CTAs
@@ -1747,13 +1792,14 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
             connectionRecoveryMessage={connectionRecoveryMessage}
             onRetryConnection={handleRetryConnection}
             onQuickProcess={handleQuickProcess}
-            quickProcessWarning={quickProcessWarning}
           />
         )
       case 2:
         return (
           <WizardConfigureStep
             isStepVisible={open && !state.isMinimized && currentStep === 2}
+            analysisProviderWarning={analysisProviderWarning}
+            focusAnalysisProvider={Boolean(analysisProviderWarning)}
           />
         )
       case 3:
@@ -1796,7 +1842,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     isOnlineForIngest,
     onClose,
     open,
-    quickProcessWarning,
+    analysisProviderWarning,
     state.isMinimized,
   ])
 
@@ -1833,6 +1879,9 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
   open,
   onClose,
   autoProcessQueued = false,
+  presetMap = DEFAULT_PRESETS,
+  openRevision = 0,
+  createNewDraft,
 }) => {
   const {
     session,
@@ -1871,8 +1920,13 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
 
   useEffect(() => {
     if (!open || session) return
-    createDraftSession()
-  }, [createDraftSession, open, session])
+    createDraftSession({
+      selectedPreset: DEFAULT_PRESET,
+      customBasePreset: DEFAULT_PRESET,
+      presetConfig: presetMap[DEFAULT_PRESET],
+      customOptions: {},
+    })
+  }, [createDraftSession, open, presetMap, session])
 
   const persistWizardState = useCallback(
     (state: IngestWizardState) => {
@@ -1904,11 +1958,14 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
 
   if (!session || !initialState) return null
 
+  const providerKey = `${session.id}:${openRevision}`
+
   return (
     <IngestWizardProvider
-      key={session.id}
+      key={providerKey}
       initialState={initialState}
       onStateChange={persistWizardState}
+      presetMap={presetMap}
     >
       <WizardModalContent
         open={open}
@@ -1918,7 +1975,7 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
         markProcessingTracking={markProcessingTracking}
         markInterrupted={markInterrupted}
         showSession={showSession}
-        replaceWithNewDraft={replaceWithNewDraft}
+        replaceWithNewDraft={createNewDraft ?? replaceWithNewDraft}
         shouldAttemptPersistedReattach={
           session.lifecycle === "processing" &&
           session.tracking?.mode === "webui-direct" &&

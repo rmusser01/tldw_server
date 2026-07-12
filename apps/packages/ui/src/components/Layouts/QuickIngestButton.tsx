@@ -1,8 +1,14 @@
 import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { UploadCloud } from "lucide-react"
+import { useStorage } from "@plasmohq/storage/hook"
 import { useQuickIngestStore } from "@/store/quick-ingest"
 import { useQuickIngestSessionStore } from "@/store/quick-ingest-session"
+import {
+  DEFAULT_PRESET,
+  resolvePresetMap,
+  type PresetMap,
+} from "@/components/Common/QuickIngest/presets"
 import { createEventHost } from "@/utils/create-event-host"
 import {
   consumePendingQuickIngestOpen,
@@ -34,20 +40,80 @@ type QuickIngestEventsOptions = {
 
 export const useQuickIngestEvents = (options?: QuickIngestEventsOptions) => {
   const focusTriggerRef = options?.focusTriggerRef
+  const [storedPresetConfigs, , presetStorageMeta] = useStorage<PresetMap>(
+    "quickIngestPresetConfigs",
+    resolvePresetMap()
+  )
+  const resolvedPresetMap = React.useMemo(
+    () => resolvePresetMap(storedPresetConfigs),
+    [storedPresetConfigs]
+  )
+  const [capturedPresetMap, setCapturedPresetMap] = useState<PresetMap>(() =>
+    resolvePresetMap()
+  )
+  const capturedPresetMapRef = useRef(capturedPresetMap)
+  const [openRevision, setOpenRevision] = useState(0)
+  const [preparedSessionId, setPreparedSessionId] = useState<string | null>(null)
+  const preparedSessionIdRef = useRef<string | null>(null)
   const [quickIngestAutoProcessQueued, setQuickIngestAutoProcessQueued] =
     useState(false)
   const [quickIngestSessionHydrated, setQuickIngestSessionHydrated] = useState(
     () => useQuickIngestSessionStore.persist?.hasHydrated?.() ?? true
   )
-  const quickIngestReadyRef = useRef(false)
+  const quickIngestModalReadyRef = useRef(false)
   const pendingQuickIngestIntroRef = useRef(false)
   const session = useQuickIngestSessionStore((s) => s.session)
   const createDraftSession = useQuickIngestSessionStore((s) => s.createDraftSession)
   const upsertSession = useQuickIngestSessionStore((s) => s.upsertSession)
   const showSession = useQuickIngestSessionStore((s) => s.showSession)
   const hideSession = useQuickIngestSessionStore((s) => s.hideSession)
+  const replaceWithNewDraft = useQuickIngestSessionStore(
+    (s) => s.replaceWithNewDraft
+  )
   const quickIngestOpen = session?.visibility === "visible"
   const hasQuickIngestSession = Boolean(session)
+  const storageAndSessionReady =
+    quickIngestSessionHydrated && !presetStorageMeta.isLoading
+  const quickIngestReady =
+    storageAndSessionReady &&
+    (!quickIngestOpen || preparedSessionId === session?.id)
+
+  const capturePresetSnapshot = useCallback((incrementRevision = true) => {
+    if (!incrementRevision) {
+      return capturedPresetMapRef.current
+    }
+    capturedPresetMapRef.current = resolvedPresetMap
+    setCapturedPresetMap(resolvedPresetMap)
+    setOpenRevision((revision) => revision + 1)
+    return resolvedPresetMap
+  }, [resolvedPresetMap])
+
+  const buildNamedPresetSeed = useCallback(
+    (presetMap: PresetMap, preset = DEFAULT_PRESET) => ({
+      selectedPreset: preset,
+      customBasePreset: preset,
+      presetConfig: presetMap[preset],
+      customOptions: {},
+    }),
+    []
+  )
+
+  const prepareExistingSession = useCallback(
+    (presetMap: PresetMap) => {
+      const currentSession = useQuickIngestSessionStore.getState().session
+      if (
+        currentSession?.lifecycle === "draft" &&
+        currentSession.selectedPreset !== "custom" &&
+        !currentSession.firstSourceAddMode
+      ) {
+        upsertSession(
+          buildNamedPresetSeed(presetMap, currentSession.selectedPreset)
+        )
+      }
+      return currentSession
+    },
+    [buildNamedPresetSeed, upsertSession]
+  )
 
   const rehydrateQuickIngestSession = useCallback(async () => {
     const persistApi = useQuickIngestSessionStore.persist
@@ -66,15 +132,48 @@ export const useQuickIngestEvents = (options?: QuickIngestEventsOptions) => {
     (options?: QuickIngestOpenOptions, detail?: QuickIngestOpenDetail) => {
       const { autoProcessQueued = false, focusTrigger = true } = options || {}
       const seed = createQuickIngestSessionSeedFromOpenDetail(detail)
-      setQuickIngestAutoProcessQueued(autoProcessQueued)
       const currentSession = useQuickIngestSessionStore.getState().session
+      const shouldRebaseCurrent = Boolean(
+        currentSession?.lifecycle === "draft" &&
+        currentSession.selectedPreset !== "custom" &&
+        !currentSession.firstSourceAddMode &&
+        !seed?.firstSourceAddMode
+      )
+      const shouldSeedNamedDraft = !currentSession && !seed?.firstSourceAddMode
+      const shouldRemountSeededDraft = Boolean(
+        currentSession?.lifecycle === "draft" && seed
+      )
+      const presetMap = capturePresetSnapshot(
+        shouldRebaseCurrent || shouldSeedNamedDraft || shouldRemountSeededDraft
+      )
+      setQuickIngestAutoProcessQueued(autoProcessQueued)
       if (currentSession) {
-        if (seed) {
-          upsertSession(seed)
+        preparedSessionIdRef.current = currentSession.id
+        setPreparedSessionId(currentSession.id)
+        if (seed && currentSession.lifecycle === "draft") {
+          upsertSession({
+            ...(shouldRebaseCurrent && currentSession.selectedPreset !== "custom"
+              ? buildNamedPresetSeed(presetMap, currentSession.selectedPreset)
+              : {}),
+            ...seed,
+          })
+        } else {
+          // Processing and terminal sessions keep their active snapshot; a new
+          // open detail applies only to drafts.
+          prepareExistingSession(presetMap)
         }
         showSession()
       } else {
-        createDraftSession(seed ?? undefined)
+        const nextSession = createDraftSession(
+          seed?.firstSourceAddMode
+            ? seed
+            : {
+                ...buildNamedPresetSeed(presetMap),
+                ...(seed ?? {}),
+              }
+        )
+        preparedSessionIdRef.current = nextSession.id
+        setPreparedSessionId(nextSession.id)
       }
       if (focusTrigger && focusTriggerRef?.current) {
         requestAnimationFrame(() => {
@@ -82,13 +181,21 @@ export const useQuickIngestEvents = (options?: QuickIngestEventsOptions) => {
         })
       }
     },
-    [createDraftSession, focusTriggerRef, showSession, upsertSession]
+    [
+      buildNamedPresetSeed,
+      capturePresetSnapshot,
+      createDraftSession,
+      focusTriggerRef,
+      prepareExistingSession,
+      showSession,
+      upsertSession,
+    ]
   )
 
   const performOpenQuickIngestIntro = useCallback(
     (options?: QuickIngestOpenOptions, detail?: QuickIngestOpenDetail) => {
       performOpenQuickIngest({ ...options, focusTrigger: false }, detail)
-      if (quickIngestReadyRef.current) {
+      if (quickIngestModalReadyRef.current) {
         window.dispatchEvent(new CustomEvent("tldw:quick-ingest-force-intro"))
       } else {
         pendingQuickIngestIntroRef.current = true
@@ -112,20 +219,38 @@ export const useQuickIngestEvents = (options?: QuickIngestEventsOptions) => {
 
   const openQuickIngest = useCallback(
     (nextOptions?: QuickIngestOpenOptions, detail?: QuickIngestOpenDetail) => {
-      if (!quickIngestSessionHydrated) {
+      if (!storageAndSessionReady) {
         rememberQuickIngestOpenRequest("normal", detail, nextOptions)
-        void rehydrateQuickIngestSession()
+        if (!quickIngestSessionHydrated) {
+          void rehydrateQuickIngestSession()
+        }
         return
       }
       performOpenQuickIngest(nextOptions, detail)
     },
-    [performOpenQuickIngest, quickIngestSessionHydrated, rehydrateQuickIngestSession]
+    [
+      performOpenQuickIngest,
+      quickIngestSessionHydrated,
+      rehydrateQuickIngestSession,
+      storageAndSessionReady,
+    ]
   )
+
+  const createNewDraft = useCallback(() => {
+    const presetMap = capturePresetSnapshot()
+    const nextSession = replaceWithNewDraft(buildNamedPresetSeed(presetMap))
+    setQuickIngestAutoProcessQueued(false)
+    preparedSessionIdRef.current = nextSession.id
+    setPreparedSessionId(nextSession.id)
+    return nextSession
+  }, [buildNamedPresetSeed, capturePresetSnapshot, replaceWithNewDraft])
 
   const closeQuickIngest = useCallback(
     (options?: { focusTrigger?: boolean }) => {
       hideSession()
       setQuickIngestAutoProcessQueued(false)
+      preparedSessionIdRef.current = null
+      setPreparedSessionId(null)
       if ((options?.focusTrigger ?? true) && focusTriggerRef?.current) {
         requestAnimationFrame(() => {
           focusTriggerRef.current?.focus()
@@ -138,9 +263,12 @@ export const useQuickIngestEvents = (options?: QuickIngestEventsOptions) => {
   // Global event listeners for opening quick ingest
   useEffect(() => {
     const handler = (event: Event) => {
+      const pending = consumePendingQuickIngestOpen()
       openQuickIngest(
-        undefined,
-        (event as CustomEvent<QuickIngestOpenDetail>).detail
+        pending?.mode === "normal" ? pending.options : undefined,
+        pending?.mode === "normal"
+          ? pending.detail
+          : (event as CustomEvent<QuickIngestOpenDetail>).detail
       )
     }
     window.addEventListener("tldw:open-quick-ingest", handler)
@@ -183,15 +311,39 @@ export const useQuickIngestEvents = (options?: QuickIngestEventsOptions) => {
   }, [])
 
   useEffect(() => {
-    if (!quickIngestSessionHydrated) {
+    if (!storageAndSessionReady) {
       return
     }
     consumePendingOpenRequest()
-  }, [consumePendingOpenRequest, quickIngestSessionHydrated])
+  }, [consumePendingOpenRequest, storageAndSessionReady])
+
+  useEffect(() => {
+    if (
+      !storageAndSessionReady ||
+      !session ||
+      session.visibility !== "visible" ||
+      preparedSessionIdRef.current === session.id
+    ) {
+      return
+    }
+    preparedSessionIdRef.current = session.id
+    setPreparedSessionId(session.id)
+    const shouldRebase =
+      session.lifecycle === "draft" &&
+      session.selectedPreset !== "custom" &&
+      !session.firstSourceAddMode
+    const presetMap = capturePresetSnapshot(shouldRebase)
+    prepareExistingSession(presetMap)
+  }, [
+    capturePresetSnapshot,
+    prepareExistingSession,
+    session,
+    storageAndSessionReady,
+  ])
 
   useEffect(() => {
     const markQuickIngestReady = () => {
-      quickIngestReadyRef.current = true
+      quickIngestModalReadyRef.current = true
       if (pendingQuickIngestIntroRef.current) {
         pendingQuickIngestIntroRef.current = false
         window.dispatchEvent(new CustomEvent("tldw:quick-ingest-force-intro"))
@@ -207,15 +359,24 @@ export const useQuickIngestEvents = (options?: QuickIngestEventsOptions) => {
   }, [])
 
   useEffect(() => {
-    const handler = () => {
-      if (!quickIngestSessionHydrated) {
-        rememberQuickIngestOpenRequest("intro", undefined, {
-          focusTrigger: false,
-        })
-        void rehydrateQuickIngestSession()
+    const handler = (event: Event) => {
+      const pending = consumePendingQuickIngestOpen()
+      const detail =
+        pending?.mode === "intro"
+          ? pending.detail
+          : (event as CustomEvent<QuickIngestOpenDetail>).detail
+      const openOptions =
+        pending?.mode === "intro"
+          ? { ...pending.options, focusTrigger: false }
+          : { focusTrigger: false }
+      if (!storageAndSessionReady) {
+        rememberQuickIngestOpenRequest("intro", detail, openOptions)
+        if (!quickIngestSessionHydrated) {
+          void rehydrateQuickIngestSession()
+        }
         return
       }
-      performOpenQuickIngestIntro({ focusTrigger: false })
+      performOpenQuickIngestIntro(openOptions, detail)
     }
     window.addEventListener("tldw:open-quick-ingest-intro", handler)
     return () => {
@@ -225,12 +386,17 @@ export const useQuickIngestEvents = (options?: QuickIngestEventsOptions) => {
     performOpenQuickIngestIntro,
     quickIngestSessionHydrated,
     rehydrateQuickIngestSession,
+    storageAndSessionReady,
   ])
 
   return {
     quickIngestOpen,
+    quickIngestReady,
     hasQuickIngestSession,
     quickIngestAutoProcessQueued,
+    presetMap: capturedPresetMap,
+    openRevision,
+    createNewDraft,
     openQuickIngest,
     closeQuickIngest
   }
@@ -245,8 +411,11 @@ export function QuickIngestButton({ className }: QuickIngestButtonProps) {
   const quickIngestBtnRef = useRef<HTMLButtonElement>(null)
   const {
     quickIngestOpen,
-    hasQuickIngestSession,
+    quickIngestReady,
     quickIngestAutoProcessQueued,
+    presetMap,
+    openRevision,
+    createNewDraft,
     openQuickIngest,
     closeQuickIngest
   } = useQuickIngestEvents({ focusTriggerRef: quickIngestBtnRef })
@@ -369,30 +538,41 @@ export function QuickIngestButton({ className }: QuickIngestButtonProps) {
         )}
       </div>
 
-      <Suspense fallback={null}>
-        <QuickIngestModal
-          open={quickIngestOpen}
-          autoProcessQueued={quickIngestAutoProcessQueued}
-          onClose={closeQuickIngest}
-        />
-      </Suspense>
+      {quickIngestReady ? (
+        <Suspense fallback={null}>
+          <QuickIngestModal
+            open={quickIngestOpen}
+            autoProcessQueued={quickIngestAutoProcessQueued}
+            presetMap={presetMap}
+            openRevision={openRevision}
+            createNewDraft={createNewDraft}
+            onClose={closeQuickIngest}
+          />
+        </Suspense>
+      ) : null}
     </>
   )
 }
 
 export const QuickIngestModalHost = createEventHost({
   useEvents: useQuickIngestEvents,
-  isActive: ({ quickIngestOpen, hasQuickIngestSession }) =>
-    quickIngestOpen || hasQuickIngestSession,
+  isActive: ({ quickIngestOpen, quickIngestReady, hasQuickIngestSession }) =>
+    quickIngestReady && (quickIngestOpen || hasQuickIngestSession),
   render: ({
     quickIngestOpen,
     quickIngestAutoProcessQueued,
+    presetMap,
+    openRevision,
+    createNewDraft,
     closeQuickIngest,
   }) => (
     <Suspense fallback={null}>
       <QuickIngestModal
         open={quickIngestOpen}
         autoProcessQueued={quickIngestAutoProcessQueued}
+        presetMap={presetMap}
+        openRevision={openRevision}
+        createNewDraft={createNewDraft}
         onClose={() => closeQuickIngest({ focusTrigger: false })}
       />
     </Suspense>

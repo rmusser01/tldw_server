@@ -6,7 +6,12 @@ import {
   IngestWizardProvider,
   useIngestWizard,
 } from "../IngestWizardContext"
-import { configMatchesPreset } from "../presets"
+import {
+  configMatchesPreset,
+  FIRST_SOURCE_QUICK_PRESET_CONFIG,
+  resolvePresetMap,
+  type PresetMap,
+} from "../presets"
 import type { WizardQueueItem } from "../types"
 
 // ---------------------------------------------------------------------------
@@ -71,12 +76,21 @@ function TestHarness() {
       <span data-testid="presetAudioLanguage">
         {state.presetConfig.typeDefaults.audio?.language || ""}
       </span>
+      <span data-testid="presetProvider">
+        {String(state.presetConfig.advancedValues?.api_name || "")}
+      </span>
+      <span data-testid="presetChunking">
+        {String(state.presetConfig.common.perform_chunking)}
+      </span>
+      <span data-testid="presetDocumentOcr">
+        {String(Boolean(state.presetConfig.typeDefaults.document?.ocr))}
+      </span>
 
       <button onClick={goNext}>goNext</button>
       <button onClick={goBack}>goBack</button>
       <button onClick={() => goToStep(1)}>goToStep1</button>
       <button onClick={() => goToStep(3)}>goToStep3</button>
-      <button onClick={() => goToStep(5 as 5)}>goToStep5</button>
+      <button onClick={() => goToStep(5)}>goToStep5</button>
       <button
         onClick={() =>
           setQueueItems([
@@ -164,6 +178,29 @@ function TestHarness() {
       >
         setAudioLanguage
       </button>
+      <button
+        onClick={() =>
+          setCustomOptions({
+            typeDefaults: { document: { ocr: true } },
+          })
+        }
+      >
+        setDocumentOcr
+      </button>
+      <button
+        onClick={() =>
+          setCustomOptions({ advancedValues: { api_name: "openai" } })
+        }
+      >
+        setProvider
+      </button>
+      <button
+        onClick={() =>
+          setCustomOptions({ advancedValues: { api_name: undefined } })
+        }
+      >
+        clearProvider
+      </button>
       <button onClick={skipToProcessing}>skipToProcessing</button>
       <button onClick={startProcessing}>startProcessing</button>
       <button onClick={cancelProcessing}>cancelProcessing</button>
@@ -186,6 +223,14 @@ function renderWithProvider() {
 function renderWithInitialState(initialState: Parameters<typeof IngestWizardProvider>[0]["initialState"]) {
   return render(
     <IngestWizardProvider initialState={initialState}>
+      <TestHarness />
+    </IngestWizardProvider>
+  )
+}
+
+function renderWithPresetMap(presetMap: PresetMap) {
+  return render(
+    <IngestWizardProvider presetMap={presetMap}>
       <TestHarness />
     </IngestWizardProvider>
   )
@@ -361,6 +406,78 @@ describe("IngestWizardContext", () => {
   // -- Presets & options ----------------------------------------------------
 
   describe("presets", () => {
+    it("uses the captured preset map for the default preset", () => {
+      const presetMap = resolvePresetMap({
+        standard: {
+          ...resolvePresetMap().standard,
+          advancedValues: { api_name: "openai" },
+        },
+      })
+
+      renderWithPresetMap(presetMap)
+
+      expect(screen.getByTestId("presetProvider").textContent).toBe("openai")
+    })
+
+    it("uses the captured preset map when switching named presets", async () => {
+      const presetMap = resolvePresetMap({
+        deep: {
+          ...resolvePresetMap().deep,
+          advancedValues: { api_name: "anthropic" },
+        },
+      })
+      renderWithPresetMap(presetMap)
+
+      await userEvent.click(screen.getByText("setDeep"))
+
+      expect(screen.getByTestId("presetProvider").textContent).toBe("anthropic")
+    })
+
+    it("preserves first-source chunking when another option changes", async () => {
+      renderWithInitialState({
+        selectedPreset: "quick",
+        customBasePreset: "quick",
+        presetConfig: FIRST_SOURCE_QUICK_PRESET_CONFIG,
+        customOptions: {},
+      })
+
+      await userEvent.click(screen.getByText("setDocumentOcr"))
+
+      expect(screen.getByTestId("presetChunking").textContent).toBe("true")
+    })
+
+    it("preserves the full first-source config when selecting Custom", async () => {
+      renderWithInitialState({
+        selectedPreset: "quick",
+        customBasePreset: "quick",
+        presetConfig: FIRST_SOURCE_QUICK_PRESET_CONFIG,
+        customOptions: {},
+      })
+
+      await userEvent.click(screen.getByText("setCustomPreset"))
+
+      expect(screen.getByTestId("presetChunking").textContent).toBe("true")
+    })
+
+    it("does not resurrect a cleared provider after another option edit", async () => {
+      renderWithInitialState({
+        selectedPreset: "custom",
+        customBasePreset: "standard",
+        presetConfig: {
+          ...resolvePresetMap().standard,
+          advancedValues: { api_name: "openai", temperature: 0.2 },
+        },
+        customOptions: {
+          advancedValues: { api_name: "openai", temperature: 0.2 },
+        },
+      })
+
+      await userEvent.click(screen.getByText("clearProvider"))
+      await userEvent.click(screen.getByText("setAudioLanguage"))
+
+      expect(screen.getByTestId("presetProvider").textContent).toBe("")
+    })
+
     it("setPreset changes selectedPreset and resolves presetConfig", async () => {
       renderWithProvider()
       expect(screen.getByTestId("preset").textContent).toBe("standard")

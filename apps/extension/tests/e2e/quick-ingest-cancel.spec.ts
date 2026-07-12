@@ -90,6 +90,114 @@ test.describe("Quick ingest cancel flow", () => {
     })
   })
 
+  test("hydrates the saved Standard analysis provider from extension storage", async () => {
+    const { context, page, optionsUrl } = await launchWithBuiltExtension({
+      seedConfig: {
+        serverUrl,
+        authMode: "single-user",
+        apiKey: API_KEY
+      }
+    })
+
+    try {
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) => {
+            chrome.storage.sync.set(
+              {
+                quickIngestPresetConfigs: JSON.stringify({
+                  standard: { advancedValues: { api_name: "openai" } }
+                })
+              },
+              () => resolve()
+            )
+          })
+      )
+      // The E2E harness redirects sync to local storage. Reload so Plasmo's
+      // sync-area hook reads the seeded value instead of waiting for a local
+      // change event that it intentionally ignores.
+      await page.reload({ waitUntil: "domcontentloaded" })
+      await page.goto(optionsUrl + "#/media", { waitUntil: "domcontentloaded" })
+      await waitForConnectionStore(page, "quick-ingest-saved-provider")
+
+      const openQuickIngestButton = page
+        .getByRole("button", { name: /quick ingest/i })
+        .first()
+      await openQuickIngestButton.click()
+
+      const dialog = page.getByRole("dialog", { name: /quick ingest/i }).first()
+      const urlInput = dialog
+        .getByLabel(/Paste URLs input/i)
+        .or(dialog.getByLabel(/URL input area/i))
+        .or(dialog.getByPlaceholder(/https:\/\/example\.com/i))
+        .first()
+      await urlInput.fill("https://example.com/saved-provider")
+      await dialog.getByRole("button", { name: /add urls/i }).first().click()
+      await dialog
+        .getByRole("button", { name: /configure \d+ items/i })
+        .first()
+        .click()
+
+      await expect(
+        dialog.getByRole("combobox", { name: /analysis provider/i })
+      ).toHaveValue("openai")
+    } finally {
+      await context.close()
+    }
+  })
+
+  test("missing analysis provider redirects to the focused Configure control", async () => {
+    const { context, page, optionsUrl } = await launchWithBuiltExtension({
+      seedConfig: {
+        serverUrl,
+        authMode: "single-user",
+        apiKey: API_KEY
+      }
+    })
+
+    try {
+      await page.goto(optionsUrl + "#/media", { waitUntil: "domcontentloaded" })
+      await waitForConnectionStore(page, "quick-ingest-provider")
+      await page.waitForFunction(
+        () => {
+          const state = (window as any).__tldw_useConnectionStore?.getState?.().state
+          return state?.isConnected === true && state?.phase === "connected"
+        },
+        null,
+        { timeout: 20_000 }
+      )
+
+      const openQuickIngestButton = page
+        .getByRole("button", { name: /quick ingest/i })
+        .first()
+      await openQuickIngestButton.click()
+
+      const dialog = page.getByRole("dialog", { name: /quick ingest/i }).first()
+      await expect(dialog).toBeVisible()
+      const urlInput = dialog
+        .getByLabel(/Paste URLs input/i)
+        .or(dialog.getByLabel(/URL input area/i))
+        .or(dialog.getByPlaceholder(/https:\/\/example\.com/i))
+        .first()
+      await urlInput.fill("https://example.com/provider-required")
+      await dialog.getByRole("button", { name: /add urls/i }).first().click()
+      await dialog.getByRole("button", { name: /use defaults/i }).click()
+
+      const provider = dialog.getByRole("combobox", {
+        name: /analysis provider/i
+      })
+      await expect(provider).toBeVisible()
+      await expect(provider).toBeFocused()
+      await expect(dialog.getByRole("alert")).toContainText(/analysis provider/i)
+      await expect(provider).toHaveAttribute(
+        "aria-describedby",
+        /quick-ingest-analysis-provider-warning/
+      )
+    } finally {
+      await context.close()
+    }
+  })
+
   test("quick ingest cancel all reaches terminal wizard results", async () => {
     const { context, page, optionsUrl } = await launchWithBuiltExtension({
       seedConfig: {
