@@ -142,15 +142,19 @@ export function ChatHeader({
     active: {
       name: toText(t(
         "option:header.notificationsActiveName",
-        `Notifications, ${notificationCount ?? 0} unread`,
-        { count: notificationCount ?? 0 }
+        {
+          count: notificationCount ?? 0,
+          defaultValue: `Notifications, ${notificationCount ?? 0} unread`
+        }
       )),
       title: toText(t("option:header.notifications", "Notifications")),
       description: (notificationCount ?? 0) > 0
         ? toText(t(
             "option:header.notificationsUnreadDescription",
-            `${notificationCount} unread notification${notificationCount === 1 ? "" : "s"}.`,
-            { count: notificationCount }
+            {
+              count: notificationCount,
+              defaultValue: `${notificationCount} unread notification${notificationCount === 1 ? "" : "s"}.`
+            }
           ))
         : toText(t("option:header.notificationsCaughtUp", "You are caught up.")),
       announcement: toText(t("option:header.notificationsActiveAnnouncement", "Notifications are active"))

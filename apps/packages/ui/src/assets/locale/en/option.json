@@ -126,9 +126,8 @@
   "header": {
     "backToHome": "Back to home",
     "notifications": "Notifications",
-    "notificationsActiveName": "Notifications, {{count}} unread",
-    "notificationsUnreadDescription_one": "{{count}} unread notification.",
-    "notificationsUnreadDescription_other": "{{count}} unread notifications.",
+    "notificationsActiveName": "Notifications, {count} unread",
+    "notificationsUnreadDescription": "{count, plural, one {# unread notification.} other {# unread notifications.}}",
     "notificationsCaughtUp": "You are caught up.",
     "notificationsActiveAnnouncement": "Notifications are active",
     "notificationsConnectingName": "Notifications, connecting",

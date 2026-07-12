@@ -13,7 +13,10 @@ vi.mock("antd", () => ({
 vi.mock("~/assets/icon.png", () => ({ default: "icon.png" }))
 vi.mock("../HeaderShortcuts", () => ({ HeaderShortcuts: () => null }))
 
-const t = ((_: string, fallback?: string) => fallback || "") as TFunction
+const t = ((
+  _: string,
+  fallback?: string | { defaultValue?: string }
+) => typeof fallback === "string" ? fallback : fallback?.defaultValue || "") as TFunction
 
 const props = (overrides: Partial<React.ComponentProps<typeof ChatHeader>> = {}) => ({
   t,
@@ -47,6 +50,19 @@ describe("ChatHeader notification lifecycle", () => {
     expect(trigger).toHaveAttribute("aria-expanded", "false")
     expect(trigger).toHaveAttribute("aria-controls", "chat-header-notification-status")
     expect(screen.getByText("3")).toHaveAttribute("aria-hidden", "true")
+  })
+
+  it("passes count interpolation through the i18next options object", () => {
+    const resourceT = ((key: string, options?: { count?: number; defaultValue?: string }) => {
+      if (key === "option:header.notificationsActiveName") {
+        return `Notifications, ${options?.count} unread`
+      }
+      return options?.defaultValue || ""
+    }) as TFunction
+
+    render(<ChatHeader {...props({ t: resourceT, notificationCount: 3 })} />)
+
+    expect(screen.getByRole("button", { name: "Notifications, 3 unread" })).toBeVisible()
   })
 
   it.each([
