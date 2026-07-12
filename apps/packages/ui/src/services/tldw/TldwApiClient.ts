@@ -2019,11 +2019,21 @@ export class TldwApiClientBase {
   }
 
   async clearCookieSingleUserSession(): Promise<void> {
-    await this.storage.remove(COOKIE_SESSION_CONFIG_KEY)
+    let failure: unknown
+    try {
+      await this.storage.remove(COOKIE_SESSION_CONFIG_KEY)
+    } catch (error) {
+      failure = error
+    }
     invalidateCookieSessionConfig()
     this.config = null
-    await this.initialize()
+    try {
+      await this.initialize()
+    } catch (error) {
+      failure ??= error
+    }
     this.publishConfigUpdated()
+    if (failure) throw failure
   }
 
   async getConfig(): Promise<TldwConfig | null> {

@@ -6,7 +6,8 @@ const mocks = vi.hoisted(() => ({
   bgStream: vi.fn(),
   tldwRequest: vi.fn(),
   storage: new Map<string, unknown>(),
-  sessionStorage: new Map<string, unknown>()
+  sessionStorage: new Map<string, unknown>(),
+  storageRemoveError: null as Error | null
 }))
 
 vi.mock("@/services/background-proxy", () => ({
@@ -28,6 +29,9 @@ vi.mock("@/utils/safe-storage", () => ({
         values.set(key, value)
       }),
       remove: vi.fn(async (key: string) => {
+        if (options?.area !== "session" && mocks.storageRemoveError) {
+          throw mocks.storageRemoveError
+        }
         values.delete(key)
       })
     }
@@ -77,6 +81,7 @@ describe("TldwApiClient quickstart auth bootstrap", () => {
     mocks.tldwRequest.mockReset()
     mocks.storage.clear()
     mocks.sessionStorage.clear()
+    mocks.storageRemoveError = null
     window.localStorage.clear()
     activateCookieSessionConfig()
   })
@@ -213,6 +218,36 @@ describe("TldwApiClient quickstart auth bootstrap", () => {
     expect(isCookieSessionConfigInvalidated()).toBe(true)
     await expect(client.getConfig()).resolves.toEqual(manualConfig)
     expect(mocks.storage.get("tldwConfig")).toEqual(manualConfig)
+  })
+
+  it("rehydrates the preserved manual connection when marker removal fails", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    const manualConfig = {
+      authMode: "single-user" as const,
+      authSource: "manual" as const,
+      serverUrl: "https://remote.example.test/path",
+      apiKey: "manual-key",
+      credentialSource: "manual" as const,
+      apiKeyPersistence: "device" as const,
+      apiKeyServerOrigin: "https://remote.example.test"
+    }
+    mocks.storage.set("tldwConfig", manualConfig)
+    mocks.storage.set("tldwCookieSessionConfig", {
+      authMode: "single-user",
+      authSource: "cookie-session",
+      serverUrl: window.location.origin
+    })
+    const client = new TldwApiClient()
+    await client.initialize()
+    mocks.storageRemoveError = new Error("marker removal unavailable")
+
+    await expect(client.clearCookieSingleUserSession()).rejects.toThrow(
+      "marker removal unavailable"
+    )
+
+    expect(isCookieSessionConfigInvalidated()).toBe(true)
+    await expect(client.getConfig()).resolves.toEqual(manualConfig)
+    expect(mocks.storage.get("tldwCookieSessionConfig")).toBeDefined()
   })
 
   it("removes a mismatched manual session credential while cookie auth is active", async () => {
