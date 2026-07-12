@@ -386,6 +386,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.query_ops import (
     get_media_status_by_id,
     get_media_by_title,
     get_media_by_url,
+    get_media_by_urls,
     get_media_by_uuid,
     get_paginated_media_list,
     get_paginated_files,
@@ -1865,6 +1866,7 @@ MediaDatabase.get_media_by_hash = get_media_by_hash
 MediaDatabase.get_media_status_by_id = get_media_status_by_id
 MediaDatabase.get_media_by_title = get_media_by_title
 MediaDatabase.get_media_by_url = get_media_by_url
+MediaDatabase.get_media_by_urls = get_media_by_urls
 MediaDatabase.get_media_by_uuid = get_media_by_uuid
 MediaDatabase.count_chatbook_scope_category = count_chatbook_scope_category
 MediaDatabase.list_chatbook_scope_ids = list_chatbook_scope_ids

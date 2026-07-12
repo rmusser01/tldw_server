@@ -20,7 +20,15 @@ modified_files:
 - tldw_Server_API/app/core/Jobs/pg_migrations.py
 - tldw_Server_API/tests/Jobs/test_jobs_migrations_sqlite.py
 - tldw_Server_API/tests/Jobs/test_jobs_migrations_postgres.py
+- tldw_Server_API/app/core/Ingestion_Media_Processing/Video/playlist_ingest_store.py
+- tldw_Server_API/app/core/DB_Management/media_db/repositories/media_lookup_repository.py
+- tldw_Server_API/app/core/DB_Management/media_db/api.py
+- tldw_Server_API/app/core/DB_Management/media_db/runtime/query_ops.py
+- tldw_Server_API/app/core/DB_Management/media_db/media_database_impl.py
 - tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_store.py
+- tldw_Server_API/tests/MediaIngestion_NEW/integration/test_playlist_ingest_store_postgres.py
+- tldw_Server_API/tests/MediaIngestion_NEW/property/test_playlist_ingest_properties.py
+- tldw_Server_API/tests/MediaDB2/test_dedupe_url_normalization.py
 ---
 
 ## Description
@@ -47,7 +55,7 @@ Follow Docs/superpowers/plans/2026-07-12-youtube-playlist-ingest-backend.md sequ
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+Task 2: implemented the owner-scoped PlaylistIngestStore and signed ordinal cursor contract using the injected JobManager connection helpers. Added atomic snapshot/materialization/run/event/cleanup operations, compare-and-set item transitions, and one-query normalized Media DB URL batch lookup. Verification: focused suite 59 passed/1 existing jobs-suite-only PostgreSQL skip; property tests cover 42 generated cases; Ruff/compileall/diff-check clean on touched scope; Bandit reported zero findings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

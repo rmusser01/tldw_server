@@ -2,7 +2,7 @@
 
 import contextlib
 import json
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from typing import Any, Protocol
 
 from loguru import logger
@@ -277,6 +277,33 @@ def get_media_by_url(
     )
     return reader.get_media_by_url(
         url,
+        include_deleted=include_deleted,
+        include_trash=include_trash,
+    )
+
+
+def get_media_by_urls(
+    db: MediaDbLike | MediaDbReadLike,
+    urls: Sequence[str],
+    *,
+    include_deleted: bool = False,
+    include_trash: bool = False,
+) -> list[dict[str, Any]]:
+    """Return media matching any normalized URL candidate in one lookup."""
+    db_instance = unwrap_media_database_like(db)
+    if is_media_database_like(db_instance):
+        return MediaLookupRepository.from_legacy_db(db_instance).by_urls(
+            urls,
+            include_deleted=include_deleted,
+            include_trash=include_trash,
+        )
+    reader = _require_read_method(
+        db,
+        "get_media_by_urls",
+        error_message="db must expose the Media DB batch URL read contract.",
+    )
+    return reader.get_media_by_urls(
+        urls,
         include_deleted=include_deleted,
         include_trash=include_trash,
     )
@@ -1151,6 +1178,7 @@ __all__ = [
     "get_media_by_title",
     "get_media_transcripts",
     "get_media_by_url",
+    "get_media_by_urls",
     "has_unvectorized_chunks",
     "get_unvectorized_anchor_index_for_offset",
     "get_unvectorized_chunk_by_index",

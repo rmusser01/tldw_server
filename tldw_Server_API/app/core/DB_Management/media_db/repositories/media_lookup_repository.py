@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from math import ceil
 import sqlite3
+from collections.abc import Sequence
 from typing import Any
 
 from loguru import logger
@@ -194,6 +195,48 @@ class MediaLookupRepository:
                 exc_info=True,
             )
             raise DatabaseError(f"Unexpected error fetching media by URL: {exc}") from exc  # noqa: TRY003
+
+    def by_urls(
+        self,
+        urls: Sequence[str],
+        *,
+        include_deleted: bool = False,
+        include_trash: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Return media matching normalized or legacy forms of any candidate URL."""
+        if isinstance(urls, (str, bytes)):
+            raise InputError("urls must be a sequence of URL strings.")  # noqa: TRY003
+
+        if any(type(url) is not str for url in urls):
+            raise InputError("urls entries must be strings.")  # noqa: TRY003
+
+        candidates = tuple(
+            dict.fromkeys(
+                candidate
+                for url in urls
+                for candidate in media_dedupe_url_candidates(url)
+            )
+        )
+        if not candidates:
+            return []
+
+        placeholders = ", ".join(["?"] * len(candidates))
+        query = f"SELECT * FROM Media WHERE url IN ({placeholders})"  # nosec B608
+        if not include_deleted:
+            query += " AND deleted = 0"
+        if not include_trash:
+            query += " AND is_trash = 0"
+        query += " ORDER BY id ASC"
+
+        try:
+            rows = self.session.execute_query(query, candidates).fetchall()
+            return [dict(row) for row in rows]
+        except (DatabaseError, sqlite3.Error) as exc:
+            logger.error("Error fetching media by URL candidates: {}", exc, exc_info=True)
+            raise DatabaseError(f"Failed fetch media by URLs: {exc}") from exc  # noqa: TRY003
+        except Exception as exc:
+            logger.error("Unexpected error fetching media by URL candidates: {}", exc, exc_info=True)
+            raise DatabaseError(f"Unexpected error fetching media by URLs: {exc}") from exc  # noqa: TRY003
 
     def by_hash(
         self,

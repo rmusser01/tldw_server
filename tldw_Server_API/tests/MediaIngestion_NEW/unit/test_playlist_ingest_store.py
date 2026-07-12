@@ -1,5 +1,74 @@
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from pydantic import ValidationError
+
+NOW = datetime(2026, 7, 12, 12, 0, tzinfo=timezone.utc)
+
+
+class _FixedClock:
+    def now_utc(self) -> datetime:
+        return NOW
+
+
+@pytest.fixture()
+def store(tmp_path, monkeypatch):
+    monkeypatch.setenv("TEST_MODE", "true")
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestStore,
+    )
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    manager = JobManager(db_path=tmp_path / "playlist-jobs.db", clock=_FixedClock())
+    return PlaylistIngestStore(manager)
+
+
+def _preflight_item(
+    occurrence_id: str,
+    ordinal: int,
+    *,
+    display_metadata: dict | None = None,
+) -> dict:
+    return {
+        "occurrence_id": occurrence_id,
+        "ordinal": ordinal,
+        "occurrence_index_for_source": 1,
+        "source_url": f"https://www.youtube.com/watch?v={ordinal}",
+        "normalized_source_id": f"youtube:{ordinal}",
+        "source_kind": "youtube",
+        "availability": "available",
+        "duplicate_status": "not_found",
+        "selected_by_default": True,
+        "display_metadata": display_metadata or {"title": f"Video {ordinal}"},
+    }
+
+
+def _seed_preflight(store, *, owner_id: str = "1", status: str = "ready", item_count: int = 2):
+    preflight = store.create_preflight(
+        owner_id,
+        source_url="https://www.youtube.com/playlist?list=PL123",
+        source_kind="youtube_playlist",
+        expires_at=NOW + timedelta(hours=1),
+    )
+    items = [_preflight_item(f"occ-{index}", index) for index in range(1, item_count + 1)]
+    store.replace_preflight_snapshot(
+        owner_id,
+        preflight.preflight_id,
+        status=status,
+        items=items,
+        summary={"item_count": item_count},
+    )
+    return store.get_preflight(owner_id, preflight.preflight_id)
+
+
+def _seed_materialization(store, *, owner_id: str = "1", item_count: int = 2):
+    ready = _seed_preflight(store, owner_id=owner_id, item_count=item_count)
+    return store.create_materialization(
+        owner_id,
+        preflight_id=ready.preflight_id,
+        occurrence_ids=[f"occ-{index}" for index in range(1, item_count + 1)],
+        expires_at=NOW + timedelta(hours=1),
+    )
 
 
 def test_duplicate_policy_choices_are_explicit():
@@ -165,3 +234,307 @@ def test_run_snapshot_requires_positive_persisted_ids(field, value):
             state="running",
             **{field: value},
         )
+
+
+def test_preflight_creation_is_owner_scoped(store):
+    preflight = store.create_preflight(
+        "1",
+        source_url="https://www.youtube.com/playlist?list=PL-create",
+        source_kind="youtube_playlist",
+        expires_at=NOW + timedelta(hours=1),
+    )
+
+    assert preflight.owner_user_id == "1"
+    assert preflight.status == "pending"
+    assert store.get_preflight("1", preflight.preflight_id) == preflight
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestNotFoundError,
+    )
+
+    with pytest.raises(PlaylistIngestNotFoundError, match="playlist resource not found"):
+        store.get_preflight("2", preflight.preflight_id)
+
+
+def test_snapshot_replacement_is_atomic(store):
+    preflight = store.create_preflight(
+        "1",
+        source_url="https://www.youtube.com/playlist?list=PL-atomic",
+        source_kind="youtube_playlist",
+        expires_at=NOW + timedelta(hours=1),
+    )
+    duplicate_occurrences = [
+        _preflight_item("occ-duplicate", 1),
+        _preflight_item("occ-duplicate", 2),
+    ]
+
+    with pytest.raises(ValueError, match="occurrence_id"):
+        store.replace_preflight_snapshot(
+            "1",
+            preflight.preflight_id,
+            status="ready",
+            items=duplicate_occurrences,
+        )
+
+    persisted = store.get_preflight("1", preflight.preflight_id)
+    assert persisted.status == "pending"
+    assert list(store.list_preflight_items("1", preflight.preflight_id)) == []
+
+
+@pytest.mark.parametrize("status", ["pending", "running", "cancelled", "failed"])
+def test_materialization_requires_ready_snapshot(store, status):
+    preflight = _seed_preflight(store, status=status)
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestNotFoundError,
+    )
+
+    with pytest.raises(PlaylistIngestNotFoundError, match="playlist resource not found"):
+        store.create_materialization(
+            "1",
+            preflight_id=preflight.preflight_id,
+            occurrence_ids=["occ-1"],
+        )
+
+
+def test_materialization_rejects_expired_snapshot(store):
+    preflight = store.create_preflight(
+        "1",
+        source_url="https://www.youtube.com/playlist?list=PL-expired",
+        source_kind="youtube_playlist",
+        expires_at=NOW - timedelta(seconds=1),
+    )
+    store.replace_preflight_snapshot(
+        "1",
+        preflight.preflight_id,
+        status="ready",
+        items=[_preflight_item("occ-expired", 1)],
+    )
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestNotFoundError,
+    )
+
+    with pytest.raises(PlaylistIngestNotFoundError, match="playlist resource not found"):
+        store.create_materialization(
+            "1",
+            preflight_id=preflight.preflight_id,
+            occurrence_ids=["occ-expired"],
+        )
+
+
+def test_materialization_copies_identity_but_not_review_policy(store):
+    ready = store.create_preflight(
+        "1",
+        source_url="https://www.youtube.com/playlist?list=PL-policy",
+        source_kind="youtube_playlist",
+        expires_at=NOW + timedelta(hours=1),
+    )
+    store.replace_preflight_snapshot(
+        "1",
+        ready.preflight_id,
+        status="ready",
+        items=[
+            _preflight_item("occ-1", 1),
+            _preflight_item(
+                "occ-2",
+                2,
+                display_metadata={
+                    "title": "Video 2",
+                    "duplicate_policy": "overwrite",
+                    "metadata_patch": {"title": "Changed"},
+                },
+            ),
+        ],
+    )
+
+    materialized = store.create_materialization(
+        "1",
+        preflight_id=ready.preflight_id,
+        occurrence_ids=["occ-2"],
+    )
+    item = store.list_materialization_items("1", materialized.id)[0]
+
+    assert item.occurrence_id == "occ-2"
+    assert item.source_url.endswith("v=2")
+    assert "duplicate_policy" not in item.display_metadata
+    assert "metadata_patch" not in item.display_metadata
+
+
+def test_materialization_rejects_duplicate_or_unknown_selection(store):
+    ready = _seed_preflight(store)
+
+    with pytest.raises(ValueError, match="duplicate occurrence_id"):
+        store.create_materialization(
+            "1",
+            preflight_id=ready.preflight_id,
+            occurrence_ids=["occ-1", "occ-1"],
+        )
+    with pytest.raises(ValueError, match="selected occurrence_id"):
+        store.create_materialization(
+            "1",
+            preflight_id=ready.preflight_id,
+            occurrence_ids=["occ-missing"],
+        )
+
+
+def test_materialization_uses_snapshot_order_not_selection_order(store):
+    ready = _seed_preflight(store, item_count=3)
+    materialized = store.create_materialization(
+        "1",
+        preflight_id=ready.preflight_id,
+        occurrence_ids=["occ-3", "occ-1", "occ-2"],
+    )
+
+    items = list(store.list_materialization_items("1", materialized.id))
+
+    assert [(item.ordinal, item.occurrence_id) for item in items] == [
+        (1, "occ-1"),
+        (2, "occ-2"),
+        (3, "occ-3"),
+    ]
+
+
+def test_ready_snapshot_order_is_immutable(store):
+    ready = _seed_preflight(store)
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestConflictError,
+    )
+
+    with pytest.raises(PlaylistIngestConflictError, match="immutable"):
+        store.replace_preflight_snapshot(
+            "1",
+            ready.preflight_id,
+            status="ready",
+            items=[_preflight_item("occ-new", 1)],
+        )
+
+
+def test_cursor_is_signed_and_bound_to_owner_resource_and_order(store):
+    ready = _seed_preflight(store, item_count=3)
+    first_page = store.list_preflight_items("1", ready.preflight_id, limit=1)
+    assert first_page.next_cursor
+
+    tampered = first_page.next_cursor[:-1] + ("A" if first_page.next_cursor[-1] != "A" else "B")
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestNotFoundError,
+    )
+
+    attempts = [
+        ("1", ready.preflight_id, tampered),
+        ("2", ready.preflight_id, first_page.next_cursor),
+        ("1", "missing", first_page.next_cursor),
+    ]
+    for owner_id, preflight_id, cursor in attempts:
+        with pytest.raises(PlaylistIngestNotFoundError, match="playlist resource not found"):
+            store.list_preflight_items(owner_id, preflight_id, limit=1, cursor=cursor)
+
+
+@pytest.mark.parametrize("cursor", ["!.*", "x" * 4097])
+def test_malformed_or_oversized_cursor_fails_closed(store, cursor):
+    ready = _seed_preflight(store)
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestNotFoundError,
+    )
+
+    with pytest.raises(PlaylistIngestNotFoundError, match="playlist resource not found"):
+        store.list_preflight_items("1", ready.preflight_id, limit=1, cursor=cursor)
+
+
+def test_run_creation_copies_materialized_items_in_one_manifest(store):
+    materialized = _seed_materialization(store)
+
+    run = store.create_run(
+        "1",
+        materialization_ids=[materialized.id],
+        processing_options={"chunk_method": "semantic"},
+        expires_at=NOW + timedelta(days=7),
+    )
+    items = list(store.list_run_items("1", run.run_id))
+
+    assert run.version == 1
+    assert [item.occurrence_id for item in items] == ["occ-1", "occ-2"]
+    assert all(item.state == "staged" for item in items)
+
+
+def test_event_replay_and_version_bump_are_atomic(store):
+    materialized = _seed_materialization(store, item_count=1)
+    run = store.create_run("1", materialization_ids=[materialized.id])
+
+    event = store.append_run_event(
+        "1",
+        run.run_id,
+        event_type="item_running",
+        occurrence_id="occ-1",
+        state="running",
+        attrs={"worker": "w1"},
+        expected_version=1,
+    )
+
+    replay = list(store.list_run_events("1", run.run_id, after_event_id=0))
+    assert [item.event_id for item in replay] == [event.event_id]
+    assert replay[0].attrs == {"worker": "w1"}
+    assert store.get_run("1", run.run_id).version == 2
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestConflictError,
+    )
+
+    with pytest.raises(PlaylistIngestConflictError, match="version"):
+        store.append_run_event(
+            "1",
+            run.run_id,
+            event_type="stale",
+            expected_version=1,
+        )
+    assert len(store.list_run_events("1", run.run_id)) == 1
+
+
+def test_compare_and_set_run_item_transition_rejects_stale_state(store):
+    materialized = _seed_materialization(store, item_count=1)
+    run = store.create_run("1", materialization_ids=[materialized.id])
+
+    assert store.compare_and_set_run_item_state(
+        "1",
+        run.run_id,
+        "occ-1",
+        expected_state="staged",
+        new_state="running",
+    )
+    assert not store.compare_and_set_run_item_state(
+        "1",
+        run.run_id,
+        "occ-1",
+        expected_state="staged",
+        new_state="queued",
+    )
+    assert store.list_run_items("1", run.run_id)[0].state == "running"
+
+
+def test_cleanup_expired_is_owner_safe(store):
+    expired = store.create_preflight(
+        "1",
+        source_url="https://example.com/expired",
+        source_kind="url",
+        expires_at=NOW - timedelta(seconds=1),
+    )
+    other_owner = store.create_preflight(
+        "2",
+        source_url="https://example.com/other",
+        source_kind="url",
+        expires_at=NOW - timedelta(seconds=1),
+    )
+
+    deleted = store.cleanup_expired("1", now=NOW)
+
+    assert deleted["preflights"] == 1
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestNotFoundError,
+    )
+
+    with pytest.raises(PlaylistIngestNotFoundError):
+        store.get_preflight("1", expired.preflight_id)
+    assert store.get_preflight("2", other_owner.preflight_id).preflight_id == other_owner.preflight_id
