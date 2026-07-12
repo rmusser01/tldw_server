@@ -1,5 +1,5 @@
 import { renderHook } from "@testing-library/react"
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { safeStorageSerde } from "@/utils/safe-storage"
 
@@ -12,25 +12,74 @@ vi.mock("@plasmohq/storage/hook", () => ({
 import { useNotificationCount } from "@/hooks/useNotificationCount"
 
 describe("useNotificationCount", () => {
-  it("subscribes to unread count changes from extension local storage", () => {
-    useStorageMock.mockReturnValue([7])
+  beforeEach(() => {
+    useStorageMock.mockReset()
+  })
+
+  it("reads unread count from the active scoped lifecycle record", () => {
+    const recordKey = "tldw:notifications:server:api.example.test:user:user-a"
+    useStorageMock
+      .mockReturnValueOnce([recordKey])
+      .mockReturnValueOnce([{ state: "active", unreadCount: 7, updatedAt: 123 }])
 
     const { result } = renderHook(() => useNotificationCount())
 
-    expect(useStorageMock).toHaveBeenCalledWith(
+    expect(useStorageMock).toHaveBeenNthCalledWith(
+      1,
       {
-        key: "tldw:notifications:unreadCount",
+        key: "tldw:notifications:activeScope",
         area: "local",
         serde: safeStorageSerde
       },
       expect.any(Function)
     )
-
-    const transform = useStorageMock.mock.calls[0]?.[1] as ((value: unknown) => number) | undefined
-    expect(transform).toBeTypeOf("function")
-    expect(transform?.(undefined)).toBe(0)
-    expect(transform?.("12")).toBe(12)
-    expect(transform?.("abc")).toBe(0)
+    expect(useStorageMock).toHaveBeenNthCalledWith(
+      2,
+      {
+        key: recordKey,
+        area: "local",
+        serde: safeStorageSerde
+      },
+      expect.any(Function)
+    )
     expect(result.current).toBe(7)
+  })
+
+  it("clears the rendered count when no scoped selector is active", () => {
+    useStorageMock
+      .mockReturnValueOnce([null])
+      .mockReturnValueOnce([undefined])
+
+    const { result } = renderHook(() => useNotificationCount())
+
+    expect(result.current).toBe(0)
+    expect(useStorageMock.mock.calls[1]?.[0]).not.toEqual(
+      expect.objectContaining({ key: "tldw:notifications:unreadCount" })
+    )
+  })
+
+  it("clears synchronously for one render when the active scope is replaced", () => {
+    const firstScope = "tldw:notifications:server:first:user:user-a"
+    const secondScope = "tldw:notifications:server:second:user:user-b"
+    let activeScope = firstScope
+    const records = new Map([
+      [firstScope, { state: "active", unreadCount: 7, updatedAt: 123 }],
+      [secondScope, { state: "active", unreadCount: 9, updatedAt: 456 }]
+    ])
+    useStorageMock.mockImplementation((options: { key: string }) => [
+      options.key === "tldw:notifications:activeScope"
+        ? activeScope
+        : records.get(options.key)
+    ])
+    const { result, rerender } = renderHook(() => useNotificationCount())
+
+    expect(result.current).toBe(7)
+
+    activeScope = secondScope
+    rerender()
+    expect(result.current).toBe(0)
+
+    rerender()
+    expect(result.current).toBe(9)
   })
 })

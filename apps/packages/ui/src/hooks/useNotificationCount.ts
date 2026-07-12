@@ -1,18 +1,37 @@
-/**
- * Hook to read the notification unread count from extension storage.
- * The count is maintained by the background notification subscription.
- *
- * Returns 0 when running outside the extension context.
- */
+/** Read the active scoped notification unread count from extension storage. */
 
+import { useRef } from "react"
 import { useStorage } from "@plasmohq/storage/hook"
 
 import { toUnreadCount } from "@/utils/notifications"
+import { safeStorageSerde } from "@/utils/safe-storage"
 
-const UNREAD_COUNT_KEY = "tldw:notifications:unreadCount"
+const ACTIVE_SCOPE_KEY = "tldw:notifications:activeScope"
+
+type NotificationRecord = {
+  state: "connecting" | "active" | "degraded" | "auth-required" | "unavailable"
+  unreadCount: number
+  updatedAt: number
+}
+
+const storageOptions = (key: string) => ({
+  key,
+  area: "local" as const,
+  serde: safeStorageSerde
+})
 
 export function useNotificationCount(): number {
-  const [count] = useStorage<number>(UNREAD_COUNT_KEY, 0)
+  const [activeScope] = useStorage<string | null>(storageOptions(ACTIVE_SCOPE_KEY), (value) =>
+    typeof value === "string" && value ? value : null
+  )
+  const [record] = useStorage<NotificationRecord | undefined>(
+    storageOptions(activeScope || ACTIVE_SCOPE_KEY),
+    (value) => (value && typeof value === "object" ? (value as NotificationRecord) : undefined)
+  )
+  const previousScope = useRef(activeScope)
+  const scopeChanged = previousScope.current !== activeScope
+  previousScope.current = activeScope
 
-  return toUnreadCount(count)
+  if (!activeScope || scopeChanged) return 0
+  return toUnreadCount(record?.unreadCount)
 }
