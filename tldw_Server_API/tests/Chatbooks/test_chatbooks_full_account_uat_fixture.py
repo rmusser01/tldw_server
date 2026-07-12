@@ -165,3 +165,29 @@ async def test_prepare_and_reset_create_separate_source_and_empty_destination(tm
     assert archive_path.is_file(), "reset-destination must not move or copy the source archive"
     with pytest.raises(fixture.FixtureVerificationError, match="destination"):
         await fixture.verify(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_prepared_user_explicit_notification_deny_takes_precedence(tmp_path: Path) -> None:
+    fixture = _load_fixture_module()
+    prepared = await fixture.prepare(tmp_path)
+    source_user_id = int(prepared["source_user_id"])
+    auth_db = tmp_path / "source" / "users.db"
+
+    with sqlite3.connect(auth_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO user_permissions (user_id, permission_id, granted)
+            SELECT ?, id, 0
+            FROM permissions
+            WHERE name = 'notifications.control'
+            """,
+            (source_user_id,),
+        )
+        conn.commit()
+
+    roles, permissions = _effective_auth_state(auth_db, source_user_id)
+
+    assert roles == ["user"]
+    assert "notifications.read" in permissions
+    assert "notifications.control" not in permissions

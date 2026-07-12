@@ -1,6 +1,87 @@
 import { test, expect, skipIfServerUnavailable, assertNoCriticalErrors } from "../../utils/fixtures"
 import { expectApiCall } from "../../utils/api-assertions"
 import { NotificationsPage } from "../../utils/page-objects"
+import type { Page, Route } from "@playwright/test"
+
+const notificationItem = {
+  id: 701,
+  user_id: 1,
+  kind: "job_failed",
+  title: "Deterministic notification",
+  message: "Acceptance fixture notification",
+  severity: "error",
+  created_at: "2026-07-11T12:00:00Z",
+  read_at: null,
+  dismissed_at: null,
+}
+
+async function fulfillJson(route: Route, status: number, body: unknown): Promise<void> {
+  await route.fulfill({
+    status,
+    contentType: "application/json",
+    headers: { "access-control-allow-origin": "*" },
+    body: JSON.stringify(body),
+  })
+}
+
+async function fulfillActiveNotificationRequest(
+  route: Route,
+  unreadCount: number,
+): Promise<void> {
+  const request = route.request()
+  const pathname = new URL(request.url()).pathname
+  const method = request.method()
+  if (method === "GET" && pathname === "/api/v1/notifications/unread-count") {
+    await fulfillJson(route, 200, { unread_count: unreadCount })
+    return
+  }
+  if (method === "GET" && pathname === "/api/v1/notifications/stream") {
+    await route.fulfill({
+      status: 200,
+      contentType: "text/event-stream",
+      headers: { "access-control-allow-origin": "*" },
+      body: ": connected\n\n",
+    })
+    return
+  }
+  if (method === "GET" && pathname === "/api/v1/notifications/preferences") {
+    await fulfillJson(route, 200, {
+      user_id: "1",
+      reminder_enabled: true,
+      job_completed_enabled: true,
+      job_failed_enabled: true,
+      updated_at: "2026-07-11T12:00:00Z",
+    })
+    return
+  }
+  if (method === "GET" && pathname === "/api/v1/notifications") {
+    const onlySnoozed = new URL(request.url()).searchParams.get("only_snoozed") === "true"
+    await fulfillJson(route, 200, {
+      items: onlySnoozed ? [] : [notificationItem],
+      total: onlySnoozed ? 0 : 1,
+    })
+    return
+  }
+  await fulfillJson(route, 200, method === "POST" ? { updated: 1 } : {})
+}
+
+const jwtFor = (subject: string): string => {
+  const payload = Buffer.from(JSON.stringify({ sub: subject })).toString("base64url")
+  return `eyJhbGciOiJub25lIn0.${payload}.signature`
+}
+
+async function switchBearerScope(page: Page, accessToken: string): Promise<void> {
+  await page.evaluate((nextAccessToken) => {
+    const oldValue = localStorage.getItem("access_token")
+    localStorage.setItem("access_token", nextAccessToken)
+    window.dispatchEvent(new StorageEvent("storage", {
+      key: "access_token",
+      oldValue,
+      newValue: nextAccessToken,
+      storageArea: localStorage,
+    }))
+  }, accessToken)
+}
 
 test.describe("Notifications", () => {
   let notifications: NotificationsPage
@@ -184,6 +265,134 @@ test.describe("Notifications", () => {
       await snoozeBtn.click()
       await apiCall
     }
+
+    await assertNoCriticalErrors(diagnostics)
+  })
+
+  test("standard user exercises list, count, control, and SSE with one explicit mutation retry", async ({
+    authedPage,
+    diagnostics,
+  }) => {
+    let listCalls = 0
+    let countCalls = 0
+    let streamCalls = 0
+    let markReadCalls = 0
+    await authedPage.route(/\/api\/v1\/notifications(?:\/.*)?(?:\?.*)?$/, async (route) => {
+      const request = route.request()
+      const pathname = new URL(request.url()).pathname
+      if (request.method() === "GET" && pathname === "/api/v1/notifications") listCalls += 1
+      if (request.method() === "GET" && pathname === "/api/v1/notifications/unread-count") countCalls += 1
+      if (request.method() === "GET" && pathname === "/api/v1/notifications/stream") streamCalls += 1
+      if (request.method() === "POST" && pathname === "/api/v1/notifications/mark-read") {
+        markReadCalls += 1
+        if (markReadCalls === 1) {
+          await fulfillJson(route, 503, { detail: "temporary notification failure" })
+          return
+        }
+      }
+      await fulfillActiveNotificationRequest(route, 1)
+    })
+
+    await notifications.goto()
+    await expect(authedPage.getByText("Acceptance fixture notification").first()).toBeVisible()
+    await authedPage.getByRole("button", { name: "Mark read" }).click()
+    await expect(authedPage.getByRole("button", { name: "Retry action" })).toBeVisible()
+    expect(markReadCalls).toBe(1)
+    await authedPage.getByRole("button", { name: "Retry action" }).click()
+    await expect.poll(() => markReadCalls).toBe(2)
+
+    expect(listCalls).toBeGreaterThan(0)
+    expect(countCalls).toBeGreaterThan(0)
+    expect(streamCalls).toBeGreaterThan(0)
+    await assertNoCriticalErrors(diagnostics)
+  })
+
+  test("restricted role suppresses the badge, stops terminal loops, and recovers after one explicit grant retry", async ({
+    authedPage,
+    diagnostics,
+  }) => {
+    let granted = false
+    let unreadCalls = 0
+    let terminalCalls = 0
+    await authedPage.route(/\/api\/v1\/notifications(?:\/.*)?(?:\?.*)?$/, async (route) => {
+      const pathname = new URL(route.request().url()).pathname
+      terminalCalls += 1
+      if (pathname === "/api/v1/notifications/unread-count") unreadCalls += 1
+      if (!granted) {
+        await fulfillJson(route, 403, { detail: "permission denied" })
+        return
+      }
+      await fulfillActiveNotificationRequest(route, 4)
+    })
+
+    await notifications.goto()
+    await expect(authedPage.getByText("Notifications unavailable for this account").first()).toBeVisible()
+    const terminalCallCount = terminalCalls
+    await authedPage.waitForTimeout(1_500)
+    expect(terminalCalls).toBe(terminalCallCount)
+
+    const trigger = authedPage.getByRole("button", {
+      name: "Notifications unavailable for this account",
+    })
+    await expect(trigger.locator("span")).toHaveCount(0)
+    await trigger.focus()
+    await authedPage.keyboard.press("Enter")
+    const retry = authedPage
+      .getByRole("dialog", { name: "Notifications unavailable for this account" })
+      .getByRole("button", { name: "Try again" })
+    await expect(retry).toBeFocused()
+    granted = true
+    const unreadBeforeRetry = unreadCalls
+    await retry.click()
+    await expect.poll(() => unreadCalls).toBe(unreadBeforeRetry + 1)
+    await expect(authedPage.getByText("Notifications unavailable for this account")).toHaveCount(0)
+
+    await assertNoCriticalErrors(diagnostics)
+  })
+
+  test("401 recovery opens the existing sign-in flow without a terminal request loop", async ({
+    authedPage,
+    diagnostics,
+  }) => {
+    let requestCalls = 0
+    await authedPage.route(/\/api\/v1\/notifications(?:\/.*)?(?:\?.*)?$/, async (route) => {
+      requestCalls += 1
+      await fulfillJson(route, 401, { detail: "expired credentials" })
+    })
+
+    await notifications.goto()
+    await expect(authedPage.getByText("Sign in again to view notifications")).toBeVisible()
+    const terminalCallCount = requestCalls
+    await authedPage.waitForTimeout(1_500)
+    expect(requestCalls).toBe(terminalCallCount)
+    await authedPage.getByRole("button", { name: "Open sign in" }).click()
+    await expect(authedPage).toHaveURL(/\/(?:login|settings\/tldw)/)
+
+    await assertNoCriticalErrors(diagnostics)
+  })
+
+  test("account switch clears the old badge before showing the new account count", async ({
+    authedPage,
+    diagnostics,
+  }) => {
+    const accountAToken = jwtFor("account-a")
+    const accountBToken = jwtFor("account-b")
+    await authedPage.addInitScript((accessToken) => {
+      localStorage.setItem("access_token", accessToken)
+    }, accountAToken)
+    await authedPage.route(/\/api\/v1\/notifications(?:\/.*)?(?:\?.*)?$/, async (route) => {
+      const authorization = route.request().headers()["authorization"]
+      await fulfillActiveNotificationRequest(
+        route,
+        authorization === `Bearer ${accountBToken}` ? 1 : 7,
+      )
+    })
+
+    await notifications.goto()
+    await expect(authedPage.getByRole("button", { name: "Notifications, 7 unread" })).toBeVisible()
+    await switchBearerScope(authedPage, accountBToken)
+    await expect(authedPage.getByRole("button", { name: "Notifications, 7 unread" })).toHaveCount(0)
+    await expect(authedPage.getByRole("button", { name: "Notifications, 1 unread" })).toBeVisible()
 
     await assertNoCriticalErrors(diagnostics)
   })

@@ -64,7 +64,7 @@ def notifications_app(monkeypatch, tmp_path):
         return AuthPrincipal(
             kind="user",
             user_id=881,
-            roles=[],
+            roles=["user"],
             permissions=[TASKS_READ, TASKS_CONTROL, NOTIFICATIONS_READ, NOTIFICATIONS_CONTROL],
             is_admin=False,
         )
@@ -155,6 +155,92 @@ def test_notifications_unread_requires_read_scope(notifications_app):
     with TestClient(notifications_app) as client:
         r = client.get("/api/v1/notifications/unread-count")
         assert r.status_code == 403
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "payload"),
+    [
+        ("GET", "/api/v1/notifications", None),
+        ("GET", "/api/v1/notifications/unread-count", None),
+        ("GET", "/api/v1/notifications/preferences", None),
+        ("GET", "/api/v1/notifications/stream", None),
+        ("POST", "/api/v1/notifications/mark-read", {"ids": [1]}),
+        ("POST", "/api/v1/notifications/1/dismiss", None),
+        ("POST", "/api/v1/notifications/1/snooze", {"minutes": 15}),
+        ("DELETE", "/api/v1/notifications/1/snooze", None),
+        ("PATCH", "/api/v1/notifications/preferences", {"reminder_enabled": False}),
+    ],
+)
+def test_restricted_custom_role_is_denied_every_notification_endpoint(
+    notifications_app,
+    method,
+    path,
+    payload,
+):
+    async def restricted_principal():
+        return AuthPrincipal(
+            kind="user",
+            user_id=881,
+            roles=["notification-restricted"],
+            permissions=[],
+            is_admin=False,
+        )
+
+    notifications_app.dependency_overrides[get_auth_principal] = restricted_principal
+    with TestClient(notifications_app) as client:
+        response = client.request(method, path, json=payload)
+
+    assert response.status_code == 403, response.text
+
+
+def test_explicit_control_deny_preserves_reads_and_blocks_mutations(notifications_app):
+    async def explicitly_denied_principal():
+        return AuthPrincipal(
+            kind="user",
+            user_id=881,
+            roles=["user"],
+            permissions=[NOTIFICATIONS_READ],
+            is_admin=False,
+        )
+
+    notifications_app.dependency_overrides[get_auth_principal] = explicitly_denied_principal
+    with TestClient(notifications_app) as client:
+        assert client.get("/api/v1/notifications").status_code == 200
+        assert client.get("/api/v1/notifications/unread-count").status_code == 200
+        assert client.get("/api/v1/notifications/preferences").status_code == 200
+        assert client.post("/api/v1/notifications/mark-read", json={"ids": [1]}).status_code == 403
+        assert client.post("/api/v1/notifications/1/dismiss").status_code == 403
+        assert client.post(
+            "/api/v1/notifications/1/snooze",
+            json={"minutes": 15},
+        ).status_code == 403
+        assert client.delete("/api/v1/notifications/1/snooze").status_code == 403
+        assert client.patch(
+            "/api/v1/notifications/preferences",
+            json={"reminder_enabled": False},
+        ).status_code == 403
+
+
+def test_standard_user_can_open_notification_stream(notifications_app, monkeypatch):
+    monkeypatch.setenv("NOTIFICATIONS_STREAM_POLL_SEC", "0.01")
+    monkeypatch.setenv("NOTIFICATIONS_STREAM_HEARTBEAT_SEC", "0.05")
+    monkeypatch.setenv("NOTIFICATIONS_STREAM_MAX_DURATION_SEC", "0.05")
+    cdb = CollectionsDatabase.for_user(user_id=881)
+    source = cdb.create_user_notification(
+        kind="job_completed",
+        title="Stream acceptance",
+        message="Standard user stream payload",
+        severity="info",
+    )
+
+    with TestClient(notifications_app) as client:
+        response = client.get("/api/v1/notifications/stream")
+
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert f"id: {source.id}" in response.text
+    assert "event: notification" in response.text
+    assert "Standard user stream payload" in response.text
 
 
 def test_notification_snooze_reconciles_scheduler(notifications_app, monkeypatch):
