@@ -39,18 +39,35 @@ labels inaccurate. It treats the symptom by removing requested functionality.
 
 ### Preset data flow
 
-`QuickIngestWizardModal` will read `quickIngestPresetConfigs` with the existing
-Plasmo storage hook and normalize it through `resolvePresetMap`. The modal will
-use the hook's `isLoading` metadata and will not initialize or auto-process a
-preset-dependent draft until storage hydration completes.
+`useQuickIngestEvents`, which is mounted by the always-present Quick Ingest
+event host, will read `quickIngestPresetConfigs` with the existing Plasmo
+storage hook and normalize it through `resolvePresetMap`. It will gate pending
+opens on both Zustand session hydration and preset-storage hydration. This
+loads settings at app mount instead of showing a blank modal while storage
+loads.
 
-On each closed-to-open transition, the modal will capture one resolved preset
-map snapshot. Changes made in Settings while the modal is open do not mutate
-the active run. Reopening captures the new settings. An explicit open revision
-will remount/rebase the provider only when the session is an idle draft and its
-selected preset is non-custom. Workflow-seeded first-source drafts are excluded
-from rebasing: their persisted `FIRST_SOURCE_QUICK_PRESET_CONFIG` intentionally
-enables chunking even though the normal Quick preset does not.
+A combined readiness flag (`sessionHydrated && presetStorageHydrated`) also
+gates event-host activation and modal rendering. A session rehydrated with
+`visibility: "visible"` therefore cannot mount the wizard or persist fallback
+defaults before preset storage is ready. When readiness completes with an
+already-visible idle draft, the hook captures the map and open revision once,
+rebases the eligible draft, and only then exposes it to the modal.
+
+On each closed-to-open transition, the event hook will capture one resolved
+preset-map snapshot. Changes made in Settings while the modal is open do not
+mutate the active run. Reopening captures the new settings. An explicit open
+revision will remount/rebase the provider only when the session is an idle
+draft and its selected preset is non-custom. Workflow-seeded first-source
+drafts are excluded from rebasing: their persisted
+`FIRST_SOURCE_QUICK_PRESET_CONFIG` intentionally enables chunking even though
+the normal Quick preset does not.
+
+Creating another draft is also a snapshot boundary. The event hook exposes a
+`createNewDraft` callback that captures the currently resolved map, increments
+the revision, and then replaces the session. "Ingest More" calls this callback
+instead of mutating the session store directly, so settings changed while a
+completed result remained open apply to the new draft without leaking
+session-only provider choices from the prior run.
 
 The provider's reducer will resolve initial non-custom state, preset switches,
 custom-option matching, and reset behavior against the supplied map. Custom
@@ -63,11 +80,15 @@ Processing, interrupted, cancelled, and completed sessions never rebase from
 Settings. Their persisted `presetConfig` remains authoritative so reattachment
 and historical results retain the configuration with which they started.
 
-For custom sessions, subsequent option edits merge into the persisted full
-`presetConfig`, rather than reconstructing it from a potentially changed base
-preset plus the lossy `customOptions` delta. Clearing an advanced field removes
-it from the full config before persistence, so JSON serialization cannot cause
-a cleared `api_name` to reappear after reload.
+All option edits merge into the session's current full `presetConfig`, rather
+than reconstructing it from a base preset plus the lossy `customOptions`
+delta. The merged full config is then matched against the captured preset map
+to determine whether its label remains a named preset or becomes Custom.
+`SET_PRESET("custom")` preserves that full current config. This rule applies to
+named, custom, and workflow-seeded sessions, so changing OCR, provider, or any
+other option cannot discard the first-source chunking override. Clearing an
+advanced field removes it from the full config before persistence, so JSON
+serialization cannot cause a cleared `api_name` to reappear after reload.
 
 The default reducer behavior remains `DEFAULT_PRESETS` when no map is supplied,
 preserving isolated consumers and tests.
@@ -93,14 +114,29 @@ failure leaves the editable combobox usable. Clearing the control removes
 Provider discovery failure is non-fatal. The control remains editable and the
 existing early guard prevents an analysis-enabled run with an empty provider.
 
+Provider selection in this wizard is session-scoped. The label/help copy will
+say "For this ingest"; changing the reusable Standard or Deep defaults remains
+the responsibility of Quick Ingest Settings. This change does not add an
+implicit "remember" behavior or another persistence control.
+
+Suggestion copy will describe entries as "configured", not "available",
+because a configured local service may still be unreachable. Locale keys for
+the label, "For this ingest" help, placeholder/catalog status, and required
+warning will be added to the English locale source and use the existing locale
+fallback behavior for untranslated languages. The service helper remains the
+validation predicate; the UI renders localized warning copy at the boundary.
+
 ### Error handling
 
-No backend fallback is added. Quick processing validates before entering the
-processing step and keeps the user on Add Content with the existing warning.
-The full configure/review flow validates before any start request; if the late
-safety guard is reached, it resets processing to idle, returns to Configure
-(step 2), and renders the provider warning beside the editable combobox. It
-must not synthesize a failed run or enter a render loop.
+No backend fallback is added, and the UI never guesses among multiple
+providers. Quick processing validates before entering the processing step. If
+Standard or Deep has analysis enabled but no provider, it advances from Add
+Content to Configure (step 2), keeps processing idle, focuses the provider
+combobox, displays an inline warning linked with `aria-describedby`, and makes
+no start request. The warning uses an alert live region so the redirect is
+announced. If the late safety guard is reached from Review, it likewise resets
+processing to idle, returns to Configure, focuses the control, and renders the
+same warning. Neither path synthesizes a failed run or enters a render loop.
 
 ### Tests
 
@@ -110,18 +146,26 @@ Focused tests will prove:
 - switching between Standard and Deep uses the configured map;
 - the configure step displays and updates the analysis provider;
 - configured Standard/Deep flows pass the provider guard;
-- a missing provider remains blocked on the exact recoverable step/status and
-  no start request occurs;
+- fresh/default Standard and Deep sessions with no provider advance to
+  Configure, focus the provider control, remain idle, and make no start request;
 - delayed preset storage hydration blocks initialization and auto-processing;
+- a preloaded visible draft with delayed preset hydration does not mount or
+  persist fallback defaults before the combined readiness gate opens;
 - closing, changing preset settings, and reopening rebases only an idle,
   non-custom draft;
 - a first-source Quick seed retains its mandatory chunking override after
-  storage hydration and reopen;
+  storage hydration, reopen, and any option edit;
 - processing/reattached and completed sessions retain their persisted config;
 - clearing a custom provider, persisting/rehydrating, and changing another
   option does not resurrect the provider;
+- provider selection remains scoped to the active session, while Ingest More
+  captures current Settings, creates a new session from that map, and does not
+  carry the previous session-only provider;
 - provider suggestions filter unconfigured entries, deduplicate configured
-  names, retain typed local/custom values, and tolerate loading failure.
+  names, retain typed local/custom values, and tolerate loading failure;
+- the provider control has an associated label, supports keyboard and free-text
+  entry, links its warning with `aria-describedby`, exposes the warning through
+  an alert live region, and receives focus after a missing-provider redirect.
 
 Shared component tests cover the reducer and modal behavior. Verification also
 requires the WebUI and extension typecheck/build gates plus one storage
