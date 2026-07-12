@@ -264,10 +264,26 @@ class TestParakeetONNX:
         monkeypatch.setitem(sys.modules, "onnx_asr", types.SimpleNamespace(load_model=load_model))
         onnx_mod.unload_onnx_models()
 
-        onnx_mod.load_parakeet_onnx_model(model_path=None, device="cpu")
+        def populate_config(**kwargs) -> None:
+            (model_dir / "config.json").write_text(
+                json.dumps({"model_type": "nemo-conformer-tdt", "features_size": 128}),
+                encoding="utf-8",
+            )
+
+        mock_download.side_effect = populate_config
+        encoder_input = types.SimpleNamespace(name="audio_signal", shape=[None, 128, None])
+        with patch("onnxruntime.InferenceSession") as mock_ort_session:
+            mock_ort_session.return_value.get_inputs.return_value = [encoder_input]
+            session, tokenizer = onnx_mod.load_parakeet_onnx_model(
+                model_path=None,
+                device="cpu",
+            )
 
         mock_download.assert_called_once()
         assert "config.json" in mock_download.call_args.kwargs["allow_patterns"]
+        assert isinstance(session, onnx_mod.ParakeetOnnxAsrRuntime)
+        assert tokenizer is not None
+        load_model.assert_called_once()
 
     @patch(
         'tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.'
@@ -466,10 +482,12 @@ class TestParakeetONNX:
         assert tokenizer is None
         mock_download.assert_not_called()
 
+    @pytest.mark.parametrize("feature_axis", (128, "features"), ids=("static", "dynamic"))
     @patch("onnxruntime.InferenceSession")
     def test_loader_uses_upstream_onnx_asr_for_parakeet_tdt_export(
         self,
         mock_ort_session: MagicMock,
+        feature_axis: int | str,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -498,7 +516,7 @@ class TestParakeetONNX:
             encoding="utf-8",
         )
         mock_ort_session.return_value.get_inputs.return_value = [
-            types.SimpleNamespace(name="audio_signal", shape=[None, 128, None])
+            types.SimpleNamespace(name="audio_signal", shape=[None, feature_axis, None])
         ]
         upstream_model = MagicMock()
         load_model = MagicMock(return_value=upstream_model)
