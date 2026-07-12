@@ -341,17 +341,23 @@ const hasCompleteManualDeviceKey = (config: TldwConfig | null): boolean =>
       normalizeHttpOrigin(config.serverUrl) === config.apiKeyServerOrigin
   )
 
-const scrubAmbiguousManualSessionKey = (serverUrl: string | null): void => {
+const scrubMismatchedManualSessionKey = (config: TldwConfig | null): void => {
   try {
     const raw = window.sessionStorage.getItem(MANUAL_SESSION_API_KEY)
     if (!raw) return
     const record = JSON.parse(raw) as Record<string, unknown>
+    const serverOrigin = normalizeHttpOrigin(config?.serverUrl)
     const complete =
+      config?.authMode === "single-user" &&
+      config.credentialSource === "manual" &&
+      config.apiKeyPersistence === "session" &&
+      serverOrigin !== null &&
+      serverOrigin === normalizeHttpOrigin(config.apiKeyServerOrigin) &&
       record.credentialSource === "manual" &&
       record.apiKeyPersistence === "session" &&
       typeof record.apiKey === "string" &&
       record.apiKey.trim() &&
-      normalizeHttpOrigin(serverUrl) === record.apiKeyServerOrigin
+      serverOrigin === normalizeHttpOrigin(record.apiKeyServerOrigin)
     if (!complete) window.sessionStorage.removeItem(MANUAL_SESSION_API_KEY)
   } catch {
     try {
@@ -401,7 +407,7 @@ const seedTldwConfigFromRuntime = async (): Promise<void> => {
     clearRuntimeAuth()
     clearRuntimeAuthOverride()
     removeLegacyRuntimeSecrets()
-    scrubAmbiguousManualSessionKey(existing?.serverUrl || null)
+    scrubMismatchedManualSessionKey(existing)
   } catch {
     // Leave existing manual configuration intact if client storage is unavailable.
   }

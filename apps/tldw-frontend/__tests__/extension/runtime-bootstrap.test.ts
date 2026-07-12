@@ -461,19 +461,46 @@ describe("runtime-bootstrap chrome shim", () => {
     )
   })
 
-  it("preserves a complete manual connection atomically beside the active cookie session", async () => {
-    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
-    localStorage.setItem(
-      "tldwConfig",
-      JSON.stringify({
+  it.each([
+    [
+      "device persistence",
+      {
         authMode: "single-user",
-        apiKey: "manual-device-key",
         credentialSource: "manual",
         apiKeyPersistence: "device",
         apiKeyServerOrigin: "https://remote.example.test",
         serverUrl: "https://remote.example.test"
-      })
-    )
+      }
+    ],
+    [
+      "cookie auth",
+      {
+        authMode: "single-user",
+        authSource: "cookie-session",
+        serverUrl: "https://remote.example.test"
+      }
+    ],
+    [
+      "incomplete manual metadata",
+      {
+        authMode: "single-user",
+        credentialSource: "manual",
+        serverUrl: "https://remote.example.test"
+      }
+    ],
+    [
+      "different-origin metadata",
+      {
+        authMode: "single-user",
+        credentialSource: "manual",
+        apiKeyPersistence: "session",
+        apiKeyServerOrigin: "https://other.example.test",
+        serverUrl: "https://remote.example.test"
+      }
+    ]
+  ])("scrubs a session secret beside %s", async (_label, config) => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    localStorage.setItem("tldwConfig", JSON.stringify(config))
     sessionStorage.setItem(
       "tldwManualSessionApiKey",
       JSON.stringify({
@@ -487,13 +514,40 @@ describe("runtime-bootstrap chrome shim", () => {
 
     await importAndAwaitBootstrap()
 
+    expect(sessionStorage.getItem("tldwManualSessionApiKey")).toBeNull()
+  })
+
+  it("preserves a complete manual session connection beside the active cookie session", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    localStorage.setItem(
+      "tldwConfig",
+      JSON.stringify({
+        authMode: "single-user",
+        credentialSource: "manual",
+        apiKeyPersistence: "session",
+        apiKeyServerOrigin: "https://remote.example.test/",
+        serverUrl: "https://remote.example.test/api"
+      })
+    )
+    sessionStorage.setItem(
+      "tldwManualSessionApiKey",
+      JSON.stringify({
+        credentialSource: "manual",
+        apiKeyPersistence: "session",
+        apiKeyServerOrigin: "https://remote.example.test/session",
+        apiKey: "manual-session-key"
+      })
+    )
+    stubCookieRuntimeFetch()
+
+    await importAndAwaitBootstrap()
+
     const manualConfig = {
-      apiKey: "manual-device-key",
       authMode: "single-user",
       credentialSource: "manual",
-      apiKeyPersistence: "device",
-      apiKeyServerOrigin: "https://remote.example.test",
-      serverUrl: "https://remote.example.test"
+      apiKeyPersistence: "session",
+      apiKeyServerOrigin: "https://remote.example.test/",
+      serverUrl: "https://remote.example.test/api"
     }
     expect(readStoredValue("tldwConfig")).toEqual(manualConfig)
     expect(readStoredValue("tldwCookieSessionConfig")).toEqual({
