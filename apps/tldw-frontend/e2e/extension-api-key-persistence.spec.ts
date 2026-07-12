@@ -191,6 +191,44 @@ const extensionStorageValue = async (
     { storageArea: area, storageKey: key }
   )
 
+const seedLegacyDeviceConfig = async (
+  context: BrowserContext,
+  serverUrl: string
+): Promise<void> => {
+  const worker = context.serviceWorkers()[0]
+  if (!worker) throw new Error("Extension service worker is unavailable")
+  await worker.evaluate(
+    ({ url, apiKey }) =>
+      new Promise<void>((resolve) => {
+        chrome.storage.local.set(
+          {
+            tldwConfig: {
+              authMode: "single-user",
+              serverUrl: url,
+              apiKey
+            }
+          },
+          () => resolve()
+        )
+      }),
+    { url: serverUrl, apiKey: MANUAL_API_KEY }
+  )
+}
+
+const hasAuthenticatedMediaListRequest = (
+  fixture: ManualApiKeyFixture,
+  offset: number
+): boolean =>
+  fixture
+    .requests()
+    .slice(offset)
+    .some(
+      (request) =>
+        request.method === "GET" &&
+        request.path === "/api/v1/media" &&
+        request.authenticated === true
+    )
+
 const expectProductionRagRequest = async (
   page: Page,
   fixture: ManualApiKeyFixture,
@@ -312,6 +350,73 @@ test.describe.serial("manual extension API-key persistence", () => {
       } finally {
         await context.close()
       }
+    }
+  })
+
+  test("legacy device key authenticates media after extension reload", async ({
+    browserName: _browserName
+  }, testInfo) => {
+    const extensionPath = prepareExtension(
+      resolveBuiltExtension(),
+      testInfo.outputPath("extension-legacy-media"),
+      fixture.url
+    )
+    const profile = testInfo.outputPath("legacy-media-profile")
+    const expectedConfig = {
+      authMode: "single-user",
+      authSource: "manual",
+      serverUrl: fixture.url,
+      apiKey: MANUAL_API_KEY,
+      credentialSource: "manual",
+      apiKeyPersistence: "device",
+      apiKeyServerOrigin: fixture.url
+    }
+    const { context, page, extensionId } = await launchExtension(
+      profile,
+      extensionPath
+    )
+
+    try {
+      await seedLegacyDeviceConfig(context, fixture.url)
+      await page.addInitScript(() => {
+        localStorage.setItem("assistant_setup_dismissed", "true")
+      })
+
+      const initialRequestOffset = fixture.requests().length
+      await page.goto(`chrome-extension://${extensionId}/options.html#/media`, {
+        waitUntil: "domcontentloaded"
+      })
+      await expect
+        .poll(() =>
+          hasAuthenticatedMediaListRequest(fixture, initialRequestOffset)
+        )
+        .toBe(true)
+      await expect(
+        page.getByText("Add your credentials to use Media", { exact: true })
+      ).toHaveCount(0)
+      expect(
+        JSON.parse(
+          String(await extensionStorageValue(page, "local", "tldwConfig"))
+        )
+      ).toEqual(expectedConfig)
+
+      const reloadRequestOffset = fixture.requests().length
+      await page.reload({ waitUntil: "domcontentloaded" })
+      await expect
+        .poll(() =>
+          hasAuthenticatedMediaListRequest(fixture, reloadRequestOffset)
+        )
+        .toBe(true)
+      await expect(
+        page.getByText("Add your credentials to use Media", { exact: true })
+      ).toHaveCount(0)
+      expect(
+        JSON.parse(
+          String(await extensionStorageValue(page, "local", "tldwConfig"))
+        )
+      ).toEqual(expectedConfig)
+    } finally {
+      await context.close()
     }
   })
 
