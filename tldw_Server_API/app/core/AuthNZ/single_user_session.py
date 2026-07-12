@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import Request, Response
+from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
     SessionError,
@@ -86,27 +87,41 @@ async def validate_single_user_session(
     token = request.cookies.get(settings.SINGLE_USER_SESSION_COOKIE_NAME)
     if not token:
         return None
-    session_manager = manager or await get_session_manager()
     try:
+        session_manager = manager or await get_session_manager()
         if strict:
             row = await session_manager.validate_session(token, raise_on_error=True)
         else:
             row = await session_manager.validate_session(token)
-    except (SessionError, SessionRevokedException):
-        raise
-    except Exception as exc:
-        if not strict:
+        if not row or row.get("device_id") != SESSION_DEVICE_ID:
+            return None
+        if int(row.get("user_id", 0)) != int(settings.SINGLE_USER_FIXED_ID):
+            return None
+        return SingleUserSessionIdentity(
+            session_id=int(row["id"]),
+            user_id=int(row["user_id"]),
+            expires_at=_as_aware_datetime(row["expires_at"]),
+        )
+    except SessionRevokedException:
+        if strict:
             raise
-        raise SessionError("Failed to validate session") from exc
-    if not row or row.get("device_id") != SESSION_DEVICE_ID:
         return None
-    if int(row.get("user_id", 0)) != int(settings.SINGLE_USER_FIXED_ID):
+    except SessionError as exc:
+        if strict:
+            raise
+        logger.warning(
+            "Single-user cookie validation failed closed: {}",
+            type(exc).__name__,
+        )
         return None
-    return SingleUserSessionIdentity(
-        session_id=int(row["id"]),
-        user_id=int(row["user_id"]),
-        expires_at=_as_aware_datetime(row["expires_at"]),
-    )
+    except Exception as exc:
+        if strict:
+            raise SessionError("Failed to validate session") from exc
+        logger.warning(
+            "Unexpected single-user cookie validation failure; treating as unauthenticated: {}",
+            type(exc).__name__,
+        )
+        return None
 
 
 def set_single_user_session_cookie(

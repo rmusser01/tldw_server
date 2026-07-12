@@ -19,7 +19,7 @@ describe('request history redaction', () => {
     localStorage.clear();
   });
 
-  it('redacts auth-bearing request headers before persisting', () => {
+  it('omits auth-bearing request headers before persisting', () => {
     addRequestHistory({
       id: '1',
       method: 'GET',
@@ -42,10 +42,10 @@ describe('request history redaction', () => {
     expect(raw).not.toContain('org-9');
 
     const [item] = getRequestHistory();
-    expect(item.requestHeaders?.authorization).toBe('[REDACTED]');
-    expect(item.requestHeaders?.['x-api-key']).toBe('[REDACTED]');
-    expect(item.requestHeaders?.['x-csrf-token']).toBe('[REDACTED]');
-    expect(item.requestHeaders?.['x-tldw-org-id']).toBe('[REDACTED]');
+    expect(item.requestHeaders).not.toHaveProperty('authorization');
+    expect(item.requestHeaders).not.toHaveProperty('x-api-key');
+    expect(item.requestHeaders).not.toHaveProperty('x-csrf-token');
+    expect(item.requestHeaders).not.toHaveProperty('x-tldw-org-id');
     // Non-sensitive headers are preserved for debugging value.
     expect(item.requestHeaders?.['content-type']).toBe('application/json');
   });

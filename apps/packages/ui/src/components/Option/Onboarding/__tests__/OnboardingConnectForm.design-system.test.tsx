@@ -611,6 +611,37 @@ describe("setup onboarding design-system state wiring", () => {
     ).toBeInTheDocument()
   })
 
+  it("clears a freshly entered API key when the unsaved server origin changes", async () => {
+    await renderConnectionForm({ initialConfig: null })
+    const serverInput = await screen.findByTestId("onboarding-server-url")
+    const apiKeyInput = await screen.findByTestId("onboarding-api-key")
+
+    fireEvent.change(serverInput, {
+      target: { value: "https://first.example.test/api" }
+    })
+    fireEvent.change(apiKeyInput, { target: { value: "origin-bound-key" } })
+    expect(apiKeyInput).toHaveValue("origin-bound-key")
+
+    fireEvent.change(serverInput, {
+      target: { value: "https://second.example.test/api" }
+    })
+
+    expect(apiKeyInput).toHaveValue("")
+  })
+
+  it("clears a key entered before the first server origin is selected", async () => {
+    await renderConnectionForm({ initialConfig: null })
+    const serverInput = await screen.findByTestId("onboarding-server-url")
+    const apiKeyInput = await screen.findByTestId("onboarding-api-key")
+
+    fireEvent.change(apiKeyInput, { target: { value: "unbound-key" } })
+    fireEvent.change(serverInput, {
+      target: { value: "https://first.example.test/api" }
+    })
+
+    expect(apiKeyInput).toHaveValue("")
+  })
+
   it("shows session-only copy when remember is unchecked", async () => {
     await renderConnectionForm({ initialConfig: null })
 

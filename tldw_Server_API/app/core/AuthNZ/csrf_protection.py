@@ -197,6 +197,10 @@ class CSRFTokenManager:
 
         settings = get_settings()
         if settings.AUTH_MODE == "single_user":
+            # API-key and Bearer requests were excluded above because their
+            # headers are not ambient browser credentials. A single-user
+            # session cookie is ambient, so every remaining unsafe request is
+            # protected regardless of content type.
             return settings.SINGLE_USER_SESSION_COOKIE_NAME in request.cookies
 
         # Check content type

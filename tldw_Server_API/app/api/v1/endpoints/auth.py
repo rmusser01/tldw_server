@@ -1213,7 +1213,10 @@ class LogoutRequest(BaseModel):
     all_devices: bool = Field(default=False, description="Logout from all devices")
 
 
-@router.post("/single-user/session")
+@router.post(
+    "/single-user/session",
+    dependencies=[Depends(check_auth_rate_limit)],
+)
 async def create_single_user_cookie_session(
     request: Request,
     response: Response,
@@ -1239,16 +1242,41 @@ async def create_single_user_cookie_session(
         )
     response.headers["Cache-Control"] = "no-store"
 
-    identity = await validate_single_user_session(request, session_manager)
+    try:
+        identity = await validate_single_user_session(
+            request,
+            session_manager,
+            strict=True,
+        )
+    except SessionRevokedException:
+        # A revoked cookie is stale authentication state; replace it with the
+        # fresh session authorized by the explicit API key on this request.
+        identity = None
+    except SessionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to validate the current session",
+            headers={"Cache-Control": "no-store"},
+        ) from exc
     if identity is not None:
         return {"authenticated": True, "expires_at": identity.expires_at}
 
-    minted = await mint_single_user_session(request, session_manager)
+    try:
+        minted = await mint_single_user_session(request, session_manager)
+    except SessionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to create a single-user session",
+            headers={"Cache-Control": "no-store"},
+        ) from exc
     set_single_user_session_cookie(response, minted)
     return {"authenticated": True, "expires_at": minted.identity.expires_at}
 
 
-@router.delete("/single-user/session")
+@router.delete(
+    "/single-user/session",
+    dependencies=[Depends(check_auth_rate_limit)],
+)
 async def delete_single_user_cookie_session(
     request: Request,
     response: Response,
@@ -1265,6 +1293,8 @@ async def delete_single_user_cookie_session(
             strict=True,
         )
     except SessionRevokedException:
+        # Already-revoked cookies are an expected logout retry. Continue so
+        # the browser receives the same idempotent cookie-clearing response.
         identity = None
     except SessionError as exc:
         raise HTTPException(

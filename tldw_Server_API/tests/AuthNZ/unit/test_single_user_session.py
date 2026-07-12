@@ -8,6 +8,7 @@ import pytest
 from fastapi import Request, Response
 
 from tldw_Server_API.app.core.AuthNZ import single_user_session
+from tldw_Server_API.app.core.AuthNZ.exceptions import SessionError
 from tldw_Server_API.app.core.AuthNZ.single_user_session import (
     MintedSingleUserSession,
     SingleUserSessionIdentity,
@@ -104,6 +105,57 @@ async def test_validate_fails_closed_outside_single_user_mode(session_settings):
     assert await validate_single_user_session(_request(cookie="opaque"), manager) is None
 
     manager.validate_session.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_non_strict_validation_fails_closed_on_unexpected_error(session_settings):
+    manager = AsyncMock()
+    manager.validate_session.side_effect = RuntimeError("session backend unavailable")
+
+    assert await validate_single_user_session(_request(cookie="opaque"), manager) is None
+
+    manager.validate_session.assert_awaited_once_with("opaque")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("strict", [False, True])
+async def test_validation_contains_manager_acquisition_failure(
+    session_settings,
+    monkeypatch,
+    strict,
+):
+    async def unavailable_manager():
+        raise RuntimeError("session manager unavailable")
+
+    monkeypatch.setattr(single_user_session, "get_session_manager", unavailable_manager)
+
+    if strict:
+        with pytest.raises(SessionError):
+            await validate_single_user_session(_request(cookie="opaque"), strict=True)
+    else:
+        assert await validate_single_user_session(_request(cookie="opaque")) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("strict", [False, True])
+async def test_validation_contains_malformed_session_row(session_settings, strict):
+    manager = AsyncMock()
+    manager.validate_session.return_value = {
+        "id": "not-an-integer",
+        "user_id": 1,
+        "device_id": "single-user-cookie:v1",
+        "expires_at": "2026-08-09T00:00:00+00:00",
+    }
+
+    if strict:
+        with pytest.raises(SessionError):
+            await validate_single_user_session(
+                _request(cookie="opaque"),
+                manager,
+                strict=True,
+            )
+    else:
+        assert await validate_single_user_session(_request(cookie="opaque"), manager) is None
 
 
 def test_cookie_helpers_set_and_clear_exact_host_only_contract(session_settings):

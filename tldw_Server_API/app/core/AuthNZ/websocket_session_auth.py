@@ -124,6 +124,9 @@ async def resolve_single_user_cookie_websocket(
     headers = getattr(websocket, "headers", {}) or {}
     origin = normalize_http_origin(headers.get("origin"))
     allowed = trusted_webui_origins()
+    # Never treat wildcard HTTP CORS as a trusted credentialed WebSocket
+    # origin. Cookies are ambient, so accepting any Origin here would enable
+    # cross-site WebSocket hijacking even when wildcard CORS is intentional.
     if origin is None or "*" in allowed or origin not in allowed:
         state.single_user_cookie_websocket_close_code = COOKIE_WEBSOCKET_UNTRUSTED_ORIGIN
         return None

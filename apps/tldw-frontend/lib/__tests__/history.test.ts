@@ -7,7 +7,7 @@ describe("request history", () => {
     localStorage.clear()
   })
 
-  it("redacts credential headers before writing request history", () => {
+  it("omits credential headers before writing request history", () => {
     addRequestHistory({
       id: "req-1",
       method: "GET",
@@ -26,8 +26,6 @@ describe("request history", () => {
 
     const [item] = getRequestHistory()
     expect(item.requestHeaders).toEqual({
-      Authorization: "[REDACTED]",
-      "x-api-key": "[REDACTED]",
       "content-type": "application/json"
     })
   })
@@ -50,8 +48,6 @@ describe("request history", () => {
     const [item] = getRequestHistory()
 
     expect(item.requestHeaders).toEqual({
-      Authorization: "[REDACTED]",
-      Cookie: "[REDACTED]",
       Accept: "application/json"
     })
     const raw = localStorage.getItem("tldw-request-history") || ""

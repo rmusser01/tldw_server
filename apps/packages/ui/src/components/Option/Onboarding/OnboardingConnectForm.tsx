@@ -1655,10 +1655,12 @@ export function OnboardingConnectForm({
                 const nextServerUrl = e.target.value
                 if (
                   apiKey &&
-                  shouldClearManualApiKeyForServerChange(
-                    configuredApiKeyServerUrlRef.current,
-                    nextServerUrl
-                  )
+                  (configuredApiKeyServerUrlRef.current
+                    ? shouldClearManualApiKeyForServerChange(
+                        configuredApiKeyServerUrlRef.current,
+                        nextServerUrl
+                      )
+                    : nextServerUrl !== serverUrl)
                 ) {
                   setApiKey("")
                   setAuthSource(undefined)
@@ -1815,7 +1817,17 @@ export function OnboardingConnectForm({
                 "Enter your API key"
               )}
               value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
+              onChange={(e) => {
+                const nextApiKey = e.target.value
+                if (nextApiKey && !configuredApiKeyServerUrlRef.current) {
+                  if (urlValidation.valid) {
+                    configuredApiKeyServerUrlRef.current = serverUrl
+                  }
+                } else if (!nextApiKey) {
+                  configuredApiKeyServerUrlRef.current = ""
+                }
+                setApiKey(nextApiKey)
+              }}
               disabled={isConnecting}
               size="large"
               className="rounded-2xl"

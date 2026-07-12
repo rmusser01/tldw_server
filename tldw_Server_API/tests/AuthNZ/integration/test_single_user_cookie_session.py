@@ -5,9 +5,10 @@ import pytest_asyncio
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.endpoints import auth as auth_endpoints
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_auth_rate_limit
 from tldw_Server_API.app.core.Audit.unified_audit_service import shutdown_audit_service
 from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
-from tldw_Server_API.app.core.AuthNZ.exceptions import SessionError
+from tldw_Server_API.app.core.AuthNZ.exceptions import SessionError, SessionRevokedException
 from tldw_Server_API.app.core.AuthNZ.initialize import bootstrap_single_user_profile
 from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager
 from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
@@ -58,6 +59,20 @@ def _mint(client: TestClient, api_key: str):
     return client.post(
         "/api/v1/auth/single-user/session",
         headers={"X-API-KEY": api_key},
+    )
+
+
+@pytest.mark.parametrize("method", ["POST", "DELETE"])
+def test_single_user_session_routes_use_auth_rate_limit(method):
+    route = next(
+        route
+        for route in auth_endpoints.router.routes
+        if route.path.endswith("/single-user/session") and method in route.methods
+    )
+
+    assert any(
+        dependency.dependency is check_auth_rate_limit
+        for dependency in route.dependencies
     )
 
 
@@ -119,6 +134,56 @@ def test_valid_cookie_session_is_reused_on_mint(single_user_cookie_client):
     assert second.status_code == 200
     assert "no-store" in second.headers["cache-control"]
     assert second.json()["expires_at"] == first.json()["expires_at"]
+    assert client.cookies["tldw_single_user_session"] == cookie_before
+
+
+def test_revoked_cookie_is_replaced_on_mint(
+    single_user_cookie_client,
+    monkeypatch,
+):
+    client, api_key = single_user_cookie_client
+    first = _mint(client, api_key)
+    assert first.status_code == 200
+    revoked_cookie = client.cookies["tldw_single_user_session"]
+
+    async def revoked_session(request, manager, *, strict=False):
+        raise SessionRevokedException()
+
+    monkeypatch.setattr(
+        auth_endpoints,
+        "validate_single_user_session",
+        revoked_session,
+    )
+    replacement = _mint(client, api_key)
+
+    assert replacement.status_code == 200
+    assert revoked_cookie not in replacement.headers["set-cookie"]
+
+
+def test_mint_returns_no_store_503_when_strict_validation_fails(
+    single_user_cookie_client,
+    monkeypatch,
+):
+    client, api_key = single_user_cookie_client
+    assert _mint(client, api_key).status_code == 200
+    cookie_before = client.cookies["tldw_single_user_session"]
+
+    async def fail_only_when_strict(request, manager, *, strict=False):
+        if strict:
+            raise SessionError("session store unavailable")
+        return None
+
+    monkeypatch.setattr(
+        auth_endpoints,
+        "validate_single_user_session",
+        fail_only_when_strict,
+    )
+
+    response = _mint(client, api_key)
+
+    assert response.status_code == 503
+    assert "no-store" in response.headers["cache-control"]
+    assert "set-cookie" not in response.headers
     assert client.cookies["tldw_single_user_session"] == cookie_before
 
 
