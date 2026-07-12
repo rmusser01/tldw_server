@@ -341,23 +341,28 @@ const hasCompleteManualDeviceKey = (config: TldwConfig | null): boolean =>
       normalizeHttpOrigin(config.serverUrl) === config.apiKeyServerOrigin
   )
 
-const scrubMismatchedManualSessionKey = (config: TldwConfig | null): void => {
+const scrubMismatchedManualSessionKey = (
+  config: TldwConfig | null,
+  quickstartServerUrl: string
+): void => {
   try {
     const raw = window.sessionStorage.getItem(MANUAL_SESSION_API_KEY)
     if (!raw) return
     const record = JSON.parse(raw) as Record<string, unknown>
     const serverOrigin = normalizeHttpOrigin(config?.serverUrl)
+    const quickstartOrigin = normalizeHttpOrigin(quickstartServerUrl)
     const complete =
       config?.authMode === "single-user" &&
       config.credentialSource === "manual" &&
       config.apiKeyPersistence === "session" &&
       serverOrigin !== null &&
-      serverOrigin === normalizeHttpOrigin(config.apiKeyServerOrigin) &&
+      serverOrigin !== quickstartOrigin &&
+      config.apiKeyServerOrigin === serverOrigin &&
       record.credentialSource === "manual" &&
       record.apiKeyPersistence === "session" &&
       typeof record.apiKey === "string" &&
       record.apiKey.trim() &&
-      serverOrigin === normalizeHttpOrigin(record.apiKeyServerOrigin)
+      record.apiKeyServerOrigin === serverOrigin
     if (!complete) window.sessionStorage.removeItem(MANUAL_SESSION_API_KEY)
   } catch {
     try {
@@ -407,7 +412,7 @@ const seedTldwConfigFromRuntime = async (): Promise<void> => {
     clearRuntimeAuth()
     clearRuntimeAuthOverride()
     removeLegacyRuntimeSecrets()
-    scrubMismatchedManualSessionKey(existing)
+    scrubMismatchedManualSessionKey(existing, quickstartWebUiServerUrl)
   } catch {
     // Leave existing manual configuration intact if client storage is unavailable.
   }

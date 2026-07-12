@@ -497,6 +497,16 @@ describe("runtime-bootstrap chrome shim", () => {
         apiKeyServerOrigin: "https://other.example.test",
         serverUrl: "https://remote.example.test"
       }
+    ],
+    [
+      "noncanonical origin metadata",
+      {
+        authMode: "single-user",
+        credentialSource: "manual",
+        apiKeyPersistence: "session",
+        apiKeyServerOrigin: "https://remote.example.test/path",
+        serverUrl: "https://remote.example.test"
+      }
     ]
   ])("scrubs a session secret beside %s", async (_label, config) => {
     process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
@@ -517,6 +527,35 @@ describe("runtime-bootstrap chrome shim", () => {
     expect(sessionStorage.getItem("tldwManualSessionApiKey")).toBeNull()
   })
 
+  it("scrubs a complete session secret for the active quickstart origin", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    const origin = window.location.origin
+    localStorage.setItem(
+      "tldwConfig",
+      JSON.stringify({
+        authMode: "single-user",
+        credentialSource: "manual",
+        apiKeyPersistence: "session",
+        apiKeyServerOrigin: origin,
+        serverUrl: origin
+      })
+    )
+    sessionStorage.setItem(
+      "tldwManualSessionApiKey",
+      JSON.stringify({
+        credentialSource: "manual",
+        apiKeyPersistence: "session",
+        apiKeyServerOrigin: origin,
+        apiKey: "same-origin-session-key"
+      })
+    )
+    stubCookieRuntimeFetch()
+
+    await importAndAwaitBootstrap()
+
+    expect(sessionStorage.getItem("tldwManualSessionApiKey")).toBeNull()
+  })
+
   it("preserves a complete manual session connection beside the active cookie session", async () => {
     process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
     localStorage.setItem(
@@ -525,7 +564,7 @@ describe("runtime-bootstrap chrome shim", () => {
         authMode: "single-user",
         credentialSource: "manual",
         apiKeyPersistence: "session",
-        apiKeyServerOrigin: "https://remote.example.test/",
+        apiKeyServerOrigin: "https://remote.example.test",
         serverUrl: "https://remote.example.test/api"
       })
     )
@@ -534,7 +573,7 @@ describe("runtime-bootstrap chrome shim", () => {
       JSON.stringify({
         credentialSource: "manual",
         apiKeyPersistence: "session",
-        apiKeyServerOrigin: "https://remote.example.test/session",
+        apiKeyServerOrigin: "https://remote.example.test",
         apiKey: "manual-session-key"
       })
     )
@@ -546,7 +585,7 @@ describe("runtime-bootstrap chrome shim", () => {
       authMode: "single-user",
       credentialSource: "manual",
       apiKeyPersistence: "session",
-      apiKeyServerOrigin: "https://remote.example.test/",
+      apiKeyServerOrigin: "https://remote.example.test",
       serverUrl: "https://remote.example.test/api"
     }
     expect(readStoredValue("tldwConfig")).toEqual(manualConfig)
@@ -558,6 +597,21 @@ describe("runtime-bootstrap chrome shim", () => {
     expect(sessionStorage.getItem("tldwManualSessionApiKey")).toContain(
       "manual-session-key"
     )
+    const { resolveManualCredential } = await import(
+      "@/services/tldw/single-user-credential"
+    )
+    await expect(
+      resolveManualCredential(manualConfig, {
+        session: {
+          get: async (key: string) => {
+            const raw = sessionStorage.getItem(key)
+            return raw ? JSON.parse(raw) : null
+          },
+          set: async () => undefined,
+          remove: async () => undefined
+        }
+      })
+    ).resolves.toBe("manual-session-key")
     const { getApiKey } = await import("@web/lib/authStorage")
     expect(getApiKey()).toBeNull()
 
