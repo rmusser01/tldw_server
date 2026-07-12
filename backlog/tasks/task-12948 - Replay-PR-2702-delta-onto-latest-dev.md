@@ -4,7 +4,7 @@ title: Replay PR 2702 delta onto latest dev
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-12 05:02'
+updated_date: '2026-07-12 05:08'
 labels:
   - release
   - rebase
@@ -31,13 +31,13 @@ Create a fresh dev-targeted branch from current origin/dev, replay only the PR #
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Created codex/pr-2702-dev-rebase from origin/dev d28c16bfa3 and replayed the eight PR #2702-specific commits while preserving newer dev changes. Seven tracking/review commits bring the branch to 15 commits and 43 changed files relative to dev. Independent and GitHub review fixes cover snapshot archive-first deletion, logical-session quota aggregation across current/legacy directories, shared maintenance locking, deferral of unidentified snapshot directories that cannot be safely locked, SQLite draft read/connection behavior, abortable duplicate/stale document preparation with accepted ingest-job cancellation, strict recovery capability checks, accurate localized statuses/errors, and narrow test corrections. GitHub Actions queue: max was rejected because the concurrency schema does not support it. Fresh validation: 70 frontend tests and 78 backend tests passed; extension compile, Playwright discovery, workflow validation, Bandit zero findings, and git diff checks passed. Full WebUI typecheck still reports only the pre-existing untouched QuickIngestWizardModal.tsx overflowY type error. Branch is 0 behind origin/dev.
+Created codex/pr-2702-dev-rebase from origin/dev d28c16bfa3 and replayed the eight PR #2702-specific commits while preserving newer dev changes. Eight tracking/review commits bring the branch to 16 commits and 43 changed files relative to dev. Independent and GitHub review fixes cover snapshot archive-first deletion, logical-session quota aggregation across current/legacy directories, shared maintenance locking, deferral of unidentified snapshot directories that cannot be safely locked, SQLite draft read/connection behavior, abortable duplicate/stale document preparation with accepted ingest-job cancellation, strict recovery capability checks, accurate localized statuses/errors, visible completed-import scope refresh coverage, and narrow test corrections. GitHub Actions queue: max was rejected because the concurrency schema does not support it. Fresh validation: 70 frontend tests and 78 backend tests passed; extension compile, Playwright discovery, workflow validation, Bandit zero findings, and git diff checks passed. Full WebUI typecheck still reports only the pre-existing untouched QuickIngestWizardModal.tsx overflowY type error. Branch is 0 behind origin/dev.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-PR #2712 targets dev from current origin/dev and contains only the PR #2702 replay plus validated review fixes; no main-targeted correction exists. The final branch is 0 behind dev, with 8 replayed commits plus 7 tracking/review commits across 43 files. Validation passed for 70 focused frontend tests, 78 focused backend tests, extension TypeScript compile, Playwright discovery, workflow parsing/concurrency, Bandit, and diff checks. The only full WebUI typecheck failure is the pre-existing untouched QuickIngestWizardModal.tsx overflowY typing issue.
+PR #2712 targets dev from current origin/dev and contains only the PR #2702 replay plus validated review fixes; no main-targeted correction exists. The final branch is 0 behind dev, with 8 replayed commits plus 8 tracking/review commits across 43 files. Validation passed for 70 focused frontend tests, 78 focused backend tests, extension TypeScript compile, Playwright discovery, workflow parsing/concurrency, Bandit, and diff checks. The only full WebUI typecheck failure is the pre-existing untouched QuickIngestWizardModal.tsx overflowY typing issue.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
