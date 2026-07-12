@@ -64,4 +64,13 @@ describe("sidepanel document processing contract", () => {
       "uploadedFiles: intent.isImageCommand ? [] : documentUploadedFiles"
     )
   })
+
+  it("cancels stale preparation and rejects duplicate sidepanel sends", () => {
+    expect(sidepanelFormSource).toContain("documentProcessingSelectionKey")
+    expect(sidepanelFormSource).toContain("sidepanelDocumentPreparationRef")
+    expect(sidepanelFormSource).toContain(
+      "signal: documentPreparation.controller.signal"
+    )
+    expect(sidepanelFormSource).toContain("active.controller.abort()")
+  })
 })

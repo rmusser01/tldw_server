@@ -1116,6 +1116,26 @@ class TestChatbookService:
         call_args = mock_to_thread.await_args.args
         assert call_args[3] is ConflictResolution.SKIP
 
+    @pytest.mark.asyncio
+    async def test_async_import_job_persists_source_format_metadata(self, service):
+        """Async import status keeps the source format needed by polling clients."""
+        sample_path = service.import_dir / "openwebui.json"
+        sample_path.write_text("[]", encoding="utf-8")
+        saved_jobs = []
+        service._save_import_job_with_quota = saved_jobs.append
+        service._core_jobs = MagicMock()
+        service._core_jobs.create_job.return_value = {"id": 1}
+
+        success, _message, job_id = await service.import_chatbook(
+            file_path=str(sample_path),
+            source_format="openwebui_json",
+            async_mode=True,
+        )
+
+        assert success is True
+        assert job_id
+        assert saved_jobs[0].metadata["source_format"] == "openwebui_json"
+
     def test_get_statistics(self, service, mock_db):
         """Test getting import/export statistics."""
         # Mock returns tuples for status counts

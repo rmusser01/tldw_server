@@ -117,8 +117,12 @@
     "ingestToLibrary": "Ingest to library",
     "ingestToLibraryDescription": "Durable library source",
     "readyCount": "{{count}} ready",
+    "pendingCount": "{{count}} pending",
+    "processingCount": "{{count}} processing",
+    "cancelledCount": "{{count}} cancelled",
     "blockedCount": "{{count}} blocked",
     "failedCount": "{{count}} failed",
+    "checkingAvailability": "Checking availability",
     "waiting": "Waiting for files",
     "preflighting": "Checking documents",
     "pending": "Ready to process",
@@ -128,11 +132,17 @@
     "failed": "Document processing failed",
     "sending": "Sending prompt",
     "cancelled": "Processing cancelled",
+    "preparingForSend": "Preparing documents",
     "genericFailure": "Document processing failed",
     "modeUnavailable": "This processing mode is unavailable.",
     "unsupportedDocument": "This document type is unsupported.",
     "directChatTooLarge": "Document text is too large for direct chat ({{count}} estimated tokens).",
-    "preflightFailed": "Document preflight failed. Try again or remove the file."
+    "preflightFailed": "Document preflight failed. Try again or remove the file.",
+    "invalidIngestJobId": "Ingest job returned an invalid job id.",
+    "ingestCancelled": "Document ingest was cancelled.",
+    "ingestTimeout": "Document ingest timed out.",
+    "ingestFailed": "Document ingest failed.",
+    "ingestMissingMediaId": "Ingest completed without a media id."
   },
   "aria": {
     "chatTranscript": "Chat messages"

@@ -52,9 +52,15 @@ vi.mock("react-i18next", () => ({
         | string
         | {
             defaultValue?: string
-          }
+          },
+      options?: { count?: number }
     ) => {
-      if (typeof defaultValueOrOptions === "string") return defaultValueOrOptions
+      if (typeof defaultValueOrOptions === "string") {
+        return defaultValueOrOptions.replace(
+          "{{count}}",
+          String(options?.count ?? "")
+        )
+      }
       if (defaultValueOrOptions?.defaultValue) return defaultValueOrOptions.defaultValue
       return key
     }
@@ -586,6 +592,65 @@ describe("ChatbooksPlaygroundPage OpenWebUI import mode", () => {
     })
   })
 
+  it("preserves manual hydration mode when refreshing the selected scope", async () => {
+    const scope = {
+      scope_id: "scope-json",
+      source_format: "openwebui_json",
+      source_user_id: null,
+      source_user_label: null,
+      conversation_count: 1,
+      attachment_reference_count: 1,
+      conversation_ids: ["conv-a"],
+      conversations: []
+    }
+    tldwClientMock.previewChatbook.mockResolvedValueOnce({
+      openwebui_preview: {
+        chat_count: 1,
+        message_count: 1,
+        branched_chat_count: 0,
+        duplicate_chat_count: 0,
+        attachment_reference_count: 1,
+        malformed_chat_count: 0,
+        warnings: []
+      }
+    })
+    tldwClientMock.importChatbook.mockResolvedValueOnce({ success: true })
+    tldwClientMock.listOpenWebUIImportScopes.mockResolvedValue({ scopes: [scope] })
+
+    const { container } = render(<ChatbooksPlaygroundPage />)
+    fireEvent.click(screen.getByRole("tab", { name: "Import" }))
+    const sourceSelect = screen
+      .getAllByRole("combobox")
+      .find((element) => (element as HTMLSelectElement).value === "chatbook")
+    fireEvent.change(sourceSelect!, { target: { value: "openwebui_json" } })
+    const uploadInput = container.querySelector(
+      ".ant-upload-drag input[type=\"file\"]"
+    ) as HTMLInputElement
+    fireEvent.change(uploadInput, {
+      target: {
+        files: [new File(["[]"], "openwebui.json", { type: "application/json" })]
+      }
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText("OpenWebUI preview")).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Import chatbook" }))
+    const manualSwitch = await screen.findByRole("switch", {
+      name: "Manual hydration scope"
+    })
+    fireEvent.click(manualSwitch)
+    expect(manualSwitch).toBeChecked()
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Refresh" })[0])
+    await waitFor(() => {
+      expect(tldwClientMock.listOpenWebUIImportScopes).toHaveBeenCalledTimes(2)
+      expect(
+        screen.getByRole("switch", { name: "Manual hydration scope" })
+      ).toBeChecked()
+    })
+  })
+
   it("refreshes OpenWebUI import scopes when a background import job completes", async () => {
     vi.useFakeTimers()
     tldwClientMock.listChatbookImportJobs.mockResolvedValueOnce({
@@ -594,7 +659,8 @@ describe("ChatbooksPlaygroundPage OpenWebUI import mode", () => {
           job_id: "import-job-1",
           status: "in_progress",
           chatbook_name: "OpenWebUI import",
-          created_at: "2026-07-09T12:00:00Z"
+          created_at: "2026-07-09T12:00:00Z",
+          metadata: { source_format: "openwebui_db" }
         }
       ]
     })
@@ -602,7 +668,8 @@ describe("ChatbooksPlaygroundPage OpenWebUI import mode", () => {
       job_id: "import-job-1",
       status: "completed",
       chatbook_name: "OpenWebUI import",
-      completed_at: "2026-07-09T12:00:03Z"
+      completed_at: "2026-07-09T12:00:03Z",
+      metadata: { source_format: "openwebui_db" }
     })
     tldwClientMock.listOpenWebUIImportScopes.mockResolvedValueOnce({
       scopes: [
@@ -620,7 +687,6 @@ describe("ChatbooksPlaygroundPage OpenWebUI import mode", () => {
     })
 
     render(<ChatbooksPlaygroundPage />)
-
     fireEvent.click(screen.getByRole("tab", { name: "Import" }))
     const sourceSelect = screen
       .getAllByRole("combobox")
@@ -642,7 +708,11 @@ describe("ChatbooksPlaygroundPage OpenWebUI import mode", () => {
       await Promise.resolve()
     })
     expect(tldwClientMock.listOpenWebUIImportScopes).toHaveBeenCalled()
-    expect(screen.getByText("OpenWebUI database · Alice · 1 conversation · 1 attachment ref")).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "OpenWebUI database · Alice · 1 conversation · 1 attachment ref"
+      )
+    ).toBeInTheDocument()
   })
 
   it("requires a fresh hydration preview after selecting a new OpenWebUI preview file", async () => {

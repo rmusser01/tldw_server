@@ -1,7 +1,7 @@
+"""API tests for chat document preflight and upload draft handoff."""
+
 from __future__ import annotations
 
-import threading
-import time
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -12,11 +12,20 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.fixture()
-def document_upload_app():
+def document_upload_app(tmp_path, monkeypatch):
+    """Build an isolated app backed by a temporary shared draft database."""
     from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user
     from tldw_Server_API.app.api.v1.endpoints.media import document_upload_processing
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.document_upload_drafts import (
+        DocumentUploadDraftStore,
+    )
 
-    document_upload_processing._DRAFTS.clear()
+    draft_store = DocumentUploadDraftStore(db_path=tmp_path / "document-upload-drafts.db")
+    monkeypatch.setattr(
+        document_upload_processing,
+        "get_document_upload_draft_store",
+        lambda: draft_store,
+    )
     app = FastAPI()
     app.include_router(document_upload_processing.router, prefix="/api/v1/media")
     app.dependency_overrides[get_request_user] = lambda: type("User", (), {"id": 1})()
@@ -24,11 +33,11 @@ def document_upload_app():
         yield app, document_upload_processing
     finally:
         app.dependency_overrides.clear()
-        document_upload_processing._DRAFTS.clear()
 
 
 @pytest.fixture()
 def client(document_upload_app):
+    """Return a test client for the isolated document upload app."""
     app, _document_upload_processing = document_upload_app
     return TestClient(app)
 
@@ -201,7 +210,8 @@ def test_document_upload_draft_owner_read_delete_and_expiry(document_upload_app,
     first_client = TestClient(app)
 
     created_at = datetime(2026, 7, 9, tzinfo=timezone.utc)
-    monkeypatch.setattr(document_upload_processing, "_now_utc", lambda: created_at)
+    draft_store = document_upload_processing.get_document_upload_draft_store()
+    monkeypatch.setattr(draft_store, "_clock", lambda: created_at)
     create_response = first_client.post(
         "/api/v1/media/document-upload/drafts",
         json={
@@ -221,39 +231,38 @@ def test_document_upload_draft_owner_read_delete_and_expiry(document_upload_app,
 
     assert create_response.status_code == 200
     draft_id = create_response.json()["draft_id"]
-    assert create_response.json()["expires_at"] == (
-        created_at + timedelta(seconds=document_upload_processing.DRAFT_TTL_SECONDS)
-    ).isoformat()
+    assert (
+        create_response.json()["expires_at"]
+        == (created_at + timedelta(seconds=document_upload_processing.DRAFT_TTL_SECONDS)).isoformat()
+    )
 
     read_response = first_client.get(f"/api/v1/media/document-upload/drafts/{draft_id}")
     assert read_response.status_code == 200
     assert read_response.json()["payload"]["draft"] == "summarize this"
 
-    app.dependency_overrides[document_upload_processing.get_request_user] = (
-        lambda: type("User", (), {"id": 2})()
-    )
+    app.dependency_overrides[document_upload_processing.get_request_user] = lambda: type("User", (), {"id": 2})()
     other_user_response = TestClient(app).get(f"/api/v1/media/document-upload/drafts/{draft_id}")
     assert other_user_response.status_code == 404
 
-    app.dependency_overrides[document_upload_processing.get_request_user] = (
-        lambda: type("User", (), {"id": 1})()
-    )
+    app.dependency_overrides[document_upload_processing.get_request_user] = lambda: type("User", (), {"id": 1})()
     monkeypatch.setattr(
-        document_upload_processing,
-        "_now_utc",
+        draft_store,
+        "_clock",
         lambda: created_at + timedelta(seconds=document_upload_processing.DRAFT_TTL_SECONDS + 1),
     )
     expired_response = TestClient(app).get(f"/api/v1/media/document-upload/drafts/{draft_id}")
     assert expired_response.status_code == 404
 
-    monkeypatch.setattr(document_upload_processing, "_now_utc", lambda: created_at)
-    second_draft = TestClient(app).post(
-        "/api/v1/media/document-upload/drafts",
-        json={"payload": {"draft": "delete me", "files": []}},
-    ).json()["draft_id"]
-    delete_response = TestClient(app).delete(
-        f"/api/v1/media/document-upload/drafts/{second_draft}"
+    monkeypatch.setattr(draft_store, "_clock", lambda: created_at)
+    second_draft = (
+        TestClient(app)
+        .post(
+            "/api/v1/media/document-upload/drafts",
+            json={"payload": {"draft": "delete me", "files": []}},
+        )
+        .json()["draft_id"]
     )
+    delete_response = TestClient(app).delete(f"/api/v1/media/document-upload/drafts/{second_draft}")
     assert delete_response.status_code == 204
     assert TestClient(app).get(f"/api/v1/media/document-upload/drafts/{second_draft}").status_code == 404
 
@@ -263,9 +272,10 @@ def test_document_upload_draft_rejects_oversized_payload(
     monkeypatch,
 ):
     app, document_upload_processing = document_upload_app
+    draft_store = document_upload_processing.get_document_upload_draft_store()
     monkeypatch.setattr(
-        document_upload_processing,
-        "MAX_DRAFT_PAYLOAD_BYTES",
+        draft_store,
+        "max_payload_bytes",
         32,
     )
 
@@ -283,8 +293,9 @@ def test_document_upload_draft_rejects_per_owner_quota(
 ):
     app, document_upload_processing = document_upload_app
     created_at = datetime(2026, 7, 9, tzinfo=timezone.utc)
-    monkeypatch.setattr(document_upload_processing, "_now_utc", lambda: created_at)
-    monkeypatch.setattr(document_upload_processing, "MAX_DRAFTS_PER_OWNER", 1)
+    draft_store = document_upload_processing.get_document_upload_draft_store()
+    monkeypatch.setattr(draft_store, "_clock", lambda: created_at)
+    monkeypatch.setattr(draft_store, "max_drafts_per_owner", 1)
 
     first_response = TestClient(app).post(
         "/api/v1/media/document-upload/drafts",
@@ -297,67 +308,6 @@ def test_document_upload_draft_rejects_per_owner_quota(
 
     assert first_response.status_code == 200
     assert second_response.status_code == 429
-
-
-def test_document_upload_draft_store_serializes_cleanup_and_create(
-    document_upload_app,
-    monkeypatch,
-):
-    _app, document_upload_processing = document_upload_app
-    from tldw_Server_API.app.api.v1.schemas.document_upload_processing import (
-        ChatDocumentDraftCreateRequest,
-    )
-
-    created_at = datetime(2026, 7, 9, tzinfo=timezone.utc)
-    expired_at = created_at - timedelta(seconds=1)
-    cleanup_started = threading.Event()
-
-    class SlowDrafts(dict):
-        def items(self):
-            for item in super().items():
-                cleanup_started.set()
-                time.sleep(0.002)
-                yield item
-
-    monkeypatch.setattr(
-        document_upload_processing,
-        "_DRAFTS",
-        SlowDrafts(
-            {
-                str(index): {
-                    "owner": "1",
-                    "created_at": expired_at,
-                    "expires_at": expired_at,
-                    "payload": {},
-                }
-                for index in range(100)
-            }
-        ),
-    )
-    monkeypatch.setattr(document_upload_processing, "_now_utc", lambda: created_at)
-
-    cleanup_errors: list[BaseException] = []
-
-    def cleanup_worker() -> None:
-        try:
-            document_upload_processing._cleanup_expired_drafts(created_at)
-        except BaseException as exc:
-            cleanup_errors.append(exc)
-
-    cleanup_thread = threading.Thread(target=cleanup_worker)
-    cleanup_thread.start()
-    assert cleanup_started.wait(timeout=1)
-
-    response = document_upload_processing.create_document_upload_draft(
-        ChatDocumentDraftCreateRequest(payload={"draft": "race", "files": []}),
-        current_user=type("User", (), {"id": 1})(),
-    )
-
-    cleanup_thread.join(timeout=2)
-
-    assert not cleanup_thread.is_alive()
-    assert cleanup_errors == []
-    assert response.draft_id in document_upload_processing._DRAFTS
 
 
 def test_document_upload_router_registered():

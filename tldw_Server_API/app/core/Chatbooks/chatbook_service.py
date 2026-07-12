@@ -2686,7 +2686,8 @@ class ChatbookService:
                 job_id=job_id,
                 user_id=self.user_id,
                 status=ImportStatus.PENDING,
-                chatbook_path=file_token
+                chatbook_path=file_token,
+                metadata={"source_format": source_format_value},
             )
 
             # Store job in database after atomically reserving Chatbooks quota.

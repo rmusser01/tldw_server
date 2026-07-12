@@ -8,7 +8,10 @@ import type {
 import { bgRequest, bgUpload } from "@/services/background-proxy"
 import i18n from "i18next"
 import { extractCompletedIngestJobMediaId } from "@/services/tldw/ingest-job-results"
-import { extractIngestJobIds } from "@/services/tldw/ingest-jobs-orchestrator"
+import {
+  extractIngestJobIds,
+  pollSingleIngestJob,
+} from "@/services/tldw/ingest-jobs-orchestrator"
 import {
   getProcessPathForType,
   inferUploadMediaTypeFromFile,
@@ -49,6 +52,10 @@ type PrepareDependencies = {
     options: { enableOcr: boolean },
   ) => Promise<ProcessedDocumentText>
   ingestDocument?: (file: UploadedFile) => Promise<IngestDocumentResult>
+  waitForIngestJob?: (
+    jobId: string | number,
+    options?: { signal?: AbortSignal },
+  ) => Promise<IngestDocumentResult>
 }
 
 export type PrepareChatDocumentAttachmentsInput = PrepareDependencies & {
@@ -56,6 +63,7 @@ export type PrepareChatDocumentAttachmentsInput = PrepareDependencies & {
   historyId?: string
   sessionId?: string
   maxDirectChatTokens?: number
+  signal?: AbortSignal
 }
 
 export type PreparedChatDocumentAttachments = {
@@ -134,11 +142,53 @@ const processingModeUnavailableReason = (): string =>
     "This processing mode is unavailable."
   )
 
-const unsupportedDocumentReason = (): string =>
+const invalidIngestJobIdReason = (): string =>
   i18n.t(
-    "playground:documentProcessing.unsupportedDocument",
-    "This document type is unsupported."
+    "playground:documentProcessing.invalidIngestJobId",
+    "Ingest job returned an invalid job id."
   )
+
+const ingestCancelledReason = (): string =>
+  i18n.t(
+    "playground:documentProcessing.ingestCancelled",
+    "Document ingest was cancelled."
+  )
+
+const ingestTimeoutReason = (): string =>
+  i18n.t(
+    "playground:documentProcessing.ingestTimeout",
+    "Document ingest timed out."
+  )
+
+const ingestFailedReason = (): string =>
+  i18n.t(
+    "playground:documentProcessing.ingestFailed",
+    "Document ingest failed."
+  )
+
+const ingestMissingMediaReason = (): string =>
+  i18n.t(
+    "playground:documentProcessing.ingestMissingMediaId",
+    "Ingest completed without a media id."
+  )
+
+const abortError = (): Error => {
+  const error = new Error(ingestCancelledReason())
+  error.name = "AbortError"
+  return error
+}
+
+const throwIfAborted = (signal?: AbortSignal): void => {
+  if (signal?.aborted) throw abortError()
+}
+
+const unsupportedDocumentReason = (): string => {
+  const fallback = "This document type is unsupported."
+  return (
+    i18n.t("playground:documentProcessing.unsupportedDocument", fallback) ||
+    fallback
+  )
+}
 
 const directChatTooLargeReason = (tokenEstimate: number): string =>
   i18n.t(
@@ -324,9 +374,6 @@ export const normalizeDocumentPreflightResponse = (
     if (!item) return file
     const mode = file.processingMode || item.default_mode || undefined
     const capability = mode ? item.modes?.[mode] : undefined
-    const firstReason = Object.values(item.modes || {}).find(
-      (entry) => entry.reason,
-    )?.reason
     const blocked =
       !mode || !capability?.available || capability.status === "blocked"
     return {
@@ -335,9 +382,7 @@ export const normalizeDocumentPreflightResponse = (
       processingStatus: blocked ? "blocked" : "pending",
       processingCapabilities: item.modes,
       processingBlockedReason: blocked
-        ? capability?.reason ||
-          firstReason ||
-          unsupportedDocumentReason()
+        ? capability?.reason || unsupportedDocumentReason()
         : undefined,
       processingPageEstimate: item.estimated_pages ?? null,
       processingTokenEstimate: item.estimated_tokens ?? null,
@@ -373,6 +418,13 @@ export const buildIngestIdempotencyKey = async ({
   sessionId?: string
 }): Promise<string> =>
   `chat-document-ingest:${historyId || sessionId || "draft"}:${await computeDocumentFileFingerprint(file)}`
+
+export const documentProcessingSelectionKey = (files: UploadedFile[]): string =>
+  files
+    .map((file) =>
+      [file.id, file.processingMode ?? "", file.size, file.uploadedAt].join(":")
+    )
+    .join("|")
 
 export const processDocumentForChat = async (
   file: UploadedFile,
@@ -461,6 +513,68 @@ export const ingestDocumentToLibrary = async (
   }
 }
 
+export const waitForIngestDocumentJob = async (
+  jobId: string | number,
+  options: {
+    timeoutMs?: number
+    pollIntervalMs?: number
+    signal?: AbortSignal
+  } = {},
+): Promise<IngestDocumentResult> => {
+  const normalizedJobId = Number(jobId)
+  if (!Number.isFinite(normalizedJobId) || normalizedJobId <= 0) {
+    throw new Error(invalidIngestJobIdReason())
+  }
+  const terminal = await pollSingleIngestJob({
+    jobId: Math.trunc(normalizedJobId),
+    timeoutMs: options.timeoutMs || DIRECT_INGEST_TIMEOUT_MS,
+    pollIntervalMs: options.pollIntervalMs,
+    isCancelled: () => Boolean(options.signal?.aborted),
+    onCancel: async () => {
+      try {
+        await bgRequest<void>({
+          path: `/api/v1/media/ingest/jobs/${encodeURIComponent(String(Math.trunc(normalizedJobId)))}?reason=user_cancelled`,
+          method: "DELETE",
+        })
+      } catch (error) {
+        console.warn(`Unable to cancel ingest job ${normalizedJobId}`, error)
+      }
+    },
+    fetchJob: async (id) => {
+      try {
+        return {
+          ok: true,
+          data: await bgRequest<unknown>({
+            path: `/api/v1/media/ingest/jobs/${encodeURIComponent(String(id))}`,
+            method: "GET",
+          }),
+        }
+      } catch (error) {
+        return { ok: false, error: errorMessage(error) }
+      }
+    },
+  })
+  throwIfAborted(options.signal)
+  if (terminal.terminalStatus !== "completed") {
+    if (terminal.terminalStatus === "cancelled") {
+      throw new Error(ingestCancelledReason())
+    }
+    if (terminal.terminalStatus === "timeout") {
+      throw new Error(ingestTimeoutReason())
+    }
+    throw new Error(terminal.error || ingestFailedReason())
+  }
+  const mediaId = extractCompletedIngestJobMediaId(terminal.data)
+  if (mediaId == null) {
+    throw new Error(ingestMissingMediaReason())
+  }
+  return {
+    mediaId,
+    jobId: Math.trunc(normalizedJobId),
+    status: "completed",
+  }
+}
+
 export const prepareChatDocumentAttachmentsForSend = async ({
   files,
   historyId,
@@ -470,6 +584,8 @@ export const prepareChatDocumentAttachmentsForSend = async ({
   processPdf = processPdfForChat,
   ingestDocument = (file) =>
     ingestDocumentToLibrary(file, { historyId, sessionId }),
+  waitForIngestJob = waitForIngestDocumentJob,
+  signal,
 }: PrepareChatDocumentAttachmentsInput): Promise<PreparedChatDocumentAttachments> => {
   const contextFiles: UploadedFile[] = []
   const failedFiles: UploadedFile[] = []
@@ -479,19 +595,30 @@ export const prepareChatDocumentAttachmentsForSend = async ({
   const chatSnippets: string[] = []
 
   for (const file of files) {
+    throwIfAborted(signal)
     const mode = file.processingMode || "add_to_chat"
     const capability = file.processingCapabilities?.[mode]
     if (capability && !capability.available) {
+      const recoveryActions: DocumentProcessingRecoveryAction[] = []
+      if (
+        mode !== "add_to_chat" &&
+        file.processingCapabilities?.add_to_chat?.available === true
+      ) {
+        recoveryActions.push("switch_to_add_to_chat")
+      }
+      if (
+        mode !== "ingest_to_library" &&
+        file.processingCapabilities?.ingest_to_library?.available === true
+      ) {
+        recoveryActions.push("switch_to_ingest")
+      }
       const blockedFile: UploadedFile = {
         ...file,
         processingMode: mode,
         processingStatus: "blocked",
         processingBlockedReason:
           capability.reason || processingModeUnavailableReason(),
-        processingRecoveryActions: [
-          "switch_to_add_to_chat",
-          "switch_to_ingest",
-        ],
+        processingRecoveryActions: recoveryActions,
       }
       blockedFiles.push(blockedFile)
       processedFiles.push(blockedFile)
@@ -500,7 +627,7 @@ export const prepareChatDocumentAttachmentsForSend = async ({
 
     try {
       if (mode === "ingest_to_library") {
-        const result = await ingestDocument(file)
+        let result = await ingestDocument(file)
         if (result.mediaId == null) {
           const status = normalizeJobStatus(result.status)
           if (
@@ -508,19 +635,19 @@ export const prepareChatDocumentAttachmentsForSend = async ({
             status !== "completed" &&
             !TERMINAL_RETRY_STATUSES.has(status)
           ) {
-            processedFiles.push({
-              ...file,
-              processingMode: mode,
-              processingStatus: "processing",
-              processed: false,
-              ingestJobId: result.jobId,
-              ingestBatchId: result.batchId,
-              processingResultRef: { kind: "ingest_job", id: result.jobId },
-              processingRecoveryActions: ["cancel"],
-            })
-            continue
+            const pendingResult = result
+            const completedResult = signal
+              ? await waitForIngestJob(result.jobId, { signal })
+              : await waitForIngestJob(result.jobId)
+            throwIfAborted(signal)
+            result = {
+              ...completedResult,
+              batchId: pendingResult.batchId ?? completedResult.batchId,
+            }
           }
-          throw new Error("Ingest completed without a media id.")
+        }
+        if (result.mediaId == null) {
+          throw new Error(ingestMissingMediaReason())
         }
         ragMediaIds.push(result.mediaId)
         processedFiles.push({
@@ -541,18 +668,24 @@ export const prepareChatDocumentAttachmentsForSend = async ({
         mode === "ocr_pages" || isPdf(file)
           ? await processPdf(file, { enableOcr: mode === "ocr_pages" })
           : await processDocument(file)
+      throwIfAborted(signal)
       const tokenEstimate = estimateDirectChatTokens(result.content)
       if (tokenEstimate > maxDirectChatTokens) {
+        const recoveryActions: DocumentProcessingRecoveryAction[] = [
+          "use_chat_scoped_retrieval",
+        ]
+        if (
+          file.processingCapabilities?.ingest_to_library?.available === true
+        ) {
+          recoveryActions.push("switch_to_ingest")
+        }
         const blockedFile: UploadedFile = {
           ...file,
           processingMode: mode,
           processingStatus: "blocked",
           processingTokenEstimate: tokenEstimate,
           processingBlockedReason: directChatTooLargeReason(tokenEstimate),
-          processingRecoveryActions: [
-            "use_chat_scoped_retrieval",
-            "switch_to_ingest",
-          ],
+          processingRecoveryActions: recoveryActions,
         }
         blockedFiles.push(blockedFile)
         processedFiles.push(blockedFile)
@@ -572,6 +705,12 @@ export const prepareChatDocumentAttachmentsForSend = async ({
       chatSnippets.push(result.content)
       processedFiles.push(readyFile)
     } catch (error) {
+      if (
+        signal?.aborted ||
+        (error instanceof Error && error.name === "AbortError")
+      ) {
+        throw abortError()
+      }
       const failedFile: UploadedFile = {
         ...file,
         processingMode: mode,

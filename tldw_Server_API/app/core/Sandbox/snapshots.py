@@ -1,3 +1,5 @@
+"""Create, restore, and maintain sandbox workspace snapshots."""
+
 from __future__ import annotations
 
 import contextlib
@@ -10,6 +12,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable, ContextManager
 
 from loguru import logger
 
@@ -480,22 +483,36 @@ class SnapshotManager:
             True if deletion was successful or snapshot didn't exist.
         """
         deleted = False
+        archive_deletion_failed = False
+        path_pairs = {
+            (
+                self._snapshot_path(session_id, snapshot_id),
+                self._metadata_path(session_id, snapshot_id),
+            ),
+            (
+                self._legacy_snapshot_path(session_id, snapshot_id),
+                self._legacy_metadata_path(session_id, snapshot_id),
+            ),
+        }
 
-        for snapshot_path in {self._snapshot_path(session_id, snapshot_id), self._legacy_snapshot_path(session_id, snapshot_id)}:
+        for snapshot_path, metadata_path in path_pairs:
             try:
                 if snapshot_path.exists():
                     snapshot_path.unlink()
                     deleted = True
             except _SNAPSHOTS_NONCRITICAL_EXCEPTIONS as e:
                 logger.warning(f"Failed to delete snapshot archive {snapshot_id}: {e}")
-
-        for metadata_path in {self._metadata_path(session_id, snapshot_id), self._legacy_metadata_path(session_id, snapshot_id)}:
+                archive_deletion_failed = True
+                continue
             try:
                 if metadata_path.exists():
                     metadata_path.unlink()
                     deleted = True
             except _SNAPSHOTS_NONCRITICAL_EXCEPTIONS as e:
                 logger.warning(f"Failed to delete snapshot metadata {snapshot_id}: {e}")
+
+        if archive_deletion_failed:
+            return False
 
         # Clean up empty session snapshot directory
         try:
@@ -598,21 +615,116 @@ class SnapshotManager:
 
         # Delete by count (keep newest)
         while len(snapshots) > max_snapshots:
-            oldest = snapshots.pop()  # List is sorted newest first
+            oldest = snapshots[-1]  # List is sorted newest first
             snap_id = oldest.get("snapshot_id")
             if snap_id and self.delete_snapshot(session_id, snap_id):
+                snapshots.pop()
                 deleted.append(snap_id)
+            else:
+                break
 
         # Delete by size (remove oldest until under limit)
         total_size = sum(s.get("size_bytes", 0) for s in snapshots)
         while total_size > max_size_bytes and snapshots:
-            oldest = snapshots.pop()
+            oldest = snapshots[-1]
             snap_id = oldest.get("snapshot_id")
             snap_size = oldest.get("size_bytes", 0)
             if snap_id and self.delete_snapshot(session_id, snap_id):
+                snapshots.pop()
                 deleted.append(snap_id)
                 total_size -= snap_size
+            else:
+                break
 
+        return deleted
+
+    @staticmethod
+    def _quota_entries_for_directory(
+        snapshot_dir: Path,
+    ) -> list[tuple[dict, Path, Path]]:
+        """Return quota metadata with paths resolved from one discovered directory."""
+        import json
+
+        entries: list[tuple[dict, Path, Path]] = []
+        for metadata_path in snapshot_dir.glob("*.meta.json"):
+            try:
+                archive_stem = metadata_path.name.removesuffix(".meta.json")
+                archive_path = snapshot_dir / f"{archive_stem}.tar.gz"
+                if not archive_path.is_file():
+                    continue
+                with open(metadata_path) as metadata_file:
+                    metadata = json.load(metadata_file)
+                metadata["size_bytes"] = archive_path.stat().st_size
+                entries.append((metadata, archive_path, metadata_path))
+            except _SNAPSHOTS_NONCRITICAL_EXCEPTIONS as exc:
+                logger.debug(f"Failed to read snapshot metadata {metadata_path}: {exc}")
+        entries.sort(key=lambda entry: entry[0].get("created_at", ""), reverse=True)
+        return entries
+
+    def _enforce_quota_for_directory(
+        self,
+        snapshot_dir: Path,
+        *,
+        max_snapshots: int,
+        max_size_mb: int,
+    ) -> list[str]:
+        """Enforce quotas without re-hashing a discovered session directory name."""
+        return self._enforce_quota_for_directories(
+            [snapshot_dir],
+            max_snapshots=max_snapshots,
+            max_size_mb=max_size_mb,
+        )
+
+    def _enforce_quota_for_directories(
+        self,
+        snapshot_dirs: list[Path],
+        *,
+        max_snapshots: int,
+        max_size_mb: int,
+    ) -> list[str]:
+        """Enforce one logical session quota across current and legacy directories."""
+        entries = [
+            entry
+            for snapshot_dir in snapshot_dirs
+            for entry in self._quota_entries_for_directory(snapshot_dir)
+        ]
+        entries.sort(key=lambda entry: entry[0].get("created_at", ""), reverse=True)
+        deleted: list[str] = []
+        max_size_bytes = max_size_mb * 1024 * 1024
+
+        def delete_oldest() -> bool:
+            metadata, archive_path, metadata_path = entries[-1]
+            snapshot_id = str(metadata.get("snapshot_id") or "")
+            try:
+                archive_path.unlink()
+            except _SNAPSHOTS_NONCRITICAL_EXCEPTIONS as exc:
+                logger.warning(f"Failed to delete snapshot archive {archive_path}: {exc}")
+                return False
+
+            entries.pop()
+            try:
+                metadata_path.unlink(missing_ok=True)
+            except _SNAPSHOTS_NONCRITICAL_EXCEPTIONS as exc:
+                logger.warning(f"Failed to delete snapshot metadata {metadata_path}: {exc}")
+            if snapshot_id:
+                deleted.append(snapshot_id)
+            return True
+
+        while len(entries) > max_snapshots:
+            if not delete_oldest():
+                break
+
+        total_size = sum(entry[0].get("size_bytes", 0) for entry in entries)
+        while total_size > max_size_bytes and entries:
+            oldest_size = entries[-1][0].get("size_bytes", 0)
+            if not delete_oldest():
+                break
+            total_size -= oldest_size
+
+        for snapshot_dir in snapshot_dirs:
+            with contextlib.suppress(_SNAPSHOTS_NONCRITICAL_EXCEPTIONS):
+                if snapshot_dir.exists() and not any(snapshot_dir.iterdir()):
+                    snapshot_dir.rmdir()
         return deleted
 
     def enforce_quota_all_sessions(
@@ -620,32 +732,58 @@ class SnapshotManager:
         *,
         max_snapshots: int = 10,
         max_size_mb: int = 256,
+        lock_session: Callable[[str], ContextManager[None]] | None = None,
     ) -> dict[str, int]:
         """Enforce snapshot quotas for all session snapshot directories."""
         scanned_sessions = 0
         evicted_sessions = 0
         deleted_snapshots = 0
-        root = Path(self.storage_path)
+        root = Path(self.storage_path).resolve(strict=False)
         if not root.exists():
             return {
                 "scanned_sessions": 0,
                 "evicted_sessions": 0,
                 "deleted_snapshots": 0,
             }
+        session_directories: dict[str, list[Path]] = {}
         with contextlib.suppress(_SNAPSHOTS_NONCRITICAL_EXCEPTIONS):
             for session_dir in root.iterdir():
-                if not session_dir.is_dir():
+                if session_dir.is_symlink() or not session_dir.is_dir():
                     continue
-                session_id = session_dir.name
-                scanned_sessions += 1
-                deleted = self.enforce_quota(
-                    session_id,
-                    max_snapshots=max_snapshots,
-                    max_size_mb=max_size_mb,
+                resolved_session_dir = session_dir.resolve(strict=False)
+                if resolved_session_dir.parent != root:
+                    continue
+                entries = self._quota_entries_for_directory(resolved_session_dir)
+                raw_session_id = next(
+                    (
+                        str(metadata.get("session_id") or "").strip()
+                        for metadata, _archive_path, _metadata_path in entries
+                        if str(metadata.get("session_id") or "").strip()
+                    ),
+                    "",
                 )
+                if raw_session_id:
+                    session_directories.setdefault(raw_session_id, []).append(
+                        resolved_session_dir
+                    )
+
+            for raw_session_id, snapshot_dirs in session_directories.items():
+                scanned_sessions += 1
+                lock_context = (
+                    lock_session(raw_session_id)
+                    if lock_session is not None
+                    else contextlib.nullcontext()
+                )
+                with lock_context:
+                    deleted = self._enforce_quota_for_directories(
+                        snapshot_dirs,
+                        max_snapshots=max_snapshots,
+                        max_size_mb=max_size_mb,
+                    )
                 if deleted:
                     evicted_sessions += 1
                     deleted_snapshots += len(deleted)
+
         return {
             "scanned_sessions": int(scanned_sessions),
             "evicted_sessions": int(evicted_sessions),

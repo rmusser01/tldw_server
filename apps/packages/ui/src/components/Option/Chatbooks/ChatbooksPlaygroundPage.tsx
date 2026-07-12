@@ -169,25 +169,83 @@ type OpenWebUIHydrationJobState = {
   error?: string | null
 }
 
-const openWebUISourceFormatLabel = (sourceFormat?: string | null) => {
-  if (sourceFormat === "openwebui_db") return "OpenWebUI database"
-  if (sourceFormat === "openwebui_json") return "OpenWebUI JSON"
-  return sourceFormat || "OpenWebUI"
+type Translate = (
+  key: string,
+  fallback: string,
+  options?: Record<string, unknown>
+) => unknown
+
+const openWebUISourceFormatLabel = (
+  sourceFormat: string | null | undefined,
+  t: Translate
+) => {
+  if (sourceFormat === "openwebui_db") {
+    return String(
+      t(
+        "settings:chatbooksPlayground.openwebuiSourceDatabase",
+        "OpenWebUI database"
+      )
+    )
+  }
+  if (sourceFormat === "openwebui_json") {
+    return String(
+      t("settings:chatbooksPlayground.openwebuiSourceJson", "OpenWebUI JSON")
+    )
+  }
+  return (
+    sourceFormat ||
+    String(t("settings:chatbooksPlayground.openwebuiSource", "OpenWebUI"))
+  )
 }
 
-const pluralize = (count: number, singular: string, plural: string) =>
-  `${count} ${count === 1 ? singular : plural}`
+const openWebUICountLabel = (
+  count: number,
+  singularKey: string,
+  pluralKey: string,
+  singularFallback: string,
+  pluralFallback: string,
+  t: Translate
+) =>
+  String(
+    t(
+      count === 1 ? singularKey : pluralKey,
+      count === 1 ? singularFallback : pluralFallback,
+      { count }
+    )
+  )
 
-const formatOpenWebUIImportScopeSummary = (scope: OpenWebUIImportScopeSummary) => {
+const formatOpenWebUIImportScopeSummary = (
+  scope: OpenWebUIImportScopeSummary,
+  t: Translate
+) => {
   const pieces = [
-    openWebUISourceFormatLabel(scope.source_format),
-    pluralize(scope.conversation_count || 0, "conversation", "conversations"),
-    pluralize(scope.attachment_reference_count || 0, "attachment ref", "attachment refs")
+    openWebUISourceFormatLabel(scope.source_format, t),
+    openWebUICountLabel(
+      scope.conversation_count || 0,
+      "settings:chatbooksPlayground.openwebuiConversationCountOne",
+      "settings:chatbooksPlayground.openwebuiConversationCount",
+      "{{count}} conversation",
+      "{{count}} conversations",
+      t
+    ),
+    openWebUICountLabel(
+      scope.attachment_reference_count || 0,
+      "settings:chatbooksPlayground.openwebuiAttachmentReferenceCountOne",
+      "settings:chatbooksPlayground.openwebuiAttachmentReferenceCount",
+      "{{count}} attachment ref",
+      "{{count}} attachment refs",
+      t
+    )
   ]
   if (scope.source_user_label || scope.source_user_id) {
     pieces.splice(1, 0, scope.source_user_label || scope.source_user_id || "")
   }
   return pieces.filter(Boolean).join(" · ")
+}
+
+const isOpenWebUIImportJob = (job: ChatbookJob) => {
+  const sourceFormat = String(job.metadata?.source_format || "").toLowerCase()
+  return sourceFormat === "openwebui_json" || sourceFormat === "openwebui_db"
 }
 
 const parseIdList = (raw: string) =>
@@ -1199,6 +1257,12 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
   const [pollIndex, setPollIndex] = React.useState(0)
   const lastSignatureRef = React.useRef<string>("")
   const previewRequestIdRef = React.useRef(0)
+  const selectedOpenWebUIImportScopeIdRef = React.useRef("")
+
+  const selectOpenWebUIImportScope = React.useCallback((scopeId: string) => {
+    selectedOpenWebUIImportScopeIdRef.current = scopeId
+    setSelectedOpenWebUIImportScopeId(scopeId)
+  }, [])
 
   const canUseChatbooks = capabilities?.hasChatbooks !== false
   const isFullAccountExport = exportMode === "full_account"
@@ -1215,7 +1279,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
     setImportPreviewVersion(0)
     setSelectedOpenWebUIUserId("")
     setOpenwebuiImportScopes([])
-    setSelectedOpenWebUIImportScopeId("")
+    selectOpenWebUIImportScope("")
     setOpenwebuiImportScopesError(null)
     setOpenwebuiImportScopesLoading(false)
     setPreviewError(null)
@@ -1234,7 +1298,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
         current === "rename" || current === "skip" ? current : "skip"
       )
     }
-  }, [importSourceFormat])
+  }, [importSourceFormat, selectOpenWebUIImportScope])
 
   React.useEffect(() => {
     clearFetchAllItemsCache()
@@ -1376,12 +1440,14 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
       const res = await tldwClient.listOpenWebUIImportScopes()
       const scopes = Array.isArray(res?.scopes) ? res.scopes : []
       setOpenwebuiImportScopes(scopes)
-      setSelectedOpenWebUIImportScopeId((current) =>
-        scopes.some((scope) => scope.scope_id === current)
-          ? current
-          : scopes[0]?.scope_id || ""
-      )
-      setHydrationUseManualScope(false)
+      const currentScopeId = selectedOpenWebUIImportScopeIdRef.current
+      const nextScopeId = scopes.some((scope) => scope.scope_id === currentScopeId)
+        ? currentScopeId
+        : scopes[0]?.scope_id || ""
+      if (nextScopeId !== currentScopeId) {
+        selectOpenWebUIImportScope(nextScopeId)
+        setHydrationUseManualScope(false)
+      }
       return scopes
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error)
@@ -1390,7 +1456,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
     } finally {
       setOpenwebuiImportScopesLoading(false)
     }
-  }, [canUseChatbooks])
+  }, [canUseChatbooks, selectOpenWebUIImportScope])
 
   const loadJobs = React.useCallback(async () => {
     if (!canUseChatbooks) return
@@ -1426,9 +1492,19 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
     const importUpdates = await Promise.all(
       importActive.map((job) => tldwClient.getChatbookImportJob(job.job_id).catch(() => job))
     )
-    const completedImportRefreshNeeded =
-      isOpenWebUIImport &&
-      importUpdates.some((job) => job?.status && !isActiveJobStatus(job.status))
+    const completedImportRefreshNeeded = importUpdates.some((job) => {
+      const previous = importActive.find((item) => item.job_id === job.job_id)
+      const mergedJob = {
+        ...previous,
+        ...job,
+        metadata: { ...previous?.metadata, ...job.metadata }
+      } as ChatbookJob
+      return (
+        Boolean(mergedJob.status) &&
+        !isActiveJobStatus(mergedJob.status) &&
+        isOpenWebUIImportJob(mergedJob)
+      )
+    })
 
     const mergeJobs = (prev: ChatbookJob[], updates: ChatbookJob[]) => {
       const map = new Map(prev.map((job) => [job.job_id, job]))
@@ -1445,7 +1521,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
     }
 
     return buildJobSignature([...nextExport, ...nextImport])
-  }, [canUseChatbooks, exportJobs, importJobs, isOpenWebUIImport, loadOpenWebUIImportScopes])
+  }, [canUseChatbooks, exportJobs, importJobs, loadOpenWebUIImportScopes])
 
   React.useEffect(() => {
     if (!canUseChatbooks) return
@@ -2636,7 +2712,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
                         <Select
                           value={selectedOpenWebUIImportScopeId || undefined}
                           onChange={(value) => {
-                            setSelectedOpenWebUIImportScopeId(String(value || ""))
+                            selectOpenWebUIImportScope(String(value || ""))
                             setHydrationUseManualScope(false)
                           }}
                           placeholder={t(
@@ -2647,7 +2723,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
                           disabled={!canUseChatbooks || hydrationPreviewLoading || hydrationJobLoading}
                           options={openwebuiImportScopes.map((scope) => ({
                             value: scope.scope_id,
-                            label: formatOpenWebUIImportScopeSummary(scope)
+                            label: formatOpenWebUIImportScopeSummary(scope, t)
                           }))}
                         />
                         {selectedOpenWebUIImportScope && (

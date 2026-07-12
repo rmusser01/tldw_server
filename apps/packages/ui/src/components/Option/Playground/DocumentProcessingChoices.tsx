@@ -27,10 +27,25 @@ type ModeOption = {
   icon: React.ComponentType<{ className?: string }>
 }
 
+type Translate = (
+  key: string,
+  fallback: string,
+  options?: Record<string, unknown>
+) => unknown
+
 const unavailableReason = (
   files: UploadedFile[],
-  mode: DocumentProcessingMode
+  mode: DocumentProcessingMode,
+  t: Translate
 ): string | null => {
+  if (files.some((file) => !file.processingCapabilities)) {
+    return String(
+      t(
+        "playground:documentProcessing.checkingAvailability",
+        "Checking availability"
+      )
+    )
+  }
   const reasons = Array.from(
     new Set(
       files
@@ -51,13 +66,25 @@ const unavailableReason = (
 
 const statusSummary = (
   files: UploadedFile[],
-  t: (key: string, fallback: string, options?: Record<string, unknown>) => unknown
+  t: Translate
 ): string => {
   const blocked = files.filter(
     (file) => file.processingStatus === "blocked"
   ).length
   const failed = files.filter((file) => file.processingStatus === "failed").length
-  const ready = Math.max(0, files.length - blocked - failed)
+  const ready = files.filter((file) => file.processingStatus === "ready").length
+  const processing = files.filter(
+    (file) => file.processingStatus === "processing"
+  ).length
+  const cancelled = files.filter(
+    (file) => file.processingStatus === "cancelled"
+  ).length
+  const pending = files.filter(
+    (file) =>
+      file.processingStatus == null ||
+      file.processingStatus === "preflighting" ||
+      file.processingStatus === "pending"
+  ).length
   const parts = [
     String(
       t("playground:documentProcessing.readyCount", "{{count}} ready", {
@@ -65,6 +92,26 @@ const statusSummary = (
       })
     )
   ]
+  if (pending > 0) {
+    parts.push(
+      String(
+        t("playground:documentProcessing.pendingCount", "{{count}} pending", {
+          count: pending
+        })
+      )
+    )
+  }
+  if (processing > 0) {
+    parts.push(
+      String(
+        t(
+          "playground:documentProcessing.processingCount",
+          "{{count}} processing",
+          { count: processing }
+        )
+      )
+    )
+  }
   if (blocked > 0) {
     parts.push(
       String(
@@ -80,6 +127,17 @@ const statusSummary = (
         t("playground:documentProcessing.failedCount", "{{count}} failed", {
           count: failed
         })
+      )
+    )
+  }
+  if (cancelled > 0) {
+    parts.push(
+      String(
+        t(
+          "playground:documentProcessing.cancelledCount",
+          "{{count}} cancelled",
+          { count: cancelled }
+        )
       )
     )
   }
@@ -163,7 +221,7 @@ export const DocumentProcessingChoices: React.FC<Props> = ({
 
       <div className="mt-2 grid gap-2 md:grid-cols-3">
         {modeOptions.map((option) => {
-          const reason = unavailableReason(files, option.mode)
+          const reason = unavailableReason(files, option.mode, t)
           const disabled = Boolean(reason)
           const Icon = option.icon
           const selected = activeMode === option.mode
@@ -215,7 +273,7 @@ export const DocumentProcessingChoices: React.FC<Props> = ({
               <div className="flex flex-wrap gap-1">
                 {modeOptions.map((option) => {
                   const capability = file.processingCapabilities?.[option.mode]
-                  const disabled = capability ? !capability.available : false
+                  const disabled = !capability || !capability.available
                   const selected = file.processingMode === option.mode
                   return (
                     <button
