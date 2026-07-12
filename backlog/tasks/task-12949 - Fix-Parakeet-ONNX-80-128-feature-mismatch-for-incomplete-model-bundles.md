@@ -1,7 +1,7 @@
 ---
 id: TASK-12949
 title: Fix Parakeet ONNX 80/128 feature mismatch for incomplete model bundles
-status: In Progress
+status: Done
 labels:
 - bug
 - audio
@@ -38,22 +38,23 @@ Require the Parakeet ONNX model metadata needed by onnx-asr, refresh incomplete 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-- TDD evidence: new cache/local/config/encoder regression cases failed against the original loader and passed after the fix.
-- Verification: focused suite 34 passed, 3 skipped; Ruff passed on production and tests; Bandit JSON reported 0 results and 0 errors; git diff --check passed; real cached INT8 encoder reported a 128-feature match.
-- Independent code review found no critical production issues. The cache-repair test was strengthened to prove the refreshed bundle completes loading, and dynamic feature axes are covered.
-- PR #2715 is a draft pending the repository-required human-written Change summary.
-Review follow-up reopened: rebase PR #2715 onto latest dev, inspect all review threads and GitHub Actions checks, address verified issues, rerun validation, and update the PR.
+- TDD evidence: cache metadata, graph, external-data, provider, explicit-local-path, and incomplete-repair regressions failed against the prior loader and passed after the fixes.
+- Review follow-up: rebased PR #2715 onto origin/dev at 8601d41f80; addressed and resolved both inline review threads.
+- Final verification: 40 passed, 3 dependency-gated skips; Ruff passed; Bandit JSON reported 0 findings; git diff --check passed.
+- Independent final review found no remaining Critical or Important issues.
+- PR head: 20e8b04e3c. Refreshed GitHub Actions runs were still queued with no logs or failures as of 2026-07-12 12:23 PDT.
+- Merge gate: repository policy still requires the human requester to write the PR Change summary explaining what changed and why.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Fixed the Parakeet ONNX 80/128 feature mismatch at model-load time. The loader now treats config.json as required metadata, refreshes stale remote caches, rejects incomplete or invalid local bundles, validates positive integer features_size values, and checks the selected encoder's static audio_signal feature axis before onnx-asr loads or the runtime is cached. Added regression coverage for cache repair, malformed metadata, quantized/unquantized mismatches, and dynamic axes.
+Rebased PR #2715 onto the latest dev and hardened Parakeet ONNX bundle loading. Metadata inspection now stays CPU-only while inference preserves requested providers. Remote TDT caches repair missing metadata, graphs, and external-data failures once, then fail closed if still incomplete; explicit local paths are never downloaded. Added red-green regression coverage for all reviewed edge cases, resolved both inline threads, and completed local test, lint, security, and independent review gates.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
