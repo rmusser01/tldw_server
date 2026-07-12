@@ -2479,7 +2479,9 @@ def extract_article_with_pipeline(
         strategy: Optional[str],
     ) -> dict[str, Any]:
         summary = result.get("summary")
-        if jsonld_summary and (not isinstance(summary, str) or not summary.strip()):
+        if result.get("extraction_successful") and jsonld_summary and (
+            not isinstance(summary, str) or not summary.strip()
+        ):
             result["summary"] = jsonld_summary
         final = _attach_trace(result, trace, strategy, order)
         if _should_clear_caches("end"):

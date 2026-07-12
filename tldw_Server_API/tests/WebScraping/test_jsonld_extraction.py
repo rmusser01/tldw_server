@@ -77,6 +77,28 @@ def test_pipeline_keeps_fallback_summary_over_jsonld_summary():
     assert result["summary"] == "Fallback summary"
 
 
+def test_pipeline_does_not_carry_jsonld_summary_when_fallback_fails():
+    def fallback_extractor(_html: str, url: str) -> dict[str, str | bool]:
+        return {
+            "url": url,
+            "title": "Fallback title",
+            "author": "N/A",
+            "date": "N/A",
+            "content": "",
+            "extraction_successful": False,
+        }
+
+    result = extract_article_with_pipeline(
+        DESCRIPTION_ONLY_JSONLD,
+        "https://example.com",
+        strategy_order=["jsonld", "trafilatura"],
+        fallback_extractor=fallback_extractor,
+    )
+
+    assert result["extraction_successful"] is False
+    assert result.get("summary") is None
+
+
 def test_jsonld_extraction_basic():
     html = """
     <html>
