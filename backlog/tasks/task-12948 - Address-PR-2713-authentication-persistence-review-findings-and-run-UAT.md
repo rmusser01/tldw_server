@@ -4,13 +4,18 @@ title: Address PR 2713 authentication persistence review findings and run UAT
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-12 04:39'
+updated_date: '2026-07-12 05:01'
 labels: []
 dependencies: []
 references:
   - TASK-12106
   - TASK-12108
   - 'https://github.com/rmusser01/tldw_server/pull/2713'
+documentation:
+  - >-
+    Docs/superpowers/specs/2026-07-11-pr-2713-auth-persistence-review-remediation-design.md
+  - >-
+    docs/superpowers/plans/2026-07-11-pr-2713-auth-persistence-review-remediation-plan.md
 ---
 
 ## Description
@@ -31,6 +36,12 @@ Resolve every Critical, Important, and Minor finding from the dedicated review o
 - [ ] #8 Focused tests, lint, type, build, Bandit, and diff verification pass or only documented unrelated baselines remain.
 <!-- AC:END -->
 
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Implementation plan: docs/superpowers/plans/2026-07-11-pr-2713-auth-persistence-review-remediation-plan.md. Execute Tasks 1-6 with TDD: shared effective-auth resolver; WebUI/extension transport integration; idempotent logout and truthful clearing; bootstrap scrub hardening; authenticated lifecycle CI; full verification and UAT.
+<!-- SECTION:PLAN:END -->
+
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
@@ -43,8 +54,8 @@ Resolve every Critical, Important, and Minor finding from the dedicated review o
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
+
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
