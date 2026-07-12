@@ -9,6 +9,10 @@ from typing import Any
 
 from fastapi import Request, Response
 
+from tldw_Server_API.app.core.AuthNZ.exceptions import (
+    SessionError,
+    SessionRevokedException,
+)
 from tldw_Server_API.app.core.AuthNZ.ip_allowlist import resolve_client_ip
 from tldw_Server_API.app.core.AuthNZ.session_manager import get_session_manager
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
@@ -72,6 +76,8 @@ async def mint_single_user_session(
 async def validate_single_user_session(
     request: Any,
     manager: Any | None = None,
+    *,
+    strict: bool = False,
 ) -> SingleUserSessionIdentity | None:
     """Validate the request's opaque cookie as a canonical single-user session."""
     settings = get_settings()
@@ -81,7 +87,17 @@ async def validate_single_user_session(
     if not token:
         return None
     session_manager = manager or await get_session_manager()
-    row = await session_manager.validate_session(token)
+    try:
+        if strict:
+            row = await session_manager.validate_session(token, raise_on_error=True)
+        else:
+            row = await session_manager.validate_session(token)
+    except (SessionError, SessionRevokedException):
+        raise
+    except Exception as exc:
+        if not strict:
+            raise
+        raise SessionError("Failed to validate session") from exc
     if not row or row.get("device_id") != SESSION_DEVICE_ID:
         return None
     if int(row.get("user_id", 0)) != int(settings.SINGLE_USER_FIXED_ID):

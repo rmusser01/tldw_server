@@ -1132,7 +1132,12 @@ class SessionManager:
             )
             raise SessionError(f"Failed to create session: {e}") from e
 
-    async def validate_session(self, access_token: str) -> Optional[dict[str, Any]]:
+    async def validate_session(
+        self,
+        access_token: str,
+        *,
+        raise_on_error: bool = False,
+    ) -> Optional[dict[str, Any]]:
         """
         Validate a session by access token
 
@@ -1140,7 +1145,11 @@ class SessionManager:
             access_token: JWT access token
 
         Returns:
-            Session data if valid, None otherwise
+            Session data if valid, None otherwise.
+
+        Raises:
+            SessionError: When validation infrastructure fails and
+                ``raise_on_error`` is enabled.
         """
         if not self._initialized:
             await self.initialize()
@@ -1265,6 +1274,8 @@ class SessionManager:
             raise
         except _SESSION_MANAGER_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Error validating session: {e}")
+            if raise_on_error:
+                raise SessionError("Failed to validate session") from e
             return None
 
     async def revoke_session(

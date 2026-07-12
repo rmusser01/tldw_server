@@ -4,8 +4,10 @@ import pytest
 import pytest_asyncio
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.api.v1.endpoints import auth as auth_endpoints
 from tldw_Server_API.app.core.Audit.unified_audit_service import shutdown_audit_service
 from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
+from tldw_Server_API.app.core.AuthNZ.exceptions import SessionError
 from tldw_Server_API.app.core.AuthNZ.initialize import bootstrap_single_user_profile
 from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager
 from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
@@ -236,6 +238,38 @@ def test_logout_with_invalid_cookie_is_idempotent(
     assert "no-store" in response.headers["cache-control"]
     assert "Max-Age=0" in response.headers["set-cookie"]
     assert revoke_calls == []
+
+
+def test_logout_preserves_cookie_when_strict_validation_fails(
+    single_user_cookie_client,
+    monkeypatch,
+):
+    client, api_key = single_user_cookie_client
+    mint = _mint(client, api_key)
+    assert mint.status_code == 200
+    cookie_before = client.cookies["tldw_single_user_session"]
+    csrf_token = client.cookies["csrf_token"]
+
+    async def fail_only_when_strict(request, manager, *, strict=False):
+        if strict:
+            raise SessionError("session store unavailable")
+        return None
+
+    monkeypatch.setattr(
+        auth_endpoints,
+        "validate_single_user_session",
+        fail_only_when_strict,
+    )
+
+    response = client.delete(
+        "/api/v1/auth/single-user/session",
+        headers={"X-CSRF-Token": csrf_token},
+    )
+
+    assert response.status_code == 503
+    assert "no-store" in response.headers["cache-control"]
+    assert "set-cookie" not in response.headers
+    assert client.cookies["tldw_single_user_session"] == cookie_before
 
 
 def test_single_user_session_logout_unavailable_in_multi_user_mode(

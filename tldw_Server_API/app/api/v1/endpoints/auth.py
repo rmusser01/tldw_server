@@ -1258,18 +1258,36 @@ async def delete_single_user_cookie_session(
     if get_settings().AUTH_MODE != "single_user":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
-    response.headers["Cache-Control"] = "no-store"
-    clear_single_user_session_cookie(response)
     try:
-        identity = await validate_single_user_session(request, session_manager)
+        identity = await validate_single_user_session(
+            request,
+            session_manager,
+            strict=True,
+        )
     except SessionRevokedException:
         identity = None
-    if identity is not None:
-        await session_manager.revoke_session(
-            session_id=identity.session_id,
-            revoked_by=identity.user_id,
-            reason="Single-user cookie logout",
-        )
+    except SessionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to validate the current session",
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    try:
+        if identity is not None:
+            await session_manager.revoke_session(
+                session_id=identity.session_id,
+                revoked_by=identity.user_id,
+                reason="Single-user cookie logout",
+            )
+    except SessionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to revoke the current session",
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+
+    response.headers["Cache-Control"] = "no-store"
+    clear_single_user_session_cookie(response)
     return {"authenticated": False}
 
 
