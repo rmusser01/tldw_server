@@ -53,7 +53,7 @@
 
 **Tests:** SQLite/PostgreSQL migration tests, repository unit tests, Hypothesis pagination/identity tests.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 1: Add contract models and Jobs migrations
 
