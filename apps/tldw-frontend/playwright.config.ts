@@ -4,6 +4,9 @@ const rawBaseUrl = process.env.TLDW_WEB_URL || 'http://localhost:8080';
 const baseURL = rawBaseUrl.replace('127.0.0.1', 'localhost');
 const webCommand = process.env.TLDW_WEB_CMD || 'bun run dev -- -p 8080';
 const shouldAutoStart = process.env.TLDW_WEB_AUTOSTART !== 'false';
+const extensionPersistenceSuite = process.argv.some((arg) =>
+  arg.includes('extension-api-key-persistence')
+);
 const cookieLifecycleSuite =
   process.env.TLDW_COOKIE_LIFECYCLE === '1' ||
   process.argv.some((arg) => arg.includes('single-user-cookie-lifecycle'));
@@ -50,7 +53,7 @@ export default defineConfig({
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
   },
-  webServer: shouldAutoStart
+  webServer: shouldAutoStart && !extensionPersistenceSuite
     ? {
         command: webCommand,
         env: webServerEnv,

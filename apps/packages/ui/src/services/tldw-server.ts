@@ -7,7 +7,7 @@ import {
   type BrowserSurface
 } from "@/services/tldw/browser-networking"
 
-const storage = createSafeStorage()
+const storage = createSafeStorage({ area: "local" })
 
 // Default local tldw_server endpoint
 const DEFAULT_TLDW_URL = "http://127.0.0.1:8000"

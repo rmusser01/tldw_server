@@ -125,7 +125,7 @@ async function apiSendImpl<T = any, P extends PathOrUrl = PathOrUrl, M extends A
     }
     // fall through to direct request
   }
-  const storage = createSafeStorage()
+  const storage = createSafeStorage({ area: "local" })
   return await tldwRequest(payload, {
     // IMPORTANT: getConfig must fetch fresh config each time it's called
     // (not pre-fetch once), because the config may change or not be seeded yet.

@@ -618,7 +618,7 @@ export const characterMethods = {
     const requestCreateDirect = async (
       requestPath: string
     ): Promise<any> => {
-      const storage = createSafeStorage()
+      const storage = createSafeStorage({ area: "local" })
       const response = await tldwRequest(
         {
           path: requestPath as AllowedPath,

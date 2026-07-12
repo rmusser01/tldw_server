@@ -374,7 +374,11 @@ git commit -m "feat(web): add manual API-key remember choice"
 **Files:**
 - Create: `apps/tldw-frontend/e2e/manual-api-key-persistence.spec.ts`
 - Create: `apps/tldw-frontend/e2e/extension-api-key-persistence.spec.ts`
+- Create: `apps/tldw-frontend/e2e/helpers/manual-api-key-fixture.ts`
 - Modify: `apps/tldw-frontend/playwright.config.ts`
+- Modify: `apps/packages/ui/src/i18n/index.ts`
+- Modify: `apps/packages/ui/src/routes/app-route.tsx`
+- Modify: tldw config readers under `apps/packages/ui/src/` to use extension-local storage
 - Modify: `Dockerfiles/README.md`
 - Modify: `backlog/tasks/task-12106 - Add-explicit-single-user-API-key-device-persistence-and-relaunch-coverage.md`
 
@@ -382,7 +386,7 @@ git commit -m "feat(web): add manual API-key remember choice"
 - Consumes: real onboarding/settings UI and persistence policy.
 - Produces: hard-reload, browser-process relaunch, and extension-installation relaunch evidence.
 
-- [ ] **Step 1: Add failing persistent-profile tests**
+- [x] **Step 1: Add failing persistent-profile tests**
 
 ```ts
 test("manual device save survives hard reload and browser relaunch", async ({}, testInfo) => {
@@ -414,7 +418,7 @@ test("manual session save survives reload but not browser relaunch", async ({}, 
 
 The extension test launches Chromium twice with the same `userDataDir` and unpacked extension path, saves through the real extension UI, records the extension ID, and verifies the same ID plus authenticated UI after relaunch. It separately confirms session storage is empty after relaunch.
 
-- [ ] **Step 2: Run lifecycle tests and confirm failures**
+- [x] **Step 2: Run lifecycle tests and confirm failures**
 
 Run WebUI: `cd apps/tldw-frontend && bunx playwright test e2e/manual-api-key-persistence.spec.ts --reporter=line`
 
@@ -422,7 +426,7 @@ Run extension: `cd apps/tldw-frontend && bunx playwright test e2e/extension-api-
 
 Expected: relaunch cases fail before the final persistence wiring is complete.
 
-- [ ] **Step 3: Add only the harness configuration required by the tests**
+- [x] **Step 3: Add only the harness configuration required by the tests**
 
 ```ts
 export const launchPersistentExtension = (userDataDir: string, extensionPath: string) =>
@@ -437,7 +441,7 @@ export const launchPersistentExtension = (userDataDir: string, extensionPath: st
 
 Keep the unpacked path identical across launches and derive the extension ID from the service worker URL instead of hard-coding it. Do not seed `tldwConfig`; exercise the UI save flow.
 
-- [ ] **Step 4: Run final verification**
+- [x] **Step 4: Run final verification**
 
 Run unit/component: `cd apps && bunx vitest run packages/ui/src/services/tldw/__tests__ packages/ui/src/components/Option/Onboarding/__tests__/OnboardingConnectForm.design-system.test.tsx packages/ui/src/components/Option/Settings/__tests__/tldw-review-comments.test.tsx tldw-frontend/__tests__/extension/runtime-bootstrap.test.ts`
 
@@ -449,7 +453,7 @@ Run tracked-secret check: `git diff --check && rg -n "secret-test-key|THIS-IS-A-
 
 Expected: tests pass; the final grep produces no output from generated artifacts.
 
-- [ ] **Step 5: Finalize and commit TASK-12106**
+- [x] **Step 5: Finalize and commit TASK-12106**
 
 Record exact commands/results, checked acceptance criteria, browser/extension versions, persistence fallbacks, known skips, and final summary in Backlog.md. Bandit is not applicable to the TypeScript-only task; record that scoped skip. Then run:
 

@@ -538,7 +538,7 @@ const getPersistedServerUrl = async (): Promise<string | null> => {
   }
 
   try {
-    const storage = createSafeStorage()
+    const storage = createSafeStorage({ area: "local" })
     const cfg = await storage.get<TldwConfig>("tldwConfig")
     const quickstartWebUiServerUrl = getQuickstartWebUiServerUrl()
     if (quickstartWebUiServerUrl) {

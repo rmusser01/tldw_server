@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   bgStream: vi.fn(),
   tldwRequest: vi.fn(),
   storage: new Map<string, unknown>(),
+  syncStorage: new Map<string, unknown>(),
   sessionStorage: new Map<string, unknown>(),
   failDeviceWrite: false,
   failSessionWrite: false,
@@ -24,7 +25,12 @@ vi.mock("@/services/tldw/request-core", () => ({
 
 vi.mock("@/utils/safe-storage", () => ({
   createSafeStorage: (options?: { area?: string }) => {
-    const values = options?.area === "session" ? mocks.sessionStorage : mocks.storage
+    const values =
+      options?.area === "session"
+        ? mocks.sessionStorage
+        : options?.area === "local"
+          ? mocks.storage
+          : mocks.syncStorage
     return {
       get: vi.fn(async (key: string) => values.get(key)),
       set: vi.fn(async (key: string, value: unknown) => {
@@ -36,7 +42,7 @@ vi.mock("@/utils/safe-storage", () => ({
           throw new Error("session storage unavailable")
         }
         if (
-          options?.area !== "session" &&
+          options?.area === "local" &&
           mocks.failDeviceWrite &&
           key === "tldwConfig" &&
           Boolean((value as { apiKey?: unknown })?.apiKey)
@@ -44,7 +50,7 @@ vi.mock("@/utils/safe-storage", () => ({
           throw new Error("device storage unavailable")
         }
         if (
-          options?.area !== "session" &&
+          options?.area === "local" &&
           mocks.failClearWrite &&
           key === "tldwConfig" &&
           !(value as { apiKey?: unknown })?.apiKey
@@ -73,6 +79,7 @@ describe("TldwApiClient connection storage sync", () => {
     mocks.bgStream.mockReset()
     mocks.tldwRequest.mockReset()
     mocks.storage.clear()
+    mocks.syncStorage.clear()
     mocks.sessionStorage.clear()
     mocks.failDeviceWrite = false
     mocks.failSessionWrite = false
@@ -98,6 +105,7 @@ describe("TldwApiClient connection storage sync", () => {
       authMode: "single-user",
       apiKey: "test-api-key"
     })
+    expect(mocks.syncStorage.has("tldwConfig")).toBe(false)
   })
 
   it("clears mirrored server URLs when the saved URL is removed", async () => {
@@ -112,6 +120,27 @@ describe("TldwApiClient connection storage sync", () => {
 
     expect(mocks.storage.has("tldwServerUrl")).toBe(false)
     expect(window.localStorage.getItem("tldw-api-host")).toBeNull()
+  })
+
+  it("migrates legacy sync config into device-local storage", async () => {
+    const legacyConfig = {
+      serverUrl: "https://api.example.test",
+      authMode: "single-user",
+      apiKey: "legacy-secret",
+      credentialSource: "manual",
+      apiKeyPersistence: "device",
+      apiKeyServerOrigin: "https://api.example.test"
+    }
+    mocks.syncStorage.set("tldwConfig", legacyConfig)
+
+    const client = new TldwApiClient()
+    await client.initialize()
+
+    expect(mocks.storage.get("tldwConfig")).toEqual(legacyConfig)
+    expect(mocks.syncStorage.has("tldwConfig")).toBe(false)
+    await expect(client.getConfig()).resolves.toMatchObject({
+      apiKey: "legacy-secret"
+    })
   })
 
   it("uses the in-memory WebUI config for audio preset mutations", async () => {

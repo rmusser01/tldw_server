@@ -166,7 +166,7 @@ export const ServerConnectionCard: React.FC<Props> = ({
 
   React.useEffect(() => {
     let cancelled = false
-    const storage = createSafeStorage()
+    const storage = createSafeStorage({ area: "local" })
     storage
       .get<unknown>("tldwConfig")
       .then((cfg) => {

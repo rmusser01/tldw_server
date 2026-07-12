@@ -641,7 +641,7 @@ async function bgRequestImpl<
   const noAuthExplicit = Object.prototype.hasOwnProperty.call(init, "noAuth")
   let resolvedNoAuth = noAuthExplicit ? noAuth : (noAuth || isAbsoluteUrl)
   if (!noAuthExplicit && isAbsoluteUrl) {
-    const storage = createSafeStorage()
+    const storage = createSafeStorage({ area: "local" })
     const cfg = (await storage.get<Record<string, unknown>>("tldwConfig").catch(() => null)) || null
     const sameOriginAbsolute = isSameOriginAbsoluteUrlForConfiguredServer(
       String(path),
@@ -714,7 +714,7 @@ async function bgRequestImpl<
     headers?: Record<string, string>
   }
   const requestDirectArrayBufferFallback = async () => {
-    const storage = createSafeStorage()
+    const storage = createSafeStorage({ area: "local" })
     return await tldwRequest(
       {
         path,
@@ -767,7 +767,7 @@ async function bgRequestImpl<
 
   // Some binary responses do not survive extension message serialization.
   if (shouldBypassBackground) {
-    const storage = createSafeStorage()
+    const storage = createSafeStorage({ area: "local" })
     const resp = await tldwRequest(
       {
         path,
@@ -967,7 +967,7 @@ async function bgRequestImpl<
   }
 
   // Fallback: direct fetch (web/dev context)
-  const storage = createSafeStorage()
+  const storage = createSafeStorage({ area: "local" })
   const resp = await tldwRequest(
     {
       path,
@@ -1079,7 +1079,7 @@ async function* bgStreamDirect<
 >(
   { path, method = 'POST' as UpperLower<M>, headers = {}, body, streamIdleTimeoutMs, abortSignal }: BgStreamInit<P, M>
 ): AsyncGenerator<string> {
-  const storage = createSafeStorage()
+  const storage = createSafeStorage({ area: "local" })
   const cfg = (await storage.get<Record<string, unknown>>("tldwConfig").catch(() => null)) || null
   const normalizedPath = normalizeKnownPathQuirks(path)
   const isAbsolute = typeof normalizedPath === "string" && /^https?:/i.test(normalizedPath)
@@ -1354,7 +1354,7 @@ export async function* bgStream<
   // hard-coded 5s. Time-to-first-byte over 5s is normal for large prompts, RAG,
   // or a cold local model, and a premature disconnect used to replay the whole
   // request. Reuse the stream idle-timeout budget (chat default 45s).
-  const streamStorage = createSafeStorage()
+  const streamStorage = createSafeStorage({ area: "local" })
   const streamCfg =
     (await streamStorage
       .get<Record<string, unknown>>("tldwConfig")
@@ -1676,7 +1676,7 @@ export async function bgUpload<T = any, P extends AllowedPath = AllowedPath, M e
     )
   }
 
-  const storage = createSafeStorage()
+  const storage = createSafeStorage({ area: "local" })
   const resp = await tldwRequest(
     { path, method, body: formData, timeoutMs, responseType },
     createDirectRuntime(storage)

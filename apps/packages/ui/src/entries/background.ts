@@ -372,7 +372,7 @@ const warmModels = async (
 
 export default defineBackground({
   main() {
-    const storage = createSafeStorage();
+    const storage = createSafeStorage({ area: "local" });
     let handleRuntimeMessageRef:
       | ((message: any, sender: any) => Promise<any>)
       | null = null;

@@ -1469,6 +1469,7 @@ export class TldwApiClientBase {
 
   constructor() {
     this.storage = createSafeStorage({
+      area: "local",
       serde: safeStorageSerde
     })
     this.sessionStorage = createSafeStorage({
@@ -1794,14 +1795,15 @@ export class TldwApiClientBase {
     let storedManual = await this.storage.get<TldwConfig>("tldwConfig")
     if (!storedManual) {
       try {
-        const localStore = createSafeStorage({
-          area: "local",
+        const legacySyncStore = createSafeStorage({
+          area: "sync",
           serde: safeStorageSerde
         })
-        const localConfig = await localStore.get<TldwConfig>("tldwConfig")
-        if (localConfig) {
-          storedManual = localConfig
-          await this.storage.set("tldwConfig", localConfig)
+        const legacySyncConfig = await legacySyncStore.get<TldwConfig>("tldwConfig")
+        if (legacySyncConfig) {
+          storedManual = legacySyncConfig
+          await this.storage.set("tldwConfig", legacySyncConfig)
+          await legacySyncStore.remove("tldwConfig").catch(() => undefined)
         }
       } catch {
         // ignore migration failures
@@ -4665,7 +4667,7 @@ export class TldwApiClientBase {
     const requestCreateDirect = async (
       requestPath: string
     ): Promise<any> => {
-      const storage = createSafeStorage()
+      const storage = createSafeStorage({ area: "local" })
       const response = await tldwRequest(
         {
           path: requestPath as AllowedPath,
