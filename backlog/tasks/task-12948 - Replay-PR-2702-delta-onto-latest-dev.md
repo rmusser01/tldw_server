@@ -1,7 +1,7 @@
 ---
 id: TASK-12948
 title: Replay PR 2702 delta onto latest dev
-status: In Progress
+status: Done
 labels:
 - release
 - rebase
@@ -17,11 +17,11 @@ Create a fresh dev-targeted branch from current origin/dev, replay only the PR #
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Branch is based on the latest origin/dev and contains no main-targeted correction
-- [ ] #2 Only PR #2702-specific changes still missing from current dev are included
-- [ ] #3 Conflicts are resolved against newer dev behavior with minimal changes
-- [ ] #4 Focused backend/frontend/workflow validation passes
-- [ ] #5 A pull request is opened targeting dev
+- [x] #1 Branch is based on the latest origin/dev and contains no main-targeted correction
+- [x] #2 Only PR #2702-specific changes still missing from current dev are included
+- [x] #3 Conflicts are resolved against newer dev behavior with minimal changes
+- [x] #4 Focused backend/frontend/workflow validation passes
+- [x] #5 A pull request is opened targeting dev
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -33,15 +33,15 @@ Created codex/pr-2702-dev-rebase directly from origin/dev at d28c16bfa3 and repl
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Created PR #2712 targeting dev from the latest origin/dev, replayed only the eight PR #2702-specific commits, preserved all newer dev changes, and made no correction branch or PR against main. The final net delta was validated with 53 frontend tests, 69 backend tests, extension compile, E2E discovery, workflow parsing/concurrency checks, Bandit with zero findings, and git diff checks. The only full-typecheck issue is an existing origin/dev error in an untouched QuickIngest file and is intentionally excluded.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
