@@ -143,6 +143,78 @@ describe("TldwApiClient quickstart auth bootstrap", () => {
     expect(mocks.storage.get("tldwConfig")).toEqual(manualConfig)
   })
 
+  it("preserves a matching manual session credential while cookie auth is active", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    const manualConfig = {
+      authMode: "single-user" as const,
+      authSource: "manual" as const,
+      serverUrl: "https://remote.example.test/path",
+      credentialSource: "manual" as const,
+      apiKeyPersistence: "session" as const,
+      apiKeyServerOrigin: "https://remote.example.test"
+    }
+    const manualSession = {
+      apiKey: "session-secret",
+      credentialSource: "manual",
+      apiKeyPersistence: "session",
+      apiKeyServerOrigin: "https://remote.example.test"
+    }
+    mocks.storage.set("tldwConfig", manualConfig)
+    mocks.sessionStorage.set("tldwManualSessionApiKey", manualSession)
+    mocks.storage.set("tldwCookieSessionConfig", {
+      authMode: "single-user",
+      authSource: "cookie-session",
+      serverUrl: window.location.origin
+    })
+    const client = new TldwApiClient()
+
+    await client.initialize()
+
+    await expect(client.getConfig()).resolves.toEqual({
+      authMode: "single-user",
+      authSource: "cookie-session",
+      serverUrl: window.location.origin
+    })
+    expect(mocks.storage.get("tldwConfig")).toEqual(manualConfig)
+    expect(mocks.sessionStorage.get("tldwManualSessionApiKey")).toEqual(
+      manualSession
+    )
+  })
+
+  it("removes a mismatched manual session credential while cookie auth is active", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    const manualConfig = {
+      authMode: "single-user" as const,
+      authSource: "manual" as const,
+      serverUrl: "https://remote.example.test/path",
+      credentialSource: "manual" as const,
+      apiKeyPersistence: "session" as const,
+      apiKeyServerOrigin: "https://remote.example.test"
+    }
+    mocks.storage.set("tldwConfig", manualConfig)
+    mocks.sessionStorage.set("tldwManualSessionApiKey", {
+      apiKey: "stale-secret",
+      credentialSource: "manual",
+      apiKeyPersistence: "session",
+      apiKeyServerOrigin: "https://other.example.test"
+    })
+    mocks.storage.set("tldwCookieSessionConfig", {
+      authMode: "single-user",
+      authSource: "cookie-session",
+      serverUrl: window.location.origin
+    })
+    const client = new TldwApiClient()
+
+    await client.initialize()
+
+    await expect(client.getConfig()).resolves.toMatchObject({
+      authSource: "cookie-session",
+      serverUrl: window.location.origin
+    })
+    expect(mocks.storage.get("tldwConfig")).toEqual(manualConfig)
+    expect(mocks.sessionStorage.has("tldwManualSessionApiKey")).toBe(false)
+  })
+
   it("keeps the explicit missing-key error when quickstart config has no key", async () => {
     process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
     delete process.env.NEXT_PUBLIC_X_API_KEY

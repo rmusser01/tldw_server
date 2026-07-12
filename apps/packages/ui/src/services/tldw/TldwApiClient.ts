@@ -63,6 +63,7 @@ import {
   MANUAL_SESSION_KEY,
   normalizeServerOrigin,
   resolveEffectiveTldwConfig,
+  resolveManualCredential,
   toPersistedTldwConfig
 } from "@/services/tldw/single-user-credential"
 import {
@@ -1860,6 +1861,16 @@ export class TldwApiClientBase {
       }
       storedManual = persistedManual
     }
+    if (storedManual?.apiKeyPersistence === "session") {
+      const manualApiKey = await resolveManualCredential(storedManual, {
+        session: this.sessionStorage
+      })
+      if (!manualApiKey) {
+        await this.sessionStorage
+          .remove(MANUAL_SESSION_KEY)
+          .catch(() => undefined)
+      }
+    }
     const stored = await resolveEffectiveTldwConfig(
       {
         persistent: {
@@ -1879,15 +1890,6 @@ export class TldwApiClientBase {
           }
         : undefined
     )
-    if (
-      storedManual?.apiKeyPersistence === "session" &&
-      !stored?.apiKey
-    ) {
-      await this.sessionStorage
-        .remove(MANUAL_SESSION_KEY)
-        .catch(() => undefined)
-    }
-
     if (!stored) {
       // True first-run without quickstart auth material: leave config null so
       // callers can distinguish unconfigured from misconfigured/unreachable.
