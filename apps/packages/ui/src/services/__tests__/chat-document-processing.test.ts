@@ -586,6 +586,24 @@ describe("chat document processing service", () => {
     })
   })
 
+  it("cancels an accepted ingest job when polling is aborted", async () => {
+    const controller = new AbortController()
+    controller.abort()
+    mocks.bgRequest.mockResolvedValueOnce(undefined)
+
+    await expect(
+      waitForIngestDocumentJob(77, {
+        pollIntervalMs: 1,
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({ name: "AbortError" })
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/media/ingest/jobs/77?reason=user_cancelled",
+      method: "DELETE",
+    })
+  })
+
   it("localizes invalid ingest job errors", async () => {
     const translate = vi
       .spyOn(i18n, "t")

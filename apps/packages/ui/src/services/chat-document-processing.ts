@@ -530,7 +530,16 @@ export const waitForIngestDocumentJob = async (
     timeoutMs: options.timeoutMs || DIRECT_INGEST_TIMEOUT_MS,
     pollIntervalMs: options.pollIntervalMs,
     isCancelled: () => Boolean(options.signal?.aborted),
-    onCancel: () => undefined,
+    onCancel: async () => {
+      try {
+        await bgRequest<void>({
+          path: `/api/v1/media/ingest/jobs/${encodeURIComponent(String(Math.trunc(normalizedJobId)))}?reason=user_cancelled`,
+          method: "DELETE",
+        })
+      } catch (error) {
+        console.warn(`Unable to cancel ingest job ${normalizedJobId}`, error)
+      }
+    },
     fetchJob: async (id) => {
       try {
         return {
