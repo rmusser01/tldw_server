@@ -328,10 +328,13 @@ export function NotificationLifecycleProvider({
         state: "auth-required"
       })
     }
+    const shouldPreserveUnavailable = () =>
+      terminalStateRef.current === "unavailable" &&
+      (suppliedScopeKey !== undefined || buildWebNotificationScopeKey() === scopeKey)
     const onCredentialsChanged = (event: Event) => {
       const detail = (event as CustomEvent<AuthCredentialsChangedDetail>).detail
       if (detail?.authenticated) {
-        if (terminalStateRef.current === "unavailable") return
+        if (shouldPreserveUnavailable()) return
         void startWork()
       } else {
         stopForRemovedCredentials()
@@ -340,6 +343,7 @@ export function NotificationLifecycleProvider({
     const onStorage = (event: StorageEvent) => {
       if (event.key !== "access_token") return
       if (event.newValue) {
+        if (shouldPreserveUnavailable()) return
         void startWork()
       } else {
         stopForRemovedCredentials()
@@ -352,7 +356,7 @@ export function NotificationLifecycleProvider({
       window.removeEventListener(AUTH_CREDENTIALS_CHANGED_EVENT, onCredentialsChanged)
       window.removeEventListener("storage", onStorage)
     }
-  }, [scopeKey, startWork, stopWork])
+  }, [scopeKey, startWork, stopWork, suppliedScopeKey])
 
   const reportRequestError = React.useCallback(
     (error: unknown) => {
