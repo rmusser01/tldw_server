@@ -86,13 +86,44 @@ async def _ensure_admin_role_membership(user_id: int) -> None:
         raise AuthNZDatabaseError("Canonical admin role membership is unavailable")
 
 
+async def _disable_admin_login(users_db, user_id: int) -> None:
+    """Best-effort fail-closed cleanup for an unverified admin account."""
+    with contextlib.suppress(*_AUTHNZ_ADMIN_CREATION_EXCEPTIONS):
+        await users_db.update_user(user_id, is_active=False, is_superuser=False)
+
+
+async def _activate_admin_after_membership(users_db, user_id: int) -> None:
+    """Enable admin login only after canonical membership is verified."""
+    try:
+        await _ensure_admin_role_membership(user_id)
+        await users_db.update_user(user_id, is_active=True, is_superuser=True)
+    except _AUTHNZ_ADMIN_CREATION_EXCEPTIONS:
+        await _disable_admin_login(users_db, user_id)
+        raise
+
+
 async def _repair_existing_admin_memberships(users_db) -> None:
     """Repair canonical membership for users already marked as admins."""
-    for admin_user in await users_db.list_users(role="admin"):
-        user_id = admin_user.get("id")
-        if user_id is None:
-            raise AuthNZDatabaseError("Existing admin user has no identifier")
-        await _ensure_admin_role_membership(int(user_id))
+    page_size = 100
+    offset = 0
+    while True:
+        admin_users = await users_db.list_users(
+            role="admin",
+            offset=offset,
+            limit=page_size,
+        )
+        for admin_user in admin_users:
+            user_id = admin_user.get("id")
+            if user_id is None:
+                raise AuthNZDatabaseError("Existing admin user has no identifier")
+            try:
+                await _ensure_admin_role_membership(int(user_id))
+            except _AUTHNZ_ADMIN_CREATION_EXCEPTIONS:
+                await _disable_admin_login(users_db, int(user_id))
+                raise
+        if len(admin_users) < page_size:
+            return
+        offset += len(admin_users)
 
 #######################################################################################################################
 #
@@ -1042,7 +1073,7 @@ async def create_admin_user():
         if existing:
             if str(existing.get("role") or "").lower() != "admin":
                 raise RuntimeError("Existing user is not an admin")
-            await _ensure_admin_role_membership(int(existing["id"]))
+            await _activate_admin_after_membership(users_db, int(existing["id"]))
             print("\n✅ Existing admin canonical membership verified")
             return True
 
@@ -1051,9 +1082,10 @@ async def create_admin_user():
             email=email,
             password_hash=password_hash,
             role="admin",
-            is_superuser=True
+            is_active=False,
+            is_superuser=False,
         )
-        await _ensure_admin_role_membership(int(admin_user["id"]))
+        await _activate_admin_after_membership(users_db, int(admin_user["id"]))
 
         # Create initial API key for admin
         api_manager = await get_api_key_manager()

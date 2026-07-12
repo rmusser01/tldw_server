@@ -13,6 +13,7 @@ Usage:
 
 import argparse
 import asyncio
+import contextlib
 import sys
 from pathlib import Path
 
@@ -34,6 +35,17 @@ async def _ensure_admin_role_membership(user_id: int) -> None:
     await repo.assign_role_if_missing(user_id=user_id, role_name="admin")
     if not await repo.has_role_assignment(user_id=user_id, role_name="admin"):
         raise RuntimeError("Canonical admin role membership is unavailable")
+
+
+async def _activate_admin_after_membership(users_db, user_id: int) -> None:
+    """Enable admin login only after canonical membership is verified."""
+    try:
+        await _ensure_admin_role_membership(user_id)
+        await users_db.update_user(user_id, is_active=True, is_superuser=True)
+    except Exception:
+        with contextlib.suppress(Exception):
+            await users_db.update_user(user_id, is_active=False, is_superuser=False)
+        raise
 
 
 async def create_admin_user_non_interactive(
@@ -86,7 +98,7 @@ async def create_admin_user_non_interactive(
         if existing:
             if str(existing.get("role") or "").lower() != "admin":
                 raise RuntimeError("Existing user is not an admin")
-            await _ensure_admin_role_membership(int(existing["id"]))
+            await _activate_admin_after_membership(users_db, int(existing["id"]))
             print(f"[create-admin] Admin user '{username}' already exists; canonical membership verified.")
             return True
 
@@ -100,11 +112,12 @@ async def create_admin_user_non_interactive(
             email=email,
             password_hash=password_hash,
             role="admin",
-            is_superuser=True,
+            is_active=False,
+            is_superuser=False,
         )
 
         user_id = admin_user["id"]
-        await _ensure_admin_role_membership(int(user_id))
+        await _activate_admin_after_membership(users_db, int(user_id))
         print(f"[create-admin] Admin user created: username={username}, id={user_id}")
 
         # Ensure user directories exist

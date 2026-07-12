@@ -107,7 +107,8 @@ async def _sync_system_role_membership(
             """
             INSERT INTO user_roles (user_id, role_id)
             VALUES ($1, $2)
-            ON CONFLICT (user_id, role_id) DO NOTHING
+            ON CONFLICT (user_id, role_id)
+            DO UPDATE SET expires_at = NULL
             """,
             user_id,
             role_id,
@@ -137,7 +138,11 @@ async def _sync_system_role_membership(
         (user_id, role_id),
     )
     await db.execute(
-        "INSERT OR IGNORE INTO user_roles (user_id, role_id) VALUES (?, ?)",
+        """
+        INSERT INTO user_roles (user_id, role_id)
+        VALUES (?, ?)
+        ON CONFLICT(user_id, role_id) DO UPDATE SET expires_at = NULL
+        """,
         (user_id, role_id),
     )
 

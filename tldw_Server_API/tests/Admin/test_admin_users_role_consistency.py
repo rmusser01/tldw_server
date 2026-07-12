@@ -14,6 +14,7 @@ from tldw_Server_API.app.services import admin_users_service
 class _RoleState:
     legacy_role: str
     memberships: set[int]
+    expired_memberships: set[int] = field(default_factory=set)
     roles: dict[str, tuple[int, bool]] = field(
         default_factory=lambda: {
             "admin": (1, True),
@@ -51,8 +52,11 @@ class _SqliteRoleDb:
             system_role_ids = {role_id for role_id, is_system in self.state.roles.values() if is_system}
             self.state.memberships -= system_role_ids - {selected_role_id}
             return _Cursor()
-        if normalized.startswith("insert or ignore into user_roles"):
-            self.state.memberships.add(int(params[1]))
+        if normalized.startswith("insert into user_roles"):
+            role_id = int(params[1])
+            self.state.memberships.add(role_id)
+            if "do update set expires_at = null" in normalized:
+                self.state.expired_memberships.discard(role_id)
             return _Cursor()
         raise AssertionError(f"Unexpected SQLite query: {query}")
 
@@ -84,7 +88,10 @@ class _PostgresRoleDb:
             self.state.memberships -= system_role_ids - {selected_role_id}
             return "DELETE"
         if normalized.startswith("insert into user_roles"):
-            self.state.memberships.add(int(params[1]))
+            role_id = int(params[1])
+            self.state.memberships.add(role_id)
+            if "do update set expires_at = null" in normalized:
+                self.state.expired_memberships.discard(role_id)
             return "INSERT"
         raise AssertionError(f"Unexpected PostgreSQL execute: {query}")
 
@@ -169,6 +176,28 @@ async def test_update_user_unknown_role_fails_without_mutating_role_state(monkey
     assert state.memberships == {2, 9}
     if backend == "sqlite":
         assert db.commit_count == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend", ["sqlite", "postgres"])
+async def test_update_user_reactivates_expired_selected_system_role(monkeypatch, backend: str) -> None:
+    state = _RoleState("user", {1, 2, 9}, expired_memberships={1})
+    db = _PostgresRoleDb(state) if backend == "postgres" else _SqliteRoleDb(state)
+    monkeypatch.setattr(admin_users_service.admin_scope_service, "enforce_admin_user_scope", _allow)
+    monkeypatch.setattr(admin_users_service, "verify_privileged_action", _reauth)
+    monkeypatch.setattr(admin_users_service, "_emit_admin_account_audit_event", _no_audit)
+
+    await admin_users_service.update_user(
+        _principal(),
+        42,
+        UserUpdateRequest(role="admin", reason="Support case 123"),
+        db,
+        password_service=object(),
+        is_pg_fn=lambda: _is_postgres(backend),
+    )
+
+    assert state.memberships == {1, 9}
+    assert state.expired_memberships == set()
 
 
 async def _is_postgres(backend: str) -> bool:

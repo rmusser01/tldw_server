@@ -12,15 +12,32 @@ class _UsersDb:
     def __init__(self, existing: dict | None) -> None:
         self.existing = existing
         self.created = False
+        self.created_kwargs: list[dict] = []
+        self.updated: list[tuple[int, dict]] = []
+        self.list_calls: list[dict] = []
+        self.paged_users: list[dict] | None = None
 
     async def get_user_by_username(self, _username: str):
         return self.existing
 
-    async def create_user(self, **_kwargs):
+    async def create_user(self, **kwargs):
         self.created = True
+        self.created_kwargs.append(dict(kwargs))
         return {"id": 81, "username": "bootstrap-admin"}
 
-    async def list_users(self, **_kwargs):
+    async def update_user(self, user_id: int, **kwargs):
+        self.updated.append((user_id, dict(kwargs)))
+        if self.existing and int(self.existing.get("id", -1)) == user_id:
+            self.existing.update(kwargs)
+            return dict(self.existing)
+        return {"id": user_id, **kwargs}
+
+    async def list_users(self, **kwargs):
+        self.list_calls.append(dict(kwargs))
+        if self.paged_users is not None:
+            offset = int(kwargs.get("offset", 0))
+            limit = int(kwargs.get("limit", 100))
+            return self.paged_users[offset : offset + limit]
         return [self.existing] if self.existing else []
 
 
@@ -137,6 +154,89 @@ async def test_admin_bootstrap_fails_when_admin_role_cannot_be_verified(monkeypa
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("module_name", ["noninteractive", "interactive"])
+async def test_new_admin_is_activated_only_after_canonical_membership(monkeypatch, module_name: str) -> None:
+    module = create_admin if module_name == "noninteractive" else initialize
+    users_db = _UsersDb(None)
+    repo = _Repo()
+    await _set_common_create_admin_patches(monkeypatch, module, users_db, repo)
+
+    if module_name == "noninteractive":
+        result = await create_admin.create_admin_user_non_interactive(
+            "bootstrap-admin",
+            "StrongPass123!",
+            "bootstrap@example.com",
+        )
+    else:
+        monkeypatch.setattr("builtins.input", lambda prompt: "bootstrap-admin" if "username" in prompt else "bootstrap@example.com")
+        monkeypatch.setattr(initialize, "getpass", lambda _prompt: "StrongPass123!")
+        monkeypatch.setattr(initialize, "get_api_key_manager", _async_result(_ApiManager()))
+        result = await initialize.create_admin_user()
+
+    assert result is True
+    assert users_db.created_kwargs[0]["is_active"] is False
+    assert users_db.created_kwargs[0]["is_superuser"] is False
+    assert users_db.updated == [(81, {"is_active": True, "is_superuser": True})]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("module_name", ["noninteractive", "interactive"])
+async def test_new_admin_membership_failure_leaves_account_disabled(monkeypatch, module_name: str) -> None:
+    module = create_admin if module_name == "noninteractive" else initialize
+    users_db = _UsersDb(None)
+    repo = _Repo(membership_available=False)
+    await _set_common_create_admin_patches(monkeypatch, module, users_db, repo)
+
+    if module_name == "noninteractive":
+        result = await create_admin.create_admin_user_non_interactive(
+            "bootstrap-admin",
+            "StrongPass123!",
+            "bootstrap@example.com",
+        )
+    else:
+        monkeypatch.setattr("builtins.input", lambda prompt: "bootstrap-admin" if "username" in prompt else "bootstrap@example.com")
+        monkeypatch.setattr(initialize, "getpass", lambda _prompt: "StrongPass123!")
+        monkeypatch.setattr(initialize, "get_api_key_manager", _async_result(_ApiManager()))
+        result = await initialize.create_admin_user()
+
+    assert result is False
+    assert users_db.created_kwargs[0]["is_active"] is False
+    assert users_db.created_kwargs[0]["is_superuser"] is False
+    assert all(update[1] == {"is_active": False, "is_superuser": False} for update in users_db.updated)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("module_name", ["noninteractive", "interactive"])
+async def test_existing_admin_membership_failure_disables_superuser(monkeypatch, module_name: str) -> None:
+    module = create_admin if module_name == "noninteractive" else initialize
+    existing = {
+        "id": 80,
+        "username": "bootstrap-admin",
+        "role": "admin",
+        "is_active": True,
+        "is_superuser": True,
+    }
+    users_db = _UsersDb(existing)
+    repo = _Repo(membership_available=False)
+    await _set_common_create_admin_patches(monkeypatch, module, users_db, repo)
+
+    if module_name == "noninteractive":
+        result = await create_admin.create_admin_user_non_interactive(
+            "bootstrap-admin",
+            "StrongPass123!",
+            "bootstrap@example.com",
+        )
+    else:
+        monkeypatch.setattr("builtins.input", lambda prompt: "bootstrap-admin" if "username" in prompt else "bootstrap@example.com")
+        monkeypatch.setattr(initialize, "getpass", lambda _prompt: "StrongPass123!")
+        monkeypatch.setattr(initialize, "get_api_key_manager", _async_result(_ApiManager()))
+        result = await initialize.create_admin_user()
+
+    assert result is False
+    assert users_db.updated == [(80, {"is_active": False, "is_superuser": False})]
+
+
+@pytest.mark.asyncio
 async def test_initialize_existing_admin_scan_repairs_canonical_membership(monkeypatch) -> None:
     users_db = _UsersDb({"id": 80, "username": "bootstrap-admin", "role": "admin"})
     repo = _Repo()
@@ -155,3 +255,24 @@ async def test_initialize_existing_admin_scan_fails_when_admin_role_is_unavailab
 
     with pytest.raises(initialize.AuthNZDatabaseError, match="Canonical admin role membership"):
         await initialize._repair_existing_admin_memberships(users_db)
+
+    assert users_db.updated == [(80, {"is_active": False, "is_superuser": False})]
+
+
+@pytest.mark.asyncio
+async def test_initialize_existing_admin_scan_repairs_every_page(monkeypatch) -> None:
+    users_db = _UsersDb(None)
+    users_db.paged_users = [
+        {"id": user_id, "username": f"admin-{user_id}", "role": "admin"}
+        for user_id in range(1, 102)
+    ]
+    repo = _Repo()
+    await _set_common_create_admin_patches(monkeypatch, initialize, users_db, repo)
+
+    await initialize._repair_existing_admin_memberships(users_db)
+
+    assert repo.assigned == [(user_id, "admin") for user_id in range(1, 102)]
+    assert users_db.list_calls == [
+        {"role": "admin", "offset": 0, "limit": 100},
+        {"role": "admin", "offset": 100, "limit": 100},
+    ]
