@@ -6,6 +6,13 @@ priority: High
 references:
 - https://github.com/rmusser01/tldw_server/pull/2633
 - https://github.com/rmusser01/tldw_server/issues/2605
+documentation:
+- Docs/superpowers/specs/2026-07-12-pr-2633-review-rebase-design.md
+- Docs/superpowers/plans/2026-07-12-pr-2633-review-rebase-implementation-plan.md
+modified_files:
+- Docs/superpowers/specs/2026-07-12-pr-2633-review-rebase-design.md
+- Docs/superpowers/plans/2026-07-12-pr-2633-review-rebase-implementation-plan.md
+- backlog/tasks/task-12148 - Rebase-PR-2633-and-address-review-feedback.md
 ---
 
 ## Description
@@ -23,6 +30,12 @@ Rebase the Research Workspace UAT and artifact verification PR onto current orig
 - [ ] #5 Bandit reports no new findings in touched Python code and git diff --check passes.
 - [ ] #6 Updated branch is force-pushed with lease and PR review/check status is re-inspected.
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Docs/superpowers/plans/2026-07-12-pr-2633-review-rebase-implementation-plan.md
+<!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 
