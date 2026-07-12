@@ -1,14 +1,13 @@
 ---
 id: TASK-12950
 title: Fix Quick Ingest Standard and Deep analysis provider presets
-status: In Progress
+status: Done
 labels:
 - bug
 - frontend
 - quick-ingest
 documentation:
 - Docs/superpowers/specs/2026-07-12-quick-ingest-preset-provider-design.md
-- Docs/superpowers/plans/2026-07-12-quick-ingest-preset-provider-implementation.md
 ---
 
 ## Description
@@ -19,11 +18,11 @@ Target dev with a shared WebUI/browser-extension fix so the active Quick Ingest 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 New Quick Ingest sessions use the saved preset configuration for the selected/default preset.
-- [ ] #2 The active wizard configure step exposes an analysis provider control when analysis is enabled.
-- [ ] #3 Standard and Deep can proceed when a provider is configured; missing-provider flows stay on a recoverable wizard step without a render loop.
-- [ ] #4 Focused unit/integration tests cover WebUI/extension shared behavior and pass.
-- [ ] #5 A pull request targets dev.
+- [x] #1 New Quick Ingest sessions use the saved preset configuration for the selected/default preset.
+- [x] #2 The active wizard configure step exposes an analysis provider control when analysis is enabled.
+- [x] #3 Standard and Deep can proceed when a provider is configured; missing-provider flows stay on a recoverable wizard step without a render loop.
+- [x] #4 Focused unit/integration tests cover WebUI/extension shared behavior and pass.
+- [x] #5 A pull request targets dev.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -57,15 +56,15 @@ Bandit: not applicable because the touched implementation/test/docs scope contai
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Fixed Quick Ingest Standard/Deep provider failures across the shared WebUI/browser-extension UI. Saved preset maps are hydrated before draft creation, captured per open, and merged losslessly through edits. The Configure step now exposes an accessible session-only provider selector and invalid runs recover there without starting requests. Review hardening covers pending-event consumption, seeded draft remount/rebase behavior, processing/terminal snapshot preservation, persisted-step redirects, reopen retries, and connection checks. PR: https://github.com/rmusser01/tldw_server/pull/2717. Human-authored Change summary remains required before merge.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
