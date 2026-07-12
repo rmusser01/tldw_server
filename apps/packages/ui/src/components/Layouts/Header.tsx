@@ -37,7 +37,7 @@ type Props = {
   notificationCount?: number
   /** Callback when notification bell is clicked */
   onOpenNotifications?: () => void
-  notificationState?: Exclude<NotificationLifecycleState, "idle">
+  notificationState?: NotificationLifecycleState
   onRetryNotifications?: () => void | Promise<void>
 }
 

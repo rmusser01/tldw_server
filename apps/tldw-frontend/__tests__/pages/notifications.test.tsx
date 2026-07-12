@@ -341,6 +341,38 @@ describe('NotificationsPage', () => {
     expect(screen.getByText('Unread: 1')).toBeInTheDocument();
   });
 
+  it('keeps retry progress visible and blocks duplicate item mutations', async () => {
+    const user = userEvent.setup();
+    const failure = Object.assign(new Error('offline'), { status: 503 });
+    let resolveRetry: ((value: { updated: number }) => void) | undefined;
+    mocks.markNotificationsRead
+      .mockRejectedValueOnce(failure)
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveRetry = resolve; }));
+    render(<NotificationsPage />);
+
+    await user.click(await screen.findByRole('button', { name: 'Mark read' }));
+    await user.click(await screen.findByRole('button', { name: 'Retry action' }));
+
+    expect(screen.getByRole('button', { name: 'Retrying...' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Mark read' })).toBeDisabled();
+    resolveRetry?.({ updated: 1 });
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Retrying...' })).not.toBeInTheDocument());
+  });
+
+  it('hides a failed mutation immediately when notification scope changes', async () => {
+    const user = userEvent.setup();
+    const failure = Object.assign(new Error('offline'), { status: 503 });
+    mocks.markNotificationsRead.mockRejectedValueOnce(failure);
+    const view = render(<NotificationsPage />);
+
+    await user.click(await screen.findByRole('button', { name: 'Mark read' }));
+    expect(await screen.findByRole('button', { name: 'Retry action' })).toBeInTheDocument();
+
+    mocks.lifecycle.scopeKey = 'notifications:server-a:user-b';
+    view.rerender(<NotificationsPage />);
+    expect(screen.queryByRole('button', { name: 'Retry action' })).not.toBeInTheDocument();
+  });
+
   it('suppresses page requests and actions while lifecycle state is terminal', async () => {
     mocks.lifecycle.state = 'unavailable';
     render(<NotificationsPage />);
@@ -350,12 +382,13 @@ describe('NotificationsPage', () => {
     expect(mocks.getUnreadCount).not.toHaveBeenCalled();
     expect(mocks.subscribeNotificationsStream).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Refresh' })).toBeDisabled();
+    expect(screen.queryByText('Loading notifications...')).not.toBeInTheDocument();
   });
 
   it.each([
     ['connecting', 'Connecting to notifications'],
     ['degraded', 'Notifications are reconnecting'],
-    ['auth-required', 'Sign in to view notifications'],
+    ['auth-required', 'Sign in again to view notifications'],
     ['unavailable', 'Notifications unavailable for this account'],
   ] as const)('renders the %s recovery state on direct navigation', async (state, copy) => {
     mocks.lifecycle.state = state;
@@ -371,6 +404,25 @@ describe('NotificationsPage', () => {
     await user.click(await screen.findByRole('button', { name: 'Try again' }));
 
     expect(mocks.tryAgain).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens the existing sign-in flow from auth-required state', async () => {
+    const user = userEvent.setup();
+    mocks.lifecycle.state = 'auth-required';
+    render(<NotificationsPage />);
+
+    await user.click(await screen.findByRole('button', { name: 'Open sign in' }));
+
+    expect(mocks.push).toHaveBeenCalledWith('/login');
+    expect(mocks.refreshPermissions).not.toHaveBeenCalled();
+  });
+
+  it('marks a retained unread count as stale while notifications are degraded', async () => {
+    mocks.lifecycle.state = 'degraded';
+    render(<NotificationsPage />);
+
+    expect(await screen.findByText('Unread: 2')).toBeInTheDocument();
+    expect(screen.getByText(/Last updated before the connection was lost/)).toBeInTheDocument();
   });
 
   it('shows snoozed notifications instead of the empty state when only snoozed items remain', async () => {

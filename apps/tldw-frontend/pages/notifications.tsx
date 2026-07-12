@@ -19,17 +19,17 @@ import { classifyNotificationError } from '@/services/notification-lifecycle';
 const DEFAULT_SNOOZE_MINUTES = 15;
 const NOTIFICATIONS_FETCH_LIMIT = 100;
 type PreferenceKey = 'reminder_enabled' | 'job_completed_enabled' | 'job_failed_enabled';
-type FailedMutation =
-  | { kind: 'mark-read'; notificationId: number; message: string }
-  | { kind: 'dismiss'; notificationId: number; message: string }
-  | { kind: 'snooze'; notificationId: number; minutes: number; message: string }
-  | { kind: 'cancel-snooze'; notificationId: number; message: string }
-  | { kind: 'preference'; key: PreferenceKey; message: string };
-type FailedMutationCommand = FailedMutation extends infer Mutation
-  ? Mutation extends FailedMutation
-    ? Omit<Mutation, 'message'>
-    : never
-  : never;
+type FailedMutationCommand =
+  | { kind: 'mark-read'; notificationId: number }
+  | { kind: 'dismiss'; notificationId: number }
+  | { kind: 'snooze'; notificationId: number; minutes: number }
+  | { kind: 'cancel-snooze'; notificationId: number }
+  | { kind: 'preference'; key: PreferenceKey };
+type FailedMutation = FailedMutationCommand & {
+  message: string;
+  scopeKey: string;
+  generation: number;
+};
 
 function resolveRouteForLinkType(linkType: string | null | undefined): string | undefined {
   if (!linkType) return undefined
@@ -70,7 +70,6 @@ export default function NotificationsPage() {
     reportRequestError,
     reportMutationError,
     tryAgain,
-    refreshPermissions,
   } = useNotificationLifecycle();
   const isTerminal = lifecycleState === 'auth-required' || lifecycleState === 'unavailable';
   const [items, setItems] = useState<NotificationItem[]>([]);
@@ -93,7 +92,7 @@ export default function NotificationsPage() {
   const [prefsError, setPrefsError] = useState<string | null>(null);
   const [prefsSavingKey, setPrefsSavingKey] = useState<PreferenceKey | null>(null);
   const [failedMutation, setFailedMutation] = useState<FailedMutation | null>(null);
-  const [isRetryingMutation, setIsRetryingMutation] = useState(false);
+  const [retryingMutation, setRetryingMutation] = useState<FailedMutation | null>(null);
   const mutationRetryInFlightRef = useRef(false);
 
   const recordFailedMutation = useCallback(
@@ -101,9 +100,14 @@ export default function NotificationsPage() {
       const classification = classifyNotificationError(mutationError, { attempt: 0 });
       if (classification.kind !== 'retry') return;
       const message = mutationError instanceof Error ? mutationError.message : fallbackMessage;
-      setFailedMutation({ ...mutation, message });
+      setFailedMutation({
+        ...mutation,
+        message,
+        scopeKey,
+        generation: pageGenerationRef.current,
+      });
     },
-    []
+    [scopeKey]
   );
 
   const clearInboxRetry = useCallback(() => {
@@ -316,8 +320,7 @@ export default function NotificationsPage() {
     setPrefsLoading(false);
     setPrefsSavingKey(null);
     setFailedMutation(null);
-    setIsRetryingMutation(false);
-    mutationRetryInFlightRef.current = false;
+    setRetryingMutation(null);
     setShowPrefs(false);
     setError(null);
     setIsLoading(true);
@@ -332,7 +335,10 @@ export default function NotificationsPage() {
   }, [refreshInbox]);
 
   useEffect(() => {
-    if (isTerminal) clearInboxRetry();
+    if (isTerminal) {
+      clearInboxRetry();
+      setIsLoading(false);
+    }
     return () => {
       clearInboxRetry();
       inboxAbortRef.current?.abort();
@@ -418,10 +424,15 @@ export default function NotificationsPage() {
   }, [recordFailedMutation, reportMutationError, show]);
 
   const retryFailedMutation = useCallback(async () => {
-    if (!failedMutation || mutationRetryInFlightRef.current) return;
+    if (
+      !failedMutation ||
+      failedMutation.scopeKey !== scopeKey ||
+      failedMutation.generation !== pageGenerationRef.current ||
+      mutationRetryInFlightRef.current
+    ) return;
     mutationRetryInFlightRef.current = true;
-    setIsRetryingMutation(true);
     const mutation = failedMutation;
+    setRetryingMutation(mutation);
     setFailedMutation(null);
     try {
       switch (mutation.kind) {
@@ -443,7 +454,7 @@ export default function NotificationsPage() {
       }
     } finally {
       mutationRetryInFlightRef.current = false;
-      setIsRetryingMutation(false);
+      setRetryingMutation(null);
     }
   }, [
     failedMutation,
@@ -451,6 +462,7 @@ export default function NotificationsPage() {
     handleDismiss,
     handleMarkRead,
     handleSnooze,
+    scopeKey,
     togglePref,
   ]);
 
@@ -459,6 +471,16 @@ export default function NotificationsPage() {
   const hasNotifications = scopedItems.length > 0;
   const hasAnyNotifications = hasNotifications || scopedSnoozedItems.length > 0;
   const unreadLabel = useMemo(() => `Unread: ${unreadCount}`, [unreadCount]);
+  const scopedFailedMutation = failedMutation?.scopeKey === scopeKey &&
+    failedMutation.generation === pageGenerationRef.current
+    ? failedMutation
+    : null;
+  const scopedRetryingMutation = retryingMutation?.scopeKey === scopeKey &&
+    retryingMutation.generation === pageGenerationRef.current
+    ? retryingMutation
+    : null;
+  const visibleFailedMutation = scopedFailedMutation ?? scopedRetryingMutation;
+  const isRetryingMutation = scopedRetryingMutation !== null;
   const lifecycleRecovery = useMemo(() => {
     switch (lifecycleState) {
       case 'connecting':
@@ -477,11 +499,11 @@ export default function NotificationsPage() {
         };
       case 'auth-required':
         return {
-          title: 'Sign in to view notifications',
+          title: 'Sign in again to view notifications',
           description: 'Your session must be refreshed before this inbox can update.',
           tone: 'warning' as const,
-          actionLabel: 'Refresh session',
-          action: refreshPermissions,
+          actionLabel: 'Open sign in',
+          action: () => void router.push('/login'),
         };
       case 'unavailable':
         return {
@@ -494,7 +516,7 @@ export default function NotificationsPage() {
       default:
         return null;
     }
-  }, [lifecycleState, refreshPermissions, tryAgain]);
+  }, [lifecycleState, router, tryAgain]);
 
   return (
     <div className="mx-auto w-full max-w-4xl px-4 py-6 sm:px-6 lg:px-8">
@@ -503,6 +525,11 @@ export default function NotificationsPage() {
           <div>
             <h1 className="text-2xl font-semibold text-foreground">Notifications</h1>
             <p className="mt-1 text-sm text-muted-foreground">{unreadLabel}</p>
+            {lifecycleState === 'degraded' ? (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Last updated before the connection was lost ({formatRelativeTime(new Date(lifecycleUpdatedAt).toISOString())}).
+              </p>
+            ) : null}
           </div>
           <div className="flex gap-2">
             <button
@@ -591,7 +618,7 @@ export default function NotificationsPage() {
                     <input
                       type="checkbox"
                       checked={prefs[key]}
-                      disabled={isTerminal || prefsSavingKey !== null}
+                      disabled={isTerminal || isRetryingMutation || prefsSavingKey !== null}
                       onChange={() => void togglePref(key)}
                       className="mt-1 h-4 w-4 rounded border-border disabled:cursor-not-allowed disabled:opacity-50"
                     />
@@ -612,14 +639,14 @@ export default function NotificationsPage() {
           </div>
         )}
 
-        {failedMutation && (
+        {visibleFailedMutation && (
           <div
             role="alert"
             className="mb-4 flex flex-col gap-3 rounded border border-danger/30 bg-danger/10 px-3 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
           >
             <div>
               <p className="font-medium text-foreground">Action was not completed</p>
-              <p className="mt-1 text-muted-foreground">{failedMutation.message}</p>
+              <p className="mt-1 text-muted-foreground">{visibleFailedMutation.message}</p>
             </div>
             <button
               type="button"
@@ -654,7 +681,7 @@ export default function NotificationsPage() {
                     <button
                       type="button"
                       className="rounded border border-primary/30 bg-primary/10 px-2 py-1 text-xs font-medium text-primary hover:bg-primary/20"
-                      disabled={isTerminal}
+                      disabled={isTerminal || isRetryingMutation}
                       onClick={async () => {
                         if (!item.read_at) {
                           try { await handleMarkRead(item.id) } catch {}
@@ -679,7 +706,7 @@ export default function NotificationsPage() {
                     <button
                       type="button"
                       className="rounded border border-border px-2 py-1 text-xs font-medium hover:bg-muted"
-                      disabled={isTerminal}
+                      disabled={isTerminal || isRetryingMutation}
                       onClick={() => void handleMarkRead(item.id)}
                     >
                       Mark read
@@ -688,7 +715,7 @@ export default function NotificationsPage() {
                   <button
                     type="button"
                     className="rounded border border-border px-2 py-1 text-xs font-medium hover:bg-muted"
-                    disabled={isTerminal}
+                    disabled={isTerminal || isRetryingMutation}
                     onClick={() => void handleSnooze(item.id, DEFAULT_SNOOZE_MINUTES)}
                   >
                     Snooze {DEFAULT_SNOOZE_MINUTES}m
@@ -696,7 +723,7 @@ export default function NotificationsPage() {
                   <button
                     type="button"
                     className="rounded border border-border px-2 py-1 text-xs font-medium hover:bg-muted"
-                    disabled={isTerminal}
+                    disabled={isTerminal || isRetryingMutation}
                     onClick={() => void handleDismiss(item.id)}
                   >
                     Dismiss
@@ -734,7 +761,7 @@ export default function NotificationsPage() {
                       <button
                         type="button"
                         className="rounded border border-border px-2 py-1 text-xs font-medium hover:bg-muted"
-                        disabled={isTerminal}
+                        disabled={isTerminal || isRetryingMutation}
                         onClick={() => void handleCancelSnooze(item.id)}
                       >
                         Cancel snooze

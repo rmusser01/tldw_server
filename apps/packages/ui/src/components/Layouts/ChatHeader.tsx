@@ -21,7 +21,7 @@ import { HeaderShortcuts } from "./HeaderShortcuts"
 import logoImage from "~/assets/icon.png"
 import type { NotificationLifecycleState } from "@/services/notification-lifecycle"
 
-type HeaderNotificationState = Exclude<NotificationLifecycleState, "idle">
+type HeaderNotificationState = NotificationLifecycleState
 
 type ChatHeaderProps = {
   t: TFunction
@@ -99,6 +99,7 @@ export function ChatHeader({
 }: ChatHeaderProps) {
   const [notificationPopoverOpen, setNotificationPopoverOpen] = React.useState(false)
   const notificationTriggerRef = React.useRef<HTMLButtonElement>(null)
+  const notificationPopoverRef = React.useRef<HTMLDivElement>(null)
   const logoSrc =
     typeof logoImage === "string"
       ? logoImage
@@ -137,51 +138,77 @@ export function ChatHeader({
     : toText(t("playground:header.shareConversation", "Share conversation"))
   const focusRingClasses =
     "focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
-  const notificationCopy = {
+  const notificationCopy = notificationState === "idle" ? null : {
     active: {
-      name: `Notifications, ${notificationCount ?? 0} unread`,
-      title: "Notifications",
+      name: toText(t(
+        "option:header.notificationsActiveName",
+        `Notifications, ${notificationCount ?? 0} unread`,
+        { count: notificationCount ?? 0 }
+      )),
+      title: toText(t("option:header.notifications", "Notifications")),
       description: (notificationCount ?? 0) > 0
-        ? `${notificationCount} unread notification${notificationCount === 1 ? "" : "s"}.`
-        : "You are caught up.",
-      announcement: "Notifications are active"
+        ? toText(t(
+            "option:header.notificationsUnreadDescription",
+            `${notificationCount} unread notification${notificationCount === 1 ? "" : "s"}.`,
+            { count: notificationCount }
+          ))
+        : toText(t("option:header.notificationsCaughtUp", "You are caught up.")),
+      announcement: toText(t("option:header.notificationsActiveAnnouncement", "Notifications are active"))
     },
     connecting: {
-      name: "Notifications, connecting",
-      title: "Notifications are connecting",
-      description: "Checking for new notifications.",
-      announcement: "Notifications are connecting"
+      name: toText(t("option:header.notificationsConnectingName", "Notifications, connecting")),
+      title: toText(t("option:header.notificationsConnectingTitle", "Notifications are connecting")),
+      description: toText(t("option:header.notificationsConnectingDescription", "Checking for new notifications.")),
+      announcement: toText(t("option:header.notificationsConnectingAnnouncement", "Notifications are connecting"))
     },
     degraded: {
-      name: "Notifications, reconnecting",
-      title: "Notifications are reconnecting",
-      description: "Recent notifications may be delayed while the connection recovers.",
-      announcement: "Notifications are reconnecting"
+      name: toText(t("option:header.notificationsReconnectingName", "Notifications, reconnecting")),
+      title: toText(t("option:header.notificationsReconnectingTitle", "Notifications are reconnecting")),
+      description: toText(t("option:header.notificationsReconnectingDescription", "Recent notifications may be delayed while the connection recovers.")),
+      announcement: toText(t("option:header.notificationsReconnectingAnnouncement", "Notifications are reconnecting"))
     },
     "auth-required": {
-      name: "Notifications, sign-in required",
-      title: "Sign in required",
-      description: "Sign in again to resume personal notifications.",
-      announcement: "Notifications require sign in"
+      name: toText(t("option:header.notificationsSignInName", "Notifications, sign-in required")),
+      title: toText(t("option:header.notificationsSignInTitle", "Sign in required")),
+      description: toText(t("option:header.notificationsSignInDescription", "Sign in again to resume personal notifications.")),
+      announcement: toText(t("option:header.notificationsSignInAnnouncement", "Notifications require sign in"))
     },
     unavailable: {
-      name: "Notifications unavailable",
-      title: "Notifications unavailable",
-      description: "Notifications are not available for this account.",
-      announcement: "Notifications are unavailable"
+      name: toText(t("option:header.notificationsUnavailableName", "Notifications unavailable for this account")),
+      title: toText(t("option:header.notificationsUnavailableTitle", "Notifications unavailable for this account")),
+      description: toText(t("option:header.notificationsUnavailableDescription", "Notifications are not available for this account.")),
+      announcement: toText(t("option:header.notificationsUnavailableAnnouncement", "Notifications are unavailable"))
     }
   }[notificationState]
 
   React.useEffect(() => {
     if (!notificationPopoverOpen) return
+    notificationPopoverRef.current
+      ?.querySelector<HTMLButtonElement>("button:not(:disabled)")
+      ?.focus()
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return
       setNotificationPopoverOpen(false)
       notificationTriggerRef.current?.focus()
     }
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null
+      if (!target) return
+      if (notificationPopoverRef.current?.contains(target)) return
+      if (notificationTriggerRef.current?.contains(target)) return
+      setNotificationPopoverOpen(false)
+    }
     document.addEventListener("keydown", onKeyDown)
-    return () => document.removeEventListener("keydown", onKeyDown)
+    document.addEventListener("pointerdown", onPointerDown)
+    return () => {
+      document.removeEventListener("keydown", onKeyDown)
+      document.removeEventListener("pointerdown", onPointerDown)
+    }
   }, [notificationPopoverOpen])
+
+  React.useEffect(() => {
+    if (notificationState === "idle") setNotificationPopoverOpen(false)
+  }, [notificationState])
 
   const openNotifications = () => {
     setNotificationPopoverOpen(false)
@@ -425,7 +452,7 @@ export function ChatHeader({
               <CogIcon className="size-4" aria-hidden="true" />
             </button>
           </Tooltip>
-          {onOpenNotifications && (
+          {onOpenNotifications && notificationCopy && (
             <div className="relative">
               <Tooltip title={notificationCopy.title}>
                 <button
@@ -452,6 +479,7 @@ export function ChatHeader({
               </Tooltip>
               {notificationPopoverOpen ? (
                 <div
+                  ref={notificationPopoverRef}
                   id="chat-header-notification-status"
                   role="dialog"
                   aria-label={notificationCopy.title}
@@ -462,11 +490,11 @@ export function ChatHeader({
                   <div className="mt-3 flex items-center gap-2">
                     {(notificationState === "degraded" || notificationState === "unavailable") && onRetryNotifications ? (
                       <button type="button" onClick={() => void onRetryNotifications()} className={`rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primaryStrong ${focusRingClasses}`}>
-                        Try again
+                        {toText(t("option:header.notificationsTryAgain", "Try again"))}
                       </button>
                     ) : null}
                     <button type="button" onClick={openNotifications} className={`rounded-md border border-border px-3 py-1.5 text-xs font-medium text-text hover:bg-surface2 ${focusRingClasses}`}>
-                      Open notifications
+                      {toText(t("option:header.notificationsOpen", "Open notifications"))}
                     </button>
                   </div>
                 </div>

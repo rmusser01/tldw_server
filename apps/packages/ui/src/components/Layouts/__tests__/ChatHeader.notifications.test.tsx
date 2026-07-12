@@ -53,10 +53,17 @@ describe("ChatHeader notification lifecycle", () => {
     ["connecting", "Notifications, connecting"],
     ["degraded", "Notifications, reconnecting"],
     ["auth-required", "Notifications, sign-in required"],
-    ["unavailable", "Notifications unavailable"]
+    ["unavailable", "Notifications unavailable for this account"]
   ] as const)("exposes %s with a truthful accessible name", (state, name) => {
     render(<ChatHeader {...props({ notificationState: state, notificationCount: 0 })} />)
     expect(screen.getByRole("button", { name })).toBeEnabled()
+  })
+
+  it("renders no notification control while the internal lifecycle is idle", () => {
+    render(<ChatHeader {...props({ notificationState: "idle" })} />)
+
+    expect(screen.queryByTestId("chat-header-notifications-bell")).not.toBeInTheDocument()
+    expect(screen.queryByRole("status")).not.toBeInTheDocument()
   })
 
   it("opens with native keyboard activation, retries once, and returns focus on Escape", async () => {
@@ -67,23 +74,41 @@ describe("ChatHeader notification lifecycle", () => {
         {...props({ notificationState: "unavailable", onRetryNotifications })}
       />
     )
-    const trigger = screen.getByRole("button", { name: "Notifications unavailable" })
+    const trigger = screen.getByRole("button", {
+      name: "Notifications unavailable for this account"
+    })
     trigger.focus()
     await user.keyboard("{Enter}")
 
     expect(trigger).toHaveAttribute("aria-expanded", "true")
-    expect(screen.getByRole("dialog", { name: "Notifications unavailable" })).toBeInTheDocument()
+    expect(
+      screen.getByRole("dialog", { name: "Notifications unavailable for this account" })
+    ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Try again" })).toHaveFocus()
     await user.keyboard("{Escape}")
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
     expect(trigger).toHaveFocus()
 
     await user.keyboard(" ")
-    await user.click(screen.getByRole("button", { name: "Try again" }))
+    expect(screen.getByRole("button", { name: "Try again" })).toHaveFocus()
+    await user.keyboard("{Enter}")
     expect(onRetryNotifications).toHaveBeenCalledTimes(1)
 
     await user.keyboard("{Escape}")
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
     expect(trigger).toHaveFocus()
+  })
+
+  it("dismisses the nonmodal status dialog on outside pointer interaction", async () => {
+    const user = userEvent.setup()
+    render(<ChatHeader {...props({ notificationState: "degraded" })} />)
+    const trigger = screen.getByRole("button", { name: "Notifications, reconnecting" })
+
+    await user.click(trigger)
+    expect(screen.getByRole("dialog")).toBeInTheDocument()
+    await user.click(document.body)
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
   })
 
   it("announces a lifecycle transition once through a polite status region", () => {
