@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from tldw_Server_API.app.core.Ingestion_Media_Processing.download_utils import (
+    _resolve_max_bytes,
     download_url_async,
 )
 
@@ -121,3 +122,78 @@ async def test_download_url_rejects_dotdot_filename(tmp_path):
             allowed_extensions=set(),
             check_extension=False,
         )
+
+
+def test_explicit_download_cap_cannot_raise_smaller_media_cap(monkeypatch):
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.download_utils._max_bytes_for_media_type",
+        lambda _media_type: 10,
+    )
+
+    resolved = _resolve_max_bytes(
+        max_bytes=50,
+        media_type_key="pdf",
+        effective_suffix=".pdf",
+        content_type="application/pdf",
+    )
+
+    assert resolved == 10
+
+
+@pytest.mark.asyncio
+async def test_download_url_rejects_oversized_content_length_before_write(tmp_path):
+    client = _FakeAsyncClient(
+        headers={"content-type": "application/pdf", "content-length": "11"},
+        body=b"x",
+    )
+
+    with pytest.raises(ValueError, match="exceeds maximum allowed size"):
+        await download_url_async(
+            client=client,
+            url="https://example.org/paper.pdf",
+            target_dir=tmp_path,
+            allowed_extensions={".pdf"},
+            max_bytes=10,
+            media_type_key="pdf",
+        )
+
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_download_url_removes_partial_file_after_streamed_overflow(tmp_path):
+    client = _FakeAsyncClient(
+        headers={"content-type": "application/pdf"},
+        body=b"x" * 11,
+    )
+
+    with pytest.raises(ValueError, match="exceeds maximum allowed size"):
+        await download_url_async(
+            client=client,
+            url="https://example.org/paper.pdf",
+            target_dir=tmp_path,
+            allowed_extensions={".pdf"},
+            max_bytes=10,
+            media_type_key="pdf",
+        )
+
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("content_type", ["text/html", "application/octet-stream"])
+async def test_download_url_rejects_non_pdf_mime_despite_pdf_suffix(tmp_path, content_type):
+    client = _FakeAsyncClient(headers={"content-type": content_type}, body=b"not a pdf")
+
+    with pytest.raises(ValueError, match="content-type"):
+        await download_url_async(
+            client=client,
+            url="https://example.org/paper.pdf",
+            target_dir=tmp_path,
+            allowed_extensions={".pdf"},
+            allowed_content_types={"application/pdf"},
+            max_bytes=50 * 1024 * 1024,
+            media_type_key="pdf",
+        )
+
+    assert list(tmp_path.iterdir()) == []

@@ -183,8 +183,9 @@ def _resolve_max_bytes(
     effective_suffix: str | None,
     content_type: str,
 ) -> int | None:
+    limits: list[int] = []
     if isinstance(max_bytes, int) and max_bytes > 0:
-        return max_bytes
+        limits.append(max_bytes)
     resolved_media_type = (
         media_type_key
         or _resolve_media_type_from_suffix(effective_suffix)
@@ -192,10 +193,26 @@ def _resolve_max_bytes(
     )
     resolved_max = _max_bytes_for_media_type(resolved_media_type)
     if resolved_max is not None:
-        return resolved_max
-    if resolved_media_type is None:
-        return _fallback_max_bytes()
-    return None
+        limits.append(resolved_max)
+    elif resolved_media_type is None:
+        fallback_max = _fallback_max_bytes()
+        if fallback_max is not None:
+            limits.append(fallback_max)
+    return min(limits) if limits else None
+
+
+def _enforce_allowed_content_type(
+    url: str,
+    content_type: str,
+    allowed_content_types: set[str] | None,
+) -> None:
+    if allowed_content_types is None or content_type in allowed_content_types:
+        return
+    allowed_list = ", ".join(sorted(allowed_content_types))
+    raise ValueError(
+        f"Downloaded file from {url} has content-type '{content_type}' unsupported "
+        f"for this endpoint (allowed: {allowed_list})."
+    )
 
 
 def _enforce_max_bytes_from_headers(
@@ -244,6 +261,7 @@ async def download_url_async(
     allowed_extensions: set[str] | None = None,
     check_extension: bool = True,
     disallow_content_types: set[str] | None = None,
+    allowed_content_types: set[str] | None = None,
     allow_redirects: bool = True,
     max_bytes: int | None = None,
     media_type_key: str | None = None,
@@ -266,6 +284,8 @@ async def download_url_async(
       streaming to prevent oversized downloads.
     """
     allowed_extensions = set() if allowed_extensions is None else {ext.lower() for ext in allowed_extensions}
+    if allowed_content_types is not None:
+        allowed_content_types = {content_type.lower() for content_type in allowed_content_types}
     safe_url = redact_url_for_log(url)
 
     # Enforce outbound policy early to avoid bypassing central egress controls.
@@ -310,6 +330,7 @@ async def download_url_async(
                 resp.raise_for_status()
                 # Normalize content-type early
                 content_type = (resp.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
+                _enforce_allowed_content_type(url, content_type, allowed_content_types)
                 if disallow_content_types and content_type in disallow_content_types:
                     allowed_list = ", ".join(sorted(allowed_extensions or [])) or "*"
                     raise ValueError(
@@ -427,6 +448,7 @@ async def download_url_async(
         content_type = (
             resp.headers.get("content-type") or ""
         ).split(";", 1)[0].strip().lower()
+        _enforce_allowed_content_type(url, content_type, allowed_content_types)
         if disallow_content_types and content_type in disallow_content_types:
             allowed_list = ", ".join(sorted(allowed_extensions or [])) or "*"
             raise ValueError(

@@ -4,7 +4,7 @@ title: Implement research discovery Phase 2A PDF Media handoff
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-12 19:58'
+updated_date: '2026-07-12 20:20'
 labels:
   - research
   - media
@@ -26,11 +26,11 @@ Implement the approved Phase 2A PDF-only handoff from persisted Research Discove
 <!-- AC:BEGIN -->
 - [x] #1 Existing ingest_eligible and recommended_candidate_id semantics identify only stable Phase 2A PDF candidates.
 - [x] #2 Owner-scoped discovery selections resolve from server-owned snapshots without Research downloading, parsing, deduplicating, or persisting Media.
-- [ ] #3 The existing /api/v1/media/add endpoint accepts discovery selections with media_type=pdf and no Research-owned ingestion endpoint is added.
-- [ ] #4 Discovery mode rejects client URLs, files, cookies, duplicate normalized candidate URLs, malformed pairs, and more than five selections.
-- [ ] #5 Media performs pre-download URL/identifier duplicate lookup and reuses existing race-safe URL/content persistence duplicate handling.
-- [ ] #6 PDF egress, redirect, MIME, and streamed byte limits are enforced through existing Media download and processing paths.
-- [ ] #7 Responses retain the existing results envelope with stable per-selection outcomes and input order.
+- [x] #3 The existing /api/v1/media/add endpoint accepts discovery selections with media_type=pdf and no Research-owned ingestion endpoint is added.
+- [x] #4 Discovery mode rejects client URLs, files, cookies, duplicate normalized candidate URLs, malformed pairs, and more than five selections.
+- [x] #5 Media performs pre-download URL/identifier duplicate lookup and reuses existing race-safe URL/content persistence duplicate handling.
+- [x] #6 PDF egress, redirect, MIME, and streamed byte limits are enforced through existing Media download and processing paths.
+- [x] #7 Responses retain the existing results envelope with stable per-selection outcomes and input order.
 - [ ] #8 Focused tests, compile checks, diff checks, and Bandit pass with no new findings.
 <!-- AC:END -->
 
@@ -53,6 +53,8 @@ Baseline verification: 53 passed, 4 warnings in 11.92s for Research discovery id
 Task-ID correction: the stale planning worktree assigned TASK-12110, which collided with an unrelated latest-dev task. The duplicate record was removed and this implementation is tracked by TASK-12950.
 
 Stage 2 complete: stable-PDF eligibility plus owner-scoped snapshot resolution with five-item bounds, ordered output, fingerprint/candidate identity revalidation, sanitized identifiers/metadata, and no Media side effects. Verification: Black clean; 87 Research discovery tests passed with 5 warnings. Self-review added candidate type, canonical URL, source provenance, and safe metadata to the descriptor and corrected provider-ID-only fingerprint reconstruction.
+
+Stages 3-4 complete. /media/add now accepts paired discovery references, rejects competing sources/cookies, resolves owner-scoped server snapshots, preflights URL and normalized identifier duplicates, blocks known restricted access, and calls existing Media persistence once for remaining PDFs with strict 50 MiB/application-pdf constraints and trusted metadata. Ordered outcomes and stable safe errors remain in the existing results envelope; no Research ingestion route was added. Regression verification: 157 focused Research/Media tests passed with 9 warnings; final integration additions pass 12 tests.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

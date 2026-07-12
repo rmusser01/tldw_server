@@ -172,7 +172,8 @@ async def test_process_document_like_item_url_post_download_validation_success_p
     downloaded_file.write_text("hello from validated url", encoding="utf-8")
     captured: dict[str, Any] = {}
 
-    async def _fake_download_url_async(**_kwargs: Any):
+    async def _fake_download_url_async(**kwargs: Any):
+        captured["download_kwargs"] = kwargs
         return downloaded_file
 
     def _fake_process_and_validate_file(*args: Any, **_kwargs: Any) -> ValidationResult:
@@ -191,7 +192,8 @@ async def test_process_document_like_item_url_post_download_validation_success_p
             "warnings": None,
         }
 
-    async def _fake_persist_doc_item_and_children(**_kwargs: Any) -> None:
+    async def _fake_persist_doc_item_and_children(**kwargs: Any) -> None:
+        captured["persisted_metadata"] = kwargs["final_result"]["metadata"]
         return None
 
     async def _fake_extract_claims_if_requested(*_args: Any, **_kwargs: Any):
@@ -231,9 +233,18 @@ async def test_process_document_like_item_url_post_download_validation_success_p
         db_path=":memory:",
         client_id="test-client",
         user_id=None,
+        max_download_bytes=50 * 1024 * 1024,
+        allowed_download_content_types={"application/pdf"},
+        trusted_source_metadata_by_url={
+            url: {"doi": "10.1000/example", "title": "Trusted Discovery Title"}
+        },
     )
 
     assert captured.get("validated_path") == downloaded_file
+    assert captured["download_kwargs"]["max_bytes"] == 50 * 1024 * 1024
+    assert captured["download_kwargs"]["allowed_content_types"] == {"application/pdf"}
+    assert captured["persisted_metadata"]["doi"] == "10.1000/example"
+    assert captured["persisted_metadata"]["title"] == "Trusted Discovery Title"
     assert result.get("status") == "Success"
     assert result.get("processing_source") == str(downloaded_file)
 

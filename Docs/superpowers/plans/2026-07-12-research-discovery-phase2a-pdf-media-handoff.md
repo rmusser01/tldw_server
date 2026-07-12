@@ -184,7 +184,7 @@ git commit -m "feat(research): resolve discovery PDF selections for Media"
 
 **Tests:** Form parsing, route integration, dependency preservation, and absence of a Research ingest route.
 
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 4: Add discovery form fields and Media validation
 
@@ -214,8 +214,8 @@ research_discovery_selections: str | None = Field(None, max_length=8192)
 - Modify: `tldw_Server_API/app/core/Ingestion_Media_Processing/research_discovery_handoff.py`
 - Create: `tldw_Server_API/tests/MediaIngestion_NEW/integration/test_research_discovery_media_add.py`
 
-- [ ] Write failing tests proving discovery mode branches before `add_media_persist`, normal URL/file requests are unchanged, dependencies remain intact, and no `/api/v1/research/discovery/ingest` route exists.
-- [ ] Add one branch in the existing route and no router or endpoint.
+- [x] Write failing tests proving discovery mode branches before `add_media_persist`, normal URL/file requests are unchanged, dependencies remain intact, and no `/api/v1/research/discovery/ingest` route exists.
+- [x] Add one branch in the existing route and no router or endpoint.
 
 ```python
 if is_research_discovery_handoff(form_data):
@@ -230,7 +230,7 @@ if is_research_discovery_handoff(form_data):
     )
 ```
 
-- [ ] Leave the existing `add_media_persist(...)` call as the only non-discovery branch, run tests, and commit.
+- [x] Leave the existing `add_media_persist(...)` call as the only non-discovery branch, run tests, and commit.
 
 ## Stage 4: Bounded PDF Pipeline Reuse
 
@@ -240,7 +240,7 @@ if is_research_discovery_handoff(form_data):
 
 **Tests:** Download utility, handoff unit, and route integration tests.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 6: Compose existing download limits safely
 
@@ -249,10 +249,10 @@ if is_research_discovery_handoff(form_data):
 - Modify: `tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py`
 - Test: `tldw_Server_API/tests/Media/test_json_url_download.py`
 
-- [ ] Write failing tests proving an explicit 50 MiB cap cannot raise a smaller configured cap, oversized `Content-Length` fails before streaming, chunked overflow fails during streaming, and HTML/octet-stream responses are rejected despite a `.pdf` suffix.
-- [ ] Change `_resolve_max_bytes` to return the minimum when explicit and configured/inferred limits both exist.
-- [ ] Add optional `allowed_content_types: set[str] | None = None` to `download_url_async`; keep `None` as the unchanged default.
-- [ ] Thread these internal-only defaulted arguments through `add_media_persist`, `add_media_orchestrate`, and `process_document_like_item`:
+- [x] Write failing tests proving an explicit 50 MiB cap cannot raise a smaller configured cap, oversized `Content-Length` fails before streaming, chunked overflow fails during streaming, and HTML/octet-stream responses are rejected despite a `.pdf` suffix.
+- [x] Change `_resolve_max_bytes` to return the minimum when explicit and configured/inferred limits both exist.
+- [x] Add optional `allowed_content_types: set[str] | None = None` to `download_url_async`; keep `None` as the unchanged default.
+- [x] Thread these internal-only defaulted arguments through `add_media_persist`, `add_media_orchestrate`, and `process_document_like_item`:
 
 ```python
 max_download_bytes: int | None = None
@@ -260,8 +260,8 @@ allowed_download_content_types: set[str] | None = None
 trusted_source_metadata_by_url: Mapping[str, dict[str, Any]] | None = None
 ```
 
-- [ ] Pass limits into `download_url_async`. Merge trusted metadata immediately before the existing safe-metadata allowlist/persistence step. Never parse these values from client form fields.
-- [ ] Run existing download and add-media tests.
+- [x] Pass limits into `download_url_async`. Merge trusted metadata immediately before the existing safe-metadata allowlist/persistence step. Never parse these values from client form fields.
+- [x] Run existing download and add-media tests.
 
 ```bash
 source .venv/bin/activate && python -m pytest -q \
@@ -276,15 +276,15 @@ source .venv/bin/activate && python -m pytest -q \
 - Test: `tldw_Server_API/tests/MediaIngestion_NEW/unit/test_research_discovery_handoff.py`
 - Test: `tldw_Server_API/tests/MediaIngestion_NEW/integration/test_research_discovery_media_add.py`
 
-- [ ] Write failing tests for owner-scoped resolution, duplicate normalized URLs within one request, URL duplicate lookup, identifier lookup through `search_by_safe_metadata(..., match_all=False)`, duplicate short-circuiting, ordered mixed outcomes, trusted metadata, no cookies, and safe logs/errors.
-- [ ] Resolve selections, create ordered result slots, and fill duplicate slots before download.
-- [ ] Reject duplicate normalized resolved URLs before building `trusted_source_metadata_by_url`; do not silently overwrite metadata for one candidate with another candidate's metadata.
-- [ ] Call `add_media_persist` once for remaining PDFs using `form_data.model_copy(update={"urls": resolved_urls, "use_cookies": False, "cookies": None})`, 50 MiB, `{application/pdf}`, and trusted metadata keyed by URL.
-- [ ] Decode the returned `JSONResponse`, map results back in active-selection order, and preserve all original result slots.
-- [ ] Add stable outcomes: `created`, `duplicate_existing`, `policy_blocked`, `timeout`, `unsupported`, and `failed`.
-- [ ] Include `result_id`, `candidate_id`, `outcome`, `db_id`, `media_uuid`, and a bounded safe error where applicable.
-- [ ] Return HTTP 200 when every item is created/duplicate; otherwise return 207. Shape/snapshot failures remain 4xx.
-- [ ] Run tests and commit.
+- [x] Write failing tests for owner-scoped resolution, duplicate normalized URLs within one request, URL duplicate lookup, identifier lookup through `search_by_safe_metadata(..., match_all=False)`, duplicate short-circuiting, ordered mixed outcomes, trusted metadata, no cookies, and safe logs/errors.
+- [x] Resolve selections, create ordered result slots, and fill duplicate slots before download.
+- [x] Reject duplicate normalized resolved URLs before building `trusted_source_metadata_by_url`; do not silently overwrite metadata for one candidate with another candidate's metadata.
+- [x] Call `add_media_persist` once for remaining PDFs using `form_data.model_copy(update={"urls": resolved_urls, "use_cookies": False, "cookies": None})`, 50 MiB, `{application/pdf}`, and trusted metadata keyed by URL.
+- [x] Decode the returned `JSONResponse`, map results back in active-selection order, and preserve all original result slots.
+- [x] Add stable outcomes: `created`, `duplicate_existing`, `policy_blocked`, `timeout`, `unsupported`, and `failed`.
+- [x] Include `result_id`, `candidate_id`, `outcome`, `db_id`, `media_uuid`, and a bounded safe error where applicable.
+- [x] Return HTTP 200 when every item is created/duplicate; otherwise return 207. Shape/snapshot failures remain 4xx.
+- [x] Run tests and commit.
 
 ```bash
 source .venv/bin/activate && python -m pytest -q \
@@ -307,7 +307,7 @@ git commit -m "feat(media): ingest bounded discovery PDF selections"
 
 **Tests:** Focused suite, compile check, route scan, diff check, and Bandit.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 8: Final verification
 

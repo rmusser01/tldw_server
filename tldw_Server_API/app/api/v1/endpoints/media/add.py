@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, UploadFile, status
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, RequirePermission, User
 
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import require_within_limit
@@ -18,6 +18,14 @@ from tldw_Server_API.app.api.v1.schemas.media_request_models import AddMediaForm
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_CREATE
 from tldw_Server_API.app.core.Ingestion_Media_Processing.persistence import (
     add_media_persist,
+)
+from tldw_Server_API.app.core.Ingestion_Media_Processing.research_discovery_handoff import (
+    add_research_discovery_pdfs,
+    is_research_discovery_handoff,
+)
+from tldw_Server_API.app.core.exceptions import (
+    ResearchDiscoveryBadRequestError,
+    ResearchDiscoveryValidationError,
 )
 
 router = APIRouter()
@@ -57,6 +65,22 @@ async def add_media(
     implemented in the core `persistence.add_media_orchestrate`
     helper.
     """
+
+    if is_research_discovery_handoff(form_data):
+        try:
+            return await add_research_discovery_pdfs(
+                background_tasks=background_tasks,
+                form_data=form_data,
+                files=files,
+                db=db,
+                current_user=current_user,
+                usage_log=usage_log,
+                request=request,
+            )
+        except ResearchDiscoveryBadRequestError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=exc.public_detail) from exc
+        except ResearchDiscoveryValidationError as exc:
+            raise HTTPException(status_code=422, detail=exc.public_detail) from exc
 
     return await add_media_persist(
         background_tasks=background_tasks,
