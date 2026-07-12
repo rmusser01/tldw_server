@@ -52,7 +52,8 @@ const shouldUseCookieCredentials = (headers: Record<string, string>): boolean =>
 async function readNotificationsStream(
   signal: AbortSignal,
   after: number,
-  onEvent: (event: NotificationStreamEvent) => void
+  onEvent: (event: NotificationStreamEvent) => void,
+  onOpen: () => void
 ): Promise<number> {
   const baseUrl = getApiBaseUrl().replace(/\/$/, "")
   const url = `${baseUrl}/notifications/stream${buildNotificationsQueryShared({ after })}`
@@ -77,7 +78,9 @@ async function readNotificationsStream(
         if (typeof event.id === "number" && Number.isFinite(event.id) && event.id > cursor) {
           cursor = event.id
         }
-      }
+      },
+      undefined,
+      onOpen
     )
     return cursor
   } catch (error) {

@@ -20,6 +20,7 @@ import {
   listNotifications,
   markNotificationsRead,
   parseNotificationStreamEvent,
+  runNotificationMutation,
   snoozeNotification,
   updateNotificationPreferences
 } from "../notifications"
@@ -113,8 +114,15 @@ describe("notifications service", () => {
     try {
       const onEvent = vi.fn()
       const onError = vi.fn()
+      const onOpen = vi.fn()
       const readStream = vi.fn(
-        async (_signal: AbortSignal, cursor: number, emit: (event: { event: string; id?: number; payload?: unknown }) => void) => {
+        async (
+          _signal: AbortSignal,
+          cursor: number,
+          emit: (event: { event: string; id?: number; payload?: unknown }) => void,
+          markOpen: () => void
+        ) => {
+          markOpen()
           if (readStream.mock.calls.length === 1) {
             emit({
               event: "notification",
@@ -149,8 +157,10 @@ describe("notifications service", () => {
       const unsubscribe = createNotificationStreamSubscription({
         after: 0,
         reconnectDelayMs: 250,
+        reconnectJitter: 0.5,
         onEvent,
         onError,
+        onOpen,
         readStream
       })
 
@@ -170,9 +180,96 @@ describe("notifications service", () => {
         expect.objectContaining({ event: "notification", id: 9 })
       )
       expect(onError).toHaveBeenCalledTimes(1)
+      expect(onOpen).toHaveBeenCalledTimes(2)
 
       unsubscribe()
     } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("does not report active until the reader confirms the stream is open", async () => {
+    const onOpen = vi.fn()
+    let confirmOpen: (() => void) | undefined
+    const readStream = vi.fn(
+      async (
+        _signal: AbortSignal,
+        cursor: number,
+        _onEvent: (event: { event: string }) => void,
+        markOpen: () => void
+      ) => {
+        confirmOpen = markOpen
+        await new Promise<void>(() => {})
+        return cursor
+      }
+    )
+
+    const unsubscribe = createNotificationStreamSubscription({
+      onEvent: vi.fn(),
+      onOpen,
+      readStream
+    })
+
+    expect(onOpen).not.toHaveBeenCalled()
+    await Promise.resolve()
+    expect(onOpen).not.toHaveBeenCalled()
+
+    confirmOpen?.()
+    expect(onOpen).toHaveBeenCalledTimes(1)
+
+    unsubscribe()
+  })
+
+  it("stops reconnecting after a terminal stream response", async () => {
+    vi.useFakeTimers()
+    try {
+      const terminalError = Object.assign(new Error("Forbidden"), {
+        status: 403
+      })
+      const readStream = vi.fn(async () => {
+        throw terminalError
+      })
+      const onError = vi.fn()
+
+      const unsubscribe = createNotificationStreamSubscription({
+        reconnectDelayMs: 250,
+        onEvent: vi.fn(),
+        onError,
+        readStream
+      })
+
+      await Promise.resolve()
+      await vi.advanceTimersByTimeAsync(60_000)
+
+      expect(readStream).toHaveBeenCalledTimes(1)
+      expect(onError).toHaveBeenCalledTimes(1)
+
+      unsubscribe()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("samples reconnect jitter when no deterministic override is provided", async () => {
+    vi.useFakeTimers()
+    const random = vi.spyOn(Math, "random").mockReturnValue(1)
+    try {
+      const readStream = vi.fn(async () => {
+        throw Object.assign(new Error("service unavailable"), { status: 503 })
+      })
+
+      const unsubscribe = createNotificationStreamSubscription({
+        reconnectDelayMs: 250,
+        onEvent: vi.fn(),
+        readStream
+      })
+
+      await Promise.resolve()
+
+      expect(random).toHaveBeenCalledTimes(1)
+      unsubscribe()
+    } finally {
+      random.mockRestore()
       vi.useRealTimers()
     }
   })
@@ -185,6 +282,7 @@ describe("notifications service", () => {
       const unsubscribe = createNotificationStreamSubscription({
         after: 0,
         reconnectDelayMs: 250,
+        reconnectJitter: 0.5,
         onEvent: vi.fn(),
         readStream
       })
@@ -219,5 +317,36 @@ describe("notifications service", () => {
     await snoozeNotification(1, 15)
 
     expect(mocks.bgRequest).toHaveBeenCalledTimes(3)
+  })
+
+  it("never automatically replays explicit notification mutations", async () => {
+    const failure = Object.assign(new Error("temporary outage"), { status: 503 })
+    mocks.bgRequest.mockRejectedValue(failure)
+
+    await expect(markNotificationsRead([1])).rejects.toBe(failure)
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(1)
+
+    await expect(dismissNotification(1)).rejects.toBe(failure)
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(2)
+
+    await expect(snoozeNotification(1, 15)).rejects.toBe(failure)
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(3)
+
+    await expect(cancelNotificationSnooze(1)).rejects.toBe(failure)
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(4)
+
+    await expect(
+      updateNotificationPreferences({ reminder_enabled: false })
+    ).rejects.toBe(failure)
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(5)
+  })
+
+  it("keeps future mutation helpers single-attempt", async () => {
+    const failure = new Error("try again explicitly")
+    const request = vi.fn().mockRejectedValue(failure)
+
+    await expect(runNotificationMutation(request)).rejects.toBe(failure)
+
+    expect(request).toHaveBeenCalledTimes(1)
   })
 })
