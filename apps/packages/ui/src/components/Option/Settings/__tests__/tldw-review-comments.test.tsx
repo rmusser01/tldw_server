@@ -112,6 +112,26 @@ vi.mock("antd", () => {
         return <div data-testid={testId}>{children}</div>
       }
     },
+    Checkbox: ({
+      children,
+      checked,
+      onChange
+    }: {
+      children?: React.ReactNode
+      checked?: boolean
+      onChange?: (event: { target: { checked: boolean } }) => void
+    }) => (
+      <label>
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(event) =>
+            onChange?.({ target: { checked: event.currentTarget.checked } })
+          }
+        />
+        {children}
+      </label>
+    ),
     Input,
     Modal: {
       confirm: modalConfirmMock
@@ -185,6 +205,10 @@ const createConnectionProps = (
     setFieldValue: vi.fn()
   } as any,
   configuredServerUrl: "https://api.example.test/path",
+  authSource: "manual",
+  rememberApiKey: true,
+  setRememberApiKey: vi.fn(),
+  onManualServerOriginChange: vi.fn(),
   authMode: "single-user",
   setAuthMode: vi.fn(),
   isLoggedIn: false,
@@ -306,6 +330,59 @@ describe("settings PR review fixes", () => {
     )
 
     expect(props.form.setFieldValue).not.toHaveBeenCalledWith("apiKey", "")
+  })
+
+  it("renders a default-on remember choice with live session-only copy", () => {
+    const Harness = () => {
+      const [rememberApiKey, setRememberApiKey] = React.useState(true)
+      return (
+        <TldwConnectionSettings
+          {...createConnectionProps()}
+          rememberApiKey={rememberApiKey}
+          setRememberApiKey={setRememberApiKey}
+        />
+      )
+    }
+
+    render(<Harness />)
+
+    const remember = screen.getByRole("checkbox", {
+      name: "Remember on this device"
+    })
+    expect(remember).toBeChecked()
+    expect(screen.getByText(/stores this api key in this browser/i)).toBeInTheDocument()
+
+    fireEvent.click(remember)
+
+    expect(screen.getByText("Keep signed in until this browser closes.")).toBeInTheDocument()
+  })
+
+  it("reveals manual key controls when a cookie session changes to a remote origin", () => {
+    const Harness = () => {
+      const [authSource, setAuthSource] = React.useState<
+        "manual" | "cookie-session"
+      >("cookie-session")
+      return (
+        <TldwConnectionSettings
+          {...createConnectionProps()}
+          authSource={authSource}
+          onManualServerOriginChange={() => setAuthSource("manual")}
+        />
+      )
+    }
+
+    render(<Harness />)
+
+    expect(screen.queryByPlaceholderText("Enter your API key")).not.toBeInTheDocument()
+    fireEvent.change(
+      screen.getByPlaceholderText("http://127.0.0.1:8000"),
+      { target: { value: "https://remote.example.test" } }
+    )
+
+    expect(screen.getByPlaceholderText("Enter your API key")).toBeInTheDocument()
+    expect(
+      screen.getByRole("checkbox", { name: "Remember on this device" })
+    ).toBeChecked()
   })
 
   it("does not register magic-link inputs as named Form fields", () => {

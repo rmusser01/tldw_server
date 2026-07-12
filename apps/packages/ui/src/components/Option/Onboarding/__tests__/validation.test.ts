@@ -148,4 +148,23 @@ describe("onboarding validation error classification", () => {
       mocks.saveManualSingleUserCredential.mock.invocationCallOrder[0]
     )
   })
+
+  it("commits the selected session scope and reports the achieved scope", async () => {
+    mocks.testApiKey.mockResolvedValueOnce(true)
+    mocks.saveManualSingleUserCredential.mockResolvedValueOnce("session")
+
+    const result = await validateApiKey(
+      "https://new.example.test",
+      "new-key",
+      ((key: string, fallback: string) => fallback || key) as any,
+      "session"
+    )
+
+    expect(result).toMatchObject({ success: true, persistence: "session" })
+    expect(mocks.saveManualSingleUserCredential).toHaveBeenCalledWith({
+      serverUrl: "https://new.example.test",
+      apiKey: "new-key",
+      persistence: "session"
+    })
+  })
 })

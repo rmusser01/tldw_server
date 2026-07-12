@@ -311,7 +311,7 @@ git commit -m "fix(web): bind manual API keys to server origin"
 - Consumes: Task 2 persistence methods and Task 3 commit flow.
 - Produces: visible accessible `rememberApiKey` form field and truthful fallback warning.
 
-- [ ] **Step 1: Write failing component tests**
+- [x] **Step 1: Write failing component tests**
 
 ```tsx
 it("defaults remember on for a new manual single-user setup", async () => {
@@ -335,13 +335,13 @@ it("hides manual controls for cookie-session runtime auth", () => {
 })
 ```
 
-- [ ] **Step 2: Run component tests and confirm failures**
+- [x] **Step 2: Run component tests and confirm failures**
 
 Run: `cd apps && bunx vitest run packages/ui/src/components/Option/Onboarding/__tests__/OnboardingConnectForm.design-system.test.tsx packages/ui/src/components/Option/Settings/__tests__/tldw-review-comments.test.tsx`
 
 Expected: remember checkbox and cookie-session state are absent.
 
-- [ ] **Step 3: Add the inline checkbox and fallback messaging**
+- [x] **Step 3: Add the inline checkbox and fallback messaging**
 
 ```tsx
 <Form.Item name="rememberApiKey" valuePropName="checked" initialValue>
@@ -356,13 +356,13 @@ Expected: remember checkbox and cookie-session state are absent.
 
 Map checked to `persistence: "device"` and unchecked to `persistence: "session"`. When device storage falls back, show `Couldn’t remember the key on this device; it will be kept until this browser closes.` When session storage also fails, show `This key is available only on this page and will be lost on reload.` Use the existing checkbox, typography, alert, focus, and form-validation components.
 
-- [ ] **Step 4: Run component and accessibility tests**
+- [x] **Step 4: Run component and accessibility tests**
 
 Run: `cd apps && bunx vitest run packages/ui/src/components/Option/Onboarding/__tests__/OnboardingConnectForm.design-system.test.tsx packages/ui/src/components/Option/Settings/__tests__/tldw-review-comments.test.tsx packages/ui/src/design-system/__tests__/proof-surface-static-guard.test.ts`
 
 Expected: all selected tests pass.
 
-- [ ] **Step 5: Commit the UX**
+- [x] **Step 5: Commit the UX**
 
 ```bash
 git add apps/packages/ui/src/components/Option/Onboarding apps/packages/ui/src/components/Option/Settings apps/packages/ui/src/assets/locale/en/settings.json apps/packages/ui/src/public/_locales/en/settings.json

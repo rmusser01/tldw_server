@@ -4,7 +4,7 @@ title: Add explicit single-user API key device persistence and relaunch coverage
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-12 00:12'
+updated_date: '2026-07-12 00:50'
 labels: []
 dependencies:
   - TASK-12108
@@ -52,6 +52,8 @@ This task covers manually configured remote WebUI and browser-extension API-key 
 2026-07-11 Task 3 complete after feature-only rebase onto origin/dev d28c16bfa3. Candidate API-key probes use the submitted origin/key with credentials omitted; invalid URLs do not probe; old config remains unchanged on probe failure; onboarding/settings commit only after success; visible keys clear only across valid origin changes. Verification: focused Vitest 5 files/28 tests passed; broader auth/storage/bootstrap regression 10 files/134 tests passed; scoped ESLint 0 errors (48 pre-existing warnings).
 
 2026-07-10 Task 2 complete: TldwApiClient migrates only confidently manual legacy keys, scrubs ambiguous keys, hydrates session credentials transiently, and provides explicit device/session/memory save plus fail-closed clear semantics. Logout and restart-onboarding reset clear manual credentials; updateConfig clears on auth-mode or normalized-origin changes and never writes hydrated session/env keys back to persistent storage. Device-write failures downgrade to session; session failures downgrade to memory. Persistent clear failures propagate. Verification: TDD RED observed; 46/46 focused tests; 18/18 extension bootstrap tests; repo-pinned ESLint 0 errors; git diff --check clean. TypeScript had 16 unrelated baseline errors. Spec and code-quality/security reviews approved. Bandit not applicable to TypeScript/TSX-only changes.
+
+2026-07-11 Task 4 complete: onboarding and Settings now expose an accessible Remember on this device checkbox for manual single-user auth, default enabled for new entries and restored from saved scope. Unchecked saves to session scope. Device-to-session and session-to-memory fallbacks show truthful warnings. Cookie-session auth shows a server-held credential notice with no browser-readable key controls; changing to a different valid origin reveals manual controls. Verification: TDD RED observed; Task 4 Vitest 25/25; broader auth/storage/bootstrap regressions 134/134; scoped ESLint 0 errors; locale JSON valid; diff check clean. TypeScript has one unrelated baseline error in QuickIngestWizardModal.tsx:1813.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

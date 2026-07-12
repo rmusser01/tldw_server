@@ -2052,6 +2052,15 @@
       "label": "API Key",
       "placeholder": "Enter your API key (or use the default demo key THIS-IS-A-SECURE-KEY-123-REPLACE-ME for local single-user setups)"
     },
+    "rememberApiKey": {
+      "label": "Remember on this device",
+      "deviceHelp": "Stores this API key in this browser until you disconnect or clear browser data. Turn this off on a shared device.",
+      "sessionHelp": "Keep signed in until this browser closes.",
+      "deviceFallback": "Couldn’t remember the key on this device; it will be kept until this browser closes.",
+      "memoryFallback": "This key is available only on this page and will be lost on reload.",
+      "cookieSession": "Connected securely through this WebUI.",
+      "cookieSessionHelp": "Your API key stays on the server and is not stored in this browser."
+    },
     "magicLink": {
       "missingEmail": "Enter your email to receive a magic link.",
       "sent": "Magic link sent. Check your inbox.",
@@ -2157,6 +2166,15 @@
     },
     "apiKeyHelp": "Find your API key in tldw_server → Settings → API Keys. Generate a key there and paste it here.",
     "apiKeyRequired": "Enter your API key to continue.",
+    "rememberApiKey": {
+      "label": "Remember on this device",
+      "deviceHelp": "Stores this API key in this browser until you disconnect or clear browser data. Turn this off on a shared device.",
+      "sessionHelp": "Keep signed in until this browser closes.",
+      "deviceFallback": "Couldn’t remember the key on this device; it will be kept until this browser closes.",
+      "memoryFallback": "This key is available only on this page and will be lost on reload.",
+      "cookieSession": "Connected securely through this WebUI.",
+      "cookieSessionHelp": "Your API key stays on the server and is not stored in this browser."
+    },
     "usernameRequired": "Enter your username to continue.",
     "passwordRequired": "Enter your password to continue.",
     "authStepAria": "Step 2 of 3 — Choose how you sign in",
