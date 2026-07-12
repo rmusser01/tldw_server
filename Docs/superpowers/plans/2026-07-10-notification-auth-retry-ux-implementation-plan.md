@@ -18,7 +18,7 @@
 
 | Stage | Goal | Success Criteria | Status |
 | --- | --- | --- | --- |
-| 1 | Canonical authorization data | SQLite 090 and PostgreSQL fresh/backfill paths grant permissions and backfill effective role membership | In Progress |
+| 1 | Canonical authorization data | SQLite 090 and PostgreSQL fresh/backfill paths grant permissions and backfill effective role membership | Complete |
 | 2 | Shared lifecycle policy | Both transports preserve status; reads/SSE retry safely; mutations never replay automatically | Not Started |
 | 3 | Runtime adapters | Extension and WebUI expose truthful principal-scoped lifecycle state | Not Started |
 | 4 | Accessible recovery UX | Header and inbox distinguish active, degraded, auth-required, and unavailable states | Not Started |
@@ -169,11 +169,11 @@ git commit -m "fix(authnz): seed notification permissions and roles"
 - Create: `tldw_Server_API/tests/AuthNZ/unit/test_registration_default_role_membership.py`
 - Modify: `tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_uat_fixture.py`
 
-- [ ] **Step 1: Write failing registration membership tests**
+- [x] **Step 1: Write failing registration membership tests**
 
 Cover default registration, registration-code-selected role, rollback on unknown role, and both database backends. Assert the created user has a `user_roles` row before registration returns.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
@@ -185,15 +185,15 @@ python -m pytest \
 
 Expected: FAIL because current registration writes the legacy role field without canonical membership.
 
-- [ ] **Step 3: Insert role membership inside the registration transaction**
+- [x] **Step 3: Insert role membership inside the registration transaction**
 
 Resolve the selected role by name and insert the membership before commit. Unknown role names fail registration with a descriptive error; they must not silently fall back.
 
-- [ ] **Step 4: Remove request-time role inference and assert the UAT fixture**
+- [x] **Step 4: Remove request-time role inference and assert the UAT fixture**
 
 Delete the `users.role` authorization fallback from `User_DB_Handling.py`. Update the Chatbooks UAT fixture test to query effective roles and permissions before server launch.
 
-- [ ] **Step 5: Run focused tests GREEN**
+- [x] **Step 5: Run focused tests GREEN**
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
@@ -204,7 +204,7 @@ python -m pytest \
   tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_uat_fixture.py -v
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
