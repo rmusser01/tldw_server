@@ -68,6 +68,45 @@ def test_sqlite_schema_has_playlist_ingest_tables(tmp_path):
     assert tables >= EXPECTED_PLAYLIST_TABLES
 
 
+@pytest.mark.parametrize(
+    ("insert_sql", "values"),
+    [
+        pytest.param(
+            """
+            INSERT INTO playlist_preflights (
+                preflight_id, owner_user_id, status, source_url, source_kind, expires_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (None, "owner-1", "pending", "https://example.test/playlist", "youtube", "2099-01-01"),
+            id="preflight-id",
+        ),
+        pytest.param(
+            """
+            INSERT INTO playlist_materializations (
+                materialization_id, preflight_id, owner_user_id, status, expires_at
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (None, "preflight-1", "owner-1", "ready", "2099-01-01"),
+            id="materialization-id",
+        ),
+        pytest.param(
+            """
+            INSERT INTO media_ingest_runs (
+                run_id, owner_user_id, status, expires_at
+            ) VALUES (?, ?, ?, ?)
+            """,
+            (None, "owner-1", "staged", "2099-01-01"),
+            id="run-id",
+        ),
+    ],
+)
+def test_sqlite_playlist_ingest_resource_ids_reject_null(tmp_path, insert_sql, values):
+    db_path = ensure_jobs_tables(tmp_path / "jobs_playlist_ingest_not_null.db")
+
+    with sqlite3.connect(db_path) as conn, pytest.raises(sqlite3.IntegrityError):
+        conn.execute(insert_sql, values)
+
+
 def test_jobs_migrations_uses_shared_sqlite_policy_helper(tmp_path):
     jobs_migrations = importlib.import_module("tldw_Server_API.app.core.Jobs.migrations")
     calls: list[dict[str, object]] = []

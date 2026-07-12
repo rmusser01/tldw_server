@@ -212,7 +212,7 @@ CREATE INDEX IF NOT EXISTS idx_job_dependencies_depends_on ON job_dependencies(d
 
 -- Owner-scoped immutable playlist inspection snapshots
 CREATE TABLE IF NOT EXISTS playlist_preflights (
-  preflight_id TEXT PRIMARY KEY,
+  preflight_id TEXT NOT NULL PRIMARY KEY,
   owner_user_id TEXT NOT NULL,
   status TEXT NOT NULL,
   source_url TEXT NOT NULL,
@@ -254,7 +254,7 @@ CREATE INDEX IF NOT EXISTS idx_playlist_preflight_items_preflight_ordinal
 
 -- Owner-bound queue records copied from a completed preflight
 CREATE TABLE IF NOT EXISTS playlist_materializations (
-  materialization_id TEXT PRIMARY KEY,
+  materialization_id TEXT NOT NULL PRIMARY KEY,
   preflight_id TEXT NOT NULL,
   owner_user_id TEXT NOT NULL,
   status TEXT NOT NULL,
@@ -287,7 +287,7 @@ CREATE INDEX IF NOT EXISTS idx_playlist_materialization_items_occurrence
 
 -- Lightweight manifest connecting selected occurrences to Jobs
 CREATE TABLE IF NOT EXISTS media_ingest_runs (
-  run_id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL PRIMARY KEY,
   owner_user_id TEXT NOT NULL,
   status TEXT NOT NULL,
   collection_id INTEGER,
