@@ -60,16 +60,22 @@ class MetadataPatch(BaseModel):
     @field_validator("title", "author", mode="before")
     @classmethod
     def _strip_text(cls, value: object) -> object:
-        return value.strip() if isinstance(value, str) else value
+        if value is None:
+            return None
+        if type(value) is not str:
+            raise ValueError("metadata patch text must be a string")
+        return value.strip()
 
     @field_validator("keywords_add", mode="before")
     @classmethod
     def _normalize_keywords(cls, value: object) -> object:
-        if not isinstance(value, list):
-            return value
+        if value is None:
+            return None
+        if type(value) is not list:
+            raise ValueError("keywords_add must be a list")
         normalized: list[str] = []
         for keyword in value:
-            if not isinstance(keyword, str):
+            if type(keyword) is not str:
                 raise ValueError("keywords_add entries must be strings")
             trimmed = keyword.strip()
             if not trimmed:
@@ -127,7 +133,9 @@ class RunItemSnapshot(BaseModel):
     @field_validator("occurrence_id", mode="before")
     @classmethod
     def _strip_occurrence_id(cls, value: object) -> object:
-        return value.strip() if isinstance(value, str) else value
+        if type(value) is not str:
+            raise ValueError("occurrence_id must be a string")
+        return value.strip()
 
     @model_validator(mode="after")
     def _validate_terminal_outcome(self) -> RunItemSnapshot:

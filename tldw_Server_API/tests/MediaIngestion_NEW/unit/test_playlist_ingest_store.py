@@ -84,6 +84,11 @@ def test_mutating_policies_accept_and_normalize_review_patch(duplicate_policy):
         pytest.param({"keywords_add": ["x" * 129]}, id="oversize-keyword"),
         pytest.param({"keywords_add": ["tag"] * 101}, id="too-many-keywords"),
         pytest.param({"title": {"nested": "value"}}, id="deep-title"),
+        pytest.param({"keywords_add": ("   ",)}, id="tuple-blank-keyword"),
+        pytest.param({"keywords_add": ("x" * 129,)}, id="tuple-oversize-keyword"),
+        pytest.param({"keywords_add": ("alpha",)}, id="tuple-keywords"),
+        pytest.param({"title": b"   "}, id="bytes-title"),
+        pytest.param({"author": b"Reviewed author"}, id="bytes-author"),
     ],
 )
 def test_review_patch_rejects_invalid_shape_and_values(metadata_patch):
@@ -132,6 +137,18 @@ def test_run_snapshot_rejects_blank_occurrence_id():
     with pytest.raises(ValidationError):
         RunItemSnapshot(
             occurrence_id="   ",
+            ordinal=1,
+            state="running",
+        )
+
+
+@pytest.mark.parametrize("occurrence_id", [b"   ", b"occ-1"])
+def test_run_snapshot_rejects_bytes_occurrence_id(occurrence_id):
+    from tldw_Server_API.app.api.v1.schemas.media_playlist_ingest import RunItemSnapshot
+
+    with pytest.raises(ValidationError):
+        RunItemSnapshot(
+            occurrence_id=occurrence_id,
             ordinal=1,
             state="running",
         )
