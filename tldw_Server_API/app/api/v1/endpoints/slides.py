@@ -60,15 +60,22 @@ from tldw_Server_API.app.api.v1.schemas.slides_schemas import (
 )
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_CREATE, MEDIA_DELETE, MEDIA_READ, MEDIA_UPDATE
+from tldw_Server_API.app.core.Claims_Extraction.artifact_verification import (
+    ArtifactVerificationResult,
+    ArtifactVerificationUnit,
+    verify_generated_artifact_against_sources,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     MediaDbSession,
+    get_document_version,
     get_latest_transcription,
 )
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry
+from tldw_Server_API.app.core.RAG.rag_service.types import Document
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
 from tldw_Server_API.app.core.Slides.slides_db import ConflictError, InputError, SlidesDatabase, VisualStyleRow
 from tldw_Server_API.app.core.Slides.slides_assets import (
@@ -111,7 +118,7 @@ from tldw_Server_API.app.core.Slides.visual_style_resolver import (
     ResolvedBuiltinVisualStyle,
     resolve_builtin_visual_style,
 )
-from tldw_Server_API.app.core.testing import is_truthy
+from tldw_Server_API.app.core.testing import is_test_mode, is_truthy
 
 router = APIRouter(prefix="/slides", tags=["slides"])
 
@@ -341,6 +348,109 @@ def _flatten_slides_text(slides: list[Slide]) -> str:
             images = metadata.get("images")
             parts.extend(collect_image_alt_text(images if isinstance(images, list) else None))
     return "\n".join(parts)
+
+
+def _slide_claim_lines(value: str | None) -> list[str]:
+    claims: list[str] = []
+    for raw_line in str(value or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        line = re.sub(r"^\s*(?:[-*+]\s+|\d+[.)]\s+|#{1,6}\s+|>\s*)", "", line).strip()
+        if line:
+            claims.append(line)
+    return claims
+
+
+def _build_slide_verification_units(slides: list[Slide]) -> list[ArtifactVerificationUnit]:
+    units: list[ArtifactVerificationUnit] = []
+    for slide in slides:
+        parts: list[str] = []
+        claims: list[str] = []
+        layout_value = str(slide.layout.value if hasattr(slide.layout, "value") else slide.layout)
+        is_title_slide = layout_value == "title"
+        if slide.title:
+            parts.append(f"Title: {slide.title}")
+        if slide.content:
+            parts.append(slide.content)
+            if not is_title_slide:
+                claims.extend(_slide_claim_lines(slide.content))
+        if slide.speaker_notes:
+            parts.append(f"Speaker notes: {slide.speaker_notes}")
+            if not is_title_slide:
+                claims.extend(_slide_claim_lines(slide.speaker_notes))
+        text = "\n".join(parts).strip()
+        if not text:
+            continue
+        units.append(
+            ArtifactVerificationUnit(
+                unit_id=f"slide:{slide.order}",
+                text=text,
+                claims=claims,
+                metadata={
+                    "slide_order": slide.order,
+                    "layout": layout_value,
+                },
+            )
+        )
+    return units
+
+
+async def _verify_slides_against_source(
+    *,
+    slides: list[Slide],
+    source_text: str,
+    source_type: str,
+    source_ref: Any | None,
+    generation_provider: str | None,
+    generation_model: str | None,
+    verification_provider: str | None = None,
+    verification_model: str | None = None,
+) -> ArtifactVerificationResult:
+    effective_provider = verification_provider or generation_provider
+    effective_model = verification_model or generation_model
+    differs_from_generation = (
+        effective_provider != generation_provider
+        or effective_model != generation_model
+    )
+    if is_test_mode():
+        return ArtifactVerificationResult(
+            verdict="grounded",
+            report={"total_claims": len(slides), "claims": []},
+            unit_results=[],
+            metadata={
+                "artifact_type": "slides",
+                "generation_provider": generation_provider,
+                "generation_model": generation_model,
+                "verification_provider": effective_provider,
+                "verification_model": effective_model,
+                "verification_provider_configured": verification_provider is not None,
+                "verification_model_configured": verification_model is not None,
+                "verification_llm_is_default": not differs_from_generation,
+                "verification_llm_differs_from_generation": differs_from_generation,
+                "test_mode": True,
+            },
+        )
+
+    return await verify_generated_artifact_against_sources(
+        artifact_type="slides",
+        units=_build_slide_verification_units(slides),
+        source_documents=[
+            Document(
+                id=f"{source_type}:{source_ref if source_ref is not None else 'source'}",
+                content=source_text,
+                metadata={
+                    "source_type": source_type,
+                    "source_ref": source_ref,
+                },
+            )
+        ],
+        generation_provider=generation_provider,
+        generation_model=generation_model,
+        verification_provider=verification_provider,
+        verification_model=verification_model,
+        generation_context={"query": "generated presentation slides"},
+    )
 
 
 def _normalize_job_status(job_status: Any) -> str:
@@ -1022,7 +1132,7 @@ def _format_rag_documents(documents: list[Any]) -> str:
     return "\n\n".join(parts).strip()
 
 
-def _generate_presentation(
+async def _generate_presentation(
     *,
     response: Response,
     db: SlidesDatabase,
@@ -1111,6 +1221,26 @@ def _generate_presentation(
     except (ValidationError, KeyError, TypeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail="invalid_generated_slides") from exc
     slides_text = _flatten_slides_text(slides)
+    claim_verification = await _verify_slides_against_source(
+        slides=slides,
+        source_text=source_text,
+        source_type=source_type,
+        source_ref=source_ref,
+        generation_provider=provider,
+        generation_model=request.model,
+        verification_provider=getattr(request, "claims_verification_provider", None),
+        verification_model=getattr(request, "claims_verification_model", None),
+    )
+    claim_verification_payload = claim_verification.to_dict()
+    if claim_verification.verdict != "grounded":
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "claim_verification_failed",
+                "claimVerification": claim_verification_payload,
+            },
+        )
+    studio_data = {"claimVerification": claim_verification_payload}
     row = db.create_presentation(
         presentation_id=None,
         title=generated["title"],
@@ -1124,7 +1254,7 @@ def _generate_presentation(
         visual_style_version=visual_style_application.version if visual_style_application else None,
         visual_style_snapshot=_serialize_visual_style_snapshot(visual_style_snapshot_dict),
         settings=_serialize_settings(settings),
-        studio_data=None,
+        studio_data=_serialize_studio_data(studio_data),
         slides=json.dumps([slide.model_dump() if hasattr(slide, "model_dump") else slide.dict() for slide in slides]),
         slides_text=slides_text,
         source_type=source_type,
@@ -2092,7 +2222,7 @@ async def generate_from_prompt(
     prompt = request.prompt.strip()
     if not prompt:
         raise HTTPException(status_code=422, detail="prompt_required")
-    return _generate_presentation(
+    return await _generate_presentation(
         response=response,
         db=db,
         request=request,
@@ -2127,7 +2257,7 @@ async def generate_from_chat(
     source_text = _format_chat_messages(messages)
     if not source_text:
         raise HTTPException(status_code=404, detail="conversation_empty")
-    return _generate_presentation(
+    return await _generate_presentation(
         response=response,
         db=db,
         request=request,
@@ -2170,7 +2300,7 @@ async def generate_from_media(
             else "media_content_not_found"
         )
         raise HTTPException(status_code=404, detail=detail)
-    return _generate_presentation(
+    return await _generate_presentation(
         response=response,
         db=db,
         request=request,
@@ -2210,7 +2340,7 @@ async def generate_from_notes(
     source_text = _format_notes(notes)
     if not source_text:
         raise HTTPException(status_code=404, detail="notes_empty")
-    return _generate_presentation(
+    return await _generate_presentation(
         response=response,
         db=db,
         request=request,
@@ -2253,7 +2383,7 @@ async def generate_from_rag(
         source_text = str(rag_result.generated_answer)
     if not source_text:
         raise HTTPException(status_code=404, detail="rag_no_results")
-    return _generate_presentation(
+    return await _generate_presentation(
         response=response,
         db=db,
         request=request,

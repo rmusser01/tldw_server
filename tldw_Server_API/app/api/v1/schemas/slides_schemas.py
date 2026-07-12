@@ -293,6 +293,8 @@ class SlideGenerationBase(VisualStyleSelectionMixin):
     summary_tokens: int | None = Field(default=None, ge=1)
     provider: str | None = None
     model: str | None = None
+    claims_verification_provider: str | None = None
+    claims_verification_model: str | None = None
     temperature: float | None = None
     max_tokens: int | None = None
 

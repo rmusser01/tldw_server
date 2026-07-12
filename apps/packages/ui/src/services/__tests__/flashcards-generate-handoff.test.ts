@@ -79,4 +79,43 @@ describe("flashcards generate handoff helpers", () => {
       messageId: undefined
     })
   })
+
+  it("round-trips generated prefill routes across supported source types", () => {
+    const sourceTypes = ["media", "note", "message", "manual"] as const
+
+    for (const [index, sourceType] of sourceTypes.entries()) {
+      const route = buildFlashcardsGenerateRoute({
+        text: `Generated card text ${index} with spaces & symbols`,
+        sourceType,
+        sourceId: `source-${index}`,
+        sourceTitle: `Source ${index}`,
+        conversationId: `conversation-${index}`,
+        messageId: `message-${index}`
+      })
+      const intent = parseFlashcardsGenerateIntentFromSearch(
+        route.slice(route.indexOf("?"))
+      )
+
+      expect(intent).toEqual({
+        text: `Generated card text ${index} with spaces & symbols`,
+        sourceType,
+        sourceId: `source-${index}`,
+        sourceTitle: `Source ${index}`,
+        conversationId: `conversation-${index}`,
+        messageId: `message-${index}`
+      })
+    }
+  })
+
+  it("clamps generated prefill text to the route handoff limit", () => {
+    const route = buildFlashcardsGenerateRoute({
+      text: "x".repeat(12_050),
+      sourceType: "media"
+    })
+    const intent = parseFlashcardsGenerateIntentFromSearch(
+      route.slice(route.indexOf("?"))
+    )
+
+    expect(intent?.text).toHaveLength(12_000)
+  })
 })

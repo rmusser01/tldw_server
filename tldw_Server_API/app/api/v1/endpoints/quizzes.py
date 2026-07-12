@@ -56,6 +56,7 @@ from tldw_Server_API.app.core.StudySuggestions.jobs import (
     study_suggestions_jobs_queue,
 )
 from tldw_Server_API.app.services.quiz_generator import (
+    QuizClaimVerificationError,
     QuizProvenanceValidationError,
     generate_quiz_from_sources,
     get_quiz_generation_profiles,
@@ -705,10 +706,20 @@ async def generate_quiz(
             focus_topics=request.focus_topics,
             model=request.model,
             api_provider=request.api_provider,
+            claims_verification_provider=request.claims_verification_provider,
+            claims_verification_model=request.claims_verification_model,
             workspace_id=request.workspace_id,
             workspace_tag=request.workspace_tag,
         )
         return result
+    except QuizClaimVerificationError as e:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "claim_verification_failed",
+                "claimVerification": e.claim_verification,
+            },
+        ) from e
     except QuizProvenanceValidationError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
     except ConflictError as e:

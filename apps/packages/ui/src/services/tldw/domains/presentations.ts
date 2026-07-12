@@ -172,6 +172,8 @@ export const presentationsMethods = {
       visualStyleScope?: string
       provider?: string
       model?: string
+      claimsVerificationProvider?: string
+      claimsVerificationModel?: string
       temperature?: number
       signal?: AbortSignal
     }
@@ -185,6 +187,7 @@ export const presentationsMethods = {
     visual_style_name?: string | null
     visual_style_version?: number | null
     visual_style_snapshot?: PresentationVisualStyleSnapshot | null
+    studio_data?: Record<string, unknown> | null
     slides: Array<{
       order: number
       layout: string
@@ -202,6 +205,12 @@ export const presentationsMethods = {
     if (options?.visualStyleScope) body.visual_style_scope = options.visualStyleScope
     if (options?.provider) body.provider = options.provider
     if (options?.model) body.model = options.model
+    if (options?.claimsVerificationProvider) {
+      body.claims_verification_provider = options.claimsVerificationProvider
+    }
+    if (options?.claimsVerificationModel) {
+      body.claims_verification_model = options.claimsVerificationModel
+    }
     if (options?.temperature != null) body.temperature = options.temperature
     return await this.request<any>({
       path: "/api/v1/slides/generate/from-media",

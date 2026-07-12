@@ -468,6 +468,8 @@ class FlashcardGenerateRequest(BaseModel):
     focus_topics: list[str] = Field(default_factory=list)
     provider: Optional[str] = Field(None, description="Optional LLM provider override")
     model: Optional[str] = Field(None, description="Optional LLM model override")
+    claims_verification_provider: Optional[str] = Field(None, description="Optional Claims verification LLM provider override")
+    claims_verification_model: Optional[str] = Field(None, description="Optional Claims verification LLM model override")
 
     @model_validator(mode="before")
     @classmethod
@@ -517,6 +519,7 @@ class GeneratedFlashcard(BaseModel):
 class FlashcardGenerateResponse(BaseModel):
     flashcards: list[GeneratedFlashcard] = Field(default_factory=list)
     count: int
+    claim_verification: Optional[dict[str, Any]] = None
 
 
 class FlashcardDeckProgress(BaseModel):

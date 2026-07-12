@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { Modal } from "antd"
 import type { WorkspaceSource } from "@/types/workspace"
 import { StudioPane } from "../StudioPane"
+import { createGroundedClaimVerification } from "./studio-test-fixtures"
 const {
   mockScheduleWorkspaceUndoAction,
   mockUndoWorkspaceAction,
@@ -19,6 +20,7 @@ const {
   mockCreateQuiz,
   mockCreateQuestion,
   mockGenerateFlashcardsService,
+  mockGenerateResearchWorkspaceArtifact,
   mockListDecks,
   mockCreateDeck,
   mockCreateFlashcard,
@@ -47,6 +49,7 @@ const {
   const createQuiz = vi.fn()
   const createQuestion = vi.fn()
   const generateFlashcardsService = vi.fn()
+  const generateResearchWorkspaceArtifact = vi.fn()
   const listDecks = vi.fn()
   const createDeck = vi.fn()
   const createFlashcard = vi.fn()
@@ -151,6 +154,7 @@ const {
     mockCreateQuiz: createQuiz,
     mockCreateQuestion: createQuestion,
     mockGenerateFlashcardsService: generateFlashcardsService,
+    mockGenerateResearchWorkspaceArtifact: generateResearchWorkspaceArtifact,
     mockListDecks: listDecks,
     mockCreateDeck: createDeck,
     mockCreateFlashcard: createFlashcard,
@@ -244,6 +248,10 @@ vi.mock("@/services/flashcards", () => ({
   createDeck: mockCreateDeck,
   createFlashcard: mockCreateFlashcard,
   createFlashcardsBulk: mockCreateFlashcardsBulk
+}))
+
+vi.mock("@/services/researchWorkspaceArtifacts", () => ({
+  generateResearchWorkspaceArtifact: mockGenerateResearchWorkspaceArtifact
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
@@ -386,6 +394,17 @@ const renderStudioPane = () => {
   return renderResult
 }
 
+const clickAntdSelectOption = async (label: string) => {
+  const matches = await screen.findAllByText(label)
+  const optionContent =
+    matches.find((element) =>
+      String(element.getAttribute("class") || "").includes(
+        "ant-select-item-option-content"
+      )
+    ) || matches[0]
+  fireEvent.click(optionContent)
+}
+
 describe("StudioPane Stage 2 workflows", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -469,6 +488,12 @@ describe("StudioPane Stage 2 workflows", () => {
       flashcards: [{ front: "Term", back: "Definition" }],
       count: 1
     })
+    mockGenerateResearchWorkspaceArtifact.mockResolvedValue({
+      artifact_type: "mindmap",
+      content: "```mermaid\nmindmap\n  root((Workspace))\n    Findings\n```",
+      data: { mermaid: "mindmap\n  root((Workspace))\n    Findings" },
+      claim_verification: createGroundedClaimVerification()
+    })
     mockGetChatModels.mockResolvedValue([])
     mockCreateDeck.mockResolvedValue({ id: 1, name: "Workspace Flashcards" })
     mockCreateFlashcard.mockResolvedValue({ uuid: "card-1" })
@@ -486,6 +511,49 @@ describe("StudioPane Stage 2 workflows", () => {
       slides: [],
       version: 1,
       created_at: "2026-02-18T00:00:00.000Z"
+    })
+    mockGenerateQuiz.mockResolvedValue({
+      quiz: {
+        id: 11,
+        name: "Workspace Quiz",
+        description: "Quiz description",
+        workspace_id: "workspace-a",
+        workspace_tag: "workspace:test",
+        media_id: 101,
+        source_bundle_json: [{ source_type: "media", source_id: "101" }],
+        total_questions: 1,
+        deleted: false,
+        client_id: "test",
+        version: 1
+      },
+      questions: [
+        {
+          id: 21,
+          quiz_id: 11,
+          question_type: "multiple_choice",
+          question_text: "What improved to 82 percent?",
+          options: ["Retention", "Rollout", "Revenue"],
+          correct_answer: 0,
+          explanation: "The source states retention improved to 82 percent.",
+          source_citations: [{ source_type: "media", source_id: "101", media_id: 101 }],
+          points: 1,
+          order_index: 0,
+          deleted: false,
+          client_id: "test",
+          version: 1
+        }
+      ],
+      claim_verification: {
+        verdict: "grounded",
+        metadata: {
+          generation_provider: "openai",
+          generation_model: "gpt-4o-mini",
+          verification_provider: "openai",
+          verification_model: "gpt-4o-mini",
+          verification_llm_is_default: true,
+          verification_llm_differs_from_generation: false
+        }
+      }
     })
     mockCreateQuiz.mockResolvedValue({ id: 11, name: "Quiz", description: "" })
     mockUpsertWorkspace.mockResolvedValue({
@@ -603,60 +671,63 @@ describe("StudioPane Stage 2 workflows", () => {
         addedAt: new Date("2026-02-18T00:00:00.000Z")
       }
     ] as WorkspaceSource[]
+    mockGetChatModels.mockResolvedValue([
+      {
+        id: "gpt-4o-mini",
+        name: "GPT-4o mini",
+        provider: "openai"
+      },
+      {
+        id: "qwen-claims",
+        name: "Qwen Claims",
+        provider: "llamacpp"
+      }
+    ])
 
     renderStudioPane()
 
-    mockGetMediaDetails.mockResolvedValue({
-      source: { title: "DSPy Prompting Talk" },
-      content: {
-        text: "Project Falcon improved retention from 64 percent to 82 percent."
-      }
-    })
-    mockCreateChatCompletion.mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          choices: [
-            {
-              message: {
-                content: JSON.stringify({
-                  title: "Workspace Quiz",
-                  description: "Quiz description",
-                  questions: [
-                    {
-                      question_type: "multiple_choice",
-                      question_text: "What improved to 82 percent?",
-                      options: ["Retention", "Rollout", "Revenue"],
-                      correct_answer: "Retention",
-                      explanation: "The source states retention improved to 82 percent."
-                    }
-                  ]
-                })
-              }
-            }
-          ],
-          usage: {
-            total_tokens: 42
-          }
-        })
-      )
+    fireEvent.click(screen.getByRole("button", { name: /Studio Options/i }))
+    const modelRuntime = screen.getByRole("region", { name: "Model Runtime" })
+    const verifierProvider = within(modelRuntime).getByLabelText(
+      "Claims verifier provider"
     )
+    fireEvent.mouseDown(
+      verifierProvider.closest(".ant-select-selector") || verifierProvider
+    )
+    await clickAntdSelectOption("llamacpp")
+
+    const verifierModel = within(modelRuntime).getByLabelText(
+      "Claims verifier model"
+    )
+    fireEvent.mouseDown(verifierModel.closest(".ant-select-selector") || verifierModel)
+    await clickAntdSelectOption("Qwen Claims")
 
     fireEvent.click(screen.getByRole("button", { name: "Quiz" }))
 
     await waitFor(() => {
-      expect(mockCreateQuiz).toHaveBeenCalledTimes(1)
+      expect(mockGenerateQuiz).toHaveBeenCalledTimes(1)
     })
 
-    expect(mockCreateChatCompletion).toHaveBeenCalledWith(
+    expect(mockGenerateQuiz).toHaveBeenCalledWith(
       expect.objectContaining({
+        sources: [
+          { source_type: "media", source_id: "101" },
+          { source_type: "media", source_id: "202" }
+        ],
+        num_questions: 6,
+        question_types: ["multiple_choice", "true_false"],
         model: "gpt-4o-mini",
-        response_format: { type: "json_object" }
+        api_provider: "openai",
+        claims_verification_provider: "llamacpp",
+        claims_verification_model: "qwen-claims",
+        workspace_id: "workspace-a",
+        workspace_tag: "workspace:test"
       }),
       expect.objectContaining({
         timeoutMs: expect.any(Number)
       })
     )
-    expect(mockCreateChatCompletion.mock.calls[0]?.[1]?.timeoutMs).toBeGreaterThanOrEqual(
+    expect(mockGenerateQuiz.mock.calls[0]?.[1]?.timeoutMs).toBeGreaterThanOrEqual(
       120_000
     )
 
@@ -665,20 +736,8 @@ describe("StudioPane Stage 2 workflows", () => {
       study_materials_policy: "workspace"
     })
 
-    expect(mockCreateQuiz).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: "Workspace Quiz",
-        description: "Quiz description",
-        media_id: 101,
-        source_bundle_json: [
-          { source_type: "media", source_id: "101" },
-          { source_type: "media", source_id: "202" }
-        ],
-        workspace_id: "workspace-a"
-      }),
-    )
-
-    expect(mockCreateQuestion).toHaveBeenCalledTimes(1)
+    expect(mockCreateQuiz).not.toHaveBeenCalled()
+    expect(mockCreateQuestion).not.toHaveBeenCalled()
 
     expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
       expect.stringMatching(/^artifact-/),
@@ -691,10 +750,137 @@ describe("StudioPane Stage 2 workflows", () => {
           sourceBundle: [
             { source_type: "media", source_id: "101" },
             { source_type: "media", source_id: "202" }
-          ]
+          ],
+          claimVerification: expect.objectContaining({
+            verdict: "grounded"
+          })
+        }),
+        producerMetadata: expect.objectContaining({
+          claimsVerificationVerdict: "grounded"
         })
       })
     )
+  })
+
+  it("keeps quiz source citations aligned after filtering unusable questions", async () => {
+    workspaceStoreState.selectedSourceIds = ["source-1", "source-2"]
+    workspaceStoreState.getSelectedMediaIds = () => [101, 202]
+    workspaceStoreState.sources = [
+      {
+        id: "source-1",
+        mediaId: 101,
+        title: "DSPy Prompting Talk",
+        type: "video",
+        status: "ready",
+        addedAt: new Date("2026-02-18T00:00:00.000Z")
+      },
+      {
+        id: "source-2",
+        mediaId: 202,
+        title: "E2E DB Media",
+        type: "document",
+        status: "ready",
+        addedAt: new Date("2026-02-18T00:00:00.000Z")
+      }
+    ] as WorkspaceSource[]
+    mockGenerateQuiz.mockResolvedValue({
+      quiz: {
+        id: 11,
+        name: "Workspace Quiz",
+        total_questions: 3,
+        deleted: false,
+        client_id: "test",
+        version: 1
+      },
+      questions: [
+        {
+          question_type: "multiple_choice",
+          question_text: "Which source describes the prompting talk?",
+          options: ["The talk", "The document"],
+          correct_answer: 0,
+          source_citations: [{ source_type: "media", source_id: "101", media_id: 101 }]
+        },
+        {
+          question_type: "multiple_choice",
+          question_text: "question goes here",
+          options: ["Option A", "Option B"],
+          correct_answer: 0,
+          source_citations: [{ source_type: "media", source_id: "101", media_id: 101 }]
+        },
+        {
+          question_type: "multiple_choice",
+          question_text: "Which source is the E2E DB media?",
+          options: ["The talk", "The document"],
+          correct_answer: 1,
+          source_citations: [{ source_type: "media", source_id: "202", media_id: 202 }]
+        }
+      ],
+      claim_verification: { verdict: "grounded" }
+    })
+
+    renderStudioPane()
+    fireEvent.click(screen.getByRole("button", { name: "Quiz" }))
+
+    await waitFor(() => {
+      expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
+        expect.stringMatching(/^artifact-/),
+        "completed",
+        expect.objectContaining({
+          data: expect.objectContaining({
+            questions: [
+              expect.objectContaining({ sourceMediaId: 101 }),
+              expect.objectContaining({ sourceMediaId: 202 })
+            ]
+          })
+        })
+      )
+    })
+  })
+
+  it("fails quiz artifacts when generated questions are placeholder-only", async () => {
+    mockGenerateQuiz.mockResolvedValue({
+      quiz: {
+        id: 11,
+        name: "Workspace Quiz",
+        total_questions: 1,
+        deleted: false,
+        client_id: "test",
+        version: 1
+      },
+      questions: [
+        {
+          id: 21,
+          quiz_id: 11,
+          question_type: "multiple_choice",
+          question_text: "question goes here",
+          options: ["Option A", "Option B"],
+          correct_answer: "Option A",
+          points: 1,
+          order_index: 0,
+          deleted: false,
+          client_id: "test",
+          version: 1
+        }
+      ]
+    })
+
+    renderStudioPane()
+
+    fireEvent.click(screen.getByRole("button", { name: "Quiz" }))
+
+    await waitFor(() => {
+      expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
+        expect.stringMatching(/^artifact-/),
+        "failed",
+        expect.objectContaining({
+          errorMessage: expect.stringContaining("usable questions")
+        })
+      )
+    })
+
+    expect(mockCreateQuiz).not.toHaveBeenCalled()
+    expect(mockCreateQuestion).not.toHaveBeenCalled()
+    expect(mockMessageSuccess).not.toHaveBeenCalled()
   })
 
   it("keeps quiz ownership general when studyMaterialsPolicy is null", async () => {
@@ -711,47 +897,18 @@ describe("StudioPane Stage 2 workflows", () => {
       }
     ] as WorkspaceSource[]
     workspaceStoreState.studyMaterialsPolicy = null
-    mockGetMediaDetails.mockResolvedValue({
-      source: { title: "DSPy Prompting Talk" },
-      content: {
-        text: "Project Falcon improved retention from 64 percent to 82 percent."
-      }
-    })
-    mockCreateChatCompletion.mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          choices: [
-            {
-              message: {
-                content: JSON.stringify({
-                  title: "Workspace Quiz",
-                  questions: [
-                    {
-                      question_type: "multiple_choice",
-                      question_text: "What improved to 82 percent?",
-                      options: ["Retention", "Rollout", "Revenue"],
-                      correct_answer: "Retention"
-                    }
-                  ]
-                })
-              }
-            }
-          ]
-        })
-      )
-    )
 
     renderStudioPane()
 
     fireEvent.click(screen.getByRole("button", { name: "Quiz" }))
 
     await waitFor(() => {
-      expect(mockCreateQuiz).toHaveBeenCalledTimes(1)
+      expect(mockGenerateQuiz).toHaveBeenCalledTimes(1)
     })
 
     expect(mockUpsertWorkspace).not.toHaveBeenCalled()
-    expect(mockCreateQuiz.mock.calls[0]?.[0]).not.toHaveProperty("workspace_id")
-    expect(mockCreateQuiz.mock.calls[0]?.[0]).not.toHaveProperty("workspace_tag")
+    expect(mockGenerateQuiz.mock.calls[0]?.[0]).not.toHaveProperty("workspace_id")
+    expect(mockGenerateQuiz.mock.calls[0]?.[0]).not.toHaveProperty("workspace_tag")
     expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
       expect.stringMatching(/^artifact-/),
       "completed",
@@ -1109,6 +1266,11 @@ describe("StudioPane Stage 2 workflows", () => {
         id: "gpt-4o-mini",
         name: "GPT-4o mini",
         provider: "openai"
+      },
+      {
+        id: "qwen-claims",
+        name: "Qwen Claims",
+        provider: "llamacpp"
       }
     ])
     mockGetMediaDetails.mockResolvedValue({
@@ -1126,6 +1288,34 @@ describe("StudioPane Stage 2 workflows", () => {
     fireEvent.mouseDown(autoDeckLabel.closest(".ant-select-selector") || autoDeckLabel)
     fireEvent.click(await screen.findByText("Biology Deck"))
 
+    fireEvent.click(screen.getByRole("button", { name: /Studio Options/i }))
+    const modelRuntime = screen.getByRole("region", { name: "Model Runtime" })
+    const verifierProvider = within(modelRuntime).getByLabelText(
+      "Claims verifier provider"
+    )
+    fireEvent.mouseDown(
+      verifierProvider.closest(".ant-select-selector") || verifierProvider
+    )
+    await clickAntdSelectOption("llamacpp")
+    await waitFor(() => {
+      expect(
+        within(modelRuntime).getByText(
+          "Claims verification override active: llamacpp / provider default will verify grounded outputs instead of the generation model."
+        )
+      ).toBeInTheDocument()
+    })
+
+    const verifierModel = within(modelRuntime).getByLabelText(
+      "Claims verifier model"
+    )
+    fireEvent.mouseDown(verifierModel.closest(".ant-select-selector") || verifierModel)
+    await clickAntdSelectOption("Qwen Claims")
+    expect(
+      within(modelRuntime).getByText(
+        "Claims verification override active: llamacpp / qwen-claims will verify grounded outputs instead of the generation model."
+      )
+    ).toBeInTheDocument()
+
     fireEvent.click(screen.getByRole("button", { name: "Flashcards" }))
 
     await waitFor(() => {
@@ -1137,7 +1327,9 @@ describe("StudioPane Stage 2 workflows", () => {
         text: expect.stringContaining("DSPy Prompting Talk"),
         num_cards: 6,
         model: "gpt-4o-mini",
-        provider: "openai"
+        provider: "openai",
+        claims_verification_provider: "llamacpp",
+        claims_verification_model: "qwen-claims"
       })
     )
     expect(mockGenerateFlashcardsService).not.toHaveBeenCalledWith(
@@ -1166,6 +1358,34 @@ describe("StudioPane Stage 2 workflows", () => {
         })
       })
     )
+  }, 15000)
+
+  it("fails flashcard artifacts when generated cards are placeholder-only", async () => {
+    mockGetMediaDetails.mockResolvedValue({
+      content: "ATP powers cellular respiration in cells."
+    })
+    mockGenerateFlashcardsService.mockResolvedValue({
+      flashcards: [{ front: "front goes here", back: "back goes here" }],
+      count: 1
+    })
+
+    renderStudioPane()
+
+    fireEvent.click(screen.getByRole("button", { name: "Flashcards" }))
+
+    await waitFor(() => {
+      expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
+        expect.stringMatching(/^artifact-/),
+        "failed",
+        expect.objectContaining({
+          errorMessage: expect.stringContaining("usable cards")
+        })
+      )
+    })
+
+    expect(mockCreateDeck).not.toHaveBeenCalled()
+    expect(mockCreateFlashcardsBulk).not.toHaveBeenCalled()
+    expect(mockMessageSuccess).not.toHaveBeenCalled()
   }, 15000)
 
   it("creates a fresh general deck for auto flashcard generation", async () => {
@@ -1426,7 +1646,7 @@ describe("StudioPane Stage 2 workflows", () => {
     })
   }, 15000)
 
-  it("generates data table output from selected source content via chat completion", async () => {
+  it("generates mind map output through the verified backend artifact service", async () => {
     workspaceStoreState.selectedSourceIds = ["source-1", "source-2"]
     workspaceStoreState.getSelectedMediaIds = () => [101, 202]
     workspaceStoreState.sources = [
@@ -1447,37 +1667,22 @@ describe("StudioPane Stage 2 workflows", () => {
         addedAt: new Date("2026-02-18T00:00:00.000Z")
       }
     ] as WorkspaceSource[]
-    mockGetMediaDetails
-      .mockResolvedValueOnce({
-        source: { title: "DSPy Prompting Talk" },
-        content: {
-          text: "DSPy helps optimize prompting workflows and compound AI pipelines."
-        }
-      })
-      .mockResolvedValueOnce({
-        source: { title: "E2E DB Media" },
-        content: {
-          text: "Hello world from E2E document processing."
-        }
-      })
-    mockCreateChatCompletion.mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          choices: [
-            {
-              message: {
-                content:
-                  "```mermaid\nmindmap\n  root((Workspace Research))\n    Prompting\n      DSPy\n    Documents\n      E2E DB Media\n```"
-              }
-            }
-          ]
-        }),
-        {
-          status: 200,
-          headers: { "content-type": "application/json" }
-        }
-      )
-    )
+    mockGenerateResearchWorkspaceArtifact.mockResolvedValue({
+      artifact_type: "mindmap",
+      content:
+        "```mermaid\nmindmap\n  root((Workspace Research))\n    Prompting\n      DSPy\n    Documents\n      E2E DB Media\n```",
+      data: {
+        mermaid: "mindmap\n  root((Workspace Research))\n    Prompting\n      DSPy\n    Documents\n      E2E DB Media"
+      },
+      claim_verification: createGroundedClaimVerification()
+    })
+    mockGetChatModels.mockResolvedValue([
+      {
+        id: "gpt-4o-mini",
+        name: "GPT-4o mini",
+        provider: "openai"
+      }
+    ])
 
     renderStudioPane()
     expandMoreOutputsSection()
@@ -1485,27 +1690,21 @@ describe("StudioPane Stage 2 workflows", () => {
     fireEvent.click(screen.getByRole("button", { name: "Mind Map" }))
 
     await waitFor(() => {
-      expect(mockGetMediaDetails).toHaveBeenCalledTimes(2)
+      expect(mockGenerateResearchWorkspaceArtifact).toHaveBeenCalledTimes(1)
     })
 
-    expect(mockCreateChatCompletion).toHaveBeenCalledWith(
+    expect(mockGenerateResearchWorkspaceArtifact).toHaveBeenCalledWith(
       expect.objectContaining({
+        artifact_type: "mindmap",
+        media_ids: [101, 202],
         model: "gpt-4o-mini",
-        messages: [
-          expect.objectContaining({
-            role: "system",
-            content: expect.stringContaining("Mermaid")
-          }),
-          expect.objectContaining({
-            role: "user",
-            content: expect.stringContaining("DSPy Prompting Talk")
-          })
-        ]
+        api_provider: "openai"
       }),
       expect.objectContaining({
         signal: expect.any(AbortSignal)
       })
     )
+    expect(mockCreateChatCompletion).not.toHaveBeenCalled()
     expect(mockRagSearch).not.toHaveBeenCalled()
 
     await waitFor(() => {
@@ -1515,7 +1714,11 @@ describe("StudioPane Stage 2 workflows", () => {
         expect.objectContaining({
           content: expect.stringContaining("mindmap"),
           data: expect.objectContaining({
-            mermaid: expect.stringContaining("mindmap")
+            mermaid: expect.stringContaining("mindmap"),
+            claimVerification: expect.objectContaining({ verdict: "grounded" })
+          }),
+          producerMetadata: expect.objectContaining({
+            claimsVerificationVerdict: "grounded"
           })
         })
       )
@@ -1574,30 +1777,15 @@ describe("StudioPane Stage 2 workflows", () => {
   })
 
   it("marks mind map generation failed when completion is not Mermaid syntax", async () => {
-    mockGetMediaDetails.mockResolvedValue({
-      source: { title: "DSPy Prompting Talk" },
-      content: {
-        text: "DSPy helps optimize prompting workflows and compound AI pipelines."
+    mockGenerateResearchWorkspaceArtifact.mockResolvedValue({
+      artifact_type: "mindmap",
+      content: "Central topic: Workspace Research\n- Prompting workflows\n- Compound AI pipelines",
+      data: {},
+      claim_verification: {
+        verdict: "grounded",
+        metadata: {}
       }
     })
-    mockCreateChatCompletion.mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          choices: [
-            {
-              message: {
-                content:
-                  "Central topic: Workspace Research\n- Prompting workflows\n- Compound AI pipelines"
-              }
-            }
-          ]
-        }),
-        {
-          status: 200,
-          headers: { "content-type": "application/json" }
-        }
-      )
-    )
 
     renderStudioPane()
     expandMoreOutputsSection()
@@ -1614,11 +1802,42 @@ describe("StudioPane Stage 2 workflows", () => {
       )
     })
 
-    expect(mockCreateChatCompletion).toHaveBeenCalledTimes(1)
+    expect(mockGenerateResearchWorkspaceArtifact).toHaveBeenCalledTimes(1)
+    expect(mockCreateChatCompletion).not.toHaveBeenCalled()
     expect(mockMessageError).toHaveBeenCalled()
   }, 15000)
 
-  it("generates data table output from selected source content via chat completion", async () => {
+  it("fails audio overview artifacts when the script is placeholder-only", async () => {
+    mockGenerateResearchWorkspaceArtifact.mockResolvedValue({
+      artifact_type: "audio_overview",
+      content: "script goes here",
+      data: {},
+      claim_verification: {
+        verdict: "grounded",
+        metadata: {}
+      }
+    })
+
+    renderStudioPane()
+    expandMoreOutputsSection()
+
+    fireEvent.click(screen.getByRole("button", { name: "Audio Summary" }))
+
+    await waitFor(() => {
+      expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
+        expect.stringMatching(/^artifact-/),
+        "failed",
+        expect.objectContaining({
+          errorMessage: expect.stringContaining("usable audio")
+        })
+      )
+    })
+
+    expect(mockSynthesizeSpeech).not.toHaveBeenCalled()
+    expect(mockMessageSuccess).not.toHaveBeenCalled()
+  }, 15000)
+
+  it("generates data table output through verified workspace artifact generation", async () => {
     workspaceStoreState.selectedSourceIds = ["source-1", "source-2"]
     workspaceStoreState.getSelectedMediaIds = () => [101, 202]
     workspaceStoreState.sources = [
@@ -1639,37 +1858,20 @@ describe("StudioPane Stage 2 workflows", () => {
         addedAt: new Date("2026-02-18T00:00:00.000Z")
       }
     ] as WorkspaceSource[]
-    mockGetMediaDetails
-      .mockResolvedValueOnce({
-        source: { title: "DSPy Prompting Talk" },
-        content: {
-          text: "DSPy helps optimize prompting workflows and compound AI pipelines."
-        }
-      })
-      .mockResolvedValueOnce({
-        source: { title: "E2E DB Media" },
-        content: {
-          text: "Hello world from E2E document processing."
-        }
-      })
-    mockCreateChatCompletion.mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          choices: [
-            {
-              message: {
-                content:
-                  "| Source | Fact |\n|---|---|\n| DSPy Prompting Talk | Prompt optimization |\n| E2E DB Media | Hello world |"
-              }
-            }
-          ]
-        }),
-        {
-          status: 200,
-          headers: { "content-type": "application/json" }
-        }
-      )
-    )
+    mockGetChatModels.mockResolvedValue([
+      {
+        id: "gpt-4o-mini",
+        name: "GPT-4o mini",
+        provider: "openai"
+      }
+    ])
+    mockGenerateResearchWorkspaceArtifact.mockResolvedValue({
+      artifact_type: "data_table",
+      content:
+        "| Source | Fact |\n|---|---|\n| DSPy Prompting Talk | Prompt optimization |\n| E2E DB Media | Hello world |",
+      data: {},
+      claim_verification: createGroundedClaimVerification()
+    })
 
     renderStudioPane()
     expandMoreOutputsSection()
@@ -1677,27 +1879,25 @@ describe("StudioPane Stage 2 workflows", () => {
     fireEvent.click(screen.getByRole("button", { name: "Data Table" }))
 
     await waitFor(() => {
-      expect(mockGetMediaDetails).toHaveBeenCalledTimes(2)
+      expect(mockGenerateResearchWorkspaceArtifact).toHaveBeenCalledTimes(1)
     })
 
-    expect(mockCreateChatCompletion.mock.calls[0]?.[0]).toEqual(
+    expect(mockGenerateResearchWorkspaceArtifact).toHaveBeenCalledWith(
       expect.objectContaining({
+        artifact_type: "data_table",
+        media_ids: [101, 202],
         model: "gpt-4o-mini",
+        api_provider: "openai",
         temperature: 0.7,
         top_p: 1,
-        max_tokens: 800,
-        messages: [
-          expect.objectContaining({
-            role: "system",
-            content: expect.stringContaining("Return ONLY a markdown table")
-          }),
-          expect.objectContaining({
-            role: "user",
-            content: expect.stringContaining("DSPy Prompting Talk")
-          })
-        ]
+        max_tokens: 800
+      }),
+      expect.objectContaining({
+        signal: expect.any(AbortSignal)
       })
     )
+    expect(mockCreateChatCompletion).not.toHaveBeenCalled()
+    expect(mockGetMediaDetails).not.toHaveBeenCalled()
     expect(mockRagSearch).not.toHaveBeenCalled()
 
     await waitFor(() => {
@@ -1709,11 +1909,73 @@ describe("StudioPane Stage 2 workflows", () => {
           data: expect.objectContaining({
             table: expect.objectContaining({
               headers: ["Source", "Fact"]
-            })
+            }),
+            claimVerification: expect.objectContaining({ verdict: "grounded" })
+          }),
+          producerMetadata: expect.objectContaining({
+            claimsVerificationVerdict: "grounded"
           })
         })
       )
     })
+  }, 15000)
+
+  it("fails data table artifacts when every parsed cell is placeholder-only", async () => {
+    mockGenerateResearchWorkspaceArtifact.mockResolvedValue({
+      artifact_type: "data_table",
+      content: "| Field | Value |\n|---|---|\n| invalid | invalid |",
+      data: {},
+      claim_verification: {
+        verdict: "grounded"
+      }
+    })
+
+    renderStudioPane()
+    expandMoreOutputsSection()
+
+    fireEvent.click(screen.getByRole("button", { name: "Data Table" }))
+
+    await waitFor(() => {
+      expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
+        expect.stringMatching(/^artifact-/),
+        "failed",
+        expect.objectContaining({
+          errorMessage: expect.stringContaining("usable data table")
+        })
+      )
+    })
+
+    expect(mockMessageSuccess).not.toHaveBeenCalled()
+    expect(mockCreateChatCompletion).not.toHaveBeenCalled()
+  }, 15000)
+
+  it("fails data table artifacts when every parsed cell is a test-placeholder", async () => {
+    mockGenerateResearchWorkspaceArtifact.mockResolvedValue({
+      artifact_type: "data_table",
+      content: "| Field | Value |\n|---|---|\n| this is a test | this is a test |",
+      data: {},
+      claim_verification: {
+        verdict: "grounded"
+      }
+    })
+
+    renderStudioPane()
+    expandMoreOutputsSection()
+
+    fireEvent.click(screen.getByRole("button", { name: "Data Table" }))
+
+    await waitFor(() => {
+      expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
+        expect.stringMatching(/^artifact-/),
+        "failed",
+        expect.objectContaining({
+          errorMessage: expect.stringContaining("usable data table")
+        })
+      )
+    })
+
+    expect(mockMessageSuccess).not.toHaveBeenCalled()
+    expect(mockCreateChatCompletion).not.toHaveBeenCalled()
   }, 15000)
 
   it("gates data tables when no chat model is selected", () => {

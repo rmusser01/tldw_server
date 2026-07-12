@@ -79,6 +79,7 @@ interface TakeQuizTabProps {
   onNavigateToCreate: () => void
   startQuizId?: number | null
   highlightQuizId?: number | null
+  forceShowWorkspaceItems?: boolean
   navigationSource?: TakeTabNavigationSource | null
   assignmentMode?: "shared" | null
   assignmentDueAt?: string | null
@@ -190,6 +191,7 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
   onNavigateToCreate,
   startQuizId,
   highlightQuizId,
+  forceShowWorkspaceItems = false,
   navigationSource,
   assignmentMode,
   assignmentDueAt,
@@ -369,7 +371,8 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
   const { data, isLoading } = useQuizzesQuery({
     limit: pageSize,
     offset,
-    q: normalizedSearchQuery.length > 0 ? normalizedSearchQuery : undefined
+    q: normalizedSearchQuery.length > 0 ? normalizedSearchQuery : undefined,
+    include_workspace_items: forceShowWorkspaceItems || undefined
   })
   const { data: attemptsData } = useAttemptsQuery({ limit: 200, offset: 0 })
   const detailQuizId = pendingQuizId ?? activeQuizId

@@ -521,11 +521,14 @@ export type FlashcardsGenerateRequest = {
   focus_topics?: string[] | null
   provider?: string | null
   model?: string | null
+  claims_verification_provider?: string | null
+  claims_verification_model?: string | null
 }
 
 export type FlashcardsGenerateResponse = {
   flashcards: FlashcardGeneratedDraft[]
   count: number
+  claim_verification?: Record<string, unknown> | null
 }
 
 export type FlashcardReviewResponse = {
