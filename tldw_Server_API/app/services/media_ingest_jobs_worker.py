@@ -396,6 +396,8 @@ def _block_playlist_preflight(
 def _raise_if_playlist_preflight_cancelled(
     jm: JobManager,
     job_id: int,
+    lease_id: str,
+    worker_id: str,
     store: PlaylistIngestStore,
     *,
     owner_user_id: str,
@@ -403,11 +405,16 @@ def _raise_if_playlist_preflight_cancelled(
 ) -> None:
     if not _should_cancel(jm, job_id):
         return
-    _block_playlist_preflight(
+    _replace_playlist_preflight_snapshot_guarded(
         store,
         owner_user_id=owner_user_id,
         preflight_id=preflight_id,
-        code="playlist_preflight_cancelled",
+        job_id=job_id,
+        lease_id=lease_id,
+        worker_id=worker_id,
+        status="blocked",
+        items=[],
+        error={"code": "playlist_preflight_cancelled"},
     )
     raise MediaIngestJobError("playlist_preflight_cancelled", retryable=False)
 
@@ -423,6 +430,7 @@ def _replace_playlist_preflight_snapshot_guarded(
     status: str,
     items: list[dict[str, Any]],
     summary: dict[str, Any] | None = None,
+    error: dict[str, Any] | None = None,
 ) -> None:
     try:
         store.replace_preflight_snapshot(
@@ -431,6 +439,7 @@ def _replace_playlist_preflight_snapshot_guarded(
             status=status,
             items=items,
             summary=summary,
+            error=error,
             expected_job_id=job_id,
             expected_lease_id=lease_id,
             expected_worker_id=worker_id,
@@ -446,12 +455,6 @@ def _replace_playlist_preflight_snapshot_guarded(
             raise MediaIngestJobError("playlist_preflight_cancelled", retryable=False) from exc
         raise MediaIngestJobError("playlist_preflight_lease_lost", retryable=False) from exc
     except Exception as exc:
-        _block_playlist_preflight(
-            store,
-            owner_user_id=owner_user_id,
-            preflight_id=preflight_id,
-            code="playlist_snapshot_write_failed",
-        )
         raise MediaIngestJobError("playlist_snapshot_write_failed", retryable=False) from exc
 
 
@@ -544,17 +547,24 @@ async def _handle_playlist_preflight_job(
     max_items = _coerce_int(payload.get("max_items"), 100)
     timeout_seconds = _coerce_int(payload.get("timeout_seconds"), 20)
     if not 1 <= max_items <= 500 or not 1 <= timeout_seconds <= 60:
-        _block_playlist_preflight(
+        _replace_playlist_preflight_snapshot_guarded(
             store,
             owner_user_id=owner_user_id,
             preflight_id=preflight_id,
-            code="playlist_preflight_invalid_request",
+            job_id=job_id,
+            lease_id=lease_id,
+            worker_id=worker_id,
+            status="blocked",
+            items=[],
+            error={"code": "playlist_preflight_invalid_request"},
         )
         raise MediaIngestJobError("playlist_preflight_invalid_request", retryable=False)
 
     _raise_if_playlist_preflight_cancelled(
         jm,
         job_id,
+        lease_id,
+        worker_id,
         store,
         owner_user_id=owner_user_id,
         preflight_id=preflight_id,
@@ -582,25 +592,37 @@ async def _handle_playlist_preflight_job(
             cancel_check=lambda: _should_cancel(jm, job_id),
         )
     except PlaylistPreflightProcessError as exc:
-        _block_playlist_preflight(
+        _replace_playlist_preflight_snapshot_guarded(
             store,
             owner_user_id=owner_user_id,
             preflight_id=preflight_id,
-            code=exc.code,
+            job_id=job_id,
+            lease_id=lease_id,
+            worker_id=worker_id,
+            status="blocked",
+            items=[],
+            error={"code": exc.code},
         )
         raise MediaIngestJobError(exc.code, retryable=False) from exc
     except Exception as exc:
-        _block_playlist_preflight(
+        _replace_playlist_preflight_snapshot_guarded(
             store,
             owner_user_id=owner_user_id,
             preflight_id=preflight_id,
-            code="playlist_preflight_failed",
+            job_id=job_id,
+            lease_id=lease_id,
+            worker_id=worker_id,
+            status="blocked",
+            items=[],
+            error={"code": "playlist_preflight_failed"},
         )
         raise MediaIngestJobError("playlist_preflight_failed", retryable=False) from exc
 
     _raise_if_playlist_preflight_cancelled(
         jm,
         job_id,
+        lease_id,
+        worker_id,
         store,
         owner_user_id=owner_user_id,
         preflight_id=preflight_id,
@@ -632,6 +654,8 @@ async def _handle_playlist_preflight_job(
     _raise_if_playlist_preflight_cancelled(
         jm,
         job_id,
+        lease_id,
+        worker_id,
         store,
         owner_user_id=owner_user_id,
         preflight_id=preflight_id,
@@ -645,6 +669,8 @@ async def _handle_playlist_preflight_job(
     _raise_if_playlist_preflight_cancelled(
         jm,
         job_id,
+        lease_id,
+        worker_id,
         store,
         owner_user_id=owner_user_id,
         preflight_id=preflight_id,
