@@ -1271,6 +1271,11 @@ async def test_playlist_preflight_worker_excludes_explicit_unavailable_entries_f
                 "title": "Private entry with an ID",
                 "availability": "private",
             },
+            {
+                "id": "deleted123",
+                "webpage_url": "https://www.youtube.com/watch?v=deleted123",
+                "title": "[Deleted video]",
+            },
             {"source_url": "https://youtu.be/public123", "title": "Public entry"},
         ]
     )
@@ -1296,20 +1301,24 @@ async def test_playlist_preflight_worker_excludes_explicit_unavailable_entries_f
     result = await worker._handle_job(jm.get_job(int(job["id"])), jm, worker._ProgressState())
 
     assert media_db.lookup_urls == ["https://www.youtube.com/watch?v=public123"]
-    assert result["loaded_count"] == 2
+    assert result["loaded_count"] == 3
     assert result["ingestible_count"] == 1
-    assert result["unavailable_count"] == 1
+    assert result["unavailable_count"] == 2
     assert result["duplicate_count"] == 0
     assert result["selected_count"] == 1
     items = list(store.list_preflight_items("7", preflight.preflight_id, limit=10))
-    assert [item.ordinal for item in items] == [1, 2]
+    assert [item.ordinal for item in items] == [1, 2, 3]
     assert items[0].availability == "private"
     assert items[0].source_url is None
     assert items[0].duplicate_status == "unknown"
     assert items[0].selected_by_default is False
-    assert items[1].availability == "available"
-    assert items[1].duplicate_status == "new"
-    assert items[1].selected_by_default is True
+    assert items[1].availability == "deleted"
+    assert items[1].source_url is None
+    assert items[1].duplicate_status == "unknown"
+    assert items[1].selected_by_default is False
+    assert items[2].availability == "available"
+    assert items[2].duplicate_status == "new"
+    assert items[2].selected_by_default is True
 
 
 @pytest.mark.asyncio

@@ -293,6 +293,48 @@ def test_deleted_missing_source_entry_remains_visible_in_ordinal_order():
 
 
 @pytest.mark.parametrize(
+    ("title", "expected_availability"),
+    [
+        ("[Deleted video]", "deleted"),
+        ("[Private video]", "private"),
+        ("  [Deleted video]  ", "deleted"),
+    ],
+)
+def test_ytdlp_bracketed_placeholder_with_generated_url_is_not_ingestible(title, expected_availability):
+    items = normalize_preflight_items(
+        [
+            {
+                "id": "placeholder123",
+                "webpage_url": "https://www.youtube.com/watch?v=placeholder123",
+                "title": title,
+            }
+        ]
+    )
+
+    assert items[0].title == title.strip()
+    assert items[0].availability == expected_availability
+    assert items[0].source_url == ""
+    assert items[0].duplicate_status == "unknown"
+    assert items[0].selected is False
+
+
+def test_ordinary_title_containing_deleted_video_words_remains_ingestible():
+    items = normalize_preflight_items(
+        [
+            {
+                "source_url": "https://youtu.be/ordinary123",
+                "title": "Why [Deleted video] placeholders matter",
+            }
+        ]
+    )
+
+    assert items[0].availability == "available"
+    assert items[0].source_url == "https://www.youtube.com/watch?v=ordinary123"
+    assert items[0].duplicate_status == "new"
+    assert items[0].selected is True
+
+
+@pytest.mark.parametrize(
     ("policy", "expected_status", "expected_submit"),
     [
         ("skip", "skipped_existing", False),

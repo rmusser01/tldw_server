@@ -79,6 +79,10 @@ _NON_INGESTIBLE_AVAILABILITIES = frozenset(
         "unavailable",
     }
 )
+_YTDLP_UNAVAILABLE_TITLES = {
+    "[Deleted video]": "deleted",
+    "[Private video]": "private",
+}
 
 
 def _is_duplicate_status(value: str | None) -> bool:
@@ -245,7 +249,10 @@ def normalize_preflight_items(raw_items: list[dict[str, Any]]) -> list[PlaylistP
         source_url = _source_url_from_entry(raw) or ""
         source_kind = str(raw.get("source_kind") or "generic_url")
         normalized_source_id = _string_or_none(raw.get("normalized_source_id"))
+        normalized_title = _string_or_none(raw.get("title"))
         upstream_availability = str(raw.get("availability") or "").strip().lower()
+        if upstream_availability in {"", "unknown"} and normalized_title in _YTDLP_UNAVAILABLE_TITLES:
+            upstream_availability = _YTDLP_UNAVAILABLE_TITLES[normalized_title]
         explicitly_unavailable = upstream_availability in _NON_INGESTIBLE_AVAILABILITIES
 
         if source_url:
@@ -282,7 +289,7 @@ def normalize_preflight_items(raw_items: list[dict[str, Any]]) -> list[PlaylistP
                 normalized_source_id=normalized_source_id,
                 source_kind=source_kind,
                 availability=availability,
-                title=_string_or_none(raw.get("title")),
+                title=normalized_title,
                 speaker=_string_or_none(raw.get("speaker") or raw.get("channel") or raw.get("uploader")),
                 duration_seconds=_coerce_duration(raw.get("duration") or raw.get("duration_seconds")),
                 published_at=_string_or_none(raw.get("published_at") or raw.get("upload_date")),
