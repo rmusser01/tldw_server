@@ -12,6 +12,7 @@ labels:
 dependencies: []
 documentation:
 - docs/superpowers/specs/2026-07-12-metadata-only-web-ingestion-guard-design.md
+- docs/superpowers/plans/2026-07-12-metadata-only-web-ingestion-guard-implementation-plan.md
 priority: high
 modified_files:
 - tldw_Server_API/app/core/Web_Scraping/Article_Extractor_Lib.py
@@ -61,3 +62,9 @@ Spec approved; implementation planning pending.
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Spec approved. TDD implementation plan written, independently reviewed, and approved. Ready for execution handoff.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
