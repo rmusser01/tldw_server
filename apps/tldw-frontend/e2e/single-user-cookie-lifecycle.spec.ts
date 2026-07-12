@@ -562,6 +562,13 @@ test.describe.serial("single-user HttpOnly cookie lifecycle", () => {
           localStorage.getItem("tldwCookieSessionConfig")
         )
       ).not.toBeNull()
+      const preLogoutCheck = page
+        .getByRole("button", { name: /^(Recheck|Test Connection)$/ })
+        .first()
+      await preLogoutCheck.click()
+      await expect(page.getByText("Core: reachable")).toBeVisible()
+      await expect(page.getByText("RAG: healthy")).toBeVisible()
+      await expect(preLogoutCheck).not.toHaveAttribute("aria-busy", "true")
 
       const preservedRemote = await startManualApiKeyFixture(HOSTILE_PORT)
       try {
@@ -598,6 +605,8 @@ test.describe.serial("single-user HttpOnly cookie lifecycle", () => {
           apiKeyServerOrigin: PRESERVED_REMOTE_URL,
           apiKey: PRESERVED_REMOTE_API_KEY,
         })
+        await expect(page.getByText("Core: not checked yet")).toBeVisible()
+        await expect(page.getByText("RAG: not checked yet")).toBeVisible()
 
         const remoteRequestOffset = preservedRemote.requests().length
         await page

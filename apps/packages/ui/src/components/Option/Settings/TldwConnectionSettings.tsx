@@ -347,6 +347,7 @@ export const TldwConnectionSettings = ({
             {
               label: t('settings:tldw.buttons.logout', 'Logout'),
               onClick: onLogout,
+              loading: logoutLoading,
               variant: "danger",
             }
           }

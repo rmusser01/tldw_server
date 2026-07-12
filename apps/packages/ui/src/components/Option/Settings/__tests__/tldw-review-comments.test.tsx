@@ -433,7 +433,7 @@ describe("settings PR review fixes", () => {
   it("renders the logged-in notice through the design-system alert primitive and preserves logout", () => {
     const onLogout = vi.fn()
 
-    render(
+    const { rerender } = render(
       <TldwConnectionSettings
         {...createConnectionProps({
           authMode: "multi-user",
@@ -451,6 +451,22 @@ describe("settings PR review fixes", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Logout" }))
     expect(onLogout).toHaveBeenCalledTimes(1)
+
+    rerender(
+      <TldwConnectionSettings
+        {...createConnectionProps({
+          authMode: "multi-user",
+          isLoggedIn: true,
+          logoutLoading: true,
+          onLogout
+        })}
+      />
+    )
+    expect(screen.getByRole("button", { name: "Logout" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Logout" })).toHaveAttribute(
+      "aria-busy",
+      "true"
+    )
   })
 
   it("offers cookie-session logout through the production auth handler", () => {

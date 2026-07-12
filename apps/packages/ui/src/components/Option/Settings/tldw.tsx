@@ -655,6 +655,10 @@ export const TldwSettings = () => {
       await tldwAuth.logout()
       setIsLoggedIn(false)
       await loadConfig()
+      setConnectionStatus(null)
+      setConnectionDetail("")
+      setCoreStatus("unknown")
+      setRagStatus("unknown")
       message.success(t('settings:tldw.logout.success', 'Logged out successfully'))
     } catch (error) {
       message.error(t('settings:tldw.logout.failed', 'Logout failed'))
