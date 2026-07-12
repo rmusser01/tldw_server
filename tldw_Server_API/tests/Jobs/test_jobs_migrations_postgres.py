@@ -1,4 +1,3 @@
-import os
 
 import pytest
 
@@ -6,8 +5,18 @@ psycopg = pytest.importorskip("psycopg")
 
 from tldw_Server_API.app.core.Jobs.pg_migrations import ensure_jobs_tables_pg
 
-
 pytestmark = [pytest.mark.pg_jobs]
+
+
+EXPECTED_PLAYLIST_TABLES = {
+    "playlist_preflights",
+    "playlist_preflight_items",
+    "playlist_materializations",
+    "playlist_materialization_items",
+    "media_ingest_runs",
+    "media_ingest_run_items",
+    "media_ingest_run_events",
+}
 
 
 @pytest.fixture(autouse=True)
@@ -44,3 +53,19 @@ def test_pg_forward_migration_adds_missing_columns_and_partial_indexes(jobs_pg_d
             row2 = cur.fetchone()
             assert row2 is not None
             assert "status = 'queued'" in (row2[1] or "")
+
+
+def test_postgres_schema_has_playlist_ingest_tables(jobs_pg_dsn):
+    ensure_jobs_tables_pg(jobs_pg_dsn)
+
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT table_name
+            FROM information_schema.tables
+            WHERE table_schema = current_schema()
+            """
+        )
+        tables = {row[0] for row in cur.fetchall()}
+
+    assert tables >= EXPECTED_PLAYLIST_TABLES

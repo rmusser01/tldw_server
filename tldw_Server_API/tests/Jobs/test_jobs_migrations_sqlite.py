@@ -8,6 +8,16 @@ import pytest
 from tldw_Server_API.app.core.DB_Management import sqlite_policy
 from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
 
+EXPECTED_PLAYLIST_TABLES = {
+    "playlist_preflights",
+    "playlist_preflight_items",
+    "playlist_materializations",
+    "playlist_materialization_items",
+    "media_ingest_runs",
+    "media_ingest_run_items",
+    "media_ingest_run_events",
+}
+
 
 def test_sqlite_schema_has_expected_columns_and_indexes(tmp_path):
 
@@ -42,6 +52,20 @@ def test_sqlite_schema_has_expected_columns_and_indexes(tmp_path):
         ensure_jobs_tables(Path(db_path))
     finally:
         conn.close()
+
+
+def test_sqlite_schema_has_playlist_ingest_tables(tmp_path):
+    db_path = ensure_jobs_tables(tmp_path / "jobs_playlist_ingest.db")
+
+    with sqlite3.connect(db_path) as conn:
+        tables = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+
+    assert tables >= EXPECTED_PLAYLIST_TABLES
 
 
 def test_jobs_migrations_uses_shared_sqlite_policy_helper(tmp_path):

@@ -209,6 +209,163 @@ CREATE TABLE IF NOT EXISTS job_dependencies (
 );
 CREATE INDEX IF NOT EXISTS idx_job_dependencies_job ON job_dependencies(job_uuid);
 CREATE INDEX IF NOT EXISTS idx_job_dependencies_depends_on ON job_dependencies(depends_on_job_uuid);
+
+-- Owner-scoped immutable playlist inspection snapshots
+CREATE TABLE IF NOT EXISTS playlist_preflights (
+  preflight_id TEXT PRIMARY KEY,
+  owner_user_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  source_url TEXT NOT NULL,
+  source_kind TEXT NOT NULL,
+  playlist_id TEXT,
+  job_id INTEGER,
+  summary_json TEXT,
+  error_json TEXT,
+  created_at TEXT NOT NULL DEFAULT (DATETIME('now')),
+  updated_at TEXT NOT NULL DEFAULT (DATETIME('now')),
+  expires_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_playlist_preflights_owner_status
+  ON playlist_preflights(owner_user_id, status);
+CREATE INDEX IF NOT EXISTS idx_playlist_preflights_job ON playlist_preflights(job_id);
+CREATE INDEX IF NOT EXISTS idx_playlist_preflights_expiry ON playlist_preflights(expires_at);
+
+CREATE TABLE IF NOT EXISTS playlist_preflight_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  preflight_id TEXT NOT NULL,
+  owner_user_id TEXT NOT NULL,
+  occurrence_id TEXT NOT NULL UNIQUE,
+  ordinal INTEGER NOT NULL CHECK (ordinal >= 1),
+  occurrence_index_for_source INTEGER NOT NULL CHECK (occurrence_index_for_source >= 1),
+  source_url TEXT,
+  normalized_source_id TEXT,
+  source_kind TEXT NOT NULL,
+  availability TEXT NOT NULL,
+  duplicate_status TEXT NOT NULL,
+  duplicate_of_occurrence_id TEXT,
+  selected_by_default INTEGER NOT NULL DEFAULT 1 CHECK (selected_by_default IN (0, 1)),
+  display_metadata_json TEXT,
+  UNIQUE (preflight_id, ordinal)
+);
+CREATE INDEX IF NOT EXISTS idx_playlist_preflight_items_owner_source
+  ON playlist_preflight_items(owner_user_id, normalized_source_id);
+CREATE INDEX IF NOT EXISTS idx_playlist_preflight_items_preflight_ordinal
+  ON playlist_preflight_items(preflight_id, ordinal);
+
+-- Owner-bound queue records copied from a completed preflight
+CREATE TABLE IF NOT EXISTS playlist_materializations (
+  materialization_id TEXT PRIMARY KEY,
+  preflight_id TEXT NOT NULL,
+  owner_user_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (DATETIME('now')),
+  updated_at TEXT NOT NULL DEFAULT (DATETIME('now')),
+  expires_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_playlist_materializations_owner_status
+  ON playlist_materializations(owner_user_id, status);
+CREATE INDEX IF NOT EXISTS idx_playlist_materializations_expiry
+  ON playlist_materializations(expires_at);
+
+CREATE TABLE IF NOT EXISTS playlist_materialization_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  materialization_id TEXT NOT NULL,
+  owner_user_id TEXT NOT NULL,
+  occurrence_id TEXT NOT NULL,
+  ordinal INTEGER NOT NULL CHECK (ordinal >= 1),
+  source_url TEXT NOT NULL,
+  normalized_source_id TEXT,
+  source_kind TEXT NOT NULL,
+  display_metadata_json TEXT,
+  UNIQUE (materialization_id, ordinal),
+  UNIQUE (materialization_id, occurrence_id)
+);
+CREATE INDEX IF NOT EXISTS idx_playlist_materialization_items_owner_source
+  ON playlist_materialization_items(owner_user_id, normalized_source_id);
+CREATE INDEX IF NOT EXISTS idx_playlist_materialization_items_occurrence
+  ON playlist_materialization_items(occurrence_id);
+
+-- Lightweight manifest connecting selected occurrences to Jobs
+CREATE TABLE IF NOT EXISTS media_ingest_runs (
+  run_id TEXT PRIMARY KEY,
+  owner_user_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  collection_id INTEGER,
+  processing_options_json TEXT,
+  playlist_summaries_json TEXT,
+  batch_ids_json TEXT,
+  version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
+  created_at TEXT NOT NULL DEFAULT (DATETIME('now')),
+  updated_at TEXT NOT NULL DEFAULT (DATETIME('now')),
+  expires_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_media_ingest_runs_owner_status
+  ON media_ingest_runs(owner_user_id, status);
+CREATE INDEX IF NOT EXISTS idx_media_ingest_runs_expiry ON media_ingest_runs(expires_at);
+
+CREATE TABLE IF NOT EXISTS media_ingest_run_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id TEXT NOT NULL,
+  owner_user_id TEXT NOT NULL,
+  occurrence_id TEXT NOT NULL,
+  ordinal INTEGER NOT NULL CHECK (ordinal >= 1),
+  input_kind TEXT NOT NULL,
+  materialization_id TEXT,
+  source_url TEXT,
+  normalized_source_id TEXT,
+  source_kind TEXT,
+  display_metadata_json TEXT,
+  duplicate_policy TEXT,
+  metadata_patch_json TEXT,
+  state TEXT NOT NULL,
+  outcome TEXT,
+  job_id INTEGER,
+  batch_id TEXT,
+  attempt INTEGER NOT NULL DEFAULT 1 CHECK (attempt >= 1),
+  idempotency_identity TEXT,
+  planned_collection_item_id INTEGER,
+  progress_percent REAL CHECK (progress_percent IS NULL OR (progress_percent >= 0 AND progress_percent <= 100)),
+  progress_message TEXT,
+  retryable INTEGER NOT NULL DEFAULT 0 CHECK (retryable IN (0, 1)),
+  media_id INTEGER,
+  error_code TEXT,
+  error_message TEXT,
+  created_at TEXT NOT NULL DEFAULT (DATETIME('now')),
+  updated_at TEXT NOT NULL DEFAULT (DATETIME('now')),
+  UNIQUE (run_id, ordinal),
+  UNIQUE (run_id, occurrence_id),
+  UNIQUE (run_id, occurrence_id, attempt)
+);
+CREATE INDEX IF NOT EXISTS idx_media_ingest_run_items_owner_state
+  ON media_ingest_run_items(owner_user_id, state);
+CREATE INDEX IF NOT EXISTS idx_media_ingest_run_items_run_ordinal
+  ON media_ingest_run_items(run_id, ordinal);
+CREATE INDEX IF NOT EXISTS idx_media_ingest_run_items_source
+  ON media_ingest_run_items(normalized_source_id);
+CREATE INDEX IF NOT EXISTS idx_media_ingest_run_items_job ON media_ingest_run_items(job_id);
+CREATE INDEX IF NOT EXISTS idx_media_ingest_run_items_attempt
+  ON media_ingest_run_items(run_id, occurrence_id, attempt);
+
+CREATE TABLE IF NOT EXISTS media_ingest_run_events (
+  event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id TEXT NOT NULL,
+  owner_user_id TEXT NOT NULL,
+  occurrence_id TEXT,
+  job_id INTEGER,
+  batch_id TEXT,
+  event_type TEXT NOT NULL,
+  state TEXT,
+  outcome TEXT,
+  progress_percent REAL CHECK (progress_percent IS NULL OR (progress_percent >= 0 AND progress_percent <= 100)),
+  progress_message TEXT,
+  attrs_json TEXT,
+  occurred_at TEXT NOT NULL DEFAULT (DATETIME('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_media_ingest_run_events_owner_run_event
+  ON media_ingest_run_events(owner_user_id, run_id, event_id);
+CREATE INDEX IF NOT EXISTS idx_media_ingest_run_events_occurrence
+  ON media_ingest_run_events(run_id, occurrence_id, event_id);
+CREATE INDEX IF NOT EXISTS idx_media_ingest_run_events_job ON media_ingest_run_events(job_id);
 """
 
 
