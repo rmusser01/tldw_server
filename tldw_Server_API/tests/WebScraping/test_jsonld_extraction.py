@@ -4,6 +4,79 @@ from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import (
 )
 
 
+DESCRIPTION_ONLY_JSONLD = """
+<html>
+  <head>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Article",
+        "headline": "Structured title",
+        "description": "Structured summary"
+      }
+    </script>
+  </head>
+  <body></body>
+</html>
+"""
+
+
+def test_jsonld_description_only_is_not_successful():
+    result = extract_jsonld_entities(DESCRIPTION_ONLY_JSONLD, "https://example.com")
+
+    assert result["extraction_successful"] is False
+    assert result["content"] == ""
+    assert result["summary"] == "Structured summary"
+
+
+def test_pipeline_retains_jsonld_summary_after_fallback():
+    def fallback_extractor(_html: str, url: str) -> dict[str, str | bool]:
+        return {
+            "url": url,
+            "title": "Fallback title",
+            "author": "N/A",
+            "date": "N/A",
+            "content": "Fallback body",
+            "summary": "   ",
+            "extraction_successful": True,
+        }
+
+    result = extract_article_with_pipeline(
+        DESCRIPTION_ONLY_JSONLD,
+        "https://example.com",
+        strategy_order=["jsonld", "trafilatura"],
+        fallback_extractor=fallback_extractor,
+    )
+
+    assert result["content"] == "Fallback body"
+    assert result["extraction_strategy"] == "trafilatura"
+    assert result["summary"] == "Structured summary"
+
+
+def test_pipeline_keeps_fallback_summary_over_jsonld_summary():
+    def fallback_extractor(_html: str, url: str) -> dict[str, str | bool]:
+        return {
+            "url": url,
+            "title": "Fallback title",
+            "author": "N/A",
+            "date": "N/A",
+            "content": "Fallback body",
+            "summary": "Fallback summary",
+            "extraction_successful": True,
+        }
+
+    result = extract_article_with_pipeline(
+        DESCRIPTION_ONLY_JSONLD,
+        "https://example.com",
+        strategy_order=["jsonld", "trafilatura"],
+        fallback_extractor=fallback_extractor,
+    )
+
+    assert result["content"] == "Fallback body"
+    assert result["extraction_strategy"] == "trafilatura"
+    assert result["summary"] == "Fallback summary"
+
+
 def test_jsonld_extraction_basic():
     html = """
     <html>

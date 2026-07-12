@@ -1005,10 +1005,9 @@ def _jsonld_score_candidate(node: dict[str, Any]) -> tuple[int, int]:
     return score, content_len
 
 
-def _jsonld_has_content(result: dict[str, Any]) -> bool:
+def _jsonld_has_body(result: dict[str, Any]) -> bool:
     content = result.get("content")
-    summary = result.get("summary")
-    return any(isinstance(value, str) and value.strip() for value in (content, summary))
+    return isinstance(content, str) and bool(content.strip())
 
 
 def _collect_jsonld_nodes(data: Any) -> list[dict[str, Any]]:
@@ -1211,7 +1210,7 @@ def extract_jsonld_entities(html_text: str, url: str) -> dict[str, Any]:
     if content:
         result["content"] = content
 
-    result["extraction_successful"] = _jsonld_has_content(result)
+    result["extraction_successful"] = _jsonld_has_body(result)
     return result
 
 
@@ -2467,6 +2466,7 @@ def extract_article_with_pipeline(
     allow_llm_extraction: bool = True,
 ) -> dict[str, Any]:
     trace: list[dict[str, Any]] = []
+    jsonld_summary: Optional[str] = None
     order, unknown = _normalize_strategy_order(strategy_order)
     if not allow_llm_extraction:
         order = [strategy for strategy in order if strategy != "llm"]
@@ -2478,6 +2478,9 @@ def extract_article_with_pipeline(
         *,
         strategy: Optional[str],
     ) -> dict[str, Any]:
+        summary = result.get("summary")
+        if jsonld_summary and (not isinstance(summary, str) or not summary.strip()):
+            result["summary"] = jsonld_summary
         final = _attach_trace(result, trace, strategy, order)
         if _should_clear_caches("end"):
             clear_extraction_caches()
@@ -2491,6 +2494,9 @@ def extract_article_with_pipeline(
         if strategy == "jsonld":
             with _strategy_throttle(strategy):
                 result = extract_jsonld_entities(html, url)
+            summary = result.get("summary")
+            if isinstance(summary, str) and summary.strip():
+                jsonld_summary = summary
             last_result = result
             if result.get("extraction_successful"):
                 trace.append(_trace_entry(strategy, "success", "jsonld_extracted"))
