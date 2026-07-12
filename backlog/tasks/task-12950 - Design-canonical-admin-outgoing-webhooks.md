@@ -32,6 +32,7 @@ Write and review the canonical public design for one secure admin outgoing-webho
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-07-12: Conversational design approved and written to Docs/Design/2026-07-12-canonical-admin-outgoing-webhooks.md. The spec records one final router, server-generated one-time secrets, encrypted target URLs and secrets under a dedicated key ring, new canonical tables, legacy JSON/DB import, six privacy-bounded events, Jobs-only retry, cross-database enqueue recovery, published HMAC protocol, egress controls, feature modes, rollback boundaries, two upstream PRs, and verification gates. Independent written-spec review is pending; no product code changed.
+Spec review iteration 1 returned one hosted retirement blocker and three upstream advisories. Upstream spec now enumerates the durable source identity for all six events, defines idempotent secret replay and key-rotation behavior when the dedicated key ring is unavailable/in transition, and defines the AuthNZ delivery state machine plus Jobs transition ownership and in-flight lifecycle races. Re-review pending.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

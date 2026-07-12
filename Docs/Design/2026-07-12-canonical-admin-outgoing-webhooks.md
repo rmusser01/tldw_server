@@ -265,7 +265,20 @@ If no usable dedicated key is available:
   available;
 - create, URL update, enable, rotate, test, automatic delivery, and manual
   redelivery return `503 admin_webhook_key_unavailable`;
+- an exact create/rotate idempotency replay that would reveal a secret also
+  returns `503` and remains replayable when the same key ring is restored; it
+  never generates a replacement resource or secret;
+- same-key/different-body detection can still return `409` from the stored
+  request hash without decrypting replay material;
 - no plaintext fallback is written.
+
+Key rotation places secret-returning mutations and replays in a bounded
+`key_rotation_in_progress` maintenance state. It re-encrypts registration
+targets, registration secrets, and unexpired idempotency replay secrets before
+readback verification. The previous key remains configured until every row is
+verified. A request interrupted by rotation receives `503` and can retry with
+the same idempotency key after rotation; it does not receive a partial or newly
+generated response.
 
 The full destination URL is encrypted at rest. Separate non-secret hostname and
 redacted-display columns support listing, policy review, and audit without
@@ -404,6 +417,24 @@ truncated into misleading payloads.
 
 ### Durable Producers
 
+Each initial event has one explicit durable source identity:
+
+| Event | Durable source | Canonical source identity |
+| --- | --- | --- |
+| `user.created` | AuthNZ user-create transaction | operation command ID generated before the transaction and persisted with the event |
+| `user.deleted` | AuthNZ user-delete transaction | operation command ID generated before the transaction and persisted with the deletion/event |
+| `incident.created` | incident record plus pending marker in `system_ops.json` | incident ID and incident version |
+| `incident.updated` | incident record plus pending marker in `system_ops.json` | incident ID and incident version |
+| `incident.resolved` | incident record plus pending marker in `system_ops.json` | incident ID and incident version |
+| `incident.notify` | explicit notify command marker in `system_ops.json` | operator command ID generated before the locked save |
+
+User command IDs are created by the service before entering the database
+transaction and are reused if that operation is retried. Incident versions are
+incremented in the same locked file mutation that writes the marker. Notify
+command IDs are reused across request/idempotency retries. The repository's
+unique source key turns repeated producer or reconciler calls into reads of the
+existing event rather than new events.
+
 Database-backed user mutations insert the source event in the same AuthNZ
 transaction as the user change. A committed user mutation cannot lose its event,
 and a rolled-back mutation cannot emit one.
@@ -455,6 +486,46 @@ If the reconciler crashes at any point, an expired claim can be recovered. A
 reconciler that finds an existing Jobs job by idempotency key attaches it rather
 than creating another. Tests cover every crash point with all four AuthNZ/Jobs
 backend combinations.
+
+### Delivery State Machine And Ownership
+
+AuthNZ stores the operator-facing delivery state. Jobs stores lease, schedule,
+retry, and job terminal state. Neither database is treated as a distributed
+transaction participant.
+
+| Delivery state | Writer | Meaning and allowed next states |
+| --- | --- | --- |
+| `pending` | event producer | Durable row exists but has no enqueue claim; next is `enqueue_claimed`, `canceled`, `superseded`, or `dead` on expiry |
+| `enqueue_claimed` | reconciler | A claim token/expiry owns the enqueue handshake; next is `queued`, back to `pending` after safe recovery, or a terminal lifecycle state |
+| `queued` | reconciler | One Jobs ID is attached; next is `processing`, `canceled`, `superseded`, or `dead` on expiry |
+| `processing` | worker | One leased Jobs attempt passed the final pre-I/O checks; next is `succeeded`, `retry_wait`, `dead`, or a terminal lifecycle state observed before I/O |
+| `retry_wait` | worker | Attempt metadata is recorded and Jobs owns the next availability time; next is `processing`, `canceled`, `superseded`, or `dead` |
+| `succeeded` | worker | Receiver returned 2xx; terminal |
+| `dead` | worker or expiry reconciler | Nonretryable response, exhausted retries, or `delivery_expired`; terminal |
+| `canceled` | control-plane service or worker | Disabled, rotated, or deleted before an HTTP request began; terminal with a specific reason code |
+| `superseded` | control-plane service or worker | Delivery configuration no longer matches and no HTTP request began; terminal |
+
+The producer and reconciler update AuthNZ only. The worker conditionally marks
+`processing` with Jobs ID, lease ID, and attempt number before I/O. A retryable
+failure records bounded attempt metadata and `retry_wait`, then raises the typed
+Jobs retry signal; it does not calculate or poll its own timer. On reacquisition,
+the same Jobs ID and delivery ID return to `processing` with a higher attempt.
+
+Lifecycle cancellation uses conditional updates and asks Jobs to cancel queued
+or retrying work. It cannot convert an already-started HTTP request into a claim
+that nothing was sent. If disable, rotate, update, or delete wins before the
+worker's final pre-I/O compare-and-set, the worker records the matching terminal
+reason and sends nothing. If the worker has already crossed that boundary, it
+records the real attempt result. A successful response remains `succeeded` with
+an audit/metadata flag such as `completed_after_config_change`; it is not
+rewritten as canceled.
+
+Terminal AuthNZ states are monotonic. Recovery code may repair a stale
+nonterminal mirror from the authoritative Jobs record, but cannot overwrite a
+terminal delivery with an older Jobs observation. A missing Jobs row for a
+claimed/queued delivery is reconciled through the same idempotency key; a Jobs
+terminal state without an AuthNZ terminal state is repaired idempotently from
+bounded job result metadata.
 
 ### Worker Contract
 
