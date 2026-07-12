@@ -741,6 +741,12 @@ def load_parakeet_onnx_model(model_path: Optional[str] = None, device: str = 'cp
                     allow_patterns=_PARAKEET_ONNX_ALLOW_PATTERNS,
                 )  # nosec B615
                 repair_attempted = True
+                if _remote_parakeet_cache_needs_refresh(model_dir):
+                    logger.error(
+                        "Remote Parakeet ONNX cache remains incomplete after refresh: {}",
+                        model_dir,
+                    )
+                    return None, None
 
         # Set up providers
         providers = []

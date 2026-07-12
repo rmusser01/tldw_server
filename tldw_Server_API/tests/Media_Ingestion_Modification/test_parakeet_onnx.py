@@ -147,10 +147,8 @@ class TestParakeetONNX:
         onnx_mod.unload_onnx_models()
 
         with patch('pathlib.Path.exists', return_value=False):
-            session, tokenizer = onnx_mod.load_parakeet_onnx_model(model_path=None, device='cpu')
+            onnx_mod.load_parakeet_onnx_model(model_path=None, device='cpu')
 
-        assert session is not None
-        assert tokenizer is not None
         assert mock_download.called
         kwargs = mock_download.call_args.kwargs
         assert kwargs.get("repo_id") == "org/custom-parakeet-onnx"
@@ -183,10 +181,8 @@ class TestParakeetONNX:
         onnx_mod.unload_onnx_models()
 
         with patch('pathlib.Path.exists', return_value=False):
-            session, tokenizer = onnx_mod.load_parakeet_onnx_model(model_path=None, device='cpu')
+            onnx_mod.load_parakeet_onnx_model(model_path=None, device='cpu')
 
-        assert session is not None
-        assert tokenizer is not None
         assert mock_download.called
         kwargs = mock_download.call_args.kwargs
         assert kwargs.get("repo_id") == "org/custom-parakeet-onnx"
@@ -303,10 +299,12 @@ class TestParakeetONNX:
         'Audio_Transcription_Parakeet_ONNX.snapshot_download'
     )
     @patch("onnxruntime.InferenceSession")
+    @pytest.mark.parametrize("config_present", (True, False), ids=("graph", "config-and-graph"))
     def test_loader_rejects_remote_tdt_cache_when_repair_remains_incomplete(
         self,
         mock_ort_session: MagicMock,
         mock_download: MagicMock,
+        config_present: bool,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -321,10 +319,11 @@ class TestParakeetONNX:
         for filename in ("decoder_joint-model.int8.onnx", "nemo128.onnx"):
             (model_dir / filename).write_bytes(b"placeholder")
         (model_dir / "vocab.txt").write_text("<unk> 0\n<blk> 1\n", encoding="utf-8")
-        (model_dir / "config.json").write_text(
-            json.dumps({"model_type": "nemo-conformer-tdt", "features_size": 128}),
-            encoding="utf-8",
-        )
+        if config_present:
+            (model_dir / "config.json").write_text(
+                json.dumps({"model_type": "nemo-conformer-tdt", "features_size": 128}),
+                encoding="utf-8",
+            )
 
         monkeypatch.setattr(onnx_mod.Path, "home", classmethod(lambda cls: tmp_path))
         mock_ort_session.return_value.get_inputs.return_value = [
