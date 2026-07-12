@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   tldwRequest: vi.fn(),
   getRuntimeSingleUserApiKeyOverride: vi.fn(),
   storageGet: vi.fn(async (_key?: string) => null),
+  sessionStorageGet: vi.fn(async (_key?: string) => null),
   storageSet: vi.fn(async () => undefined)
 }))
 
@@ -33,9 +34,31 @@ vi.mock("@/services/tldw/request-core", async () => {
 })
 
 vi.mock("@/utils/safe-storage", () => ({
-  createSafeStorage: () => ({
-    get: (...args: unknown[]) =>
-      (mocks.storageGet as (...args: unknown[]) => unknown)(...args),
+  createSafeStorage: (options?: { area?: string }) => ({
+    get: async (...args: unknown[]) => {
+      const value = await (options?.area === "session"
+        ? (mocks.sessionStorageGet as (...args: unknown[]) => unknown)(...args)
+        : (mocks.storageGet as (...args: unknown[]) => unknown)(...args))
+      if (
+        options?.area !== "session" &&
+        args[0] === "tldwConfig" &&
+        value &&
+        typeof value === "object" &&
+        (value as any).authMode === "single-user" &&
+        typeof (value as any).apiKey === "string" &&
+        typeof (value as any).serverUrl === "string" &&
+        !(value as any).credentialSource
+      ) {
+        const serverOrigin = new URL(String((value as any).serverUrl)).origin
+        return {
+          ...(value as Record<string, unknown>),
+          credentialSource: "manual",
+          apiKeyPersistence: "device",
+          apiKeyServerOrigin: serverOrigin
+        }
+      }
+      return value
+    },
     set: (...args: unknown[]) =>
       (mocks.storageSet as (...args: unknown[]) => unknown)(...args)
   })
@@ -43,7 +66,8 @@ vi.mock("@/utils/safe-storage", () => ({
 
 vi.mock("@/services/tldw/runtime-auth-override", () => ({
   getRuntimeSingleUserApiKeyOverride: (...args: unknown[]) =>
-    (mocks.getRuntimeSingleUserApiKeyOverride as (...args: unknown[]) => unknown)(...args)
+    (mocks.getRuntimeSingleUserApiKeyOverride as (...args: unknown[]) => unknown)(...args),
+  isCookieSessionConfigInvalidated: () => false
 }))
 
 const importProxy = async () => import("@/services/background-proxy")
@@ -57,9 +81,11 @@ describe("background proxy fallback safety", () => {
     mocks.tldwRequest.mockReset()
     mocks.getRuntimeSingleUserApiKeyOverride.mockReset()
     mocks.storageGet.mockReset()
+    mocks.sessionStorageGet.mockReset()
     mocks.storageSet.mockReset()
     mocks.getRuntimeSingleUserApiKeyOverride.mockReturnValue(null)
     mocks.storageGet.mockResolvedValue(null)
+    mocks.sessionStorageGet.mockResolvedValue(null)
     mocks.storageSet.mockResolvedValue(undefined)
   })
 
@@ -726,6 +752,110 @@ describe("background proxy fallback safety", () => {
 
     expect(mocks.sendMessage).not.toHaveBeenCalled()
     expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
+  })
+
+  it("hydrates an origin-bound session key for direct uploads without persisting it", async () => {
+    const persistentConfig = {
+      serverUrl: "https://api.example.test",
+      authMode: "single-user",
+      authSource: "manual",
+      credentialSource: "manual",
+      apiKeyPersistence: "session",
+      apiKeyServerOrigin: "https://api.example.test"
+    }
+    mocks.storageGet.mockImplementation(async (key: string) =>
+      key === "tldwConfig" ? persistentConfig : null
+    )
+    mocks.sessionStorageGet.mockImplementation(async (key: string) =>
+      key === "tldwManualSessionApiKey"
+        ? {
+            apiKey: "session-upload-key",
+            credentialSource: "manual",
+            apiKeyPersistence: "session",
+            apiKeyServerOrigin: "https://api.example.test"
+          }
+        : null
+    )
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true }
+    })
+
+    const { bgUpload } = await importProxy()
+    await bgUpload({
+      path: "/api/v1/media/ingest/jobs",
+      method: "POST",
+      fields: { media_type: "document" },
+      preferDirect: true
+    })
+
+    const runtime = mocks.tldwRequest.mock.calls[0]?.[1] as {
+      getConfig: () => Promise<Record<string, unknown>>
+    }
+    await expect(runtime.getConfig()).resolves.toMatchObject({
+      apiKey: "session-upload-key"
+    })
+    expect(persistentConfig).not.toHaveProperty("apiKey")
+    expect(mocks.storageSet).not.toHaveBeenCalledWith(
+      "tldwConfig",
+      expect.objectContaining({ apiKey: "session-upload-key" })
+    )
+  })
+
+  it("hydrates an origin-bound session key for direct HTTP streams without persisting it", async () => {
+    const persistentConfig = {
+      serverUrl: "https://api.example.test",
+      authMode: "single-user",
+      authSource: "manual",
+      credentialSource: "manual",
+      apiKeyPersistence: "session",
+      apiKeyServerOrigin: "https://api.example.test"
+    }
+    mocks.sendMessage.mockResolvedValue({ ok: false })
+    mocks.storageGet.mockImplementation(async (key: string) =>
+      key === "tldwConfig" ? persistentConfig : null
+    )
+    mocks.sessionStorageGet.mockImplementation(async (key: string) =>
+      key === "tldwManualSessionApiKey"
+        ? {
+            apiKey: "session-stream-key",
+            credentialSource: "manual",
+            apiKeyPersistence: "session",
+            apiKeyServerOrigin: "https://api.example.test"
+          }
+        : null
+    )
+    const fetchSpy = vi.fn(async () =>
+      new Response('data: {"ok":true}\n\ndata: [DONE]\n\n', {
+        status: 200,
+        headers: { "content-type": "text/event-stream" }
+      })
+    )
+    vi.stubGlobal("fetch", fetchSpy as any)
+
+    try {
+      const { bgStream } = await importProxy()
+      const chunks: string[] = []
+      for await (const chunk of bgStream({
+        path: "/api/v1/chat/completions",
+        method: "POST",
+        body: { stream: true }
+      })) {
+        chunks.push(chunk)
+      }
+
+      expect(chunks).toContain('{"ok":true}')
+      const headers = new Headers(fetchSpy.mock.calls[0]?.[1]?.headers)
+      expect(headers.get("X-API-KEY")).toBe("session-stream-key")
+      expect(persistentConfig).not.toHaveProperty("apiKey")
+      expect(mocks.storageSet).not.toHaveBeenCalledWith(
+        "tldwConfig",
+        expect.objectContaining({ apiKey: "session-stream-key" })
+      )
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it("appends multiple named files for direct-preferred uploads", async () => {

@@ -62,7 +62,7 @@ import {
   isCompleteDeviceCredential,
   MANUAL_SESSION_KEY,
   normalizeServerOrigin,
-  resolveManualCredential,
+  resolveEffectiveTldwConfig,
   toPersistedTldwConfig
 } from "@/services/tldw/single-user-credential"
 import {
@@ -1823,7 +1823,6 @@ export class TldwApiClientBase {
     )
       ? storedCookieSession
       : null
-    let hydratedManual = storedManual
     if (storedManual) {
       const origin = normalizeServerOrigin(storedManual.serverUrl)
       const hasLegacyManualKey =
@@ -1859,23 +1858,35 @@ export class TldwApiClientBase {
           .set("tldwConfig", persistedManual)
           .catch(() => undefined)
       }
-
-      const manualApiKey = await resolveManualCredential(persistedManual, {
-        session: this.sessionStorage
-      })
-      hydratedManual = { ...persistedManual }
-      if (manualApiKey) {
-        hydratedManual.apiKey = manualApiKey
-      } else if (!isCompleteDeviceCredential(hydratedManual)) {
-        delete hydratedManual.apiKey
-        if (hydratedManual.apiKeyPersistence === "session") {
-          await this.sessionStorage
-            .remove(MANUAL_SESSION_KEY)
-            .catch(() => undefined)
-        }
-      }
+      storedManual = persistedManual
     }
-    const stored = activeCookieSession || hydratedManual
+    const stored = await resolveEffectiveTldwConfig(
+      {
+        persistent: {
+          get: async <T>(key: string) =>
+            key === "tldwConfig"
+              ? (storedManual as T | null | undefined)
+              : await this.storage.get<T>(key),
+          set: <T>(key: string, value: T) => this.storage.set(key, value),
+          remove: (key: string) => this.storage.remove(key)
+        },
+        session: this.sessionStorage
+      },
+      activeCookieSession
+        ? {
+            cookieSession: activeCookieSession,
+            expectedCookieOrigin: quickstartWebUiServerUrl
+          }
+        : undefined
+    )
+    if (
+      storedManual?.apiKeyPersistence === "session" &&
+      !stored?.apiKey
+    ) {
+      await this.sessionStorage
+        .remove(MANUAL_SESSION_KEY)
+        .catch(() => undefined)
+    }
 
     if (!stored) {
       // True first-run without quickstart auth material: leave config null so

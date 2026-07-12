@@ -143,6 +143,53 @@ describe("TldwApiClient connection storage sync", () => {
     })
   })
 
+  it("initializes from the effective cookie config without exposing preserved manual auth", async () => {
+    const previousMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    const preservedManual = {
+      serverUrl: "https://remote.example.test",
+      authMode: "single-user",
+      authSource: "manual",
+      apiKey: "preserved-device-key",
+      credentialSource: "manual",
+      apiKeyPersistence: "device",
+      apiKeyServerOrigin: "https://remote.example.test"
+    }
+    mocks.storage.set("tldwConfig", preservedManual)
+    mocks.storage.set("tldwCookieSessionConfig", {
+      serverUrl: window.location.origin,
+      authMode: "single-user",
+      authSource: "cookie-session",
+      apiKey: "must-not-leak",
+      apiBearer: "must-not-leak",
+      accessToken: "must-not-leak",
+      refreshToken: "must-not-leak"
+    })
+
+    try {
+      const client = new TldwApiClient()
+      await client.initialize()
+
+      const effective = await client.getConfig()
+      expect(effective).toMatchObject({
+        serverUrl: window.location.origin,
+        authMode: "single-user",
+        authSource: "cookie-session"
+      })
+      expect(effective).not.toHaveProperty("apiKey")
+      expect(effective).not.toHaveProperty("apiBearer")
+      expect(effective).not.toHaveProperty("accessToken")
+      expect(effective).not.toHaveProperty("refreshToken")
+      expect(mocks.storage.get("tldwConfig")).toEqual(preservedManual)
+    } finally {
+      if (previousMode === undefined) {
+        delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+      } else {
+        process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = previousMode
+      }
+    }
+  })
+
   it("uses the in-memory WebUI config for audio preset mutations", async () => {
     const client = new TldwApiClient()
     await client.updateConfig({

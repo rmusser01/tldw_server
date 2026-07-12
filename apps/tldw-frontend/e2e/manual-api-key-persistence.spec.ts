@@ -59,6 +59,50 @@ const saveManualConnection = async (
     .not.toBeNull()
 }
 
+const expectProductionRagRequest = async (
+  page: Page,
+  fixture: ManualApiKeyFixture,
+  authenticated: boolean
+): Promise<void> => {
+  const requestOffset = fixture.requests().length
+  await page
+    .getByRole("button", { name: /^(Recheck|Test Connection)$/ })
+    .first()
+    .click()
+  if (authenticated) {
+    await expect
+      .poll(() =>
+        fixture
+          .requests()
+          .slice(requestOffset)
+          .some(
+            (request) =>
+              request.path === "/api/v1/rag/health" && request.authenticated
+          )
+      )
+      .toBe(true)
+    return
+  }
+
+  await expect
+    .poll(() =>
+      fixture
+        .requests()
+        .slice(requestOffset)
+        .some((request) => !request.authenticated)
+    )
+    .toBe(true)
+  expect(
+    fixture
+      .requests()
+      .slice(requestOffset)
+      .some(
+        (request) =>
+          request.path === "/api/v1/rag/health" && request.authenticated
+      )
+  ).toBe(false)
+}
+
 test.describe.serial("manual WebUI API-key persistence", () => {
   let fixture: ManualApiKeyFixture
 
@@ -70,7 +114,7 @@ test.describe.serial("manual WebUI API-key persistence", () => {
     await fixture?.close()
   })
 
-  test("device save survives hard reload and reopening the same browser profile", async ({}, testInfo) => {
+  test("device save survives hard reload and reopening the same browser profile", async ({ browserName: _browserName }, testInfo) => {
     const profile = testInfo.outputPath("device-profile")
 
     await withPersistentBrowser(profile, async (_context, page) => {
@@ -83,6 +127,7 @@ test.describe.serial("manual WebUI API-key persistence", () => {
       await expect(
         page.getByRole("checkbox", { name: "Remember on this device" })
       ).toBeChecked()
+      await expectProductionRagRequest(page, fixture, true)
     })
 
     await withPersistentBrowser(profile, async (_context, page) => {
@@ -99,10 +144,11 @@ test.describe.serial("manual WebUI API-key persistence", () => {
         apiKey: MANUAL_API_KEY,
         apiKeyServerOrigin: fixture.url
       })
+      await expectProductionRagRequest(page, fixture, true)
     })
   })
 
-  test("session save survives reload but not reopening the browser profile", async ({}, testInfo) => {
+  test("session save survives reload but not reopening the browser profile", async ({ browserName: _browserName }, testInfo) => {
     const profile = testInfo.outputPath("session-profile")
 
     await withPersistentBrowser(profile, async (_context, page) => {
@@ -122,6 +168,7 @@ test.describe.serial("manual WebUI API-key persistence", () => {
       await expect(
         page.getByRole("checkbox", { name: "Remember on this device" })
       ).not.toBeChecked()
+      await expectProductionRagRequest(page, fixture, true)
     })
 
     await withPersistentBrowser(profile, async (_context, page) => {
@@ -133,6 +180,7 @@ test.describe.serial("manual WebUI API-key persistence", () => {
       expect(
         await page.evaluate(() => localStorage.getItem("tldwConfig"))
       ).not.toContain(MANUAL_API_KEY)
+      await expectProductionRagRequest(page, fixture, false)
     })
   })
 })

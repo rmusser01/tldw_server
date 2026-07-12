@@ -7,8 +7,16 @@ import {
   resolveBrowserRequestTransport,
   tldwRequest
 } from "@/services/tldw/request-core"
-import { resolveAdvancedRequestTransportGuard } from "@/services/tldw/browser-networking"
-import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
+import {
+  COOKIE_SESSION_CONFIG_KEY,
+  resolveAdvancedRequestTransportGuard
+} from "@/services/tldw/browser-networking"
+import {
+  getRuntimeSingleUserApiKeyOverride,
+  isCookieSessionConfigInvalidated
+} from "@/services/tldw/runtime-auth-override"
+import { resolveEffectiveTldwConfig } from "@/services/tldw/single-user-credential"
+import type { TldwConfig } from "@/services/tldw/TldwApiClient"
 import {
   BACKEND_UNREACHABLE_EVENT,
   type BackendUnreachableDetail
@@ -453,8 +461,42 @@ const pruneRateLimitedGetResults = () => {
 
 type DirectRuntimeStorage = Pick<
   ReturnType<typeof createSafeStorage>,
-  "get" | "set"
+  "get" | "set" | "remove"
 >
+
+const getQuickstartWebUiCookie = async (
+  storage: DirectRuntimeStorage
+): Promise<
+  | { cookieSession: TldwConfig | null; expectedCookieOrigin: string }
+  | undefined
+> => {
+  if (isCookieSessionConfigInvalidated() || typeof window === "undefined") {
+    return undefined
+  }
+  const protocol = String(window.location?.protocol || "").toLowerCase()
+  if (protocol !== "http:" && protocol !== "https:") return undefined
+  const deploymentMode = String(
+    typeof process !== "undefined"
+      ? process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE || ""
+      : ""
+  ).trim()
+  if (deploymentMode !== "quickstart") return undefined
+  const expectedCookieOrigin = String(window.location?.origin || "").trim()
+  if (!expectedCookieOrigin) return undefined
+  const cookieSession = await storage
+    .get<TldwConfig>(COOKIE_SESSION_CONFIG_KEY)
+    .catch(() => null)
+  return { cookieSession, expectedCookieOrigin }
+}
+
+const resolveDirectConfig = async (storage: DirectRuntimeStorage) =>
+  await resolveEffectiveTldwConfig(
+    {
+      persistent: storage,
+      session: createSafeStorage({ area: "session" })
+    },
+    await getQuickstartWebUiCookie(storage)
+  )
 
 // Module-level single-flight for the web/direct fallback token refresh. Mirrors
 // the extension worker's `refreshInFlight`: concurrent 401s (a common pattern
@@ -469,9 +511,7 @@ const refreshAuthDirect = async (
   if (!webRefreshInFlight) {
     webRefreshInFlight = (async () => {
       const cfg =
-        ((await storage.get("tldwConfig").catch(() => null)) as
-          | Record<string, unknown>
-          | null) || null
+        (await resolveDirectConfig(storage)) || null
       const refreshToken = String((cfg?.refreshToken as string) || "").trim()
       // Signal failure (throw) rather than resolving silently: request-core
       // treats a resolved refreshAuth as success and would retry with the stale
@@ -488,7 +528,7 @@ const refreshAuthDirect = async (
           body: { refresh_token: refreshToken },
           noAuth: true
         },
-        { getConfig: () => storage.get("tldwConfig").catch(() => null) }
+        { getConfig: () => resolveDirectConfig(storage) }
       )
       const tokens = (resp?.ok ? resp.data : null) as
         | { access_token?: string; refresh_token?: string }
@@ -499,13 +539,10 @@ const refreshAuthDirect = async (
         )
       }
       const latest =
-        ((await storage.get("tldwConfig").catch(() => null)) as
-          | Record<string, unknown>
-          | null) ||
-        cfg ||
-        {}
+        (await resolveDirectConfig(storage)) ||
+        cfg
       await storage.set("tldwConfig", {
-        ...latest,
+        ...(latest || {}),
         accessToken: tokens.access_token,
         refreshToken:
           tokens.refresh_token ||
@@ -523,7 +560,7 @@ const refreshAuthDirect = async (
 // request-core's 401 refresh-and-retry runs in the browser (not just inside the
 // extension worker), and single-flights it across concurrent callers.
 const createDirectRuntime = (storage: DirectRuntimeStorage) => ({
-  getConfig: () => storage.get("tldwConfig").catch(() => null),
+  getConfig: () => resolveDirectConfig(storage),
   refreshAuth: () => refreshAuthDirect(storage)
 })
 
@@ -1080,7 +1117,7 @@ async function* bgStreamDirect<
   { path, method = 'POST' as UpperLower<M>, headers = {}, body, streamIdleTimeoutMs, abortSignal }: BgStreamInit<P, M>
 ): AsyncGenerator<string> {
   const storage = createSafeStorage({ area: "local" })
-  const cfg = (await storage.get<Record<string, unknown>>("tldwConfig").catch(() => null)) || null
+  const cfg = (await resolveDirectConfig(storage)) || null
   const normalizedPath = normalizeKnownPathQuirks(path)
   const isAbsolute = typeof normalizedPath === "string" && /^https?:/i.test(normalizedPath)
   const absolutePath = isAbsolute ? String(normalizedPath) : ""
@@ -1097,7 +1134,13 @@ async function* bgStreamDirect<
     hasConfiguredServerUrl: Boolean(cfg?.serverUrl),
     isAbsolute
   })
-  if (isAbsolute && !isAbsoluteUrlAllowlisted(absolutePath, cfg)) {
+  if (
+    isAbsolute &&
+    !isAbsoluteUrlAllowlisted(
+      absolutePath,
+      cfg as unknown as Record<string, unknown>
+    )
+  ) {
     throw new Error(ABSOLUTE_URL_BLOCK_ERROR)
   }
   if (advancedTransportGuard.isUnconfigured) {
@@ -1111,7 +1154,10 @@ async function* bgStreamDirect<
     : transport?.url ||
       `${baseUrl}${String(normalizedPath).startsWith("/") ? "" : "/"}${String(normalizedPath)}`
   const sameOriginAbsolute = isAbsolute
-    ? isSameOriginAbsoluteUrlForConfiguredServer(absolutePath, cfg)
+    ? isSameOriginAbsoluteUrlForConfiguredServer(
+        absolutePath,
+        cfg as unknown as Record<string, unknown>
+      )
     : false
   const shouldSkipAuth = isAbsolute && !sameOriginAbsolute
   const resolvedHeaders: Record<string, string> = { ...(headers || {}) }
@@ -1207,9 +1253,7 @@ async function* bgStreamDirect<
         const tokens = await refreshResp.json().catch(() => null)
         if (tokens?.access_token) {
           const latestCfg =
-            (await storage
-              .get<Record<string, unknown>>("tldwConfig")
-              .catch(() => null)) || null
+            (await resolveDirectConfig(storage)) || null
           const updated = {
             ...(latestCfg || cfg || {}),
             accessToken: tokens.access_token,

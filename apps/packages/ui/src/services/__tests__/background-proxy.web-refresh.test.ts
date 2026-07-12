@@ -6,7 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 // so bgRequest skips the extension messaging path and uses the direct fallback.
 const mocks = vi.hoisted(() => ({
   store: {} as Record<string, unknown>,
+  sessionStore: {} as Record<string, unknown>,
   storageGet: vi.fn(),
+  sessionStorageGet: vi.fn(),
   storageSet: vi.fn()
 }))
 
@@ -18,8 +20,11 @@ vi.mock("wxt/browser", () => ({
 }))
 
 vi.mock("@/utils/safe-storage", () => ({
-  createSafeStorage: () => ({
-    get: (...args: unknown[]) => (mocks.storageGet as any)(...args),
+  createSafeStorage: (options?: { area?: string }) => ({
+    get: (...args: unknown[]) =>
+      options?.area === "session"
+        ? (mocks.sessionStorageGet as any)(...args)
+        : (mocks.storageGet as any)(...args),
     set: (...args: unknown[]) => (mocks.storageSet as any)(...args)
   })
 }))
@@ -33,6 +38,7 @@ describe("background proxy web token refresh", () => {
     vi.resetModules()
     vi.useRealTimers()
     delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+    document.cookie = "csrf_token=; Max-Age=0; Path=/"
     mocks.store = {
       tldwConfig: {
         serverUrl: "https://api.example.com",
@@ -41,13 +47,67 @@ describe("background proxy web token refresh", () => {
         refreshToken: "refresh-token"
       }
     }
+    mocks.sessionStore = {}
     mocks.storageGet.mockReset()
+    mocks.sessionStorageGet.mockReset()
     mocks.storageSet.mockReset()
     mocks.storageGet.mockImplementation(async (key: string) => mocks.store[key] ?? null)
+    mocks.sessionStorageGet.mockImplementation(
+      async (key: string) => mocks.sessionStore[key] ?? null
+    )
     mocks.storageSet.mockImplementation(async (key: string, value: unknown) => {
       mocks.store[key] = value
     })
   })
+
+  it.each(["POST", "PATCH"])(
+    "prefers an active exact-origin cookie marker and adds current CSRF for %s",
+    async (method) => {
+      process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+      document.cookie = "csrf_token=fresh-csrf; Path=/"
+      mocks.store = {
+        tldwConfig: {
+          serverUrl: "https://remote.example.test",
+          authMode: "single-user",
+          authSource: "manual",
+          apiKey: "preserved-remote-key",
+          credentialSource: "manual",
+          apiKeyPersistence: "device",
+          apiKeyServerOrigin: "https://remote.example.test"
+        },
+        tldwCookieSessionConfig: {
+          serverUrl: window.location.origin,
+          authMode: "single-user",
+          authSource: "cookie-session",
+          apiKey: "must-not-leak",
+          accessToken: "must-not-leak"
+        }
+      }
+      const fetchSpy = vi.fn(async () =>
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      )
+      vi.stubGlobal("fetch", fetchSpy as any)
+
+      const { bgRequest } = await importProxy()
+      await bgRequest({
+        path: "/api/v1/notes/search/" as unknown as `/${string}`,
+        method: method as "POST",
+        body: { q: "cookie" },
+        preferDirect: true
+      })
+
+      const headers = new Headers(fetchSpy.mock.calls[0]?.[1]?.headers)
+      expect(headers.get("X-CSRF-Token")).toBe("fresh-csrf")
+      expect(headers.has("X-API-KEY")).toBe(false)
+      expect(headers.has("Authorization")).toBe(false)
+      expect(mocks.store.tldwConfig).toMatchObject({
+        apiKey: "preserved-remote-key"
+      })
+    }
+  )
 
   afterEach(() => {
     if (originalDeploymentMode === undefined) {

@@ -191,6 +191,68 @@ const extensionStorageValue = async (
     { storageArea: area, storageKey: key }
   )
 
+const expectProductionRagRequest = async (
+  page: Page,
+  fixture: ManualApiKeyFixture,
+  authenticated: boolean
+): Promise<void> => {
+  const requestOffset = fixture.requests().length
+  await page.evaluate(
+    async ({ origin }) => {
+      await new Promise<void>((resolve) => {
+        chrome.storage.local.set(
+          {
+            tldwCookieSessionConfig: {
+              serverUrl: origin,
+              authMode: "single-user",
+              authSource: "cookie-session"
+            }
+          },
+          () => resolve()
+        )
+      })
+    },
+    { origin: fixture.url }
+  )
+  await page
+    .getByRole("button", { name: /^(Recheck|Test Connection)$/ })
+    .first()
+    .click()
+
+  if (authenticated) {
+    await expect
+      .poll(() =>
+        fixture
+          .requests()
+          .slice(requestOffset)
+          .some(
+            (request) =>
+              request.path === "/api/v1/rag/health" && request.authenticated
+          )
+      )
+      .toBe(true)
+    return
+  }
+
+  await expect
+    .poll(() =>
+      fixture
+        .requests()
+        .slice(requestOffset)
+        .some((request) => !request.authenticated)
+    )
+    .toBe(true)
+  expect(
+    fixture
+      .requests()
+      .slice(requestOffset)
+      .some(
+        (request) =>
+          request.path === "/api/v1/rag/health" && request.authenticated
+      )
+  ).toBe(false)
+}
+
 test.describe.serial("manual extension API-key persistence", () => {
   test.describe.configure({ timeout: 180_000 })
   let fixture: ManualApiKeyFixture
@@ -203,7 +265,7 @@ test.describe.serial("manual extension API-key persistence", () => {
     await fixture?.close()
   })
 
-  test("device save survives reopening the same extension installation and profile", async ({}, testInfo) => {
+  test("device save survives reopening the same extension installation and profile", async ({ browserName: _browserName }, testInfo) => {
     const extensionPath = prepareExtension(
       resolveBuiltExtension(),
       testInfo.outputPath("extension-device"),
@@ -226,6 +288,7 @@ test.describe.serial("manual extension API-key persistence", () => {
             await extensionStorageValue(page, "local", "tldwConfig")
           )
         ).toContain(MANUAL_API_KEY)
+        await expectProductionRagRequest(page, fixture, true)
       } finally {
         await context.close()
       }
@@ -245,13 +308,14 @@ test.describe.serial("manual extension API-key persistence", () => {
         await expect(
           page.getByRole("checkbox", { name: "Remember on this device" })
         ).toBeChecked()
+        await expectProductionRagRequest(page, fixture, true)
       } finally {
         await context.close()
       }
     }
   })
 
-  test("session save is cleared when the extension browser session restarts", async ({}, testInfo) => {
+  test("session save is cleared when the extension browser session restarts", async ({ browserName: _browserName }, testInfo) => {
     const extensionPath = prepareExtension(
       resolveBuiltExtension(),
       testInfo.outputPath("extension-session"),
@@ -283,6 +347,11 @@ test.describe.serial("manual extension API-key persistence", () => {
             )
           )
         ).toContain(MANUAL_API_KEY)
+        await page.reload({ waitUntil: "domcontentloaded" })
+        await expect(page.getByText("tldw Server Configuration")).toBeVisible({
+          timeout: 60_000
+        })
+        await expectProductionRagRequest(page, fixture, true)
       } finally {
         await context.close()
       }
@@ -306,6 +375,7 @@ test.describe.serial("manual extension API-key persistence", () => {
             "tldwManualSessionApiKey"
           )
         ).toBeUndefined()
+        await expectProductionRagRequest(page, fixture, false)
       } finally {
         await context.close()
       }
