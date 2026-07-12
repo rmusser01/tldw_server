@@ -63,6 +63,11 @@ import {
   isDbMessageDuplicate,
 } from "./QuickIngest/constants"
 import { isQuickIngestPlaylistPreflightDetail } from "@/utils/quick-ingest-open"
+import {
+  DEFAULT_PRESET,
+  DEFAULT_PRESETS,
+  type PresetMap,
+} from "./QuickIngest/presets"
 
 // ---------------------------------------------------------------------------
 // Props
@@ -73,6 +78,9 @@ type QuickIngestWizardModalProps = {
   onClose: () => void
   /** When true, automatically skip to processing on mount (compat with old modal). */
   autoProcessQueued?: boolean
+  presetMap?: PresetMap
+  openRevision?: number
+  createNewDraft?: () => QuickIngestSessionRecord
 }
 
 type QuickIngestEntryType = "auto" | "html" | "pdf" | "document" | "audio" | "video"
@@ -132,7 +140,7 @@ const QUICK_INGEST_MODAL_STYLES = {
   body: {
     padding: "0 16px 16px",
     maxHeight: "calc(100vh - 180px)",
-    overflowY: "auto",
+    overflowY: "auto" as const,
   },
 }
 
@@ -1833,6 +1841,9 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
   open,
   onClose,
   autoProcessQueued = false,
+  presetMap = DEFAULT_PRESETS,
+  openRevision = 0,
+  createNewDraft,
 }) => {
   const {
     session,
@@ -1871,8 +1882,13 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
 
   useEffect(() => {
     if (!open || session) return
-    createDraftSession()
-  }, [createDraftSession, open, session])
+    createDraftSession({
+      selectedPreset: DEFAULT_PRESET,
+      customBasePreset: DEFAULT_PRESET,
+      presetConfig: presetMap[DEFAULT_PRESET],
+      customOptions: {},
+    })
+  }, [createDraftSession, open, presetMap, session])
 
   const persistWizardState = useCallback(
     (state: IngestWizardState) => {
@@ -1904,11 +1920,14 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
 
   if (!session || !initialState) return null
 
+  const providerKey = `${session.id}:${openRevision}`
+
   return (
     <IngestWizardProvider
-      key={session.id}
+      key={providerKey}
       initialState={initialState}
       onStateChange={persistWizardState}
+      presetMap={presetMap}
     >
       <WizardModalContent
         open={open}
@@ -1918,7 +1937,7 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
         markProcessingTracking={markProcessingTracking}
         markInterrupted={markInterrupted}
         showSession={showSession}
-        replaceWithNewDraft={replaceWithNewDraft}
+        replaceWithNewDraft={createNewDraft ?? replaceWithNewDraft}
         shouldAttemptPersistedReattach={
           session.lifecycle === "processing" &&
           session.tracking?.mode === "webui-direct" &&

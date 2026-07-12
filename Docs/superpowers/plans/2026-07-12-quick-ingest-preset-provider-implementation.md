@@ -24,13 +24,13 @@
 **Goal:** Capture saved presets before creating, rebasing, or rendering eligible drafts.
 **Success Criteria:** No fallback persistence during hydration; lifecycle exclusions and Ingest More boundaries hold.
 **Tests:** `QuickIngestButton.resume.test.tsx` and modal session cases.
-**Status:** In Progress
+**Status:** Complete
 
 ### Stage 3: Provider recovery UI
 **Goal:** Add the editable provider control and recoverable redirect.
 **Success Criteria:** Missing providers focus Configure with localized accessible feedback and no request.
 **Tests:** Configure/modal integration and session cases.
-**Status:** Not Started
+**Status:** In Progress
 
 ### Stage 4: Runtime verification
 **Goal:** Prove shared behavior under WebUI and extension adapters.
