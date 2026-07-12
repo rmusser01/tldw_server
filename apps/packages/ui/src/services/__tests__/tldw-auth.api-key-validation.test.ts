@@ -47,8 +47,10 @@ describe("TldwAuthService.testApiKey", () => {
       expect(url).toBe("https://example.com/api/v1/users/me/profile")
       expect(init).toMatchObject({
         method: "GET",
-        headers: { "X-API-KEY": "real-api-key" }
+        headers: { "X-API-KEY": "real-api-key" },
+        credentials: "omit"
       })
+      expect(init?.headers).not.toHaveProperty("Authorization")
       return new Response(JSON.stringify({ id: 1 }), {
         status: 200,
         headers: { "Content-Type": "application/json" }

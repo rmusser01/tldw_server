@@ -70,6 +70,7 @@ import {
   validateMagicLinkAuth,
   categorizeConnectionError,
   isConnectivityErrorKind,
+  shouldClearManualApiKeyForServerChange,
   type ConnectionErrorKind,
   type ValidationResult,
 } from "./validation"
@@ -435,6 +436,7 @@ export function OnboardingConnectForm({
 
   const urlInputRef = useRef<InputRef | null>(null)
   const apiKeyInputRef = useRef<InputRef | null>(null)
+  const configuredApiKeyServerUrlRef = useRef("")
   const usernameInputRef = useRef<InputRef | null>(null)
   const magicEmailInputRef = useRef<InputRef | null>(null)
   const hasLoadedInitialConfigRef = useRef(false)
@@ -450,7 +452,10 @@ export function OnboardingConnectForm({
         const cfg = await tldwClient.getConfig()
         if (cfg?.serverUrl) setServerUrl(cfg.serverUrl)
         if (cfg?.authMode) setAuthMode(cfg.authMode)
-        if (cfg?.apiKey) setApiKey(cfg.apiKey)
+        if (cfg?.apiKey) {
+          setApiKey(cfg.apiKey)
+          configuredApiKeyServerUrlRef.current = cfg.serverUrl
+        }
 
         if (!cfg?.serverUrl) {
           const fallback = await getTldwServerURL()
@@ -614,7 +619,9 @@ export function OnboardingConnectForm({
           )
         }
       })
-      await actions.setConfigPartial({ serverUrl })
+      if (authMode !== "single-user") {
+        await actions.setConfigPartial({ serverUrl })
+      }
 
       // Give a moment for the UI to show "checking"
       await new Promise((r) => setTimeout(r, 300))
@@ -661,10 +668,12 @@ export function OnboardingConnectForm({
         return
       }
 
-      await actions.setConfigPartial({
-        authMode,
-        apiKey: authMode === "single-user" ? apiKey : undefined,
-      })
+      if (authMode === "single-user") {
+        configuredApiKeyServerUrlRef.current = serverUrl
+        await actions.setConfigPartial({ serverUrl, authMode })
+      } else {
+        await actions.setConfigPartial({ authMode })
+      }
 
       // Phase 3: Run full connection test (authentication is verified here)
       dispatchUi({
@@ -1602,7 +1611,19 @@ export function OnboardingConnectForm({
                 "http://127.0.0.1:8000"
               )}
               value={serverUrl}
-              onChange={(e) => setServerUrl(e.target.value)}
+              onChange={(e) => {
+                const nextServerUrl = e.target.value
+                if (
+                  apiKey &&
+                  shouldClearManualApiKeyForServerChange(
+                    configuredApiKeyServerUrlRef.current,
+                    nextServerUrl
+                  )
+                ) {
+                  setApiKey("")
+                }
+                setServerUrl(nextServerUrl)
+              }}
               status={
                 serverUrl && !urlValidation.valid ? "error" : undefined
               }

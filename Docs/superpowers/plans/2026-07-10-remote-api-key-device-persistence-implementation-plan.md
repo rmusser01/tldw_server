@@ -232,7 +232,7 @@ git commit -m "feat(web): persist manual API keys by selected scope"
 - Consumes: Task 2 save/clear methods.
 - Produces: `testApiKey(serverUrl, apiKey)` as an unaffiliated candidate probe and `commitManualServerTransition()`.
 
-- [ ] **Step 1: Write failing origin-transition tests**
+- [x] **Step 1: Write failing origin-transition tests**
 
 ```ts
 it("candidate probe sends only the submitted key", async () => {
@@ -251,13 +251,13 @@ it("keeps the old configuration when the new-origin probe fails", async () => {
 })
 ```
 
-- [ ] **Step 2: Run tests and confirm failures**
+- [x] **Step 2: Run tests and confirm failures**
 
 Run: `cd apps && bunx vitest run packages/ui/src/services/tldw/__tests__/TldwAuth.api-key-origin.test.ts packages/ui/src/components/Option/Onboarding/__tests__/OnboardingConnectForm.connection-ui.test.ts packages/ui/src/components/Option/Settings/__tests__/tldw-review-comments.test.tsx`
 
 Expected: form save publishes config before a fully isolated origin transition is established.
 
-- [ ] **Step 3: Implement explicit probe then ordered commit**
+- [x] **Step 3: Implement explicit probe then ordered commit**
 
 ```ts
 async testApiKey(serverUrl: string, apiKey: string): Promise<boolean> {
@@ -283,13 +283,13 @@ async function commitManualServerTransition(input: ManualConnectionInput) {
 
 When a populated form changes to a different valid origin, clear its visible key field. Preserve it for path/trailing-slash changes on the same origin. Keep invalid URLs from invoking a probe.
 
-- [ ] **Step 4: Run origin transition tests**
+- [x] **Step 4: Run origin transition tests**
 
 Run: `cd apps && bunx vitest run packages/ui/src/services/tldw/__tests__/TldwAuth.api-key-origin.test.ts packages/ui/src/components/Option/Onboarding/__tests__/OnboardingConnectForm.connection-ui.test.ts packages/ui/src/components/Option/Settings/__tests__/tldw-review-comments.test.tsx`
 
 Expected: all selected tests pass.
 
-- [ ] **Step 5: Commit safe origin transitions**
+- [x] **Step 5: Commit safe origin transitions**
 
 ```bash
 git add apps/packages/ui/src/services/tldw/TldwAuth.ts apps/packages/ui/src/components/Option/Onboarding apps/packages/ui/src/components/Option/Settings

@@ -375,6 +375,7 @@ export class TldwAuthService {
       const response = await fetch(validationUrl, {
         method: 'GET',
         headers: { 'X-API-KEY': apiKey },
+        credentials: 'omit',
         signal: controller.signal
       })
 

@@ -184,6 +184,7 @@ const createConnectionProps = (
   form: {
     setFieldValue: vi.fn()
   } as any,
+  configuredServerUrl: "https://api.example.test/path",
   authMode: "single-user",
   setAuthMode: vi.fn(),
   isLoggedIn: false,
@@ -281,6 +282,30 @@ describe("settings PR review fixes", () => {
     expect(props.setMagicToken).toHaveBeenCalledWith("")
     expect(props.setMagicSent).toHaveBeenCalledWith(false)
     expect(props.setIsLoggedIn).toHaveBeenCalledWith(false)
+  })
+
+  it("clears the visible API key when the server changes to a different origin", () => {
+    const props = createConnectionProps()
+    render(<TldwConnectionSettings {...props} />)
+
+    fireEvent.change(
+      screen.getByPlaceholderText("http://127.0.0.1:8000"),
+      { target: { value: "https://other.example.test/path" } }
+    )
+
+    expect(props.form.setFieldValue).toHaveBeenCalledWith("apiKey", "")
+  })
+
+  it("preserves the visible API key for path-only changes on the same origin", () => {
+    const props = createConnectionProps()
+    render(<TldwConnectionSettings {...props} />)
+
+    fireEvent.change(
+      screen.getByPlaceholderText("http://127.0.0.1:8000"),
+      { target: { value: "https://api.example.test/other/" } }
+    )
+
+    expect(props.form.setFieldValue).not.toHaveBeenCalledWith("apiKey", "")
   })
 
   it("does not register magic-link inputs as named Form fields", () => {

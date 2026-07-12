@@ -4,28 +4,21 @@ title: Add explicit single-user API key device persistence and relaunch coverage
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: 2026-07-10 22:44
+updated_date: '2026-07-12 00:12'
 labels: []
 dependencies:
-- TASK-12108
+  - TASK-12108
 references:
-- TASK-12108
-- TASK-12030
-- TASK-12127
-- https://github.com/rmusser01/tldw_server/issues/2590
+  - TASK-12108
+  - TASK-12030
+  - TASK-12127
+  - 'https://github.com/rmusser01/tldw_server/issues/2590'
 documentation:
-- Docs/superpowers/specs/2026-07-10-single-user-api-key-device-persistence-design.md
-- docs/superpowers/plans/2026-07-10-remote-api-key-device-persistence-implementation-plan.md
+  - >-
+    Docs/superpowers/specs/2026-07-10-single-user-api-key-device-persistence-design.md
+  - >-
+    docs/superpowers/plans/2026-07-10-remote-api-key-device-persistence-implementation-plan.md
 priority: high
-modified_files:
-- apps/packages/ui/src/services/tldw/TldwApiClient.ts
-- apps/packages/ui/src/services/tldw/TldwAuth.ts
-- apps/packages/ui/src/store/connection.tsx
-- apps/packages/ui/src/services/__tests__/tldw-api-client.connection-sync.test.ts
-- apps/packages/ui/src/services/__tests__/tldw-api-client.quickstart-auth.test.ts
-- apps/packages/ui/src/services/__tests__/tldw-auth.refresh-rotation.test.ts
-- apps/packages/ui/src/store/__tests__/connection.test.ts
-- Docs/superpowers/plans/2026-07-10-remote-api-key-device-persistence-implementation-plan.md
 ---
 
 ## Description
@@ -55,6 +48,10 @@ Implementation plan: docs/superpowers/plans/2026-07-10-remote-api-key-device-per
 
 <!-- SECTION:NOTES:BEGIN -->
 This task covers manually configured remote WebUI and browser-extension API-key persistence; same-origin runtime auth is TASK-12108 and never exposes or persists its key. Manual device persistence remains atomically in tldwConfig with complete manual/device/origin metadata so existing background and streaming readers continue working. Manual session keys use session storage. Candidate probes never inherit old auth; origin transitions are ordered; ambiguous or runtime-owned legacy values fail closed; persistence falls back device → session → memory. Design: Docs/superpowers/specs/2026-07-10-single-user-api-key-device-persistence-design.md
+
+2026-07-11 Task 3 complete after feature-only rebase onto origin/dev d28c16bfa3. Candidate API-key probes use the submitted origin/key with credentials omitted; invalid URLs do not probe; old config remains unchanged on probe failure; onboarding/settings commit only after success; visible keys clear only across valid origin changes. Verification: focused Vitest 5 files/28 tests passed; broader auth/storage/bootstrap regression 10 files/134 tests passed; scoped ESLint 0 errors (48 pre-existing warnings).
+
+2026-07-10 Task 2 complete: TldwApiClient migrates only confidently manual legacy keys, scrubs ambiguous keys, hydrates session credentials transiently, and provides explicit device/session/memory save plus fail-closed clear semantics. Logout and restart-onboarding reset clear manual credentials; updateConfig clears on auth-mode or normalized-origin changes and never writes hydrated session/env keys back to persistent storage. Device-write failures downgrade to session; session failures downgrade to memory. Persistent clear failures propagate. Verification: TDD RED observed; 46/46 focused tests; 18/18 extension bootstrap tests; repo-pinned ESLint 0 errors; git diff --check clean. TypeScript had 16 unrelated baseline errors. Spec and code-quality/security reviews approved. Bandit not applicable to TypeScript/TSX-only changes.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -76,11 +73,3 @@ This task covers manually configured remote WebUI and browser-extension API-key 
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-This task covers manually configured remote WebUI and browser-extension API-key persistence; same-origin runtime auth is TASK-12108 and never exposes or persists its key. Manual device persistence remains atomically in tldwConfig with complete manual/device/origin metadata so existing background and streaming readers continue working. Manual session keys use session storage. Candidate probes never inherit old auth; origin transitions are ordered; ambiguous or runtime-owned legacy values fail closed; persistence falls back device → session → memory. Design: Docs/superpowers/specs/2026-07-10-single-user-api-key-device-persistence-design.md
-
-2026-07-10 Task 2 complete: TldwApiClient now migrates only confidently manual legacy keys, scrubs ambiguous keys, hydrates session credentials transiently, and provides explicit device/session/memory save plus fail-closed clear semantics. Explicit logout and restart-onboarding reset clear manual credentials; updateConfig clears on auth-mode or normalized-origin changes and never writes hydrated session/env keys back to persistent storage. Device-write failures downgrade to session; session failures downgrade to memory and remove misleading persisted session metadata. Persistent clear failures propagate rather than falsely reactivating stale credentials. Verification: TDD RED observed; 46/46 focused tests; 18/18 extension bootstrap tests; repo-pinned ESLint 0 errors; git diff --check clean. TypeScript has 16 unrelated baseline errors outside Task 2 files. Spec and code-quality/security reviews approved. Bandit not applicable to TypeScript/TSX-only changes.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->

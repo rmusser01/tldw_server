@@ -18,6 +18,7 @@ import type { PathOrUrl } from "@/services/tldw/openapi-guard"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import { useConnectionStore } from "@/store/connection"
 import { mapMultiUserLoginErrorMessage } from "@/services/auth-errors"
+import { commitManualServerTransition } from "@/components/Option/Onboarding/validation"
 import { emitSplashAfterSingleUserAuthSuccess } from "@/services/splash-auth"
 import { ServerOverviewHint } from "@/components/Common/ServerOverviewHint"
 import { requestOptionalHostPermission } from "@/utils/extension-permissions"
@@ -195,7 +196,25 @@ export const TldwSettings = () => {
         }
       )
 
-      await tldwClient.updateConfig(config)
+      if (values.authMode === 'single-user') {
+        await commitManualServerTransition({
+          serverUrl: values.serverUrl,
+          apiKey: values.apiKey,
+          persistence: "device"
+        })
+        const {
+          serverUrl: _serverUrl,
+          authMode: _authMode,
+          apiKey: _apiKey,
+          accessToken: _accessToken,
+          refreshToken: _refreshToken,
+          ...settingsConfig
+        } = config
+        await tldwClient.updateConfig(settingsConfig)
+      } else {
+        await tldwClient.updateConfig(config)
+      }
+      setServerUrl(values.serverUrl)
       message.success(t("settings:savedSuccessfully"))
 
       await testConnection({
@@ -832,6 +851,7 @@ export const TldwSettings = () => {
           <TldwConnectionSettings
             t={t}
             form={form}
+            configuredServerUrl={serverUrl}
             authMode={authMode}
             setAuthMode={setAuthMode}
             isLoggedIn={isLoggedIn}

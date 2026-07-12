@@ -13,6 +13,7 @@ import React from "react"
 import type { TFunction } from "i18next"
 import { isFirefoxTarget } from "@/config/platform"
 import { Alert } from "@/components/ui/primitives"
+import { shouldClearManualApiKeyForServerChange } from "@/components/Option/Onboarding/validation"
 import {
   getCoreStatusLabel,
   getRagStatusLabel,
@@ -25,6 +26,7 @@ export type LoginMethod = "magic-link" | "password"
 export type TldwConnectionSettingsProps = {
   t: TFunction
   form: FormInstance
+  configuredServerUrl: string
   authMode: "single-user" | "multi-user"
   setAuthMode: (mode: "single-user" | "multi-user") => void
   isLoggedIn: boolean
@@ -77,6 +79,7 @@ const ragStatusColor = (status: RagStatus) => {
 export const TldwConnectionSettings = ({
   t,
   form,
+  configuredServerUrl,
   authMode,
   setAuthMode,
   isLoggedIn,
@@ -122,6 +125,16 @@ export const TldwConnectionSettings = ({
             'settings:tldw.fields.serverUrl.placeholder',
             'http://127.0.0.1:8000'
           ) as string}
+          onChange={(event) => {
+            if (
+              shouldClearManualApiKeyForServerChange(
+                configuredServerUrl,
+                event.target.value
+              )
+            ) {
+              form.setFieldValue('apiKey', '')
+            }
+          }}
         />
       </Form.Item>
       <Form.Item
