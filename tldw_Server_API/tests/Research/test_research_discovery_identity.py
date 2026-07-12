@@ -385,3 +385,84 @@ def test_unpaywall_resolver_wraps_doi_lookup_and_sanitizes_signed_pdf_url():
     assert candidates[0].url_redacted is True
     assert candidates[0].safe_url == "https://repo.example/paper.pdf"
     assert "SECRET" not in candidates[0].candidate_id
+
+
+def test_discovery_result_recommends_first_stable_pdf_candidate():
+    from tldw_Server_API.app.core.Research.discovery.identity import normalize_and_merge_records
+
+    results = normalize_and_merge_records(
+        [
+            {
+                "source_id": "openalex",
+                "provider": "openalex",
+                "title": "Stable candidate selection",
+                "doi": "10.1000/stable-selection",
+                "raw_urls": [
+                    "https://repo.example/signed.pdf?token=SECRET",
+                    "https://repo.example/stable.pdf",
+                ],
+            }
+        ],
+        catalog_version="research-discovery-v1",
+    )
+
+    result = results[0]
+    stable_candidate = next(candidate for candidate in result.oa_candidates if not candidate.requires_reresolution)
+    assert result.recommended_candidate_id == stable_candidate.candidate_id
+    assert result.ingest_eligible is True
+
+
+def test_discovery_result_marks_redacted_only_pdf_as_ineligible():
+    from tldw_Server_API.app.core.Research.discovery.identity import normalize_and_merge_records
+
+    results = normalize_and_merge_records(
+        [
+            {
+                "source_id": "openalex",
+                "provider": "openalex",
+                "title": "Signed candidate only",
+                "doi": "10.1000/signed-only",
+                "pdf_url": "https://repo.example/signed-only.pdf?token=SECRET",
+            }
+        ],
+        catalog_version="research-discovery-v1",
+    )
+
+    result = results[0]
+    assert result.recommended_candidate_id is None
+    assert result.ingest_eligible is False
+
+
+def test_phase2a_candidate_helper_accepts_only_stable_pdf():
+    from tldw_Server_API.app.core.Research.discovery.models import (
+        DiscoveryOACandidate,
+        is_phase2a_media_handoff_candidate,
+    )
+
+    def candidate(candidate_type="pdf", safe_url="https://repo.example/paper.pdf", **overrides):
+        values = {
+            "candidate_id": "candidate-1",
+            "candidate_type": candidate_type,
+            "safe_url": safe_url,
+            "resolver_reference": None,
+            "url_redacted": False,
+            "requires_reresolution": False,
+            "provider": "test",
+            "access_status": "open",
+            "license_hint": None,
+            "content_type_hint": "application/pdf",
+            "rank": 1,
+            "confidence": 1.0,
+            "warnings": (),
+        }
+        values.update(overrides)
+        return DiscoveryOACandidate(**values)
+
+    assert is_phase2a_media_handoff_candidate(candidate()) is True
+    assert is_phase2a_media_handoff_candidate(candidate("html_full_text")) is False
+    assert is_phase2a_media_handoff_candidate(candidate("landing_page")) is False
+    assert is_phase2a_media_handoff_candidate(candidate("repository_file")) is False
+    assert is_phase2a_media_handoff_candidate(candidate("metadata_only")) is False
+    assert is_phase2a_media_handoff_candidate(candidate(safe_url=None)) is False
+    assert is_phase2a_media_handoff_candidate(candidate(url_redacted=True)) is False
+    assert is_phase2a_media_handoff_candidate(candidate(requires_reresolution=True)) is False

@@ -31,6 +31,7 @@ from .models import (
     DiscoverySearchResponse,
     ResearchSourceCatalogEntry,
     SourceStatus,
+    recommended_phase2a_media_candidate,
 )
 from .router import ResearchSourceRouter
 
@@ -523,14 +524,15 @@ async def _attach_oa_resolver_candidates(
     resolver_candidate_groups = await asyncio.gather(*(_resolve_with_limit(result) for result in results))
     for result, resolver_candidates in zip(results, resolver_candidate_groups):
         oa_candidates = _merge_oa_candidates(result.oa_candidates, resolver_candidates)
+        recommended_candidate = recommended_phase2a_media_candidate(oa_candidates)
         ranking_signals = dict(result.ranking_signals)
         ranking_signals["has_oa_candidate"] = bool(oa_candidates)
         enriched.append(
             replace(
                 result,
                 oa_candidates=oa_candidates,
-                recommended_candidate_id=(oa_candidates[0].candidate_id if oa_candidates else None),
-                ingest_eligible=any(candidate.safe_url for candidate in oa_candidates),
+                recommended_candidate_id=(recommended_candidate.candidate_id if recommended_candidate else None),
+                ingest_eligible=recommended_candidate is not None,
                 ranking_signals=ranking_signals,
             )
         )
