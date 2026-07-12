@@ -1,3 +1,5 @@
+"""Exercise cancellation and lease cleanup in the core Chatbooks worker."""
+
 import asyncio
 import time
 from datetime import timedelta
@@ -5,12 +7,15 @@ from pathlib import Path
 
 import pytest
 
-from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
 
 
 @pytest.mark.asyncio
-async def test_core_worker_honors_mid_processing_cancellation(monkeypatch, tmp_path):
+async def test_core_worker_honors_mid_processing_cancellation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     # Prepare isolated jobs DB
     jobs_db = tmp_path / "jobs.db"
     ensure_jobs_tables(jobs_db)
@@ -34,12 +39,16 @@ async def test_core_worker_honors_mid_processing_cancellation(monkeypatch, tmp_p
     class FakeChatbookService:
         def __init__(self, user_id, db, **kwargs):
             self._jobs = {}
+
         def _get_export_job(self, jid: str):
             return self._jobs.get(jid)
+
         def _save_export_job(self, ej):
             self._jobs[ej.job_id] = ej
+
         def _build_download_url(self, job_id, _exp):
             return f"http://test/{job_id}"
+
         async def _create_chatbook_sync_wrapper(self, **kwargs):
             # Simulate long work
             await asyncio.sleep(0.5)
@@ -51,6 +60,7 @@ async def test_core_worker_honors_mid_processing_cancellation(monkeypatch, tmp_p
     class JMProxy:
         def __init__(self):
             self._jm = jm
+
         def __getattr__(self, name):
             return getattr(self._jm, name)
 
@@ -65,8 +75,9 @@ async def test_core_worker_honors_mid_processing_cancellation(monkeypatch, tmp_p
     # Ensure the worker built in module will find the ej when it constructs svc anew
     # by monkeypatching _get_export_job to always refer to our seeded state
     def _fake_get_export_job(self, jid):
-             # Avoid recursion by reading from the seeded instance dictionary directly
+        # Avoid recursion by reading from the seeded instance dictionary directly
         return svc._jobs.get(jid)
+
     monkeypatch.setattr(FakeChatbookService, "_get_export_job", _fake_get_export_job)
 
     # Create a job and start the worker
@@ -115,7 +126,10 @@ async def test_core_worker_honors_mid_processing_cancellation(monkeypatch, tmp_p
 
 
 @pytest.mark.asyncio
-async def test_core_worker_allows_supported_import_media_and_embeddings(monkeypatch, tmp_path):
+async def test_core_worker_allows_supported_import_media_and_embeddings(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     # Prepare isolated jobs DB
     jobs_db = tmp_path / "jobs.db"
     ensure_jobs_tables(jobs_db)
@@ -130,6 +144,8 @@ async def test_core_worker_allows_supported_import_media_and_embeddings(monkeypa
             self.started_at = None
             self.completed_at = None
             self.error_message = None
+            self.warnings = []
+            self.metadata = {}
 
     class FakeChatbookService:
         jobs = {}
@@ -162,6 +178,14 @@ async def test_core_worker_allows_supported_import_media_and_embeddings(monkeypa
                 "import_embeddings": import_embeddings,
             }
             return True, "ok", {"imported_items": {"media": 1, "embedding": 1}, "warnings": []}
+
+        async def finalize_account_restore(
+            self,
+            ok: bool,
+            message: str,
+            result: dict[str, object],
+        ) -> tuple[bool, str, dict[str, object]]:
+            return ok, message, result
 
         def _resolve_import_archive_path(self, file_ref):
             return Path(file_ref)
@@ -227,7 +251,10 @@ async def test_core_worker_allows_supported_import_media_and_embeddings(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_core_worker_cleans_export_file_and_stops_renew_after_midflight_cancel(monkeypatch, tmp_path):
+async def test_core_worker_cleans_export_file_and_stops_renew_after_midflight_cancel(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     jobs_db = tmp_path / "jobs.db"
     ensure_jobs_tables(jobs_db)
     jm = JobManager(jobs_db)
@@ -249,6 +276,7 @@ async def test_core_worker_cleans_export_file_and_stops_renew_after_midflight_ca
             self.expires_at = None
             self.download_url = None
             self.error_message = None
+            self.metadata = {}
 
     class FakeChatbookService:
         jobs = {}
@@ -354,7 +382,10 @@ async def test_core_worker_cleans_export_file_and_stops_renew_after_midflight_ca
 
 
 @pytest.mark.asyncio
-async def test_core_worker_stops_renew_after_successful_export(monkeypatch, tmp_path):
+async def test_core_worker_stops_renew_after_successful_export(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     jobs_db = tmp_path / "jobs.db"
     ensure_jobs_tables(jobs_db)
     jm = JobManager(jobs_db)
@@ -376,6 +407,7 @@ async def test_core_worker_stops_renew_after_successful_export(monkeypatch, tmp_
             self.expires_at = None
             self.download_url = None
             self.error_message = None
+            self.metadata = {}
 
     class FakeChatbookService:
         jobs = {}
@@ -402,6 +434,9 @@ async def test_core_worker_stops_renew_after_successful_export(monkeypatch, tmp_
             export_path.write_text("payload", encoding="utf-8")
             await asyncio.sleep(0.2)
             return True, None, str(export_path)
+
+        def build_export_job_metadata(self, _file_path: str) -> dict[str, object]:
+            return {}
 
     import tldw_Server_API.app.services.core_jobs_worker as worker
 
@@ -471,7 +506,10 @@ async def test_core_worker_stops_renew_after_successful_export(monkeypatch, tmp_
 
 
 @pytest.mark.asyncio
-async def test_core_worker_propagates_task_cancellation_while_idle(monkeypatch, tmp_path):
+async def test_core_worker_propagates_task_cancellation_while_idle(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     jobs_db = tmp_path / "jobs.db"
     ensure_jobs_tables(jobs_db)
     jm = JobManager(jobs_db)

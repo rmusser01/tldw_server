@@ -2,6 +2,7 @@ import io
 import json
 import zipfile
 from datetime import datetime
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import FastAPI
@@ -18,6 +19,8 @@ from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
     ImportStatus,
 )
 from tldw_Server_API.app.core.Chatbooks.exceptions import JobError
+
+pytestmark = pytest.mark.unit
 
 
 class _DummyAuditService:
@@ -479,8 +482,16 @@ def test_import_job_list_redacts_path_like_chatbook_name():
     assert response.json()["jobs"][0]["chatbook_name"] == "[redacted-path]"
 
 
-def test_remove_finished_job_history_uses_server_side_bulk_operation():
-    app = _make_app(_BulkRemoveFinishedJobsService())
+def test_remove_finished_job_history_offloads_server_side_bulk_operation(monkeypatch):
+    service = _BulkRemoveFinishedJobsService()
+    to_thread = AsyncMock(
+        return_value={
+            "export_jobs_removed": 75,
+            "import_jobs_removed": 64,
+        }
+    )
+    monkeypatch.setattr(chatbooks_endpoints.asyncio, "to_thread", to_thread)
+    app = _make_app(service)
 
     with TestClient(app) as client:
         response = client.delete("/api/v1/chatbooks/jobs/finished")
@@ -492,6 +503,7 @@ def test_remove_finished_job_history_uses_server_side_bulk_operation():
         "export_jobs_removed": 75,
         "import_jobs_removed": 64,
     }
+    to_thread.assert_awaited_once_with(service.delete_finished_jobs)
 
 
 def test_continue_export_sanitizes_service_failure_message():

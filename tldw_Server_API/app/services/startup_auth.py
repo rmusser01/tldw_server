@@ -110,5 +110,10 @@ async def _ensure_pg_extras(db_pool: object) -> None:
             ok = await ensure_fn(db_pool)
             if ok:
                 logger.info(f"App Startup: Ensured PG {label}")
+            else:
+                logger.warning(
+                    f"App Startup: PG {label} ensure returned False; "
+                    "canonical database state may be incomplete"
+                )
     except _STARTUP_GUARD_EXCEPTIONS as exc:
         logger.debug(f"App Startup: PG extras ensure failed/skipped: {exc}")

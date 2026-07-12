@@ -275,4 +275,31 @@ describe("ChatbooksPlaygroundPage accessibility", () => {
       ),
     ).toBeInTheDocument();
   });
+
+  it("falls back to summary labels when account inventory is malformed", async () => {
+    tldwClientMock.previewChatbook.mockResolvedValueOnce({
+      manifest: {
+        name: "Malformed inventory archive",
+        content_items: [],
+        account_inventory: { account_profiles: 1 },
+        account_inventory_summary: {
+          counts: { account_profiles: 1 },
+          warning_count: 0,
+          sensitive_category_count: 0,
+          post_write_verification: true,
+        },
+      },
+    });
+    const { container } = render(<ChatbooksPlaygroundPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "Import" }));
+    const uploadInput = container.querySelector(
+      '.ant-upload-drag input[type="file"]',
+    ) as HTMLInputElement;
+
+    fireEvent.change(uploadInput, {
+      target: { files: [new File(["archive"], "malformed.chatbook")] },
+    });
+
+    expect(await screen.findByText("Account Profiles · 1")).toBeInTheDocument();
+  });
 });

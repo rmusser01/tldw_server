@@ -25,6 +25,7 @@ sys.path.insert(0, PROJECT_ROOT_TEXT)
 FIXTURE_SCRIPT = PROJECT_ROOT / "Helper_Scripts" / "Testing-related" / "chatbooks_full_account_uat_fixture.py"
 WEBUI_SPEC = "e2e/workflows/tier-2-features/chatbooks-full-account-roundtrip.spec.ts"
 EXTENSION_SPEC = "tests/e2e/chatbooks-export-download.spec.ts"
+ARCHIVE_SCAN_CHUNK_SIZE = 64 * 1024
 
 
 class BrowserUatError(RuntimeError):
@@ -172,7 +173,7 @@ def _verify_inventory_payload(
     inventory: list[Any],
     payload_path: str,
     label: str,
-) -> str:
+) -> tuple[str, bytes]:
     entry = _inventory_entry(inventory, payload_path, label)
     integrity = entry.get("integrity")
     if not isinstance(integrity, dict):
@@ -189,7 +190,45 @@ def _verify_inventory_payload(
         or entry.get("size_bytes") != len(payload)
     ):
         raise BrowserUatError(f"Browser archive {label} inventory is not verified")
-    return digest
+    return digest, payload
+
+
+def _expected_account_counts(expected: dict[str, Any], key: str) -> dict[str, int]:
+    inventory = expected.get("account_inventory")
+    counts = inventory.get(key) if isinstance(inventory, dict) else None
+    if not isinstance(counts, dict) or not counts:
+        raise BrowserUatError(f"Fixture expected state has no {key.replace('_', ' ')}")
+    try:
+        normalized = {str(category): int(count) for category, count in counts.items()}
+    except (TypeError, ValueError) as exc:
+        raise BrowserUatError("Fixture account inventory counts are invalid") from exc
+    if any(not category or count < 0 for category, count in normalized.items()):
+        raise BrowserUatError("Fixture account inventory counts are invalid")
+    return normalized
+
+
+def _verify_manifest_account_inventory(
+    manifest: dict[str, Any],
+    expected_counts: dict[str, int],
+) -> None:
+    inventory = manifest.get("account_inventory")
+    summary = manifest.get("account_inventory_summary")
+    summary_counts = summary.get("counts") if isinstance(summary, dict) else None
+    if not isinstance(inventory, list) or not isinstance(summary_counts, dict):
+        raise BrowserUatError("Browser archive has no complete account inventory")
+    rows = {
+        str(row.get("category")): row
+        for row in inventory
+        if isinstance(row, dict) and row.get("category")
+    }
+    if len(rows) != len(inventory) or set(rows) != set(expected_counts):
+        raise BrowserUatError("Browser archive account inventory does not cover every expected category")
+    for category, expected_count in expected_counts.items():
+        count_key = rows[category].get("manifest_count_key")
+        if not isinstance(count_key, str) or summary_counts.get(count_key) != expected_count:
+            raise BrowserUatError(
+                f"Browser archive account inventory count does not match for {category}"
+            )
 
 
 def _verify_no_sensitive_archive_leaks(
@@ -201,12 +240,20 @@ def _verify_no_sensitive_archive_leaks(
         password_hash.encode("utf-8"),
         str(config.source_root).encode("utf-8"),
     )
+    max_value_length = max(len(value) for value in forbidden_values)
+    overlap_length = max_value_length - 1
     for member in archive.infolist():
         if member.is_dir():
             continue
-        payload = archive.read(member)
-        if any(value in payload for value in forbidden_values):
-            raise BrowserUatError("Browser archive contains sensitive data or a raw source storage path")
+        overlap = b""
+        with archive.open(member, "r") as member_file:
+            while chunk := member_file.read(ARCHIVE_SCAN_CHUNK_SIZE):
+                window = overlap + chunk
+                if any(value in window for value in forbidden_values):
+                    raise BrowserUatError(
+                        "Browser archive contains sensitive data or a raw source storage path"
+                    )
+                overlap = window[-overlap_length:] if overlap_length else b""
 
 
 def inspect_browser_archive(config: BrowserUatConfig) -> dict[str, Any]:
@@ -246,21 +293,49 @@ def inspect_browser_archive(config: BrowserUatConfig) -> dict[str, Any]:
             inventory = manifest.get("file_inventory")
             if not isinstance(inventory, list):
                 raise BrowserUatError("Browser archive has no verified file inventory")
+            source_counts = _expected_account_counts(expected, "source_counts")
+            _verify_manifest_account_inventory(manifest, source_counts)
             _verify_no_sensitive_archive_leaks(archive, config)
 
-            profile_sha = _verify_inventory_payload(
+            profile_sha, profile_payload = _verify_inventory_payload(
                 archive,
                 inventory,
                 "json/account_profile.json",
                 "account profile",
             )
-            settings_sha = _verify_inventory_payload(
+            settings_sha, settings_payload = _verify_inventory_payload(
                 archive,
                 inventory,
                 "json/account_settings.json",
                 "account settings",
             )
-            media_sha = _verify_inventory_payload(
+            expected_characters = expected.get("characters")
+            embedding_path = str(expected.get("embeddings", {}).get("archive_path") or "")
+            if not isinstance(expected_characters, list) or not expected_characters or not embedding_path:
+                raise BrowserUatError("Fixture expected state is missing character or embedding payload paths")
+            character_payloads: list[tuple[dict[str, Any], str, bytes]] = []
+            for expected_character in expected_characters:
+                if not isinstance(expected_character, dict):
+                    raise BrowserUatError("Fixture expected state has invalid characters")
+                character_path = str(expected_character.get("archive_path") or "")
+                if not character_path:
+                    raise BrowserUatError("Fixture expected state has invalid characters")
+                character_sha, character_payload = _verify_inventory_payload(
+                    archive,
+                    inventory,
+                    character_path,
+                    f"character {expected_character.get('name') or character_path}",
+                )
+                character_payloads.append(
+                    (expected_character, character_sha, character_payload)
+                )
+            embedding_sha, embedding_payload = _verify_inventory_payload(
+                archive,
+                inventory,
+                embedding_path,
+                "embedding collection",
+            )
+            media_sha, _media_payload = _verify_inventory_payload(
                 archive,
                 inventory,
                 media_path,
@@ -272,6 +347,44 @@ def inspect_browser_archive(config: BrowserUatConfig) -> dict[str, Any]:
     expected_media_sha = str(expected.get("media", {}).get("artifact_sha256") or "")
     if media_sha != expected_media_sha:
         raise BrowserUatError("Browser archive bundled media bytes do not match the source")
+    try:
+        profile_data = json.loads(profile_payload)
+        settings_data = json.loads(settings_payload)
+        embedding_data = json.loads(embedding_payload)
+        character_data = [
+            (expected_character, character_sha, json.loads(character_payload))
+            for expected_character, character_sha, character_payload in character_payloads
+        ]
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise BrowserUatError("Browser archive account payload is not valid JSON") from exc
+    if profile_data.get("profile") != expected.get("profile"):
+        raise BrowserUatError("Browser archive account profile does not match the fixture")
+    if settings_data.get("overrides") != expected.get("settings"):
+        raise BrowserUatError("Browser archive account settings do not match the fixture")
+    if any(
+        payload.get("name") != expected_character.get("name")
+        for expected_character, _character_sha, payload in character_data
+    ):
+        raise BrowserUatError("Browser archive characters do not match the fixture")
+    embedding_rows = sorted(
+        (
+            {
+                "id": str(row.get("id") or ""),
+                "embedding": row.get("embedding"),
+                "metadata": row.get("metadata") if isinstance(row.get("metadata"), dict) else {},
+            }
+            for row in embedding_data.get("chunks", [])
+            if isinstance(row, dict)
+        ),
+        key=lambda row: row["id"],
+    )
+    expected_embeddings = expected.get("embeddings", {})
+    if (
+        embedding_data.get("embedding_set_id") != expected_embeddings.get("collection_name")
+        or embedding_data.get("item_count") != expected_embeddings.get("row_count")
+        or embedding_rows != expected_embeddings.get("rows")
+    ):
+        raise BrowserUatError("Browser archive embedding collection does not match the fixture")
     return {
         "path": str(archive_path),
         "sha256": archive_sha256,
@@ -281,38 +394,38 @@ def inspect_browser_archive(config: BrowserUatConfig) -> dict[str, Any]:
         "verified_payloads": {
             "account_profile": profile_sha,
             "account_settings": settings_sha,
+            "characters": {
+                str(expected_character["name"]): character_sha
+                for expected_character, character_sha, _payload in character_data
+            },
             "bundled_media": media_sha,
+            "embedding_collection": embedding_sha,
         },
     }
 
 
-def validate_phase_scope(phase: str, scope: dict[str, Any]) -> None:
+def validate_phase_scope(
+    phase: str,
+    scope: dict[str, Any],
+    expected_counts: dict[str, int],
+) -> None:
     """Reject an API lifecycle that is attached to the wrong account stores."""
     categories = scope.get("categories")
     if not isinstance(categories, list):
         raise BrowserUatError(f"{phase} API scope did not return account categories")
-    counts = {
-        str(row.get("category")): int(row.get("count") or 0)
-        for row in categories
-        if isinstance(row, dict) and row.get("category")
-    }
-    if phase == "source":
-        minimums = {
-            "account_settings": 1,
-            "characters": 1,
-            "media_records": 1,
-            "media_stored_artifacts": 1,
-            "embeddings": 2,
+    if phase not in {"source", "destination"}:
+        raise BrowserUatError(f"Unsupported API scope phase: {phase}")
+    try:
+        counts = {
+            str(row["category"]): int(row.get("count") or 0)
+            for row in categories
+            if isinstance(row, dict) and row.get("category")
         }
-        if any(counts.get(category, 0) < minimum for category, minimum in minimums.items()):
-            raise BrowserUatError("source API scope does not expose the seeded full account")
-        return
-    if phase == "destination":
-        empty_categories = ("media_records", "media_stored_artifacts", "embeddings")
-        if any(counts.get(category, 0) != 0 for category in empty_categories):
-            raise BrowserUatError("destination API scope is not clean")
-        return
-    raise BrowserUatError(f"Unsupported API scope phase: {phase}")
+    except (TypeError, ValueError) as exc:
+        raise BrowserUatError(f"{phase} API scope returned invalid category counts") from exc
+    if len(counts) != len(categories) or counts != expected_counts:
+        suffix = "does not expose the complete seeded account" if phase == "source" else "is not clean"
+        raise BrowserUatError(f"{phase} API scope {suffix}")
 
 
 def _assert_destination_matches_expected(
@@ -320,17 +433,31 @@ def _assert_destination_matches_expected(
     destination: dict[str, Any],
 ) -> None:
     expected = _load_expected(config)
+    for section in ("profile", "settings"):
+        if destination.get(section) != expected.get(section):
+            raise BrowserUatError(f"Destination {section} does not match the source account")
+    expected_characters = [
+        {"name": str(character.get("name") or "")}
+        for character in expected.get("characters", [])
+        if isinstance(character, dict)
+    ]
+    if destination.get("characters") != expected_characters:
+        raise BrowserUatError("Destination characters do not match the source account")
     destination_media = destination.get("media")
     destination_embeddings = destination.get("embeddings")
     if not isinstance(destination_media, dict) or not isinstance(destination_embeddings, dict):
         raise BrowserUatError("Destination verification did not return media and embeddings")
-    for key in ("artifact_sha256", "vector_sha256"):
+    for key in ("title", "transcript_count", "chunk_count", "artifact_sha256", "vector_sha256"):
         if destination_media.get(key) != expected.get("media", {}).get(key):
             raise BrowserUatError(f"Destination {key} does not match the source account")
-    if destination_embeddings.get("collection_name") != expected.get("embeddings", {}).get(
-        "collection_name"
-    ) or destination_embeddings.get("collection_ids") != expected.get("embeddings", {}).get("collection_ids"):
-        raise BrowserUatError("Destination embedding identifiers do not match the source account")
+    for key in ("collection_name", "collection_ids", "row_count", "rows"):
+        if destination_embeddings.get(key) != expected.get("embeddings", {}).get(key):
+            raise BrowserUatError(f"Destination embedding {key} does not match the source account")
+    if destination.get("account_inventory_counts") != _expected_account_counts(
+        expected,
+        "source_counts",
+    ):
+        raise BrowserUatError("Destination account inventory does not match the source account")
 
 
 def run_browser_uat(
@@ -356,6 +483,20 @@ def run_browser_uat(
         reset = active_runtime.reset_destination(config)
         if prepared.get("source_user_id") == reset.get("destination_user_id"):
             raise BrowserUatError("Source and destination accounts must be distinct")
+        expected = _load_expected(config)
+        reset_counts = reset.get("counts")
+        if not isinstance(reset_counts, dict):
+            raise BrowserUatError("Destination reset did not return complete account counts")
+        validate_phase_scope(
+            "destination",
+            {
+                "categories": [
+                    {"category": category, "count": count}
+                    for category, count in reset_counts.items()
+                ]
+            },
+            _expected_account_counts(expected, "clean_destination_counts"),
+        )
         active_runtime.start_api(config, "destination")
         destination_started = True
         active_runtime.run_browser(config, "import", config.downloaded_archive)
@@ -406,6 +547,7 @@ def _phase_environment(config: BrowserUatConfig, phase: Literal["source", "desti
     allowed_origins = [f"http://localhost:{config.web_port}"] if config.web_port else []
     return {
         "AUTH_MODE": "multi_user",
+        "APP_MODE": "multi",
         "PROFILE": "multi-user-sqlite",
         "DATABASE_URL": f"sqlite:///{phase_root / 'users.db'}",
         "USER_DB_BASE_DIR": str(phase_root / "user_databases"),
@@ -572,7 +714,9 @@ class RealBrowserUatRuntime:
             raise BrowserUatError(f"{phase} API scope preflight returned invalid JSON") from exc
         if not isinstance(scope, dict):
             raise BrowserUatError(f"{phase} API scope preflight returned invalid data")
-        validate_phase_scope(phase, scope)
+        expected = _load_expected(config)
+        expected_key = "source_counts" if phase == "source" else "clean_destination_counts"
+        validate_phase_scope(phase, scope, _expected_account_counts(expected, expected_key))
 
     def _browser_command(self, config: BrowserUatConfig) -> tuple[Path, list[str]]:
         if shutil.which("bunx") is None:

@@ -1,3 +1,4 @@
+import { StrictMode } from "react"
 import { renderHook } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -108,6 +109,47 @@ describe("useNotificationCount", () => {
     activeScope = secondScope
     rerender()
     expect(result.current).toBe(0)
+
+    rerender()
+    expect(result.current).toBe(9)
+  })
+
+  it("keeps the scope-switch barrier across StrictMode render replays", () => {
+    const firstConfig = { serverUrl: "https://first.test", authMode: "multi-user", userId: "user-a", accessToken: "a" }
+    const secondConfig = { serverUrl: "https://second.test", authMode: "multi-user", userId: "user-b", accessToken: "b" }
+    const firstScope = notificationRecordKeyForConfig(firstConfig)
+    const secondScope = notificationRecordKeyForConfig(secondConfig)
+    let config = firstConfig
+    let activeScope = firstScope
+    const records = new Map([
+      [firstScope, { state: "active", unreadCount: 7, updatedAt: 123 }],
+      [secondScope, { state: "active", unreadCount: 9, updatedAt: 456 }]
+    ])
+    useStorageMock.mockImplementation((options: { key: string }) => [
+      options.key === "tldwConfig"
+        ? config
+        : options.key === "tldw:notifications:activeScope"
+        ? activeScope
+        : records.get(options.key)
+    ])
+    const observed: number[] = []
+    const { result, rerender } = renderHook(
+      () => {
+        const count = useNotificationCount()
+        observed.push(count)
+        return count
+      },
+      { wrapper: StrictMode }
+    )
+
+    expect(result.current).toBe(7)
+    const switchRenderIndex = observed.length
+    config = secondConfig
+    activeScope = secondScope
+    rerender()
+
+    expect(result.current).toBe(0)
+    expect(observed.slice(switchRenderIndex)).not.toContain(9)
 
     rerender()
     expect(result.current).toBe(9)

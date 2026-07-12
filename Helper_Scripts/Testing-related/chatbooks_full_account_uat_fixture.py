@@ -23,6 +23,7 @@ from tldw_Server_API.app.core.AuthNZ.initialize import ensure_authnz_schema_read
 from tldw_Server_API.app.core.AuthNZ.repos.rbac_repo import AuthnzRbacRepo
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+from tldw_Server_API.app.core.Chatbooks.chatbook_account_inventory import ACCOUNT_DATA_INVENTORY
 from tldw_Server_API.app.core.Chatbooks.chatbook_models import ChatbookVersion, ConflictResolution
 from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
 from tldw_Server_API.app.core.config import clear_config_cache
@@ -66,9 +67,56 @@ def sha256_bytes(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def _clean_destination_counts() -> dict[str, int]:
+    return {
+        row.category: 1
+        if row.category in {"account_profile", "account_settings", "characters"}
+        else 0
+        for row in ACCOUNT_DATA_INVENTORY
+    }
+
+
+def _account_inventory_counts(service: ChatbookService) -> dict[str, int]:
+    scope = service.get_full_account_export_scope()
+    categories = scope.get("categories") if isinstance(scope, dict) else None
+    if not isinstance(categories, list):
+        raise RuntimeError("Full-account scope did not return account categories")
+    counts = {
+        str(row.get("category")): int(row.get("count") or 0)
+        for row in categories
+        if isinstance(row, dict) and row.get("category")
+    }
+    expected_categories = {row.category for row in ACCOUNT_DATA_INVENTORY}
+    if len(counts) != len(categories) or set(counts) != expected_categories:
+        raise RuntimeError("Full-account scope did not cover every account category")
+    return counts
+
+
+def _normalize_embedding_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
+    ids = list(result.get("ids") or [])
+    raw_embeddings = result.get("embeddings")
+    if hasattr(raw_embeddings, "tolist"):
+        raw_embeddings = raw_embeddings.tolist()
+    embeddings = list(raw_embeddings or [])
+    metadatas = list(result.get("metadatas") or [])
+    if len(ids) != len(embeddings) or len(ids) != len(metadatas):
+        raise FixtureVerificationError("destination embedding rows are incomplete")
+    return sorted(
+        (
+            {
+                "id": str(item_id),
+                "embedding": [round(float(value), 6) for value in embeddings[index]],
+                "metadata": metadatas[index] if isinstance(metadatas[index], dict) else {},
+            }
+            for index, item_id in enumerate(ids)
+        ),
+        key=lambda row: row["id"],
+    )
+
+
 def _fixture_password_hash(username: str) -> str:
     """Return a deterministic, non-authenticating password hash for fixture users."""
-    return sha256_bytes(f"chatbooks-uat-disabled-login:{username}".encode("utf-8"))
+    return sha256_bytes(f"chatbooks-uat-disabled-login:{username}".encode())
 
 
 def _phase_root(root: Path, phase: str) -> Path:
@@ -214,68 +262,37 @@ async def _seed_source_account(source_root: Path) -> tuple[int, ChatbookService,
         mime_type="application/octet-stream",
         checksum=f"sha256:{sha256_bytes(MEDIA_BYTES)}",
     )
-    with media_db.transaction() as conn:
-        media_row = media_db._fetchone_with_connection(
-            conn,
-            "SELECT uuid, version FROM Media WHERE id = ? AND deleted = 0",
-            (int(media_id),),
-        )
-        if not media_row:
-            raise RuntimeError("Seeded source media row was not found")
-        current_version = int(media_row.get("version") or 1)
-        next_version = current_version + 1
-        now = media_db._get_current_utc_timestamp_str()
-        cursor = media_db._execute_with_connection(
-            conn,
-            """
-            UPDATE Media
-               SET vector_embedding = ?, last_modified = ?, version = ?, client_id = ?
-             WHERE id = ? AND version = ? AND deleted = 0
-            """,
-            (
-                MEDIA_VECTOR,
-                now,
-                next_version,
-                media_db.client_id,
-                int(media_id),
-                current_version,
-            ),
-        )
-        if getattr(cursor, "rowcount", 0) != 1:
-            raise RuntimeError("Failed to attach the source media vector")
-        media_db._log_sync_event(
-            conn,
-            "Media",
-            str(media_row["uuid"]),
-            "update",
-            next_version,
-            {
-                "id": int(media_id),
-                "uuid": str(media_row["uuid"]),
-                "version": next_version,
-                "last_modified": now,
-                "client_id": media_db.client_id,
-                "vector_embedding_seeded": True,
-            },
-        )
+    media_db.set_media_vector_embedding(int(media_id), MEDIA_VECTOR)
 
     chroma = service._get_chroma_manager()
     if chroma is None:
         raise RuntimeError("ChromaDB is required for the full-account UAT fixture")
+    collection_metadata = [
+        {"media_id": str(media_id), "media_uuid": str(media_uuid), "chunk_index": index}
+        for index in range(len(chunks))
+    ]
     chroma.store_in_chroma(
         collection_name=COLLECTION_NAME,
         texts=[chunk["text"] for chunk in chunks],
         embeddings=COLLECTION_EMBEDDINGS,
         ids=COLLECTION_IDS,
-        metadatas=[
-            {"media_id": str(media_id), "media_uuid": str(media_uuid), "chunk_index": index}
-            for index in range(len(chunks))
-        ],
+        metadatas=collection_metadata,
     )
     return source_user_id, service, {
         "character_id": int(character_id),
         "media_id": int(media_id),
         "media_uuid": str(media_uuid),
+        "embedding_rows": sorted(
+            (
+                {
+                    "id": COLLECTION_IDS[index],
+                    "embedding": [round(float(value), 6) for value in COLLECTION_EMBEDDINGS[index]],
+                    "metadata": collection_metadata[index],
+                }
+                for index in range(len(COLLECTION_IDS))
+            ),
+            key=lambda row: row["id"],
+        ),
     }
 
 
@@ -288,6 +305,7 @@ async def prepare(root: str | Path) -> dict[str, Any]:
         shutil.rmtree(source_root)
     source_root = await _activate_phase(root_path, "source")
     source_user_id, service, seeded = await _seed_source_account(source_root)
+    source_counts = _account_inventory_counts(service)
 
     success, message, generated_path = await service.create_chatbook(
         name="Full account",
@@ -305,6 +323,7 @@ async def prepare(root: str | Path) -> dict[str, Any]:
     shutil.copyfile(generated_path, archive_path)
 
     with zipfile.ZipFile(archive_path) as archive:
+        manifest = json.loads(archive.read("manifest.json"))
         media_payload_path = f"content/media/media_{seeded['media_id']}.json"
         media_payload = json.loads(archive.read(media_payload_path))
         bundled_artifacts = [
@@ -316,8 +335,48 @@ async def prepare(root: str | Path) -> dict[str, Any]:
             raise RuntimeError("Expected exactly one bundled source media artifact")
         archive_media_path = str(bundled_artifacts[0]["archive_path"])
         archived_media_bytes = archive.read(archive_media_path)
+        content_items = manifest.get("content_items") or []
+        character_items = sorted(
+            (
+                {"name": str(item.get("title") or ""), "archive_path": str(item.get("file_path") or "")}
+                for item in content_items
+                if isinstance(item, dict) and item.get("type") == "character"
+            ),
+            key=lambda item: item["name"],
+        )
+        embedding_path = next(
+            (
+                str(item.get("file_path"))
+                for item in content_items
+                if isinstance(item, dict)
+                and item.get("type") == "embedding"
+                and item.get("id") == f"collection:{COLLECTION_NAME}"
+            ),
+            "",
+        )
+        archive_inventory = manifest.get("account_inventory") or []
+        archive_categories = {
+            str(row.get("category"))
+            for row in archive_inventory
+            if isinstance(row, dict) and row.get("category")
+        }
+        if archive_categories != {row.category for row in ACCOUNT_DATA_INVENTORY}:
+            raise RuntimeError("Exporter account inventory did not cover every category")
+        summary_counts = (manifest.get("account_inventory_summary") or {}).get("counts") or {}
+        archive_counts = {
+            row.category: int(summary_counts.get(row.manifest_count_key) or 0)
+            for row in ACCOUNT_DATA_INVENTORY
+        }
     if archived_media_bytes != MEDIA_BYTES:
         raise RuntimeError("Exporter did not bundle the exact stored source media bytes")
+    if (
+        {item["name"] for item in character_items} != {"Default Assistant", CHARACTER_NAME}
+        or any(not item["archive_path"] for item in character_items)
+        or not embedding_path
+    ):
+        raise RuntimeError("Exporter did not identify character and embedding payloads")
+    if archive_counts != source_counts:
+        raise RuntimeError("Exporter account inventory counts do not match the source stores")
 
     expected = {
         "schema_version": "1.0",
@@ -325,7 +384,7 @@ async def prepare(root: str | Path) -> dict[str, Any]:
         "destination_user_id": 2,
         "profile": {"identity.email": SOURCE_EMAIL},
         "settings": dict(sorted(SOURCE_SETTINGS.items())),
-        "character": {"name": CHARACTER_NAME},
+        "characters": character_items,
         "media": {
             "title": MEDIA_TITLE,
             "archive_path": archive_media_path,
@@ -337,6 +396,13 @@ async def prepare(root: str | Path) -> dict[str, Any]:
         "embeddings": {
             "collection_name": COLLECTION_NAME,
             "collection_ids": sorted(COLLECTION_IDS),
+            "archive_path": embedding_path,
+            "row_count": len(COLLECTION_IDS),
+            "rows": seeded["embedding_rows"],
+        },
+        "account_inventory": {
+            "source_counts": source_counts,
+            "clean_destination_counts": _clean_destination_counts(),
         },
     }
     expected_path = root_path / "expected.json"
@@ -365,13 +431,30 @@ async def reset_destination(root: str | Path) -> dict[str, Any]:
         raise RuntimeError("Destination fixture user id is not deterministic")
 
     service = _new_chatbook_service(destination_user_id)
+    default_character = service.db.get_character_card_by_id(1)
+    character_ids = service.db.list_chatbook_scope_ids("characters")
+    if (
+        not default_character
+        or default_character.get("name") != "Default Assistant"
+        or [str(value) for value in character_ids] != ["1"]
+    ):
+        raise RuntimeError("Destination reset contains non-default character records")
     create_media_database(
         str(destination_user_id),
         db_path=str(DatabasePaths.get_media_db_path(destination_user_id)),
     )
-    counts = _content_counts(service, destination_user_id)
-    if any(counts.values()):
-        raise RuntimeError("Destination reset did not create empty account stores")
+    counts = _account_inventory_counts(service)
+    clean_counts = _clean_destination_counts()
+    if counts != clean_counts:
+        differences = {
+            category: {"actual": counts.get(category), "expected": clean_counts.get(category)}
+            for category in sorted(set(counts) | set(clean_counts))
+            if counts.get(category) != clean_counts.get(category)
+        }
+        raise RuntimeError(
+            "Destination reset did not create empty account stores: "
+            + json.dumps(differences, sort_keys=True)
+        )
     return {"destination_user_id": destination_user_id, "counts": counts}
 
 
@@ -429,9 +512,26 @@ async def verify(root: str | Path) -> dict[str, Any]:
     _require_equal(settings, expected["settings"], "destination settings")
 
     service = _new_chatbook_service(destination_user_id)
-    character = service.db.get_character_card_by_name(expected["character"]["name"])
-    if not character:
-        raise FixtureVerificationError("destination character is missing")
+    character_ids = service.db.list_chatbook_scope_ids("characters")
+    characters = sorted(
+        (
+            {"name": str(character.get("name") or "")}
+            for character_id in character_ids
+            if (character := service.db.get_character_card_by_id(int(character_id)))
+        ),
+        key=lambda item: item["name"],
+    )
+    expected_characters = [
+        {"name": str(character.get("name") or "")}
+        for character in expected["characters"]
+    ]
+    _require_equal(characters, expected_characters, "destination characters")
+    account_inventory_counts = _account_inventory_counts(service)
+    _require_equal(
+        account_inventory_counts,
+        expected["account_inventory"]["source_counts"],
+        "destination account inventory",
+    )
 
     media_db = create_media_database(
         str(destination_user_id),
@@ -477,7 +577,10 @@ async def verify(root: str | Path) -> dict[str, Any]:
         raise FixtureVerificationError("destination embedding store is unavailable")
     try:
         collection = chroma.get_collection(expected["embeddings"]["collection_name"])
-        collection_result = collection.get(ids=expected["embeddings"]["collection_ids"])
+        collection_result = collection.get(
+            ids=expected["embeddings"]["collection_ids"],
+            include=["embeddings", "metadatas"],
+        )
     except (KeyError, RuntimeError, ValueError) as exc:
         raise FixtureVerificationError("destination embedding collection is missing") from exc
     collection_ids = sorted(str(value) for value in collection_result.get("ids", []))
@@ -486,13 +589,25 @@ async def verify(root: str | Path) -> dict[str, Any]:
         expected["embeddings"]["collection_ids"],
         "destination embedding identifiers",
     )
+    collection_count = int(collection.count())
+    _require_equal(
+        collection_count,
+        expected["embeddings"]["row_count"],
+        "destination embedding collection row count",
+    )
+    collection_rows = _normalize_embedding_rows(collection_result)
+    _require_equal(
+        collection_rows,
+        expected["embeddings"]["rows"],
+        "destination embedding vectors and metadata",
+    )
 
     return {
         "source_user_id": int(expected["source_user_id"]),
         "destination_user_id": destination_user_id,
         "profile": profile,
         "settings": settings,
-        "character": {"name": str(character.get("name") or "")},
+        "characters": characters,
         "media": {
             "title": str(media_row.get("title") or ""),
             "transcript_count": transcript_count,
@@ -504,7 +619,10 @@ async def verify(root: str | Path) -> dict[str, Any]:
         "embeddings": {
             "collection_name": expected["embeddings"]["collection_name"],
             "collection_ids": collection_ids,
+            "row_count": collection_count,
+            "rows": collection_rows,
         },
+        "account_inventory_counts": account_inventory_counts,
         "expected": expected,
     }
 
@@ -517,25 +635,6 @@ def _load_expected(root: Path) -> dict[str, Any]:
     if not isinstance(payload, dict) or payload.get("schema_version") != "1.0":
         raise ValueError("Fixture expected state is invalid")
     return payload
-
-
-def _content_counts(service: ChatbookService, user_id: int) -> dict[str, int]:
-    media_db = create_media_database(
-        str(user_id),
-        db_path=str(DatabasePaths.get_media_db_path(user_id)),
-    )
-    chroma = service._get_chroma_manager()
-    if chroma is None:
-        raise RuntimeError("ChromaDB is required to verify the destination is empty")
-    embedding_count = sum(int(collection.count()) for collection in chroma.list_collections())
-    return {
-        "characters": 1 if service.db.get_character_card_by_name(CHARACTER_NAME) else 0,
-        "media_records": int(media_db.count_chatbook_scope_category("media_records") or 0),
-        "media_stored_artifacts": int(
-            media_db.count_chatbook_scope_category("media_stored_artifacts") or 0
-        ),
-        "embeddings": embedding_count,
-    }
 
 
 def _require_equal(actual: Any, expected: Any, label: str) -> None:

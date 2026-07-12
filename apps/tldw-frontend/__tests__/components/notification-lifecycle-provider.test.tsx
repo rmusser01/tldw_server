@@ -116,6 +116,35 @@ describe("NotificationLifecycleProvider", () => {
     vi.useRealTimers()
   })
 
+  it("does not overlap unread polls when a prior poll is still pending", async () => {
+    vi.useFakeTimers()
+    let resolvePoll: ((value: { unread_count: number }) => void) | undefined
+    mocks.getUnreadCount
+      .mockResolvedValueOnce({ unread_count: 5 })
+      .mockImplementationOnce(
+        () =>
+          new Promise<{ unread_count: number }>((resolve) => {
+            resolvePoll = resolve
+          })
+      )
+      .mockResolvedValueOnce({ unread_count: 7 })
+    const view = renderProvider()
+    await act(async () => vi.advanceTimersByTimeAsync(0))
+
+    await act(async () => vi.advanceTimersByTimeAsync(30_000))
+    expect(mocks.getUnreadCount).toHaveBeenCalledTimes(2)
+
+    await act(async () => vi.advanceTimersByTimeAsync(30_000))
+    expect(mocks.getUnreadCount).toHaveBeenCalledTimes(2)
+
+    await act(async () => resolvePoll?.({ unread_count: 6 }))
+    await act(async () => vi.advanceTimersByTimeAsync(30_000))
+    expect(mocks.getUnreadCount).toHaveBeenCalledTimes(3)
+
+    view.unmount()
+    vi.useRealTimers()
+  })
+
   it.each([
     [401, "auth-required"],
     [403, "unavailable"]
@@ -461,6 +490,49 @@ describe("NotificationLifecycleProvider", () => {
     expect(view.latest().latestEvent).toMatchObject({ id: 11 })
     expect(view.latest().unreadCount).toBe(6)
   })
+
+  it("adds a validated coalesced count to the lifecycle unread total", async () => {
+    let streamOptions: Record<string, unknown> | undefined
+    mocks.subscribeNotificationsStream.mockImplementation((options: Record<string, unknown>) => {
+      streamOptions = options
+      return vi.fn()
+    })
+    const view = renderProvider()
+    await waitFor(() => expect(mocks.subscribeNotificationsStream).toHaveBeenCalledTimes(1))
+
+    act(() =>
+      (streamOptions?.onEvent as ((event: unknown) => void) | undefined)?.({
+        event: "notifications_coalesced",
+        id: 14,
+        payload: { count: 3 }
+      })
+    )
+
+    expect(view.latest().unreadCount).toBe(8)
+  })
+
+  it.each([0, -1, Number.POSITIVE_INFINITY, Number.NaN])(
+    "ignores invalid coalesced unread count %s",
+    async (count) => {
+      let streamOptions: Record<string, unknown> | undefined
+      mocks.subscribeNotificationsStream.mockImplementation((options: Record<string, unknown>) => {
+        streamOptions = options
+        return vi.fn()
+      })
+      const view = renderProvider()
+      await waitFor(() => expect(mocks.subscribeNotificationsStream).toHaveBeenCalledTimes(1))
+
+      act(() =>
+        (streamOptions?.onEvent as ((event: unknown) => void) | undefined)?.({
+          event: "notifications_coalesced",
+          id: 14,
+          payload: { count }
+        })
+      )
+
+      expect(view.latest().unreadCount).toBe(5)
+    }
+  )
 
   it("retains every stream event delivered in one React batch", async () => {
     let streamOptions: Record<string, unknown> | undefined

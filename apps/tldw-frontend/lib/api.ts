@@ -447,10 +447,13 @@ function handleUnauthorized(
     ? authorization.slice(7).trim()
     : null;
   const currentToken = localStorage.getItem('access_token');
-  if (currentToken !== sessionTokenAtStart) {
-    return;
-  }
-  if (requestToken && currentToken && requestToken !== currentToken) {
+  if (
+    !requestToken ||
+    !sessionTokenAtStart ||
+    !currentToken ||
+    requestToken !== sessionTokenAtStart ||
+    requestToken !== currentToken
+  ) {
     return;
   }
 

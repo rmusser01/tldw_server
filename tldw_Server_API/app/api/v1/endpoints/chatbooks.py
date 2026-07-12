@@ -2055,7 +2055,7 @@ async def remove_finished_jobs(
 ):
     """Remove all terminal Chatbook job history and saved export archives."""
     try:
-        result = service.delete_finished_jobs()
+        result = await asyncio.to_thread(service.delete_finished_jobs)
         export_jobs_removed = int(result.get("export_jobs_removed") or 0)
         import_jobs_removed = int(result.get("import_jobs_removed") or 0)
         total_removed = export_jobs_removed + import_jobs_removed

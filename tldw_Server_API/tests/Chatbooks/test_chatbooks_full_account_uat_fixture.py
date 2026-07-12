@@ -109,6 +109,10 @@ async def test_prepare_and_reset_create_separate_source_and_empty_destination(tm
     assert expected["source_user_id"] != expected["destination_user_id"]
     assert expected["media"]["artifact_sha256"]
     assert expected["embeddings"]["collection_ids"]
+    assert expected["embeddings"]["row_count"] == len(expected["embeddings"]["rows"])
+    assert set(expected["account_inventory"]["source_counts"]) == {
+        row.category for row in fixture.ACCOUNT_DATA_INVENTORY
+    }
     assert roles == ["user"]
     assert {"notifications.read", "notifications.control"}.issubset(permissions)
 
@@ -147,17 +151,54 @@ async def test_prepare_and_reset_create_separate_source_and_empty_destination(tm
     )
 
     assert reset["destination_user_id"] == expected["destination_user_id"]
-    assert reset["counts"] == {
-        "characters": 0,
-        "media_records": 0,
-        "media_stored_artifacts": 0,
-        "embeddings": 0,
-    }
+    assert reset["counts"] == expected["account_inventory"]["clean_destination_counts"]
+    assert reset["counts"]["account_profile"] == 1
+    assert reset["counts"]["account_settings"] == 1
+    assert reset["counts"]["characters"] == 1
+    assert all(
+        count == 0
+        for category, count in reset["counts"].items()
+        if category not in {"account_profile", "account_settings", "characters"}
+    )
     assert destination_roles == ["user"]
     assert {"notifications.read", "notifications.control"}.issubset(destination_permissions)
     assert archive_path.is_file(), "reset-destination must not move or copy the source archive"
     with pytest.raises(fixture.FixtureVerificationError, match="destination"):
         await fixture.verify(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_fixture_round_trip_verifies_full_inventory_and_exact_embeddings(
+    tmp_path: Path,
+) -> None:
+    fixture = _load_fixture_module()
+    prepared = await fixture.prepare(tmp_path)
+    expected = json.loads(Path(prepared["expected_path"]).read_text(encoding="utf-8"))
+    await fixture.reset_destination(tmp_path)
+
+    imported = await fixture.import_archive(tmp_path, prepared["archive_path"])
+    verified = await fixture.verify(tmp_path)
+
+    assert imported["success"] is True
+    assert verified["profile"] == expected["profile"]
+    assert verified["settings"] == expected["settings"]
+    assert verified["characters"] == [
+        {"name": character["name"]} for character in expected["characters"]
+    ]
+    assert verified["account_inventory_counts"] == expected["account_inventory"]["source_counts"]
+    assert verified["embeddings"] == {
+        "collection_name": expected["embeddings"]["collection_name"],
+        "collection_ids": expected["embeddings"]["collection_ids"],
+        "row_count": expected["embeddings"]["row_count"],
+        "rows": expected["embeddings"]["rows"],
+    }
+
+
+def test_fixture_uses_public_media_vector_operation() -> None:
+    source = SCRIPT_PATH.read_text(encoding="utf-8")
+
+    assert "media_db.set_media_vector_embedding(" in source
+    assert "UPDATE Media" not in source
 
 
 @pytest.mark.asyncio

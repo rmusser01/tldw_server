@@ -71,6 +71,15 @@ const initialSnapshot = (scopeKey: string, lifecycleEpoch: number): Notification
   mutationError: null
 })
 
+const unreadIncrementForEvent = (event: NotificationStreamEvent): number => {
+  if (event.event === "notification") return 1
+  if (event.event !== "notifications_coalesced" || !event.payload || typeof event.payload !== "object") {
+    return 0
+  }
+  const count = Number((event.payload as Record<string, unknown>).count ?? 0)
+  return Number.isFinite(count) && count > 0 ? count : 0
+}
+
 const readStoredOrgId = (): string | number | null => {
   if (typeof window === "undefined") return null
   try {
@@ -240,8 +249,7 @@ export function NotificationLifecycleProvider({
               latestEvent: event,
               eventSequence: sequence,
               events: [...current.events, { sequence, event }].slice(-MAX_BUFFERED_EVENTS),
-              unreadCount:
-                event.event === "notification" ? current.unreadCount + 1 : current.unreadCount,
+              unreadCount: current.unreadCount + unreadIncrementForEvent(event),
               updatedAt: Date.now()
             }
           })
@@ -291,47 +299,54 @@ export function NotificationLifecycleProvider({
     if (cursorCurrentRef.current) openStream(cursor)
     if (terminalGenerationRef.current === generation) return
 
+    let pollInFlight = false
     const pollNotificationState = async () => {
+      if (pollInFlight) return
+      pollInFlight = true
       try {
-        const result = await getUnreadCount({ signal: requestAbort.signal })
-        if (!isCurrent()) return
-        unreadCurrentRef.current = true
-        updateCurrent(generation, (current) => ({
-          ...current,
-          state:
-            canBeActive() && current.state === "degraded"
-              ? (reduceNotificationLifecycle(current.state, {
-                  type: "open"
-                }) as ExposedNotificationState)
-              : current.state,
-          unreadCount: Math.max(0, Number(result?.unread_count) || 0),
-          updatedAt: Date.now()
-        }))
-      } catch (error) {
-        if (!isCurrent()) return
-        unreadCurrentRef.current = false
-        if (applyFailure(error, generation) === "terminal") return
-      }
-
-      if (!cursorCurrentRef.current && terminalGenerationRef.current !== generation) {
         try {
-          const latest = await listNotifications({
-            limit: 1,
-            offset: 0,
-            include_archived: false,
-            signal: requestAbort.signal
-          })
+          const result = await getUnreadCount({ signal: requestAbort.signal })
           if (!isCurrent()) return
-          const nextCursor = latest.items.reduce(
-            (maximum, item) => Math.max(maximum, Number(item.id) || 0),
-            0
-          )
-          cursorCurrentRef.current = true
-          openStream(nextCursor)
+          unreadCurrentRef.current = true
+          updateCurrent(generation, (current) => ({
+            ...current,
+            state:
+              canBeActive() && current.state === "degraded"
+                ? (reduceNotificationLifecycle(current.state, {
+                    type: "open"
+                  }) as ExposedNotificationState)
+                : current.state,
+            unreadCount: Math.max(0, Number(result?.unread_count) || 0),
+            updatedAt: Date.now()
+          }))
         } catch (error) {
           if (!isCurrent()) return
+          unreadCurrentRef.current = false
           if (applyFailure(error, generation) === "terminal") return
         }
+
+        if (!cursorCurrentRef.current && terminalGenerationRef.current !== generation) {
+          try {
+            const latest = await listNotifications({
+              limit: 1,
+              offset: 0,
+              include_archived: false,
+              signal: requestAbort.signal
+            })
+            if (!isCurrent()) return
+            const nextCursor = latest.items.reduce(
+              (maximum, item) => Math.max(maximum, Number(item.id) || 0),
+              0
+            )
+            cursorCurrentRef.current = true
+            openStream(nextCursor)
+          } catch (error) {
+            if (!isCurrent()) return
+            if (applyFailure(error, generation) === "terminal") return
+          }
+        }
+      } finally {
+        pollInFlight = false
       }
     }
 

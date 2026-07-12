@@ -106,6 +106,7 @@ async def _repair_existing_admin_memberships(users_db) -> None:
     """Repair canonical membership for users already marked as admins."""
     page_size = 100
     offset = 0
+    first_error: BaseException | None = None
     while True:
         admin_users = await users_db.list_users(
             role="admin",
@@ -118,10 +119,16 @@ async def _repair_existing_admin_memberships(users_db) -> None:
                 raise AuthNZDatabaseError("Existing admin user has no identifier")
             try:
                 await _ensure_admin_role_membership(int(user_id))
-            except _AUTHNZ_ADMIN_CREATION_EXCEPTIONS:
+            except asyncio.CancelledError:
                 await _disable_admin_login(users_db, int(user_id))
                 raise
+            except _AUTHNZ_ADMIN_CREATION_EXCEPTIONS as exc:
+                await _disable_admin_login(users_db, int(user_id))
+                if first_error is None:
+                    first_error = exc
         if len(admin_users) < page_size:
+            if first_error is not None:
+                raise first_error
             return
         offset += len(admin_users)
 

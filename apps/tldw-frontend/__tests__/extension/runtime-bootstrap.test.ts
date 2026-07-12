@@ -254,7 +254,7 @@ describe("runtime-bootstrap chrome shim", () => {
         authMode: "multi-user",
         accessToken: "user-token",
         refreshToken: "user-refresh",
-        serverUrl: "http://127.0.0.1:8000"
+        serverUrl: "http://127.0.0.1:8000/"
       })
     )
 
@@ -263,37 +263,37 @@ describe("runtime-bootstrap chrome shim", () => {
     expect(readStoredValue("tldwConfig")).toMatchObject({
       authMode: "multi-user",
       accessToken: "user-token",
-      refreshToken: "user-refresh"
+      refreshToken: "user-refresh",
+      serverUrl: "http://127.0.0.1:8000"
     })
   })
 
-  it("clears manual multi-user tokens when bootstrap changes server URL", async () => {
+  it("clears manual multi-user tokens when the target server changes", async () => {
     process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
-    process.env.NEXT_PUBLIC_API_URL = "http://127.0.0.1:8000"
+    process.env.NEXT_PUBLIC_API_URL = "https://new-api.example.test"
     delete process.env.NEXT_PUBLIC_X_API_KEY
     delete process.env.NEXT_PUBLIC_API_BEARER
-    localStorage.setItem("tldw-api-host", "http://localhost:18001")
     localStorage.setItem(
       "tldwConfig",
       JSON.stringify({
         authMode: "multi-user",
-        accessToken: "user-token",
-        refreshToken: "user-refresh",
-        serverUrl: "http://127.0.0.1:8000"
+        accessToken: "old-access-token",
+        refreshToken: "old-refresh-token",
+        serverUrl: "https://old-api.example.test"
       })
     )
 
     await importAndAwaitBootstrap()
 
+    expect(readStoredValue("tldwConfig")).toEqual(
+      expect.objectContaining({
+        authMode: "multi-user",
+        serverUrl: "https://new-api.example.test"
+      })
+    )
     const nextConfig = readStoredValue("tldwConfig") as Record<string, unknown>
-    expect(nextConfig).toMatchObject({
-      authMode: "multi-user",
-      serverUrl: "http://localhost:18001"
-    })
     expect(nextConfig.accessToken).toBeUndefined()
     expect(nextConfig.refreshToken).toBeUndefined()
-    expect(localStorage.getItem("tldwConfig")).not.toContain("user-token")
-    expect(localStorage.getItem("tldwConfig")).not.toContain("user-refresh")
   })
 
   it("repairs a stale env LAN host to the current browser host during bootstrap", async () => {

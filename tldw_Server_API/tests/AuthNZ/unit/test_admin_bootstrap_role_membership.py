@@ -1,11 +1,13 @@
+"""Verify admin bootstrap grants and enforces canonical RBAC membership."""
+
 from __future__ import annotations
 
 from types import SimpleNamespace
 
 import pytest
 
-from tldw_Server_API.app.core.AuthNZ import create_admin, initialize
 from tldw_Server_API.app.core.AuthNZ import api_key_manager as api_key_manager_module
+from tldw_Server_API.app.core.AuthNZ import create_admin, initialize
 
 
 class _UsersDb:
@@ -272,6 +274,31 @@ async def test_initialize_existing_admin_scan_repairs_every_page(monkeypatch) ->
     await initialize._repair_existing_admin_memberships(users_db)
 
     assert repo.assigned == [(user_id, "admin") for user_id in range(1, 102)]
+    assert users_db.list_calls == [
+        {"role": "admin", "offset": 0, "limit": 100},
+        {"role": "admin", "offset": 100, "limit": 100},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_initialize_existing_admin_scan_disables_all_failures_across_pages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    users_db = _UsersDb(None)
+    users_db.paged_users = [
+        {"id": user_id, "username": f"admin-{user_id}", "role": "admin"}
+        for user_id in range(1, 102)
+    ]
+    repo = _Repo(membership_available=False)
+    await _set_common_create_admin_patches(monkeypatch, initialize, users_db, repo)
+
+    with pytest.raises(initialize.AuthNZDatabaseError, match="Canonical admin role membership"):
+        await initialize._repair_existing_admin_memberships(users_db)
+
+    assert users_db.updated == [
+        (user_id, {"is_active": False, "is_superuser": False})
+        for user_id in range(1, 102)
+    ]
     assert users_db.list_calls == [
         {"role": "admin", "offset": 0, "limit": 100},
         {"role": "admin", "offset": 100, "limit": 100},

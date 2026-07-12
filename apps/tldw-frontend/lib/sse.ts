@@ -45,7 +45,7 @@ async function openSSEStream(
   if (!res.ok || !res.body) {
     const { ApiError } = await import('@web/lib/api');
     throw new ApiError(`Stream error: ${res.status} ${res.statusText}`, {
-      status: res.status,
+      status: res.ok ? undefined : res.status,
       retryAfter: readRetryAfterSeconds(res.headers),
     });
   }

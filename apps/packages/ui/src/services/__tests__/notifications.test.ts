@@ -320,17 +320,15 @@ describe("notifications service", () => {
     }
   })
 
-  it("backs off repeated graceful stream closes", async () => {
+  it("backs off repeated stream closes before acquisition", async () => {
     vi.useFakeTimers()
     try {
       const readStream = vi.fn(
         async (
           _signal: AbortSignal,
           cursor: number,
-          _onEvent: (event: { event: string }) => void,
-          markOpen: () => void
+          _onEvent: (event: { event: string }) => void
         ) => {
-          markOpen()
           return cursor
         }
       )
@@ -348,6 +346,44 @@ describe("notifications service", () => {
       await vi.advanceTimersByTimeAsync(250)
       expect(readStream).toHaveBeenCalledTimes(2)
 
+      await vi.advanceTimersByTimeAsync(250)
+      expect(readStream).toHaveBeenCalledTimes(2)
+
+      await vi.advanceTimersByTimeAsync(250)
+      expect(readStream).toHaveBeenCalledTimes(3)
+
+      unsubscribe()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("resets reconnect backoff when a quiet stream opens successfully", async () => {
+    vi.useFakeTimers()
+    try {
+      const readStream = vi.fn(
+        async (
+          _signal: AbortSignal,
+          cursor: number,
+          _onEvent: (event: { event: string }) => void,
+          markOpen: () => void
+        ) => {
+          if (readStream.mock.calls.length === 1) {
+            throw Object.assign(new Error("offline"), { status: 503 })
+          }
+          markOpen()
+          return cursor
+        }
+      )
+
+      const unsubscribe = createNotificationStreamSubscription({
+        reconnectDelayMs: 250,
+        reconnectJitter: 0.5,
+        onEvent: vi.fn(),
+        readStream
+      })
+
+      await Promise.resolve()
       await vi.advanceTimersByTimeAsync(250)
       expect(readStream).toHaveBeenCalledTimes(2)
 

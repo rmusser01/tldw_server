@@ -1341,7 +1341,6 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
   React.useEffect(() => {
     previewRequestIdRef.current += 1
     setImportFile(null)
-    setImportRecoveryNotice(null)
     setPreviewManifest(null)
     setOpenwebuiPreview(null)
     setOpenwebuiDbPreview(null)
@@ -1405,7 +1404,10 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
     const counts = summary?.counts
     if (!summary || !counts || typeof counts !== "object") return null
     const labels = new Map<string, string>()
-    for (const row of previewManifest?.account_inventory || []) {
+    const inventory = Array.isArray(previewManifest?.account_inventory)
+      ? previewManifest.account_inventory
+      : []
+    for (const row of inventory) {
       if (row?.category) {
         labels.set(String(row.category), String(row.label || ""))
       }
@@ -1875,7 +1877,24 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
     )
   }
 
-  const handleReviewImport = () => {
+  const getExportFailureSummary = (job: ChatbookJob) =>
+    sanitizeServerErrorMessage(
+      job.error_message,
+      t(
+        "settings:chatbooksPlayground.exportFailureFallback",
+        "The export failed. Review the server logs and try again."
+      )
+    )
+
+  const handleReviewImport = (job: ChatbookJob) => {
+    const sourceFormat = job.metadata?.source_format
+    if (
+      sourceFormat === "chatbook" ||
+      sourceFormat === "openwebui_json" ||
+      sourceFormat === "openwebui_db"
+    ) {
+      setImportSourceFormat(sourceFormat)
+    }
     setImportRecoveryNotice(
       t(
         "settings:chatbooksPlayground.importRecoveryNotice",
@@ -2748,7 +2767,10 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
             <Select
               aria-label={t("settings:chatbooksPlayground.importSource", "Import source")}
               value={importSourceFormat}
-              onChange={(value) => setImportSourceFormat(value as ImportSourceFormat)}
+              onChange={(value) => {
+                setImportRecoveryNotice(null)
+                setImportSourceFormat(value as ImportSourceFormat)
+              }}
               className="min-w-[220px]"
               options={[
                 {
@@ -3876,7 +3898,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
             size={touchSized ? "middle" : "small"}
             className={touchSized ? "min-h-11" : undefined}
             type="primary"
-            onClick={handleReviewImport}
+            onClick={() => handleReviewImport(job)}
           >
             {t("settings:chatbooksPlayground.reviewImport", "Review import")}
           </Button>
@@ -4009,7 +4031,8 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
             {
               title: t("settings:chatbooksPlayground.jobError", "Error"),
               dataIndex: "error_message",
-              render: (value: string) => value || "—"
+              render: (value: string, job: ChatbookJob) =>
+                value ? getExportFailureSummary(job) : "—"
             },
             {
               title: t("settings:chatbooksPlayground.jobWarnings", "Warnings"),
@@ -4128,7 +4151,9 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
                       </div>
                     </div>
 
-                    {job.error_message && <Text type="danger">{job.error_message}</Text>}
+                    {job.error_message && (
+                      <Text type="danger">{getExportFailureSummary(job)}</Text>
+                    )}
                     {renderExportJobActions(job, true)}
                   </div>
                 )
@@ -4404,7 +4429,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
                             <Text type="danger" className="text-xs">
                               {job.kind === "import"
                                 ? getImportFailureSummary(job)
-                                : job.error_message}
+                                : getExportFailureSummary(job)}
                             </Text>
                           )}
                           <Space wrap>
@@ -4424,7 +4449,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
                               <Button
                                 size="small"
                                 type="primary"
-                                onClick={handleReviewImport}
+                                onClick={() => handleReviewImport(job)}
                               >
                                 {t(
                                   "settings:chatbooksPlayground.reviewImport",

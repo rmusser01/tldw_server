@@ -404,6 +404,33 @@ describe("fetch-backed WebUI api client", () => {
     expect(localStorage.getItem("user")).toContain("bob")
   })
 
+  it("does not clear an unchanged JWT when a non-bearer request returns 401", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse({ detail: "Unauthorized" }, { status: 401 })
+      )
+    )
+    localStorage.setItem("access_token", "jwt-token")
+    localStorage.setItem("user", JSON.stringify({ username: "alice" }))
+    setWindowLocation("http://localhost:3000/chat")
+    const { apiClient } = await loadApiModule()
+
+    await expect(
+      apiClient.get("/single-user-resource", {
+        headers: {
+          Authorization: "Basic c2luZ2xlLXVzZXI=",
+          "X-API-KEY": "single-user-key"
+        },
+        withCredentials: false
+      })
+    ).rejects.toMatchObject({ status: 401 })
+
+    expect(localStorage.getItem("access_token")).toBe("jwt-token")
+    expect(localStorage.getItem("user")).toContain("alice")
+    expect(window.location.href).toBe("http://localhost:3000/chat")
+  })
+
   it("supports timeout cancellation and caller-provided abort signals", async () => {
     vi.useFakeTimers()
     const fetchMock = vi.fn((_url: string, init?: RequestInit) => {

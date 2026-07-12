@@ -10,12 +10,23 @@ export const parseNotificationRuntimeConfig = (
 ): NotificationRuntimeConfig | null => {
   if (!value || typeof value !== "object") return null
   const config = value as Record<string, unknown>
-  const serverUrl = String(config.serverUrl || "").trim()
-  const authMode = String(config.authMode || "").trim().toLowerCase()
+  if (typeof config.serverUrl !== "string" || typeof config.authMode !== "string") {
+    return null
+  }
+  const serverUrl = config.serverUrl.trim()
+  const authMode = config.authMode.trim().toLowerCase()
   if (!serverUrl || (authMode !== "single-user" && authMode !== "multi-user")) return null
 
-  const accessToken = String(config.accessToken || "").trim()
-  const apiKey = String(config.apiKey || "").trim()
+  if (
+    (Object.prototype.hasOwnProperty.call(config, "accessToken") &&
+      typeof config.accessToken !== "string") ||
+    (Object.prototype.hasOwnProperty.call(config, "apiKey") &&
+      typeof config.apiKey !== "string")
+  ) {
+    return null
+  }
+  const accessToken = typeof config.accessToken === "string" ? config.accessToken.trim() : ""
+  const apiKey = typeof config.apiKey === "string" ? config.apiKey.trim() : ""
   if (authMode === "multi-user" ? !accessToken : !apiKey) return null
 
   return {

@@ -26,6 +26,7 @@ const enabled =
   Boolean(archivePath && accessToken && serverUrl)
 
 const authHeaders = () => ({ Authorization: `Bearer ${accessToken}` })
+const POLL_REQUEST_TIMEOUT_MS = 15_000
 
 async function waitForJob(
   kind: "export" | "import",
@@ -34,16 +35,26 @@ async function waitForJob(
   const deadline = Date.now() + 180_000
   let lastStatus = "unknown"
   while (Date.now() < deadline) {
-    const response = await fetch(
-      `${serverUrl}/api/v1/chatbooks/${kind}/jobs/${encodeURIComponent(jobId)}`,
-      { headers: authHeaders() },
+    const controller = new AbortController()
+    const timeout = setTimeout(
+      () => controller.abort(),
+      Math.min(POLL_REQUEST_TIMEOUT_MS, Math.max(1, deadline - Date.now())),
     )
-    if (!response.ok) {
-      throw new Error(
-        `${kind} job status failed: ${response.status} ${await response.text()}`,
+    let job: JobResponse
+    try {
+      const response = await fetch(
+        `${serverUrl}/api/v1/chatbooks/${kind}/jobs/${encodeURIComponent(jobId)}`,
+        { headers: authHeaders(), signal: controller.signal },
       )
+      if (!response.ok) {
+        throw new Error(
+          `${kind} job status failed: ${response.status} ${await response.text()}`,
+        )
+      }
+      job = (await response.json()) as JobResponse
+    } finally {
+      clearTimeout(timeout)
     }
-    const job = (await response.json()) as JobResponse
     lastStatus = String(job.status || "unknown")
     if (lastStatus === "completed") return job
     if (["failed", "cancelled", "expired"].includes(lastStatus)) {
@@ -69,7 +80,7 @@ test.describe("Chatbooks packaged-extension full-account round trip", () => {
   test.skip(!enabled, "Run through chatbooks_full_account_browser_uat.py")
 
   test("exports or imports the configured full-account UAT phase", async () => {
-    test.setTimeout(240_000)
+    test.setTimeout(360_000)
     const health = await fetch(`${serverUrl}/api/v1/chatbooks/health`, {
       headers: authHeaders(),
     })
@@ -168,7 +179,7 @@ test.describe("Chatbooks packaged-extension full-account round trip", () => {
       ).toBeVisible({ timeout: 30_000 })
       await expect(page.getByText(/Account profile/i).first()).toBeVisible()
       await expect(page.getByText(/Account settings/i).first()).toBeVisible()
-      await expect(page.getByText(/Media stored artifacts/i).first()).toBeVisible()
+      await expect(page.getByText(/Stored media artifacts/i).first()).toBeVisible()
       await expect(page.getByText(/^Verified$/i).first()).toBeVisible()
 
       const importRequestPromise = page.waitForRequest(

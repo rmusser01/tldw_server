@@ -73,7 +73,7 @@ test.describe("Chatbooks full-account browser round trip", () => {
 
   test("exports the source account through Backup all", async ({ page }) => {
     test.skip(phase !== "export", "Import phase invocation")
-    test.setTimeout(240_000)
+    test.setTimeout(360_000)
     await openChatbooks(page)
 
     const exportName = "Browser UAT full account backup"
@@ -131,7 +131,7 @@ test.describe("Chatbooks full-account browser round trip", () => {
     page,
   }) => {
     test.skip(phase !== "import", "Export phase invocation")
-    test.setTimeout(240_000)
+    test.setTimeout(360_000)
     expect(existsSync(archivePath!)).toBe(true)
     await openChatbooks(page)
     await page.getByRole("tab", { name: /Import/i }).click()

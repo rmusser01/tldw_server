@@ -64,6 +64,39 @@ async def test_user_profile_update_accepts_valid_identity_email_with_pydantic_v2
     assert updates == [(7, "email", "restored.profile@example.com")]
 
 
+@pytest.mark.asyncio
+async def test_invalid_identity_email_log_excludes_validation_details(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    debug_calls: list[tuple[str, tuple[object, ...]]] = []
+
+    def _capture_debug(message: str, *args: object) -> None:
+        debug_calls.append((message, args))
+
+    monkeypatch.setattr(update_service_module.logger, "debug", _capture_debug)
+    service = update_service_module.UserProfileUpdateService(db_pool=object())
+    rejected_email = "private-rejected-value"
+
+    with pytest.raises(ValueError, match="^invalid_email$"):
+        await service._apply_key_update(
+            user_id=7,
+            key="identity.email",
+            value=rejected_email,
+            dry_run=True,
+            db_conn=object(),
+            repo_holder={"repo": None},
+            updated_by=7,
+            scope=None,
+            is_platform_admin=False,
+            membership_context=None,
+            is_postgres_backend=False,
+        )
+
+    assert debug_calls == [("Invalid email update for user {}", (7,))]
+    assert rejected_email not in repr(debug_calls)
+    assert "ValidationError" not in repr(debug_calls)
+
+
 def test_user_profile_update_preferences(auth_headers) -> None:
     with TestClient(app) as client:
         resp = client.patch(

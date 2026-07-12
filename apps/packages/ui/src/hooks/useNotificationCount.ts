@@ -1,6 +1,6 @@
 /** Read the active scoped notification unread count from extension storage. */
 
-import { useRef } from "react"
+import { useEffect, useRef } from "react"
 import { useStorage } from "@plasmohq/storage/hook"
 
 import { toUnreadCount } from "@/utils/notifications"
@@ -34,7 +34,9 @@ export function useNotificationCount(): number {
   )
   const previousScope = useRef(activeScope)
   const scopeChanged = previousScope.current !== activeScope
-  previousScope.current = activeScope
+  useEffect(() => {
+    previousScope.current = activeScope
+  }, [activeScope])
 
   if (!expectedScope || activeScope !== expectedScope || scopeChanged) return 0
   return toUnreadCount(record?.unreadCount)

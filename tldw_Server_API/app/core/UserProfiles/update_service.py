@@ -168,7 +168,7 @@ class UserProfileUpdateService:
             try:
                 email = TypeAdapter(EmailStr).validate_python(value)
             except ValidationError as exc:
-                logger.debug("Invalid email update for user {}: {}", user_id, exc)
+                logger.debug("Invalid email update for user {}", user_id)
                 raise ValueError("invalid_email") from exc
             if not dry_run:
                 await _update_user_field(db_conn, user_id, "email", str(email).lower())

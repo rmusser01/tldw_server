@@ -249,7 +249,10 @@ export function createNotificationStreamSubscription(options: SubscribeNotificat
             reconnectAttempt = 0
             options.onEvent(event)
           },
-          () => options.onOpen?.()
+          () => {
+            reconnectAttempt = 0
+            options.onOpen?.()
+          }
         )
         if (controller.signal.aborted) break
         const reconnectDelay = nextReconnectDelay({

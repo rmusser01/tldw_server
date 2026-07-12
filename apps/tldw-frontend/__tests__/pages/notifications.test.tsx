@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -62,7 +64,7 @@ vi.mock('@web/components/notifications/NotificationLifecycleProvider', () => ({
   }),
 }));
 
-import NotificationsPage from '@web/pages/notifications';
+import NotificationsPage from '@web/components/notifications/NotificationsRoute';
 
 describe('NotificationsPage', () => {
   beforeEach(() => {
@@ -117,6 +119,13 @@ describe('NotificationsPage', () => {
       run_at: '2026-02-26T00:15:00+00:00',
     });
     mocks.subscribeNotificationsStream.mockImplementation(() => () => {});
+  });
+
+  it('keeps the Next page as an SSR-disabled thin wrapper', () => {
+    const source = readFileSync(resolve(process.cwd(), 'pages/notifications.tsx'), 'utf8');
+
+    expect(source).toContain("dynamic(() => import('@web/components/notifications/NotificationsRoute'), { ssr: false })");
+    expect(source.trim().split('\n')).toHaveLength(3);
   });
 
   it('renders unread count and marks notification read', async () => {
@@ -573,6 +582,36 @@ describe('NotificationsPage', () => {
       await screen.findByText('Notification preferences are currently unavailable.')
     ).toBeInTheDocument();
     expect(screen.queryByText('Loading preferences...')).not.toBeInTheDocument();
+  });
+
+  it('stops preference retries when the lifecycle becomes terminal', async () => {
+    const user = userEvent.setup();
+    mocks.getNotificationPreferences.mockRejectedValueOnce(new Error('preferences unavailable'));
+    const view = render(<NotificationsPage />);
+
+    await user.click(await screen.findByRole('button', { name: 'Preferences' }));
+    const retryButton = await screen.findByRole('button', { name: 'Retry' });
+    expect(mocks.getNotificationPreferences).toHaveBeenCalledTimes(1);
+
+    mocks.lifecycle.state = 'unavailable';
+    view.rerender(<NotificationsPage />);
+
+    expect(retryButton).toBeDisabled();
+    await user.click(retryButton);
+    expect(mocks.getNotificationPreferences).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves an optimistic unread decrement across lifecycle timestamp changes', async () => {
+    const user = userEvent.setup();
+    const view = render(<NotificationsPage />);
+
+    await user.click(await screen.findByRole('button', { name: 'Mark read' }));
+    expect(screen.getByText('Unread: 1')).toBeInTheDocument();
+
+    mocks.lifecycle.updatedAt = 2;
+    view.rerender(<NotificationsPage />);
+
+    expect(screen.getByText('Unread: 1')).toBeInTheDocument();
   });
 
   it('disables preference toggles while a save is in flight and ignores duplicate clicks', async () => {

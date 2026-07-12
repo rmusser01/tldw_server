@@ -6,7 +6,6 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -173,6 +172,45 @@ async def test_init_auth_services_runs_pg_extras_when_pool_present(
         "usage",
         "virtual_key_counters",
         "provider_overrides",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_pg_ensure_false_emits_high_signal_warning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _successful_ensure(_pool: object) -> bool:
+        return True
+
+    async def _failed_ensure(_pool: object) -> bool:
+        return False
+
+    pg_ensures = {
+        "ensure_user_timestamp_timezones_pg": _successful_ensure,
+        "ensure_authnz_core_tables_pg": _successful_ensure,
+        "ensure_notification_permissions_pg": _failed_ensure,
+        "ensure_generated_files_table_pg": _successful_ensure,
+        "ensure_tool_catalogs_tables_pg": _successful_ensure,
+        "ensure_privilege_snapshots_table_pg": _successful_ensure,
+        "ensure_api_keys_tables_pg": _successful_ensure,
+        "ensure_usage_tables_pg": _successful_ensure,
+        "ensure_virtual_key_counters_pg": _successful_ensure,
+        "ensure_llm_provider_overrides_pg": _successful_ensure,
+    }
+    _install_module(
+        monkeypatch,
+        "tldw_Server_API.app.core.AuthNZ.pg_migrations_extra",
+        **pg_ensures,
+    )
+    startup_auth = _import_startup_auth()
+    warnings: list[str] = []
+    monkeypatch.setattr(startup_auth.logger, "warning", warnings.append)
+
+    await startup_auth._ensure_pg_extras(SimpleNamespace(pool=object()))
+
+    assert warnings == [
+        "App Startup: PG notification permissions ensure returned False; "
+        "canonical database state may be incomplete"
     ]
 
 

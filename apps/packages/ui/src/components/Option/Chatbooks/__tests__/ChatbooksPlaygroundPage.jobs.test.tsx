@@ -161,7 +161,13 @@ const importJob = {
   created_at: "2026-07-09T12:01:00Z",
   error_message:
     "selected_openwebui_user_id is required for OpenWebUI DB imports at /private/imports/webui.db",
+  metadata: { source_format: "openwebui_db" },
 };
+
+const sensitiveExportError =
+  "POST /api/v1/chatbooks/export failed at /private/exports/account.zip authorization=secret-token";
+const sanitizedExportError =
+  "POST [server-endpoint] failed at [redacted-path] authorization=[redacted-secret]";
 
 describe("ChatbooksPlaygroundPage Jobs", () => {
   beforeEach(() => {
@@ -304,6 +310,9 @@ describe("ChatbooksPlaygroundPage Jobs", () => {
         "Review the import settings and choose the archive again if needed.",
       ),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Drop an OpenWebUI webui\.db or \.sqlite database/),
+    ).toBeVisible();
 
     const retryInput = document.querySelector<HTMLInputElement>(
       '.ant-upload-drag input[type="file"]',
@@ -323,6 +332,45 @@ describe("ChatbooksPlaygroundPage Jobs", () => {
         screen.queryByTestId("chatbooks-import-recovery"),
       ).not.toBeInTheDocument();
     });
+  });
+
+  it("sanitizes export errors in the compact job tracker", async () => {
+    mocks.tldwClient.listChatbookExportJobs.mockResolvedValue({
+      jobs: [
+        {
+          ...exportJob,
+          status: "failed",
+          error_message: sensitiveExportError,
+        },
+      ],
+    });
+
+    render(<ChatbooksPlaygroundPage />);
+
+    expect(await screen.findByText(sanitizedExportError)).toBeVisible();
+    expect(screen.queryByText(sensitiveExportError)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["desktop", true],
+    ["mobile", false],
+  ])("sanitizes export errors in the %s jobs view", async (_label, isDesktop) => {
+    mocks.isDesktop = isDesktop;
+    mocks.tldwClient.listChatbookExportJobs.mockResolvedValue({
+      jobs: [
+        {
+          ...exportJob,
+          status: "failed",
+          error_message: sensitiveExportError,
+        },
+      ],
+    });
+
+    render(<ChatbooksPlaygroundPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "Jobs" }));
+
+    expect(await screen.findByText(sanitizedExportError)).toBeVisible();
+    expect(screen.queryByText(sensitiveExportError)).not.toBeInTheDocument();
   });
 
   it("confirms the exact scope of archive and history deletion", async () => {
