@@ -1,4 +1,4 @@
-import { test, expect, skipIfServerUnavailable, assertNoCriticalErrors } from "../../utils/fixtures"
+import { test, expect, assertNoCriticalErrors } from "../../utils/fixtures"
 import { expectApiCall } from "../../utils/api-assertions"
 import { NotificationsPage } from "../../utils/page-objects"
 import type { Page, Route } from "@playwright/test"
@@ -65,8 +65,8 @@ async function fulfillActiveNotificationRequest(
   await fulfillJson(route, 200, method === "POST" ? { updated: 1 } : {})
 }
 
-const jwtFor = (subject: string): string => {
-  const payload = Buffer.from(JSON.stringify({ sub: subject })).toString("base64url")
+const jwtFor = (subject: string, roles: string[] = []): string => {
+  const payload = Buffer.from(JSON.stringify({ sub: subject, roles })).toString("base64url")
   return `eyJhbGciOiJub25lIn0.${payload}.signature`
 }
 
@@ -86,15 +86,11 @@ async function switchBearerScope(page: Page, accessToken: string): Promise<void>
 test.describe("Notifications", () => {
   let notifications: NotificationsPage
 
-  test.beforeEach(async ({ authedPage, serverInfo }) => {
-    skipIfServerUnavailable(serverInfo)
+  test.beforeEach(async ({ authedPage }) => {
     notifications = new NotificationsPage(authedPage)
   })
 
-  test("notifications page loads with heading and refresh button", async ({
-    authedPage,
-    diagnostics,
-  }) => {
+  test("notifications page loads with heading and refresh button", async ({ diagnostics }) => {
     await notifications.goto()
     await notifications.assertPageReady()
 
@@ -107,7 +103,7 @@ test.describe("Notifications", () => {
     await assertNoCriticalErrors(diagnostics)
   })
 
-  test("notifications page shows unread count label", async ({ authedPage, diagnostics }) => {
+  test("notifications page shows unread count label", async ({ diagnostics }) => {
     await notifications.goto()
     await notifications.assertPageReady()
 
@@ -135,10 +131,7 @@ test.describe("Notifications", () => {
     await assertNoCriticalErrors(diagnostics)
   })
 
-  test("notifications page shows empty state or list after loading", async ({
-    authedPage,
-    diagnostics,
-  }) => {
+  test("notifications page shows empty state or list after loading", async ({ diagnostics }) => {
     await notifications.goto()
     await notifications.waitForLoaded()
 
@@ -273,6 +266,10 @@ test.describe("Notifications", () => {
     authedPage,
     diagnostics,
   }) => {
+    const standardUserToken = jwtFor("standard-user", ["user"])
+    await authedPage.addInitScript((accessToken) => {
+      localStorage.setItem("access_token", accessToken)
+    }, standardUserToken)
     let listCalls = 0
     let countCalls = 0
     let streamCalls = 0
@@ -280,6 +277,10 @@ test.describe("Notifications", () => {
     await authedPage.route(/\/api\/v1\/notifications(?:\/.*)?(?:\?.*)?$/, async (route) => {
       const request = route.request()
       const pathname = new URL(request.url()).pathname
+      if (request.headers()["authorization"] !== `Bearer ${standardUserToken}`) {
+        await fulfillJson(route, 401, { detail: "missing standard-user credentials" })
+        return
+      }
       if (request.method() === "GET" && pathname === "/api/v1/notifications") listCalls += 1
       if (request.method() === "GET" && pathname === "/api/v1/notifications/unread-count") countCalls += 1
       if (request.method() === "GET" && pathname === "/api/v1/notifications/stream") streamCalls += 1
@@ -311,6 +312,7 @@ test.describe("Notifications", () => {
     authedPage,
     diagnostics,
   }) => {
+    await authedPage.clock.install()
     let granted = false
     let unreadCalls = 0
     let terminalCalls = 0
@@ -328,7 +330,7 @@ test.describe("Notifications", () => {
     await notifications.goto()
     await expect(authedPage.getByText("Notifications unavailable for this account").first()).toBeVisible()
     const terminalCallCount = terminalCalls
-    await authedPage.waitForTimeout(1_500)
+    await authedPage.clock.fastForward(31_000)
     expect(terminalCalls).toBe(terminalCallCount)
 
     const trigger = authedPage.getByRole("button", {
@@ -345,7 +347,7 @@ test.describe("Notifications", () => {
     const unreadBeforeRetry = unreadCalls
     await retry.click()
     await expect.poll(() => unreadCalls).toBe(unreadBeforeRetry + 1)
-    await expect(authedPage.getByText("Notifications unavailable for this account")).toHaveCount(0)
+    await expect(authedPage.getByRole("button", { name: "Notifications, 4 unread" })).toBeVisible()
 
     await assertNoCriticalErrors(diagnostics)
   })
@@ -354,19 +356,28 @@ test.describe("Notifications", () => {
     authedPage,
     diagnostics,
   }) => {
+    await authedPage.clock.install()
+    let reauthenticated = false
     let requestCalls = 0
     await authedPage.route(/\/api\/v1\/notifications(?:\/.*)?(?:\?.*)?$/, async (route) => {
       requestCalls += 1
-      await fulfillJson(route, 401, { detail: "expired credentials" })
+      if (!reauthenticated) {
+        await fulfillJson(route, 401, { detail: "expired credentials" })
+        return
+      }
+      await fulfillActiveNotificationRequest(route, 2)
     })
 
     await notifications.goto()
     await expect(authedPage.getByText("Sign in again to view notifications")).toBeVisible()
     const terminalCallCount = requestCalls
-    await authedPage.waitForTimeout(1_500)
+    await authedPage.clock.fastForward(31_000)
     expect(requestCalls).toBe(terminalCallCount)
     await authedPage.getByRole("button", { name: "Open sign in" }).click()
     await expect(authedPage).toHaveURL(/\/(?:login|settings\/tldw)/)
+    reauthenticated = true
+    await switchBearerScope(authedPage, jwtFor("reauthenticated-user", ["user"]))
+    await expect(authedPage.getByRole("button", { name: "Notifications, 2 unread" })).toBeVisible()
 
     await assertNoCriticalErrors(diagnostics)
   })
@@ -377,11 +388,22 @@ test.describe("Notifications", () => {
   }) => {
     const accountAToken = jwtFor("account-a")
     const accountBToken = jwtFor("account-b")
+    let releaseAccountBUnread!: () => void
+    const accountBUnreadPending = new Promise<void>((resolve) => {
+      releaseAccountBUnread = resolve
+    })
     await authedPage.addInitScript((accessToken) => {
       localStorage.setItem("access_token", accessToken)
     }, accountAToken)
     await authedPage.route(/\/api\/v1\/notifications(?:\/.*)?(?:\?.*)?$/, async (route) => {
+      const pathname = new URL(route.request().url()).pathname
       const authorization = route.request().headers()["authorization"]
+      if (
+        authorization === `Bearer ${accountBToken}`
+        && pathname === "/api/v1/notifications/unread-count"
+      ) {
+        await accountBUnreadPending
+      }
       await fulfillActiveNotificationRequest(
         route,
         authorization === `Bearer ${accountBToken}` ? 1 : 7,
@@ -391,7 +413,11 @@ test.describe("Notifications", () => {
     await notifications.goto()
     await expect(authedPage.getByRole("button", { name: "Notifications, 7 unread" })).toBeVisible()
     await switchBearerScope(authedPage, accountBToken)
-    await expect(authedPage.getByRole("button", { name: "Notifications, 7 unread" })).toHaveCount(0)
+    await expect(authedPage.getByRole("button", { name: "Notifications, 7 unread" })).toHaveCount(0, {
+      timeout: 1_000,
+    })
+    await expect(authedPage.getByRole("button", { name: "Notifications, 1 unread" })).toHaveCount(0)
+    releaseAccountBUnread()
     await expect(authedPage.getByRole("button", { name: "Notifications, 1 unread" })).toBeVisible()
 
     await assertNoCriticalErrors(diagnostics)

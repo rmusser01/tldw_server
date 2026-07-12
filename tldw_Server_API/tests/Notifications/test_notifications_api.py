@@ -6,7 +6,6 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.api.v1.endpoints.notifications import router as notifications_router
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.AuthNZ.permissions import (
     NOTIFICATIONS_CONTROL,
     NOTIFICATIONS_READ,
@@ -14,9 +13,9 @@ from tldw_Server_API.app.core.AuthNZ.permissions import (
     TASKS_READ,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.config import settings
-
+from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 
 pytestmark = pytest.mark.unit
 
@@ -171,7 +170,7 @@ def test_notifications_unread_requires_read_scope(notifications_app):
         ("PATCH", "/api/v1/notifications/preferences", {"reminder_enabled": False}),
     ],
 )
-def test_restricted_custom_role_is_denied_every_notification_endpoint(
+def test_principal_without_notification_permissions_is_denied_every_endpoint(
     notifications_app,
     method,
     path,
@@ -193,7 +192,7 @@ def test_restricted_custom_role_is_denied_every_notification_endpoint(
     assert response.status_code == 403, response.text
 
 
-def test_explicit_control_deny_preserves_reads_and_blocks_mutations(notifications_app):
+def test_read_only_effective_principal_can_read_but_cannot_mutate(notifications_app):
     async def explicitly_denied_principal():
         return AuthPrincipal(
             kind="user",
