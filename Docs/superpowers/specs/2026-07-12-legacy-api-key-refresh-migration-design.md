@@ -2,7 +2,7 @@
 
 **Backlog task:** TASK-12950
 
-**Status:** Revised after pre-implementation audit; pending spec re-review
+**Status:** Independently re-reviewed; pending requester confirmation
 
 **Date:** 2026-07-12
 
@@ -77,8 +77,8 @@ Development follows test-driven implementation:
 
 1. Replace the unit expectation that an eligible bare legacy record is scrubbed with a failing regression test that expects complete manual/device/origin metadata and a usable key after initialization.
 2. Retain or add fail-closed unit cases for present-but-empty metadata, contradictory or empty `authSource`, invalid origin, placeholder key, hosted mode, same-origin quickstart mode, active cookie session, environment key, and runtime override.
-3. Add a WebUI browser regression that seeds the pre-metadata record, opens `/media`, performs a hard refresh, and verifies the authenticated media state and request header remain intact.
-4. Add the equivalent packaged-extension regression using extension device storage and `options.html#/media`.
+3. Add a WebUI browser regression explicitly configured for self-hosted advanced transport that seeds the pre-metadata record, opens `/media`, performs a hard refresh, and verifies the authenticated media state and request header remain intact.
+4. Add the equivalent packaged-extension regression, also explicitly configured for self-hosted advanced transport, using extension device storage and `options.html#/media`.
 5. Run the existing authentication bootstrap, credential lifecycle, WebUI persistence, and packaged-extension persistence suites.
 
 Because the implementation is TypeScript-only, Python Bandit is not applicable; the task record will document that skip. Existing frontend lint/type checks remain required for touched code.
