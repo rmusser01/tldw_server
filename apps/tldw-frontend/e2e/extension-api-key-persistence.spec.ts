@@ -70,16 +70,17 @@ const resolveExtensionId = async (context: BrowserContext): Promise<string> => {
   return match[1]
 }
 
-const setExtensionLocalStorage = async (
+const setExtensionStorage = async (
   context: BrowserContext,
+  area: "local" | "sync",
   values: Record<string, unknown>
 ): Promise<void> => {
   const worker = context.serviceWorkers()[0]
   if (!worker) throw new Error("Extension service worker is unavailable")
   await worker.evaluate(
-    (storageValues) =>
+    ({ storageArea, storageValues }) =>
       new Promise<void>((resolve, reject) => {
-        chrome.storage.local.set(storageValues, () => {
+        chrome.storage[storageArea].set(storageValues, () => {
           const error = chrome.runtime.lastError
           if (error) {
             reject(new Error(error.message))
@@ -88,7 +89,7 @@ const setExtensionLocalStorage = async (
           resolve()
         })
       }),
-    values
+    { storageArea: area, storageValues: values }
   )
 }
 
@@ -116,7 +117,7 @@ const launchExtension = async (
   })
   try {
     const extensionId = await resolveExtensionId(context)
-    await setExtensionLocalStorage(context, {
+    await setExtensionStorage(context, "local", {
       __e2eSeeded: true,
       __tldw_first_run_complete: true,
       tldw_skip_landing_hub: true
@@ -194,7 +195,7 @@ const saveManualConnection = async (
 
 const extensionStorageValue = async (
   page: Page,
-  area: "local" | "session",
+  area: "local" | "session" | "sync",
   key: string
 ): Promise<unknown> =>
   page.evaluate(
@@ -214,12 +215,12 @@ const seedLegacyDeviceConfig = async (
   context: BrowserContext,
   serverUrl: string
 ): Promise<void> => {
-  await setExtensionLocalStorage(context, {
-    tldwConfig: {
+  await setExtensionStorage(context, "sync", {
+    tldwConfig: JSON.stringify({
       authMode: "single-user",
       serverUrl,
       apiKey: MANUAL_API_KEY
-    }
+    })
   })
 }
 
@@ -280,14 +281,9 @@ const expectProductionRagRequest = async (
     return
   }
 
-  await expect
-    .poll(() =>
-      fixture
-        .requests()
-        .slice(requestOffset)
-        .some((request) => !request.authenticated)
-    )
-    .toBe(true)
+  await expect(
+    page.getByText("RAG: needs attention", { exact: true })
+  ).toBeVisible()
   expect(
     fixture
       .requests()
@@ -407,6 +403,9 @@ test.describe.serial("manual extension API-key persistence", () => {
           await extensionStorageValue(page, "local", "tldwConfig")
         )
       ).toEqual(expectedConfig)
+      expect(
+        await extensionStorageValue(page, "sync", "tldwConfig")
+      ).toBeUndefined()
 
       const reloadRequestOffset = fixture.requests().length
       await page.reload({ waitUntil: "domcontentloaded" })
@@ -423,6 +422,9 @@ test.describe.serial("manual extension API-key persistence", () => {
           await extensionStorageValue(page, "local", "tldwConfig")
         )
       ).toEqual(expectedConfig)
+      expect(
+        await extensionStorageValue(page, "sync", "tldwConfig")
+      ).toBeUndefined()
     } finally {
       await context.close()
     }
