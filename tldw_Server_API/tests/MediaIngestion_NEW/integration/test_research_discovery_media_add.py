@@ -81,7 +81,11 @@ async def test_handoff_resolves_server_metadata_and_calls_existing_persistence(m
 
     monkeypatch.setattr(handoff, "resolve_discovery_selections", fake_resolve)
     monkeypatch.setattr(handoff, "add_media_persist", fake_persist)
-    form = _form(selections=[("result-2", "candidate-2"), ("result-1", "candidate-1")])
+    form = _form(
+        selections=[("result-2", "candidate-2"), ("result-1", "candidate-1")],
+        title="Client title",
+        author="Client author",
+    )
 
     response = await handoff.add_research_discovery_pdfs(
         background_tasks=BackgroundTasks(),
@@ -99,10 +103,16 @@ async def test_handoff_resolves_server_metadata_and_calls_existing_persistence(m
         ("result-2", "candidate-2"),
         ("result-1", "candidate-1"),
     )
-    assert captured["persist"]["form_data"].urls == [item.url for item in resolved]
+    persistence_form = captured["persist"]["form_data"]
+    assert persistence_form.urls == [item.url for item in resolved]
+    assert persistence_form.title is None
+    assert persistence_form.author is None
+    assert persistence_form.overwrite_existing is False
     assert captured["persist"]["max_download_bytes"] == 50 * 1024 * 1024
     assert captured["persist"]["allowed_download_content_types"] == {"application/pdf"}
     trusted = captured["persist"]["trusted_source_metadata_by_url"][resolved[0].url]
+    assert trusted["title"] == "Paper 2"
+    assert trusted["author"] == "Ada Lovelace"
     assert trusted["doi"] == "10.1000/2"
     assert trusted["provider_ids"] == {"openalex_id": "W2"}
     body = json.loads(response.body)
@@ -119,8 +129,12 @@ async def test_handoff_skips_existing_identifier_before_download(monkeypatch):
     class ExistingDB(_NoDuplicatesDB):
         def search_by_safe_metadata(self, **kwargs):
             if kwargs["filters"][0]["value"] == "10.1000/1":
-                return [{"id": 91, "uuid": "media-91", "title": "Existing"}], 1
+                return [{"media_id": 91, "title": "Existing"}], 1
             return [], 0
+
+        def get_media_by_id(self, media_id):
+            assert media_id == 91
+            return {"id": 91, "uuid": "media-91", "title": "Existing"}
 
     monkeypatch.setattr(handoff, "resolve_discovery_selections", lambda **_kwargs: (item,))
 
@@ -142,6 +156,7 @@ async def test_handoff_skips_existing_identifier_before_download(monkeypatch):
     result = json.loads(response.body)["results"][0]
     assert result["outcome"] == "duplicate_existing"
     assert result["db_id"] == 91
+    assert result["media_uuid"] == "media-91"
 
 
 @pytest.mark.asyncio
@@ -290,6 +305,43 @@ async def test_handoff_returns_stable_error_without_downstream_details(monkeypat
     assert result["outcome"] == "failed"
     assert result["error"] == "PDF ingestion failed."
     assert "SECRET" not in str(result)
+
+
+@pytest.mark.asyncio
+async def test_handoff_returns_200_when_persistence_warning_is_created(monkeypatch):
+    from tldw_Server_API.app.core.Ingestion_Media_Processing import research_discovery_handoff as handoff
+
+    item = _resolved(1)
+    monkeypatch.setattr(handoff, "resolve_discovery_selections", lambda **_kwargs: (item,))
+
+    async def fake_persist(**_kwargs):
+        return JSONResponse(
+            content={
+                "results": [
+                    {
+                        "status": "Warning",
+                        "input_ref": item.url,
+                        "message": "Created with a non-fatal warning.",
+                        "db_id": 12,
+                    }
+                ]
+            },
+            status_code=207,
+        )
+
+    monkeypatch.setattr(handoff, "add_media_persist", fake_persist)
+    response = await handoff.add_research_discovery_pdfs(
+        background_tasks=BackgroundTasks(),
+        form_data=_form(),
+        files=None,
+        db=_NoDuplicatesDB(),
+        current_user=SimpleNamespace(id=42),
+        usage_log=SimpleNamespace(),
+        request=None,
+    )
+
+    assert response.status_code == 200
+    assert json.loads(response.body)["results"][0]["outcome"] == "created"
 
 
 @pytest.mark.asyncio

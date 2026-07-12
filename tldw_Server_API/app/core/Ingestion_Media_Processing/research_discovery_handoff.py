@@ -6,13 +6,11 @@ import json
 from collections.abc import Sequence
 from typing import Any
 
+from starlette import status
 from starlette.responses import JSONResponse
 
 from tldw_Server_API.app.core.DB_Management.media_db.dedupe_urls import normalize_media_dedupe_url
-from tldw_Server_API.app.core.Ingestion_Media_Processing.persistence import (
-    add_media_persist,
-    determine_add_media_final_status,
-)
+from tldw_Server_API.app.core.Ingestion_Media_Processing.persistence import add_media_persist
 from tldw_Server_API.app.core.Research.discovery.selection import (
     ResolvedDiscoverySelection,
     resolve_discovery_selections,
@@ -87,6 +85,8 @@ def validate_research_discovery_handoff(
         raise ResearchDiscoveryBadRequestError("research_discovery_conflicting_input_sources")
     if getattr(form_data, "use_cookies", False) or getattr(form_data, "cookies", None):
         raise ResearchDiscoveryBadRequestError("research_discovery_credentials_not_allowed")
+    if getattr(form_data, "overwrite_existing", False):
+        raise ResearchDiscoveryBadRequestError("research_discovery_overwrite_not_allowed")
     return parse_research_discovery_selections(selections_json)
 
 
@@ -117,7 +117,7 @@ async def add_research_discovery_pdfs(
         if _access_is_restricted(item.access_status):
             blocked_pairs.add(pair)
             continue
-        existing = None if getattr(form_data, "overwrite_existing", False) else _find_existing_media(db, item)
+        existing = _find_existing_media(db, item)
         if existing is None:
             pending.append(item)
         else:
@@ -127,7 +127,16 @@ async def add_research_discovery_pdfs(
     if pending:
         urls = [item.url for item in pending]
         trusted_metadata = {item.url: _trusted_metadata(item) for item in pending}
-        persistence_form = form_data.model_copy(update={"urls": urls, "use_cookies": False, "cookies": None})
+        persistence_form = form_data.model_copy(
+            update={
+                "urls": urls,
+                "use_cookies": False,
+                "cookies": None,
+                "overwrite_existing": False,
+                "title": None,
+                "author": None,
+            }
+        )
         persistence_response = await add_media_persist(
             background_tasks=background_tasks,
             form_data=persistence_form,
@@ -173,8 +182,9 @@ async def add_research_discovery_pdfs(
         result["candidate_id"] = item.candidate_id
         results.append(result)
 
+    all_succeeded = all(result.get("outcome") in {"created", "duplicate_existing"} for result in results)
     return JSONResponse(
-        status_code=determine_add_media_final_status(results),
+        status_code=status.HTTP_200_OK if all_succeeded else status.HTTP_207_MULTI_STATUS,
         content={"results": results},
     )
 
@@ -212,7 +222,11 @@ def _find_existing_media(db: Any, item: ResolvedDiscoverySelection) -> dict[str,
             group_by_media=True,
         )
         if rows:
-            return rows[0]
+            search_row = rows[0]
+            media_id = search_row.get("media_id")
+            if media_id is not None:
+                return db.get_media_by_id(media_id) or search_row
+            return search_row
     return None
 
 
@@ -273,7 +287,7 @@ def _duplicate_result(item: ResolvedDiscoverySelection, existing: dict[str, Any]
         "processing_source": None,
         "media_type": "pdf",
         "metadata": _trusted_metadata(item),
-        "db_id": existing.get("id"),
+        "db_id": existing.get("id") or existing.get("media_id"),
         "media_uuid": existing.get("media_uuid") or existing.get("uuid"),
         "message": "Matching media already exists.",
     }

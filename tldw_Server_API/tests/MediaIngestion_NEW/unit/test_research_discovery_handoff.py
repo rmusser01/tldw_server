@@ -174,3 +174,17 @@ def test_rejects_competing_sources_and_credentials(form_overrides, files, error)
         validate_research_discovery_handoff(form_data=_form(**form_overrides), files=files)
 
     assert exc_info.value.public_detail == error
+
+
+def test_rejects_overwrite_existing_in_discovery_mode():
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.research_discovery_handoff import (
+        validate_research_discovery_handoff,
+    )
+
+    with pytest.raises(ResearchDiscoveryBadRequestError) as exc_info:
+        validate_research_discovery_handoff(
+            form_data=_form(overwrite_existing=True),
+            files=None,
+        )
+
+    assert exc_info.value.public_detail == "research_discovery_overwrite_not_allowed"
