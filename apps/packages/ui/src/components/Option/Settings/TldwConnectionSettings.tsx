@@ -46,6 +46,7 @@ export type TldwConnectionSettingsProps = {
   setMagicSent: (sent: boolean) => void
   magicSending: boolean
   testingConnection: boolean
+  logoutLoading: boolean
   connectionStatus: "success" | "error" | null
   connectionDetail: string
   coreStatus: CoreStatus
@@ -103,6 +104,7 @@ export const TldwConnectionSettings = ({
   setMagicSent,
   magicSending,
   testingConnection,
+  logoutLoading,
   connectionStatus,
   connectionDetail,
   coreStatus,
@@ -193,6 +195,12 @@ export const TldwConnectionSettings = ({
             'settings:tldw.rememberApiKey.cookieSession',
             'Connected securely through this WebUI.'
           )}
+          action={{
+            label: t('settings:tldw.buttons.logout', 'Logout'),
+            onClick: onLogout,
+            loading: logoutLoading,
+            variant: 'danger'
+          }}
           variant="success"
           className="mb-4"
         >

@@ -654,6 +654,7 @@ export const TldwSettings = () => {
       setLoading(true)
       await tldwAuth.logout()
       setIsLoggedIn(false)
+      await loadConfig()
       message.success(t('settings:tldw.logout.success', 'Logged out successfully'))
     } catch (error) {
       message.error(t('settings:tldw.logout.failed', 'Logout failed'))
@@ -909,6 +910,7 @@ export const TldwSettings = () => {
             setMagicSent={setMagicSent}
             magicSending={magicSending}
             testingConnection={testingConnection}
+            logoutLoading={loading}
             connectionStatus={connectionStatus}
             connectionDetail={connectionDetail}
             coreStatus={coreStatus}

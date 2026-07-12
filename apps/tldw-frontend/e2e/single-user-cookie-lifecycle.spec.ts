@@ -5,6 +5,11 @@ import { createServer, type Server } from "node:http"
 import { tmpdir } from "node:os"
 import path from "node:path"
 
+import {
+  MANUAL_API_KEY,
+  startManualApiKeyFixture,
+} from "./helpers/manual-api-key-fixture"
+
 const INITIAL_API_KEY =
   process.env.TLDW_COOKIE_LIFECYCLE_API_KEY ||
   "THIS-IS-A-SECURE-KEY-123-FAKE-KEY"
@@ -21,8 +26,8 @@ const WEB_URL = (process.env.TLDW_WEB_URL || "http://localhost:8080").replace(
 )
 const API_URL = `http://127.0.0.1:${API_PORT}`
 const SESSION_COOKIE_NAME = "tldw_single_user_session"
-const PRESERVED_REMOTE_URL = "http://127.0.0.1:65534"
-const PRESERVED_REMOTE_API_KEY = "preserved-remote-device-key"
+const PRESERVED_REMOTE_URL = `http://127.0.0.1:${HOSTILE_PORT}`
+const PRESERVED_REMOTE_API_KEY = MANUAL_API_KEY
 
 const repoRoot = path.resolve(__dirname, "..", "..", "..")
 const lifecycleScript = path.join(
@@ -546,36 +551,70 @@ test.describe.serial("single-user HttpOnly cookie lifecycle", () => {
           ?.slice("csrf_token=".length)
       )
       expect(csrfToken).toBeTruthy()
-      const logout = await page.evaluate(async (token) => {
-        const response = await fetch("/api/v1/auth/single-user/session", {
-          method: "DELETE",
-          credentials: "same-origin",
-          headers: { "X-CSRF-Token": token || "" },
-        })
-        return {
-          status: response.status,
-          cacheControl: response.headers.get("cache-control"),
-        }
-      }, csrfToken)
-      expect(logout).toEqual({ status: 200, cacheControl: "no-store" })
-      expect(
-        (await context.cookies()).some(
-          (cookie) => cookie.name === SESSION_COOKIE_NAME
-        )
-      ).toBe(false)
+      await page.goto(`${WEB_URL}/settings/tldw`, {
+        waitUntil: "domcontentloaded",
+      })
+      await expect(
+        page.getByText("Connected securely through this WebUI.")
+      ).toBeVisible({ timeout: 60_000 })
       expect(
         await page.evaluate(() =>
-          JSON.parse(localStorage.getItem("tldwConfig") || "null")
+          localStorage.getItem("tldwCookieSessionConfig")
         )
-      ).toEqual({
-        serverUrl: PRESERVED_REMOTE_URL,
-        authMode: "single-user",
-        authSource: "manual",
-        credentialSource: "manual",
-        apiKeyPersistence: "device",
-        apiKeyServerOrigin: PRESERVED_REMOTE_URL,
-        apiKey: PRESERVED_REMOTE_API_KEY,
-      })
+      ).not.toBeNull()
+
+      const preservedRemote = await startManualApiKeyFixture(HOSTILE_PORT)
+      try {
+        const logoutResponsePromise = page.waitForResponse(
+          (response) =>
+            response.request().method() === "DELETE" &&
+            new URL(response.url()).pathname ===
+              "/api/v1/auth/single-user/session"
+        )
+        await page.getByRole("button", { name: "Logout" }).click()
+        const logoutResponse = await logoutResponsePromise
+        expect(logoutResponse.status()).toBe(200)
+        expect(logoutResponse.headers()["cache-control"]).toBe("no-store")
+        expect(
+          (await context.cookies()).some(
+            (cookie) => cookie.name === SESSION_COOKIE_NAME
+          )
+        ).toBe(false)
+        expect(
+          await page.evaluate(() =>
+            localStorage.getItem("tldwCookieSessionConfig")
+          )
+        ).toBeNull()
+        expect(
+          await page.evaluate(() =>
+            JSON.parse(localStorage.getItem("tldwConfig") || "null")
+          )
+        ).toEqual({
+          serverUrl: PRESERVED_REMOTE_URL,
+          authMode: "single-user",
+          authSource: "manual",
+          credentialSource: "manual",
+          apiKeyPersistence: "device",
+          apiKeyServerOrigin: PRESERVED_REMOTE_URL,
+          apiKey: PRESERVED_REMOTE_API_KEY,
+        })
+
+        const remoteRequestOffset = preservedRemote.requests().length
+        await page
+          .getByRole("button", { name: /^(Recheck|Test Connection)$/ })
+          .first()
+          .click()
+        await expect
+          .poll(() =>
+            preservedRemote
+              .requests()
+              .slice(remoteRequestOffset)
+              .some((request) => request.authenticated)
+          )
+          .toBe(true)
+      } finally {
+        await preservedRemote.close()
+      }
 
       await context.addCookies([
         {

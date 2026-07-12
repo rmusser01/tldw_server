@@ -223,6 +223,7 @@ const createConnectionProps = (
   setMagicSent: vi.fn(),
   magicSending: false,
   testingConnection: false,
+  logoutLoading: false,
   connectionStatus: null,
   connectionDetail: "",
   coreStatus: "unknown",
@@ -450,6 +451,42 @@ describe("settings PR review fixes", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Logout" }))
     expect(onLogout).toHaveBeenCalledTimes(1)
+  })
+
+  it("offers cookie-session logout through the production auth handler", () => {
+    const onLogout = vi.fn()
+
+    const { rerender } = render(
+      <TldwConnectionSettings
+        {...createConnectionProps({
+          authMode: "single-user",
+          authSource: "cookie-session",
+          onLogout
+        })}
+      />
+    )
+
+    expect(
+      screen.getByText("Connected securely through this WebUI.")
+    ).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Logout" }))
+    expect(onLogout).toHaveBeenCalledTimes(1)
+
+    rerender(
+      <TldwConnectionSettings
+        {...createConnectionProps({
+          authMode: "single-user",
+          authSource: "cookie-session",
+          logoutLoading: true,
+          onLogout
+        })}
+      />
+    )
+    expect(screen.getByRole("button", { name: "Logout" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Logout" })).toHaveAttribute(
+      "aria-busy",
+      "true"
+    )
   })
 
   it("formats invoice amounts using the invoice currency instead of a hardcoded dollar prefix", () => {
