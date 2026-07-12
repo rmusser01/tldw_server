@@ -93,7 +93,7 @@ export default function NotificationsPage() {
   const [prefsSavingKey, setPrefsSavingKey] = useState<PreferenceKey | null>(null);
   const [failedMutation, setFailedMutation] = useState<FailedMutation | null>(null);
   const [retryingMutation, setRetryingMutation] = useState<FailedMutation | null>(null);
-  const mutationRetryInFlightRef = useRef(false);
+  const mutationRetryTokenRef = useRef<string | null>(null);
 
   const recordFailedMutation = useCallback(
     (mutationError: unknown, mutation: FailedMutationCommand, fallbackMessage: string) => {
@@ -424,13 +424,16 @@ export default function NotificationsPage() {
   }, [recordFailedMutation, reportMutationError, show]);
 
   const retryFailedMutation = useCallback(async () => {
+    const retryToken = failedMutation
+      ? `${failedMutation.scopeKey}\u0000${failedMutation.generation}`
+      : null;
     if (
       !failedMutation ||
       failedMutation.scopeKey !== scopeKey ||
       failedMutation.generation !== pageGenerationRef.current ||
-      mutationRetryInFlightRef.current
+      mutationRetryTokenRef.current === retryToken
     ) return;
-    mutationRetryInFlightRef.current = true;
+    mutationRetryTokenRef.current = retryToken;
     const mutation = failedMutation;
     setRetryingMutation(mutation);
     setFailedMutation(null);
@@ -453,8 +456,14 @@ export default function NotificationsPage() {
           break;
       }
     } finally {
-      mutationRetryInFlightRef.current = false;
-      setRetryingMutation(null);
+      if (mutationRetryTokenRef.current === retryToken) {
+        mutationRetryTokenRef.current = null;
+      }
+      setRetryingMutation((current) =>
+        current?.scopeKey === mutation.scopeKey && current.generation === mutation.generation
+          ? null
+          : current
+      );
     }
   }, [
     failedMutation,

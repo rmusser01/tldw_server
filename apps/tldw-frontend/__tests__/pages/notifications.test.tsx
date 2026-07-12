@@ -373,6 +373,31 @@ describe('NotificationsPage', () => {
     expect(screen.queryByRole('button', { name: 'Retry action' })).not.toBeInTheDocument();
   });
 
+  it('allows a new-scope retry while an old-scope retry is still pending', async () => {
+    const user = userEvent.setup();
+    const oldFailure = Object.assign(new Error('old account offline'), { status: 503 });
+    const newFailure = Object.assign(new Error('new account offline'), { status: 503 });
+    let resolveOldRetry: ((value: { updated: number }) => void) | undefined;
+    mocks.markNotificationsRead
+      .mockRejectedValueOnce(oldFailure)
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveOldRetry = resolve; }))
+      .mockRejectedValueOnce(newFailure)
+      .mockResolvedValueOnce({ updated: 1 });
+    const view = render(<NotificationsPage />);
+
+    await user.click(await screen.findByRole('button', { name: 'Mark read' }));
+    await user.click(await screen.findByRole('button', { name: 'Retry action' }));
+    expect(mocks.markNotificationsRead).toHaveBeenCalledTimes(2);
+
+    mocks.lifecycle.scopeKey = 'notifications:server-a:user-b';
+    view.rerender(<NotificationsPage />);
+    await user.click(await screen.findByRole('button', { name: 'Mark read' }));
+    await user.click(await screen.findByRole('button', { name: 'Retry action' }));
+
+    await waitFor(() => expect(mocks.markNotificationsRead).toHaveBeenCalledTimes(4));
+    resolveOldRetry?.({ updated: 1 });
+  });
+
   it('suppresses page requests and actions while lifecycle state is terminal', async () => {
     mocks.lifecycle.state = 'unavailable';
     render(<NotificationsPage />);
