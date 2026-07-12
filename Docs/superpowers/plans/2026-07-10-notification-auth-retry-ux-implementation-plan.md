@@ -22,7 +22,7 @@
 | 2 | Shared lifecycle policy | Both transports preserve status; reads/SSE retry safely; mutations never replay automatically | Complete |
 | 3 | Runtime adapters | Extension and WebUI expose truthful principal-scoped lifecycle state | Complete |
 | 4 | Accessible recovery UX | Header and inbox distinguish active, degraded, auth-required, and unavailable states | Complete |
-| 5 | Acceptance and security | Focused browser tests, Bandit, typecheck, and UAT role assertions pass | Not Started |
+| 5 | Acceptance and security | Focused browser tests, Bandit, typecheck, and UAT role assertions pass | Complete |
 
 ## File Responsibilities
 
@@ -54,7 +54,7 @@
 
 ## Stage 0: Preflight
 
-- [ ] Confirm the implementation branch contains current `origin/dev` and record both SHAs in TASK-12098.4:
+- [x] Confirm the implementation branch contains current `origin/dev` and record both SHAs in TASK-12098.4:
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
@@ -66,7 +66,7 @@ git status --short --branch
 
 Expected: ancestor check exits 0; only documented unrelated files may be untracked.
 
-- [ ] Confirm migration 089 is still latest immediately before editing; if not, renumber every migration-090 reference in this plan before proceeding:
+- [x] Confirm migration 089 is still latest immediately before editing; if not, renumber every migration-090 reference in this plan before proceeding:
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
@@ -461,19 +461,22 @@ and code-quality re-reviews approved.
 ## Task 6: Add Browser Acceptance Coverage
 
 **Files:**
+- Modify: `apps/packages/ui/src/assets/locale/en/option.json`
+- Modify: `apps/packages/ui/src/components/Layouts/ChatHeader.tsx`
+- Modify: `apps/packages/ui/src/components/Layouts/__tests__/ChatHeader.notifications.test.tsx`
 - Modify: `apps/tldw-frontend/e2e/workflows/tier-4-admin/notifications.spec.ts`
 - Modify: `tldw_Server_API/tests/Notifications/test_notifications_api.py`
 - Modify: `tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_uat_fixture.py`
 
-- [ ] **Step 1: Add failing browser scenarios**
+- [x] **Step 1: Add failing browser scenarios**
 
 Cover standard-user list/count/control/SSE, restricted-role badge suppression and keyboard popover, one explicit retry, 401 sign-in recovery, later role grant plus `Try again`, account switch, and zero terminal request loops.
 
-- [ ] **Step 2: Add backend API assertions**
+- [x] **Step 2: Add backend API assertions**
 
 Assert a standard user can call all notification endpoints and a restricted custom role remains 403. Include explicit-deny precedence.
 
-- [ ] **Step 3: Run the new acceptance tests and verify RED**
+- [x] **Step 3: Run the new acceptance tests and verify RED**
 
 Run both command blocks below before making integration fixes. Expected: at least one new scenario fails on missing final browser/UAT wiring; if all pass, document that earlier tasks already satisfied the acceptance test and do not manufacture a failure.
 
@@ -491,11 +494,11 @@ cd apps/tldw-frontend
 bunx playwright test e2e/workflows/tier-4-admin/notifications.spec.ts --project=tier-4 --reporter=line
 ```
 
-- [ ] **Step 4: Implement only acceptance wiring gaps**
+- [x] **Step 4: Implement only acceptance wiring gaps**
 
 Keep production behavior in the modules from Tasks 1-5. This step may update fixtures, auth setup, and browser selectors, but must not duplicate lifecycle logic inside the E2E test.
 
-- [ ] **Step 5: Run focused backend and browser tests GREEN**
+- [x] **Step 5: Run focused backend and browser tests GREEN**
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
@@ -513,7 +516,7 @@ bunx playwright test e2e/workflows/tier-4-admin/notifications.spec.ts --project=
 
 Expected: all required scenarios pass with no skips.
 
-- [ ] **Step 6: Run security and final notification gates**
+- [x] **Step 6: Run security and final notification gates**
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
@@ -538,7 +541,7 @@ cd "$(git rev-parse --show-toplevel)"
 git diff --check
 ```
 
-- [ ] **Step 7: Update TASK-12098.4 and commit**
+- [x] **Step 7: Update TASK-12098.4 and commit**
 
 Record exact pass counts, Bandit result, browser report path, and any documented skips (the certification scenario itself permits none).
 
@@ -548,15 +551,36 @@ git add apps/tldw-frontend/e2e/workflows/tier-4-admin/notifications.spec.ts tldw
 git commit -m "test(notifications): cover authorization recovery ux"
 ```
 
+Task 6 completed through `77495aa8d7`. Browser UAT found and fixed an ICU
+interpolation mismatch that left the notification button's accessible count at
+zero while the visual badge was current. The no-skip browser suite now covers a
+user-role bearer principal, explicit mutation retry, terminal 401/403 behavior
+past the 30-second poll boundary, successful reauthentication, successful role
+grant recovery, keyboard operation, badge suppression, and synchronous stale
+count clearing while the next principal's unread response is held pending.
+
+Final verification: 24 backend authorization/full-account tests, 77 WebUI tests,
+65 shared/extension tests, and 13 Playwright scenarios passed with zero skipped,
+unexpected, or flaky cases. Extension TypeScript compile, Ruff, touched-file
+ESLint (zero errors), and diff hygiene passed. The retained browser report is
+`/tmp/task-12098.4-notifications-playwright.json`. Full Bandit output is
+`/tmp/bandit_task_12098_4.json`; it reports three unchanged low-severity B106
+literal false positives in `User_DB_Handling.py` and no medium/high findings.
+The new-findings gate at `/tmp/bandit_task_12098_4_new_findings.json` passed with
+zero findings. Full WebUI typecheck retains only the unchanged `origin/dev`
+`QuickIngestWizardModal.tsx:1813` `overflowY` baseline; touched frontend code and
+the extension compile cleanly. Independent specification and correctness
+re-reviews approved the behavioral changes after the UAT hardening fixes.
+
 ## Final Verification Checklist
 
-- [ ] SQLite 090 migrates from 089 and is idempotent.
-- [ ] PostgreSQL fresh install and existing-install backfill both grant after role seeding.
-- [ ] Existing matching legacy roles are backfilled before request-time fallback is removed.
-- [ ] Explicit user denies and custom grants are unchanged.
-- [ ] WebUI and extension preserve structured 401/403 status.
-- [ ] Only idempotent reads/bootstrap/poll/SSE retry automatically.
-- [ ] State and unread counts never cross server or principal boundaries.
-- [ ] Header and inbox meet keyboard, focus, naming, and live-region requirements.
-- [ ] Standard, restricted, reauthentication, and role-grant browser scenarios pass without skips.
-- [ ] Typecheck, targeted pytest/Vitest/Playwright, Bandit, and `git diff --check` pass.
+- [x] SQLite 090 migrates from 089 and is idempotent.
+- [x] PostgreSQL fresh install and existing-install backfill both grant after role seeding.
+- [x] Existing matching legacy roles are backfilled before request-time fallback is removed.
+- [x] Explicit user denies and custom grants are unchanged.
+- [x] WebUI and extension preserve structured 401/403 status.
+- [x] Only idempotent reads/bootstrap/poll/SSE retry automatically.
+- [x] State and unread counts never cross server or principal boundaries.
+- [x] Header and inbox meet keyboard, focus, naming, and live-region requirements.
+- [x] Standard, restricted, reauthentication, and role-grant browser scenarios pass without skips.
+- [x] Targeted pytest/Vitest/Playwright, extension compile, the Bandit new-findings gate, and `git diff --check` pass; full WebUI typecheck retains only the documented unchanged `origin/dev` baseline.
