@@ -524,7 +524,8 @@ export function OnboardingConnectForm({
 
   const authValidation = useMemo(() => {
     if (authMode === "single-user") {
-      const missingApiKey = apiKey.trim().length === 0
+      const missingApiKey =
+        authSource !== "cookie-session" && apiKey.trim().length === 0
       return {
         valid: !missingApiKey,
         missingApiKey,
@@ -558,7 +559,7 @@ export function OnboardingConnectForm({
       missingMagicEmail: false,
       missingMagicToken: false,
     }
-  }, [authMode, apiKey, username, password, loginMethod, magicEmail, magicToken])
+  }, [authMode, authSource, apiKey, username, password, loginMethod, magicEmail, magicToken])
 
   const showAuthErrors = authTouched && !authValidation.valid
 
@@ -650,7 +651,11 @@ export function OnboardingConnectForm({
         authResult = await validateMultiUserAuth(username, password, t)
       } else if (authMode === "multi-user" && loginMethod === "magic-link" && magicToken) {
         authResult = await validateMagicLinkAuth(magicToken, t)
-      } else if (authMode === "single-user" && apiKey) {
+      } else if (
+        authMode === "single-user" &&
+        authSource !== "cookie-session" &&
+        apiKey
+      ) {
         // Validate API key before saving
         const requestedPersistence = rememberApiKey ? "device" : "session"
         authResult = await validateApiKey(
@@ -780,6 +785,7 @@ export function OnboardingConnectForm({
     authValidation.valid,
     serverUrl,
     authMode,
+    authSource,
     apiKey,
     rememberApiKey,
     username,

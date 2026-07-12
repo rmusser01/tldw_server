@@ -152,6 +152,7 @@ const renderConnectionForm = async (options: RenderConnectionFormOptions = {}) =
   vi.resetModules()
   let connectionState = createIdleConnectionState()
   const validationResult = options.validationResult ?? { success: true }
+  const validateApiKey = vi.fn().mockResolvedValue(validationResult)
   const setConfigPartial = vi.fn().mockResolvedValue(undefined)
   const testConnectionFromOnboarding = vi.fn().mockImplementation(async () => {
     if (options.testConnectionRejects) {
@@ -499,7 +500,7 @@ const renderConnectionForm = async (options: RenderConnectionFormOptions = {}) =
     )
     return {
       ...actual,
-      validateApiKey: vi.fn().mockResolvedValue(validationResult),
+      validateApiKey,
       validateMultiUserAuth: vi.fn(),
       validateMagicLinkAuth: vi.fn(),
       categorizeConnectionError: vi.fn().mockReturnValue(null)
@@ -513,6 +514,8 @@ const renderConnectionForm = async (options: RenderConnectionFormOptions = {}) =
       <OnboardingConnectForm />
     </MemoryRouter>
   )
+
+  return { testConnectionFromOnboarding, validateApiKey }
 }
 
 const waitForConnectButton = async () => {
@@ -636,5 +639,23 @@ describe("setup onboarding design-system state wiring", () => {
     expect(
       screen.queryByRole("checkbox", { name: "Remember on this device" })
     ).not.toBeInTheDocument()
+  })
+
+  it("connects an active cookie session without validating or persisting a manual key", async () => {
+    const { testConnectionFromOnboarding, validateApiKey } =
+      await renderConnectionForm({
+        initialConfig: {
+          serverUrl: "http://127.0.0.1:8080",
+          authMode: "single-user",
+          authSource: "cookie-session"
+        }
+      })
+
+    fireEvent.click(await waitForConnectButton())
+
+    await waitFor(() => {
+      expect(testConnectionFromOnboarding).toHaveBeenCalledTimes(1)
+    })
+    expect(validateApiKey).not.toHaveBeenCalled()
   })
 })

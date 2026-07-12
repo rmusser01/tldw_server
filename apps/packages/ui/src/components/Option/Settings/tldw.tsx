@@ -141,7 +141,29 @@ export const TldwSettings = () => {
           setIsLoggedIn(true)
         }
       } else {
+        setAuthMode('single-user')
+        setAuthSource(undefined)
+        setRememberApiKey(true)
+        setIsLoggedIn(false)
+        setServerUrl("")
+        setMagicEmail("")
+        setMagicToken("")
+        setMagicSent(false)
+        setConnectionStatus(null)
+        setConnectionDetail("")
+        setCoreStatus("unknown")
+        setRagStatus("unknown")
         setTimeoutPreset('balanced')
+        form.setFieldsValue({
+          serverUrl: '',
+          apiKey: '',
+          authMode: 'single-user',
+          username: '',
+          password: '',
+          magicEmail: '',
+          magicToken: '',
+          rememberApiKey: true
+        })
       }
       setInitializingError(null)
     } catch (error) {
