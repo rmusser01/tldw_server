@@ -2,7 +2,7 @@
 
 **Backlog task:** TASK-12950
 
-**Status:** Approved direction; pending spec review
+**Status:** Independently reviewed; pending requester review
 
 **Date:** 2026-07-12
 
@@ -30,7 +30,7 @@ A stored record is a legacy manual-device credential eligible for migration only
 1. `authMode` is `single-user`.
 2. `apiKey` is a non-empty, non-placeholder string.
 3. `serverUrl` normalizes to a valid server origin.
-4. `credentialSource`, `apiKeyPersistence`, and `apiKeyServerOrigin` are all absent, identifying the pre-metadata shape.
+4. `credentialSource`, `apiKeyPersistence`, and `apiKeyServerOrigin` properties are genuinely absent, identifying the pre-metadata shape. Present-but-empty, invalid, or otherwise falsy values are malformed metadata, not legacy absence.
 5. No active same-origin cookie session has been restored.
 6. No environment API key is available for the active connection.
 7. No runtime single-user API key override is available.
