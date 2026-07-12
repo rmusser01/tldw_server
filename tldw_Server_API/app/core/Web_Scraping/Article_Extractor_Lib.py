@@ -3291,7 +3291,7 @@ async def scrape_and_summarize_multiple(
                         article['summary'] = "No content available to summarize."
                         logging.warning(f"No content to summarize for URL {url}")
                 else:
-                    article['summary'] = None
+                    article.setdefault('summary', None)
 
                 results.append(article)
             else:

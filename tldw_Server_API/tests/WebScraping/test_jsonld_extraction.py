@@ -1,8 +1,10 @@
+import pytest
+
+from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as extractor_lib
 from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import (
     extract_article_with_pipeline,
     extract_jsonld_entities,
 )
-
 
 DESCRIPTION_ONLY_JSONLD = """
 <html>
@@ -19,6 +21,33 @@ DESCRIPTION_ONLY_JSONLD = """
   <body></body>
 </html>
 """
+
+
+@pytest.mark.asyncio
+async def test_legacy_scrape_preserves_structured_summary_when_summarization_disabled(monkeypatch):
+    async def fake_scrape_article(_url: str, custom_cookies=None):
+        return {
+            "url": "https://example.com",
+            "title": "Structured title",
+            "content": "Fallback body",
+            "summary": "Structured summary",
+            "extraction_successful": True,
+        }
+
+    monkeypatch.setattr(extractor_lib, "scrape_article", fake_scrape_article)
+    monkeypatch.setattr(extractor_lib, "RateLimiter", lambda: None)
+
+    result = await extractor_lib.scrape_and_summarize_multiple(
+        urls="https://example.com",
+        custom_prompt_arg=None,
+        api_name="",
+        api_key=None,
+        keywords="",
+        custom_article_titles=None,
+        summarize_checkbox=False,
+    )
+
+    assert result[0]["summary"] == "Structured summary"
 
 
 def test_jsonld_description_only_is_not_successful():
