@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => ({
   showToast: vi.fn(),
   reportMutationError: vi.fn(),
   reportRequestError: vi.fn(),
+  tryAgain: vi.fn(),
+  refreshPermissions: vi.fn(),
   lifecycle: {
     scopeKey: 'notifications:server-a:user-a',
     lifecycleEpoch: 1,
@@ -55,6 +57,8 @@ vi.mock('@web/components/notifications/NotificationLifecycleProvider', () => ({
     ...mocks.lifecycle,
     reportMutationError: mocks.reportMutationError,
     reportRequestError: mocks.reportRequestError,
+    tryAgain: mocks.tryAgain,
+    refreshPermissions: mocks.refreshPermissions,
   }),
 }));
 
@@ -318,6 +322,25 @@ describe('NotificationsPage', () => {
     expect(mocks.reportMutationError).toHaveBeenCalledTimes(1);
   });
 
+  it('retries a transient mutation only after one explicit user action', async () => {
+    const user = userEvent.setup();
+    const failure = Object.assign(new Error('offline'), { status: 503 });
+    mocks.markNotificationsRead
+      .mockRejectedValueOnce(failure)
+      .mockResolvedValueOnce({ updated: 1 });
+    render(<NotificationsPage />);
+
+    await user.click(await screen.findByRole('button', { name: 'Mark read' }));
+    const retryButton = await screen.findByRole('button', { name: 'Retry action' });
+
+    expect(mocks.markNotificationsRead).toHaveBeenCalledTimes(1);
+    await user.click(retryButton);
+
+    await waitFor(() => expect(mocks.markNotificationsRead).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole('button', { name: 'Retry action' })).not.toBeInTheDocument();
+    expect(screen.getByText('Unread: 1')).toBeInTheDocument();
+  });
+
   it('suppresses page requests and actions while lifecycle state is terminal', async () => {
     mocks.lifecycle.state = 'unavailable';
     render(<NotificationsPage />);
@@ -327,6 +350,27 @@ describe('NotificationsPage', () => {
     expect(mocks.getUnreadCount).not.toHaveBeenCalled();
     expect(mocks.subscribeNotificationsStream).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Refresh' })).toBeDisabled();
+  });
+
+  it.each([
+    ['connecting', 'Connecting to notifications'],
+    ['degraded', 'Notifications are reconnecting'],
+    ['auth-required', 'Sign in to view notifications'],
+    ['unavailable', 'Notifications unavailable for this account'],
+  ] as const)('renders the %s recovery state on direct navigation', async (state, copy) => {
+    mocks.lifecycle.state = state;
+    render(<NotificationsPage />);
+    expect(await screen.findByText(copy)).toBeInTheDocument();
+  });
+
+  it('makes exactly one explicit retry from degraded inbox state', async () => {
+    const user = userEvent.setup();
+    mocks.lifecycle.state = 'degraded';
+    render(<NotificationsPage />);
+
+    await user.click(await screen.findByRole('button', { name: 'Try again' }));
+
+    expect(mocks.tryAgain).toHaveBeenCalledTimes(1);
   });
 
   it('shows snoozed notifications instead of the empty state when only snoozed items remain', async () => {

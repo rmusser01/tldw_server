@@ -19,6 +19,17 @@ import { classifyNotificationError } from '@/services/notification-lifecycle';
 const DEFAULT_SNOOZE_MINUTES = 15;
 const NOTIFICATIONS_FETCH_LIMIT = 100;
 type PreferenceKey = 'reminder_enabled' | 'job_completed_enabled' | 'job_failed_enabled';
+type FailedMutation =
+  | { kind: 'mark-read'; notificationId: number; message: string }
+  | { kind: 'dismiss'; notificationId: number; message: string }
+  | { kind: 'snooze'; notificationId: number; minutes: number; message: string }
+  | { kind: 'cancel-snooze'; notificationId: number; message: string }
+  | { kind: 'preference'; key: PreferenceKey; message: string };
+type FailedMutationCommand = FailedMutation extends infer Mutation
+  ? Mutation extends FailedMutation
+    ? Omit<Mutation, 'message'>
+    : never
+  : never;
 
 function resolveRouteForLinkType(linkType: string | null | undefined): string | undefined {
   if (!linkType) return undefined
@@ -58,6 +69,8 @@ export default function NotificationsPage() {
     events,
     reportRequestError,
     reportMutationError,
+    tryAgain,
+    refreshPermissions,
   } = useNotificationLifecycle();
   const isTerminal = lifecycleState === 'auth-required' || lifecycleState === 'unavailable';
   const [items, setItems] = useState<NotificationItem[]>([]);
@@ -79,6 +92,19 @@ export default function NotificationsPage() {
   const [prefsLoading, setPrefsLoading] = useState(false);
   const [prefsError, setPrefsError] = useState<string | null>(null);
   const [prefsSavingKey, setPrefsSavingKey] = useState<PreferenceKey | null>(null);
+  const [failedMutation, setFailedMutation] = useState<FailedMutation | null>(null);
+  const [isRetryingMutation, setIsRetryingMutation] = useState(false);
+  const mutationRetryInFlightRef = useRef(false);
+
+  const recordFailedMutation = useCallback(
+    (mutationError: unknown, mutation: FailedMutationCommand, fallbackMessage: string) => {
+      const classification = classifyNotificationError(mutationError, { attempt: 0 });
+      if (classification.kind !== 'retry') return;
+      const message = mutationError instanceof Error ? mutationError.message : fallbackMessage;
+      setFailedMutation({ ...mutation, message });
+    },
+    []
+  );
 
   const clearInboxRetry = useCallback(() => {
     if (inboxRetryTimerRef.current === null) return;
@@ -139,6 +165,7 @@ export default function NotificationsPage() {
 
   const handleSnooze = useCallback(
     async (notificationId: number, minutes: number = DEFAULT_SNOOZE_MINUTES) => {
+      setFailedMutation(null);
       const requestGeneration = pageGenerationRef.current;
       try {
         const result = await snoozeNotification(notificationId, minutes);
@@ -168,6 +195,11 @@ export default function NotificationsPage() {
         if (requestGeneration !== pageGenerationRef.current) return;
         reportMutationError(snoozeError);
         const message = snoozeError instanceof Error ? snoozeError.message : 'Failed to snooze notification';
+        recordFailedMutation(
+          snoozeError,
+          { kind: 'snooze', notificationId, minutes },
+          'Failed to snooze notification'
+        );
         show({
           title: 'Snooze failed',
           description: message,
@@ -175,10 +207,11 @@ export default function NotificationsPage() {
         });
       }
     },
-    [items, reportMutationError, show]
+    [items, recordFailedMutation, reportMutationError, show]
   );
 
   const handleCancelSnooze = useCallback(async (notificationId: number) => {
+    setFailedMutation(null);
     const requestGeneration = pageGenerationRef.current;
     try {
       await cancelNotificationSnooze(notificationId);
@@ -193,9 +226,14 @@ export default function NotificationsPage() {
       if (requestGeneration !== pageGenerationRef.current) return;
       reportMutationError(cancelError);
       const message = cancelError instanceof Error ? cancelError.message : 'Failed to cancel snooze';
+      recordFailedMutation(
+        cancelError,
+        { kind: 'cancel-snooze', notificationId },
+        'Failed to cancel snooze'
+      );
       show({ title: 'Cancel snooze failed', description: message, variant: 'danger' });
     }
-  }, [reportMutationError, show]);
+  }, [recordFailedMutation, reportMutationError, show]);
 
   const loadPrefs = useCallback(async () => {
     if (prefsLoading) return;
@@ -219,6 +257,7 @@ export default function NotificationsPage() {
   const togglePref = useCallback(
     async (key: PreferenceKey) => {
       if (!prefs || prefsSavingKey) return;
+      setFailedMutation(null);
       const nextValue = !prefs[key];
       const updated =
         key === 'reminder_enabled'
@@ -235,12 +274,17 @@ export default function NotificationsPage() {
       } catch (preferenceError) {
         if (requestGeneration !== pageGenerationRef.current) return;
         reportMutationError(preferenceError);
+        recordFailedMutation(
+          preferenceError,
+          { kind: 'preference', key },
+          'Failed to update notification preference'
+        );
         show({ title: 'Failed to update preference', variant: 'danger' });
       } finally {
         if (requestGeneration === pageGenerationRef.current) setPrefsSavingKey(null);
       }
     },
-    [prefs, prefsSavingKey, reportMutationError, show]
+    [prefs, prefsSavingKey, recordFailedMutation, reportMutationError, show]
   );
 
   const applyIncomingNotification = useCallback(
@@ -271,6 +315,9 @@ export default function NotificationsPage() {
     setPrefsError(null);
     setPrefsLoading(false);
     setPrefsSavingKey(null);
+    setFailedMutation(null);
+    setIsRetryingMutation(false);
+    mutationRetryInFlightRef.current = false;
     setShowPrefs(false);
     setError(null);
     setIsLoading(true);
@@ -318,6 +365,7 @@ export default function NotificationsPage() {
   }, [applyIncomingNotification, events, refreshInbox]);
 
   const handleMarkRead = useCallback(async (notificationId: number) => {
+    setFailedMutation(null);
     const requestGeneration = pageGenerationRef.current;
     try {
       await markNotificationsRead([notificationId]);
@@ -334,11 +382,17 @@ export default function NotificationsPage() {
       if (requestGeneration !== pageGenerationRef.current) return;
       reportMutationError(markError);
       const message = markError instanceof Error ? markError.message : 'Failed to mark notification as read';
+      recordFailedMutation(
+        markError,
+        { kind: 'mark-read', notificationId },
+        'Failed to mark notification as read'
+      );
       show({ title: 'Mark read failed', description: message, variant: 'danger' });
     }
-  }, [reportMutationError, show]);
+  }, [recordFailedMutation, reportMutationError, show]);
 
   const handleDismiss = useCallback(async (notificationId: number) => {
+    setFailedMutation(null);
     const requestGeneration = pageGenerationRef.current;
     try {
       await dismissNotification(notificationId);
@@ -354,15 +408,93 @@ export default function NotificationsPage() {
       if (requestGeneration !== pageGenerationRef.current) return;
       reportMutationError(dismissError);
       const message = dismissError instanceof Error ? dismissError.message : 'Failed to dismiss notification';
+      recordFailedMutation(
+        dismissError,
+        { kind: 'dismiss', notificationId },
+        'Failed to dismiss notification'
+      );
       show({ title: 'Dismiss failed', description: message, variant: 'danger' });
     }
-  }, [reportMutationError, show]);
+  }, [recordFailedMutation, reportMutationError, show]);
+
+  const retryFailedMutation = useCallback(async () => {
+    if (!failedMutation || mutationRetryInFlightRef.current) return;
+    mutationRetryInFlightRef.current = true;
+    setIsRetryingMutation(true);
+    const mutation = failedMutation;
+    setFailedMutation(null);
+    try {
+      switch (mutation.kind) {
+        case 'mark-read':
+          await handleMarkRead(mutation.notificationId);
+          break;
+        case 'dismiss':
+          await handleDismiss(mutation.notificationId);
+          break;
+        case 'snooze':
+          await handleSnooze(mutation.notificationId, mutation.minutes);
+          break;
+        case 'cancel-snooze':
+          await handleCancelSnooze(mutation.notificationId);
+          break;
+        case 'preference':
+          await togglePref(mutation.key);
+          break;
+      }
+    } finally {
+      mutationRetryInFlightRef.current = false;
+      setIsRetryingMutation(false);
+    }
+  }, [
+    failedMutation,
+    handleCancelSnooze,
+    handleDismiss,
+    handleMarkRead,
+    handleSnooze,
+    togglePref,
+  ]);
 
   const scopedItems = loadedScopeKey === scopeKey ? items : [];
   const scopedSnoozedItems = loadedScopeKey === scopeKey ? snoozedItems : [];
   const hasNotifications = scopedItems.length > 0;
   const hasAnyNotifications = hasNotifications || scopedSnoozedItems.length > 0;
   const unreadLabel = useMemo(() => `Unread: ${unreadCount}`, [unreadCount]);
+  const lifecycleRecovery = useMemo(() => {
+    switch (lifecycleState) {
+      case 'connecting':
+        return {
+          title: 'Connecting to notifications',
+          description: 'Recent notifications will appear when the connection is ready.',
+          tone: 'neutral' as const,
+        };
+      case 'degraded':
+        return {
+          title: 'Notifications are reconnecting',
+          description: 'The list may be out of date while automatic recovery continues.',
+          tone: 'warning' as const,
+          actionLabel: 'Try again',
+          action: tryAgain,
+        };
+      case 'auth-required':
+        return {
+          title: 'Sign in to view notifications',
+          description: 'Your session must be refreshed before this inbox can update.',
+          tone: 'warning' as const,
+          actionLabel: 'Refresh session',
+          action: refreshPermissions,
+        };
+      case 'unavailable':
+        return {
+          title: 'Notifications unavailable for this account',
+          description: 'This server or account does not currently allow notification access.',
+          tone: 'danger' as const,
+          actionLabel: 'Try again',
+          action: tryAgain,
+        };
+      default:
+        return null;
+    }
+  }, [lifecycleState, refreshPermissions, tryAgain]);
 
   return (
     <div className="mx-auto w-full max-w-4xl px-4 py-6 sm:px-6 lg:px-8">
@@ -398,6 +530,35 @@ export default function NotificationsPage() {
             </button>
           </div>
         </header>
+
+        {lifecycleRecovery && (
+          <div
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+            className={`mb-4 flex flex-col gap-3 rounded border px-3 py-3 text-sm sm:flex-row sm:items-center sm:justify-between ${
+              lifecycleRecovery.tone === 'danger'
+                ? 'border-danger/30 bg-danger/10'
+                : lifecycleRecovery.tone === 'warning'
+                  ? 'border-warning/40 bg-warning/10'
+                  : 'border-border bg-muted/30'
+            }`}
+          >
+            <div>
+              <p className="font-medium text-foreground">{lifecycleRecovery.title}</p>
+              <p className="mt-1 text-muted-foreground">{lifecycleRecovery.description}</p>
+            </div>
+            {lifecycleRecovery.action && lifecycleRecovery.actionLabel ? (
+              <button
+                type="button"
+                className="shrink-0 self-start rounded border border-border bg-background px-3 py-2 font-medium text-foreground hover:bg-muted sm:self-auto"
+                onClick={lifecycleRecovery.action}
+              >
+                {lifecycleRecovery.actionLabel}
+              </button>
+            ) : null}
+          </div>
+        )}
 
         {showPrefs && (
           <div className="mb-4 rounded-lg border border-border bg-muted/30 p-4">
@@ -448,6 +609,26 @@ export default function NotificationsPage() {
         {error && (
           <div className="mb-4 rounded border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
             {error}
+          </div>
+        )}
+
+        {failedMutation && (
+          <div
+            role="alert"
+            className="mb-4 flex flex-col gap-3 rounded border border-danger/30 bg-danger/10 px-3 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
+          >
+            <div>
+              <p className="font-medium text-foreground">Action was not completed</p>
+              <p className="mt-1 text-muted-foreground">{failedMutation.message}</p>
+            </div>
+            <button
+              type="button"
+              className="shrink-0 self-start rounded border border-border bg-background px-3 py-2 font-medium text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50 sm:self-auto"
+              disabled={isRetryingMutation || isTerminal}
+              onClick={() => void retryFailedMutation()}
+            >
+              {isRetryingMutation ? 'Retrying...' : 'Retry action'}
+            </button>
           </div>
         )}
 

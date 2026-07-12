@@ -3,8 +3,10 @@ import type { TFunction } from "i18next"
 import { Tooltip, Input } from "antd"
 import {
   Bell,
+  BellOff,
   CogIcon,
   House,
+  LoaderCircle,
   Menu,
   Moon,
   Search,
@@ -12,10 +14,14 @@ import {
   Signpost,
   SquarePen,
   Sun,
+  TriangleAlert,
   UserCircle2
 } from "lucide-react"
 import { HeaderShortcuts } from "./HeaderShortcuts"
 import logoImage from "~/assets/icon.png"
+import type { NotificationLifecycleState } from "@/services/notification-lifecycle"
+
+type HeaderNotificationState = Exclude<NotificationLifecycleState, "idle">
 
 type ChatHeaderProps = {
   t: TFunction
@@ -50,6 +56,8 @@ type ChatHeaderProps = {
   notificationCount?: number
   /** Callback when notification bell is clicked */
   onOpenNotifications?: () => void
+  notificationState?: HeaderNotificationState
+  onRetryNotifications?: () => void | Promise<void>
 }
 
 const toText = (value: unknown): string =>
@@ -85,8 +93,12 @@ export function ChatHeader({
   onToggleShortcuts,
   commandKeyLabel,
   notificationCount,
-  onOpenNotifications
+  onOpenNotifications,
+  notificationState = "active",
+  onRetryNotifications
 }: ChatHeaderProps) {
+  const [notificationPopoverOpen, setNotificationPopoverOpen] = React.useState(false)
+  const notificationTriggerRef = React.useRef<HTMLButtonElement>(null)
   const logoSrc =
     typeof logoImage === "string"
       ? logoImage
@@ -125,6 +137,64 @@ export function ChatHeader({
     : toText(t("playground:header.shareConversation", "Share conversation"))
   const focusRingClasses =
     "focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+  const notificationCopy = {
+    active: {
+      name: `Notifications, ${notificationCount ?? 0} unread`,
+      title: "Notifications",
+      description: (notificationCount ?? 0) > 0
+        ? `${notificationCount} unread notification${notificationCount === 1 ? "" : "s"}.`
+        : "You are caught up.",
+      announcement: "Notifications are active"
+    },
+    connecting: {
+      name: "Notifications, connecting",
+      title: "Notifications are connecting",
+      description: "Checking for new notifications.",
+      announcement: "Notifications are connecting"
+    },
+    degraded: {
+      name: "Notifications, reconnecting",
+      title: "Notifications are reconnecting",
+      description: "Recent notifications may be delayed while the connection recovers.",
+      announcement: "Notifications are reconnecting"
+    },
+    "auth-required": {
+      name: "Notifications, sign-in required",
+      title: "Sign in required",
+      description: "Sign in again to resume personal notifications.",
+      announcement: "Notifications require sign in"
+    },
+    unavailable: {
+      name: "Notifications unavailable",
+      title: "Notifications unavailable",
+      description: "Notifications are not available for this account.",
+      announcement: "Notifications are unavailable"
+    }
+  }[notificationState]
+
+  React.useEffect(() => {
+    if (!notificationPopoverOpen) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return
+      setNotificationPopoverOpen(false)
+      notificationTriggerRef.current?.focus()
+    }
+    document.addEventListener("keydown", onKeyDown)
+    return () => document.removeEventListener("keydown", onKeyDown)
+  }, [notificationPopoverOpen])
+
+  const openNotifications = () => {
+    setNotificationPopoverOpen(false)
+    onOpenNotifications?.()
+  }
+
+  const NotificationIcon = notificationState === "active"
+    ? Bell
+    : notificationState === "connecting"
+      ? LoaderCircle
+      : notificationState === "unavailable"
+        ? BellOff
+        : TriangleAlert
 
   return (
     <header
@@ -356,22 +426,55 @@ export function ChatHeader({
             </button>
           </Tooltip>
           {onOpenNotifications && (
-            <Tooltip title={t("option:header.notifications", "Notifications")}>
-              <button
-                type="button"
-                onClick={onOpenNotifications}
-                aria-label={t("option:header.notificationsAria", "Open notifications") as string}
-                className={`relative inline-flex items-center justify-center rounded-md p-2 text-text-muted hover:bg-surface2 hover:text-text ${focusRingClasses}`}
-                data-testid="chat-header-notifications-bell"
-              >
-                <Bell className="size-4" aria-hidden="true" />
-                {(notificationCount ?? 0) > 0 && (
-                  <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-bold text-white">
-                    {notificationCount! > 99 ? "99+" : notificationCount}
-                  </span>
-                )}
-              </button>
-            </Tooltip>
+            <div className="relative">
+              <Tooltip title={notificationCopy.title}>
+                <button
+                  ref={notificationTriggerRef}
+                  type="button"
+                  onClick={() => setNotificationPopoverOpen((open) => !open)}
+                  aria-label={notificationCopy.name}
+                  aria-haspopup="dialog"
+                  aria-expanded={notificationPopoverOpen}
+                  aria-controls="chat-header-notification-status"
+                  className={`relative inline-flex items-center justify-center rounded-md p-2 text-text-muted hover:bg-surface2 hover:text-text ${focusRingClasses}`}
+                  data-testid="chat-header-notifications-bell"
+                >
+                  <NotificationIcon
+                    className={`size-4 ${notificationState === "connecting" ? "animate-spin" : ""}`}
+                    aria-hidden="true"
+                  />
+                  {notificationState === "active" && (notificationCount ?? 0) > 0 && (
+                    <span aria-hidden="true" className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-bold text-white">
+                      {notificationCount! > 99 ? "99+" : notificationCount}
+                    </span>
+                  )}
+                </button>
+              </Tooltip>
+              {notificationPopoverOpen ? (
+                <div
+                  id="chat-header-notification-status"
+                  role="dialog"
+                  aria-label={notificationCopy.title}
+                  className="absolute right-0 top-full z-50 mt-2 w-72 rounded-lg border border-border bg-surface p-3 text-left shadow-lg"
+                >
+                  <p className="text-sm font-semibold text-text">{notificationCopy.title}</p>
+                  <p className="mt-1 text-xs leading-5 text-text-muted">{notificationCopy.description}</p>
+                  <div className="mt-3 flex items-center gap-2">
+                    {(notificationState === "degraded" || notificationState === "unavailable") && onRetryNotifications ? (
+                      <button type="button" onClick={() => void onRetryNotifications()} className={`rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primaryStrong ${focusRingClasses}`}>
+                        Try again
+                      </button>
+                    ) : null}
+                    <button type="button" onClick={openNotifications} className={`rounded-md border border-border px-3 py-1.5 text-xs font-medium text-text hover:bg-surface2 ${focusRingClasses}`}>
+                      Open notifications
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+              <span role="status" aria-live="polite" className="sr-only">
+                {notificationCopy.announcement}
+              </span>
+            </div>
           )}
           {onToggleTheme && (
             <Tooltip title={themeToggleLabel}>

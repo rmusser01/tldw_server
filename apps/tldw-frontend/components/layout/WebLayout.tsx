@@ -120,7 +120,11 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   const isMobileViewport = useMobile();
   useServerOnline();
 
-  const { unreadCount: notificationCount } = useNotificationLifecycle();
+  const {
+    state: notificationState,
+    unreadCount: notificationCount,
+    tryAgain: retryNotifications,
+  } = useNotificationLifecycle();
   const handleOpenNotifications = useCallback(() => navigate('/notifications'), [navigate]);
   const location = useLocation();
   const historyId = useStoreMessageOption((state) => state.historyId);
@@ -433,6 +437,8 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
                     showChatSidebar && isMobileViewport ? !sidebarOpen : chatSidebarCollapsed
                   }
                   notificationCount={notificationCount}
+                  notificationState={notificationState}
+                  onRetryNotifications={retryNotifications}
                   onOpenNotifications={handleOpenNotifications}
                 />
               </div>
@@ -450,6 +456,8 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
                     showChatSidebar && isMobileViewport ? !sidebarOpen : chatSidebarCollapsed
                   }
                   notificationCount={notificationCount}
+                  notificationState={notificationState}
+                  onRetryNotifications={retryNotifications}
                   onOpenNotifications={handleOpenNotifications}
                 />
               </div>
