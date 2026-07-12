@@ -1,18 +1,14 @@
 ---
-id: TASK-12111
+id: TASK-12951
 title: Prevent metadata-only web ingestion records
 status: Done
-assignee: []
-created_date: ''
-updated_date: 2026-07-12 20:35
 labels:
 - bug
 - web-scraping
 - ingestion
-dependencies: []
+priority: high
 documentation:
 - docs/superpowers/specs/2026-07-12-metadata-only-web-ingestion-guard-design.md
-priority: high
 modified_files:
 - tldw_Server_API/app/core/Web_Scraping/Article_Extractor_Lib.py
 - tldw_Server_API/app/services/enhanced_web_scraping_service.py
@@ -39,17 +35,14 @@ Fix web ingestion so description-only JSON-LD does not short-circuit full-page e
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
-Spec approved; implementation planning pending.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Implementation completed using TDD and subagent-driven review. Final post-rebase verification on current origin/dev: 44 focused tests passed; Black passed for task-owned test files; Ruff passed for all touched files except the unchanged pre-existing I001/F841 findings in Article_Extractor_Lib.py; current origin/dev already has unrelated Black debt in both service files and Black proposed no changes to TASK-12951-added service lines; compileall passed; Bandit reported 0 findings and 0 errors; git diff checks passed; final whole-range review found no issues. The post-rebase scrape_article test double was aligned with the upstream allow_llm_extraction keyword. Known skip: the full repository suite was not run because verification was scoped to affected web-ingestion and adjacent persistence suites.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
+## Final Summary
 
-<!-- SECTION:FINAL_SUMMARY:END -->
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Corrected JSON-LD extraction so summaries no longer count as page bodies, preserved structured summaries through successful fallback extraction and legacy no-LLM processing, and added pre-persistence body guards to enhanced and legacy ingestion. Canonical metadata envelopes are parsed with robust leading JSON boundaries and safely handle malformed or deeply nested input. Invalid articles are skipped with URL-scoped errors while valid siblings persist and the existing persist-ok response contract remains intact.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
@@ -61,15 +54,3 @@ Spec approved; implementation planning pending.
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Implementation completed using TDD and subagent-driven review. Verification: 29 focused tests passed; four baseline-clean touched files passed Black; normalized full touched-scope Black and Ruff results matched the pre-change baseline; compileall passed; Bandit reported 0 findings and 0 errors; final whole-range review found no issues. Known skips: the full repository test suite was not run because the approved plan scoped verification to the affected web-ingestion suites. Pre-existing whole-file Black debt and Ruff I001/F841 findings in Article_Extractor_Lib.py were unchanged.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
-## Final Summary
-
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Corrected JSON-LD extraction so summaries no longer count as page bodies, preserved structured summaries through successful fallback extraction and legacy no-LLM processing, and added pre-persistence body guards to enhanced and legacy ingestion. Canonical metadata envelopes are parsed with robust leading JSON boundaries and safely handle malformed or deeply nested input. Invalid articles are skipped with URL-scoped errors while valid siblings persist and the existing persist-ok response contract remains intact.
-<!-- SECTION:FINAL_SUMMARY:END -->

@@ -25,7 +25,13 @@ DESCRIPTION_ONLY_JSONLD = """
 
 @pytest.mark.asyncio
 async def test_legacy_scrape_preserves_structured_summary_when_summarization_disabled(monkeypatch):
-    async def fake_scrape_article(_url: str, custom_cookies=None):
+    async def fake_scrape_article(
+        _url: str,
+        custom_cookies=None,
+        *,
+        allow_llm_extraction: bool = True,
+    ):
+        _ = allow_llm_extraction
         return {
             "url": "https://example.com",
             "title": "Structured title",
