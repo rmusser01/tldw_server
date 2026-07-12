@@ -280,6 +280,16 @@ verified. A request interrupted by rotation receives `503` and can retry with
 the same idempotency key after rotation; it does not receive a partial or newly
 generated response.
 
+Rotation progress is durable in migration state: operation ID, source and target
+key IDs, phase, last processed table/key cursor, processed count, verified count,
+start time, and completion time. Each row update is idempotent because its
+envelope records the target key ID. After a crash, the operator resumes the same
+operation; the scanner skips already re-encrypted rows and continues from the
+durable cursor, then performs a complete readback pass. Once any row has moved,
+rotation is forward-resume only. The source key cannot be removed and
+secret-returning operations remain unavailable until verification commits the
+completed state.
+
 The full destination URL is encrypted at rest. Separate non-secret hostname and
 redacted-display columns support listing, policy review, and audit without
 decrypting path/query credentials.
@@ -311,6 +321,22 @@ The producer uniqueness key is either:
 
 or an explicit stable command ID for command-like events such as
 `incident.notify`.
+
+The schema represents these alternatives without nullable-unique ambiguity:
+
+- `source_kind` is `aggregate` or `command`;
+- aggregate rows require `aggregate_type`, `aggregate_id`, and
+  `aggregate_version` and leave `source_command_id` null;
+- command rows require `source_command_id` and leave aggregate identity null;
+- a partial unique index covers
+  `(event_type, aggregate_type, aggregate_id, aggregate_version)` where
+  `source_kind='aggregate'`;
+- a second partial unique index covers `(event_type, source_command_id)` where
+  `source_kind='command'`.
+
+SQLite and PostgreSQL migrations create equivalent check constraints and partial
+indexes. Aggregate IDs and versions use bounded text so existing integer, UUID,
+and file-version identities share one representation without lossy conversion.
 
 ### `admin_webhook_deliveries`
 
@@ -468,6 +494,27 @@ version differs from the original, the API requires an explicit confirmation,
 the UI displays both versions and the current hostname, and the audit record
 marks `redelivery_to_changed_config=true`.
 
+### Synchronous Test Attempts
+
+The test endpoint is persisted but does not create a Jobs job. In one AuthNZ
+transaction it creates a `webhook.test` event with a new command ID and a
+`kind=test` delivery row using the current registration/configuration versions.
+The endpoint then invokes the same bounded `DeliveryAttemptExecutor` used by the
+Jobs worker and waits for exactly one attempt.
+
+The executor owns deterministic payload bytes, signature headers, final
+configuration checks, central egress I/O, and bounded attempt metadata. The Jobs
+worker supplies Jobs ID, lease ID, and attempt number. The synchronous test path
+instead supplies a random test-attempt token and attempt number one. It never
+calls Jobs retry APIs and never schedules another attempt.
+
+Test requires completed migration and an available encryption key but does not
+require worker heartbeat. It is allowed while the registration is inactive,
+sets `X-TLDW-Webhook-Test: true`, and retains its event/delivery metadata under
+normal 30-day terminal retention. If the API process dies after marking a test
+attempt `processing`, recovery marks the stale test delivery `dead` with reason
+`test_attempt_interrupted`; it does not retry an operator's test implicitly.
+
 ### Cross-Database Enqueue Handshake
 
 AuthNZ and Jobs can each use SQLite or PostgreSQL, including different databases.
@@ -495,10 +542,10 @@ transaction participant.
 
 | Delivery state | Writer | Meaning and allowed next states |
 | --- | --- | --- |
-| `pending` | event producer | Durable row exists but has no enqueue claim; next is `enqueue_claimed`, `canceled`, `superseded`, or `dead` on expiry |
+| `pending` | event producer or test service | Durable row exists but has no enqueue claim; automatic/manual work moves to `enqueue_claimed`, while test work moves directly to `processing`; terminal lifecycle or expiry transitions are also allowed |
 | `enqueue_claimed` | reconciler | A claim token/expiry owns the enqueue handshake; next is `queued`, back to `pending` after safe recovery, or a terminal lifecycle state |
 | `queued` | reconciler | One Jobs ID is attached; next is `processing`, `canceled`, `superseded`, or `dead` on expiry |
-| `processing` | worker | One leased Jobs attempt passed the final pre-I/O checks; next is `succeeded`, `retry_wait`, `dead`, or a terminal lifecycle state observed before I/O |
+| `processing` | worker or synchronous test executor | One Jobs-leased attempt or one test-attempt token passed the final pre-I/O checks; next is `succeeded`, `retry_wait` for Jobs work only, `dead`, or a terminal lifecycle state observed before I/O |
 | `retry_wait` | worker | Attempt metadata is recorded and Jobs owns the next availability time; next is `processing`, `canceled`, `superseded`, or `dead` |
 | `succeeded` | worker | Receiver returned 2xx; terminal |
 | `dead` | worker or expiry reconciler | Nonretryable response, exhausted retries, or `delivery_expired`; terminal |
@@ -506,10 +553,13 @@ transaction participant.
 | `superseded` | control-plane service or worker | Delivery configuration no longer matches and no HTTP request began; terminal |
 
 The producer and reconciler update AuthNZ only. The worker conditionally marks
-`processing` with Jobs ID, lease ID, and attempt number before I/O. A retryable
-failure records bounded attempt metadata and `retry_wait`, then raises the typed
-Jobs retry signal; it does not calculate or poll its own timer. On reacquisition,
-the same Jobs ID and delivery ID return to `processing` with a higher attempt.
+`processing` with Jobs ID, lease ID, and attempt number before I/O. The test
+service conditionally marks `processing` with its test-attempt token. A retryable
+Jobs failure records bounded attempt metadata and `retry_wait`, then raises the
+typed Jobs retry signal; it does not calculate or poll its own timer. On
+reacquisition, the same Jobs ID and delivery ID return to `processing` with a
+higher attempt. A test failure always transitions directly to `dead` with its
+HTTP/network reason and no retry.
 
 Lifecycle cancellation uses conditional updates and asks Jobs to cancel queued
 or retrying work. It cannot convert an already-started HTTP request into a claim
