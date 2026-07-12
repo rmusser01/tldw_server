@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import contextlib
 import json
 import os
@@ -8,6 +9,7 @@ import threading
 from collections.abc import Awaitable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from enum import Enum
 from typing import Any, Callable
 from weakref import WeakKeyDictionary
 
@@ -23,6 +25,7 @@ from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
     is_trusted_base_url_request,
     resolve_byok_base_url_allowlist,
     resolve_server_default_key,
+    validate_base_url_override,
     validate_credential_fields,
 )
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
@@ -43,6 +46,10 @@ from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
     normalize_provider_name,
 )
 from tldw_Server_API.app.core.config import loaded_config_data
+from tldw_Server_API.app.core.custom_openai_providers import (
+    custom_openai_provider_number,
+    custom_openai_section_name,
+)
 from tldw_Server_API.app.core.http_client import RetryPolicy as _RetryPolicy
 from tldw_Server_API.app.core.http_client import afetch as _http_afetch
 from tldw_Server_API.app.core.Metrics import increment_counter
@@ -55,8 +62,89 @@ _OPENAI_SOURCE_API_KEY = "api_key"
 _OPENAI_SOURCE_OAUTH = "oauth"
 _OPENAI_CREDENTIAL_VERSION = 2
 
+_BYOK_RESOLUTION_ERROR_CODES = frozenset(
+    {
+        "invalid_provider_credentials",
+        "credential_store_unavailable",
+        "credential_scope_revoked",
+    }
+)
+_SHARED_APP_CONFIG_KEYS = {
+    "HTTP": frozenset(
+        {
+            "connect_timeout",
+            "read_timeout",
+            "write_timeout",
+            "pool_timeout",
+            "proxy_allowlist",
+            "enforce_tls_min_version",
+            "tls_min_version",
+            "allow_redirects",
+            "max_redirects",
+            "allow_cross_host_redirects",
+        }
+    ),
+    "Egress": frozenset(
+        {
+            "egress_allowlist",
+            "egress_denylist",
+            "workflows_allowlist",
+            "workflows_denylist",
+            "allowed_ports",
+            "profile",
+            "block_private",
+        }
+    ),
+}
+_LOCAL_PROVIDER_APP_CONFIG_KEYS = {
+    "llama.cpp": "llama_api",
+    "kobold": "kobold_api",
+    "ooba": "ooba_api",
+    "tabbyapi": "tabby_api",
+    "vllm": "vllm_api",
+    "local-llm": "local_llm",
+    "ollama": "ollama_api",
+    "aphrodite": "aphrodite_api",
+    "mlx": "mlx",
+}
+_PROVIDER_CONFIG_KEYS = frozenset(
+    {
+        "model",
+        "model_id",
+        "model_path",
+        "mlx_model_path",
+        "timeout",
+        "connect_timeout",
+        "read_timeout",
+        "write_timeout",
+        "pool_timeout",
+        "api_timeout",
+        "retry",
+        "retries",
+        "retry_attempts",
+        "retry_delay",
+        "api_retries",
+        "api_retry_delay",
+        "backoff_base_ms",
+        "backoff_cap_s",
+        "base_url",
+        "api_base_url",
+        "api_url",
+        "api_ip",
+        "endpoint",
+        "runtime_endpoint",
+        "organization",
+        "organization_id",
+        "org_id",
+        "project",
+        "project_id",
+    }
+)
+
 _openai_oauth_refresh_lock_guard = threading.Lock()
-_openai_oauth_refresh_locks: "WeakKeyDictionary[asyncio.AbstractEventLoop, dict[str, asyncio.Lock]]" = WeakKeyDictionary()
+_openai_oauth_refresh_locks: "WeakKeyDictionary[asyncio.AbstractEventLoop, dict[str, asyncio.Lock]]" = (
+    WeakKeyDictionary()
+)
 _openai_oauth_refresh_backend_warned: set[str] = set()
 
 _BYOK_RUNTIME_NONCRITICAL_EXCEPTIONS = (
@@ -114,8 +202,15 @@ def _bool_label(value: bool) -> str:
     return "true" if value else "false"
 
 
-def _can_use_base_url_override(provider: str, request: Any | None) -> bool:
-    if not is_trusted_base_url_request(request):
+def _can_use_base_url_override(
+    provider: str,
+    request: Any | None,
+    trusted_base_url_override: bool | None = None,
+) -> bool:
+    trusted = (
+        is_trusted_base_url_request(request) if trusted_base_url_override is None else trusted_base_url_override is True
+    )
+    if not trusted:
         return False
     provider_norm = normalize_provider_name(provider)
     return provider_norm in resolve_byok_base_url_allowlist()
@@ -137,19 +232,40 @@ def _sanitize_credential_fields(
         cleaned.pop("base_url", None)
         logger.debug("BYOK base_url override ignored for provider={}", provider)
 
-    return validate_credential_fields(provider, cleaned, allow_base_url=allow_base_url)
+    validated = validate_credential_fields(provider, cleaned, allow_base_url=allow_base_url)
+    if "base_url" in validated:
+        validated["base_url"] = validate_base_url_override(validated["base_url"])
+    return validated
 
 
-def _apply_active_scope(ids: list[int], active_id: Any) -> list[int]:
-    if not ids:
-        return []
+def _apply_active_scope(ids: list[int], active_id: Any, *, provider: str) -> list[int]:
     if active_id is None:
         return ids if len(ids) == 1 else []
     try:
         active = int(active_id)
     except (TypeError, ValueError):
-        return []
-    return [active] if active in ids else []
+        raise ByokResolutionError("credential_scope_revoked", provider) from None
+    if active not in ids:
+        raise ByokResolutionError("credential_scope_revoked", provider)
+    return [active]
+
+
+class ByokResolutionStatus(str, Enum):
+    """Non-secret terminal state for credential resolution."""
+
+    ABSENT = "ABSENT"
+    RESOLVED = "RESOLVED"
+
+
+class ByokResolutionError(Exception):
+    """Sanitized failure raised when credential resolution cannot continue."""
+
+    def __init__(self, code: str, provider: str) -> None:
+        if code not in _BYOK_RESOLUTION_ERROR_CODES:
+            raise ValueError("Unsupported BYOK resolution error code")
+        self.code = code
+        self.provider = normalize_provider_name(provider)
+        super().__init__(f"{self.code}: {self.provider}")
 
 
 @dataclass
@@ -160,12 +276,20 @@ class ResolvedByokCredentials:
     credential_fields: dict[str, Any]
     source: str
     allowlisted: bool
+    status: ByokResolutionStatus = ByokResolutionStatus.RESOLVED
     auth_source: str | None = None
     _touch_cb: Callable[[], Awaitable[None]] | None = None
 
     @property
     def uses_byok(self) -> bool:
         return self.source in {"user", "team", "org"}
+
+    def __repr__(self) -> str:
+        return (
+            "ResolvedByokCredentials("
+            f"provider={self.provider!r}, source={self.source!r}, "
+            f"allowlisted={self.allowlisted!r}, status={self.status.value!r})"
+        )
 
     async def touch_last_used(self) -> None:
         if not self._touch_cb:
@@ -263,65 +387,65 @@ def _fallback_result(
     return ResolvedByokCredentials(
         provider=provider,
         api_key=api_key,
-        app_config=None,
+        app_config=_build_app_config(provider, {}),
         credential_fields={},
         source=source,
         allowlisted=allowlisted,
-        auth_source=None,
-        _touch_cb=None,
-    )
-
-
-def _invalid_byok_result(provider: str, *, source: str) -> ResolvedByokCredentials:
-    return ResolvedByokCredentials(
-        provider=provider,
-        api_key=None,
-        app_config=None,
-        credential_fields={},
-        source=source,
-        allowlisted=True,
+        status=(ByokResolutionStatus.RESOLVED if api_key else ByokResolutionStatus.ABSENT),
         auth_source=None,
         _touch_cb=None,
     )
 
 
 def _build_app_config(provider: str, credential_fields: dict[str, Any]) -> dict[str, Any] | None:
-    if not credential_fields:
-        return None
     try:
         base_cfg = loaded_config_data
     except _BYOK_RUNTIME_NONCRITICAL_EXCEPTIONS:
         base_cfg = None
     provider_norm = normalize_provider_name(provider)
-    scrubbed_cfg: dict[str, Any] | None = None
+    section = PROVIDER_APP_CONFIG_KEYS.get(provider_norm) or _LOCAL_PROVIDER_APP_CONFIG_KEYS.get(provider_norm)
+    custom_number = custom_openai_provider_number(provider_norm)
+    if section is None and custom_number is not None:
+        section = custom_openai_section_name(custom_number)
+    if section is None:
+        section = f"{provider_norm.replace('.', '_').replace('-', '_')}_api"
+
+    scrubbed_cfg: dict[str, Any] = {}
     if base_cfg:
         try:
-            section = PROVIDER_APP_CONFIG_KEYS.get(provider_norm)
             if section and isinstance(base_cfg.get(section), dict):
-                cleaned = {
-                    k: v
-                    for k, v in base_cfg.get(section, {}).items()
-                    if k not in {"api_base_url", "org_id", "project_id"}
+                cleaned_provider = {
+                    k: copy.deepcopy(v) for k, v in base_cfg.get(section, {}).items() if k in _PROVIDER_CONFIG_KEYS
                 }
-                scrubbed_cfg = dict(base_cfg)
-                scrubbed_cfg[section] = cleaned
-            else:
-                scrubbed_cfg = dict(base_cfg)
+                if cleaned_provider:
+                    scrubbed_cfg[section] = cleaned_provider
+
+            for canonical_section, allowed_keys in _SHARED_APP_CONFIG_KEYS.items():
+                for candidate in (canonical_section, canonical_section.lower()):
+                    shared = base_cfg.get(candidate)
+                    if isinstance(shared, dict):
+                        cleaned_shared = {k: copy.deepcopy(v) for k, v in shared.items() if k in allowed_keys}
+                        if cleaned_shared:
+                            scrubbed_cfg[candidate] = cleaned_shared
+                        break
         except _BYOK_RUNTIME_NONCRITICAL_EXCEPTIONS:
-            scrubbed_cfg = None
-    merged = merge_app_config_overrides(scrubbed_cfg if scrubbed_cfg else None, provider, credential_fields)
+            scrubbed_cfg = {}
+    merged = merge_app_config_overrides(scrubbed_cfg or None, provider, credential_fields)
     return merged or None
 
 
-def _extract_payload(row: dict[str, Any], provider: str) -> dict[str, Any] | None:
+def _extract_payload(row: dict[str, Any], provider: str) -> dict[str, Any]:
     encrypted_blob = row.get("encrypted_blob")
     if not encrypted_blob:
-        return None
+        raise ByokResolutionError("invalid_provider_credentials", provider)
     try:
-        return decrypt_byok_payload(loads_envelope(encrypted_blob))
-    except _BYOK_RUNTIME_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning(f"BYOK decrypt failed for provider={provider}: {exc}")
-        return None
+        payload = decrypt_byok_payload(loads_envelope(encrypted_blob))
+    except _BYOK_RUNTIME_NONCRITICAL_EXCEPTIONS:
+        logger.warning("BYOK decrypt failed for provider={}", provider)
+        raise ByokResolutionError("invalid_provider_credentials", provider) from None
+    if not isinstance(payload, dict) or not payload:
+        raise ByokResolutionError("invalid_provider_credentials", provider)
+    return payload
 
 
 def _coerce_nonempty_string(value: Any) -> str | None:
@@ -473,9 +597,7 @@ def _extract_runtime_auth_source(
         return None
 
     active_source_raw = payload.get("active_auth_source")
-    active_source = (
-        active_source_raw.strip().lower() if isinstance(active_source_raw, str) else ""
-    )
+    active_source = active_source_raw.strip().lower() if isinstance(active_source_raw, str) else ""
     if active_source in {_OPENAI_SOURCE_API_KEY, _OPENAI_SOURCE_OAUTH} and _v2_source_available(
         payload,
         active_source,
@@ -744,9 +866,7 @@ async def _openai_oauth_token_refresh(
 
         if status_code < 200 or status_code >= 300:
             if payload:
-                provider_error = _coerce_nonempty_string(
-                    payload.get("error_description") or payload.get("error")
-                )
+                provider_error = _coerce_nonempty_string(payload.get("error_description") or payload.get("error"))
                 if provider_error:
                     logger.debug(f"OpenAI OAuth refresh rejected: {provider_error}")
             return None
@@ -769,9 +889,9 @@ async def _persist_user_payload_update(
         key_hint = row.get("key_hint") or ""
     try:
         envelope = encrypt_byok_payload(payload)
-    except _BYOK_RUNTIME_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning(f"BYOK encrypt failed while persisting provider={provider}: {exc}")
-        return
+    except _BYOK_RUNTIME_NONCRITICAL_EXCEPTIONS:
+        logger.warning("BYOK encrypt failed while persisting provider={}", provider)
+        raise ByokResolutionError("invalid_provider_credentials", provider) from None
 
     metadata_to_store = _parse_metadata_value(row.get("metadata"))
     try:
@@ -785,8 +905,13 @@ async def _persist_user_payload_update(
             created_by=user_id,
             updated_by=user_id,
         )
-    except _BYOK_RUNTIME_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning(f"BYOK payload persist failed for user_id={user_id} provider={provider}: {exc}")
+    except _BYOK_RUNTIME_NONCRITICAL_EXCEPTIONS:
+        logger.warning(
+            "BYOK payload persist failed for user_id={} provider={}",
+            user_id,
+            provider,
+        )
+        raise ByokResolutionError("credential_store_unavailable", provider) from None
 
 
 async def _resolve_openai_user_payload(
@@ -815,14 +940,16 @@ async def _resolve_openai_user_payload(
         async with _openai_oauth_refresh_lock(user_id=user_id, provider=_OPENAI_PROVIDER):
             try:
                 latest_row = await user_repo.fetch_secret_for_user(int(user_id), _OPENAI_PROVIDER)
-            except _BYOK_RUNTIME_NONCRITICAL_EXCEPTIONS as exc:
+            except _BYOK_RUNTIME_NONCRITICAL_EXCEPTIONS:
                 logger.debug(
-                    "BYOK user reload before OAuth refresh failed for user_id={} provider={}: {}",
+                    "BYOK user reload before OAuth refresh failed for user_id={} provider={}",
                     user_id,
                     _OPENAI_PROVIDER,
-                    exc,
                 )
-                latest_row = None
+                raise ByokResolutionError(
+                    "credential_store_unavailable",
+                    _OPENAI_PROVIDER,
+                ) from None
 
             if latest_row:
                 latest_payload = _extract_payload(latest_row, _OPENAI_PROVIDER)
@@ -864,7 +991,9 @@ async def _resolve_openai_user_payload(
                     access_token = _coerce_nonempty_string(token_payload.get("access_token"))
                     if access_token:
                         oauth_payload = _openai_source_payload(merged_payload, _OPENAI_SOURCE_OAUTH)
-                        next_refresh_token = _coerce_nonempty_string(token_payload.get("refresh_token")) or refresh_token
+                        next_refresh_token = (
+                            _coerce_nonempty_string(token_payload.get("refresh_token")) or refresh_token
+                        )
                         token_type = (
                             _coerce_nonempty_string(token_payload.get("token_type"))
                             or _coerce_nonempty_string(oauth_payload.get("token_type"))
@@ -998,11 +1127,16 @@ async def resolve_byok_credentials(
     org_ids: list[int] | None = None,
     fallback_resolver: Callable[[str], str | None] | None = None,
     force_oauth_refresh: bool = False,
+    trusted_base_url_override: bool | None = None,
 ) -> ResolvedByokCredentials:
     provider_norm = normalize_provider_name(provider)
     byok_enabled = is_byok_enabled()
     allowlisted = is_provider_allowlisted(provider_norm)
-    allow_base_url = _can_use_base_url_override(provider_norm, request)
+    allow_base_url = _can_use_base_url_override(
+        provider_norm,
+        request,
+        trusted_base_url_override,
+    )
 
     if not byok_enabled or user_id is None or not allowlisted:
         return _finalize_resolution(
@@ -1018,11 +1152,15 @@ async def resolve_byok_credentials(
     try:
         user_repo = await _get_user_repo()
         user_row = await user_repo.fetch_secret_for_user(int(user_id), provider_norm)
-    except _BYOK_RUNTIME_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug(f"BYOK user lookup failed for user_id={user_id}, provider={provider_norm}: {exc}")
-        user_row = None
+    except _BYOK_RUNTIME_NONCRITICAL_EXCEPTIONS:
+        logger.debug(
+            "BYOK user lookup failed for user_id={} provider={}",
+            user_id,
+            provider_norm,
+        )
+        raise ByokResolutionError("credential_store_unavailable", provider_norm) from None
 
-    if user_row:
+    if user_row is not None:
         payload = _extract_payload(user_row, provider_norm)
         if payload:
             runtime_payload = payload
@@ -1041,12 +1179,11 @@ async def resolve_byok_credentials(
                 runtime_payload = openai_resolution.payload
                 runtime_auth_source = openai_resolution.auth_source
                 if openai_resolution.fail_closed:
-                    return _finalize_resolution(
-                        _invalid_byok_result(provider_norm, source="user"),
-                        byok_enabled=byok_enabled,
-                    )
+                    raise ByokResolutionError("invalid_provider_credentials", provider_norm)
 
             api_key = _extract_runtime_api_key(runtime_payload)
+            if not api_key:
+                raise ByokResolutionError("invalid_provider_credentials", provider_norm)
             if api_key:
                 credential_fields_raw = runtime_payload.get("credential_fields") or {}
                 try:
@@ -1055,17 +1192,16 @@ async def resolve_byok_credentials(
                         credential_fields_raw,
                         allow_base_url=allow_base_url,
                     )
-                except ValueError as exc:
+                except ValueError:
                     logger.warning(
-                        'BYOK credential_fields invalid for user_id={} provider={}: {}',
+                        "BYOK credential_fields invalid for user_id={} provider={}",
                         user_id,
                         provider_norm,
-                        exc,
                     )
-                    return _finalize_resolution(
-                        _invalid_byok_result(provider_norm, source="user"),
-                        byok_enabled=byok_enabled,
-                    )
+                    raise ByokResolutionError(
+                        "invalid_provider_credentials",
+                        provider_norm,
+                    ) from None
                 last_used_at = _parse_last_used(user_row.get("last_used_at"))
                 return _finalize_resolution(
                     ResolvedByokCredentials(
@@ -1093,11 +1229,11 @@ async def resolve_byok_credentials(
         try:
             active_team_id = getattr(request.state, "active_team_id", None)
         except _BYOK_RUNTIME_NONCRITICAL_EXCEPTIONS:
-            active_team_id = None
+            raise ByokResolutionError("credential_store_unavailable", provider_norm) from None
         try:
             active_org_id = getattr(request.state, "active_org_id", None)
         except _BYOK_RUNTIME_NONCRITICAL_EXCEPTIONS:
-            active_org_id = None
+            raise ByokResolutionError("credential_store_unavailable", provider_norm) from None
 
     if team_ids is None or org_ids is None:
         try:
@@ -1107,52 +1243,53 @@ async def resolve_byok_credentials(
                 if org_ids is None:
                     org_ids = list(getattr(request.state, "org_ids", None) or [])
         except _BYOK_RUNTIME_NONCRITICAL_EXCEPTIONS:
-            team_ids = team_ids or []
-            org_ids = org_ids or []
+            raise ByokResolutionError("credential_store_unavailable", provider_norm) from None
 
     if team_ids is None or org_ids is None:
         try:
             memberships = await list_memberships_for_user(int(user_id))
             if team_ids is None:
-                team_ids = [
-                    m.get("team_id") for m in memberships if m.get("team_id") is not None
-                ]
+                team_ids = [m.get("team_id") for m in memberships if m.get("team_id") is not None]
             if org_ids is None:
-                org_ids = sorted(
-                    {m.get("org_id") for m in memberships if m.get("org_id") is not None}
-                )
-        except _BYOK_RUNTIME_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"BYOK membership lookup failed for user_id={user_id}: {exc}")
-            team_ids = team_ids or []
-            org_ids = org_ids or []
+                org_ids = sorted({m.get("org_id") for m in memberships if m.get("org_id") is not None})
+        except _BYOK_RUNTIME_NONCRITICAL_EXCEPTIONS:
+            logger.debug("BYOK membership lookup failed for user_id={}", user_id)
+            raise ByokResolutionError("credential_store_unavailable", provider_norm) from None
 
     team_ids = team_ids or []
     org_ids = org_ids or []
-    team_ids = _apply_active_scope(team_ids, active_team_id)
-    org_ids = _apply_active_scope(org_ids, active_org_id)
+    team_ids = _apply_active_scope(team_ids, active_team_id, provider=provider_norm)
+    org_ids = _apply_active_scope(org_ids, active_org_id, provider=provider_norm)
 
-    try:
-        shared_repo = await _get_org_repo()
-    except _BYOK_RUNTIME_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug(f"BYOK shared repo init failed: {exc}")
-        shared_repo = None
+    shared_repo = None
+    if team_ids or org_ids:
+        try:
+            shared_repo = await _get_org_repo()
+        except _BYOK_RUNTIME_NONCRITICAL_EXCEPTIONS:
+            logger.debug("BYOK shared repo init failed for provider={}", provider_norm)
+            raise ByokResolutionError("credential_store_unavailable", provider_norm) from None
 
     if shared_repo:
         # Prefer team scope over org scope, mirroring list_user_provider_keys()
         for team_id in sorted({int(tid) for tid in team_ids if tid is not None}):
             try:
                 row = await shared_repo.fetch_secret("team", int(team_id), provider_norm)
-            except _BYOK_RUNTIME_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"BYOK team lookup failed for team_id={team_id}: {exc}")
-                row = None
-            if not row:
+            except _BYOK_RUNTIME_NONCRITICAL_EXCEPTIONS:
+                logger.debug(
+                    "BYOK team lookup failed for team_id={} provider={}",
+                    team_id,
+                    provider_norm,
+                )
+                raise ByokResolutionError(
+                    "credential_store_unavailable",
+                    provider_norm,
+                ) from None
+            if row is None:
                 continue
             payload = _extract_payload(row, provider_norm)
-            if not payload:
-                continue
             api_key = _extract_runtime_api_key(payload)
             if not api_key:
-                continue
+                raise ByokResolutionError("invalid_provider_credentials", provider_norm)
             credential_fields_raw = payload.get("credential_fields") or {}
             try:
                 credential_fields = _sanitize_credential_fields(
@@ -1160,17 +1297,16 @@ async def resolve_byok_credentials(
                     credential_fields_raw,
                     allow_base_url=allow_base_url,
                 )
-            except ValueError as exc:
+            except ValueError:
                 logger.warning(
-                    'BYOK credential_fields invalid for team_id={} provider={}: {}',
+                    "BYOK credential_fields invalid for team_id={} provider={}",
                     team_id,
                     provider_norm,
-                    exc,
                 )
-                return _finalize_resolution(
-                    _invalid_byok_result(provider_norm, source="team"),
-                    byok_enabled=byok_enabled,
-                )
+                raise ByokResolutionError(
+                    "invalid_provider_credentials",
+                    provider_norm,
+                ) from None
             last_used_at = _parse_last_used(row.get("last_used_at"))
             return _finalize_resolution(
                 ResolvedByokCredentials(
@@ -1195,17 +1331,22 @@ async def resolve_byok_credentials(
         for org_id in sorted({int(oid) for oid in org_ids if oid is not None}):
             try:
                 row = await shared_repo.fetch_secret("org", int(org_id), provider_norm)
-            except _BYOK_RUNTIME_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"BYOK org lookup failed for org_id={org_id}: {exc}")
-                row = None
-            if not row:
+            except _BYOK_RUNTIME_NONCRITICAL_EXCEPTIONS:
+                logger.debug(
+                    "BYOK org lookup failed for org_id={} provider={}",
+                    org_id,
+                    provider_norm,
+                )
+                raise ByokResolutionError(
+                    "credential_store_unavailable",
+                    provider_norm,
+                ) from None
+            if row is None:
                 continue
             payload = _extract_payload(row, provider_norm)
-            if not payload:
-                continue
             api_key = _extract_runtime_api_key(payload)
             if not api_key:
-                continue
+                raise ByokResolutionError("invalid_provider_credentials", provider_norm)
             credential_fields_raw = payload.get("credential_fields") or {}
             try:
                 credential_fields = _sanitize_credential_fields(
@@ -1213,17 +1354,16 @@ async def resolve_byok_credentials(
                     credential_fields_raw,
                     allow_base_url=allow_base_url,
                 )
-            except ValueError as exc:
+            except ValueError:
                 logger.warning(
-                    'BYOK credential_fields invalid for org_id={} provider={}: {}',
+                    "BYOK credential_fields invalid for org_id={} provider={}",
                     org_id,
                     provider_norm,
-                    exc,
                 )
-                return _finalize_resolution(
-                    _invalid_byok_result(provider_norm, source="org"),
-                    byok_enabled=byok_enabled,
-                )
+                raise ByokResolutionError(
+                    "invalid_provider_credentials",
+                    provider_norm,
+                ) from None
             last_used_at = _parse_last_used(row.get("last_used_at"))
             return _finalize_resolution(
                 ResolvedByokCredentials(

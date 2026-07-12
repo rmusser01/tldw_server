@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 
@@ -28,7 +29,7 @@ def _decrypted_payload_from_row(row: dict) -> dict:
 
 
 @pytest.mark.asyncio
-async def test_resolve_byok_credentials_invalid_fields_returns_invalid(monkeypatch):
+async def test_resolve_byok_credentials_invalid_fields_raise_typed_failure(monkeypatch):
     from tldw_Server_API.app.core.AuthNZ import byok_runtime
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
@@ -50,11 +51,17 @@ async def test_resolve_byok_credentials_invalid_fields_returns_invalid(monkeypat
     monkeypatch.setattr(byok_runtime, "is_byok_enabled", lambda: True)
     monkeypatch.setattr(byok_runtime, "is_provider_allowlisted", lambda _provider: True)
 
-    resolved = await byok_runtime.resolve_byok_credentials("openai", user_id=1)
+    error_type = getattr(byok_runtime, "ByokResolutionError", RuntimeError)
+    with pytest.raises(error_type) as exc_info:
+        await byok_runtime.resolve_byok_credentials("OpenAI", user_id=1)
 
-    assert resolved.source == "user"
-    assert resolved.api_key is None
-    assert resolved.credential_fields == {}
+    assert exc_info.value.code == "invalid_provider_credentials"
+    assert exc_info.value.provider == "openai"
+    assert vars(exc_info.value) == {
+        "code": "invalid_provider_credentials",
+        "provider": "openai",
+    }
+    assert "bad_field" not in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -149,9 +156,7 @@ async def test_resolve_byok_credentials_v2_oauth_refresh_success_updates_payload
             "oauth": {
                 "access_token": "stale-access-token",
                 "refresh_token": "refresh-token-123",
-                "expires_at": (
-                    datetime.now(timezone.utc) + timedelta(seconds=30)
-                ).isoformat(),
+                "expires_at": (datetime.now(timezone.utc) + timedelta(seconds=30)).isoformat(),
             },
             "api_key": {"api_key": "sk-api-fallback-123"},
         },
@@ -240,9 +245,7 @@ async def test_resolve_byok_credentials_v2_oauth_refresh_failure_falls_back_to_a
             "oauth": {
                 "access_token": "expired-access-token",
                 "refresh_token": "refresh-token-123",
-                "expires_at": (
-                    datetime.now(timezone.utc) - timedelta(seconds=10)
-                ).isoformat(),
+                "expires_at": (datetime.now(timezone.utc) - timedelta(seconds=10)).isoformat(),
             },
             "api_key": {"api_key": "sk-api-fallback-xyz"},
         },
@@ -305,7 +308,7 @@ async def test_resolve_byok_credentials_v2_oauth_refresh_failure_falls_back_to_a
 
 
 @pytest.mark.asyncio
-async def test_resolve_byok_credentials_v2_oauth_refresh_failure_without_api_key_fails_closed(monkeypatch):
+async def test_resolve_byok_credentials_v2_oauth_refresh_failure_without_api_key_raises_typed_failure(monkeypatch):
     from tldw_Server_API.app.core.AuthNZ import byok_runtime
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
@@ -324,9 +327,7 @@ async def test_resolve_byok_credentials_v2_oauth_refresh_failure_without_api_key
             "oauth": {
                 "access_token": "expired-access-token",
                 "refresh_token": "refresh-token-123",
-                "expires_at": (
-                    datetime.now(timezone.utc) - timedelta(seconds=10)
-                ).isoformat(),
+                "expires_at": (datetime.now(timezone.utc) - timedelta(seconds=10)).isoformat(),
             },
         },
     }
@@ -358,8 +359,371 @@ async def test_resolve_byok_credentials_v2_oauth_refresh_failure_without_api_key
     monkeypatch.setattr(byok_runtime, "is_byok_enabled", lambda: True)
     monkeypatch.setattr(byok_runtime, "is_provider_allowlisted", lambda _provider: True)
 
-    resolved = await byok_runtime.resolve_byok_credentials("openai", user_id=1)
+    error_type = getattr(byok_runtime, "ByokResolutionError", RuntimeError)
+    with pytest.raises(error_type) as exc_info:
+        await byok_runtime.resolve_byok_credentials("openai", user_id=1)
 
-    assert resolved.source == "user"
-    assert resolved.api_key is None
-    assert resolved.auth_source is None
+    assert exc_info.value.code == "invalid_provider_credentials"
+    assert exc_info.value.provider == "openai"
+    assert "refresh-token-123" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_decrypt_failure_does_not_advance_to_server_default(monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+
+    class _FakeUserRepo:
+        async def fetch_secret_for_user(self, user_id: int, provider: str):
+            return {"encrypted_blob": "not-an-envelope", "last_used_at": None}
+
+    async def _fake_get_user_repo():
+        return _FakeUserRepo()
+
+    fallback_calls: list[str] = []
+
+    def _fallback(provider: str) -> str:
+        fallback_calls.append(provider)
+        return "server-secret-must-not-be-used"
+
+    monkeypatch.setattr(byok_runtime, "_get_user_repo", _fake_get_user_repo)
+    monkeypatch.setattr(byok_runtime, "is_byok_enabled", lambda: True)
+    monkeypatch.setattr(byok_runtime, "is_provider_allowlisted", lambda _provider: True)
+
+    error_type = getattr(byok_runtime, "ByokResolutionError", RuntimeError)
+    with pytest.raises(error_type) as exc_info:
+        await byok_runtime.resolve_byok_credentials(
+            "openai",
+            user_id=1,
+            fallback_resolver=_fallback,
+        )
+
+    assert exc_info.value.code == "invalid_provider_credentials"
+    assert exc_info.value.provider == "openai"
+    assert fallback_calls == []
+
+
+@pytest.mark.asyncio
+async def test_user_repository_outage_raises_sanitized_typed_failure(monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+
+    async def _fake_get_user_repo():
+        raise OSError("database unavailable with secret=sk-do-not-leak")
+
+    monkeypatch.setattr(byok_runtime, "_get_user_repo", _fake_get_user_repo)
+    monkeypatch.setattr(byok_runtime, "is_byok_enabled", lambda: True)
+    monkeypatch.setattr(byok_runtime, "is_provider_allowlisted", lambda _provider: True)
+
+    error_type = getattr(byok_runtime, "ByokResolutionError", RuntimeError)
+    with pytest.raises(error_type) as exc_info:
+        await byok_runtime.resolve_byok_credentials("OpenAI", user_id=1)
+
+    assert exc_info.value.code == "credential_store_unavailable"
+    assert exc_info.value.provider == "openai"
+    assert vars(exc_info.value) == {
+        "code": "credential_store_unavailable",
+        "provider": "openai",
+    }
+    assert "sk-do-not-leak" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("scope_type", "team_ids", "org_ids"),
+    [
+        ("team", [7], []),
+        ("org", [], [8]),
+    ],
+)
+async def test_shared_repository_outage_does_not_advance_precedence(
+    monkeypatch,
+    scope_type,
+    team_ids,
+    org_ids,
+):
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+
+    class _FakeUserRepo:
+        async def fetch_secret_for_user(self, user_id: int, provider: str):
+            return None
+
+    class _FakeSharedRepo:
+        async def fetch_secret(self, requested_scope: str, scope_id: int, provider: str):
+            assert requested_scope == scope_type
+            raise ConnectionError("shared store outage with token=do-not-leak")
+
+    async def _fake_get_user_repo():
+        return _FakeUserRepo()
+
+    async def _fake_get_org_repo():
+        return _FakeSharedRepo()
+
+    monkeypatch.setattr(byok_runtime, "_get_user_repo", _fake_get_user_repo)
+    monkeypatch.setattr(byok_runtime, "_get_org_repo", _fake_get_org_repo)
+    monkeypatch.setattr(byok_runtime, "is_byok_enabled", lambda: True)
+    monkeypatch.setattr(byok_runtime, "is_provider_allowlisted", lambda _provider: True)
+
+    error_type = getattr(byok_runtime, "ByokResolutionError", RuntimeError)
+    with pytest.raises(error_type) as exc_info:
+        await byok_runtime.resolve_byok_credentials(
+            "openai",
+            user_id=1,
+            team_ids=team_ids,
+            org_ids=org_ids,
+            fallback_resolver=lambda _provider: "server-secret-must-not-be-used",
+        )
+
+    assert exc_info.value.code == "credential_store_unavailable"
+    assert exc_info.value.provider == "openai"
+    assert "do-not-leak" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_membership_lookup_outage_raises_sanitized_typed_failure(monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+
+    class _FakeUserRepo:
+        async def fetch_secret_for_user(self, user_id: int, provider: str):
+            return None
+
+    async def _fake_get_user_repo():
+        return _FakeUserRepo()
+
+    async def _fail_membership_lookup(user_id: int):
+        raise TimeoutError("membership backend timed out with cookie=do-not-leak")
+
+    monkeypatch.setattr(byok_runtime, "_get_user_repo", _fake_get_user_repo)
+    monkeypatch.setattr(byok_runtime, "list_memberships_for_user", _fail_membership_lookup)
+    monkeypatch.setattr(byok_runtime, "is_byok_enabled", lambda: True)
+    monkeypatch.setattr(byok_runtime, "is_provider_allowlisted", lambda _provider: True)
+
+    error_type = getattr(byok_runtime, "ByokResolutionError", RuntimeError)
+    with pytest.raises(error_type) as exc_info:
+        await byok_runtime.resolve_byok_credentials("openai", user_id=1)
+
+    assert exc_info.value.code == "credential_store_unavailable"
+    assert exc_info.value.provider == "openai"
+    assert "do-not-leak" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("active_field", "active_id", "team_ids", "org_ids"),
+    [
+        ("active_team_id", 99, [7], []),
+        ("active_org_id", 99, [], [8]),
+    ],
+)
+async def test_invalid_active_scope_raises_revoked_failure(
+    monkeypatch,
+    active_field,
+    active_id,
+    team_ids,
+    org_ids,
+):
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+
+    class _FakeUserRepo:
+        async def fetch_secret_for_user(self, user_id: int, provider: str):
+            return None
+
+    async def _fake_get_user_repo():
+        return _FakeUserRepo()
+
+    state = SimpleNamespace(active_team_id=None, active_org_id=None)
+    setattr(state, active_field, active_id)
+    request = SimpleNamespace(state=state)
+
+    monkeypatch.setattr(byok_runtime, "_get_user_repo", _fake_get_user_repo)
+    monkeypatch.setattr(byok_runtime, "is_byok_enabled", lambda: True)
+    monkeypatch.setattr(byok_runtime, "is_provider_allowlisted", lambda _provider: True)
+
+    error_type = getattr(byok_runtime, "ByokResolutionError", RuntimeError)
+    with pytest.raises(error_type) as exc_info:
+        await byok_runtime.resolve_byok_credentials(
+            "openai",
+            user_id=1,
+            request=request,
+            team_ids=team_ids,
+            org_ids=org_ids,
+        )
+
+    assert exc_info.value.code == "credential_scope_revoked"
+    assert exc_info.value.provider == "openai"
+
+
+def test_resolved_credentials_repr_redacts_all_sensitive_fields():
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+
+    async def _touch_secret():
+        return None
+
+    resolved = byok_runtime.ResolvedByokCredentials(
+        provider="openai",
+        api_key="sk-repr-secret",
+        app_config={
+            "openai_api": {
+                "api_key": "config-secret",
+                "model": "secret-looking-model",
+            }
+        },
+        credential_fields={"base_url": "https://credential-field.example"},
+        source="user",
+        allowlisted=True,
+        auth_source="oauth",
+        _touch_cb=_touch_secret,
+    )
+
+    rendered = repr(resolved)
+
+    for hidden in (
+        "sk-repr-secret",
+        "config-secret",
+        "secret-looking-model",
+        "credential-field.example",
+        "_touch_secret",
+        "api_key",
+        "app_config",
+        "credential_fields",
+        "_touch_cb",
+    ):
+        assert hidden not in rendered
+    assert "provider='openai'" in rendered
+    assert "source='user'" in rendered
+
+
+def test_build_app_config_is_provider_scoped_and_scrubs_secrets(monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+
+    source_proxy_allowlist = ["proxy.example"]
+    monkeypatch.setattr(
+        byok_runtime,
+        "loaded_config_data",
+        {
+            "openai_api": {
+                "api_key": "server-openai-secret",
+                "access_token": "server-openai-token",
+                "client_secret": "oauth-client-secret",
+                "Authorization": "Bearer server-openai-secret",
+                "model": "gpt-safe",
+                "api_timeout": 12,
+                "api_retries": 2,
+                "api_retry_delay": 0.25,
+                "api_base_url": "https://server-openai.example/v1",
+                "organization_id": "org-safe",
+                "project_id": "project-safe",
+                "temperature": 0.2,
+            },
+            "anthropic_api": {
+                "api_key": "unrelated-secret",
+                "model": "unrelated-model",
+            },
+            "HTTP": {
+                "connect_timeout": 5,
+                "read_timeout": 30,
+                "proxy_allowlist": source_proxy_allowlist,
+                "authorization": "Basic do-not-copy",
+                "cookie": "do-not-copy",
+            },
+            "Egress": {
+                "egress_allowlist": ["api.openai.com"],
+                "allowed_ports": [443],
+                "block_private": True,
+                "client_secret": "do-not-copy",
+            },
+            "database": {"password": "do-not-copy"},
+        },
+    )
+
+    app_config = byok_runtime._build_app_config(
+        "openai",
+        {
+            "base_url": "https://byok-openai.example/v1",
+            "org_id": "byok-org",
+            "project_id": "byok-project",
+        },
+    )
+
+    assert app_config == {
+        "openai_api": {
+            "model": "gpt-safe",
+            "api_timeout": 12,
+            "api_retries": 2,
+            "api_retry_delay": 0.25,
+            "api_base_url": "https://byok-openai.example/v1",
+            "organization_id": "org-safe",
+            "org_id": "byok-org",
+            "project_id": "byok-project",
+        },
+        "HTTP": {
+            "connect_timeout": 5,
+            "read_timeout": 30,
+            "proxy_allowlist": ["proxy.example"],
+        },
+        "Egress": {
+            "egress_allowlist": ["api.openai.com"],
+            "allowed_ports": [443],
+            "block_private": True,
+        },
+    }
+    app_config["HTTP"]["proxy_allowlist"].append("mutated.example")
+    assert source_proxy_allowlist == ["proxy.example"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("provider", "server_key", "expected_source", "expected_status", "section", "endpoint_key"),
+    [
+        ("openai", "sk-server-only", "server_default", "RESOLVED", "openai_api", "api_base_url"),
+        ("ollama", None, "none", "ABSENT", "ollama_api", "api_url"),
+        (
+            "custom-openai-api-3",
+            "sk-custom-server",
+            "server_default",
+            "RESOLVED",
+            "custom_openai_api_3",
+            "api_base_url",
+        ),
+    ],
+)
+async def test_fallback_results_keep_only_selected_provider_config(
+    monkeypatch,
+    provider,
+    server_key,
+    expected_source,
+    expected_status,
+    section,
+    endpoint_key,
+):
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+
+    monkeypatch.setattr(byok_runtime, "is_byok_enabled", lambda: False)
+    monkeypatch.setattr(
+        byok_runtime,
+        "loaded_config_data",
+        {
+            section: {
+                "api_key": "config-secret",
+                "model": "selected-model",
+                endpoint_key: "http://selected-provider.example/v1",
+                "api_timeout": 10,
+            },
+            "anthropic_api": {"api_key": "unrelated-secret", "model": "unrelated-model"},
+        },
+    )
+
+    resolved = await byok_runtime.resolve_byok_credentials(
+        provider,
+        user_id=1,
+        fallback_resolver=lambda _provider: server_key,
+    )
+
+    assert resolved.source == expected_source
+    assert resolved.status == expected_status
+    assert resolved.api_key == server_key
+    assert resolved.app_config == {
+        section: {
+            "model": "selected-model",
+            endpoint_key: "http://selected-provider.example/v1",
+            "api_timeout": 10,
+        }
+    }

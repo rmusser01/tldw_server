@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 import pytest
 from fastapi import Request
 
+from tldw_Server_API.app.core.AuthNZ import byok_runtime
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import resolve_byok_credentials
 from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import AuthnzUserProviderSecretsRepo
 from tldw_Server_API.app.core.AuthNZ.repos.org_provider_secrets_repo import AuthnzOrgProviderSecretsRepo
@@ -118,6 +119,7 @@ async def test_byok_resolution_precedence(tmp_path, monkeypatch):
         request=request,
     )
     assert resolved.source == "user"
+    assert resolved.status == "RESOLVED"
     assert resolved.api_key == "sk-user-openai-1111"
     assert resolved.app_config
     assert resolved.app_config["openai_api"]["api_base_url"] == "https://example.com/v1"
@@ -132,6 +134,7 @@ async def test_byok_resolution_precedence(tmp_path, monkeypatch):
         request=request,
     )
     assert resolved.source == "team"
+    assert resolved.status == "RESOLVED"
     assert resolved.api_key == "sk-team-openai-2222"
 
     # Remove team key to fall back to org shared key
@@ -144,7 +147,36 @@ async def test_byok_resolution_precedence(tmp_path, monkeypatch):
         request=request,
     )
     assert resolved.source == "org"
+    assert resolved.status == "RESOLVED"
     assert resolved.api_key == "sk-org-openai-3333"
+
+    # Remove the org key to validate server precedence.
+    await org_repo.delete_secret("org", org_id, "openai")
+    resolved = await resolve_byok_credentials(
+        "openai",
+        user_id=user_id,
+        team_ids=[team_id],
+        org_ids=[org_id],
+        request=request,
+        fallback_resolver=lambda _provider: "sk-server-openai-4444",
+    )
+    assert resolved.source == "server_default"
+    assert resolved.status == "RESOLVED"
+    assert resolved.api_key == "sk-server-openai-4444"
+
+    # Successful not-found queries at every scope produce explicit absence.
+    monkeypatch.setattr(byok_runtime, "resolve_server_default_key", lambda _provider: None)
+    resolved = await resolve_byok_credentials(
+        "openai",
+        user_id=user_id,
+        team_ids=[team_id],
+        org_ids=[org_id],
+        request=request,
+        fallback_resolver=lambda _provider: None,
+    )
+    assert resolved.source == "none"
+    assert resolved.status == "ABSENT"
+    assert resolved.api_key is None
 
 
 @pytest.mark.asyncio
@@ -193,6 +225,30 @@ async def test_byok_resolution_base_url_requires_trusted_request(tmp_path, monke
     base_url = ((resolved.app_config or {}).get("openai_api") or {}).get("api_base_url")
     assert base_url != "https://example.com/v1"
 
+    # A supplied authority decision is authoritative over the legacy request path.
+    monkeypatch.setattr(byok_runtime, "is_trusted_base_url_request", lambda _request: True)
+    resolved = await resolve_byok_credentials(
+        "openai",
+        user_id=user_id,
+        team_ids=[team_id],
+        org_ids=[org_id],
+        request=request,
+        trusted_base_url_override=False,
+    )
+    base_url = ((resolved.app_config or {}).get("openai_api") or {}).get("api_base_url")
+    assert base_url != "https://example.com/v1"
+
+    resolved = await resolve_byok_credentials(
+        "openai",
+        user_id=user_id,
+        team_ids=[team_id],
+        org_ids=[org_id],
+        request=request,
+        trusted_base_url_override=True,
+    )
+    base_url = ((resolved.app_config or {}).get("openai_api") or {}).get("api_base_url")
+    assert base_url == "https://example.com/v1"
+
 
 @pytest.mark.asyncio
 async def test_byok_resolution_respects_allowlist(tmp_path, monkeypatch):
@@ -207,6 +263,7 @@ async def test_byok_resolution_respects_allowlist(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-server-openai-0000")
 
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+
     reset_settings()
 
     resolved = await resolve_byok_credentials("openai", user_id=user_id)
