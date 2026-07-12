@@ -24,10 +24,10 @@ Review the shared WebUI/browser-extension playlist ingestion flow and specify a 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Document the current single-row playlist failure mode across shared frontend and backend worker paths.
-- [ ] #2 Specify mandatory playlist preflight, per-video identity, queue, progress, cancellation, persistence, and recovery behavior for both clients.
-- [ ] #3 Specify scalable snapshot pagination, run/chunk/job contracts, error handling, security, and testing strategy.
-- [ ] #4 Commit the reviewed design specification and link it from this task.
+- [x] #1 Document the current single-row playlist failure mode across shared frontend and backend worker paths.
+- [x] #2 Specify mandatory playlist preflight, per-video identity, queue, progress, cancellation, persistence, and recovery behavior for both clients.
+- [x] #3 Specify scalable snapshot pagination, run/chunk/job contracts, error handling, security, and testing strategy.
+- [x] #4 Commit the reviewed design specification and link it from this task.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -39,7 +39,9 @@ Brainstorming/design workflow only. A separate implementation plan will be writt
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Completed the brainstorming design and three independent written-spec review iterations. The final two review issues were resolved with requester approval: queue materialization preserves source identity only; Start Processing supplies validated Review-time overrides after a fresh duplicate lookup; every selected occurrence resolves once, while only processing-required actions create a media job; file_reattach_required is client presentation over server awaiting_upload.
 
+Verification: git diff --check passed for the specification and task record. A targeted placeholder and stale-language scan returned no matches. Positive contract checks confirmed review_required/review_overrides, exactly-once resolution with processing-only jobs, and client-derived file reattachment wording. Bandit was not run because this task changes documentation only. No implementation blocker is known; requester file review remains the gate before implementation planning.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -50,10 +52,10 @@ Brainstorming/design workflow only. A separate implementation plan will be writt
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
 - [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

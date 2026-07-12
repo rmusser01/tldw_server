@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-12
 
-**Status:** Approved in brainstorming; pending written-spec review
+**Status:** Three-iteration written-spec review complete; final issues resolved with requester approval; pending requester file review
 
 **Backlog:** TASK-12109
 
@@ -16,7 +16,7 @@ The target behavior is fail-closed and per-item:
 
 1. Every playlist-shaped URL is inspected by the server before it can enter the queue.
 2. The complete, ordered playlist is shown to the user.
-3. Every selected video becomes one concrete queue occurrence and one media ingest job.
+3. Every selected video becomes one concrete queue occurrence. Each occurrence resolves exactly once, and only an action that requires media processing creates one media ingest job per attempt.
 4. WebUI and extension show the same per-video queue, progress, cancellation, recovery, and result states.
 5. Large playlists remain bounded, virtualized, resumable, and honest about server limits.
 
@@ -46,7 +46,7 @@ The earlier bulk conference workflow established a useful metadata-only prefligh
 | Large playlists | Load the complete playlist through a bounded server snapshot and paginated client reads. Never silently truncate. |
 | Row presentation | Show playlist position and video title first; show channel, duration, availability, duplicate state, and progress second. Keep the concrete URL in row details. |
 | Client parity | WebUI paste, extension active-tab import, Add, and Enter use the same shared controller and state model. |
-| Execution identity | One selected playlist occurrence maps to one queue row and one media ingest job. |
+| Execution identity | Every selected occurrence resolves exactly once. A processing-required action maps to one media ingest job per attempt; duplicate reuse, skip, and metadata-only actions terminate without a processing job. |
 | Collections | A media collection is optional. Run tracking cannot depend on collection creation. |
 
 ## Goals
@@ -80,7 +80,7 @@ flowchart LR
     F --> G["Confirmed concrete occurrences"]
     G --> H["Owner-scoped ingest run"]
     H --> I["Bounded job-submission chunks"]
-    I --> J["One media job per occurrence"]
+    I --> J["One media job per processing occurrence"]
     J --> K["SSE or run-level polling"]
     K --> L["Per-video progress and results"]
     H -. "optional" .-> M["Media collection and planned items"]
@@ -91,7 +91,7 @@ The new contracts are deliberately narrow:
 - an asynchronous, temporary playlist-preflight resource;
 - a small owner-scoped playlist ingest run manifest;
 - structured occurrence-aware submission fields and results on the existing media Jobs endpoint;
-- one shared client controller and normalized status transport.
+- one shared client controller and normalized run-status transport.
 
 The existing Jobs worker remains responsible for processing each concrete video URL.
 
@@ -114,14 +114,15 @@ Rules:
 
 The current synchronous endpoint remains available as a compatibility surface during rollout. The version-2 client uses an asynchronous resource contract advertised by `mediaPlaylistIngestContractVersion >= 2`.
 
-Suggested routes:
+Required version-2 routes:
 
 - `POST /api/v1/media/playlist-preflights`
 - `GET /api/v1/media/playlist-preflights/{preflight_id}`
 - `GET /api/v1/media/playlist-preflights/{preflight_id}/items?cursor=...&limit=...`
+- `POST /api/v1/media/playlist-preflights/{preflight_id}/materializations`
 - `DELETE /api/v1/media/playlist-preflights/{preflight_id}`
 
-`POST` validates the playlist URL, creates an owner-scoped resource, starts bounded extraction, and returns promptly with HTTP 202. It does not create media, collections, runs, or media ingest jobs.
+`POST` validates the playlist URL, creates an owner-scoped resource, starts bounded extraction, and returns promptly with HTTP 202. It does not create media, collections, runs, or media ingest jobs. The implementation may use an internal `playlist_preflight` Jobs-domain task for multi-worker-safe leasing and execution; that task is not a media ingest job and has no library side effects.
 
 The resource state is one of:
 
@@ -154,7 +155,9 @@ The item endpoint returns an immutable ordered page plus an opaque `next_cursor`
 - Extraction runs outside the API event loop in a bounded, terminable process so timeout or cancellation can reclaim capacity.
 - The extractor requests at most `configured_limit + 1` entries. Seeing the extra entry produces `playlist_too_large`; it must not first materialize an unbounded playlist.
 - If YouTube provides a trustworthy total, the UI may show it. Otherwise the oversized error says the playlist contains more than the configured limit rather than inventing an exact count.
-- Successful snapshots are stored in an owner-scoped TTL/LRU cache or equivalent temporary store and are immutable.
+- Preflight resource metadata and normalized snapshot items are stored in a shared owner-scoped temporary repository backed by the deployment's configured SQLite/PostgreSQL data layer. A process-local TTL/LRU may be only a read-through optimization, never the source of truth.
+- Extraction claims use database-backed leases and enforce global and per-owner capacity across API/worker processes. A local child process performs the blocking yt-dlp call only after a worker owns the lease.
+- Successful snapshots are immutable and TTL-bound. Cleanup releases leases and removes expired snapshot rows or temporary artifacts.
 - Server restart may expire temporary preflights. That is a recoverable state, not data loss, because no ingest has begun.
 - Deleting a preflight terminates or marks extraction cancelled, releases temporary artifacts, and makes future item reads unavailable.
 
@@ -162,6 +165,7 @@ The item endpoint returns an immutable ordered page plus an opaque `next_cursor`
 
 Each item includes:
 
+- `occurrence_id`
 - `ordinal`
 - `occurrence_index_for_source`
 - `source_url`, when ingestible
@@ -179,11 +183,19 @@ Each item includes:
 
 Unavailable entries remain visible but cannot be selected. A response is `ready` only when the snapshot is complete. An interrupted extraction with unknown missing entries is `blocked`, not partial-ready.
 
+### Queue materialization
+
+`Add N videos` calls the materialization route with selected occurrence IDs. The server re-reads the completed owner-scoped snapshot and copies only the selected source identity: concrete URLs, occurrence IDs, normalized source IDs, and compact display metadata. It must not freeze duplicate evidence, duplicate-policy choices, or metadata patches because library state and user choices can change through Review. The route returns `materialization_id`, an owner-bound opaque materialization token, compact occurrence records, and `expires_at`.
+
+The client creates queue rows only after this request succeeds and persists the materialization reference with them. A preflight snapshot may then expire without invalidating those rows because Start Processing resolves playlist inputs from the materialization record, not from the deleted preflight snapshot and not from client-supplied URLs.
+
+Queue materialization retention is at least as long as the supported Quick Ingest draft-retention window and may be renewed while the draft remains active, subject to an administrator-configured maximum. If the materialization itself expires before Start Processing, playlist rows become blocked and require reinspection; the client must not submit its cached URL copies as authoritative replacements.
+
 ## Identity and Duplicate Semantics
 
 Identity must distinguish an occurrence from its underlying video:
 
-- **Occurrence ID:** stable identity for one row in one preflight/run. It is derived from the opaque preflight identity plus playlist ordinal/occurrence and is used for queue, job, progress, cancellation, and result mapping.
+- **Occurrence ID:** an opaque server-generated identifier returned on every preflight item. It is unique within the authenticated owner's preflight namespace, stable for the lifetime of that immutable snapshot, and copied unchanged into the queue and run. Clients must not derive it. It is used for queue, job, progress, cancellation, and result mapping.
 - **Normalized source ID:** canonical video identity, such as a YouTube video ID, used for duplicate detection.
 
 The same video may appear more than once in one playlist or across several staged playlists. Those occurrences remain independently visible while sharing a dedupe identity.
@@ -204,14 +216,26 @@ Refresh reconciliation uses normalized source ID plus occurrence index among rep
 
 Confirmation creates a lightweight owner-scoped run before any job submission. The run is not a replacement for Jobs; it is a manifest that preserves the relationship between selected occurrences and the job batches that execute them.
 
-Suggested routes:
+Required routes:
 
 - `POST /api/v1/media/ingest/runs`
 - `GET /api/v1/media/ingest/runs/{run_id}`
+- `GET /api/v1/media/ingest/runs/{run_id}/items?cursor=...&limit=...`
+- `GET /api/v1/media/ingest/runs/{run_id}/events/stream?after_id=...`
 - `POST /api/v1/media/ingest/runs/{run_id}/cancel`
 - `POST /api/v1/media/ingest/runs/{run_id}/retry`
 
-Run creation receives the preflight identity or identities, selected occurrence IDs, normalized processing options, and optional collection metadata. The server copies the selected concrete URLs and compact display metadata into the run so later preflight expiry cannot affect ingestion.
+`Add N videos` materializes selected preflight items into the owner-scoped queue materialization described above and then creates concrete client queue records plus compact IndexedDB persistence. It does not create the server run. The server run is created only when the user chooses Start Processing, after all playlists, ordinary URLs, files, configuration, and review choices are final. Preflight expiry after queue materialization therefore does not invalidate the queued playlist rows.
+
+Run creation receives normalized processing options, optional collection metadata, a list of selected input records, and `review_overrides` keyed by occurrence ID. An override contains the final duplicate policy when duplicate evidence requires a choice and an optional metadata patch conforming to the allowlist below. At Start Processing, the server refreshes owner-scoped duplicate evidence, then validates that every override belongs to an input occurrence, that every selected duplicate has an explicit valid policy, and that metadata patches are allowed for that policy. Unknown, missing, conflicting, or extra overrides fail run creation before any collection, metadata mutation, or job submission. If refreshed evidence changes a required choice, the API returns structured `review_required` details and the client returns to Review without side effects.
+
+Input records are a discriminated union:
+
+- `materialized_playlist_item`: owner-bound materialization ID/token plus the server-issued occurrence ID;
+- `direct_url`: a client-generated opaque occurrence ID, concrete non-playlist URL, normalized type, and compact display metadata;
+- `file_stub`: a client-generated opaque occurrence ID plus file name/type/size metadata, later bound to the staged upload job without storing file bytes in the run manifest.
+
+For `materialized_playlist_item`, the server resolves the occurrence from the owner-scoped unexpired queue materialization and treats its stored source identity as authoritative, refreshes duplicate evidence, and applies only the validated Review-time override supplied at Start Processing. For `direct_url`, the server validates and canonicalizes the URL, rejects any playlist candidate, requires occurrence IDs to be unique within the run, and validates its Review-time override against the same fresh duplicate lookup. For `file_stub`, the server records metadata and an `awaiting_upload` lifecycle state but no bytes. This gives mixed sessions one identity contract while keeping local file bytes in the existing upload path.
 
 The run stores:
 
@@ -228,6 +252,53 @@ The run stores:
 A collection is optional. When requested, collection plus planned-item creation is one transactional bulk operation. Failure leaves the run unsubmitted and does not create a partial collection.
 
 Run retention outlives active jobs and remains long enough for reload, extension restart, retry, and result inspection. Cleanup removes only run metadata; it never deletes referenced media or collections.
+
+### Run status snapshot and events
+
+`GET /ingest/runs/{run_id}` returns the owner-scoped run summary, aggregate counts, current version, update timestamp, optional collection ID, and all known batch IDs. It does not embed an unbounded item list.
+
+`GET /ingest/runs/{run_id}/items` returns an ordered occurrence page with lifecycle `state`, terminal `outcome` when present, progress percentage/message when known, job and media IDs when available, attempt, retryability, and an opaque `next_cursor`. Occurrence ordering is immutable after run creation, so the cursor is bound to owner, run ID, sort order, and the last stable occurrence position rather than the frequently changing status version. Each page reports the current run version; clients merge by occurrence ID and refresh active rows if versions changed during a multi-page read.
+
+The run event stream emits an initial summary snapshot followed by occurrence-aware events with:
+
+- monotonically increasing `event_id`
+- `run_id`
+- `occurrence_id`
+- optional `job_id` and `batch_id`
+- event type, lifecycle state, and terminal outcome when present
+- progress percentage/message when known
+- `occurred_at`
+
+Clients resume with `Last-Event-ID` or `after_id`. The producer queries run/job events by owner and `run_id` on every cycle; it must not freeze the tracked job-ID set at connection time. Jobs accepted by later submission chunks therefore appear in the same stream. If replay history has expired, the server emits `resync_required` and the client reloads the summary and paginated item snapshot before continuing.
+
+### Lifecycle state and terminal outcome
+
+Run items expose two separate axes. `state` describes current lifecycle position:
+
+- `staged`
+- `preparing`
+- `awaiting_upload`
+- `submit_pending`
+- `queued`
+- `running`
+- `cancellation_requested`
+- `status_unavailable`
+- `terminal`
+
+`outcome` is null until `state=terminal` and is then exactly one of:
+
+- `completed`
+- `included_existing`
+- `metadata_updated`
+- `skipped_existing`
+- `submit_failed`
+- `processing_failed`
+- `metadata_update_failed`
+- `cancelled`
+
+Progress phase/message is optional evidence from the worker, not a third lifecycle state. This separation is used consistently by the run snapshot, events, IndexedDB record, filters, counts, and result groups.
+
+`file_reattach_required` is a client presentation state, not a backend lifecycle value. The client derives it only when the server reports `awaiting_upload` and the current browser runtime no longer has the corresponding local file bytes.
 
 ## Job Submission and Idempotency
 
@@ -255,13 +326,40 @@ The submit response returns a structured record for every occurrence:
 
 String-only error lists are insufficient because they cannot safely map failures back to repeated URLs.
 
+URL chunks use aligned occurrence/attempt/planned-item arrays. File chunks use multipart `files` plus aligned `file_occurrence_ids`, `file_attempts`, and optional `file_planned_item_ids`; array lengths must exactly match the uploaded file count. The server validates that each file occurrence belongs to the owner/run and is currently `awaiting_upload`, stages the upload, writes `run_id`, `occurrence_id`, and attempt into the job payload, and returns the same structured per-occurrence acceptance record used for URLs.
+
+If the UI/runtime restarts before a file job is accepted, browser file bytes are not assumed recoverable. The server item remains `awaiting_upload`; the client presents `file_reattach_required` while the bytes are absent. The user may reselect the file, preserving occurrence identity, or cancel it. Once the job is accepted, normal run/job reattachment applies.
+
 Global failures stop later chunks: authentication/authorization, quota, worker unavailability, shutdown/draining, invalid run ownership, and rate limiting. Rate-limited clients honor `Retry-After`. Isolated invalid, unavailable, or duplicate entries do not stop unrelated occurrences.
 
 Ambiguous network failure retries the same occurrence attempt. Jobs idempotency returns the original job rather than creating another. A deliberate processing retry uses a new attempt number after reconciling whether the prior attempt already created media.
 
+### Duplicate policy actions
+
+Duplicate policies have distinct server actions whether or not a collection exists:
+
+| Policy | Job action | Terminal outcome | Optional collection behavior |
+|---|---|---|---|
+| `skip` | Do not submit a job or mutate media metadata. | `skipped_existing` with the resolved existing media ID when available. | Do not add membership. |
+| `include_existing` | Do not submit a job. Resolve and reuse the existing media item. | `included_existing`. | Resolve the planned item/membership to the existing media ID. |
+| `update_metadata_only` | Do not submit a media-processing job. Apply only the reviewed metadata patch contract through the Media DB abstraction. | `metadata_updated` or `metadata_update_failed`. | Resolve membership to the existing media ID when the update succeeds. |
+| `overwrite` | Submit one concrete job with overwrite enabled. | Normal completed/processing-failed outcome. | Resolve the planned item to the resulting media ID. |
+
+Without a collection, `include_existing` still creates a run result linking the existing media item, while `update_metadata_only` still performs and reports the metadata operation. These policies must not collapse into the same `skipped_existing` state.
+
+The metadata patch is built at Review time only from fields the user explicitly edited or explicitly applied as shared tags. Extracted playlist metadata that the user did not edit is not permission to overwrite an existing record.
+
+The allowed patch schema is:
+
+- `title`: non-empty validated string; replace the existing title;
+- `author`: validated string sourced from an explicitly edited speaker/author field; replace the existing author;
+- `keywords_add`: validated keyword list sourced from explicitly applied shared/item tags; case-insensitive union with existing keywords.
+
+Content, media type, analysis, prompt, deletion state, and keyword set/remove operations are forbidden. An empty patch makes `update_metadata_only` unavailable in the UI and invalid at the API. The backend applies title/author plus keyword union through one Media DB abstraction transaction with normal version/conflict handling; a conflict produces `metadata_update_failed` and does not silently partially apply the patch.
+
 ## Worker Boundary
 
-The media Jobs endpoint enforces the one-occurrence/one-job invariant. An opaque playlist candidate submitted directly to that endpoint fails with HTTP 422 and `playlist_preflight_required`.
+Every selected run occurrence resolves to exactly one action and terminal outcome. The media Jobs endpoint enforces one job per attempt only for occurrences whose resolved action requires media processing. `skip`, `include_existing`, and `update_metadata_only` resolve through the run without creating a media-processing job. An opaque playlist candidate submitted directly to the Jobs endpoint fails with HTTP 422 and `playlist_preflight_required`.
 
 The worker receives one concrete video URL and returns one media result. It must not expand a playlist within a media ingest job.
 
@@ -307,20 +405,7 @@ The title/ordinal is primary. The URL and optional thumbnail appear only in deta
 
 The first state is **Preparing N videos** while run/collection records and jobs are created. Rows do not claim to be processing before job acceptance.
 
-Normalized occurrence states include:
-
-- `staged`
-- `preparing`
-- `submit_pending`
-- `queued`
-- `running`
-- `cancellation_requested`
-- `completed`
-- `skipped_existing`
-- `submit_failed`
-- `processing_failed`
-- `cancelled`
-- `status_unavailable`
+The processing UI uses the lifecycle `state` and terminal `outcome` axes defined by the run contract. In particular, included-existing and metadata-only results are terminal outcomes and `status_unavailable` is a recoverable server lifecycle state. `file_reattach_required` is a recoverable client presentation of server `awaiting_upload` when local bytes are missing.
 
 Known backend progress and messages are displayed. The UI must not fabricate precise Analyze or Store stages when the server supplied only generic processing evidence.
 
@@ -336,7 +421,7 @@ Preflight, queue, processing, and result lists are virtualized and offer useful 
 
 ### Results and retry
 
-Terminal result groups are Completed, Skipped existing, Not submitted, Failed during processing, and Cancelled.
+Terminal result groups are Completed, Included existing, Metadata updated, Skipped existing, Not submitted, Failed during processing, Metadata update failed, and Cancelled.
 
 `status_unavailable` is not terminal. It retains Check again and Reconnect actions and becomes interrupted only when the user abandons recovery or the server proves the job record is no longer recoverable.
 
@@ -379,6 +464,7 @@ Stable public preflight errors include:
 - `preflight_expired`
 - `preflight_cancelled`
 - `preflight_incomplete`
+- `materialization_expired`
 - `server_unreachable`
 
 Submission/run errors distinguish authentication, authorization, quota, rate limit, worker unavailable, server draining, invalid ownership, structured per-occurrence rejection, and terminal processing failure.
@@ -388,7 +474,7 @@ The UI preserves the source input and gives typed retry/troubleshooting guidance
 ## Security and Privacy
 
 - Validate trusted YouTube host boundaries; reject lookalike domains.
-- Bind preflights, cursors, runs, and jobs to the authenticated owner.
+- Bind preflights, queue materializations, cursors, runs, and jobs to the authenticated owner.
 - Derive Jobs idempotency keys with owner scope.
 - Redact complete playlist URLs and query secrets in logs and metrics.
 - Never persist browser cookies or credentials in preflight/run records.
@@ -408,8 +494,8 @@ The `/process-videos` playlist contract remains separate and covered by compatib
 
 ### Fast PR gate
 
-- Backend unit tests for classification, snapshot state, capacity, pagination, duplicate lookup, error sanitization, Jobs rejection, run transitions, and owner-derived idempotency.
-- Hypothesis property/state-machine tests for pagination completeness, occurrence uniqueness, chunk coverage, idempotent ambiguous retry, cancellation/completion races, and terminal-count invariants.
+- Backend unit tests for classification, snapshot state, queue materialization/expiry, capacity, pagination, duplicate lookup and Review-time refresh, metadata-patch validation, error sanitization, Jobs rejection, run transitions, file binding, state/outcome separation, and owner-derived idempotency.
+- Hypothesis property/state-machine tests for pagination completeness, occurrence uniqueness, chunk coverage, exactly-once action resolution, zero media jobs for non-processing duplicate actions, at-most-one accepted job per processing attempt, idempotent ambiguous retry, cancellation/completion races, and terminal-count invariants.
 - Shared Vitest tests for mandatory inspection, mixed input blocking, metadata persistence, duplicate selection, filters, virtualization, cancellation dispatch, and transport normalization.
 - TypeScript checks and Bandit on touched backend scope.
 
@@ -417,7 +503,7 @@ The `/process-videos` playlist contract remains separate and covered by compatib
 
 - Temporary real Jobs database and worker with only expensive media processing replaced by a deterministic fake.
 - Preflight process timeout, cancellation, crash, shutdown, capacity release, and orphan cleanup.
-- Owner isolation across preflight, cursors, runs, jobs, optional collections, and idempotency.
+- Owner isolation across preflight, queue materializations, cursors, runs, jobs, optional collections, and idempotency.
 - Structured partial acceptance, global chunk-stop behavior, retry reconciliation, run-level list/cancel, and optional transactional collection planning.
 - IndexedDB migration, interrupted migration, quota failure, cleanup, retention, multi-tab coordination, and runtime recreation.
 
@@ -438,7 +524,7 @@ Accessibility checks combine axe with explicit tests for virtual-list position m
 
 - No WebUI or extension entry path can queue a YouTube playlist as one opaque item.
 - A complete ordered preview appears before confirmation, or ingestion remains blocked with typed guidance.
-- Every selected occurrence becomes one concrete queue row and at most one accepted job per attempt.
+- Every selected occurrence becomes one concrete queue row and resolves exactly once; only processing-required actions create at most one accepted job per attempt.
 - Queue, processing, cancellation, recovery, and results preserve occurrence identity and title-first presentation.
 - WebUI and extension expose the same normalized states and outcomes.
 - Large playlists use bounded extraction, virtualized rendering, chunked submission, and run-level status retrieval.
