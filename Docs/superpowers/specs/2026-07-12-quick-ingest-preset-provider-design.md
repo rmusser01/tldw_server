@@ -40,39 +40,65 @@ labels inaccurate. It treats the symptom by removing requested functionality.
 ### Preset data flow
 
 `QuickIngestWizardModal` will read `quickIngestPresetConfigs` with the existing
-Plasmo storage hook and normalize it through `resolvePresetMap`. It will pass
-the resolved map to `IngestWizardProvider`.
+Plasmo storage hook and normalize it through `resolvePresetMap`. The modal will
+use the hook's `isLoading` metadata and will not initialize or auto-process a
+preset-dependent draft until storage hydration completes.
+
+On each closed-to-open transition, the modal will capture one resolved preset
+map snapshot. Changes made in Settings while the modal is open do not mutate
+the active run. Reopening captures the new settings. An explicit open revision
+will remount/rebase the provider only when the session is an idle draft and its
+selected preset is non-custom.
 
 The provider's reducer will resolve initial non-custom state, preset switches,
 custom-option matching, and reset behavior against the supplied map. Custom
-sessions keep their persisted configuration. Non-custom sessions use the
-current saved definition for their selected preset, which makes the existing
-Settings promise—changes apply the next time Quick Ingest opens—true for the
-active wizard.
+sessions keep their persisted full `presetConfig`. Eligible idle, non-custom
+drafts use the captured definition for their selected preset, which makes the
+existing Settings promise—changes apply the next time Quick Ingest opens—true
+for the active wizard.
+
+Processing, interrupted, cancelled, and completed sessions never rebase from
+Settings. Their persisted `presetConfig` remains authoritative so reattachment
+and historical results retain the configuration with which they started.
+
+For custom sessions, subsequent option edits merge into the persisted full
+`presetConfig`, rather than reconstructing it from a potentially changed base
+preset plus the lossy `customOptions` delta. Clearing an advanced field removes
+it from the full config before persistence, so JSON serialization cannot cause
+a cleared `api_name` to reappear after reload.
 
 The default reducer behavior remains `DEFAULT_PRESETS` when no map is supplied,
 preserving isolated consumers and tests.
 
 ### Analysis provider control
 
-When analysis is enabled, `WizardConfigureStep` will show an "Analysis
-provider" control bound to `presetConfig.advancedValues.api_name`.
+When the configure step is visible and analysis is enabled,
+`WizardConfigureStep` will show an editable "Analysis provider" combobox bound
+to `presetConfig.advancedValues.api_name`.
 
 The control will load configured providers from the existing
-`tldwClient.getProvidersStatus()` endpoint and offer them as suggestions. It
-will still accept a typed value so local/custom provider aliases work and a
-temporary provider-catalog failure does not make the form unusable. Clearing
-the control removes `api_name` through the existing `setCustomOptions` merge
-path.
+`tldwClient.getProvidersStatus()` endpoint and offer them as suggestions. The
+suggestion list is the trimmed, deduplicated names from entries whose
+`configured` field is true; it does not use `any_configured`, because usable
+local providers do not contribute to that cloud-only aggregate. The current
+typed value remains available even when absent from the catalog.
+
+The request runs only while the configure step is visible and analysis is
+enabled. Effect cleanup ignores stale responses. A temporary provider-catalog
+failure leaves the editable combobox usable. Clearing the control removes
+`api_name` through the full-config merge path described above.
 
 Provider discovery failure is non-fatal. The control remains editable and the
 existing early guard prevents an analysis-enabled run with an empty provider.
 
 ### Error handling
 
-No backend fallback is added. If analysis remains enabled without a provider,
-the wizard stays on or returns to a recoverable pre-processing step with the
-existing warning. It must not synthesize a failed run or enter a render loop.
+No backend fallback is added. Quick processing validates before entering the
+processing step and keeps the user on Add Content with the existing warning.
+The full configure/review flow validates before any start request; if the late
+safety guard is reached, it resets processing to idle, returns to Configure
+(step 2), and renders the provider warning beside the editable combobox. It
+must not synthesize a failed run or enter a render loop.
 
 ### Tests
 
@@ -82,11 +108,22 @@ Focused tests will prove:
 - switching between Standard and Deep uses the configured map;
 - the configure step displays and updates the analysis provider;
 - configured Standard/Deep flows pass the provider guard;
-- a missing provider remains blocked without entering processing.
+- a missing provider remains blocked on the exact recoverable step/status and
+  no start request occurs;
+- delayed preset storage hydration blocks initialization and auto-processing;
+- closing, changing preset settings, and reopening rebases only an idle,
+  non-custom draft;
+- processing/reattached and completed sessions retain their persisted config;
+- clearing a custom provider, persisting/rehydrating, and changing another
+  option does not resurrect the provider;
+- provider suggestions filter unconfigured entries, deduplicate configured
+  names, retain typed local/custom values, and tolerate loading failure.
 
-The shared component tests cover both WebUI and extension behavior. Verification
-will include focused Vitest, the shared UI/frontend TypeScript check, diff
-checks, and browser coverage when the existing targeted harness is available.
+Shared component tests cover the reducer and modal behavior. Verification also
+requires the WebUI and extension typecheck/build gates plus one storage
+hydration smoke path under each runtime adapter. The existing targeted WebUI
+and extension Quick Ingest browser harnesses will verify the affected boundary,
+not merely the shared source in isolation.
 
 ## Scope
 
