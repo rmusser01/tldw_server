@@ -76,10 +76,10 @@
 - Modify: `apps/tldw-frontend/extension/shims/runtime-bootstrap.ts`
 - Test: `apps/tldw-frontend/__tests__/extension/runtime-bootstrap.test.ts`
 
-- [ ] Add failing tests for leftover session secrets beside device, cookie, ambiguous, and different-origin connection metadata.
-- [ ] Run `bunx vitest run __tests__/extension/runtime-bootstrap.test.ts --maxWorkers=1` from `apps/tldw-frontend`; confirm the mismatched records survive before the fix.
-- [ ] Make the scrub predicate require complete active manual/session metadata plus the same normalized origin.
-- [ ] Re-run the focused bootstrap suite and commit `fix(web): scrub mismatched session credentials`.
+- [x] Add failing tests for leftover session secrets beside device, cookie, ambiguous, different-origin, same-origin, and noncanonical connection metadata.
+- [x] Run `bunx vitest run __tests__/extension/runtime-bootstrap.test.ts --maxWorkers=1` from `apps/tldw-frontend`; confirm the mismatched records survive before the fix.
+- [x] Make the scrub predicate require complete active manual/session metadata, canonical matching origins, and a remote origin distinct from the quickstart WebUI.
+- [x] Re-run the 24-case focused bootstrap suite and commit Task 4 plus its quality-review follow-up (`c7941f1dcb`, `e08dfb36fa`).
 
 ### Task 5: Authenticate through lifecycle E2E and required CI
 
