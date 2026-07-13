@@ -4,7 +4,7 @@ title: Consolidate provider credential runtime for Chat and Knowledge QA
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-13 18:15'
+updated_date: '2026-07-13 20:21'
 labels: []
 dependencies: []
 documentation:
@@ -24,7 +24,7 @@ Design and implement a shared execution-scoped provider credential runtime used 
 <!-- AC:BEGIN -->
 - [x] #1 Approved design specification is written, reviewed, and linked from this task.
 - [ ] #2 Invalid credentials, credential-store failures, and revoked background scope fail closed.
-- [ ] #3 RAG semantic cache reuses documents but never cached generated answers.
+- [x] #3 RAG semantic cache reuses documents but never cached generated answers.
 - [ ] #4 Streaming credential errors use sanitized structured codes and do not trigger non-stream fallback.
 - [ ] #5 Focused backend/frontend tests and Bandit pass for touched scope.
 - [ ] #6 Chat and all provider-backed RAG call paths, including query-time hosted embeddings, use the shared credential runtime with explicit no-fallback semantics.
@@ -68,6 +68,8 @@ Docs/superpowers/plans/2026-07-12-shared-provider-credential-runtime-implementat
 2026-07-13: Implementation commits 861b2d207e, 1fc7b851ad, ab01dfbb23, 86969c8167, and 2dd1019009 add real SGL and MultiDatabaseRetriever bindings, typed bounded failures, trusted server scope injection, immediate schema-allowlisted action normalization, fail-closed source handling, bounded numeric inputs, provider/model propagation, and semantic image/video dedup keys.
 2026-07-13: Final verification: Task 8A 109 passed; Task 8 matrix 197 passed; full RAG unit suite 827 passed, 3 skipped; Ruff, py_compile, and diff checks clean; Bandit 0 findings; secret sentinel 18 passed with no injected-secret matches.
 2026-07-13: Independent final spec/security and quality/simplicity reviews approved Task 8A at 2dd1019009 with no unresolved findings.
+
+2026-07-13: Task 9 complete. Commits 2a418f0728, 693056059f, acb0092068, and 70085147ca make semantic caching retrieval-only and tenant-safe: legacy/generated answers and generation-only document metadata are removed; persisted payloads are strict finite JSON; direct/fake cache payloads use the same sanitizer; namespace identities and filenames are collision-resistant; semantic matches are bounded and never expose raw cached queries; cache identity covers the effective base retrieval configuration; immutable trusted base-retrieval snapshots prevent double processing; advanced secondary retrieval, auto-temporal, explicit include-ID, research-loop, and classification external-prefetch paths fail closed from caching; failed base retrieval fallback evidence is never stored. TDD included regressions for punctuation/case/safe-mimic collisions, non-finite values, malformed matches, FTS/date/late-chunk identity, raw pre-transform snapshots, bypass provenance, and failed-execution fallback. Final root verification: exact Task 9 suite 132 passed; full RAG_NEW/unit 866 passed, 3 skipped; Ruff and py_compile clean; Bandit 0 findings/0 errors across 8,538 production LOC; diff and production sentinel scans clean. Independent specification and quality/security reviews approved 70085147ca with no open findings.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

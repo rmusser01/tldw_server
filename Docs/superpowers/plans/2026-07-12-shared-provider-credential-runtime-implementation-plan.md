@@ -525,7 +525,7 @@ git commit -m "fix(rag): close residual provider runtime callers"
 
 **Tests:** Cache persistence, checkpoint/resume integration, shared contract fixture, Knowledge QA provider tests, and Playwright route behavior.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 9: Make semantic cache retrieval-only
 
@@ -534,29 +534,36 @@ git commit -m "fix(rag): close residual provider runtime callers"
 - Modify: `tldw_Server_API/app/core/RAG/rag_service/semantic_cache.py`
 - Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_semantic_cache_persistence.py`
 - Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_semantic_cache_tenant_scoping.py`
+- Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_semantic_cache_sanitizers.py`
+- Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_semantic_cache_path_sanitization.py`
+- Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_unified_pipeline.py`
+- Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_unified_pipeline_focused.py`
+- Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_standard_core_contract_threading.py`
+- Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_knowledge_source_retrieval_coverage.py`
+- Modify: `tldw_Server_API/tests/RAG_NEW/integration/test_rag_integration.py`
 
-- [ ] **Step 1: Write failing persisted-cache tests**
+- [x] **Step 1: Write failing persisted-cache tests**
 
-Write a real temporary legacy cache containing documents plus `answer: "STALE_SENTINEL"`, reload it, and assert documents are reused but the answer is ignored/cleared and generation runs. Assert new persisted payloads contain no `answer`, failed regeneration cannot reveal the sentinel, and metadata distinguishes retrieval hit from generation execution.
+Write a real temporary legacy cache containing documents plus `answer: "STALE_SENTINEL"`, reload it, and assert documents are reused but the answer is ignored/cleared and generation runs. Update every existing cache-hit contract test that assumes answer reuse. Assert new in-memory and persisted payloads contain no `answer` or generation-only fields at either payload or per-document metadata depth, and prove the same sanitizer protects the pipeline from direct fake-cache payloads. Assert a real `Document` payload saves and reloads through strict RFC JSON, with non-finite metadata values dropped and non-finite scores normalized, failed/disabled/gated regeneration cannot reveal the sentinel, and metadata distinguishes retrieval hit from generation execution. Assert payload clones remain isolated from caller mutation and legacy raw document lists remain readable. Add isolation regressions proving two trusted users with the same explicit corpus/workspace cannot share entries, retrieval-affecting sources/search mode/top-k/min-score/FTS level/explicit date filter/late-chunk settings/index/collection scope changes produce distinct cache identities, ownerless callers bind database-path scope, and distinct long namespaces with the same first 64 characters, short namespaces that differ only by punctuation, or case-only namespace variants produce distinct shared instances and persisted paths. Update the prior workspace namespace contract to verify opaque identity isolation without requiring plaintext workspace labels. Prove cache storage snapshots raw retrieval documents before in-place injection/rerank/highlighting mutations so a cache hit cannot apply transformations twice. Prove query expansion, HyDE, PRF, query decomposition, gap-analysis follow-up retrieval, other optional secondary retrieval modes with no complete deterministic identity, auto-derived temporal windows, successful research-loop evidence, and classification external-prefetch evidence bypass both retrieval-cache lookup and storage. If a base-cache miss is followed by failed base retrieval and best-effort fallback evidence, prove that evidence is returned but never stored. Malformed semantic-match tuples must be treated as misses: cached queries are bounded strings, similarity is a finite number in range, and neither raw cached queries nor malformed values enter result metadata.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
-Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/RAG_NEW/unit/test_semantic_cache_persistence.py tldw_Server_API/tests/RAG_NEW/unit/test_semantic_cache_tenant_scoping.py -q`
+Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/RAG_NEW/unit/test_semantic_cache_persistence.py tldw_Server_API/tests/RAG_NEW/unit/test_semantic_cache_tenant_scoping.py tldw_Server_API/tests/RAG_NEW/unit/test_semantic_cache_sanitizers.py tldw_Server_API/tests/RAG_NEW/unit/test_semantic_cache_path_sanitization.py tldw_Server_API/tests/RAG_NEW/unit/test_unified_pipeline.py tldw_Server_API/tests/RAG_NEW/unit/test_unified_pipeline_focused.py tldw_Server_API/tests/RAG_NEW/unit/test_standard_core_contract_threading.py tldw_Server_API/tests/RAG_NEW/unit/test_knowledge_source_retrieval_coverage.py tldw_Server_API/tests/RAG_NEW/integration/test_rag_integration.py -q`
 
-Expected: FAIL because cached answers currently populate `generated_answer` and skip generation.
+Expected: FAIL on the added namespace-collision, cache-boundary sanitation, retrieval-identity, and raw-snapshot regressions.
 
-- [ ] **Step 3: Remove answer caching**
+- [x] **Step 3: Remove answer caching**
 
-Ignore legacy `answer` fields on read, clear any cached answer before generation, remove `and not result.cache_hit` from generation gating, and store cloned documents/metadata only. Keep legacy document-list entries readable.
+Ignore legacy `answer` and generation-only fields on set/load/read at both payload and per-document metadata depth, and reuse that same document sanitizer for direct cache implementations before restoring documents. Drop non-finite metadata values, normalize non-finite scores, and enforce strict JSON serialization with `allow_nan=False`. Clear any cached answer before generation, remove `and not result.cache_hit` from generation gating, and store cloned, JSON-safe retrieval-document wire payloads plus fixed retrieval-safe metadata only. Restore cached wire documents to the pipeline's normal document shape and keep legacy document-list entries readable. Keep credential-handle rejection ahead of sanitization. A retrieval cache hit may skip retrieval but never generation when generation is enabled; if generation is disabled, gated, or fails, the result must not expose a legacy cached answer. Compose the cache namespace from a trusted user identity (or ownerless database-path digest), workspace, and a deterministic digest of the actual base retrieval configuration: canonical sources/use-FTS/use-vector, top-k, min-score, FTS level, explicit effective date filter, late-chunk method/size/overlap/language, index namespace, and collection scope. Capture an immutable document snapshot only after an explicit trusted base-retrieval execution flag is set and workspace filtering has run, before injection, reranking, highlighting, or other in-place processing; cache that snapshot rather than the final mutated result. Bypass retrieval caching for query expansion, HyDE, PRF, query decomposition, gap-analysis follow-up retrieval, and other optional secondary retrieval modes until each has a complete deterministic identity; also bypass for auto-derived temporal windows whose request-time microseconds would create one-use identities and for research/classification external evidence that bypasses the base retriever. Preserve collision-resistant identity whenever namespace normalization is lossy, including punctuation replacement and length truncation, by retaining a stable digest suffix; persisted filenames always retain a raw-namespace digest so case-insensitive filesystems cannot alias scopes. Validate semantic-match tuple shape/query/similarity before lookup or metadata; expose only bounded similarity and omit/hash the cached query. Normalize cache call results by awaitability rather than function declaration so sync, async, and wrapped awaitable implementations retain compatibility and cancellation propagation.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run the Step 2 command. Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
-git add tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py tldw_Server_API/app/core/RAG/rag_service/semantic_cache.py tldw_Server_API/tests/RAG_NEW/unit/test_semantic_cache_persistence.py tldw_Server_API/tests/RAG_NEW/unit/test_semantic_cache_tenant_scoping.py
+git add tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py tldw_Server_API/app/core/RAG/rag_service/semantic_cache.py tldw_Server_API/tests/RAG_NEW/unit/test_semantic_cache_persistence.py tldw_Server_API/tests/RAG_NEW/unit/test_semantic_cache_tenant_scoping.py tldw_Server_API/tests/RAG_NEW/unit/test_semantic_cache_sanitizers.py tldw_Server_API/tests/RAG_NEW/unit/test_semantic_cache_path_sanitization.py tldw_Server_API/tests/RAG_NEW/unit/test_unified_pipeline.py tldw_Server_API/tests/RAG_NEW/unit/test_unified_pipeline_focused.py tldw_Server_API/tests/RAG_NEW/unit/test_standard_core_contract_threading.py tldw_Server_API/tests/RAG_NEW/unit/test_knowledge_source_retrieval_coverage.py tldw_Server_API/tests/RAG_NEW/integration/test_rag_integration.py
 git commit -m "fix(rag): make semantic cache retrieval-only"
 ```
 
