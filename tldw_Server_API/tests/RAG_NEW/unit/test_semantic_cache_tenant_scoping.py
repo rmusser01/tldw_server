@@ -48,6 +48,68 @@ def test_shared_cache_instances_are_isolated_by_namespace(tmp_path, monkeypatch)
     assert cache_tenant_a is not cache_tenant_b
 
 
+@pytest.mark.parametrize(
+    ("first_namespace", "second_namespace"),
+    [
+        ("tenant/a", "tenant?a"),
+        ("Tenant-A", "tenant-a"),
+    ],
+)
+def test_shared_cache_instances_preserve_raw_namespace_identity(
+    tmp_path,
+    monkeypatch,
+    first_namespace,
+    second_namespace,
+):
+    cache_root = tmp_path / "cache_root"
+    cache_root.mkdir()
+    monkeypatch.setenv("RAG_SEMANTIC_CACHE_DIR", str(cache_root))
+    monkeypatch.delenv("RAG_CACHE_DIR", raising=False)
+    monkeypatch.setattr(semantic_cache, "_DEFAULT_CACHE_DIR", None)
+    semantic_cache._SHARED_CACHES.clear()
+
+    first = semantic_cache.get_shared_cache(
+        cache_cls=SemanticCache,
+        similarity_threshold=0.9,
+        ttl=60,
+        max_size=10,
+        namespace=first_namespace,
+    )
+    second = semantic_cache.get_shared_cache(
+        cache_cls=SemanticCache,
+        similarity_threshold=0.9,
+        ttl=60,
+        max_size=10,
+        namespace=second_namespace,
+    )
+
+    assert first is not second
+
+
+def test_shared_cache_instances_reject_safe_namespace_mimic(monkeypatch):
+    unsafe_namespace = "tenant/a"
+    safe_mimic = semantic_cache._normalize_namespace(unsafe_namespace)
+    monkeypatch.setattr(semantic_cache, "_resolve_default_cache_dir", lambda: None)
+    semantic_cache._SHARED_CACHES.clear()
+
+    unsafe = semantic_cache.get_shared_cache(
+        cache_cls=SemanticCache,
+        similarity_threshold=0.9,
+        ttl=60,
+        max_size=10,
+        namespace=unsafe_namespace,
+    )
+    mimic = semantic_cache.get_shared_cache(
+        cache_cls=SemanticCache,
+        similarity_threshold=0.9,
+        ttl=60,
+        max_size=10,
+        namespace=safe_mimic,
+    )
+
+    assert unsafe is not mimic
+
+
 def test_shared_cache_constructor_failure_does_not_retry_unscoped(
     tmp_path,
     monkeypatch,

@@ -9,6 +9,7 @@ import asyncio
 import contextlib
 import hashlib
 import json
+import math
 import os
 import re
 import threading
@@ -34,10 +35,22 @@ _RETRIEVAL_CACHE_METADATA = {
     "schema_version": 1,
 }
 _UNSUPPORTED = object()
+_GENERATION_METADATA_KEYS = frozenset(
+    {
+        "answer",
+        "generated_answer",
+        "generation_model",
+        "generation_provider",
+        "generation_prompt",
+        "verification_report",
+    }
+)
 
 
 def _json_safe_value(value: Any) -> Any:
     """Clone supported JSON values without stringifying unknown objects."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return _UNSUPPORTED
     if value is None or isinstance(value, (bool, int, float, str)):
         return value
     if isinstance(value, Enum):
@@ -47,7 +60,7 @@ def _json_safe_value(value: Any) -> Any:
     if isinstance(value, Mapping):
         cloned: dict[str, Any] = {}
         for key, item in value.items():
-            if not isinstance(key, str):
+            if not isinstance(key, str) or key in _GENERATION_METADATA_KEYS:
                 continue
             safe_item = _json_safe_value(item)
             if safe_item is not _UNSUPPORTED:
@@ -96,6 +109,8 @@ def _wire_document(document: Any) -> Optional[dict[str, Any]]:
     try:
         safe_score = float(score or 0.0)
     except (TypeError, ValueError):
+        safe_score = 0.0
+    if not math.isfinite(safe_score):
         safe_score = 0.0
     return {
         "id": safe_id,
@@ -592,7 +607,7 @@ class SemanticCache:
 
                 # Save main state as JSON
                 with open(self.persist_path, 'w') as f:
-                    json.dump(state, f, indent=2)
+                    json.dump(state, f, indent=2, allow_nan=False)
 
                 logger.info(f"Saved semantic cache state ({len(self._cache)} entries)")
         except (OSError, RuntimeError, TypeError, ValueError) as e:
@@ -744,11 +759,26 @@ _SHARED_CACHES: dict[tuple[type[SemanticCache], str, float, Optional[int], Optio
 _DEFAULT_CACHE_DIR: Optional[Path] = None
 
 
-def _normalize_namespace(namespace: Optional[str]) -> str:
+def _raw_namespace(namespace: Optional[str]) -> str:
+    """Return the canonical raw namespace used for identity hashing."""
     raw = str(namespace).strip() if namespace is not None else ""
-    if not raw:
-        return "default"
-    return re.sub(r"[^A-Za-z0-9_.-]", "_", raw)
+    return raw or "default"
+
+
+def _namespace_digest(raw_namespace: str) -> str:
+    """Return a short case-sensitive digest for a raw namespace."""
+    return hashlib.sha256(raw_namespace.encode("utf-8")).hexdigest()[:12]
+
+
+def _readable_namespace_prefix(raw_namespace: str) -> str:
+    """Return a filesystem-safe readable prefix for a raw namespace."""
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", raw_namespace) or "default"
+
+
+def _normalize_namespace(namespace: Optional[str]) -> str:
+    raw = _raw_namespace(namespace)
+    readable = _readable_namespace_prefix(raw)
+    return f"{readable}-{_namespace_digest(raw)}"
 
 
 def _normalize_namespace_key_for_filename(namespace_key: str, max_length: int = 64) -> str:
@@ -758,14 +788,12 @@ def _normalize_namespace_key_for_filename(namespace_key: str, max_length: int = 
     This protects against unexpected characters and excessively long filenames,
     even if callers pass an untrusted or unnormalized value.
     """
-    # Reuse the existing namespace normalization to enforce the allowed character set.
-    normalized = _normalize_namespace(namespace_key)
-    # Keep a digest suffix when truncating so long namespaces cannot collide.
-    if len(normalized) > max_length:
-        digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:12]
-        normalized = f"{normalized[:max_length - len(digest) - 1]}-{digest}"
-    # As a final safeguard, ensure we never return an empty string.
-    return normalized or "default"
+    raw = _raw_namespace(namespace_key)
+    readable = _readable_namespace_prefix(raw)
+    digest = _namespace_digest(raw)
+    prefix_length = max(0, max_length - len(digest) - 1)
+    prefix = readable[:prefix_length]
+    return f"{prefix}-{digest}" if prefix else digest[:max_length]
 
 
 def _resolve_default_cache_dir() -> Optional[Path]:
@@ -933,9 +961,10 @@ def get_shared_cache(
     embedding_model: Optional[Any] = None,
     namespace: Optional[str] = None,
 ) -> SemanticCache:
+    raw_namespace = _raw_namespace(namespace)
     namespace_key = _normalize_namespace(namespace)
-    persist_path = persist_path or _default_persist_path(namespace_key)
-    persist_path = _sanitize_persist_path(persist_path, namespace_key)
+    persist_path = persist_path or _default_persist_path(raw_namespace)
+    persist_path = _sanitize_persist_path(persist_path, raw_namespace)
     if persist_path:
         with contextlib.suppress(OSError):
             Path(persist_path).parent.mkdir(parents=True, exist_ok=True)

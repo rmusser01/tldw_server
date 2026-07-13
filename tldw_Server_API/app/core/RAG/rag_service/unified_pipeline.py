@@ -19,6 +19,7 @@ import copy
 import hashlib
 import inspect
 import json
+import math
 import os
 import re
 import sqlite3
@@ -28,6 +29,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from functools import partial
+from numbers import Real
 from types import SimpleNamespace
 from typing import Any, Callable, Literal, Optional, cast
 
@@ -207,6 +209,10 @@ def _restore_cached_document(document: Any) -> Optional["Document"]:
 
 def _extract_cached_documents(value: Any) -> list["Document"]:
     """Extract only non-empty retrieval documents from a cache payload."""
+    if callable(_sanitize_cache_payload):
+        value = _sanitize_cache_payload(value)
+        if value is None:
+            return []
     if isinstance(value, dict):
         raw_documents = value.get("documents")
     elif isinstance(value, list):
@@ -220,6 +226,27 @@ def _extract_cached_documents(value: Any) -> list["Document"]:
         for document in raw_documents
         if (restored := _restore_cached_document(document)) is not None
     ]
+
+
+_MAX_CACHED_QUERY_CHARS = 4096
+
+
+def _validate_semantic_cache_match(value: Any) -> Optional[tuple[str, float]]:
+    """Validate and bound the untrusted result returned by ``find_similar``."""
+    if not isinstance(value, tuple) or len(value) not in {2, 3}:
+        return None
+    cached_query, similarity = value[-2:]
+    if not isinstance(cached_query, str):
+        return None
+    cached_query = cached_query.strip()
+    if not cached_query or len(cached_query) > _MAX_CACHED_QUERY_CHARS:
+        return None
+    if isinstance(similarity, bool) or not isinstance(similarity, Real):
+        return None
+    similarity_value = float(similarity)
+    if not math.isfinite(similarity_value) or not 0.0 <= similarity_value <= 1.0:
+        return None
+    return cached_query, similarity_value
 
 
 async def _invoke_cache_callable(callable_obj: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
@@ -702,12 +729,16 @@ try:
         SemanticCache as _SemanticCache,
     )
     from .semantic_cache import (
+        _sanitize_retrieval_payload as _sanitize_cache_payload,
+    )
+    from .semantic_cache import (
         get_shared_cache as _get_shared_cache,
     )
 except ImportError:
     _SemanticCache = None
     _AdaptiveCache = None
     _get_shared_cache = None
+    _sanitize_cache_payload = None
 
 SemanticCache = _SemanticCache
 AdaptiveCache = _AdaptiveCache
@@ -2299,6 +2330,22 @@ async def unified_rag_pipeline(
         pass
     result.metadata["retrieval_cache_hit"] = False
     result.metadata["generation_executed"] = False
+    cache_bypass_modes = [
+        mode
+        for enabled, mode in (
+            (expand_query, "query_expansion"),
+            (enable_hyde, "hyde"),
+            (enable_prf, "prf"),
+            (enable_query_decomposition, "query_decomposition"),
+        )
+        if enabled
+    ]
+    retrieval_cache_eligible = bool(enable_cache and not cache_bypass_modes)
+    if enable_cache and cache_bypass_modes:
+        result.metadata["cache_bypassed"] = {
+            "reason": "secondary_retrieval_mode",
+            "modes": cache_bypass_modes,
+        }
 
     def _ensure_profile_resolution_metadata() -> dict[str, Any]:
         profile_resolution = result.metadata.get("profile_resolution")
@@ -2337,6 +2384,7 @@ async def unified_rag_pipeline(
 
     cache_instance = None
     cache_setup_attempted = False
+    cache_retrieval_snapshot: Optional[list[Any]] = None
     cache_max_size = 1000
     try:
         from tldw_Server_API.app.core.config import RAG_SERVICE_CONFIG
@@ -2381,21 +2429,40 @@ async def unified_rag_pipeline(
             if retrieval_plan is not None
             else {}
         )
+        normalized_search_mode = str(retrieval_search_mode or "").strip().lower()
+        effective_date_range = None
+        if enable_date_filter and isinstance(date_range, dict):
+            effective_date_range = {
+                "start": str(date_range.get("start") or ""),
+                "end": str(date_range.get("end") or ""),
+            }
         retrieval_scope = {
             "sources": sorted(
-                str(getattr(source, "value", source)).strip().lower()
-                for source in (retrieval_sources or [])
+                _normalize_pipeline_sources(
+                    list(retrieval_sources) if retrieval_sources is not None else None
+                )
             ),
-            "search_mode": str(retrieval_search_mode or "").strip().lower(),
+            "search_mode": normalized_search_mode,
+            "use_fts": normalized_search_mode in {"fts", "hybrid"},
+            "use_vector": normalized_search_mode in {"vector", "hybrid"},
             "top_k": int(retrieval_top_k),
             "min_score": float(retrieval_min_score),
+            "fts_level": str(fts_level),
+            "date_range": effective_date_range,
+            "late_chunking": {
+                "enabled": bool(enable_text_late_chunking),
+                "method": chunk_method,
+                "size": chunk_size,
+                "overlap": chunk_overlap,
+                "language": chunk_language,
+            },
             "index_namespace": str(retrieval_index_namespace or ""),
             "collection_names": collection_scope,
         }
         return "|".join(
             (
                 f"owner:{_cache_identity_digest(owner_scope)}",
-                f"workspace:{_cache_identity_digest({'id': str(workspace_id or 'global')})}",
+                f"workspace:{_cache_identity_digest({'id': 'global' if workspace_id is None else str(workspace_id)})}",
                 f"retrieval:{_cache_identity_digest(retrieval_scope)}",
             )
         )
@@ -2553,6 +2620,7 @@ async def unified_rag_pipeline(
                 cache_disabled_for_scope = bool(enable_cache)
                 if cache_disabled_for_scope:
                     enable_cache = False
+                    retrieval_cache_eligible = False
                     result.metadata["cache_bypassed"] = {
                         "reason": "explicit_source_selection",
                     }
@@ -3475,73 +3543,6 @@ async def unified_rag_pipeline(
             prefer_current_scalars=retrieval_scalar_overrides_applied,
         )
 
-        # ========== CACHE CHECK ==========
-        if enable_cache and not _skip_retrieval_stack and not _skip_local_retrieval:
-            cache_start = time.time()
-            cache = _get_cache_instance()
-
-            if cache:
-                get_fn = getattr(cache, "get", None)
-                try:
-                    direct = (
-                        await _invoke_cache_callable(get_fn, query)
-                        if callable(get_fn)
-                        else None
-                    )
-                except (AttributeError, OSError, RuntimeError, TypeError):
-                    direct = None
-                cached_documents = _extract_cached_documents(direct)
-                if cached_documents:
-                    result.cache_hit = True
-                else:
-                    # Check cache for all query variations
-                    for q in expanded_queries:
-                        try:
-                            find_fn = getattr(cache, 'find_similar', None)
-                            if not callable(find_fn):
-                                break
-                            cached_result = await _invoke_cache_callable(find_fn, q)
-                        except (AttributeError, OSError, RuntimeError, TypeError):
-                            cached_result = None
-                        if isinstance(cached_result, (list, tuple)) and len(cached_result) in {2, 3}:
-                            # find_similar returns (key, query, sim) or (query, sim)
-                            if len(cached_result) == 3:
-                                _, cached_query, similarity = cached_result
-                            else:
-                                cached_query, similarity = cached_result
-                            try:
-                                similar_payload = (
-                                    await _invoke_cache_callable(get_fn, cached_query)
-                                    if callable(get_fn)
-                                    else None
-                                )
-                            except (AttributeError, OSError, RuntimeError, TypeError):
-                                similar_payload = None
-                            cached_documents = _extract_cached_documents(similar_payload)
-                            if cached_documents:
-                                result.cache_hit = True
-                                result.metadata["cache_similarity"] = similarity
-                                result.metadata["cached_query"] = cached_query
-                                break
-
-                if result.cache_hit:
-                    result.documents = cached_documents
-                    result.generated_answer = None
-                    result.metadata["retrieval_cache_hit"] = True
-                    result.metadata["cached_flag"] = True
-
-            result.timings["cache_check"] = time.time() - cache_start
-            if metrics:
-                metrics.cache_lookup_time = result.timings["cache_check"]
-        elif _skip_retrieval_stack or _skip_local_retrieval:
-            result.metadata["cache_bypassed"] = {
-                "reason": (
-                    _skip_retrieval_reason
-                    if _skip_retrieval_stack
-                    else "classification_local_disabled"
-                )
-            }
-
         # ========== INTENT-BASED WEIGHTING (optional) ==========
         if adaptive_hybrid_weights and search_mode == "hybrid":
             try:
@@ -3694,6 +3695,70 @@ async def unified_rag_pipeline(
                     }
             except (AttributeError, TypeError, ValueError, RuntimeError):
                 pass
+
+        # ========== CACHE CHECK ==========
+        # Resolve auto-temporal scope before deriving the retrieval cache identity.
+        if retrieval_cache_eligible and not _skip_retrieval_stack and not _skip_local_retrieval:
+            cache_start = time.time()
+            cache = _get_cache_instance()
+
+            if cache:
+                get_fn = getattr(cache, "get", None)
+                try:
+                    direct = (
+                        await _invoke_cache_callable(get_fn, query)
+                        if callable(get_fn)
+                        else None
+                    )
+                except (AttributeError, OSError, RuntimeError, TypeError):
+                    direct = None
+                cached_documents = _extract_cached_documents(direct)
+                if cached_documents:
+                    result.cache_hit = True
+                else:
+                    for q in expanded_queries:
+                        try:
+                            find_fn = getattr(cache, "find_similar", None)
+                            if not callable(find_fn):
+                                break
+                            cached_result = await _invoke_cache_callable(find_fn, q)
+                        except (AttributeError, OSError, RuntimeError, TypeError):
+                            cached_result = None
+                        validated_match = _validate_semantic_cache_match(cached_result)
+                        if validated_match is None:
+                            continue
+                        cached_query, similarity = validated_match
+                        try:
+                            similar_payload = (
+                                await _invoke_cache_callable(get_fn, cached_query)
+                                if callable(get_fn)
+                                else None
+                            )
+                        except (AttributeError, OSError, RuntimeError, TypeError):
+                            similar_payload = None
+                        cached_documents = _extract_cached_documents(similar_payload)
+                        if cached_documents:
+                            result.cache_hit = True
+                            result.metadata["cache_similarity"] = similarity
+                            break
+
+                if result.cache_hit:
+                    result.documents = cached_documents
+                    result.generated_answer = None
+                    result.metadata["retrieval_cache_hit"] = True
+                    result.metadata["cached_flag"] = True
+
+            result.timings["cache_check"] = time.time() - cache_start
+            if metrics:
+                metrics.cache_lookup_time = result.timings["cache_check"]
+        elif _skip_retrieval_stack or _skip_local_retrieval:
+            result.metadata["cache_bypassed"] = {
+                "reason": (
+                    _skip_retrieval_reason
+                    if _skip_retrieval_stack
+                    else "classification_local_disabled"
+                )
+            }
 
         # ========== DOCUMENT RETRIEVAL ==========
         if not result.cache_hit and not _skip_retrieval_stack and not _skip_local_retrieval:
@@ -4393,6 +4458,12 @@ async def unified_rag_pipeline(
                 "reason": "classification_local_disabled",
                 "documents_preserved": int(len(result.documents or [])),
             }
+
+        if retrieval_cache_eligible and not result.cache_hit and result.documents:
+            _apply_workspace_filtering_to_result()
+            cache_retrieval_snapshot = _clone_cached_documents(
+                list(result.documents)
+            )
 
         # ========== MULTI-VECTOR PASSAGES (optional, pre-rerank) ==========
         if enable_multi_vector_passages and result.documents:
@@ -7838,7 +7909,11 @@ async def unified_rag_pipeline(
         _apply_workspace_filtering_to_result()
 
         # ========== CACHE STORAGE ==========
-        if enable_cache and not result.cache_hit and result.documents:
+        if (
+            retrieval_cache_eligible
+            and not result.cache_hit
+            and cache_retrieval_snapshot
+        ):
             try:
                 # Store in cache for future use
                 cache = _get_cache_instance()
@@ -7849,7 +7924,7 @@ async def unified_rag_pipeline(
                     if set_fn:
                         wire_documents = [
                             _serialize_result_document(document)
-                            for document in result.documents
+                            for document in cache_retrieval_snapshot
                         ]
                         cache_queries = [query]
                         cache_queries.extend(
@@ -7870,6 +7945,10 @@ async def unified_rag_pipeline(
                                     "schema_version": 1,
                                 },
                             }
+                            if callable(_sanitize_cache_payload):
+                                cache_payload = _sanitize_cache_payload(cache_payload)
+                            if cache_payload is None:
+                                continue
                             await _invoke_cache_callable(
                                 set_fn,
                                 cq,

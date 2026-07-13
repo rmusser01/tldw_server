@@ -6,6 +6,7 @@ and its actual dependencies.
 """
 
 import asyncio
+import copy
 import hashlib
 import json
 import sqlite3
@@ -359,6 +360,29 @@ class TestUnifiedPipelineFeatures:
             await capture_namespace(search_mode="hybrid"),
             await capture_namespace(top_k=4),
             await capture_namespace(min_score=0.2),
+            await capture_namespace(fts_level="chunk"),
+            await capture_namespace(
+                enable_date_filter=True,
+                date_range={"start": "2024-01-01", "end": "2024-01-31"},
+            ),
+            await capture_namespace(auto_temporal_filters=True),
+            await capture_namespace(enable_text_late_chunking=True),
+            await capture_namespace(
+                enable_text_late_chunking=True,
+                chunk_method="sentences",
+            ),
+            await capture_namespace(
+                enable_text_late_chunking=True,
+                chunk_size=640,
+            ),
+            await capture_namespace(
+                enable_text_late_chunking=True,
+                chunk_overlap=64,
+            ),
+            await capture_namespace(
+                enable_text_late_chunking=True,
+                chunk_language="fr",
+            ),
             await capture_namespace(index_namespace="index-b"),
         ]
         collection_a = RetrievalPlan(
@@ -402,6 +426,99 @@ class TestUnifiedPipelineFeatures:
             "ownerless_db_paths_are_distinct": ownerless_a != ownerless_b,
         }
         assert checks == dict.fromkeys(checks, True)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("mode_name", "mode_kwargs"),
+        [
+            ("query_expansion", {"expand_query": True}),
+            ("hyde", {"enable_hyde": True}),
+            ("prf", {"enable_prf": True}),
+            ("query_decomposition", {"enable_query_decomposition": True}),
+        ],
+    )
+    async def test_secondary_retrieval_modes_bypass_cache(
+        self,
+        mode_name,
+        mode_kwargs,
+    ):
+        with patch(
+            'tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.get_shared_cache'
+        ) as mock_shared_cache, patch(
+            'tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.MultiDatabaseRetriever'
+        ) as mock_retriever, patch(
+            'tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.multi_strategy_expansion',
+            None,
+        ), patch(
+            'tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.QueryRewriter',
+            None,
+        ), patch(
+            'tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.generate_hypothetical_answer',
+            None,
+        ):
+            retriever = MagicMock()
+            retriever.retrieve = AsyncMock(return_value=[
+                Document(id="fresh", content="fresh evidence", metadata={})
+            ])
+            mock_retriever.return_value = retriever
+            result = await unified_rag_pipeline(
+                query="cache bypass query",
+                top_k=1,
+                enable_cache=True,
+                enable_generation=False,
+                enable_reranking=False,
+                adaptive_cache=False,
+                **mode_kwargs,
+            )
+
+        mock_shared_cache.assert_not_called()
+        retriever.retrieve.assert_awaited_once()
+        assert result.cache_hit is False
+        assert result.metadata["cache_bypassed"] == {
+            "reason": "secondary_retrieval_mode",
+            "modes": [mode_name],
+        }
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("source", "scope_kwargs"),
+        [
+            ("media_db", {"include_media_ids": [7]}),
+            ("notes", {"include_note_ids": ["note-7"]}),
+        ],
+    )
+    async def test_explicit_include_ids_bypass_cache(
+        self,
+        source,
+        scope_kwargs,
+    ):
+        with patch(
+            'tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.get_shared_cache'
+        ) as mock_shared_cache, patch(
+            'tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.MultiDatabaseRetriever'
+        ) as mock_retriever:
+            retriever = MagicMock()
+            retriever.retrieve = AsyncMock(return_value=[
+                Document(id="scoped", content="scoped evidence", metadata={})
+            ])
+            mock_retriever.return_value = retriever
+            result = await unified_rag_pipeline(
+                query="explicit scope query",
+                sources=[source],
+                top_k=1,
+                enable_cache=True,
+                enable_generation=False,
+                enable_reranking=False,
+                adaptive_cache=False,
+                **scope_kwargs,
+            )
+
+        mock_shared_cache.assert_not_called()
+        retriever.retrieve.assert_awaited_once()
+        assert result.cache_hit is False
+        assert result.metadata["cache_bypassed"] == {
+            "reason": "explicit_source_selection",
+        }
 
     @pytest.mark.asyncio
     async def test_cache_namespace_uses_post_routing_retrieval_values(self):
@@ -542,6 +659,112 @@ class TestUnifiedPipelineFeatures:
         assert result.metadata["generation_executed"] is False
 
     @pytest.mark.asyncio
+    async def test_direct_cache_payload_uses_retrieval_only_document_sanitizer(self):
+        cached_result = {
+            "answer": "STALE_SENTINEL",
+            "documents": [
+                {
+                    "id": "cached-doc",
+                    "content": "cached evidence",
+                    "score": float("inf"),
+                    "metadata": {
+                        "answer": "STALE_SENTINEL",
+                        "generation_provider": "STALE_SENTINEL",
+                        "nested": {
+                            "generated_answer": "STALE_SENTINEL",
+                            "generation_model": "STALE_SENTINEL",
+                            "generation_prompt": "STALE_SENTINEL",
+                            "verification_report": {"answer": "STALE_SENTINEL"},
+                            "safe": "kept",
+                            "nan": float("nan"),
+                        },
+                    },
+                }
+            ],
+        }
+        mock_cache = MagicMock()
+        mock_cache.get.return_value = cached_result
+
+        with patch(
+            'tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.get_shared_cache',
+            return_value=mock_cache,
+        ), patch(
+            'tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.MultiDatabaseRetriever'
+        ) as mock_retriever:
+            result = await unified_rag_pipeline(
+                query="direct cache query",
+                enable_cache=True,
+                enable_generation=False,
+                enable_reranking=False,
+                adaptive_cache=False,
+            )
+
+        mock_retriever.assert_not_called()
+        assert result.cache_hit is True
+        assert "STALE_SENTINEL" not in repr(result)
+        assert result.documents[0]["score"] == 0.0
+        assert result.documents[0]["metadata"]["nested"] == {"safe": "kept"}
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "semantic_match",
+        [
+            ("too", "many", "fields", 0.5),
+            ("", 0.5),
+            ("x" * 4097, 0.5),
+            ("similar query", True),
+            ("similar query", float("nan")),
+            ("similar query", -0.1),
+            ("similar query", 1.1),
+            ("similar query", "0.9"),
+        ],
+    )
+    async def test_malformed_semantic_cache_match_is_a_miss(
+        self,
+        semantic_match,
+    ):
+        get_queries = []
+
+        class MalformedMatchCache:
+            def get(self, query):
+                get_queries.append(query)
+                if query != "original query":
+                    return {
+                        "documents": [
+                            {"id": "unsafe", "content": "unsafe cached evidence"}
+                        ]
+                    }
+                return None
+
+            def find_similar(self, _query):
+                return semantic_match
+
+        with patch(
+            'tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.get_shared_cache',
+            return_value=MalformedMatchCache(),
+        ), patch(
+            'tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.MultiDatabaseRetriever'
+        ) as mock_retriever:
+            retriever = MagicMock()
+            retriever.retrieve = AsyncMock(return_value=[
+                Document(id="fresh", content="fresh evidence", metadata={})
+            ])
+            mock_retriever.return_value = retriever
+            result = await unified_rag_pipeline(
+                query="original query",
+                enable_cache=True,
+                enable_generation=False,
+                enable_reranking=False,
+                adaptive_cache=False,
+            )
+
+        assert get_queries == ["original query"]
+        retriever.retrieve.assert_awaited_once()
+        assert result.cache_hit is False
+        assert "cached_query" not in result.metadata
+        assert "cache_similarity" not in result.metadata
+
+    @pytest.mark.asyncio
     async def test_sync_cache_wrappers_returning_awaitables_are_awaited(self):
         calls = []
 
@@ -592,6 +815,8 @@ class TestUnifiedPipelineFeatures:
         assert result.cache_hit is True
         assert result.documents[0]["content"] == "wrapped evidence"
         assert "STALE_SENTINEL" not in repr(result)
+        assert result.metadata["cache_similarity"] == 0.95
+        assert "cached_query" not in result.metadata
         mock_retriever.assert_not_called()
 
     @pytest.mark.asyncio
@@ -705,6 +930,66 @@ class TestUnifiedPipelineFeatures:
         assert payload["documents"][0]["id"] == "doc-cache"
         assert "answer" not in payload
         assert "generated_answer" not in payload
+
+    @pytest.mark.asyncio
+    async def test_cache_stores_pre_transformation_retrieval_snapshot(self):
+        class MemoryCache:
+            def __init__(self):
+                self.payload = None
+
+            def get(self, _query):
+                return copy.deepcopy(self.payload)
+
+            def find_similar(self, _query):
+                return None
+
+            def set(self, _query, value, ttl=None):
+                self.payload = copy.deepcopy(value)
+
+        cache = MemoryCache()
+
+        def downweight(documents, strength):
+            for document in documents:
+                document.score *= strength
+            return {"affected": len(documents), "total": len(documents)}
+
+        with patch(
+            'tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.get_shared_cache',
+            return_value=cache,
+        ), patch(
+            'tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.MultiDatabaseRetriever'
+        ) as mock_retriever, patch(
+            'tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.downweight_injection_docs',
+            side_effect=downweight,
+        ):
+            retriever = MagicMock()
+            retriever.retrieve = AsyncMock(return_value=[
+                Document(
+                    id="injection-doc",
+                    content="potential injection evidence",
+                    metadata={},
+                    score=1.0,
+                )
+            ])
+            mock_retriever.return_value = retriever
+            common = {
+                "query": "snapshot query",
+                "enable_cache": True,
+                "enable_generation": False,
+                "enable_reranking": False,
+                "enable_injection_filter": True,
+                "injection_filter_strength": 0.5,
+                "adaptive_cache": False,
+            }
+            miss = await unified_rag_pipeline(**common)
+            hit = await unified_rag_pipeline(**common)
+
+        retriever.retrieve.assert_awaited_once()
+        assert miss.cache_hit is False
+        assert hit.cache_hit is True
+        assert miss.documents[0]["score"] == 0.5
+        assert hit.documents[0]["score"] == 0.5
+        assert cache.payload["documents"][0]["score"] == 1.0
 
     @pytest.mark.asyncio
     async def test_cache_storage_error_log_omits_exception_details(self):

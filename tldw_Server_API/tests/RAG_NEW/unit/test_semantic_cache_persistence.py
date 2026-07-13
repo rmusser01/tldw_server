@@ -12,6 +12,7 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     ProviderCallCredentials,
 )
 from tldw_Server_API.app.core.RAG.rag_service.semantic_cache import SemanticCache
+from tldw_Server_API.app.core.RAG.rag_service.types import Document
 
 pytestmark = pytest.mark.unit
 
@@ -100,6 +101,57 @@ async def test_semantic_cache_save_load_and_find_similar(tmp_path):
     _key, cached_query, similarity = await cache_loaded.find_similar("beta")
     assert cached_query == "alpha"
     assert similarity >= 0.8
+
+
+@pytest.mark.asyncio
+async def test_semantic_cache_persists_strict_retrieval_only_document_metadata(
+    tmp_path: Path,
+) -> None:
+    cache_path = tmp_path / "semantic_cache.json"
+    cache = SemanticCache(persist_path=str(cache_path))
+    document = Document(
+        id="strict-doc",
+        content="strict evidence",
+        score=float("nan"),
+        metadata={
+            "answer": "STALE_SENTINEL",
+            "generation_provider": "STALE_SENTINEL",
+            "retrieval_safe": {"rank": 1},
+            "nested": {
+                "generated_answer": "STALE_SENTINEL",
+                "generation_model": "STALE_SENTINEL",
+                "generation_prompt": "STALE_SENTINEL",
+                "verification_report": {"answer": "STALE_SENTINEL"},
+                "safe": "kept",
+                "nan": float("nan"),
+                "infinity": float("inf"),
+            },
+        },
+    )
+
+    await cache.set("strict query", {"documents": [document]})
+    cache.save()
+
+    raw = cache_path.read_text()
+    assert "STALE_SENTINEL" not in raw
+    assert "NaN" not in raw
+    assert "Infinity" not in raw
+    json.loads(raw, parse_constant=lambda value: pytest.fail(f"non-finite JSON: {value}"))
+
+    reloaded = SemanticCache(persist_path=str(cache_path))
+    payload = await reloaded.get("strict query")
+    assert payload["documents"] == [
+        {
+            "id": "strict-doc",
+            "content": "strict evidence",
+            "metadata": {
+                "retrieval_safe": {"rank": 1},
+                "nested": {"safe": "kept"},
+                "source": "media_db",
+            },
+            "score": 0.0,
+        }
+    ]
 
 
 @pytest.mark.asyncio
