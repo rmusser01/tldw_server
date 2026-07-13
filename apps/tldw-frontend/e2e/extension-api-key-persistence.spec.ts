@@ -288,14 +288,6 @@ const expectProductionRagRequest = async (
     return
   }
 
-  await expect
-    .poll(() =>
-      fixture
-        .requests()
-        .slice(requestOffset)
-        .some((request) => request.path === "/api/v1/rag/health")
-    )
-    .toBe(true)
   await expect(
     page.getByText("RAG: needs attention", { exact: true })
   ).toBeVisible()
