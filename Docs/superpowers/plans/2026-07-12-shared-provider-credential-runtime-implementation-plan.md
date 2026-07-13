@@ -380,43 +380,47 @@ git commit -m "fix(rag): credentialize generation and verification stages"
 ### Task 7: Migrate direct async auxiliary callers
 
 **Files:**
+- Modify: `tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py`
 - Modify: `tldw_Server_API/app/core/RAG/rag_service/query_classifier.py`
 - Modify: `tldw_Server_API/app/core/RAG/rag_service/research_agent.py`
 - Modify: `tldw_Server_API/app/core/RAG/rag_service/suggestion_generator.py`
 - Modify: `tldw_Server_API/app/core/RAG/rag_service/knowledge_strips.py`
 - Modify: `tldw_Server_API/app/core/RAG/rag_service/evidence_accumulator.py`
 - Modify: `tldw_Server_API/app/core/RAG/rag_service/evidence_chains.py`
+- Modify: `tldw_Server_API/app/core/RAG/rag_service/citations.py`
 - Modify: `tldw_Server_API/app/core/RAG/rag_service/media_search.py`
 - Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_query_classifier.py`
 - Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_research_agent.py`
 - Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_suggestion_generator.py`
 - Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_media_search.py`
 - Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_evidence_chains_sanitizers.py`
+- Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_citations_sanitizers.py`
+- Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_generation_executor.py`
 - Modify: `tldw_Server_API/tests/RAG/test_knowledge_strips.py`
 - Modify: `tldw_Server_API/tests/RAG/test_evidence_accumulator_sanitizers.py`
 
-- [ ] **Step 1: Add one failing behavior test per stage family**
+- [x] **Step 1: Add one failing behavior test per stage family**
 
 Use a shared fake runtime and a server fallback resolver that raises. Verify provider selection, explicit call kwargs, sanitized degradation, and trust-state changes rather than internal helper calls.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/RAG_NEW/unit/test_query_classifier.py tldw_Server_API/tests/RAG_NEW/unit/test_research_agent.py tldw_Server_API/tests/RAG_NEW/unit/test_suggestion_generator.py tldw_Server_API/tests/RAG_NEW/unit/test_media_search.py tldw_Server_API/tests/RAG/test_knowledge_strips.py tldw_Server_API/tests/RAG/test_evidence_accumulator_sanitizers.py tldw_Server_API/tests/RAG_NEW/unit/test_evidence_chains_sanitizers.py -q`
 
 Expected: focused new assertions FAIL.
 
-- [ ] **Step 3: Add optional runtime arguments and resolve per provider**
+- [x] **Step 3: Add optional runtime arguments and resolve per provider**
 
 Keep existing direct callers compatible by defaulting to `None`. When supplied, resolve through it and prohibit config fallback. Credential/auth errors do not trigger provider failover; optional stages record bounded unavailable reason codes.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run the Step 2 command. Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
-git add tldw_Server_API/app/core/RAG/rag_service tldw_Server_API/tests/RAG tldw_Server_API/tests/RAG_NEW/unit
+git add tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py tldw_Server_API/app/core/RAG/rag_service/query_classifier.py tldw_Server_API/app/core/RAG/rag_service/research_agent.py tldw_Server_API/app/core/RAG/rag_service/suggestion_generator.py tldw_Server_API/app/core/RAG/rag_service/knowledge_strips.py tldw_Server_API/app/core/RAG/rag_service/evidence_accumulator.py tldw_Server_API/app/core/RAG/rag_service/evidence_chains.py tldw_Server_API/app/core/RAG/rag_service/citations.py tldw_Server_API/app/core/RAG/rag_service/media_search.py tldw_Server_API/tests/RAG_NEW/unit/test_query_classifier.py tldw_Server_API/tests/RAG_NEW/unit/test_research_agent.py tldw_Server_API/tests/RAG_NEW/unit/test_suggestion_generator.py tldw_Server_API/tests/RAG_NEW/unit/test_media_search.py tldw_Server_API/tests/RAG_NEW/unit/test_evidence_chains_sanitizers.py tldw_Server_API/tests/RAG_NEW/unit/test_citations_sanitizers.py tldw_Server_API/tests/RAG_NEW/unit/test_generation_executor.py tldw_Server_API/tests/RAG/test_knowledge_strips.py tldw_Server_API/tests/RAG/test_evidence_accumulator_sanitizers.py
 git commit -m "fix(rag): credentialize auxiliary provider calls"
 ```
 
