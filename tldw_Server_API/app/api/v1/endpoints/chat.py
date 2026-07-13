@@ -883,6 +883,7 @@ def _extract_routing_requested_capabilities(
 _PROVIDER_CREDENTIAL_MESSAGES = {
     "provider_authentication_failed": "The selected provider credentials could not be authenticated.",
     "invalid_provider_credentials": "The selected provider credentials are invalid.",
+    "missing_provider_credentials": "The selected provider credentials are not configured.",
     "credential_store_unavailable": "Provider credential storage is temporarily unavailable.",
     "credential_scope_revoked": "The selected provider credential scope is no longer available.",
     "provider_configuration_invalid": "The selected provider configuration is invalid.",
@@ -897,14 +898,29 @@ class _SanitizedProviderStreamError(Exception):
         super().__init__(f"{code}: {_PROVIDER_CREDENTIAL_MESSAGES[code]}")
 
 
+class _ProviderCredentialTerminalError(RuntimeError):
+    """Carry a bounded credential failure through chat-service normalization."""
+
+    def __init__(self, code: str) -> None:
+        self.code = code if code in _PROVIDER_CREDENTIAL_MESSAGES else "provider_configuration_invalid"
+        super().__init__(self.code)
+
+
 def _provider_credential_error_code(exc: BaseException) -> str | None:
     """Return an allow-listed public code for a typed credential failure."""
+    if isinstance(exc, _ProviderCredentialTerminalError):
+        return exc.code
     if isinstance(exc, ChatAuthenticationError):
         return "provider_authentication_failed"
     if isinstance(exc, ChatConfigurationError):
         return "provider_configuration_invalid"
     if isinstance(exc, ByokResolutionError):
         return exc.code if exc.code in _PROVIDER_CREDENTIAL_MESSAGES else "provider_configuration_invalid"
+    detail = getattr(exc, "detail", None)
+    if isinstance(detail, dict):
+        detail_code = detail.get("error_code")
+        if detail_code in _PROVIDER_CREDENTIAL_MESSAGES:
+            return str(detail_code)
     try:
         status_code = int(getattr(exc, "status_code", 0) or 0)
     except (TypeError, ValueError):
@@ -1002,9 +1018,11 @@ def _attach_credential_runtime_cleanup(
             nonlocal has_output, error_emitted
             error_code, chunk_has_output, _ = _inspect_provider_stream_chunk(chunk)
             has_output = has_output or chunk_has_output
+            pending_code = (stream_error_state or {}).get("code")
+            if error_emitted and error_code == pending_code:
+                return
             error_emitted = error_emitted or error_code is not None
             yield chunk
-            pending_code = (stream_error_state or {}).get("code")
             if has_output and pending_code and not error_emitted:
                 error_emitted = True
                 yield _provider_stream_error_frame_for_code(pending_code)
@@ -1059,14 +1077,20 @@ def _sanitize_provider_stream_call(
             if sanitized_error is None:
                 raise
             error_state["code"] = sanitized_error.code
-            raise sanitized_error from None
+
+            def eager_error_iterator():
+                raise sanitized_error
+                yield  # pragma: no cover - keeps this a lazy iterator
+
+            return eager_error_iterator()
 
         if hasattr(stream, "__aiter__"):
 
             async def async_iterator():
                 try:
                     async for chunk in stream:
-                        error_state["output_started"] = True
+                        if _provider_stream_chunk_has_output(chunk):
+                            error_state["output_started"] = True
                         yield chunk
                 except BaseException as exc:
                     sanitized_error = _sanitized_provider_stream_error(exc)
@@ -1080,7 +1104,8 @@ def _sanitize_provider_stream_call(
         def sync_iterator():
             try:
                 for chunk in stream:
-                    error_state["output_started"] = True
+                    if _provider_stream_chunk_has_output(chunk):
+                        error_state["output_started"] = True
                     yield chunk
             except BaseException as exc:
                 sanitized_error = _sanitized_provider_stream_error(exc)
@@ -1092,6 +1117,21 @@ def _sanitize_provider_stream_call(
         return sync_iterator()
 
     return sanitized_call
+
+
+def _provider_stream_chunk_has_output(chunk: Any) -> bool:
+    """Return whether a raw provider chunk contains visible content or tool output."""
+    _, has_output, _ = _inspect_provider_stream_chunk(chunk)
+    if has_output:
+        return True
+    raw_chunk = chunk.decode("utf-8", errors="replace") if isinstance(chunk, bytes) else str(chunk)
+    for raw_line in raw_chunk.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith(":") or line.startswith("event:"):
+            continue
+        if not line.startswith("data:"):
+            return True
+    return False
 
 
 def _inspect_provider_stream_chunk(chunk: Any) -> tuple[str | None, bool, bool]:
@@ -2790,1665 +2830,1784 @@ async def create_chat_completion(
     )
     credential_runtime_owned_by_stream = False
 
-    if auto_model_requested:
-        try:
-            routing_decision, routing_debug = await _resolve_auto_chat_routing_decision(
-                request_data,
-                request=request,
-                sticky_store=routing_decision_store,
-                current_user=current_user,
-                request_id=request_id,
-                credential_runtime=credential_runtime,
-            )
-        except BaseException as exc:
-            await credential_runtime.close()
-            if isinstance(
-                exc,
-                (ByokResolutionError, ChatAuthenticationError, ChatConfigurationError),
-            ):
-                raise _provider_credential_http_exception(exc) from exc
-            raise
-        if routing_decision is None:
-            await credential_runtime.close()
-            candidate_count = int((routing_debug or {}).get("candidate_count") or 0)
-            if candidate_count > 0:
+    try:
+        if auto_model_requested:
+            try:
+                routing_decision, routing_debug = await _resolve_auto_chat_routing_decision(
+                    request_data,
+                    request=request,
+                    sticky_store=routing_decision_store,
+                    current_user=current_user,
+                    request_id=request_id,
+                    credential_runtime=credential_runtime,
+                )
+            except BaseException as exc:
+                if isinstance(
+                    exc,
+                    (ByokResolutionError, ChatAuthenticationError, ChatConfigurationError),
+                ):
+                    raise _provider_credential_http_exception(exc) from exc
+                raise
+            if routing_decision is None:
+                candidate_count = int((routing_debug or {}).get("candidate_count") or 0)
+                if candidate_count > 0:
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail={
+                            "error_code": "auto_routing_failed",
+                            "message": (
+                                "Auto-routing failed and the current routing policy did not allow "
+                                "deterministic fallback."
+                            ),
+                            "routing": routing_debug or {},
+                        },
+                    )
                 raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    status_code=status.HTTP_400_BAD_REQUEST,
                     detail={
-                        "error_code": "auto_routing_failed",
-                        "message": (
-                            "Auto-routing failed and the current routing policy did not allow "
-                            "deterministic fallback."
-                        ),
+                        "error_code": "auto_routing_no_candidates",
+                        "message": "No eligible models matched the current auto-routing constraints.",
                         "routing": routing_debug or {},
                     },
                 )
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={
-                    "error_code": "auto_routing_no_candidates",
-                    "message": "No eligible models matched the current auto-routing constraints.",
-                    "routing": routing_debug or {},
-                },
+            if str((routing_debug or {}).get("policy", {}).get("boundary_mode") or "").strip().lower() == "pinned_provider":
+                allow_provider_fallback_for_request = False
+
+        request_model_was_explicit = bool(str(getattr(request_data, "model", None) or "").strip())
+
+        try:
+            (
+                metrics_provider,
+                metrics_model,
+                selected_provider,
+                selected_model,
+                provider_debug,
+            ) = resolve_provider_and_model(
+                request_data=request_data,
+                metrics_default_provider=DEFAULT_LLM_PROVIDER,
+                normalize_default_provider=_get_default_provider(),
+                routing_decision=routing_decision,
             )
-        if str((routing_debug or {}).get("policy", {}).get("boundary_mode") or "").strip().lower() == "pinned_provider":
-            allow_provider_fallback_for_request = False
+        except BaseException:
+            raise
 
-    request_model_was_explicit = bool(str(getattr(request_data, "model", None) or "").strip())
-
-    try:
-        (
-            metrics_provider,
-            metrics_model,
-            selected_provider,
-            selected_model,
-            provider_debug,
-        ) = resolve_provider_and_model(
-            request_data=request_data,
-            metrics_default_provider=DEFAULT_LLM_PROVIDER,
-            normalize_default_provider=_get_default_provider(),
-            routing_decision=routing_decision,
-        )
-    except BaseException:
-        await credential_runtime.close()
-        raise
-
-    provider = metrics_provider
-    model = metrics_model
-    initial_provider = metrics_provider
-
-    try:
-        logger.debug("Provider/model resolution: {}", provider_debug)
-    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as log_err:  # pragma: no cover - defensive
-        logger.debug("Provider/model resolution logging skipped: {}", log_err)
-
-    context = None
-    if audit_service:
-        try:
-            context = AuditContext(
-                user_id=user_id,
-                request_id=request_id,
-                ip_address=request.client.host if request and hasattr(request, "client") else None,
-                endpoint="/chat/completions",
-                method="POST",
-            )
-            await audit_service.log_event(
-                event_type=AuditEventType.API_REQUEST,
-                context=context,
-                action="chat_completion_request",
-                metadata={
-                    "model": model,
-                    "provider": provider,
-                    "message_count": len(request_data.messages),
-                    "streaming": request_data.stream,
-                    "has_tools": bool(request_data.tools),
-                    "conversation_id": request_data.conversation_id,
-                },
-            )
-        except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as log_error:
-            logger.warning(f"Failed to log audit event: {log_error}")
-
-    try:
-        usage_log.log_event(
-            "chat.completions",
-            tags=[provider, model],
-            metadata={"message_count": len(request_data.messages), "stream": bool(request_data.stream)},
-        )
-    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as _usage_log_err:
-        logger.debug(f"Usage event logging failed: {_usage_log_err}")
-
-    _rg_handle_id = None
-    _rg_policy_id = None
-    rg_finalized = False
-
-    # Billing: initialized after request_json is available (see below)
-    _billing_enforcer: LimitEnforcer | None = None
-    _billing_enforcer_entered = False
-
-    try:
-        _track_request_cm = metrics.track_request(
-            provider=provider, model=model, streaming=request_data.stream, client_id=client_id
-        )
-        span = await _track_request_cm.__aenter__()
-    except BaseException:
-        await credential_runtime.close()
-        raise
-    try:
-        # Authentication is enforced via get_request_user dependency (JWT or X-API-KEY).
-        # If it fails, FastAPI raises 401 before reaching here. No further checks needed.
-
-        # Slash command handling: compute, moderate, then optionally inject
-        try:
-            if command_router.commands_enabled() and request_data and request_data.messages:
-                # Locate the most recent user message text
-                last_user_idx = None
-                last_text = None
-                for idx in range(len(request_data.messages) - 1, -1, -1):
-                    m = request_data.messages[idx]
-                    if getattr(m, 'role', None) == 'user':
-                        if isinstance(m.content, str):
-                            last_text = m.content
-                            last_user_idx = idx
-                            break
-                        elif isinstance(m.content, list):
-                            for part in m.content:
-                                if getattr(part, 'type', None) == 'text' and isinstance(getattr(part, 'text', None), str):
-                                    last_text = part.text
-                                    last_user_idx = idx
-                                    break
-                            if last_user_idx is not None:
-                                break
-                if last_user_idx is not None and isinstance(last_text, str):
-                    parsed = command_router.parse_slash_command(last_text)
-                    if parsed:
-                        cmd_name, cmd_args = parsed
-                        ctx = command_router.CommandContext(
-                            user_id=str(getattr(current_user, 'id', 'anonymous')),
-                            auth_user_id=int(getattr(current_user, 'id', 0)) if getattr(current_user, 'id', None) is not None else None,
-                            request_meta={
-                                'endpoint': '/chat/completions',
-                                'auth_user_id': int(getattr(current_user, 'id', 0)) if getattr(current_user, 'id', None) is not None else None,
-                                'conversation_id': request_data.conversation_id,
-                                'character_id': request_data.character_id,
-                                'chat_db': chat_db,
-                                'user_base_dir': user_base_dir,
-                                'selected_provider': selected_provider,
-                                'selected_model': selected_model,
-                                'tools': request_data.tools,
-                            },
-                        )
-                        result = await command_router.async_dispatch_command(ctx, cmd_name, cmd_args)
-                        inj_mode = command_router.get_injection_mode()
-                        override = getattr(request_data, 'slash_command_injection_mode', None)
-                        if isinstance(override, str) and override.lower() in {"system", "preface", "replace"}:
-                            inj_mode = override.lower()
-                        inj_meta = {
-                            'command': cmd_name,
-                            'args': cmd_args,
-                            'mode': inj_mode,
-                            'result_ok': bool(result.ok),
-                            'error': (result.metadata or {}).get('error') if hasattr(result, 'metadata') else None,
-                            'rbac': (result.metadata or {}).get('rbac') if hasattr(result, 'metadata') else None,
-                            'conversation_id': request_data.conversation_id,
-                        }
-                        # Prepare content for injection and run input moderation on it
-                        content_text = command_router.build_injection_text(cmd_name, result.content)
-                        moderated_content_text = content_text
-                        inj_mod = {
-                            'action': 'pass',
-                            'blocked': False,
-                            'category': None,
-                            'pattern': None,
-                            'redacted': False,
-                        }
-                        try:
-                            moderation = get_moderation_service()
-                            # Determine effective policy for this user/client
-                            req_user_id = None
-                            try:
-                                if request is not None and hasattr(request, "state"):
-                                    req_user_id = getattr(request.state, "user_id", None)
-                            except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
-                                req_user_id = None
-                            policy = moderation.get_effective_policy(str(req_user_id) if req_user_id is not None else client_id)
-                            action, redacted, matched, category = moderation.evaluate_action(content_text, policy, 'input')
-                            if action and action != 'pass':
-                                inj_mod['action'] = action
-                                inj_mod['category'] = category
-                                inj_mod['pattern'] = matched
-                                if action == 'redact':
-                                    moderated_content_text = moderation.redact_text(content_text, policy)
-                                    inj_mod['redacted'] = True
-                                elif action == 'block':
-                                    inj_mod['blocked'] = True
-                            # Track moderation for metrics
-                            with contextlib.suppress(_CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS):
-                                metrics.track_moderation_input(str(req_user_id or client_id), inj_mod['action'], category=(inj_mod.get('category') or "default"))
-                                # Audit moderation decision
-                                await write_mandatory_moderation_audit(
-                                    audit_service=audit_service,
-                                    audit_context=context,
-                                    audit_event_type=AuditEventType.SECURITY_VIOLATION,
-                                    action="moderation.input",
-                                    result=("failure" if inj_mod['blocked'] else "success"),
-                                    metadata={"phase": "input", "action": inj_mod['action'], "pattern": inj_mod.get('pattern'), "category": inj_mod.get('category')},
-                                )
-                                if inj_mod["action"] != "pass" and is_moderation_review_capture_enabled():
-                                    try:
-                                        await asyncio.to_thread(
-                                            partial(
-                                                capture_moderation_review_item,
-                                                phase="input",
-                                                action=str(inj_mod["action"]),
-                                                excerpt="[matched content redacted]",
-                                                category=inj_mod.get("category"),
-                                                matched_pattern=inj_mod.get("pattern"),
-                                                effective_policy=policy.to_dict() if hasattr(policy, "to_dict") else {},
-                                                source_type="chat",
-                                                source_id=str(request_data.conversation_id) if request_data.conversation_id else None,
-                                                user_id=str(req_user_id or client_id) if (req_user_id or client_id) else None,
-                                                session_id=None,
-                                            )
-                                        )
-                                    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
-                                        logger.warning(
-                                            "Moderation review capture failed in chat endpoint: {}: {}",
-                                            type(exc).__name__,
-                                            str(exc),
-                                        )
-                        except MandatoryAuditWriteError as exc:
-                            raise HTTPException(
-                                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                                detail=_mandatory_audit_unavailable_detail(),
-                            ) from exc
-                        except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as _mod_err:
-                            logger.debug(f"Slash command moderation step skipped due to error: {_mod_err}")
-
-                        # Update injection metadata with moderation outcome prior to audit logging
-                        try:
-                            inj_meta['moderation'] = inj_mod
-                            if inj_mod.get('blocked'):
-                                inj_meta['result_ok'] = False
-                        except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
-                            pass
-
-                        # Audit the command execution (with moderation outcome attached)
-                        try:
-                            if audit_service and context:
-                                await audit_service.log_event(
-                                    event_type=AuditEventType.API_REQUEST,
-                                    context=context,
-                                    action="chat.command.executed",
-                                    result=("success" if (result.ok and not inj_mod.get('blocked')) else "failure"),
-                                    metadata=inj_meta,
-                                )
-                        except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as _ae:
-                            logger.debug(f"Slash command audit log skipped: {_ae}")
-
-                        # Mutate request messages for injection (use moderated/sanitized text) when not blocked
-                        if not inj_mod.get('blocked'):
-                            if inj_mode == 'preface':
-                                # Prefix the user's message
-                                if isinstance(request_data.messages[last_user_idx].content, str):
-                                    rest = (cmd_args or '').strip()
-                                    new_user_text = (f"{moderated_content_text}\n\n{rest}" if rest else f"{moderated_content_text}")
-                                    request_data.messages[last_user_idx].content = new_user_text
-                                else:
-                                    parts = request_data.messages[last_user_idx].content
-                                    for part in parts:
-                                        if getattr(part, 'type', None) == 'text':
-                                            rest = (cmd_args or '').strip()
-                                            part.text = (f"{moderated_content_text}\n\n{rest}" if rest else f"{moderated_content_text}")
-                                            break
-                            elif inj_mode == 'replace':
-                                # Replace the user's message entirely with the command result
-                                if isinstance(request_data.messages[last_user_idx].content, str):
-                                    request_data.messages[last_user_idx].content = moderated_content_text
-                                else:
-                                    parts = request_data.messages[last_user_idx].content
-                                    for part in parts:
-                                        if getattr(part, 'type', None) == 'text':
-                                            part.text = moderated_content_text
-                                            break
-                            else:
-                                # System injection and strip the command from user text
-                                if isinstance(request_data.messages[last_user_idx].content, str):
-                                    request_data.messages[last_user_idx].content = (cmd_args or '').strip()
-                                else:
-                                    parts = request_data.messages[last_user_idx].content
-                                    for part in parts:
-                                        if getattr(part, 'type', None) == 'text':
-                                            part.text = (cmd_args or '').strip()
-                                            break
-                                try:
-                                    # Use model_construct to bypass schema validation for system-command injections;
-                                    # the full payload is validated after mutation.
-                                    sys_msg = ChatCompletionSystemMessageParam.model_construct(
-                                        role="system",
-                                        content=moderated_content_text,
-                                        name="system-command",
-                                    )
-                                    # Attach metadata if possible
-                                    with contextlib.suppress(_CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS):
-                                        sys_msg.metadata = {"tldw_injection": inj_meta, "moderation": inj_mod}
-                                    request_data.messages.append(sys_msg)
-                                except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as inj_err:
-                                    logger.debug(f"Failed to append system injection message: {inj_err}")
-        except HTTPException as _cmd_err:
-            detail = getattr(_cmd_err, "detail", None)
-            if (
-                _cmd_err.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
-                and isinstance(detail, dict)
-                and detail.get("error_code") == "mandatory_audit_unavailable"
-            ):
-                raise
-            logger.debug(f"Slash command handling skipped due to error: {_cmd_err}")
-        except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as _cmd_err:
-            logger.debug(f"Slash command handling skipped due to error: {_cmd_err}")
-
-        # Recompute request payload after slash command injection and revalidate/rate-limit
-        validation_start = time.time()
-        is_valid, error_message = await validate_request_payload(
-            request_data,
-            max_messages=MAX_MESSAGES_PER_REQUEST,
-            max_images=MAX_IMAGES_PER_REQUEST,
-            max_text_length=MAX_TEXT_LENGTH,
-            enforce_image_max_bytes=enforce_image_size,
-            max_image_bytes=max_image_bytes,
-        )
-        metrics.metrics.validation_duration.record(time.time() - validation_start)
-
-        if not is_valid:
-            metrics.track_validation_failure("payload_post_injection", error_message)
-            logger.warning(f"Request validation failed after slash command injection: {error_message}")
-            if any(term in error_message.lower() for term in ("too many", "too long", "too large")):
-                raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=error_message)
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_message)
-
-        request_json = json.dumps(request_data.model_dump())
-        request_json_bytes = request_json.encode()
-        metrics.metrics.request_size_bytes.record(len(request_json_bytes))
+        provider = metrics_provider
+        model = metrics_model
+        initial_provider = metrics_provider
 
         try:
-            # Validate overall request size (post-injection JSON)
-            validate_request_size(request_json)
-        except ValueError as e:
-            logger.warning(f"Input validation error: {e}")
-            error_text = str(e)
-            if "request too large" in error_text.lower():
-                raise HTTPException(
-                    status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-                    detail="Request payload too large.",
-                ) from None
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid request.") from None
+            logger.debug("Provider/model resolution: {}", provider_debug)
+        except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as log_err:  # pragma: no cover - defensive
+            logger.debug("Provider/model resolution logging skipped: {}", log_err)
 
-        # Apply rate limiting after slash command mutation so estimates are accurate.
-        #
-        # When ResourceGovernor is active (via RGSimpleMiddleware), request-level
-        # limits are already enforced at ingress and we prefer RG for token
-        # accounting as well to avoid double enforcement.
-        # In some test scenarios we patch dependencies with Mocks. Historically we
-        # disabled rate limiting when mocks were detected to simplify unit tests.
-        # However, Chat_NEW integration tests rely on deterministic TEST_MODE rate
-        # limits to validate 429 behavior. So we only bypass the limiter for mocks
-        # when not running in TEST_MODE.
-        try:
-            _is_test_mode = _shared_is_test_mode()
-        except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
-            _is_test_mode = False
-
-        rg_active = False
-        try:
-            from tldw_Server_API.app.core.config import rg_enabled as _rg_enabled_flag
-
-            rg_active = bool(_rg_enabled_flag(False))
-        except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(
-                "Chat RG: rg_enabled lookup failed; disabling RG path: {}",
-                exc,
-            )
-            rg_active = False
-
-        # ResourceGovernor is attached in middleware and the governor/policy_loader
-        # are stored on app.state. Use them when present to enforce tokens with
-        # correct per-request units (and durable tokens/day caps via the ledger).
-        rg_gov = None
-        rg_loader = None
-        if request is not None:
+        context = None
+        if audit_service:
             try:
-                rg_gov = getattr(request.app.state, "rg_governor", None)
-                rg_loader = getattr(request.app.state, "rg_policy_loader", None)
+                context = AuditContext(
+                    user_id=user_id,
+                    request_id=request_id,
+                    ip_address=request.client.host if request and hasattr(request, "client") else None,
+                    endpoint="/chat/completions",
+                    method="POST",
+                )
+                await audit_service.log_event(
+                    event_type=AuditEventType.API_REQUEST,
+                    context=context,
+                    action="chat_completion_request",
+                    metadata={
+                        "model": model,
+                        "provider": provider,
+                        "message_count": len(request_data.messages),
+                        "streaming": request_data.stream,
+                        "has_tools": bool(request_data.tools),
+                        "conversation_id": request_data.conversation_id,
+                    },
+                )
+            except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as log_error:
+                logger.warning(f"Failed to log audit event: {log_error}")
+
+        try:
+            usage_log.log_event(
+                "chat.completions",
+                tags=[provider, model],
+                metadata={"message_count": len(request_data.messages), "stream": bool(request_data.stream)},
+            )
+        except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as _usage_log_err:
+            logger.debug(f"Usage event logging failed: {_usage_log_err}")
+
+        _rg_handle_id = None
+        _rg_policy_id = None
+        rg_finalized = False
+
+        # Billing: initialized after request_json is available (see below)
+        _billing_enforcer: LimitEnforcer | None = None
+        _billing_enforcer_entered = False
+
+        try:
+            _track_request_cm = metrics.track_request(
+                provider=provider, model=model, streaming=request_data.stream, client_id=client_id
+            )
+            span = await _track_request_cm.__aenter__()
+        except BaseException:
+            raise
+        try:
+            # Authentication is enforced via get_request_user dependency (JWT or X-API-KEY).
+            # If it fails, FastAPI raises 401 before reaching here. No further checks needed.
+
+            # Slash command handling: compute, moderate, then optionally inject
+            try:
+                if command_router.commands_enabled() and request_data and request_data.messages:
+                    # Locate the most recent user message text
+                    last_user_idx = None
+                    last_text = None
+                    for idx in range(len(request_data.messages) - 1, -1, -1):
+                        m = request_data.messages[idx]
+                        if getattr(m, 'role', None) == 'user':
+                            if isinstance(m.content, str):
+                                last_text = m.content
+                                last_user_idx = idx
+                                break
+                            elif isinstance(m.content, list):
+                                for part in m.content:
+                                    if getattr(part, 'type', None) == 'text' and isinstance(getattr(part, 'text', None), str):
+                                        last_text = part.text
+                                        last_user_idx = idx
+                                        break
+                                if last_user_idx is not None:
+                                    break
+                    if last_user_idx is not None and isinstance(last_text, str):
+                        parsed = command_router.parse_slash_command(last_text)
+                        if parsed:
+                            cmd_name, cmd_args = parsed
+                            ctx = command_router.CommandContext(
+                                user_id=str(getattr(current_user, 'id', 'anonymous')),
+                                auth_user_id=int(getattr(current_user, 'id', 0)) if getattr(current_user, 'id', None) is not None else None,
+                                request_meta={
+                                    'endpoint': '/chat/completions',
+                                    'auth_user_id': int(getattr(current_user, 'id', 0)) if getattr(current_user, 'id', None) is not None else None,
+                                    'conversation_id': request_data.conversation_id,
+                                    'character_id': request_data.character_id,
+                                    'chat_db': chat_db,
+                                    'user_base_dir': user_base_dir,
+                                    'selected_provider': selected_provider,
+                                    'selected_model': selected_model,
+                                    'tools': request_data.tools,
+                                },
+                            )
+                            result = await command_router.async_dispatch_command(ctx, cmd_name, cmd_args)
+                            inj_mode = command_router.get_injection_mode()
+                            override = getattr(request_data, 'slash_command_injection_mode', None)
+                            if isinstance(override, str) and override.lower() in {"system", "preface", "replace"}:
+                                inj_mode = override.lower()
+                            inj_meta = {
+                                'command': cmd_name,
+                                'args': cmd_args,
+                                'mode': inj_mode,
+                                'result_ok': bool(result.ok),
+                                'error': (result.metadata or {}).get('error') if hasattr(result, 'metadata') else None,
+                                'rbac': (result.metadata or {}).get('rbac') if hasattr(result, 'metadata') else None,
+                                'conversation_id': request_data.conversation_id,
+                            }
+                            # Prepare content for injection and run input moderation on it
+                            content_text = command_router.build_injection_text(cmd_name, result.content)
+                            moderated_content_text = content_text
+                            inj_mod = {
+                                'action': 'pass',
+                                'blocked': False,
+                                'category': None,
+                                'pattern': None,
+                                'redacted': False,
+                            }
+                            try:
+                                moderation = get_moderation_service()
+                                # Determine effective policy for this user/client
+                                req_user_id = None
+                                try:
+                                    if request is not None and hasattr(request, "state"):
+                                        req_user_id = getattr(request.state, "user_id", None)
+                                except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+                                    req_user_id = None
+                                policy = moderation.get_effective_policy(str(req_user_id) if req_user_id is not None else client_id)
+                                action, redacted, matched, category = moderation.evaluate_action(content_text, policy, 'input')
+                                if action and action != 'pass':
+                                    inj_mod['action'] = action
+                                    inj_mod['category'] = category
+                                    inj_mod['pattern'] = matched
+                                    if action == 'redact':
+                                        moderated_content_text = moderation.redact_text(content_text, policy)
+                                        inj_mod['redacted'] = True
+                                    elif action == 'block':
+                                        inj_mod['blocked'] = True
+                                # Track moderation for metrics
+                                with contextlib.suppress(_CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS):
+                                    metrics.track_moderation_input(str(req_user_id or client_id), inj_mod['action'], category=(inj_mod.get('category') or "default"))
+                                    # Audit moderation decision
+                                    await write_mandatory_moderation_audit(
+                                        audit_service=audit_service,
+                                        audit_context=context,
+                                        audit_event_type=AuditEventType.SECURITY_VIOLATION,
+                                        action="moderation.input",
+                                        result=("failure" if inj_mod['blocked'] else "success"),
+                                        metadata={"phase": "input", "action": inj_mod['action'], "pattern": inj_mod.get('pattern'), "category": inj_mod.get('category')},
+                                    )
+                                    if inj_mod["action"] != "pass" and is_moderation_review_capture_enabled():
+                                        try:
+                                            await asyncio.to_thread(
+                                                partial(
+                                                    capture_moderation_review_item,
+                                                    phase="input",
+                                                    action=str(inj_mod["action"]),
+                                                    excerpt="[matched content redacted]",
+                                                    category=inj_mod.get("category"),
+                                                    matched_pattern=inj_mod.get("pattern"),
+                                                    effective_policy=policy.to_dict() if hasattr(policy, "to_dict") else {},
+                                                    source_type="chat",
+                                                    source_id=str(request_data.conversation_id) if request_data.conversation_id else None,
+                                                    user_id=str(req_user_id or client_id) if (req_user_id or client_id) else None,
+                                                    session_id=None,
+                                                )
+                                            )
+                                        except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
+                                            logger.warning(
+                                                "Moderation review capture failed in chat endpoint: {}: {}",
+                                                type(exc).__name__,
+                                                str(exc),
+                                            )
+                            except MandatoryAuditWriteError as exc:
+                                raise HTTPException(
+                                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                                    detail=_mandatory_audit_unavailable_detail(),
+                                ) from exc
+                            except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as _mod_err:
+                                logger.debug(f"Slash command moderation step skipped due to error: {_mod_err}")
+
+                            # Update injection metadata with moderation outcome prior to audit logging
+                            try:
+                                inj_meta['moderation'] = inj_mod
+                                if inj_mod.get('blocked'):
+                                    inj_meta['result_ok'] = False
+                            except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+                                pass
+
+                            # Audit the command execution (with moderation outcome attached)
+                            try:
+                                if audit_service and context:
+                                    await audit_service.log_event(
+                                        event_type=AuditEventType.API_REQUEST,
+                                        context=context,
+                                        action="chat.command.executed",
+                                        result=("success" if (result.ok and not inj_mod.get('blocked')) else "failure"),
+                                        metadata=inj_meta,
+                                    )
+                            except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as _ae:
+                                logger.debug(f"Slash command audit log skipped: {_ae}")
+
+                            # Mutate request messages for injection (use moderated/sanitized text) when not blocked
+                            if not inj_mod.get('blocked'):
+                                if inj_mode == 'preface':
+                                    # Prefix the user's message
+                                    if isinstance(request_data.messages[last_user_idx].content, str):
+                                        rest = (cmd_args or '').strip()
+                                        new_user_text = (f"{moderated_content_text}\n\n{rest}" if rest else f"{moderated_content_text}")
+                                        request_data.messages[last_user_idx].content = new_user_text
+                                    else:
+                                        parts = request_data.messages[last_user_idx].content
+                                        for part in parts:
+                                            if getattr(part, 'type', None) == 'text':
+                                                rest = (cmd_args or '').strip()
+                                                part.text = (f"{moderated_content_text}\n\n{rest}" if rest else f"{moderated_content_text}")
+                                                break
+                                elif inj_mode == 'replace':
+                                    # Replace the user's message entirely with the command result
+                                    if isinstance(request_data.messages[last_user_idx].content, str):
+                                        request_data.messages[last_user_idx].content = moderated_content_text
+                                    else:
+                                        parts = request_data.messages[last_user_idx].content
+                                        for part in parts:
+                                            if getattr(part, 'type', None) == 'text':
+                                                part.text = moderated_content_text
+                                                break
+                                else:
+                                    # System injection and strip the command from user text
+                                    if isinstance(request_data.messages[last_user_idx].content, str):
+                                        request_data.messages[last_user_idx].content = (cmd_args or '').strip()
+                                    else:
+                                        parts = request_data.messages[last_user_idx].content
+                                        for part in parts:
+                                            if getattr(part, 'type', None) == 'text':
+                                                part.text = (cmd_args or '').strip()
+                                                break
+                                    try:
+                                        # Use model_construct to bypass schema validation for system-command injections;
+                                        # the full payload is validated after mutation.
+                                        sys_msg = ChatCompletionSystemMessageParam.model_construct(
+                                            role="system",
+                                            content=moderated_content_text,
+                                            name="system-command",
+                                        )
+                                        # Attach metadata if possible
+                                        with contextlib.suppress(_CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS):
+                                            sys_msg.metadata = {"tldw_injection": inj_meta, "moderation": inj_mod}
+                                        request_data.messages.append(sys_msg)
+                                    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as inj_err:
+                                        logger.debug(f"Failed to append system injection message: {inj_err}")
+            except HTTPException as _cmd_err:
+                detail = getattr(_cmd_err, "detail", None)
+                if (
+                    _cmd_err.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+                    and isinstance(detail, dict)
+                    and detail.get("error_code") == "mandatory_audit_unavailable"
+                ):
+                    raise
+                logger.debug(f"Slash command handling skipped due to error: {_cmd_err}")
+            except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as _cmd_err:
+                logger.debug(f"Slash command handling skipped due to error: {_cmd_err}")
+
+            # Recompute request payload after slash command injection and revalidate/rate-limit
+            validation_start = time.time()
+            is_valid, error_message = await validate_request_payload(
+                request_data,
+                max_messages=MAX_MESSAGES_PER_REQUEST,
+                max_images=MAX_IMAGES_PER_REQUEST,
+                max_text_length=MAX_TEXT_LENGTH,
+                enforce_image_max_bytes=enforce_image_size,
+                max_image_bytes=max_image_bytes,
+            )
+            metrics.metrics.validation_duration.record(time.time() - validation_start)
+
+            if not is_valid:
+                metrics.track_validation_failure("payload_post_injection", error_message)
+                logger.warning(f"Request validation failed after slash command injection: {error_message}")
+                if any(term in error_message.lower() for term in ("too many", "too long", "too large")):
+                    raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=error_message)
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_message)
+
+            request_json = json.dumps(request_data.model_dump())
+            request_json_bytes = request_json.encode()
+            metrics.metrics.request_size_bytes.record(len(request_json_bytes))
+
+            try:
+                # Validate overall request size (post-injection JSON)
+                validate_request_size(request_json)
+            except ValueError as e:
+                logger.warning(f"Input validation error: {e}")
+                error_text = str(e)
+                if "request too large" in error_text.lower():
+                    raise HTTPException(
+                        status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                        detail="Request payload too large.",
+                    ) from None
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid request.") from None
+
+            # Apply rate limiting after slash command mutation so estimates are accurate.
+            #
+            # When ResourceGovernor is active (via RGSimpleMiddleware), request-level
+            # limits are already enforced at ingress and we prefer RG for token
+            # accounting as well to avoid double enforcement.
+            # In some test scenarios we patch dependencies with Mocks. Historically we
+            # disabled rate limiting when mocks were detected to simplify unit tests.
+            # However, Chat_NEW integration tests rely on deterministic TEST_MODE rate
+            # limits to validate 429 behavior. So we only bypass the limiter for mocks
+            # when not running in TEST_MODE.
+            try:
+                _is_test_mode = _shared_is_test_mode()
+            except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+                _is_test_mode = False
+
+            rg_active = False
+            try:
+                from tldw_Server_API.app.core.config import rg_enabled as _rg_enabled_flag
+
+                rg_active = bool(_rg_enabled_flag(False))
             except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
                 logger.debug(
-                    "Chat RG: governor/policy_loader lookup failed; disabling RG path: {}",
+                    "Chat RG: rg_enabled lookup failed; disabling RG path: {}",
                     exc,
                 )
-                rg_gov = None
-                rg_loader = None
+                rg_active = False
 
-        rg_ready = bool(rg_active and rg_gov is not None and rg_loader is not None)
-
-        rate_limiter = None
-        if not rg_active:
-            rate_limiter = get_rate_limiter()
-            if (
-                not _is_test_mode
-                and (isinstance(chat_db, Mock) or isinstance(perform_chat_api_call, Mock))
-            ):
-                rate_limiter = None
-            # Ensure a limiter exists in TEST_MODE even if startup didn't init it
-            if _is_test_mode and rate_limiter is None:
+            # ResourceGovernor is attached in middleware and the governor/policy_loader
+            # are stored on app.state. Use them when present to enforce tokens with
+            # correct per-request units (and durable tokens/day caps via the ledger).
+            rg_gov = None
+            rg_loader = None
+            if request is not None:
                 try:
-                    from tldw_Server_API.app.core.Chat.rate_limiter import initialize_rate_limiter
-                    # Passing None lets initialize_rate_limiter read TEST_MODE env overrides
-                    rate_limiter = initialize_rate_limiter()  # type: ignore[arg-type]
-                except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+                    rg_gov = getattr(request.app.state, "rg_governor", None)
+                    rg_loader = getattr(request.app.state, "rg_policy_loader", None)
+                except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
+                    logger.debug(
+                        "Chat RG: governor/policy_loader lookup failed; disabling RG path: {}",
+                        exc,
+                    )
+                    rg_gov = None
+                    rg_loader = None
+
+            rg_ready = bool(rg_active and rg_gov is not None and rg_loader is not None)
+
+            rate_limiter = None
+            if not rg_active:
+                rate_limiter = get_rate_limiter()
+                if (
+                    not _is_test_mode
+                    and (isinstance(chat_db, Mock) or isinstance(perform_chat_api_call, Mock))
+                ):
                     rate_limiter = None
-
-        if rg_ready:
-            # Estimate tokens for rate limiting (heuristic).
-            estimated_tokens = estimate_tokens_from_json(_sanitize_json_for_rate_limit(request_json))
-            try:
-                # Derive policy_id from middleware route_map when present.
-                policy_id = str(
-                    getattr(request.state, "rg_policy_id", None) or "chat.default"
-                )
-                _rg_policy_id = policy_id
-
-                entity = derive_entity_key(request)
-                try:
-                    entity_scope, entity_value = entity.split(":", 1)
-                except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
-                    logger.debug(
-                        "Chat RG: entity split failed, using user fallback: {}",
-                        exc,
-                    )
-                    user_id = resolve_user_id_for_request(
-                        current_user,
-                        error_status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    )
-                    entity_scope, entity_value = "user", str(user_id)
-
-                # Best-effort backfill: if a tokens.daily_cap is configured,
-                # mirror today's legacy llm_usage_log totals into the ledger
-                # so upgrades preserve in-progress daily caps.
-                daily_cap = 0
-                try:
-                    pol = rg_loader.get_policy(policy_id) or {}
-                    daily_cap = int((pol.get("tokens") or {}).get("daily_cap") or 0)
-                except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
-                    logger.debug(
-                        "Chat RG: tokens.daily_cap lookup failed for policy_id={}: {}",
-                        policy_id,
-                        exc,
-                    )
-                    daily_cap = 0
-                if daily_cap > 0:
-                    # Best-effort helper is idempotent and internally guarded
-                    # by a per-process entity/day set, so hot-path overhead is
-                    # minimal after the first backfill.
+                # Ensure a limiter exists in TEST_MODE even if startup didn't init it
+                if _is_test_mode and rate_limiter is None:
                     try:
-                        await backfill_legacy_tokens_to_ledger(
-                            entity_scope=str(entity_scope),
-                            entity_value=str(entity_value),
-                        )
+                        from tldw_Server_API.app.core.Chat.rate_limiter import initialize_rate_limiter
+                        # Passing None lets initialize_rate_limiter read TEST_MODE env overrides
+                        rate_limiter = initialize_rate_limiter()  # type: ignore[arg-type]
+                    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+                        rate_limiter = None
+
+            if rg_ready:
+                # Estimate tokens for rate limiting (heuristic).
+                estimated_tokens = estimate_tokens_from_json(_sanitize_json_for_rate_limit(request_json))
+                try:
+                    # Derive policy_id from middleware route_map when present.
+                    policy_id = str(
+                        getattr(request.state, "rg_policy_id", None) or "chat.default"
+                    )
+                    _rg_policy_id = policy_id
+
+                    entity = derive_entity_key(request)
+                    try:
+                        entity_scope, entity_value = entity.split(":", 1)
                     except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
                         logger.debug(
-                            "Chat RG: legacy tokens backfill failed for entity_scope={} entity_value={}: {}",
-                            entity_scope,
-                            entity_value,
+                            "Chat RG: entity split failed, using user fallback: {}",
                             exc,
                         )
+                        user_id = resolve_user_id_for_request(
+                            current_user,
+                            error_status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        )
+                        entity_scope, entity_value = "user", str(user_id)
 
-                completion_budget = 0
-                try:
-                    completion_budget = int(getattr(request_data, "max_tokens", 0) or 0)
-                except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
-                    completion_budget = 0
-
-                reserve_units = max(1, int(estimated_tokens or 0) + max(0, completion_budget))
-                dec, hid = await rg_gov.reserve(
-                    RGRequest(
-                        entity=entity,
-                        categories={"tokens": {"units": reserve_units}},
-                        tags={"policy_id": policy_id, "endpoint": request.url.path},
-                    ),
-                    op_id=request_id,
-                )
-                if not bool(getattr(dec, "allowed", False)):
-                    retry_after = int(getattr(dec, "retry_after", None) or 1)
-                    detail = f"Rate limit exceeded (ResourceGovernor policy={policy_id})"
-                    if retry_after >= 0:
-                        detail = f"{detail}; retry_after={retry_after}s"
-                    headers = {"Retry-After": str(retry_after)}
+                    # Best-effort backfill: if a tokens.daily_cap is configured,
+                    # mirror today's legacy llm_usage_log totals into the ledger
+                    # so upgrades preserve in-progress daily caps.
+                    daily_cap = 0
                     try:
                         pol = rg_loader.get_policy(policy_id) or {}
-                        per_min = int((pol.get("tokens") or {}).get("per_min") or 0)
-                        limit_val = per_min or int((pol.get("tokens") or {}).get("daily_cap") or 0)
-                        if limit_val:
-                            headers.update(
-                                {
-                                    "X-RateLimit-Limit": str(limit_val),
-                                    "X-RateLimit-Remaining": "0",
-                                    "X-RateLimit-Reset": str(retry_after),
-                                }
-                            )
-                            if per_min > 0:
-                                headers.update(
-                                    {
-                                        "X-RateLimit-PerMinute-Limit": str(per_min),
-                                        "X-RateLimit-PerMinute-Remaining": "0",
-                                        "X-RateLimit-Tokens-Remaining": "0",
-                                    }
-                                )
+                        daily_cap = int((pol.get("tokens") or {}).get("daily_cap") or 0)
                     except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
                         logger.debug(
-                            "Chat RG: header enrichment from policy failed for policy_id={}: {}",
+                            "Chat RG: tokens.daily_cap lookup failed for policy_id={}: {}",
                             policy_id,
                             exc,
                         )
-                    raise HTTPException(
-                        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                        detail=detail,
-                        headers=headers,
+                        daily_cap = 0
+                    if daily_cap > 0:
+                        # Best-effort helper is idempotent and internally guarded
+                        # by a per-process entity/day set, so hot-path overhead is
+                        # minimal after the first backfill.
+                        try:
+                            await backfill_legacy_tokens_to_ledger(
+                                entity_scope=str(entity_scope),
+                                entity_value=str(entity_value),
+                            )
+                        except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
+                            logger.debug(
+                                "Chat RG: legacy tokens backfill failed for entity_scope={} entity_value={}: {}",
+                                entity_scope,
+                                entity_value,
+                                exc,
+                            )
+
+                    completion_budget = 0
+                    try:
+                        completion_budget = int(getattr(request_data, "max_tokens", 0) or 0)
+                    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+                        completion_budget = 0
+
+                    reserve_units = max(1, int(estimated_tokens or 0) + max(0, completion_budget))
+                    dec, hid = await rg_gov.reserve(
+                        RGRequest(
+                            entity=entity,
+                            categories={"tokens": {"units": reserve_units}},
+                            tags={"policy_id": policy_id, "endpoint": request.url.path},
+                        ),
+                        op_id=request_id,
                     )
-                _rg_handle_id = hid
-            except HTTPException:
-                raise
-            except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as rg_exc:
-                logger.debug(f"RG tokens reserve skipped: {rg_exc}")
-
-        elif rate_limiter:
-            active_count = await _increment_active_request(user_id)
-            try:
-                # Estimate tokens for rate limiting (heuristic).
-                estimated_tokens = estimate_tokens_from_json(_sanitize_json_for_rate_limit(request_json))
-
-                # In TEST_MODE, avoid cross-test flakiness by scoping limiter to this request
-                # when no explicit conversation_id is provided. This prevents cumulative
-                # state from prior tests from causing 429s here, while leaving production
-                # behavior unchanged.
-                limiter_conversation_id = request_data.conversation_id
-                if _is_test_mode and not limiter_conversation_id:
-                    limiter_conversation_id = request_id
-
-                # Heuristic: detect concurrent bursts for this user (TEST_MODE only)
-                per_user_limit = getattr(getattr(rate_limiter, "config", None), "per_user_rpm", None)
-                enable_burst_suppression = (
-                    _is_test_mode
-                    and isinstance(per_user_limit, (int, float))
-                    and per_user_limit >= _RECENT_CALLS_MIN_CONCURRENT
-                )
-                concurrent_burst = active_count > 1
-                if enable_burst_suppression and not concurrent_burst:
-                    try:
-                        now_ts = time.time()
-                        dq = _recent_calls_by_user[str(user_id)]
-                        # prune window
-                        while dq and (now_ts - dq[0]) > _RECENT_CALLS_WINDOW_SEC:
-                            dq.popleft()
-                        dq.append(now_ts)
-                        concurrent_burst = len(dq) >= _RECENT_CALLS_MIN_CONCURRENT
-                    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
-                        concurrent_burst = False
-
-                limiter_user_id = user_id
-                if enable_burst_suppression and concurrent_burst:
-                    try:
-                        limiter_user_id = f"{user_id}:{request_id}"
-                    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
-                        limiter_user_id = user_id
-
-                allowed, rate_error = await rate_limiter.check_rate_limit(
-                    user_id=limiter_user_id,
-                    conversation_id=limiter_conversation_id,
-                    estimated_tokens=estimated_tokens,
-                )
-
-                # Shadow-mode comparison between legacy limiter and ResourceGovernor (observability-only).
-                if request is not None:
-                    try:
-                        await _maybe_rg_shadow_chat_decision(
-                            request=request,
-                            limiter_user_id=str(limiter_user_id),
-                            limiter_conversation_id=limiter_conversation_id,
-                            estimated_tokens=int(estimated_tokens or 0),
-                            legacy_allowed=bool(allowed),
-                        )
-                    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:  # noqa: BLE001 - defensive: RG shadow must not affect rate limiting
-                        # Shadow path must never affect primary rate-limiting behavior.
-                        logger.debug(
-                            "RG shadow helper failed; ignoring and continuing: {}",
-                            exc,
-                        )
-
-                if not allowed:
-                    metrics.track_rate_limit(user_id)
-                    if audit_service and context:
-                        await audit_service.log_event(
-                            event_type=AuditEventType.API_RATE_LIMITED,
-                            context=context,
-                            action="rate_limit_exceeded",
-                            metadata={"reason": rate_error},
-                        )
-                    # In TEST_MODE, try a short wait-for-capacity to reduce
-                    # suite-order flakiness in concurrency tests. If still denied,
-                    # surface as 503 (service busy) rather than 429 which those
-                    # tests do not assert on.
-                    if _is_test_mode:
-                        # Only apply wait/503 fallback for global capacity exhaustion;
-                        # keep 429 for per-user/conversation/token limits to satisfy
-                        # deterministic rate-limit tests.
-                        is_global_cap = (rate_error or "").lower().startswith("global rate limit exceeded")
-                        if is_global_cap or concurrent_burst:
-                            try:
-                                allowed_after_wait, _ = await rate_limiter.wait_for_capacity(
-                                    user_id=limiter_user_id,
-                                    conversation_id=limiter_conversation_id,
-                                    estimated_tokens=estimated_tokens,
-                                    timeout=5.0,
+                    if not bool(getattr(dec, "allowed", False)):
+                        retry_after = int(getattr(dec, "retry_after", None) or 1)
+                        detail = f"Rate limit exceeded (ResourceGovernor policy={policy_id})"
+                        if retry_after >= 0:
+                            detail = f"{detail}; retry_after={retry_after}s"
+                        headers = {"Retry-After": str(retry_after)}
+                        try:
+                            pol = rg_loader.get_policy(policy_id) or {}
+                            per_min = int((pol.get("tokens") or {}).get("per_min") or 0)
+                            limit_val = per_min or int((pol.get("tokens") or {}).get("daily_cap") or 0)
+                            if limit_val:
+                                headers.update(
+                                    {
+                                        "X-RateLimit-Limit": str(limit_val),
+                                        "X-RateLimit-Remaining": "0",
+                                        "X-RateLimit-Reset": str(retry_after),
+                                    }
                                 )
-                            except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
-                                allowed_after_wait = False
-                            if not allowed_after_wait:
+                                if per_min > 0:
+                                    headers.update(
+                                        {
+                                            "X-RateLimit-PerMinute-Limit": str(per_min),
+                                            "X-RateLimit-PerMinute-Remaining": "0",
+                                            "X-RateLimit-Tokens-Remaining": "0",
+                                        }
+                                    )
+                        except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
+                            logger.debug(
+                                "Chat RG: header enrichment from policy failed for policy_id={}: {}",
+                                policy_id,
+                                exc,
+                            )
+                        raise HTTPException(
+                            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                            detail=detail,
+                            headers=headers,
+                        )
+                    _rg_handle_id = hid
+                except HTTPException:
+                    raise
+                except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as rg_exc:
+                    logger.debug(f"RG tokens reserve skipped: {rg_exc}")
+
+            elif rate_limiter:
+                active_count = await _increment_active_request(user_id)
+                try:
+                    # Estimate tokens for rate limiting (heuristic).
+                    estimated_tokens = estimate_tokens_from_json(_sanitize_json_for_rate_limit(request_json))
+
+                    # In TEST_MODE, avoid cross-test flakiness by scoping limiter to this request
+                    # when no explicit conversation_id is provided. This prevents cumulative
+                    # state from prior tests from causing 429s here, while leaving production
+                    # behavior unchanged.
+                    limiter_conversation_id = request_data.conversation_id
+                    if _is_test_mode and not limiter_conversation_id:
+                        limiter_conversation_id = request_id
+
+                    # Heuristic: detect concurrent bursts for this user (TEST_MODE only)
+                    per_user_limit = getattr(getattr(rate_limiter, "config", None), "per_user_rpm", None)
+                    enable_burst_suppression = (
+                        _is_test_mode
+                        and isinstance(per_user_limit, (int, float))
+                        and per_user_limit >= _RECENT_CALLS_MIN_CONCURRENT
+                    )
+                    concurrent_burst = active_count > 1
+                    if enable_burst_suppression and not concurrent_burst:
+                        try:
+                            now_ts = time.time()
+                            dq = _recent_calls_by_user[str(user_id)]
+                            # prune window
+                            while dq and (now_ts - dq[0]) > _RECENT_CALLS_WINDOW_SEC:
+                                dq.popleft()
+                            dq.append(now_ts)
+                            concurrent_burst = len(dq) >= _RECENT_CALLS_MIN_CONCURRENT
+                        except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+                            concurrent_burst = False
+
+                    limiter_user_id = user_id
+                    if enable_burst_suppression and concurrent_burst:
+                        try:
+                            limiter_user_id = f"{user_id}:{request_id}"
+                        except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+                            limiter_user_id = user_id
+
+                    allowed, rate_error = await rate_limiter.check_rate_limit(
+                        user_id=limiter_user_id,
+                        conversation_id=limiter_conversation_id,
+                        estimated_tokens=estimated_tokens,
+                    )
+
+                    # Shadow-mode comparison between legacy limiter and ResourceGovernor (observability-only).
+                    if request is not None:
+                        try:
+                            await _maybe_rg_shadow_chat_decision(
+                                request=request,
+                                limiter_user_id=str(limiter_user_id),
+                                limiter_conversation_id=limiter_conversation_id,
+                                estimated_tokens=int(estimated_tokens or 0),
+                                legacy_allowed=bool(allowed),
+                            )
+                        except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:  # noqa: BLE001 - defensive: RG shadow must not affect rate limiting
+                            # Shadow path must never affect primary rate-limiting behavior.
+                            logger.debug(
+                                "RG shadow helper failed; ignoring and continuing: {}",
+                                exc,
+                            )
+
+                    if not allowed:
+                        metrics.track_rate_limit(user_id)
+                        if audit_service and context:
+                            await audit_service.log_event(
+                                event_type=AuditEventType.API_RATE_LIMITED,
+                                context=context,
+                                action="rate_limit_exceeded",
+                                metadata={"reason": rate_error},
+                            )
+                        # In TEST_MODE, try a short wait-for-capacity to reduce
+                        # suite-order flakiness in concurrency tests. If still denied,
+                        # surface as 503 (service busy) rather than 429 which those
+                        # tests do not assert on.
+                        if _is_test_mode:
+                            # Only apply wait/503 fallback for global capacity exhaustion;
+                            # keep 429 for per-user/conversation/token limits to satisfy
+                            # deterministic rate-limit tests.
+                            is_global_cap = (rate_error or "").lower().startswith("global rate limit exceeded")
+                            if is_global_cap or concurrent_burst:
+                                try:
+                                    allowed_after_wait, _ = await rate_limiter.wait_for_capacity(
+                                        user_id=limiter_user_id,
+                                        conversation_id=limiter_conversation_id,
+                                        estimated_tokens=estimated_tokens,
+                                        timeout=5.0,
+                                    )
+                                except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+                                    allowed_after_wait = False
+                                if not allowed_after_wait:
+                                    raise HTTPException(
+                                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                                        detail="Service busy. Please retry.",
+                                    )
+                                # If capacity became available, continue processing
+                            else:
                                 raise HTTPException(
-                                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                                    detail="Service busy. Please retry.",
+                                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                                    detail=rate_error or "Rate limit exceeded",
                                 )
-                            # If capacity became available, continue processing
                         else:
                             raise HTTPException(
                                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                                 detail=rate_error or "Rate limit exceeded",
                             )
-                    else:
-                        raise HTTPException(
-                            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                            detail=rate_error or "Rate limit exceeded",
-                        )
-            finally:
-                await _decrement_active_request(user_id)
+                finally:
+                    await _decrement_active_request(user_id)
 
-        # Billing: LLM token enforcement via context manager (tracks actual usage)
-        if enforcement_enabled() and billing_org_id is not None and not _billing_enforcer_entered:
-            try:
-                _est = estimate_tokens_from_json(
-                    _sanitize_json_for_rate_limit(request_json)
-                ) if request_json else 1000
-                _billing_enforcer = LimitEnforcer(
-                    billing_org_id,
-                    LimitCategory.LLM_TOKENS_MONTH,
-                    estimated_units=max(1, _est),
-                )
-                await _billing_enforcer.__aenter__()
-                _billing_enforcer_entered = True
-            except HTTPException:
-                raise
-            except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as _billing_err:
-                logger.debug(f"Billing token pre-check failed (fail-open): {_billing_err}")
-                _billing_enforcer = None
-        try:
-            input_moderation_chat_type = await resolve_input_moderation_chat_type(
-                chat_db=chat_db,
-                request_data=request_data,
-                loop=current_loop,
-            )
-        except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug("resolve_input_moderation_chat_type failed; defaulting to None: {}", exc)
-            input_moderation_chat_type = None
-
-        # Guardian & self-monitoring integration
-        _supervised_engine = None
-        _self_mon_service = None
-        _dep_user_id = None
-        try:
-            from tldw_Server_API.app.core.feature_flags import is_guardian_enabled, is_self_monitoring_enabled
-
-            guardian_enabled = is_guardian_enabled()
-            self_monitoring_enabled = is_self_monitoring_enabled()
-            if (
-                current_user
-                and getattr(current_user, "id", None) is not None
-                and (guardian_enabled or self_monitoring_enabled)
-            ):
-                _guardian_runtime = bootstrap_guardian_moderation_runtime(
-                    user_id=current_user.id,
-                    dependent_user_id=str(current_user.id),
-                    chat_type=input_moderation_chat_type,
-                )
-                _dep_user_id = _guardian_runtime.dependent_user_id
-
-                if guardian_enabled and _guardian_runtime.supervised_engine:
-                    _supervised_engine = _guardian_runtime.supervised_engine
-
-                if self_monitoring_enabled and _guardian_runtime.guardian_db:
-                    from tldw_Server_API.app.core.Monitoring.self_monitoring_service import get_self_monitoring_service
-                    _self_mon_service = get_self_monitoring_service(_guardian_runtime.guardian_db)
-        except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
-            logger.warning("Guardian moderation bootstrap failed; continuing with base moderation only: {}", exc)
-
-        # Moderation: apply global/per-user policy to input messages (redact or block)
-        try:
-            moderation = get_moderation_service()
-            try:
-                mon = get_topic_monitoring_service()
-            except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
-                mon = None
-            await moderate_input_messages(
-                request_data=request_data,
-                request=request,
-                moderation_service=moderation,
-                topic_monitoring_service=mon,
-                metrics=metrics,
-                audit_service=audit_service,
-                audit_context=context,
-                client_id=client_id,
-                audit_event_type=AuditEventType.SECURITY_VIOLATION,
-                supervised_policy_engine=_supervised_engine,
-                self_monitoring_service=_self_mon_service,
-                dependent_user_id=_dep_user_id,
-                chat_type=input_moderation_chat_type,
-            )
-        except MandatoryAuditWriteError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=_mandatory_audit_unavailable_detail(),
-            ) from exc
-        except HTTPException:
-            raise
-        except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as e:
-            logger.warning(f"Moderation input processing error: {e}")
-
-        # Normalize provider/model on the request for downstream logic (already resolved)
-        provider = selected_provider
-        model = selected_model or model
-
-        def _get_default_model_for_provider_name(target_provider: str) -> str | None:
-            override_default = get_override_default_model(target_provider)
-            if override_default:
-                return override_default
-            override = get_llm_provider_override(target_provider)
-            if override and override.allowed_models:
-                return override.allowed_models[0]
-            normalized = target_provider.replace(".", "_").replace("-", "_")
-            env_key = f"DEFAULT_MODEL_{normalized.upper()}"
-            env_val = os.getenv(env_key)
-            if env_val:
-                return env_val
-            config_key = f"default_model_{normalized.lower()}"
-            if _chat_config:
-                cfg_val = _chat_config.get(config_key)
-                if cfg_val:
-                    return cfg_val
-            return None
-
-        if not request_model_was_explicit:
-            default_model_for_provider = _get_default_model_for_provider_name(provider)
-            if default_model_for_provider:
-                model = default_model_for_provider
-                request_data.model = default_model_for_provider
-        if not model:
-            # Fail fast with a clear client error instead of cascading into a 500
-            # when downstream provider adapters require an explicit model.
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    f"Model is required for provider '{provider}'. Please select a model in the WebUI "
-                    f"or configure a default via environment variable 'DEFAULT_MODEL_{provider.replace('.', '_').replace('-', '_').upper()}'"
-                ),
-            )
-
-        override_error = validate_provider_override(provider, model)
-        if override_error:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=override_error)
-
-        persona_alias_used = _resolve_character_id_from_persona_alias(request_data)
-
-        user_identifier_for_log = getattr(chat_db, 'client_id', 'unknown_client') # Example from original
-        logger.info(
-            f"Chat completion request. Provider={provider}, Model={request_data.model}, User={user_identifier_for_log}, "
-            f"Stream={request_data.stream}, ConvID={request_data.conversation_id}, CharID={request_data.character_id}"
-        )
-
-        character_card_for_context: dict[str, Any] | None = None
-        final_conversation_id: str | None = request_data.conversation_id
-        persona_debug_requested = bool(getattr(request_data, "persona_debug", False))
-        persona_debug_meta: dict[str, Any] | None = None
-        persona_selected_exemplars: list[dict[str, Any]] = []
-        persona_budget_tokens_used = int(_PERSONA_EXEMPLAR_DEFAULT_BUDGET)
-        persona_budget_auto_adjusted = False
-        persona_budget_adjustment_reason: str | None = None
-
-        try:
-            # In TEST_MODE or when explicitly enabled via config/env, allow
-            # auto-switching from 'local-llm' to 'openai' if an OpenAI key
-            # is present. This is primarily to satisfy integration tests that
-            # expect config-driven defaults.
-            _test_mode_flag = _shared_is_test_mode()
-            _autoswitch_enabled = ALLOW_AUTOSWITCH_TO_OPENAI or _test_mode_flag
-            if (
-                _autoswitch_enabled
-                and provider == "local-llm"
-                and getattr(request_data, "api_provider", None) in (None, "")
-            ):
-                openai_key, _openai_debug = resolve_provider_api_key(
-                    "openai",
-                    prefer_module_keys_in_tests=True,
-                )
-                if openai_key:
-                    provider = "openai"
-
-            target_api_provider = provider  # Already determined (possibly adjusted above)
-            credential_handle = await credential_runtime.resolve(target_api_provider)
-            credential_handles = {
-                target_api_provider.strip().lower(): credential_handle,
-            }
-            provider_api_key = credential_handle.api_key
-            app_config_override = credential_handle.app_config
-
-            async def _mark_provider_used(name: str) -> None:
-                handle = await credential_runtime.resolve(name)
-                await credential_runtime.mark_used(handle)
-
-            # Centralized provider capabilities
-            try:
-                from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
-            except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
-
-                def provider_requires_api_key(_provider: str) -> bool:  # type: ignore[misc]
-                    return True
-
-            # Allow explicit mock forcing in tests even if provider key is absent
-            _force_mock = _shared_is_truthy(os.getenv("CHAT_FORCE_MOCK", ""))
-            if provider_requires_api_key(target_api_provider) and not provider_api_key and not _force_mock:
-                record_byok_missing_credentials(target_api_provider, operation="chat")
-
-                # Distinguish "no LLM providers configured at all" (fresh install) from
-                # "this specific provider's key is missing" (user picked a provider that
-                # lacks credentials).  The former gets a dedicated error code so the
-                # frontend can show onboarding-style guidance.
-                if not explicit_provider_requested and not _any_cloud_provider_has_key():
-                    logger.error(
-                        "No LLM provider API keys are configured on this server. "
-                        "At least one provider key (e.g. OPENAI_API_KEY) must be set."
+            # Billing: LLM token enforcement via context manager (tracks actual usage)
+            if enforcement_enabled() and billing_org_id is not None and not _billing_enforcer_entered:
+                try:
+                    _est = estimate_tokens_from_json(
+                        _sanitize_json_for_rate_limit(request_json)
+                    ) if request_json else 1000
+                    _billing_enforcer = LimitEnforcer(
+                        billing_org_id,
+                        LimitCategory.LLM_TOKENS_MONTH,
+                        estimated_units=max(1, _est),
                     )
-                    raise HTTPException(
-                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                        detail={
-                            "error": "no_provider_configured",
-                            "message": (
-                                "No LLM provider is configured. "
-                                "Contact your administrator or check the provider configuration."
-                            ),
-                            "docs_url": "/docs#section/LLM-Providers",
-                            "admin_url": "/admin/providers",
-                        },
-                    )
-
-                logger.error(f"API key for provider '{target_api_provider}' is missing or not configured.")
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail={
-                        "error_code": "missing_provider_credentials",
-                        "message": f"Provider '{target_api_provider}' requires an API key. Please configure credentials.",
-                    },
-                )
-            if strict_model_selection and explicit_model_requested:
-                availability_error = _validate_explicit_model_availability(target_api_provider, model)
-                if availability_error:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=availability_error,
-                    )
-            # Avoid external calls for deterministic invalid-key sentinels in tests.
-            if _test_mode_flag and provider_api_key and provider_requires_api_key(target_api_provider):
-                invalid_patterns = ("invalid-", "test-invalid-", "bad-key-", "dummy-invalid-")
-                if any(str(provider_api_key).lower().startswith(p) for p in invalid_patterns):
-                    raise _provider_credential_http_exception_for_code("provider_authentication_failed")
-
-            # --- Character/Conversation Context, History, and Current Turn ---
-            continuation_runtime: dict[str, Any] = {}
-            (
-                character_card_for_context,
-                character_db_id_for_context,
-                final_conversation_id,
-                conversation_created_this_turn,
-                llm_payload_messages,
-                should_persist,
-            ) = await _build_context_and_messages_compat(
-                chat_db=chat_db,
-                request_data=request_data,
-                loop=current_loop,
-                metrics=metrics,
-                default_save_to_db=DEFAULT_SAVE_TO_DB,
-                final_conversation_id=final_conversation_id,
-                save_message_fn=_save_message_turn_to_db,
-                runtime_state=continuation_runtime,
-            )
-            continuation_meta = (
-                continuation_runtime.get("tldw_continuation")
-                if isinstance(continuation_runtime.get("tldw_continuation"), dict)
-                else None
-            )
-            assistant_parent_message_id = (
-                str(continuation_runtime.get("assistant_parent_message_id"))
-                if continuation_runtime.get("assistant_parent_message_id")
-                else None
-            )
-            assistant_context = (
-                continuation_runtime.get("assistant_context")
-                if isinstance(continuation_runtime.get("assistant_context"), dict)
-                else None
-            )
+                    await _billing_enforcer.__aenter__()
+                    _billing_enforcer_entered = True
+                except HTTPException:
+                    raise
+                except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as _billing_err:
+                    logger.debug(f"Billing token pre-check failed (fail-open): {_billing_err}")
+                    _billing_enforcer = None
             try:
-                output_moderation_chat_type = resolve_moderation_chat_type(
+                input_moderation_chat_type = await resolve_input_moderation_chat_type(
+                    chat_db=chat_db,
                     request_data=request_data,
-                    assistant_context=assistant_context,
-                )
-            except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug("resolve_moderation_chat_type failed; defaulting to None: {}", exc)
-                output_moderation_chat_type = None
-
-            # --- Prompt Templating (system + content transforms) ---
-            final_system_message, templated_llm_payload = apply_prompt_templating(
-                request_data=request_data,
-                character_card=character_card_for_context or {},
-                llm_payload_messages=llm_payload_messages,
-            )
-
-            # Persona exemplar augmentation (character chat path)
-            persona_strategy = _resolve_persona_strategy(
-                getattr(request_data, "persona_exemplar_strategy", None)
-            )
-            if persona_debug_requested:
-                persona_debug_meta = {
-                    "debug_id": uuid.uuid4().hex,
-                    "enabled": True,
-                    "strategy": persona_strategy,
-                    "selection": {
-                        "selected_count": 0,
-                        "selected_exemplar_ids": [],
-                        "budget_tokens_used": 0,
-                        "coverage": {
-                            "openers": 0,
-                            "emphasis": 0,
-                            "enders": 0,
-                            "catchphrases_used": 0,
-                        },
-                    },
-                    "applied": False,
-                    "reason": "not_run",
-                }
-
-            persona_assistant_id = (
-                str(assistant_context.get("assistant_id") or "").strip()
-                if isinstance(assistant_context, dict)
-                else ""
-            )
-            is_persona_backed_chat = (
-                isinstance(assistant_context, dict)
-                and assistant_context.get("assistant_kind") == "persona"
-                and bool(persona_assistant_id)
-            )
-            telemetry_assistant_kind = (
-                str(assistant_context.get("assistant_kind") or "").strip()
-                if isinstance(assistant_context, dict)
-                else ""
-            )
-            telemetry_assistant_id_from_context = (
-                str(assistant_context.get("assistant_id") or "").strip()
-                if isinstance(assistant_context, dict)
-                else ""
-            )
-            if is_persona_backed_chat:
-                telemetry_assistant_id = persona_assistant_id
-            elif telemetry_assistant_id_from_context:
-                telemetry_assistant_id = telemetry_assistant_id_from_context
-            elif telemetry_assistant_kind != "persona" and character_db_id_for_context is not None:
-                telemetry_assistant_id = str(character_db_id_for_context)
-            else:
-                telemetry_assistant_id = ""
-            should_record_persona_telemetry = (
-                is_persona_backed_chat or character_db_id_for_context is not None
-            )
-
-            if persona_strategy != "off" and is_persona_backed_chat:
-                persona_exemplars = await asyncio.to_thread(
-                    chat_db.list_persona_exemplars,
-                    user_id=str(user_id),
-                    persona_id=persona_assistant_id,
-                    include_disabled=False,
-                    include_deleted=False,
-                    limit=50,
-                    offset=0,
-                )
-                runtime_guidance = _assemble_persona_runtime_guidance(
-                    system_message=final_system_message,
-                    assistant_context=assistant_context,
-                    exemplars=persona_exemplars,
-                    current_turn_text=_extract_latest_user_turn_text(templated_llm_payload),
-                )
-                final_system_message = runtime_guidance["system_message"]
-                persona_selected_exemplars = list(runtime_guidance["selected_exemplars"])
-
-                if persona_debug_meta is not None:
-                    persona_debug_meta["source"] = "persona_profile"
-                    persona_debug_meta["applied"] = bool(runtime_guidance["applied"])
-                    persona_debug_meta["reason"] = (
-                        "selected"
-                        if runtime_guidance["applied"]
-                        else ("no_exemplars_selected" if persona_exemplars else "no_enabled_exemplars")
-                    )
-                    persona_debug_meta["selection"] = {
-                        "selected_count": len(runtime_guidance["selected_exemplars"]),
-                        "selected_exemplar_ids": [
-                            str(item.get("id"))
-                            for item in runtime_guidance["selected_exemplars"]
-                            if item.get("id")
-                        ],
-                        "budget_tokens_used": sum(int(section[2]) for section in runtime_guidance["sections"]),
-                        "coverage": {
-                            "boundary": sum(
-                                1
-                                for item in runtime_guidance["selected_exemplars"]
-                                if str(item.get("kind") or "") == "boundary"
-                            ),
-                            "style_like": sum(
-                                1
-                                for item in runtime_guidance["selected_exemplars"]
-                                if str(item.get("kind") or "") != "boundary"
-                            ),
-                        },
-                    }
-                    persona_debug_meta["assembly_sections"] = [
-                        str(name) for name, _, _ in runtime_guidance["sections"]
-                    ]
-                    persona_debug_meta["rejected_exemplars"] = [
-                        {
-                            "id": str(item.get("id") or ""),
-                            "reason": str(item.get("reason") or ""),
-                        }
-                        for item in runtime_guidance["rejected_exemplars"]
-                    ]
-            elif persona_strategy != "off" and character_db_id_for_context is not None:
-                user_turn_text = _extract_latest_user_turn_text(getattr(request_data, "messages", []))
-                if user_turn_text:
-                    budget_override = getattr(request_data, "persona_exemplar_budget_tokens", None)
-                    budget_tokens, persona_budget_auto_adjusted, persona_budget_adjustment_reason = (
-                        _resolve_effective_persona_budget_tokens(
-                            budget_override=budget_override,
-                            user_id=user_id,
-                            character_id=character_db_id_for_context,
-                        )
-                    )
-                    persona_budget_tokens_used = int(budget_tokens)
-                    if persona_budget_auto_adjusted:
-                        logger.info(
-                            "Persona budget auto-adjust applied user_id={} character_id={} base={} adjusted={} reason={}",
-                            str(user_id or "unknown"),
-                            character_db_id_for_context,
-                            int(_PERSONA_EXEMPLAR_DEFAULT_BUDGET),
-                            int(budget_tokens),
-                            persona_budget_adjustment_reason or "unspecified",
-                        )
-                    selector_config = PersonaExemplarSelectorConfig(
-                        budget_tokens=max(1, budget_tokens),
-                        max_exemplar_tokens=120,
-                        mmr_lambda=0.7,
-                    )
-                    embedding_callback = None
-                    if persona_strategy in {"hybrid", "embeddings"}:
-
-                        def _embedding_callback(turn_text: str, candidates: list[dict[str, Any]]) -> dict[str, float]:
-                            return score_exemplars_with_embeddings(
-                                turn_text,
-                                candidates,
-                                user_id=user_id,
-                                character_id=character_db_id_for_context,
-                            )
-
-                        embedding_callback = _embedding_callback
-
-                    selected_result = select_character_exemplars(
-                        db=chat_db,
-                        character_id=character_db_id_for_context,
-                        user_turn=user_turn_text,
-                        config=selector_config,
-                        embedding_score_fn=embedding_callback,
-                    )
-                    persona_selected_exemplars = list(selected_result.selected)
-                    persona_guidance_block = _format_persona_exemplar_guidance(selected_result.selected)
-                    if persona_guidance_block:
-                        if final_system_message and final_system_message.strip():
-                            final_system_message = f"{final_system_message.rstrip()}\n\n{persona_guidance_block}"
-                        else:
-                            final_system_message = persona_guidance_block
-
-                    if persona_debug_meta is not None:
-                        persona_debug_meta["applied"] = bool(persona_guidance_block)
-                        persona_debug_meta["reason"] = "selected" if persona_guidance_block else "no_exemplars_selected"
-                        persona_debug_meta["selection"] = {
-                            "selected_count": len(selected_result.selected),
-                            "selected_exemplar_ids": [
-                                str(item.get("id")) for item in selected_result.selected if item.get("id")
-                            ],
-                            "budget_tokens_used": selected_result.budget_tokens_used,
-                            "coverage": selected_result.coverage,
-                        }
-                        persona_debug_meta["budget_tokens"] = selector_config.budget_tokens
-                        persona_debug_meta["budget_auto_adjusted"] = bool(persona_budget_auto_adjusted)
-                        if persona_budget_adjustment_reason:
-                            persona_debug_meta["budget_adjustment_reason"] = persona_budget_adjustment_reason
-                elif persona_debug_meta is not None:
-                    persona_debug_meta["reason"] = "no_user_turn_text"
-            elif persona_debug_meta is not None:
-                if persona_strategy == "off":
-                    persona_debug_meta["reason"] = "disabled_by_strategy"
-                elif character_db_id_for_context is None:
-                    persona_debug_meta["reason"] = "character_context_unavailable"
-
-            if persona_debug_meta is not None and "budget_tokens" not in persona_debug_meta:
-                persona_debug_meta["budget_tokens"] = int(persona_budget_tokens_used)
-                persona_debug_meta["budget_auto_adjusted"] = bool(persona_budget_auto_adjusted)
-                if persona_budget_adjustment_reason:
-                    persona_debug_meta["budget_adjustment_reason"] = persona_budget_adjustment_reason
-
-            if user_base_dir is not None and current_user and getattr(current_user, "id", None) is not None:
-                final_system_message = await build_system_message_with_skills_async(
-                    final_system_message,
-                    current_user.id,
-                    user_base_dir,
-                    db=chat_db,
-                )
-
-            system_message_id: str | None = None
-            if should_persist and final_conversation_id:
-                system_message_id = await _persist_system_message_if_needed(
-                    db=chat_db,
-                    conversation_id=final_conversation_id,
-                    system_message=final_system_message,
-                    save_message_fn=_save_message_turn_to_db,
                     loop=current_loop,
                 )
+            except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
+                logger.debug("resolve_input_moderation_chat_type failed; defaulting to None: {}", exc)
+                input_moderation_chat_type = None
 
-            def _resolve_llamacpp_grammar_record(target_provider: str) -> dict[str, Any] | None:
-                """Resolve the saved llama.cpp grammar record for the active provider."""
-                if target_provider != "llama.cpp" or getattr(request_data, "grammar_mode", None) != "library":
-                    return None
-                grammar_id = str(getattr(request_data, "grammar_id", "") or "").strip()
-                if not grammar_id:
-                    raise ChatBadRequestError(
-                        provider=target_provider,
-                        message="grammar_id is required when grammar_mode is 'library'",
+            # Guardian & self-monitoring integration
+            _supervised_engine = None
+            _self_mon_service = None
+            _dep_user_id = None
+            try:
+                from tldw_Server_API.app.core.feature_flags import is_guardian_enabled, is_self_monitoring_enabled
+
+                guardian_enabled = is_guardian_enabled()
+                self_monitoring_enabled = is_self_monitoring_enabled()
+                if (
+                    current_user
+                    and getattr(current_user, "id", None) is not None
+                    and (guardian_enabled or self_monitoring_enabled)
+                ):
+                    _guardian_runtime = bootstrap_guardian_moderation_runtime(
+                        user_id=current_user.id,
+                        dependent_user_id=str(current_user.id),
+                        chat_type=input_moderation_chat_type,
                     )
-                grammar_record = chat_db.get_chat_grammar(grammar_id)
-                if not isinstance(grammar_record, dict):
-                    raise ChatBadRequestError(
-                        provider=target_provider,
-                        message="Saved grammar could not be resolved",
-                    )
-                return grammar_record
+                    _dep_user_id = _guardian_runtime.dependent_user_id
 
-            llamacpp_grammar_record = _resolve_llamacpp_grammar_record(target_api_provider)
+                    if guardian_enabled and _guardian_runtime.supervised_engine:
+                        _supervised_engine = _guardian_runtime.supervised_engine
 
-            llm_final_system_message, llm_templated_payload = inject_research_context_into_prompt(
-                final_system_message=final_system_message,
-                templated_llm_payload=templated_llm_payload,
-                research_context=getattr(request_data, "research_context", None),
-            )
+                    if self_monitoring_enabled and _guardian_runtime.guardian_db:
+                        from tldw_Server_API.app.core.Monitoring.self_monitoring_service import get_self_monitoring_service
+                        _self_mon_service = get_self_monitoring_service(_guardian_runtime.guardian_db)
+            except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
+                logger.warning("Guardian moderation bootstrap failed; continuing with base moderation only: {}", exc)
 
-            # --- LLM Call ---
-            cleaned_args = build_call_params_from_request(
-                request_data=request_data,
-                target_api_provider=target_api_provider,
-                provider_api_key=provider_api_key,
-                templated_llm_payload=llm_templated_payload,
-                final_system_message=llm_final_system_message,
-                app_config=app_config_override,
-                grammar_record=llamacpp_grammar_record,
-                resolved_model=model,
-            )
-            cleaned_args["request"] = request
-            cleaned_args["model"] = cleaned_args.get("model") or model
-            cleaned_args["credentials_resolved"] = credential_handle.credentials_resolved
-            cleaned_args["_endpoint_provenance"] = _derive_endpoint_provenance(
-                credential_handle,
-                request_override=_request_has_endpoint_override(request_data),
-            )
-
-            async def rebuild_call_params_for_provider(
-                target_provider: str,
-                *,
-                force_oauth_refresh: bool = False,
-            ) -> tuple[dict[str, Any], str | None]:
-                refreshed_handle = await credential_runtime.resolve(
-                    target_provider,
-                    force_refresh=force_oauth_refresh,
+            # Moderation: apply global/per-user policy to input messages (redact or block)
+            try:
+                moderation = get_moderation_service()
+                try:
+                    mon = get_topic_monitoring_service()
+                except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+                    mon = None
+                await moderate_input_messages(
+                    request_data=request_data,
+                    request=request,
+                    moderation_service=moderation,
+                    topic_monitoring_service=mon,
+                    metrics=metrics,
+                    audit_service=audit_service,
+                    audit_context=context,
+                    client_id=client_id,
+                    audit_event_type=AuditEventType.SECURITY_VIOLATION,
+                    supervised_policy_engine=_supervised_engine,
+                    self_monitoring_service=_self_mon_service,
+                    dependent_user_id=_dep_user_id,
+                    chat_type=input_moderation_chat_type,
                 )
-                credential_handles[target_provider.strip().lower()] = refreshed_handle
-                provider_api_key_new = refreshed_handle.api_key
-                if provider_requires_api_key(target_provider) and not provider_api_key_new:
-                    logger.error(f"API key for provider '{target_provider}' is missing or not configured (fallback).")
-                    record_byok_missing_credentials(target_provider, operation="chat")
+            except MandatoryAuditWriteError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=_mandatory_audit_unavailable_detail(),
+                ) from exc
+            except HTTPException:
+                raise
+            except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as e:
+                logger.warning(f"Moderation input processing error: {e}")
+
+            # Normalize provider/model on the request for downstream logic (already resolved)
+            provider = selected_provider
+            model = selected_model or model
+
+            def _get_default_model_for_provider_name(target_provider: str) -> str | None:
+                override_default = get_override_default_model(target_provider)
+                if override_default:
+                    return override_default
+                override = get_llm_provider_override(target_provider)
+                if override and override.allowed_models:
+                    return override.allowed_models[0]
+                normalized = target_provider.replace(".", "_").replace("-", "_")
+                env_key = f"DEFAULT_MODEL_{normalized.upper()}"
+                env_val = os.getenv(env_key)
+                if env_val:
+                    return env_val
+                config_key = f"default_model_{normalized.lower()}"
+                if _chat_config:
+                    cfg_val = _chat_config.get(config_key)
+                    if cfg_val:
+                        return cfg_val
+                return None
+
+            if not request_model_was_explicit:
+                default_model_for_provider = _get_default_model_for_provider_name(provider)
+                if default_model_for_provider:
+                    model = default_model_for_provider
+                    request_data.model = default_model_for_provider
+            if not model:
+                # Fail fast with a clear client error instead of cascading into a 500
+                # when downstream provider adapters require an explicit model.
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"Model is required for provider '{provider}'. Please select a model in the WebUI "
+                        f"or configure a default via environment variable 'DEFAULT_MODEL_{provider.replace('.', '_').replace('-', '_').upper()}'"
+                    ),
+                )
+
+            override_error = validate_provider_override(provider, model)
+            if override_error:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=override_error)
+
+            persona_alias_used = _resolve_character_id_from_persona_alias(request_data)
+
+            user_identifier_for_log = getattr(chat_db, 'client_id', 'unknown_client') # Example from original
+            logger.info(
+                f"Chat completion request. Provider={provider}, Model={request_data.model}, User={user_identifier_for_log}, "
+                f"Stream={request_data.stream}, ConvID={request_data.conversation_id}, CharID={request_data.character_id}"
+            )
+
+            character_card_for_context: dict[str, Any] | None = None
+            final_conversation_id: str | None = request_data.conversation_id
+            persona_debug_requested = bool(getattr(request_data, "persona_debug", False))
+            persona_debug_meta: dict[str, Any] | None = None
+            persona_selected_exemplars: list[dict[str, Any]] = []
+            persona_budget_tokens_used = int(_PERSONA_EXEMPLAR_DEFAULT_BUDGET)
+            persona_budget_auto_adjusted = False
+            persona_budget_adjustment_reason: str | None = None
+
+            try:
+                # In TEST_MODE or when explicitly enabled via config/env, allow
+                # auto-switching from 'local-llm' to 'openai' if an OpenAI key
+                # is present. This is primarily to satisfy integration tests that
+                # expect config-driven defaults.
+                _test_mode_flag = _shared_is_test_mode()
+                _autoswitch_enabled = ALLOW_AUTOSWITCH_TO_OPENAI or _test_mode_flag
+                if (
+                    _autoswitch_enabled
+                    and provider == "local-llm"
+                    and getattr(request_data, "api_provider", None) in (None, "")
+                ):
+                    openai_key, _openai_debug = resolve_provider_api_key(
+                        "openai",
+                        prefer_module_keys_in_tests=True,
+                    )
+                    if openai_key:
+                        provider = "openai"
+
+                target_api_provider = provider  # Already determined (possibly adjusted above)
+                credential_handle = await credential_runtime.resolve(target_api_provider)
+                credential_handles = {
+                    target_api_provider.strip().lower(): credential_handle,
+                }
+                provider_api_key = credential_handle.api_key
+                app_config_override = credential_handle.app_config
+
+                async def _mark_provider_used(name: str) -> None:
+                    handle = await credential_runtime.resolve(name)
+                    await credential_runtime.mark_used(handle)
+
+                # Centralized provider capabilities
+                try:
+                    from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
+                except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+
+                    def provider_requires_api_key(_provider: str) -> bool:  # type: ignore[misc]
+                        return True
+
+                # Allow explicit mock forcing in tests even if provider key is absent
+                _force_mock = _shared_is_truthy(os.getenv("CHAT_FORCE_MOCK", ""))
+                if provider_requires_api_key(target_api_provider) and not provider_api_key and not _force_mock:
+                    record_byok_missing_credentials(target_api_provider, operation="chat")
+
+                    # Distinguish "no LLM providers configured at all" (fresh install) from
+                    # "this specific provider's key is missing" (user picked a provider that
+                    # lacks credentials).  The former gets a dedicated error code so the
+                    # frontend can show onboarding-style guidance.
+                    if not explicit_provider_requested and not _any_cloud_provider_has_key():
+                        logger.error(
+                            "No LLM provider API keys are configured on this server. "
+                            "At least one provider key (e.g. OPENAI_API_KEY) must be set."
+                        )
+                        raise HTTPException(
+                            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                            detail={
+                                "error": "no_provider_configured",
+                                "message": (
+                                    "No LLM provider is configured. "
+                                    "Contact your administrator or check the provider configuration."
+                                ),
+                                "docs_url": "/docs#section/LLM-Providers",
+                                "admin_url": "/admin/providers",
+                            },
+                        )
+
+                    logger.error(f"API key for provider '{target_api_provider}' is missing or not configured.")
                     raise HTTPException(
                         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                         detail={
                             "error_code": "missing_provider_credentials",
-                            "message": f"Provider '{target_provider}' requires an API key. Please configure credentials.",
+                            "message": f"Provider '{target_api_provider}' requires an API key. Please configure credentials.",
                         },
                     )
+                if strict_model_selection and explicit_model_requested:
+                    availability_error = _validate_explicit_model_availability(target_api_provider, model)
+                    if availability_error:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=availability_error,
+                        )
+                # Avoid external calls for deterministic invalid-key sentinels in tests.
+                if _test_mode_flag and provider_api_key and provider_requires_api_key(target_api_provider):
+                    invalid_patterns = ("invalid-", "test-invalid-", "bad-key-", "dummy-invalid-")
+                    if any(str(provider_api_key).lower().startswith(p) for p in invalid_patterns):
+                        raise _provider_credential_http_exception_for_code("provider_authentication_failed")
 
-                refreshed_args = build_call_params_from_request(
+                # --- Character/Conversation Context, History, and Current Turn ---
+                continuation_runtime: dict[str, Any] = {}
+                (
+                    character_card_for_context,
+                    character_db_id_for_context,
+                    final_conversation_id,
+                    conversation_created_this_turn,
+                    llm_payload_messages,
+                    should_persist,
+                ) = await _build_context_and_messages_compat(
+                    chat_db=chat_db,
                     request_data=request_data,
-                    target_api_provider=target_provider,
-                    provider_api_key=provider_api_key_new,
+                    loop=current_loop,
+                    metrics=metrics,
+                    default_save_to_db=DEFAULT_SAVE_TO_DB,
+                    final_conversation_id=final_conversation_id,
+                    save_message_fn=_save_message_turn_to_db,
+                    runtime_state=continuation_runtime,
+                )
+                continuation_meta = (
+                    continuation_runtime.get("tldw_continuation")
+                    if isinstance(continuation_runtime.get("tldw_continuation"), dict)
+                    else None
+                )
+                assistant_parent_message_id = (
+                    str(continuation_runtime.get("assistant_parent_message_id"))
+                    if continuation_runtime.get("assistant_parent_message_id")
+                    else None
+                )
+                assistant_context = (
+                    continuation_runtime.get("assistant_context")
+                    if isinstance(continuation_runtime.get("assistant_context"), dict)
+                    else None
+                )
+                try:
+                    output_moderation_chat_type = resolve_moderation_chat_type(
+                        request_data=request_data,
+                        assistant_context=assistant_context,
+                    )
+                except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
+                    logger.debug("resolve_moderation_chat_type failed; defaulting to None: {}", exc)
+                    output_moderation_chat_type = None
+
+                # --- Prompt Templating (system + content transforms) ---
+                final_system_message, templated_llm_payload = apply_prompt_templating(
+                    request_data=request_data,
+                    character_card=character_card_for_context or {},
+                    llm_payload_messages=llm_payload_messages,
+                )
+
+                # Persona exemplar augmentation (character chat path)
+                persona_strategy = _resolve_persona_strategy(
+                    getattr(request_data, "persona_exemplar_strategy", None)
+                )
+                if persona_debug_requested:
+                    persona_debug_meta = {
+                        "debug_id": uuid.uuid4().hex,
+                        "enabled": True,
+                        "strategy": persona_strategy,
+                        "selection": {
+                            "selected_count": 0,
+                            "selected_exemplar_ids": [],
+                            "budget_tokens_used": 0,
+                            "coverage": {
+                                "openers": 0,
+                                "emphasis": 0,
+                                "enders": 0,
+                                "catchphrases_used": 0,
+                            },
+                        },
+                        "applied": False,
+                        "reason": "not_run",
+                    }
+
+                persona_assistant_id = (
+                    str(assistant_context.get("assistant_id") or "").strip()
+                    if isinstance(assistant_context, dict)
+                    else ""
+                )
+                is_persona_backed_chat = (
+                    isinstance(assistant_context, dict)
+                    and assistant_context.get("assistant_kind") == "persona"
+                    and bool(persona_assistant_id)
+                )
+                telemetry_assistant_kind = (
+                    str(assistant_context.get("assistant_kind") or "").strip()
+                    if isinstance(assistant_context, dict)
+                    else ""
+                )
+                telemetry_assistant_id_from_context = (
+                    str(assistant_context.get("assistant_id") or "").strip()
+                    if isinstance(assistant_context, dict)
+                    else ""
+                )
+                if is_persona_backed_chat:
+                    telemetry_assistant_id = persona_assistant_id
+                elif telemetry_assistant_id_from_context:
+                    telemetry_assistant_id = telemetry_assistant_id_from_context
+                elif telemetry_assistant_kind != "persona" and character_db_id_for_context is not None:
+                    telemetry_assistant_id = str(character_db_id_for_context)
+                else:
+                    telemetry_assistant_id = ""
+                should_record_persona_telemetry = (
+                    is_persona_backed_chat or character_db_id_for_context is not None
+                )
+
+                if persona_strategy != "off" and is_persona_backed_chat:
+                    persona_exemplars = await asyncio.to_thread(
+                        chat_db.list_persona_exemplars,
+                        user_id=str(user_id),
+                        persona_id=persona_assistant_id,
+                        include_disabled=False,
+                        include_deleted=False,
+                        limit=50,
+                        offset=0,
+                    )
+                    runtime_guidance = _assemble_persona_runtime_guidance(
+                        system_message=final_system_message,
+                        assistant_context=assistant_context,
+                        exemplars=persona_exemplars,
+                        current_turn_text=_extract_latest_user_turn_text(templated_llm_payload),
+                    )
+                    final_system_message = runtime_guidance["system_message"]
+                    persona_selected_exemplars = list(runtime_guidance["selected_exemplars"])
+
+                    if persona_debug_meta is not None:
+                        persona_debug_meta["source"] = "persona_profile"
+                        persona_debug_meta["applied"] = bool(runtime_guidance["applied"])
+                        persona_debug_meta["reason"] = (
+                            "selected"
+                            if runtime_guidance["applied"]
+                            else ("no_exemplars_selected" if persona_exemplars else "no_enabled_exemplars")
+                        )
+                        persona_debug_meta["selection"] = {
+                            "selected_count": len(runtime_guidance["selected_exemplars"]),
+                            "selected_exemplar_ids": [
+                                str(item.get("id"))
+                                for item in runtime_guidance["selected_exemplars"]
+                                if item.get("id")
+                            ],
+                            "budget_tokens_used": sum(int(section[2]) for section in runtime_guidance["sections"]),
+                            "coverage": {
+                                "boundary": sum(
+                                    1
+                                    for item in runtime_guidance["selected_exemplars"]
+                                    if str(item.get("kind") or "") == "boundary"
+                                ),
+                                "style_like": sum(
+                                    1
+                                    for item in runtime_guidance["selected_exemplars"]
+                                    if str(item.get("kind") or "") != "boundary"
+                                ),
+                            },
+                        }
+                        persona_debug_meta["assembly_sections"] = [
+                            str(name) for name, _, _ in runtime_guidance["sections"]
+                        ]
+                        persona_debug_meta["rejected_exemplars"] = [
+                            {
+                                "id": str(item.get("id") or ""),
+                                "reason": str(item.get("reason") or ""),
+                            }
+                            for item in runtime_guidance["rejected_exemplars"]
+                        ]
+                elif persona_strategy != "off" and character_db_id_for_context is not None:
+                    user_turn_text = _extract_latest_user_turn_text(getattr(request_data, "messages", []))
+                    if user_turn_text:
+                        budget_override = getattr(request_data, "persona_exemplar_budget_tokens", None)
+                        budget_tokens, persona_budget_auto_adjusted, persona_budget_adjustment_reason = (
+                            _resolve_effective_persona_budget_tokens(
+                                budget_override=budget_override,
+                                user_id=user_id,
+                                character_id=character_db_id_for_context,
+                            )
+                        )
+                        persona_budget_tokens_used = int(budget_tokens)
+                        if persona_budget_auto_adjusted:
+                            logger.info(
+                                "Persona budget auto-adjust applied user_id={} character_id={} base={} adjusted={} reason={}",
+                                str(user_id or "unknown"),
+                                character_db_id_for_context,
+                                int(_PERSONA_EXEMPLAR_DEFAULT_BUDGET),
+                                int(budget_tokens),
+                                persona_budget_adjustment_reason or "unspecified",
+                            )
+                        selector_config = PersonaExemplarSelectorConfig(
+                            budget_tokens=max(1, budget_tokens),
+                            max_exemplar_tokens=120,
+                            mmr_lambda=0.7,
+                        )
+                        embedding_callback = None
+                        if persona_strategy in {"hybrid", "embeddings"}:
+
+                            def _embedding_callback(turn_text: str, candidates: list[dict[str, Any]]) -> dict[str, float]:
+                                return score_exemplars_with_embeddings(
+                                    turn_text,
+                                    candidates,
+                                    user_id=user_id,
+                                    character_id=character_db_id_for_context,
+                                )
+
+                            embedding_callback = _embedding_callback
+
+                        selected_result = select_character_exemplars(
+                            db=chat_db,
+                            character_id=character_db_id_for_context,
+                            user_turn=user_turn_text,
+                            config=selector_config,
+                            embedding_score_fn=embedding_callback,
+                        )
+                        persona_selected_exemplars = list(selected_result.selected)
+                        persona_guidance_block = _format_persona_exemplar_guidance(selected_result.selected)
+                        if persona_guidance_block:
+                            if final_system_message and final_system_message.strip():
+                                final_system_message = f"{final_system_message.rstrip()}\n\n{persona_guidance_block}"
+                            else:
+                                final_system_message = persona_guidance_block
+
+                        if persona_debug_meta is not None:
+                            persona_debug_meta["applied"] = bool(persona_guidance_block)
+                            persona_debug_meta["reason"] = "selected" if persona_guidance_block else "no_exemplars_selected"
+                            persona_debug_meta["selection"] = {
+                                "selected_count": len(selected_result.selected),
+                                "selected_exemplar_ids": [
+                                    str(item.get("id")) for item in selected_result.selected if item.get("id")
+                                ],
+                                "budget_tokens_used": selected_result.budget_tokens_used,
+                                "coverage": selected_result.coverage,
+                            }
+                            persona_debug_meta["budget_tokens"] = selector_config.budget_tokens
+                            persona_debug_meta["budget_auto_adjusted"] = bool(persona_budget_auto_adjusted)
+                            if persona_budget_adjustment_reason:
+                                persona_debug_meta["budget_adjustment_reason"] = persona_budget_adjustment_reason
+                    elif persona_debug_meta is not None:
+                        persona_debug_meta["reason"] = "no_user_turn_text"
+                elif persona_debug_meta is not None:
+                    if persona_strategy == "off":
+                        persona_debug_meta["reason"] = "disabled_by_strategy"
+                    elif character_db_id_for_context is None:
+                        persona_debug_meta["reason"] = "character_context_unavailable"
+
+                if persona_debug_meta is not None and "budget_tokens" not in persona_debug_meta:
+                    persona_debug_meta["budget_tokens"] = int(persona_budget_tokens_used)
+                    persona_debug_meta["budget_auto_adjusted"] = bool(persona_budget_auto_adjusted)
+                    if persona_budget_adjustment_reason:
+                        persona_debug_meta["budget_adjustment_reason"] = persona_budget_adjustment_reason
+
+                if user_base_dir is not None and current_user and getattr(current_user, "id", None) is not None:
+                    final_system_message = await build_system_message_with_skills_async(
+                        final_system_message,
+                        current_user.id,
+                        user_base_dir,
+                        db=chat_db,
+                    )
+
+                system_message_id: str | None = None
+                if should_persist and final_conversation_id:
+                    system_message_id = await _persist_system_message_if_needed(
+                        db=chat_db,
+                        conversation_id=final_conversation_id,
+                        system_message=final_system_message,
+                        save_message_fn=_save_message_turn_to_db,
+                        loop=current_loop,
+                    )
+
+                def _resolve_llamacpp_grammar_record(target_provider: str) -> dict[str, Any] | None:
+                    """Resolve the saved llama.cpp grammar record for the active provider."""
+                    if target_provider != "llama.cpp" or getattr(request_data, "grammar_mode", None) != "library":
+                        return None
+                    grammar_id = str(getattr(request_data, "grammar_id", "") or "").strip()
+                    if not grammar_id:
+                        raise ChatBadRequestError(
+                            provider=target_provider,
+                            message="grammar_id is required when grammar_mode is 'library'",
+                        )
+                    grammar_record = chat_db.get_chat_grammar(grammar_id)
+                    if not isinstance(grammar_record, dict):
+                        raise ChatBadRequestError(
+                            provider=target_provider,
+                            message="Saved grammar could not be resolved",
+                        )
+                    return grammar_record
+
+                llamacpp_grammar_record = _resolve_llamacpp_grammar_record(target_api_provider)
+
+                llm_final_system_message, llm_templated_payload = inject_research_context_into_prompt(
+                    final_system_message=final_system_message,
+                    templated_llm_payload=templated_llm_payload,
+                    research_context=getattr(request_data, "research_context", None),
+                )
+
+                # --- LLM Call ---
+                cleaned_args = build_call_params_from_request(
+                    request_data=request_data,
+                    target_api_provider=target_api_provider,
+                    provider_api_key=provider_api_key,
                     templated_llm_payload=llm_templated_payload,
                     final_system_message=llm_final_system_message,
-                    app_config=refreshed_handle.app_config,
-                    grammar_record=_resolve_llamacpp_grammar_record(target_provider),
+                    app_config=app_config_override,
+                    grammar_record=llamacpp_grammar_record,
+                    resolved_model=model,
                 )
-                refreshed_args["request"] = request
-                refreshed_args["credentials_resolved"] = refreshed_handle.credentials_resolved
-                refreshed_args["_endpoint_provenance"] = _derive_endpoint_provenance(
-                    refreshed_handle,
+                cleaned_args["request"] = request
+                cleaned_args["model"] = cleaned_args.get("model") or model
+                cleaned_args["credentials_resolved"] = credential_handle.credentials_resolved
+                cleaned_args["_endpoint_provenance"] = _derive_endpoint_provenance(
+                    credential_handle,
                     request_override=_request_has_endpoint_override(request_data),
                 )
-                refreshed_model = refreshed_args.get("model")
-                use_default_model = False
-                if not refreshed_model:
-                    use_default_model = True
-                elif target_provider != initial_provider:
-                    raw_model_str = (raw_model_input or "").strip()
-                    raw_prefix = None
-                    if raw_model_str and "/" in raw_model_str:
-                        raw_prefix = raw_model_str.split("/", 1)[0].strip().lower()
-                    # If the original model was unprefixed (or missing), prefer the
-                    # fallback provider's default model to avoid cross-provider mismatches.
-                    if not raw_model_str or raw_prefix is None or raw_prefix != target_provider.lower():
+
+                async def rebuild_call_params_for_provider(
+                    target_provider: str,
+                    *,
+                    force_oauth_refresh: bool = False,
+                ) -> tuple[dict[str, Any], str | None]:
+                    refreshed_handle = await credential_runtime.resolve(
+                        target_provider,
+                        force_refresh=force_oauth_refresh,
+                    )
+                    credential_handles[target_provider.strip().lower()] = refreshed_handle
+                    provider_api_key_new = refreshed_handle.api_key
+                    if provider_requires_api_key(target_provider) and not provider_api_key_new:
+                        logger.error(f"API key for provider '{target_provider}' is missing or not configured (fallback).")
+                        record_byok_missing_credentials(target_provider, operation="chat")
+                        raise HTTPException(
+                            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                            detail={
+                                "error_code": "missing_provider_credentials",
+                                "message": f"Provider '{target_provider}' requires an API key. Please configure credentials.",
+                            },
+                        )
+
+                    refreshed_args = build_call_params_from_request(
+                        request_data=request_data,
+                        target_api_provider=target_provider,
+                        provider_api_key=provider_api_key_new,
+                        templated_llm_payload=llm_templated_payload,
+                        final_system_message=llm_final_system_message,
+                        app_config=refreshed_handle.app_config,
+                        grammar_record=_resolve_llamacpp_grammar_record(target_provider),
+                    )
+                    refreshed_args["request"] = request
+                    refreshed_args["credentials_resolved"] = refreshed_handle.credentials_resolved
+                    refreshed_args["_endpoint_provenance"] = _derive_endpoint_provenance(
+                        refreshed_handle,
+                        request_override=_request_has_endpoint_override(request_data),
+                    )
+                    refreshed_model = refreshed_args.get("model")
+                    use_default_model = False
+                    if not refreshed_model:
                         use_default_model = True
-                if use_default_model:
-                    default_model = _get_default_model_for_provider_name(target_provider)
-                    if default_model:
-                        refreshed_args["model"] = default_model
-                        refreshed_model = default_model
+                    elif target_provider != initial_provider:
+                        raw_model_str = (raw_model_input or "").strip()
+                        raw_prefix = None
+                        if raw_model_str and "/" in raw_model_str:
+                            raw_prefix = raw_model_str.split("/", 1)[0].strip().lower()
+                        # If the original model was unprefixed (or missing), prefer the
+                        # fallback provider's default model to avoid cross-provider mismatches.
+                        if not raw_model_str or raw_prefix is None or raw_prefix != target_provider.lower():
+                            use_default_model = True
+                    if use_default_model:
+                        default_model = _get_default_model_for_provider_name(target_provider)
+                        if default_model:
+                            refreshed_args["model"] = default_model
+                            refreshed_model = default_model
 
-                refreshed_args["api_endpoint"] = target_provider
-                return refreshed_args, refreshed_model
+                    refreshed_args["api_endpoint"] = target_provider
+                    return refreshed_args, refreshed_model
 
-            # Use provider manager for health checks and failover
-            provider_manager = get_provider_manager()
-            selected_provider = provider
+                # Use provider manager for health checks and failover
+                provider_manager = get_provider_manager()
+                selected_provider = provider
 
-            if provider_manager:
-                disabled_overrides = {
-                    name
-                    for name, override in get_llm_provider_overrides_snapshot().items()
-                    if override.is_enabled is False
-                }
-                # Check if the requested provider is healthy first
-                # Use the circuit breaker check if the provider is registered
-                if (
-                    provider in provider_manager.circuit_breakers
-                    and provider_manager.circuit_breakers[provider].can_attempt_call()
-                ):
-                    selected_provider = provider
-                    logger.info(f"Using requested provider {selected_provider} (health check passed)")
-                elif allow_provider_fallback_for_request:
-                    # Only try alternative providers if fallback is enabled
-                    healthy_provider = provider_manager.get_available_provider(
-                        exclude=[provider, *sorted(disabled_overrides)]
-                    )
-                    if healthy_provider:
-                        selected_provider = healthy_provider
-                        logger.warning(
-                            f"Requested provider {provider} is unhealthy or not registered, using {selected_provider} instead (fallback enabled)"
-                        )
-                    else:
+                if provider_manager:
+                    disabled_overrides = {
+                        name
+                        for name, override in get_llm_provider_overrides_snapshot().items()
+                        if override.is_enabled is False
+                    }
+                    # Check if the requested provider is healthy first
+                    # Use the circuit breaker check if the provider is registered
+                    if (
+                        provider in provider_manager.circuit_breakers
+                        and provider_manager.circuit_breakers[provider].can_attempt_call()
+                    ):
                         selected_provider = provider
-                        logger.warning(f"No healthy providers available, using {provider} anyway")
-                else:
-                    # Fallback disabled - use requested provider even if unhealthy
-                    selected_provider = provider
-                    logger.info(
-                        f"Using requested provider {selected_provider} (fallback disabled, health check not performed)"
-                    )
-
-            # Update provider in cleaned_args
-            # Note: chat_api_call expects 'api_endpoint', not 'api_provider'
-            # Update the api_endpoint with the selected provider after health check
-            cleaned_args["api_endpoint"] = selected_provider
-            if selected_provider != provider:
-                try:
-                    refreshed_args, refreshed_model = await rebuild_call_params_for_provider(selected_provider)
-                    override_error = validate_provider_override(selected_provider, refreshed_model or model)
-                    if override_error:
-                        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=override_error)
-                    cleaned_args = refreshed_args
-                    model = refreshed_model or model
-                except HTTPException:
-                    raise
-                except (
-                    ByokResolutionError,
-                    ChatAuthenticationError,
-                    ChatConfigurationError,
-                ) as refresh_exc:
-                    raise _provider_credential_http_exception(refresh_exc) from refresh_exc
-                except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as refresh_exc:
-                    logger.error(
-                        "Failed to rebuild call params for fallback provider '{}': {}",
-                        selected_provider,
-                        refresh_exc,
-                    )
-                    raise HTTPException(
-                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                        detail="Fallback provider initialization failed. Please retry.",
-                    ) from refresh_exc
-
-            # Request Queue Integration (Admission control / backpressure)
-            # ------------------------------------------------------------------------
-            is_test_mode_flag = _shared_is_test_mode()
-            try:
-                queue_candidate = get_request_queue()
-            except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
-                queue_candidate = None
-
-            queue = None
-            if queue_candidate is not None:
-                if is_test_mode_flag:
-                    allow_queue_env = _shared_is_truthy(os.getenv("FORCE_CHAT_QUEUE_IN_TESTS", ""))
-                    queue_module = getattr(queue_candidate.__class__, "__module__", "")
-                    allow_queue_override = getattr(queue_candidate, "allow_in_test_mode", False)
-                    allow_queue_stub = (
-                        ".tests." in queue_module
-                        or queue_module.startswith("tests.")
-                        or queue_module.startswith("tldw_Server_API.tests.")
-                        or queue_module.startswith("pytest.")
-                    )
-                    try:
-                        from tldw_Server_API.app.core.Chat.request_queue import (
-                            RequestQueue as _RequestQueue,  # type: ignore
+                        logger.info(f"Using requested provider {selected_provider} (health check passed)")
+                    elif allow_provider_fallback_for_request:
+                        # Only try alternative providers if fallback is enabled
+                        healthy_provider = provider_manager.get_available_provider(
+                            exclude=[provider, *sorted(disabled_overrides)]
                         )
-                    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:  # pragma: no cover
-                        _RequestQueue = None
-                    is_real_queue = bool(_RequestQueue) and isinstance(queue_candidate, _RequestQueue)
-                    if allow_queue_env or allow_queue_override or allow_queue_stub or not is_real_queue:
-                        queue = queue_candidate
-                else:
-                    queue = queue_candidate
-            if queue is not None and not queue_is_active(queue):
-                queue = None
-            # Admission-only gating: only apply when queued execution is disabled to
-            # avoid double-charging rate limits (execution path will enqueue itself).
-            admission_queue = queue if (queue is not None and not QUEUED_EXECUTION) else None
-            if admission_queue is not None:
-                try:
-                    # Estimate tokens for queue gating (sanitize base64 payloads)
-                    est_tokens_for_queue = _estimate_tokens_for_queue(request_json)
-                    # Use user_id for per-client fairness; HIGH priority for streaming
-                    priority = RequestPriority.HIGH if bool(request_data.stream) else RequestPriority.NORMAL
-                    # Use request_id generated for this call
-                    logger.debug(
-                        'Queue admission: enqueue request_id={} client_id={} priority={} est_tokens={}',
-                        request_id,
-                        str(user_id),
-                        getattr(priority, "name", str(priority)),
-                        est_tokens_for_queue,
-                    )
-                    q_future = await admission_queue.enqueue(
-                        request_id=request_id,
-                        request_data={"endpoint": "/api/v1/chat/completions"},
-                        client_id=str(user_id),
-                        priority=priority,
-                        estimated_tokens=est_tokens_for_queue,
-                    )
-                    # Await admission; if queue times out internally, it will raise
-                    await q_future
-                    logger.debug(
-                        'Queue admission: admitted request_id={}', request_id
-                    )
-                except ValueError as e:
-                    # Queue full or rate limit in queue -> 429
-                    logger.warning(
-                        'Queue admission rejected for request_id={}: {}', request_id, e
-                    )
-                    raise HTTPException(
-                        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                        detail="Rate limit exceeded. Please retry.",
-                    ) from e
-                except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as e:
-                    # Treat unexpected queue errors as service unavailable
-                    logger.error(
-                        'Queue admission error for request_id={}: {}', request_id, e
-                    )
-                    raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Service busy. Please retry.") from e
-            # The request queue system has been initialized in main.py but is not yet
-            # integrated here. Once the central scheduling/queue module is built, this
-            # endpoint should enqueue requests rather than processing them directly.
-            #
-            # Integration points:
-            # 1. Get the request queue instance: queue = get_request_queue()
-            # 2. Determine priority based on user/request type
-            # 3. Enqueue the request with:
-            #    future = await queue.enqueue(
-            #        request_id=request_id,
-            #        request_data={'cleaned_args': cleaned_args, 'request': request_data},
-            #        client_id=client_id,
-            #        priority=priority,
-            #        estimated_tokens=estimated_tokens
-            #    )
-            # 4. Await the future for the result
-            # 5. The queue's worker would call perform_chat_api_call
-            #
-            # Benefits of queue integration:
-            # - Prevents server overload with backpressure
-            # - Allows priority-based processing (e.g., premium users)
-            # - Better resource utilization with controlled concurrency
-            # - Request timeout management
-            # - Queue depth monitoring for scaling decisions
-            #
-            # Current implementation continues with direct processing:
-            # ------------------------------------------------------------------------
-
-            mock_friendly_keys = {"sk-mock-key-12345", "test-openai-key", "mock-openai-key"}
-            _force_mock = _shared_is_truthy(os.getenv("CHAT_FORCE_MOCK", ""))
-            use_mock_provider = (
-                (
-                    _test_mode_flag and (
-                        (provider_api_key and provider_api_key in mock_friendly_keys)
-                        or _force_mock
-                        or (target_api_provider in {"openai", "groq", "mistral"})
-                    )
-                )
-                and perform_chat_api_call is _ORIGINAL_PERFORM_CHAT_API_CALL
-            )
-
-            def _mock_chat_call(**kwargs):
-                messages_payload = kwargs.get("messages_payload") or []
-                streaming_flag = bool(kwargs.get("streaming"))
-                model_name = kwargs.get("model") or request_data.model or "mock-model"
-                content = _build_test_mode_chat_response(
-                    messages_payload,
-                    system_message=kwargs.get("system_message"),
-                )
-
-                if streaming_flag:
-                    chunk_text = content
-
-                    def _stream_generator():
-                        data_chunk = {
-                            "choices": [
-                                {
-                                    "delta": {"role": "assistant", "content": chunk_text},
-                                    "finish_reason": None,
-                                    "index": 0,
-                                }
-                            ]
-                        }
-                        yield f"data: {json.dumps(data_chunk)}\n\n"
-                        yield "data: [DONE]\n\n"
-
-                    return _stream_generator()
-
-                # Token estimation with reasonable caps to prevent overflow
-                # Max tokens capped at 1M to prevent integer overflow issues
-                MAX_TOKEN_CAP = 1_000_000
-                prompt_tokens = min(MAX_TOKEN_CAP, max(1, len(json.dumps(messages_payload)) // 4))
-                completion_tokens = min(MAX_TOKEN_CAP, max(1, len(content) // 4))
-                total_tokens = min(MAX_TOKEN_CAP * 2, prompt_tokens + completion_tokens)
-
-                return {
-                    "id": f"mock-{target_api_provider}-{uuid.uuid4().hex[:8]}",
-                    "object": "chat.completion",
-                    "created": int(time.time()),
-                    "model": model_name,
-                    "choices": [
-                        {
-                            "index": 0,
-                            "message": {"role": "assistant", "content": content},
-                            "finish_reason": "stop",
-                        }
-                    ],
-                    "usage": {
-                        "prompt_tokens": prompt_tokens,
-                        "completion_tokens": completion_tokens,
-                        "total_tokens": total_tokens,
-                    },
-                }
-
-            if use_mock_provider and provider in {"openai", "groq", "mistral"}:
-                llm_call_func = partial(_mock_chat_call, **cleaned_args)
-            else:
-                llm_call_func = partial(perform_chat_api_call, **cleaned_args)
-
-            selected_credential_handle = credential_handles.get(selected_provider.strip().lower())
-            selected_openai_oauth = bool(
-                selected_provider.strip().lower() == "openai"
-                and selected_credential_handle is not None
-                and selected_credential_handle.auth_source == "oauth"
-            )
-
-            def _is_auth_401_error(exc: BaseException) -> bool:
-                try:
-                    status_code = int(getattr(exc, "status_code", 0) or 0)
-                except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
-                    status_code = 0
-                return status_code == status.HTTP_401_UNAUTHORIZED
-
-            def _is_missing_credentials_error(exc: BaseException) -> bool:
-                if not isinstance(exc, HTTPException):
-                    return False
-                if exc.status_code != status.HTTP_503_SERVICE_UNAVAILABLE:
-                    return False
-                detail = getattr(exc, "detail", None)
-                return isinstance(detail, dict) and detail.get("error_code") == "missing_provider_credentials"
-
-            def _record_openai_oauth_retry(outcome: str) -> None:
-                try:
-                    log_counter(
-                        "byok_oauth_401_retry_total",
-                        labels={
-                            "provider": "openai",
-                            "outcome": outcome,
-                        },
-                    )
-                except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
-                    pass
-
-            oauth_retry_state = {"attempted": False}
-            if selected_openai_oauth and not request_data.stream:
-                base_llm_call_func = llm_call_func
-
-                def _run_refresh_on_endpoint_loop() -> tuple[dict[str, Any], str | None]:
-                    future = asyncio.run_coroutine_threadsafe(
-                        rebuild_call_params_for_provider(
-                            selected_provider,
-                            force_oauth_refresh=True,
-                        ),
-                        current_loop,
-                    )
-                    return future.result(timeout=20.0)
-
-                def _llm_call_with_openai_oauth_retry():
-                    try:
-                        return base_llm_call_func()
-                    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as initial_exc:
-                        if oauth_retry_state["attempted"] or not _is_auth_401_error(initial_exc):
-                            raise
-                        oauth_retry_state["attempted"] = True
+                        if healthy_provider:
+                            selected_provider = healthy_provider
+                            logger.warning(
+                                f"Requested provider {provider} is unhealthy or not registered, using {selected_provider} instead (fallback enabled)"
+                            )
+                        else:
+                            selected_provider = provider
+                            logger.warning(f"No healthy providers available, using {provider} anyway")
+                    else:
+                        # Fallback disabled - use requested provider even if unhealthy
+                        selected_provider = provider
                         logger.info(
-                            "OpenAI OAuth auth failure detected; forcing refresh and retrying once."
+                            f"Using requested provider {selected_provider} (fallback disabled, health check not performed)"
+                        )
+
+                # Update provider in cleaned_args
+                # Note: chat_api_call expects 'api_endpoint', not 'api_provider'
+                # Update the api_endpoint with the selected provider after health check
+                cleaned_args["api_endpoint"] = selected_provider
+                if selected_provider != provider:
+                    try:
+                        refreshed_args, refreshed_model = await rebuild_call_params_for_provider(selected_provider)
+                        override_error = validate_provider_override(selected_provider, refreshed_model or model)
+                        if override_error:
+                            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=override_error)
+                        cleaned_args = refreshed_args
+                        model = refreshed_model or model
+                    except HTTPException:
+                        raise
+                    except (
+                        ByokResolutionError,
+                        ChatAuthenticationError,
+                        ChatConfigurationError,
+                    ) as refresh_exc:
+                        raise _provider_credential_http_exception(refresh_exc) from refresh_exc
+                    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as refresh_exc:
+                        logger.error(
+                            "Failed to rebuild call params for fallback provider '{}': {}",
+                            selected_provider,
+                            refresh_exc,
+                        )
+                        raise HTTPException(
+                            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                            detail="Fallback provider initialization failed. Please retry.",
+                        ) from refresh_exc
+
+                # Request Queue Integration (Admission control / backpressure)
+                # ------------------------------------------------------------------------
+                is_test_mode_flag = _shared_is_test_mode()
+                try:
+                    queue_candidate = get_request_queue()
+                except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+                    queue_candidate = None
+
+                queue = None
+                if queue_candidate is not None:
+                    if is_test_mode_flag:
+                        allow_queue_env = _shared_is_truthy(os.getenv("FORCE_CHAT_QUEUE_IN_TESTS", ""))
+                        queue_module = getattr(queue_candidate.__class__, "__module__", "")
+                        allow_queue_override = getattr(queue_candidate, "allow_in_test_mode", False)
+                        allow_queue_stub = (
+                            ".tests." in queue_module
+                            or queue_module.startswith("tests.")
+                            or queue_module.startswith("tldw_Server_API.tests.")
+                            or queue_module.startswith("pytest.")
                         )
                         try:
-                            refreshed_args, _ = _run_refresh_on_endpoint_loop()
-                        except HTTPException as refresh_exc:
-                            if _is_auth_401_error(refresh_exc) or _is_missing_credentials_error(refresh_exc):
+                            from tldw_Server_API.app.core.Chat.request_queue import (
+                                RequestQueue as _RequestQueue,  # type: ignore
+                            )
+                        except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:  # pragma: no cover
+                            _RequestQueue = None
+                        is_real_queue = bool(_RequestQueue) and isinstance(queue_candidate, _RequestQueue)
+                        if allow_queue_env or allow_queue_override or allow_queue_stub or not is_real_queue:
+                            queue = queue_candidate
+                    else:
+                        queue = queue_candidate
+                if queue is not None and not queue_is_active(queue):
+                    queue = None
+                # Admission-only gating: only apply when queued execution is disabled to
+                # avoid double-charging rate limits (execution path will enqueue itself).
+                admission_queue = queue if (queue is not None and not QUEUED_EXECUTION) else None
+                if admission_queue is not None:
+                    try:
+                        # Estimate tokens for queue gating (sanitize base64 payloads)
+                        est_tokens_for_queue = _estimate_tokens_for_queue(request_json)
+                        # Use user_id for per-client fairness; HIGH priority for streaming
+                        priority = RequestPriority.HIGH if bool(request_data.stream) else RequestPriority.NORMAL
+                        # Use request_id generated for this call
+                        logger.debug(
+                            'Queue admission: enqueue request_id={} client_id={} priority={} est_tokens={}',
+                            request_id,
+                            str(user_id),
+                            getattr(priority, "name", str(priority)),
+                            est_tokens_for_queue,
+                        )
+                        q_future = await admission_queue.enqueue(
+                            request_id=request_id,
+                            request_data={"endpoint": "/api/v1/chat/completions"},
+                            client_id=str(user_id),
+                            priority=priority,
+                            estimated_tokens=est_tokens_for_queue,
+                        )
+                        # Await admission; if queue times out internally, it will raise
+                        await q_future
+                        logger.debug(
+                            'Queue admission: admitted request_id={}', request_id
+                        )
+                    except ValueError as e:
+                        # Queue full or rate limit in queue -> 429
+                        logger.warning(
+                            'Queue admission rejected for request_id={}: {}', request_id, e
+                        )
+                        raise HTTPException(
+                            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                            detail="Rate limit exceeded. Please retry.",
+                        ) from e
+                    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as e:
+                        # Treat unexpected queue errors as service unavailable
+                        logger.error(
+                            'Queue admission error for request_id={}: {}', request_id, e
+                        )
+                        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Service busy. Please retry.") from e
+                # The request queue system has been initialized in main.py but is not yet
+                # integrated here. Once the central scheduling/queue module is built, this
+                # endpoint should enqueue requests rather than processing them directly.
+                #
+                # Integration points:
+                # 1. Get the request queue instance: queue = get_request_queue()
+                # 2. Determine priority based on user/request type
+                # 3. Enqueue the request with:
+                #    future = await queue.enqueue(
+                #        request_id=request_id,
+                #        request_data={'cleaned_args': cleaned_args, 'request': request_data},
+                #        client_id=client_id,
+                #        priority=priority,
+                #        estimated_tokens=estimated_tokens
+                #    )
+                # 4. Await the future for the result
+                # 5. The queue's worker would call perform_chat_api_call
+                #
+                # Benefits of queue integration:
+                # - Prevents server overload with backpressure
+                # - Allows priority-based processing (e.g., premium users)
+                # - Better resource utilization with controlled concurrency
+                # - Request timeout management
+                # - Queue depth monitoring for scaling decisions
+                #
+                # Current implementation continues with direct processing:
+                # ------------------------------------------------------------------------
+
+                mock_friendly_keys = {"sk-mock-key-12345", "test-openai-key", "mock-openai-key"}
+                _force_mock = _shared_is_truthy(os.getenv("CHAT_FORCE_MOCK", ""))
+                use_mock_provider = (
+                    (
+                        _test_mode_flag and (
+                            (provider_api_key and provider_api_key in mock_friendly_keys)
+                            or _force_mock
+                            or (target_api_provider in {"openai", "groq", "mistral"})
+                        )
+                    )
+                    and perform_chat_api_call is _ORIGINAL_PERFORM_CHAT_API_CALL
+                )
+
+                def _mock_chat_call(**kwargs):
+                    messages_payload = kwargs.get("messages_payload") or []
+                    streaming_flag = bool(kwargs.get("streaming"))
+                    model_name = kwargs.get("model") or request_data.model or "mock-model"
+                    content = _build_test_mode_chat_response(
+                        messages_payload,
+                        system_message=kwargs.get("system_message"),
+                    )
+
+                    if streaming_flag:
+                        chunk_text = content
+
+                        def _stream_generator():
+                            data_chunk = {
+                                "choices": [
+                                    {
+                                        "delta": {"role": "assistant", "content": chunk_text},
+                                        "finish_reason": None,
+                                        "index": 0,
+                                    }
+                                ]
+                            }
+                            yield f"data: {json.dumps(data_chunk)}\n\n"
+                            yield "data: [DONE]\n\n"
+
+                        return _stream_generator()
+
+                    # Token estimation with reasonable caps to prevent overflow
+                    # Max tokens capped at 1M to prevent integer overflow issues
+                    MAX_TOKEN_CAP = 1_000_000
+                    prompt_tokens = min(MAX_TOKEN_CAP, max(1, len(json.dumps(messages_payload)) // 4))
+                    completion_tokens = min(MAX_TOKEN_CAP, max(1, len(content) // 4))
+                    total_tokens = min(MAX_TOKEN_CAP * 2, prompt_tokens + completion_tokens)
+
+                    return {
+                        "id": f"mock-{target_api_provider}-{uuid.uuid4().hex[:8]}",
+                        "object": "chat.completion",
+                        "created": int(time.time()),
+                        "model": model_name,
+                        "choices": [
+                            {
+                                "index": 0,
+                                "message": {"role": "assistant", "content": content},
+                                "finish_reason": "stop",
+                            }
+                        ],
+                        "usage": {
+                            "prompt_tokens": prompt_tokens,
+                            "completion_tokens": completion_tokens,
+                            "total_tokens": total_tokens,
+                        },
+                    }
+
+                if use_mock_provider and provider in {"openai", "groq", "mistral"}:
+                    llm_call_func = partial(_mock_chat_call, **cleaned_args)
+                else:
+                    llm_call_func = partial(perform_chat_api_call, **cleaned_args)
+
+                selected_credential_handle = credential_handles.get(selected_provider.strip().lower())
+                selected_openai_oauth = bool(
+                    selected_provider.strip().lower() == "openai"
+                    and selected_credential_handle is not None
+                    and selected_credential_handle.auth_source == "oauth"
+                )
+
+                def _is_auth_401_error(exc: BaseException) -> bool:
+                    try:
+                        status_code = int(getattr(exc, "status_code", 0) or 0)
+                    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+                        status_code = 0
+                    return status_code == status.HTTP_401_UNAUTHORIZED
+
+                def _record_openai_oauth_retry(outcome: str) -> None:
+                    try:
+                        log_counter(
+                            "byok_oauth_401_retry_total",
+                            labels={
+                                "provider": "openai",
+                                "outcome": outcome,
+                            },
+                        )
+                    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+                        pass
+
+                oauth_retry_state = {"attempted": False}
+                if selected_openai_oauth and not request_data.stream:
+                    base_llm_call_func = llm_call_func
+
+                    def _run_refresh_on_endpoint_loop() -> tuple[dict[str, Any], str | None]:
+                        future = asyncio.run_coroutine_threadsafe(
+                            rebuild_call_params_for_provider(
+                                selected_provider,
+                                force_oauth_refresh=True,
+                            ),
+                            current_loop,
+                        )
+                        return future.result(timeout=20.0)
+
+                    def _llm_call_with_openai_oauth_retry():
+                        try:
+                            return base_llm_call_func()
+                        except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as initial_exc:
+                            if oauth_retry_state["attempted"] or not _is_auth_401_error(initial_exc):
+                                raise
+                            oauth_retry_state["attempted"] = True
+                            logger.info("OpenAI OAuth auth failure detected; forcing refresh and retrying once.")
+                            try:
+                                refreshed_args, _ = _run_refresh_on_endpoint_loop()
+                            except Exception as refresh_exc:
+                                refresh_code = _provider_credential_error_code(refresh_exc)
+                                if refresh_code is not None:
+                                    _record_openai_oauth_retry("refresh_failed")
+                                    raise _ProviderCredentialTerminalError(refresh_code) from refresh_exc
+                                logger.warning("OpenAI OAuth forced refresh failed: {}", refresh_exc)
                                 _record_openai_oauth_retry("refresh_failed")
                                 raise initial_exc from refresh_exc
-                            _record_openai_oauth_retry("refresh_failed")
-                            raise initial_exc from refresh_exc
-                        except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as refresh_exc:
-                            logger.warning("OpenAI OAuth forced refresh failed: {}", refresh_exc)
-                            _record_openai_oauth_retry("refresh_failed")
-                            raise initial_exc from refresh_exc
 
-                        refreshed_key = refreshed_args.get("api_key")
-                        if not isinstance(refreshed_key, str) or not refreshed_key.strip():
-                            _record_openai_oauth_retry("refresh_missing_api_key")
-                            raise initial_exc
+                            refreshed_key = refreshed_args.get("api_key")
+                            if not isinstance(refreshed_key, str) or not refreshed_key.strip():
+                                _record_openai_oauth_retry("refresh_missing_api_key")
+                                raise _ProviderCredentialTerminalError("missing_provider_credentials")
 
-                        try:
-                            refreshed_response = perform_chat_api_call(**refreshed_args)
-                            _record_openai_oauth_retry("success")
-                            return refreshed_response
-                        except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as retry_exc:
-                            if _is_auth_401_error(retry_exc):
-                                _record_openai_oauth_retry("retry_auth_failed")
-                                raise initial_exc from retry_exc
-                            _record_openai_oauth_retry("retry_failed")
-                            raise
+                            try:
+                                refreshed_response = perform_chat_api_call(**refreshed_args)
+                                _record_openai_oauth_retry("success")
+                                return refreshed_response
+                            except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as retry_exc:
+                                if _is_auth_401_error(retry_exc):
+                                    _record_openai_oauth_retry("retry_auth_failed")
+                                    raise initial_exc from retry_exc
+                                _record_openai_oauth_retry("retry_failed")
+                                raise
 
-                llm_call_func = _llm_call_with_openai_oauth_retry
+                    llm_call_func = _llm_call_with_openai_oauth_retry
 
-            # Build moderation getter that overlays guardian policies on output
-            def _get_moderation_with_guardian():
-                base = get_moderation_service()
-                if not _supervised_engine or not _dep_user_id:
-                    return base
-                try:
-                    from tldw_Server_API.app.core.Moderation.supervised_policy import GuardianModerationProxy
-                    return GuardianModerationProxy(
-                        base,
-                        _supervised_engine,
-                        _dep_user_id,
-                        chat_type=output_moderation_chat_type,
-                    )
-                except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
-                    return base
+                # Build moderation getter that overlays guardian policies on output
+                def _get_moderation_with_guardian():
+                    base = get_moderation_service()
+                    if not _supervised_engine or not _dep_user_id:
+                        return base
+                    try:
+                        from tldw_Server_API.app.core.Moderation.supervised_policy import GuardianModerationProxy
 
-            async def _on_stream_full_reply_for_persona_telemetry(full_reply: str) -> None:
-                assistant_text = str(full_reply or "")
-                if should_record_persona_telemetry:
-                    persona_telemetry = compute_persona_exemplar_telemetry(
-                        output_text=assistant_text,
-                        selected_exemplars=persona_selected_exemplars,
-                    )
-                    debug_id_for_logs = (
-                        str(persona_debug_meta.get("debug_id"))
-                        if isinstance(persona_debug_meta, dict) and persona_debug_meta.get("debug_id")
-                        else None
-                    )
-                    logger.debug(
-                        "Persona streaming telemetry debug_id={} ioo={} ior={} lcs={}",
-                        debug_id_for_logs or "n/a",
-                        persona_telemetry.get("ioo"),
-                        persona_telemetry.get("ior"),
-                        persona_telemetry.get("lcs"),
-                    )
-                    _record_persona_telemetry_hooks(
-                        telemetry=persona_telemetry,
-                        provider=provider,
-                        model=model,
+                        return GuardianModerationProxy(
+                            base,
+                            _supervised_engine,
+                            _dep_user_id,
+                            chat_type=output_moderation_chat_type,
+                        )
+                    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+                        return base
+
+                async def _on_stream_full_reply_for_persona_telemetry(full_reply: str) -> None:
+                    assistant_text = str(full_reply or "")
+                    if should_record_persona_telemetry:
+                        persona_telemetry = compute_persona_exemplar_telemetry(
+                            output_text=assistant_text,
+                            selected_exemplars=persona_selected_exemplars,
+                        )
+                        debug_id_for_logs = (
+                            str(persona_debug_meta.get("debug_id"))
+                            if isinstance(persona_debug_meta, dict) and persona_debug_meta.get("debug_id")
+                            else None
+                        )
+                        logger.debug(
+                            "Persona streaming telemetry debug_id={} ioo={} ior={} lcs={}",
+                            debug_id_for_logs or "n/a",
+                            persona_telemetry.get("ioo"),
+                            persona_telemetry.get("ior"),
+                            persona_telemetry.get("lcs"),
+                        )
+                        _record_persona_telemetry_hooks(
+                            telemetry=persona_telemetry,
+                            provider=provider,
+                            model=model,
+                            user_id=user_id,
+                            character_id=character_db_id_for_context,
+                            assistant_kind=telemetry_assistant_kind,
+                            assistant_id=telemetry_assistant_id,
+                            debug_id=debug_id_for_logs,
+                        )
+
+                    await _persist_persona_chat_reply_if_enabled(
+                        assistant_context=assistant_context,
                         user_id=user_id,
-                        character_id=character_db_id_for_context,
-                        assistant_kind=telemetry_assistant_kind,
-                        assistant_id=telemetry_assistant_id,
-                        debug_id=debug_id_for_logs,
+                        conversation_id=final_conversation_id,
+                        assistant_text=assistant_text,
                     )
 
-                await _persist_persona_chat_reply_if_enabled(
-                    assistant_context=assistant_context,
-                    user_id=user_id,
-                    conversation_id=final_conversation_id,
-                    assistant_text=assistant_text,
-                )
+                if request_data.stream:
 
-            if request_data.stream:
+                    async def _execute_stream_response(
+                        active_call_func: Callable[[], Any],
+                        error_state: dict[str, Any],
+                    ):
+                        return await execute_streaming_call(
+                            current_loop=current_loop,
+                            cleaned_args=cleaned_args,
+                            selected_provider=selected_provider,
+                            provider=provider,
+                            model=model,
+                            request_json=request_json,
+                            request=request,
+                            metrics=metrics,
+                            provider_manager=provider_manager,
+                            templated_llm_payload=templated_llm_payload,
+                            should_persist=should_persist,
+                            final_conversation_id=final_conversation_id,
+                            character_card_for_context=character_card_for_context,
+                            chat_db=chat_db,
+                            save_message_fn=_save_message_turn_to_db,
+                            system_message_id=system_message_id,
+                            audit_service=audit_service,
+                            audit_context=context,
+                            client_id=user_id,
+                            queue_execution_enabled=QUEUED_EXECUTION,
+                            enable_provider_fallback=allow_provider_fallback_for_request,
+                            llm_call_func=_sanitize_provider_stream_call(
+                                active_call_func,
+                                error_state,
+                            ),
+                            refresh_provider_params=rebuild_call_params_for_provider,
+                            moderation_getter=_get_moderation_with_guardian,
+                            on_success=_mark_provider_used,
+                            on_stream_full_reply=_on_stream_full_reply_for_persona_telemetry,
+                            rg_commit_cb=_build_streaming_commit_cb(
+                                _rg_handle_id,
+                                request,
+                                _billing_enforcer,
+                                billing_org_id,
+                            ),
+                            rg_refund_cb=(
+                                (
+                                    lambda **_kwargs: (
+                                        request.app.state.rg_governor.commit(_rg_handle_id, actuals={"tokens": 0})
+                                        if getattr(request.app.state, "rg_governor", None) and _rg_handle_id
+                                        else None
+                                    )
+                                )
+                                if _rg_handle_id
+                                else None
+                            ),
+                            self_monitoring_service=_self_mon_service,
+                            assistant_parent_message_id=assistant_parent_message_id,
+                            continuation_metadata=continuation_meta,
+                        )
 
-                async def _execute_stream_response(
-                    active_call_func: Callable[[], Any],
-                    error_state: dict[str, Any],
-                ):
-                    return await execute_streaming_call(
+                    while True:
+                        stream_error_state: dict[str, Any] = {}
+                        stream_response = await _execute_stream_response(
+                            llm_call_func,
+                            stream_error_state,
+                        )
+                        (
+                            primed_chunks,
+                            stream_error_code,
+                            stream_has_output,
+                            stream_complete,
+                        ) = await _prime_provider_stream_response(
+                            stream_response,
+                            stream_error_state,
+                        )
+                        if stream_error_code is None:
+                            if stream_complete and not stream_has_output:
+                                await _mark_provider_used(selected_provider)
+                            if oauth_retry_state["attempted"]:
+                                _record_openai_oauth_retry("success")
+                            break
+
+                        if stream_error_state.get("output_started"):
+                            # The HTTP response has to remain a stream once the provider has
+                            # produced anything. The sanitized error is replayed with the
+                            # primed chunks, without retrying or replaying provider output.
+                            break
+
+                        await _close_provider_stream_response(stream_response)
+                        if (
+                            stream_error_code == "provider_authentication_failed"
+                            and selected_openai_oauth
+                            and not oauth_retry_state["attempted"]
+                        ):
+                            oauth_retry_state["attempted"] = True
+                            logger.info(
+                                "OpenAI OAuth auth failure detected before stream output; "
+                                "forcing refresh and retrying once."
+                            )
+                            try:
+                                refreshed_args, refreshed_model = await rebuild_call_params_for_provider(
+                                    selected_provider,
+                                    force_oauth_refresh=True,
+                                )
+                            except Exception as refresh_exc:
+                                _record_openai_oauth_retry("refresh_failed")
+                                refresh_code = _provider_credential_error_code(refresh_exc)
+                                if refresh_code is not None:
+                                    raise _provider_credential_http_exception_for_code(refresh_code) from refresh_exc
+                                raise _provider_credential_http_exception_for_code(stream_error_code) from refresh_exc
+                            refreshed_key = refreshed_args.get("api_key")
+                            if not isinstance(refreshed_key, str) or not refreshed_key.strip():
+                                _record_openai_oauth_retry("refresh_missing_api_key")
+                                raise _provider_credential_http_exception_for_code("missing_provider_credentials")
+                            cleaned_args = refreshed_args
+                            model = refreshed_model or model
+                            llm_call_func = partial(perform_chat_api_call, **cleaned_args)
+                            continue
+
+                        if oauth_retry_state["attempted"]:
+                            _record_openai_oauth_retry("retry_auth_failed")
+                        raise _provider_credential_http_exception_for_code(stream_error_code)
+
+                    if persona_debug_requested and persona_debug_meta and persona_debug_meta.get("debug_id"):
+                        try:
+                            stream_response.headers["X-TLDW-Persona-Debug-ID"] = str(persona_debug_meta["debug_id"])
+                        except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+                            pass
+                    alias_headers = _build_persona_alias_deprecation_headers(persona_alias_used)
+                    for header_key, header_value in alias_headers.items():
+                        stream_response.headers[header_key] = header_value
+                    _attach_credential_runtime_cleanup(
+                        stream_response,
+                        credential_runtime,
+                        primed_chunks,
+                        stream_error_state,
+                    )
+                    credential_runtime_owned_by_stream = True
+                    return stream_response
+
+                else:  # Non-streaming
+                    encoded_payload = await execute_non_stream_call(
                         current_loop=current_loop,
                         cleaned_args=cleaned_args,
                         selected_provider=selected_provider,
@@ -4470,526 +4629,406 @@ async def create_chat_completion(
                         client_id=user_id,
                         queue_execution_enabled=QUEUED_EXECUTION,
                         enable_provider_fallback=allow_provider_fallback_for_request,
-                        llm_call_func=_sanitize_provider_stream_call(
-                            active_call_func,
-                            error_state,
-                        ),
+                        llm_call_func=llm_call_func,
                         refresh_provider_params=rebuild_call_params_for_provider,
                         moderation_getter=_get_moderation_with_guardian,
                         on_success=_mark_provider_used,
-                        on_stream_full_reply=_on_stream_full_reply_for_persona_telemetry,
-                        rg_commit_cb=_build_streaming_commit_cb(
-                            _rg_handle_id,
-                            request,
-                            _billing_enforcer,
-                            billing_org_id,
-                        ),
-                        rg_refund_cb=(
-                            (
-                                lambda **_kwargs: (
-                                    request.app.state.rg_governor.commit(_rg_handle_id, actuals={"tokens": 0})
-                                    if getattr(request.app.state, "rg_governor", None) and _rg_handle_id
-                                    else None
-                                )
-                            )
-                            if _rg_handle_id
-                            else None
-                        ),
                         self_monitoring_service=_self_mon_service,
                         assistant_parent_message_id=assistant_parent_message_id,
                         continuation_metadata=continuation_meta,
                     )
-
-                while True:
-                    stream_error_state: dict[str, Any] = {}
-                    stream_response = await _execute_stream_response(
-                        llm_call_func,
-                        stream_error_state,
+                    persona_telemetry: dict[str, Any] | None = None
+                    assistant_reply_text = (
+                        _extract_assistant_text_from_completion_payload(encoded_payload)
+                        if isinstance(encoded_payload, dict)
+                        else ""
                     )
-                    (
-                        primed_chunks,
-                        stream_error_code,
-                        stream_has_output,
-                        stream_complete,
-                    ) = await _prime_provider_stream_response(
-                        stream_response,
-                        stream_error_state,
-                    )
-                    if stream_error_code is None:
-                        if stream_complete and not stream_has_output:
-                            await _mark_provider_used(selected_provider)
-                        if oauth_retry_state["attempted"]:
-                            _record_openai_oauth_retry("success")
-                        break
-
-                    if stream_error_state.get("output_started"):
-                        # The HTTP response has to remain a stream once the provider has
-                        # produced anything. The sanitized error is replayed with the
-                        # primed chunks, without retrying or replaying provider output.
-                        break
-
-                    await _close_provider_stream_response(stream_response)
-                    if (
-                        stream_error_code == "provider_authentication_failed"
-                        and selected_openai_oauth
-                        and not oauth_retry_state["attempted"]
-                    ):
-                        oauth_retry_state["attempted"] = True
-                        logger.info(
-                            "OpenAI OAuth auth failure detected before stream output; "
-                            "forcing refresh and retrying once."
-                        )
-                        try:
-                            refreshed_args, refreshed_model = await rebuild_call_params_for_provider(
-                                selected_provider,
-                                force_oauth_refresh=True,
-                            )
-                        except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
-                            _record_openai_oauth_retry("refresh_failed")
-                            raise _provider_credential_http_exception_for_code(stream_error_code)
-                        refreshed_key = refreshed_args.get("api_key")
-                        if not isinstance(refreshed_key, str) or not refreshed_key.strip():
-                            _record_openai_oauth_retry("refresh_missing_api_key")
-                            raise _provider_credential_http_exception_for_code(stream_error_code)
-                        cleaned_args = refreshed_args
-                        model = refreshed_model or model
-                        llm_call_func = partial(perform_chat_api_call, **cleaned_args)
-                        continue
-
-                    if oauth_retry_state["attempted"]:
-                        _record_openai_oauth_retry("retry_auth_failed")
-                    raise _provider_credential_http_exception_for_code(stream_error_code)
-
-                if persona_debug_requested and persona_debug_meta and persona_debug_meta.get("debug_id"):
-                    try:
-                        stream_response.headers["X-TLDW-Persona-Debug-ID"] = str(persona_debug_meta["debug_id"])
-                    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
-                        pass
-                alias_headers = _build_persona_alias_deprecation_headers(persona_alias_used)
-                for header_key, header_value in alias_headers.items():
-                    stream_response.headers[header_key] = header_value
-                _attach_credential_runtime_cleanup(
-                    stream_response,
-                    credential_runtime,
-                    primed_chunks,
-                    stream_error_state,
-                )
-                credential_runtime_owned_by_stream = True
-                return stream_response
-
-            else:  # Non-streaming
-                encoded_payload = await execute_non_stream_call(
-                    current_loop=current_loop,
-                    cleaned_args=cleaned_args,
-                    selected_provider=selected_provider,
-                    provider=provider,
-                    model=model,
-                    request_json=request_json,
-                    request=request,
-                    metrics=metrics,
-                    provider_manager=provider_manager,
-                    templated_llm_payload=templated_llm_payload,
-                    should_persist=should_persist,
-                    final_conversation_id=final_conversation_id,
-                    character_card_for_context=character_card_for_context,
-                    chat_db=chat_db,
-                    save_message_fn=_save_message_turn_to_db,
-                    system_message_id=system_message_id,
-                    audit_service=audit_service,
-                    audit_context=context,
-                    client_id=user_id,
-                    queue_execution_enabled=QUEUED_EXECUTION,
-                    enable_provider_fallback=allow_provider_fallback_for_request,
-                    llm_call_func=llm_call_func,
-                    refresh_provider_params=rebuild_call_params_for_provider,
-                    moderation_getter=_get_moderation_with_guardian,
-                    on_success=_mark_provider_used,
-                    self_monitoring_service=_self_mon_service,
-                    assistant_parent_message_id=assistant_parent_message_id,
-                    continuation_metadata=continuation_meta,
-                )
-                persona_telemetry: dict[str, Any] | None = None
-                assistant_reply_text = (
-                    _extract_assistant_text_from_completion_payload(encoded_payload)
-                    if isinstance(encoded_payload, dict)
-                    else ""
-                )
-                if isinstance(encoded_payload, dict) and should_record_persona_telemetry:
-                    persona_telemetry = compute_persona_exemplar_telemetry(
-                        output_text=assistant_reply_text,
-                        selected_exemplars=persona_selected_exemplars,
-                    )
-                    debug_id_for_logs = (
-                        str(persona_debug_meta.get("debug_id"))
-                        if isinstance(persona_debug_meta, dict) and persona_debug_meta.get("debug_id")
-                        else None
-                    )
-                    try:
-                        logger.debug(
-                            "Persona telemetry debug_id={} ioo={} ior={} lcs={}",
-                            debug_id_for_logs or "n/a",
-                            persona_telemetry.get("ioo"),
-                            persona_telemetry.get("ior"),
-                            persona_telemetry.get("lcs"),
-                        )
-                        _record_persona_telemetry_hooks(
-                            telemetry=persona_telemetry,
-                            provider=provider,
-                            model=model,
-                            user_id=user_id,
-                            character_id=character_db_id_for_context,
-                            assistant_kind=telemetry_assistant_kind,
-                            assistant_id=telemetry_assistant_id,
-                            debug_id=debug_id_for_logs,
-                        )
-                    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
-                        pass
-
-                if (
-                    persona_debug_requested
-                    and persona_debug_meta is not None
-                    and isinstance(encoded_payload, dict)
-                ):
-                    if persona_telemetry is None:
+                    if isinstance(encoded_payload, dict) and should_record_persona_telemetry:
                         persona_telemetry = compute_persona_exemplar_telemetry(
-                            output_text="",
+                            output_text=assistant_reply_text,
                             selected_exemplars=persona_selected_exemplars,
                         )
-                    persona_debug_meta["telemetry"] = persona_telemetry
-                    meta_payload = encoded_payload.get("meta")
-                    if not isinstance(meta_payload, dict):
-                        meta_payload = {}
-                        encoded_payload["meta"] = meta_payload
-                    meta_payload["persona"] = persona_debug_meta
+                        debug_id_for_logs = (
+                            str(persona_debug_meta.get("debug_id"))
+                            if isinstance(persona_debug_meta, dict) and persona_debug_meta.get("debug_id")
+                            else None
+                        )
+                        try:
+                            logger.debug(
+                                "Persona telemetry debug_id={} ioo={} ior={} lcs={}",
+                                debug_id_for_logs or "n/a",
+                                persona_telemetry.get("ioo"),
+                                persona_telemetry.get("ior"),
+                                persona_telemetry.get("lcs"),
+                            )
+                            _record_persona_telemetry_hooks(
+                                telemetry=persona_telemetry,
+                                provider=provider,
+                                model=model,
+                                user_id=user_id,
+                                character_id=character_db_id_for_context,
+                                assistant_kind=telemetry_assistant_kind,
+                                assistant_id=telemetry_assistant_id,
+                                debug_id=debug_id_for_logs,
+                            )
+                        except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+                            pass
 
-                if isinstance(encoded_payload, dict):
-                    await _persist_persona_chat_reply_if_enabled(
-                        assistant_context=assistant_context,
-                        user_id=user_id,
-                        conversation_id=final_conversation_id,
-                        assistant_text=assistant_reply_text,
-                    )
-                # Track response size and return
-                if isinstance(encoded_payload, dict):
-                    response_size = len(json.dumps(encoded_payload))
-                    metrics.metrics.response_size_bytes.record(
-                        response_size,
-                        {
-                            "provider": provider,
-                            "model": model,
-                            "streaming": "false",
-                        },
-                    )
-                # Resource Governor: commit actual tokens if reserved
-                try:
-                    gov = getattr(request.app.state, "rg_governor", None) if request is not None else None
-                    if gov is not None and _rg_handle_id:
-                        actual = None
+                    if (
+                        persona_debug_requested
+                        and persona_debug_meta is not None
+                        and isinstance(encoded_payload, dict)
+                    ):
+                        if persona_telemetry is None:
+                            persona_telemetry = compute_persona_exemplar_telemetry(
+                                output_text="",
+                                selected_exemplars=persona_selected_exemplars,
+                            )
+                        persona_debug_meta["telemetry"] = persona_telemetry
+                        meta_payload = encoded_payload.get("meta")
+                        if not isinstance(meta_payload, dict):
+                            meta_payload = {}
+                            encoded_payload["meta"] = meta_payload
+                        meta_payload["persona"] = persona_debug_meta
+
+                    if isinstance(encoded_payload, dict):
+                        await _persist_persona_chat_reply_if_enabled(
+                            assistant_context=assistant_context,
+                            user_id=user_id,
+                            conversation_id=final_conversation_id,
+                            assistant_text=assistant_reply_text,
+                        )
+                    # Track response size and return
+                    if isinstance(encoded_payload, dict):
+                        response_size = len(json.dumps(encoded_payload))
+                        metrics.metrics.response_size_bytes.record(
+                            response_size,
+                            {
+                                "provider": provider,
+                                "model": model,
+                                "streaming": "false",
+                            },
+                        )
+                    # Resource Governor: commit actual tokens if reserved
+                    try:
+                        gov = getattr(request.app.state, "rg_governor", None) if request is not None else None
+                        if gov is not None and _rg_handle_id:
+                            actual = None
+                            try:
+                                usage = (encoded_payload or {}).get("usage") if isinstance(encoded_payload, dict) else None
+                                total = int((usage or {}).get("total_tokens") or 0) if usage else 0
+                                if total > 0:
+                                    actual = {"tokens": total}
+                            except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+                                actual = None
+                            await gov.commit(_rg_handle_id, actuals=actual)
+                            rg_finalized = True
+                    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as _rg_commit_err:
+                        logger.debug(f"RG tokens commit skipped/failed: {_rg_commit_err}")
+                    # Billing: record actual token usage for non-streaming
+                    if _billing_enforcer is not None:
                         try:
                             usage = (encoded_payload or {}).get("usage") if isinstance(encoded_payload, dict) else None
                             total = int((usage or {}).get("total_tokens") or 0) if usage else 0
                             if total > 0:
-                                actual = {"tokens": total}
-                        except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
-                            actual = None
-                        await gov.commit(_rg_handle_id, actuals=actual)
-                        rg_finalized = True
-                except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as _rg_commit_err:
-                    logger.debug(f"RG tokens commit skipped/failed: {_rg_commit_err}")
-                # Billing: record actual token usage for non-streaming
-                if _billing_enforcer is not None:
-                    try:
-                        usage = (encoded_payload or {}).get("usage") if isinstance(encoded_payload, dict) else None
-                        total = int((usage or {}).get("total_tokens") or 0) if usage else 0
-                        if total > 0:
-                            _billing_enforcer.record_actual(total)
-                    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as _billing_err:
-                        logger.debug(f"Billing token recording failed: {_billing_err}")
-                alias_headers = _build_persona_alias_deprecation_headers(persona_alias_used)
-                return JSONResponse(content=encoded_payload, headers=alias_headers or None)
+                                _billing_enforcer.record_actual(total)
+                        except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as _billing_err:
+                            logger.debug(f"Billing token recording failed: {_billing_err}")
+                    alias_headers = _build_persona_alias_deprecation_headers(persona_alias_used)
+                    return JSONResponse(content=encoded_payload, headers=alias_headers or None)
 
-        # --- Exception Handling --- Improved with structured error handling
+            # --- Exception Handling --- Improved with structured error handling
 
-        # Important: preserve HTTPException status codes raised from deeper layers
-        # before a broad Exception handler can catch and normalize them.
-        except ByokResolutionError as credential_error:
-            raise _provider_credential_http_exception(credential_error) from credential_error
+            # Important: preserve HTTPException status codes raised from deeper layers
+            # before a broad Exception handler can catch and normalize them.
+            except _ProviderCredentialTerminalError as credential_error:
+                raise _provider_credential_http_exception_for_code(credential_error.code) from credential_error
 
-        except (ChatAuthenticationError, ChatConfigurationError) as provider_error:
-            raise _provider_credential_http_exception(provider_error) from provider_error
+            except ByokResolutionError as credential_error:
+                raise _provider_credential_http_exception(credential_error) from credential_error
 
-        except HTTPException as e_http:
-            # Log with request context
-            if e_http.status_code >= 500:
-                logger.error(
-                    "HTTPException (Server Error): {} - {}",
-                    e_http.status_code,
-                    e_http.detail,
-                    extra={"request_id": request_id, "status_code": e_http.status_code},
-                    exc_info=True
-                )
-            else:
-                logger.warning(
-                    "HTTPException (Client Error): {} - {}",
-                    e_http.status_code,
-                    e_http.detail,
-                    extra={"request_id": request_id, "status_code": e_http.status_code}
-                )
-            # Allow-list expected HTTP errors raised intentionally by the endpoint
-            allowed_statuses = {
-                status.HTTP_400_BAD_REQUEST,
-                status.HTTP_401_UNAUTHORIZED,
-                status.HTTP_403_FORBIDDEN,
-                status.HTTP_404_NOT_FOUND,
-                status.HTTP_409_CONFLICT,
-                status.HTTP_413_CONTENT_TOO_LARGE,
-                status.HTTP_429_TOO_MANY_REQUESTS,
-                status.HTTP_500_INTERNAL_SERVER_ERROR,
-                status.HTTP_502_BAD_GATEWAY,
-                status.HTTP_503_SERVICE_UNAVAILABLE,
-                status.HTTP_504_GATEWAY_TIMEOUT,
-            }
-            if e_http.status_code in allowed_statuses:
-                # Re-raise expected/intentional HTTP errors
-                raise
-            # For unexpected HTTP statuses (e.g., from mocked upstream), coerce to 500
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="An unexpected internal server error occurred."
-            ) from e_http
+            except (ChatAuthenticationError, ChatConfigurationError) as provider_error:
+                raise _provider_credential_http_exception(provider_error) from provider_error
 
-        except ChatModuleException as e_chat:
-            # Our custom exceptions with structured error handling
-            e_chat.log()
-
-            # Map to appropriate HTTP status codes
-            status_map = {
-                ChatErrorCode.AUTH_MISSING_TOKEN: status.HTTP_401_UNAUTHORIZED,
-                ChatErrorCode.AUTH_INVALID_TOKEN: status.HTTP_401_UNAUTHORIZED,
-                ChatErrorCode.AUTH_EXPIRED_TOKEN: status.HTTP_401_UNAUTHORIZED,
-                ChatErrorCode.AUTH_INSUFFICIENT_PERMISSIONS: status.HTTP_403_FORBIDDEN,
-                ChatErrorCode.VAL_INVALID_REQUEST: status.HTTP_400_BAD_REQUEST,
-                ChatErrorCode.VAL_MESSAGE_TOO_LONG: status.HTTP_413_CONTENT_TOO_LARGE,
-                ChatErrorCode.VAL_FILE_TOO_LARGE: status.HTTP_413_CONTENT_TOO_LARGE,
-                ChatErrorCode.DB_NOT_FOUND: status.HTTP_404_NOT_FOUND,
-                ChatErrorCode.RATE_LIMIT_EXCEEDED: status.HTTP_429_TOO_MANY_REQUESTS,
-                ChatErrorCode.EXT_PROVIDER_ERROR: status.HTTP_502_BAD_GATEWAY,
-                ChatErrorCode.INT_CONFIGURATION_ERROR: status.HTTP_503_SERVICE_UNAVAILABLE,
-            }
-
-            http_status = status_map.get(e_chat.code, status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-            # Log audit event if service available
-            if audit_service and context:
-                await audit_service.log_event(
-                    event_type=AuditEventType.API_ERROR,
-                    context=context,
-                    action="chat_error",
-                    result="failure",
-                    metadata={
-                        "error_code": e_chat.code.value,
-                        "request_id": request_id
-                    }
-                )
-
-            # Tests expect detail to be a string; expose safe user_message when available
-            safe_detail = getattr(e_chat, "user_message", None)
-            if not safe_detail:
-                if http_status == status.HTTP_400_BAD_REQUEST:
-                    safe_detail = "Invalid request."
-                elif http_status == status.HTTP_401_UNAUTHORIZED:
-                    safe_detail = "Unauthorized."
-                elif http_status == status.HTTP_403_FORBIDDEN:
-                    safe_detail = "Forbidden."
-                elif http_status == status.HTTP_404_NOT_FOUND:
-                    safe_detail = "Not found."
-                elif http_status == status.HTTP_409_CONFLICT:
-                    safe_detail = "Conflict."
-                elif http_status == status.HTTP_429_TOO_MANY_REQUESTS:
-                    safe_detail = "Rate limit exceeded. Please retry."
+            except HTTPException as e_http:
+                # Log with request context
+                if e_http.status_code >= 500:
+                    logger.error(
+                        "HTTPException (Server Error): {} - {}",
+                        e_http.status_code,
+                        e_http.detail,
+                        extra={"request_id": request_id, "status_code": e_http.status_code},
+                        exc_info=True,
+                    )
                 else:
-                    safe_detail = "An unexpected internal server error occurred."
-                logger.error(
-                    "ChatModuleException missing user_message: {}",
-                    repr(e_chat),
-                )
-            raise HTTPException(
-                status_code=http_status,
-                detail=safe_detail
-            ) from e_chat
-
-        except MandatoryAuditWriteError as e_chat:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=_mandatory_audit_unavailable_detail(),
-            ) from e_chat
-        except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as e_chat:
-            # Do not leak raw HTTPException details from underlying call sites.
-            # For unexpected HTTPException from lower layers (e.g., provider shims),
-            # normalize to a generic 500 to match test expectations.
-            # However, billing (402) and rate-limit (429) responses must propagate
-            # to the client unchanged so callers can react appropriately.
-            if isinstance(e_chat, HTTPException):
-                if e_chat.status_code in (
-                    status.HTTP_402_PAYMENT_REQUIRED,
+                    logger.warning(
+                        "HTTPException (Client Error): {} - {}",
+                        e_http.status_code,
+                        e_http.detail,
+                        extra={"request_id": request_id, "status_code": e_http.status_code}
+                    )
+                # Allow-list expected HTTP errors raised intentionally by the endpoint
+                allowed_statuses = {
+                    status.HTTP_400_BAD_REQUEST,
+                    status.HTTP_401_UNAUTHORIZED,
+                    status.HTTP_403_FORBIDDEN,
+                    status.HTTP_404_NOT_FOUND,
+                    status.HTTP_409_CONFLICT,
+                    status.HTTP_413_CONTENT_TOO_LARGE,
                     status.HTTP_429_TOO_MANY_REQUESTS,
+                    status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    status.HTTP_502_BAD_GATEWAY,
                     status.HTTP_503_SERVICE_UNAVAILABLE,
-                ):
+                    status.HTTP_504_GATEWAY_TIMEOUT,
+                }
+                if e_http.status_code in allowed_statuses:
+                    # Re-raise expected/intentional HTTP errors
                     raise
+                # For unexpected HTTP statuses (e.g., from mocked upstream), coerce to 500
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="An unexpected internal server error occurred."
-                ) from e_chat
-            # Special-case DB errors here, because a generic Exception handler precedes
-            # the DB-specific except block below. Map to precise HTTP statuses.
-            if isinstance(e_chat, (InputError, ConflictError, CharactersRAGDBError)):
-                logger.error(
-                    "Database Error: {} - {}",
-                    type(e_chat).__name__,
-                    str(e_chat),
-                    exc_info=True,
-                )
-                db_status = (
-                    status.HTTP_400_BAD_REQUEST if isinstance(e_chat, InputError) else
-                    status.HTTP_409_CONFLICT if isinstance(e_chat, ConflictError) else
-                    status.HTTP_500_INTERNAL_SERVER_ERROR
-                )
-                if db_status == status.HTTP_400_BAD_REQUEST:
-                    client_detail = "Invalid request."
-                elif db_status == status.HTTP_409_CONFLICT:
-                    client_detail = "Conflict."
-                else:
-                    client_detail = "A database error occurred. Please try again later."
-                raise HTTPException(status_code=db_status, detail=client_detail) from e_chat
-            # Handle legacy chat library exceptions robustly, even if class identity differs.
-            # For non-library exceptions, return a generic 500 rather than leaking the raw exception.
-            is_chat_lib_error = (
-                hasattr(e_chat, 'status_code') or hasattr(e_chat, 'provider') or
-                type(e_chat).__name__.startswith('Chat')
-            )
-            # Log audit event for chat error
-            if audit_service and context:
-                await audit_service.log_event(
-                    event_type=AuditEventType.API_ERROR,
-                    context=context,
-                    action="chat_error",
-                    result="failure",
-                    metadata=_build_chat_error_audit_metadata(
-                        e_chat,
-                        provider=provider,
-                        model=model,
-                    )
-                )
-            # Determine status robustly across possible module/class identity mismatches
-            if is_chat_lib_error:
-                name_lower = type(e_chat).__name__.lower()
-                if 'authentication' in name_lower:
-                    err_status = status.HTTP_401_UNAUTHORIZED
-                elif 'ratelimit' in name_lower or 'rate_limit' in name_lower:
-                    err_status = status.HTTP_429_TOO_MANY_REQUESTS
-                elif 'badrequest' in name_lower or 'bad_request' in name_lower:
-                    err_status = status.HTTP_400_BAD_REQUEST
-                elif 'configuration' in name_lower:
-                    err_status = status.HTTP_503_SERVICE_UNAVAILABLE
-                elif 'provider' in name_lower:
-                    err_status = getattr(e_chat, 'status_code', status.HTTP_502_BAD_GATEWAY) or status.HTTP_502_BAD_GATEWAY
-                else:
-                    err_status = getattr(e_chat, 'status_code', status.HTTP_500_INTERNAL_SERVER_ERROR) or status.HTTP_500_INTERNAL_SERVER_ERROR
-            else:
-                err_status = status.HTTP_500_INTERNAL_SERVER_ERROR
-            # Don't use f-string when logging errors that might contain JSON with curly braces
-            # Use lazy formatting to avoid issues with curly braces in error messages
-            # Use safe fallbacks: standard Exception doesn't have `.message` or `.provider` attributes
-            safe_message = getattr(e_chat, 'message', str(e_chat))
-            safe_provider = getattr(e_chat, 'provider', provider)
-            logger.error(
-                "Chat Library Error: {} - {} (Provider: {}, UpstreamStatus: {})",
-                type(e_chat).__name__,
-                repr(safe_message),
-                safe_provider,
-                getattr(e_chat, 'status_code', 'N/A'),
-                exc_info=True
-            )
-            if not is_chat_lib_error and err_status == status.HTTP_500_INTERNAL_SERVER_ERROR:
-                try:
-                    conversation_id_for_error = locals().get("final_conversation_id")
-                    unexpected_error = ChatModuleException(
-                        code=ChatErrorCode.INT_UNEXPECTED_ERROR,
-                        message=f"Unexpected error in chat completion endpoint: {str(e_chat)}",
-                        details={
-                            "error_type": type(e_chat).__name__,
-                            "error_str": str(e_chat),
-                            "request_id": request_id,
-                            "conversation_id": conversation_id_for_error,
-                        },
-                        cause=e_chat,
-                        user_message=(
-                            "An unexpected error occurred. Please try again or contact support "
-                            "if the issue persists."
-                        ),
-                    )
-                    unexpected_error.log(level="critical")
-                    if hasattr(e_chat, "__module__") and "sqlite" not in e_chat.__module__:
-                        logger.critical(
-                            "ALERT: Critical error in chat module - Request ID: {}",
-                            request_id,
-                        )
-                except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
-                    pass
-            # Standardize error messages - never expose internal details for 5xx errors
-            if err_status < 500:
-                # Keep client errors generic to avoid leaking provider details.
-                if err_status == status.HTTP_400_BAD_REQUEST:
-                    client_detail = "Invalid request."
-                elif err_status == status.HTTP_401_UNAUTHORIZED:
-                    client_detail = "Unauthorized."
-                elif err_status == status.HTTP_403_FORBIDDEN:
-                    client_detail = "Forbidden."
-                elif err_status == status.HTTP_404_NOT_FOUND:
-                    client_detail = "Not found."
-                elif err_status == status.HTTP_409_CONFLICT:
-                    client_detail = "Conflict."
-                elif err_status == status.HTTP_429_TOO_MANY_REQUESTS:
-                    client_detail = "Rate limit exceeded. Please retry."
-                else:
-                    client_detail = "Request failed."
-            else:
-                # Server errors should be generic
-                if err_status == 502:
-                    client_detail = "The chat service provider is currently unavailable."
-                elif err_status == 503:
-                    client_detail = "The chat service is temporarily unavailable."
-                elif err_status == 504:
-                    client_detail = "The chat service request timed out."
-                elif err_status == 500 and not is_chat_lib_error:
-                    # For unexpected non-library errors, include the 'unexpected' variant to match tests
-                    client_detail = "An unexpected internal server error occurred."
-                else:
-                    client_detail = "An internal server error occurred."
-            raise HTTPException(status_code=err_status, detail=client_detail) from e_chat
+                ) from e_http
 
+            except ChatModuleException as e_chat:
+                # Our custom exceptions with structured error handling
+                e_chat.log()
+
+                # Map to appropriate HTTP status codes
+                status_map = {
+                    ChatErrorCode.AUTH_MISSING_TOKEN: status.HTTP_401_UNAUTHORIZED,
+                    ChatErrorCode.AUTH_INVALID_TOKEN: status.HTTP_401_UNAUTHORIZED,
+                    ChatErrorCode.AUTH_EXPIRED_TOKEN: status.HTTP_401_UNAUTHORIZED,
+                    ChatErrorCode.AUTH_INSUFFICIENT_PERMISSIONS: status.HTTP_403_FORBIDDEN,
+                    ChatErrorCode.VAL_INVALID_REQUEST: status.HTTP_400_BAD_REQUEST,
+                    ChatErrorCode.VAL_MESSAGE_TOO_LONG: status.HTTP_413_CONTENT_TOO_LARGE,
+                    ChatErrorCode.VAL_FILE_TOO_LARGE: status.HTTP_413_CONTENT_TOO_LARGE,
+                    ChatErrorCode.DB_NOT_FOUND: status.HTTP_404_NOT_FOUND,
+                    ChatErrorCode.RATE_LIMIT_EXCEEDED: status.HTTP_429_TOO_MANY_REQUESTS,
+                    ChatErrorCode.EXT_PROVIDER_ERROR: status.HTTP_502_BAD_GATEWAY,
+                    ChatErrorCode.INT_CONFIGURATION_ERROR: status.HTTP_503_SERVICE_UNAVAILABLE,
+                }
+
+                http_status = status_map.get(e_chat.code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+                # Log audit event if service available
+                if audit_service and context:
+                    await audit_service.log_event(
+                        event_type=AuditEventType.API_ERROR,
+                        context=context,
+                        action="chat_error",
+                        result="failure",
+                        metadata={
+                            "error_code": e_chat.code.value,
+                            "request_id": request_id
+                        }
+                    )
+
+                # Tests expect detail to be a string; expose safe user_message when available
+                safe_detail = getattr(e_chat, "user_message", None)
+                if not safe_detail:
+                    if http_status == status.HTTP_400_BAD_REQUEST:
+                        safe_detail = "Invalid request."
+                    elif http_status == status.HTTP_401_UNAUTHORIZED:
+                        safe_detail = "Unauthorized."
+                    elif http_status == status.HTTP_403_FORBIDDEN:
+                        safe_detail = "Forbidden."
+                    elif http_status == status.HTTP_404_NOT_FOUND:
+                        safe_detail = "Not found."
+                    elif http_status == status.HTTP_409_CONFLICT:
+                        safe_detail = "Conflict."
+                    elif http_status == status.HTTP_429_TOO_MANY_REQUESTS:
+                        safe_detail = "Rate limit exceeded. Please retry."
+                    else:
+                        safe_detail = "An unexpected internal server error occurred."
+                    logger.error(
+                        "ChatModuleException missing user_message: {}",
+                        repr(e_chat),
+                    )
+                raise HTTPException(
+                    status_code=http_status,
+                    detail=safe_detail
+                ) from e_chat
+
+            except MandatoryAuditWriteError as e_chat:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=_mandatory_audit_unavailable_detail(),
+                ) from e_chat
+            except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as e_chat:
+                # Do not leak raw HTTPException details from underlying call sites.
+                # For unexpected HTTPException from lower layers (e.g., provider shims),
+                # normalize to a generic 500 to match test expectations.
+                # However, billing (402) and rate-limit (429) responses must propagate
+                # to the client unchanged so callers can react appropriately.
+                if isinstance(e_chat, HTTPException):
+                    if e_chat.status_code in (
+                        status.HTTP_402_PAYMENT_REQUIRED,
+                        status.HTTP_429_TOO_MANY_REQUESTS,
+                        status.HTTP_503_SERVICE_UNAVAILABLE,
+                    ):
+                        raise
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="An unexpected internal server error occurred."
+                    ) from e_chat
+                # Special-case DB errors here, because a generic Exception handler precedes
+                # the DB-specific except block below. Map to precise HTTP statuses.
+                if isinstance(e_chat, (InputError, ConflictError, CharactersRAGDBError)):
+                    logger.error(
+                        "Database Error: {} - {}",
+                        type(e_chat).__name__,
+                        str(e_chat),
+                        exc_info=True,
+                    )
+                    db_status = (
+                        status.HTTP_400_BAD_REQUEST if isinstance(e_chat, InputError) else
+                        status.HTTP_409_CONFLICT if isinstance(e_chat, ConflictError) else
+                        status.HTTP_500_INTERNAL_SERVER_ERROR
+                    )
+                    if db_status == status.HTTP_400_BAD_REQUEST:
+                        client_detail = "Invalid request."
+                    elif db_status == status.HTTP_409_CONFLICT:
+                        client_detail = "Conflict."
+                    else:
+                        client_detail = "A database error occurred. Please try again later."
+                    raise HTTPException(status_code=db_status, detail=client_detail) from e_chat
+                # Handle legacy chat library exceptions robustly, even if class identity differs.
+                # For non-library exceptions, return a generic 500 rather than leaking the raw exception.
+                is_chat_lib_error = (
+                    hasattr(e_chat, 'status_code') or hasattr(e_chat, 'provider') or
+                    type(e_chat).__name__.startswith('Chat')
+                )
+                # Log audit event for chat error
+                if audit_service and context:
+                    await audit_service.log_event(
+                        event_type=AuditEventType.API_ERROR,
+                        context=context,
+                        action="chat_error",
+                        result="failure",
+                        metadata=_build_chat_error_audit_metadata(
+                            e_chat,
+                            provider=provider,
+                            model=model,
+                        )
+                    )
+                # Determine status robustly across possible module/class identity mismatches
+                if is_chat_lib_error:
+                    name_lower = type(e_chat).__name__.lower()
+                    if 'authentication' in name_lower:
+                        err_status = status.HTTP_401_UNAUTHORIZED
+                    elif 'ratelimit' in name_lower or 'rate_limit' in name_lower:
+                        err_status = status.HTTP_429_TOO_MANY_REQUESTS
+                    elif 'badrequest' in name_lower or 'bad_request' in name_lower:
+                        err_status = status.HTTP_400_BAD_REQUEST
+                    elif 'configuration' in name_lower:
+                        err_status = status.HTTP_503_SERVICE_UNAVAILABLE
+                    elif 'provider' in name_lower:
+                        err_status = getattr(e_chat, 'status_code', status.HTTP_502_BAD_GATEWAY) or status.HTTP_502_BAD_GATEWAY
+                    else:
+                        err_status = getattr(e_chat, 'status_code', status.HTTP_500_INTERNAL_SERVER_ERROR) or status.HTTP_500_INTERNAL_SERVER_ERROR
+                else:
+                    err_status = status.HTTP_500_INTERNAL_SERVER_ERROR
+                # Don't use f-string when logging errors that might contain JSON with curly braces
+                # Use lazy formatting to avoid issues with curly braces in error messages
+                # Use safe fallbacks: standard Exception doesn't have `.message` or `.provider` attributes
+                safe_message = getattr(e_chat, 'message', str(e_chat))
+                safe_provider = getattr(e_chat, 'provider', provider)
+                logger.error(
+                    "Chat Library Error: {} - {} (Provider: {}, UpstreamStatus: {})",
+                    type(e_chat).__name__,
+                    repr(safe_message),
+                    safe_provider,
+                    getattr(e_chat, 'status_code', 'N/A'),
+                    exc_info=True
+                )
+                if not is_chat_lib_error and err_status == status.HTTP_500_INTERNAL_SERVER_ERROR:
+                    try:
+                        conversation_id_for_error = locals().get("final_conversation_id")
+                        unexpected_error = ChatModuleException(
+                            code=ChatErrorCode.INT_UNEXPECTED_ERROR,
+                            message=f"Unexpected error in chat completion endpoint: {str(e_chat)}",
+                            details={
+                                "error_type": type(e_chat).__name__,
+                                "error_str": str(e_chat),
+                                "request_id": request_id,
+                                "conversation_id": conversation_id_for_error,
+                            },
+                            cause=e_chat,
+                            user_message=(
+                                "An unexpected error occurred. Please try again or contact support "
+                                "if the issue persists."
+                            ),
+                        )
+                        unexpected_error.log(level="critical")
+                        if hasattr(e_chat, "__module__") and "sqlite" not in e_chat.__module__:
+                            logger.critical(
+                                "ALERT: Critical error in chat module - Request ID: {}",
+                                request_id,
+                            )
+                    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+                        pass
+                # Standardize error messages - never expose internal details for 5xx errors
+                if err_status < 500:
+                    # Keep client errors generic to avoid leaking provider details.
+                    if err_status == status.HTTP_400_BAD_REQUEST:
+                        client_detail = "Invalid request."
+                    elif err_status == status.HTTP_401_UNAUTHORIZED:
+                        client_detail = "Unauthorized."
+                    elif err_status == status.HTTP_403_FORBIDDEN:
+                        client_detail = "Forbidden."
+                    elif err_status == status.HTTP_404_NOT_FOUND:
+                        client_detail = "Not found."
+                    elif err_status == status.HTTP_409_CONFLICT:
+                        client_detail = "Conflict."
+                    elif err_status == status.HTTP_429_TOO_MANY_REQUESTS:
+                        client_detail = "Rate limit exceeded. Please retry."
+                    else:
+                        client_detail = "Request failed."
+                else:
+                    # Server errors should be generic
+                    if err_status == 502:
+                        client_detail = "The chat service provider is currently unavailable."
+                    elif err_status == 503:
+                        client_detail = "The chat service is temporarily unavailable."
+                    elif err_status == 504:
+                        client_detail = "The chat service request timed out."
+                    elif err_status == 500 and not is_chat_lib_error:
+                        # For unexpected non-library errors, include the 'unexpected' variant to match tests
+                        client_detail = "An unexpected internal server error occurred."
+                    else:
+                        client_detail = "An internal server error occurred."
+                raise HTTPException(status_code=err_status, detail=client_detail) from e_chat
+
+        finally:
+            exc_type, exc_value, exc_tb = sys.exc_info()
+            if exc_type is not None and _rg_handle_id and not rg_finalized:
+                try:
+                    gov = getattr(request.app.state, "rg_governor", None) if request is not None else None
+                    if gov is not None:
+                        await gov.commit(_rg_handle_id, actuals={"tokens": 0})
+                        rg_finalized = True
+                except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as _rg_refund_err:
+                    logger.debug(f"RG tokens refund skipped/failed: {_rg_refund_err}")
+            # Billing: finalize the LimitEnforcer context manager.
+            # For streaming: the callback handles recording via apply_usage_delta
+            # directly, so __aexit__ only needs to run for non-streaming paths
+            # (where record_actual was called before __aexit__).
+            if _billing_enforcer is not None and _billing_enforcer_entered:
+                try:
+                    await _billing_enforcer.__aexit__(exc_type, exc_value, exc_tb)
+                except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as _billing_exit_err:
+                    logger.debug(f"Billing enforcer exit failed: {_billing_exit_err}")
+            try:
+                await _track_request_cm.__aexit__(exc_type, exc_value, exc_tb)
+            except BaseException:
+                # Response handoff did not complete, so the outer lifecycle
+                # guard still owns and must close streaming credentials.
+                credential_runtime_owned_by_stream = False
+                raise
     finally:
-        exc_type, exc_value, exc_tb = sys.exc_info()
         if not credential_runtime_owned_by_stream:
             await credential_runtime.close()
-        if exc_type is not None and _rg_handle_id and not rg_finalized:
-            try:
-                gov = getattr(request.app.state, "rg_governor", None) if request is not None else None
-                if gov is not None:
-                    await gov.commit(_rg_handle_id, actuals={"tokens": 0})
-                    rg_finalized = True
-            except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as _rg_refund_err:
-                logger.debug(f"RG tokens refund skipped/failed: {_rg_refund_err}")
-        # Billing: finalize the LimitEnforcer context manager.
-        # For streaming: the callback handles recording via apply_usage_delta
-        # directly, so __aexit__ only needs to run for non-streaming paths
-        # (where record_actual was called before __aexit__).
-        if _billing_enforcer is not None and _billing_enforcer_entered:
-            try:
-                await _billing_enforcer.__aexit__(exc_type, exc_value, exc_tb)
-            except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as _billing_exit_err:
-                logger.debug(f"Billing enforcer exit failed: {_billing_exit_err}")
-        await _track_request_cm.__aexit__(exc_type, exc_value, exc_tb)
 
 
 # End of chat.py

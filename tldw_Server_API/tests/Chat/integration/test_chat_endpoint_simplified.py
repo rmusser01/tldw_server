@@ -3,6 +3,7 @@ Simplified chat endpoint tests using real database and authentication.
 """
 
 import asyncio
+import json
 from contextlib import ExitStack
 from typing import Optional
 from types import SimpleNamespace
@@ -33,6 +34,8 @@ def _credential_runtime_double(
     auth_source: str | None = None,
     auth_sources: dict[str, str | None] | None = None,
     errors: dict[str, Exception] | None = None,
+    refresh_errors: dict[str, BaseException] | None = None,
+    refresh_api_keys: dict[str, str | None] | None = None,
 ):
     class RuntimeDouble:
         instances: list["RuntimeDouble"] = []
@@ -47,12 +50,17 @@ def _credential_runtime_double(
         async def resolve(self, provider: str, *, force_refresh: bool = False):
             provider = provider.strip().lower()
             self.resolve_calls.append((provider, force_refresh))
+            if force_refresh and provider in (refresh_errors or {}):
+                raise refresh_errors[provider]
             error = (errors or {}).get(provider)
             if error is not None:
                 raise error
             key = (api_keys or {}).get(provider, f"{provider}-runtime-key")
             if force_refresh:
-                key = f"{provider}-refreshed-runtime-key"
+                key = (refresh_api_keys or {}).get(
+                    provider,
+                    f"{provider}-refreshed-runtime-key",
+                )
             return SimpleNamespace(
                 provider=provider,
                 api_key=key,
@@ -878,7 +886,13 @@ async def test_stream_runtime_cleanup_runs_on_completion_error_and_cancel():
 
 @pytest.mark.parametrize(
     "failure_point",
-    ["auto_router", "provider_resolution", "metrics_context", "metrics_enter"],
+    [
+        "auto_router",
+        "provider_resolution",
+        "metrics_context",
+        "metrics_enter",
+        "metrics_exit",
+    ],
 )
 def test_chat_closes_runtime_for_every_setup_failure_after_construction(
     authenticated_client,
@@ -891,6 +905,7 @@ def test_chat_closes_runtime_for_every_setup_failure_after_construction(
         model="auto" if failure_point == "auto_router" else "gpt-4o-mini",
         api_provider="openai",
         messages=[ChatCompletionUserMessageParam(role="user", content="Hello")],
+        stream=failure_point == "metrics_exit",
     )
     failure = RuntimeError(f"injected {failure_point} failure")
 
@@ -919,16 +934,71 @@ def test_chat_closes_runtime_for_every_setup_failure_after_construction(
                 metrics.track_request.side_effect = failure
             else:
                 track_context = MagicMock()
-                track_context.__aenter__ = AsyncMock(side_effect=failure)
-                track_context.__aexit__ = AsyncMock(return_value=None)
+                track_context.__aenter__ = AsyncMock(
+                    side_effect=failure if failure_point == "metrics_enter" else None,
+                )
+                track_context.__aexit__ = AsyncMock(
+                    side_effect=failure if failure_point == "metrics_exit" else None,
+                    return_value=None,
+                )
                 metrics.track_request.return_value = track_context
             stack.enter_context(patch.object(chat_endpoint, "get_chat_metrics", return_value=metrics))
+            if failure_point == "metrics_exit":
+                async def successful_stream():
+                    yield 'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n'
+
+                stack.enter_context(
+                    patch.object(
+                        chat_endpoint,
+                        "execute_streaming_call",
+                        AsyncMock(return_value=StreamingResponse(successful_stream())),
+                    )
+                )
 
         with pytest.raises(RuntimeError, match=failure_point):
             authenticated_client.post(
                 "/api/v1/chat/completions",
                 json=request_data.model_dump(),
             )
+
+    assert len(runtime_type.instances) == 1
+    assert runtime_type.instances[0].close_calls == 1
+
+
+@pytest.mark.parametrize("failure_point", ["audit", "usage"])
+def test_chat_closes_runtime_for_unexpected_setup_baseexception(
+    authenticated_client,
+    mock_chacha_db,
+    setup_dependencies,
+    failure_point,
+):
+    class InjectedSetupFailure(Exception):
+        pass
+
+    runtime_type = _credential_runtime_double()
+    request_data = ChatCompletionRequest(
+        model="gpt-4o-mini",
+        api_provider="openai",
+        messages=[ChatCompletionUserMessageParam(role="user", content="Hello")],
+    )
+    dependency = (
+        chat_endpoint.get_audit_service_for_user if failure_point == "audit" else chat_endpoint.get_usage_event_logger
+    )
+    service = MagicMock()
+    if failure_point == "audit":
+        service.log_event = AsyncMock(side_effect=InjectedSetupFailure("injected audit failure"))
+    else:
+        service.log_event.side_effect = InjectedSetupFailure("injected usage failure")
+
+    with (
+        patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
+        patch.dict(app.dependency_overrides, {dependency: lambda: service}),
+        pytest.raises(InjectedSetupFailure, match=failure_point),
+    ):
+        authenticated_client.post(
+            "/api/v1/chat/completions",
+            json=request_data.model_dump(),
+        )
 
     assert len(runtime_type.instances) == 1
     assert runtime_type.instances[0].close_calls == 1
@@ -1145,6 +1215,62 @@ def test_streaming_preoutput_typed_error_maps_before_response_handoff(
     assert runtime_type.instances[0].close_calls == 1
 
 
+@pytest.mark.parametrize(
+    ("eager_error", "expected_status", "expected_code"),
+    [
+        (
+            ChatAuthenticationError("sentinel eager auth body", provider="openai"),
+            status.HTTP_502_BAD_GATEWAY,
+            "provider_authentication_failed",
+        ),
+        (
+            ChatConfigurationError("sentinel eager config body", provider="openai"),
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "provider_configuration_invalid",
+        ),
+    ],
+)
+def test_streaming_eager_typed_error_maps_before_response_handoff(
+    authenticated_client,
+    mock_chacha_db,
+    setup_dependencies,
+    eager_error,
+    expected_status,
+    expected_code,
+):
+    runtime_type = _credential_runtime_double()
+    provider_manager = MagicMock()
+    provider_manager.circuit_breakers = {"openai": SimpleNamespace(can_attempt_call=lambda: True)}
+    request_data = ChatCompletionRequest(
+        model="gpt-4o-mini",
+        api_provider="openai",
+        messages=[ChatCompletionUserMessageParam(role="user", content="Hello")],
+        stream=True,
+    )
+
+    with (
+        patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
+        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
+        patch.object(
+            chat_endpoint,
+            "perform_chat_api_call",
+            side_effect=eager_error,
+        ),
+    ):
+        response = authenticated_client.post(
+            "/api/v1/chat/completions",
+            json=request_data.model_dump(),
+        )
+
+    assert response.status_code == expected_status
+    detail = response.json()["detail"]
+    assert detail["error_code"] == expected_code
+    assert "sentinel" not in str(detail).lower()
+    provider_manager.get_available_provider.assert_not_called()
+
+
 def test_streaming_lazy_openai_oauth_refreshes_once_before_output(
     authenticated_client,
     mock_chacha_db,
@@ -1189,6 +1315,146 @@ def test_streaming_lazy_openai_oauth_refreshes_once_before_output(
     assert runtime_type.instances[0].resolve_calls.count(("openai", True)) == 1
 
 
+@pytest.mark.parametrize("oauth_enabled", [True, False])
+def test_streaming_keepalive_before_auth_error_is_not_provider_output(
+    authenticated_client,
+    mock_chacha_db,
+    setup_dependencies,
+    oauth_enabled,
+):
+    runtime_type = _credential_runtime_double(auth_source="oauth" if oauth_enabled else None)
+    provider_manager = MagicMock()
+    provider_manager.circuit_breakers = {"openai": SimpleNamespace(can_attempt_call=lambda: True)}
+    request_data = ChatCompletionRequest(
+        model="gpt-4o-mini",
+        api_provider="openai",
+        messages=[ChatCompletionUserMessageParam(role="user", content="Hello")],
+        stream=True,
+    )
+
+    def keepalive_then_error():
+        yield ": keepalive\n\n"
+        yield 'data: {"choices":[{"delta":{}}]}\n\n'
+        raise ChatAuthenticationError("sentinel keepalive auth", provider="openai")
+
+    def refreshed_stream():
+        yield 'data: {"choices":[{"delta":{"content":"recovered"}}]}\n\n'
+        yield "data: [DONE]\n\n"
+
+    provider_side_effect = [keepalive_then_error(), refreshed_stream()] if oauth_enabled else [keepalive_then_error()]
+    with (
+        patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
+        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
+        patch.object(
+            chat_endpoint,
+            "perform_chat_api_call",
+            side_effect=provider_side_effect,
+        ) as provider_call,
+    ):
+        response = authenticated_client.post(
+            "/api/v1/chat/completions",
+            json=request_data.model_dump(),
+        )
+
+    if oauth_enabled:
+        assert response.status_code == status.HTTP_200_OK
+        assert "recovered" in response.text
+        assert provider_call.call_count == 2
+        assert runtime_type.instances[0].resolve_calls.count(("openai", True)) == 1
+    else:
+        assert response.status_code == status.HTTP_502_BAD_GATEWAY
+        assert response.json()["detail"]["error_code"] == "provider_authentication_failed"
+        assert provider_call.call_count == 1
+        assert ("openai", True) not in runtime_type.instances[0].resolve_calls
+    assert "sentinel" not in response.text.lower()
+
+
+@pytest.mark.parametrize("streaming", [False, True])
+@pytest.mark.parametrize(
+    "expected_code",
+    [
+        "invalid_provider_credentials",
+        "missing_provider_credentials",
+        "credential_store_unavailable",
+        "credential_scope_revoked",
+        "provider_configuration_invalid",
+    ],
+)
+def test_oauth_refresh_failure_preserves_terminal_credential_taxonomy(
+    authenticated_client,
+    mock_chacha_db,
+    setup_dependencies,
+    streaming,
+    expected_code,
+):
+    refresh_errors: dict[str, BaseException] = {}
+    refresh_api_keys: dict[str, str | None] = {}
+    if expected_code == "missing_provider_credentials":
+        refresh_api_keys["openai"] = None
+    elif expected_code == "provider_configuration_invalid":
+        refresh_errors["openai"] = ChatConfigurationError(
+            "sentinel refresh config",
+            provider="openai",
+        )
+    else:
+        refresh_errors["openai"] = ByokResolutionError(
+            expected_code,
+            "openai",
+        )
+
+    runtime_type = _credential_runtime_double(
+        auth_source="oauth",
+        refresh_errors=refresh_errors,
+        refresh_api_keys=refresh_api_keys,
+    )
+    provider_manager = MagicMock()
+    provider_manager.circuit_breakers = {"openai": SimpleNamespace(can_attempt_call=lambda: True)}
+    provider_manager.get_available_provider.return_value = "anthropic"
+    request_data = ChatCompletionRequest(
+        model="gpt-4o-mini",
+        api_provider="openai",
+        messages=[ChatCompletionUserMessageParam(role="user", content="Hello")],
+        stream=streaming,
+    )
+
+    if streaming:
+
+        def expired_stream():
+            if False:
+                yield ""
+            raise ChatAuthenticationError("sentinel initial auth", provider="openai")
+
+        provider_side_effect = [expired_stream()]
+    else:
+        provider_side_effect = [ChatAuthenticationError("sentinel initial auth", provider="openai")]
+
+    with (
+        patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
+        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch.object(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", True),
+        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
+        patch.object(
+            chat_endpoint,
+            "perform_chat_api_call",
+            side_effect=provider_side_effect,
+        ) as provider_call,
+    ):
+        response = authenticated_client.post(
+            "/api/v1/chat/completions",
+            json=request_data.model_dump(),
+        )
+
+    assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+    detail = response.json()["detail"]
+    assert detail["error_code"] == expected_code
+    assert "sentinel" not in str(detail).lower()
+    assert provider_call.call_count == 1
+    provider_manager.get_available_provider.assert_not_called()
+
+
 def test_streaming_auth_failure_after_output_is_sanitized_without_refresh(
     authenticated_client,
     mock_chacha_db,
@@ -1224,6 +1490,15 @@ def test_streaming_auth_failure_after_output_is_sanitized_without_refresh(
     assert "partial" in response.text
     assert "provider_authentication_failed" in response.text
     assert "sentinel" not in response.text.lower()
+    data_frames = []
+    for line in response.text.splitlines():
+        if not line.startswith("data: ") or line == "data: [DONE]":
+            continue
+        payload = json.loads(line.removeprefix("data: "))
+        if isinstance(payload, dict) and "error" in payload:
+            data_frames.append(payload)
+    assert len(data_frames) == 1
+    assert response.text.index("partial") < response.text.index('"error"')
     assert ("openai", True) not in runtime_type.instances[0].resolve_calls
 
 
