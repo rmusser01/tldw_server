@@ -471,15 +471,21 @@ class LLMGenerator(BaseGenerator):
             try:
                 if hasattr(response, "__aiter__"):
                     async for chunk in response:
-                        if not output_emitted and _extract_stream_text(chunk):
-                            output_emitted = True
-                            await credential_runtime.mark_used(credential_handle)
+                        if not output_emitted:
+                            output_emitted, _ = _classify_stream_content(
+                                _extract_stream_text(chunk)
+                            )
+                            if output_emitted:
+                                await credential_runtime.mark_used(credential_handle)
                         yield chunk
                 else:
                     for chunk in response:
-                        if not output_emitted and _extract_stream_text(chunk):
-                            output_emitted = True
-                            await credential_runtime.mark_used(credential_handle)
+                        if not output_emitted:
+                            output_emitted, _ = _classify_stream_content(
+                                _extract_stream_text(chunk)
+                            )
+                            if output_emitted:
+                                await credential_runtime.mark_used(credential_handle)
                         yield chunk
                         await asyncio.sleep(0)
                 completed = True

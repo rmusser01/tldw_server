@@ -145,6 +145,57 @@ async def test_stream_controls_then_cancellation_remain_unmarked(
 
 
 @pytest.mark.parametrize("stream_kind", ["sync", "async"])
+@pytest.mark.parametrize("terminal_kind", ["failure", "cancellation"])
+@pytest.mark.parametrize(
+    ("content", "expected_mark_count"),
+    [
+        ("ping", 0),
+        ("pong", 0),
+        ("heartbeat", 0),
+        ("keepalive", 0),
+        ("", 0),
+        ("answer", 1),
+    ],
+)
+@pytest.mark.asyncio
+async def test_openai_delta_tracking_classifies_content_before_interruption(
+    monkeypatch: pytest.MonkeyPatch,
+    stream_kind: str,
+    terminal_kind: str,
+    content: str,
+    expected_mark_count: int,
+) -> None:
+    runtime = _StreamingRuntime()
+    chunk = {"choices": [{"delta": {"content": content}}]}
+
+    def interrupt() -> None:
+        if terminal_kind == "failure":
+            raise ChatAuthenticationError("private upstream", provider="test-provider")
+        raise asyncio.CancelledError
+
+    if stream_kind == "async":
+        async def async_upstream() -> Any:
+            yield chunk
+            interrupt()
+
+        upstream: Any = async_upstream()
+    else:
+        def sync_upstream() -> Any:
+            yield chunk
+            interrupt()
+
+        upstream = sync_upstream()
+
+    expected_error = (
+        ChatAuthenticationError if terminal_kind == "failure" else asyncio.CancelledError
+    )
+    with pytest.raises(expected_error):
+        await _consume_tracked_stream(monkeypatch, upstream, runtime)
+
+    assert runtime.marked == [runtime.handle] * expected_mark_count  # nosec B101
+
+
+@pytest.mark.parametrize("stream_kind", ["sync", "async"])
 @pytest.mark.asyncio
 async def test_clean_empty_stream_marks_once(
     monkeypatch: pytest.MonkeyPatch,
