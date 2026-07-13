@@ -14,12 +14,14 @@
 #
 ####################
 # Import necessary libraries
+import copy
 import inspect
 import json
 import os
 from collections.abc import Generator
 from typing import Any, Callable, Optional, Union
 
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
 from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
 from tldw_Server_API.app.core.Chat.streaming_utils import _extract_text_from_upstream_sse
 
@@ -39,6 +41,7 @@ from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     resolve_provider_model,
     resolve_provider_section,
 )
+from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
 from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
 from tldw_Server_API.app.core.Utils.Utils import logging
 
@@ -93,6 +96,39 @@ _SUMMARIZATION_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     ValueError,
     json.JSONDecodeError,
 )
+_SUMMARY_ADAPTER_EXCEPTIONS = (ChatAPIError,) + _SUMMARIZATION_NONCRITICAL_EXCEPTIONS
+
+_SUMMARY_ERROR_CODES = frozenset(
+    {
+        "invalid_provider",
+        "adapter_unavailable",
+        "missing_model",
+        "missing_credentials",
+        "provider_failure",
+    }
+)
+
+
+class SummaryProviderError(Exception):
+    """Sanitized provider failure raised to runtime-bound summarization callers."""
+
+    def __init__(self, *, code: str, provider: str) -> None:
+        self.code = code if code in _SUMMARY_ERROR_CODES else "provider_failure"
+        normalized = "".join(char for char in str(provider or "").lower() if char.isalnum() or char in ".-_")[:64]
+        self.provider = normalized or "unknown"
+        super().__init__(f"Summary provider error: {self.code} ({self.provider})")
+
+
+def _summary_failure(
+    *,
+    code: str,
+    provider: str,
+    raise_on_error: bool,
+    legacy_message: str,
+) -> str:
+    if raise_on_error:
+        raise SummaryProviderError(code=code, provider=provider)
+    return legacy_message
 
 
 def _resolve_default_system_prompt() -> str:
@@ -139,29 +175,68 @@ def _summarize_via_adapter(
     system_message: Optional[str],
     streaming: bool,
     model_override: Optional[str],
+    app_config: Optional[dict[str, Any]],
+    credentials_resolved: bool,
+    raise_on_error: bool,
 ) -> Union[str, Generator[str, None, None], None]:
     provider = _adapter_provider_name(api_name)
     if not provider:
-        return f"Error: Invalid API Name '{api_name}'"
-    app_config = ensure_app_config(loaded_config_data)
+        return _summary_failure(
+            code="invalid_provider",
+            provider=api_name,
+            raise_on_error=raise_on_error,
+            legacy_message=f"Error: Invalid API Name '{api_name}'",
+        )
+    explicit_credentials = credentials_resolved is True
+    if explicit_credentials:
+        effective_app_config = copy.deepcopy(app_config) if app_config is not None else {}
+    else:
+        effective_app_config = ensure_app_config(app_config if app_config is not None else loaded_config_data)
     adapter = get_registry().get_adapter(provider)
     if adapter is None:
-        return f"Error: LLM adapter unavailable for provider '{provider}'"
-    model = model_override or resolve_provider_model(provider, app_config)
+        return _summary_failure(
+            code="adapter_unavailable",
+            provider=provider,
+            raise_on_error=raise_on_error,
+            legacy_message=f"Error: LLM adapter unavailable for provider '{provider}'",
+        )
+    model = model_override or resolve_provider_model(provider, effective_app_config)
     if not model:
-        return f"Error: Model is required for provider '{provider}'"
+        return _summary_failure(
+            code="missing_model",
+            provider=provider,
+            raise_on_error=raise_on_error,
+            legacy_message=f"Error: Model is required for provider '{provider}'",
+        )
+    resolved_api_key = (
+        api_key
+        if explicit_credentials
+        else api_key or resolve_provider_api_key_from_config(provider, effective_app_config)
+    )
+    if (
+        explicit_credentials
+        and provider_requires_api_key(provider)
+        and not (isinstance(resolved_api_key, str) and resolved_api_key.strip())
+    ):
+        return _summary_failure(
+            code="missing_credentials",
+            provider=provider,
+            raise_on_error=raise_on_error,
+            legacy_message=f"Error: API key is required for provider '{provider}'",
+        )
     prompt = _build_summary_prompt(text_to_summarize, custom_prompt_arg)
     request: dict[str, Any] = {
         "messages": [{"role": "user", "content": prompt}],
         "system_message": system_message,
         "model": model,
-        "api_key": api_key or resolve_provider_api_key_from_config(provider, app_config),
+        "api_key": resolved_api_key,
         "temperature": temp,
         "stream": streaming,
-        "app_config": app_config,
+        "app_config": effective_app_config,
     }
-    timeout = _resolve_adapter_timeout(provider, app_config)
+    timeout = _resolve_adapter_timeout(provider, effective_app_config)
     if streaming:
+
         def stream_generator() -> Generator[str, None, None]:
             gen = None
             try:
@@ -170,11 +245,16 @@ def _summarize_via_adapter(
                     line = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else str(raw)
                     text_chunk, error_payload, _done = _extract_text_from_upstream_sse(line)
                     if error_payload is not None:
-                        yield f"Error: {error_payload}"
+                        if raise_on_error:
+                            raise SummaryProviderError(code="provider_failure", provider=provider)
+                        yield "Error: Provider streaming failed."
                         return
                     if text_chunk:
                         yield text_chunk
-            except _SUMMARIZATION_NONCRITICAL_EXCEPTIONS as exc:
+            except _SUMMARY_ADAPTER_EXCEPTIONS as exc:
+                if raise_on_error:
+                    logging.error(f"Adapter streaming failed for {provider}")
+                    raise SummaryProviderError(code="provider_failure", provider=provider) from None
                 logging.error(f"Error during adapter streaming for {provider}: {exc}", exc_info=True)
                 yield f"Error during streaming: {exc}"
             finally:
@@ -183,11 +263,15 @@ def _summarize_via_adapter(
                         gen.close()
                 except _SUMMARIZATION_NONCRITICAL_EXCEPTIONS:
                     pass
+
         return stream_generator()
     try:
         response = adapter.chat(request, timeout=timeout)
         return extract_response_content(response) or str(response)
-    except _SUMMARIZATION_NONCRITICAL_EXCEPTIONS as exc:
+    except _SUMMARY_ADAPTER_EXCEPTIONS as exc:
+        if raise_on_error:
+            logging.error(f"Adapter summarization failed for {provider}")
+            raise SummaryProviderError(code="provider_failure", provider=provider) from None
         logging.error(f"Error during adapter summarization for {provider}: {exc}", exc_info=True)
         return f"Error calling API {api_name}: {exc}"
 
@@ -372,6 +456,10 @@ def _dispatch_to_api(
     system_message: Optional[str],
     streaming: bool,
     model_override: Optional[str] = None,
+    *,
+    app_config: Optional[dict[str, Any]] = None,
+    credentials_resolved: bool = False,
+    raise_on_error: bool = False,
 ) -> Union[str, Generator[str, None, None], None]:
     """
     Internal function to call the appropriate API-specific summarization function.
@@ -390,6 +478,9 @@ def _dispatch_to_api(
             system_message=system_message,
             streaming=streaming,
             model_override=model_override,
+            app_config=app_config,
+            credentials_resolved=credentials_resolved,
+            raise_on_error=raise_on_error,
         )
         if adapter_result is None:
             error_msg = f"Error: LLM adapter unavailable for provider '{api_name}'"
@@ -398,6 +489,12 @@ def _dispatch_to_api(
         return adapter_result
 
     except _SUMMARIZATION_NONCRITICAL_EXCEPTIONS as e:
+        if raise_on_error:
+            logging.error(f"Summary provider dispatch failed for {_adapter_provider_name(api_name)}")
+            raise SummaryProviderError(
+                code="provider_failure",
+                provider=_adapter_provider_name(api_name),
+            ) from None
         logging.error(f"Error during dispatch to API '{api_name}': {str(e)}", exc_info=True)
         return f"Error calling API {api_name}: {str(e)}"
 
@@ -415,6 +512,10 @@ def analyze(
     chunked_summarization: bool = False, # Summarize chunks separately & combine
     chunk_options: Optional[dict] = None,
     model_override: Optional[str] = None,
+    *,
+    app_config: Optional[dict[str, Any]] = None,
+    credentials_resolved: bool = False,
+    raise_on_error: bool = False,
 ) -> Union[str, Generator[str, None, None]]:
     """
     Performs analysis(summarization by default) using a specified API, with optional chunking strategies. Provide a system prompt to avoid summarization.
@@ -528,7 +629,10 @@ def analyze(
                     api_key,
                     temp,
                     system_message,  # System message is handled by _dispatch_to_api
-                    streaming=False  # IMPORTANT: Force non-streaming for internal recursive steps
+                    streaming=False,  # IMPORTANT: Force non-streaming for internal recursive steps
+                    app_config=app_config,
+                    credentials_resolved=credentials_resolved,
+                    raise_on_error=raise_on_error,
                 )
                 # consume_generator handles both strings and generators, returning a string
                 processed_result = consume_generator(api_result)
@@ -567,6 +671,9 @@ def analyze(
                     chunk['text'], custom_prompt_arg, api_name, api_key,
                     temp, system_message, streaming=False, # Force non-streaming
                     model_override=model_override,
+                    app_config=app_config,
+                    credentials_resolved=credentials_resolved,
+                    raise_on_error=raise_on_error,
                 )
                 # Consume generator immediately
                 processed_chunk_summary = consume_generator(chunk_summary_result)
@@ -590,6 +697,9 @@ def analyze(
                  text_content, custom_prompt_arg, api_name, api_key,
                  temp, system_message, streaming=effective_streaming_for_api_call,
                  model_override=model_override,
+                 app_config=app_config,
+                 credentials_resolved=credentials_resolved,
+                 raise_on_error=raise_on_error,
             )
 
         # --- Post-processing and Return ---

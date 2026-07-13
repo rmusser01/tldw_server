@@ -7,6 +7,7 @@ from __future__ import annotations
 
 #
 import asyncio
+import copy
 import configparser
 import hashlib
 import json
@@ -16,7 +17,7 @@ import threading
 import time
 import warnings
 import weakref
-from functools import wraps
+from functools import partial, wraps
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
@@ -1730,6 +1731,10 @@ def create_embeddings_batch(
     texts: list[str],
     user_app_config: dict[str, Any],  # Renamed for clarity: this is the top-level app config
     model_id_override: str | None = None,
+    *,
+    api_key_override: str | None = None,
+    base_url_override: str | None = None,
+    credentials_resolved: bool = False,
 ) -> list[list[float]]:
     """
     Creates embeddings for a batch of texts.
@@ -2010,8 +2015,18 @@ def create_embeddings_batch(
                 logger.error("`get_openai_embeddings_batch` is not available or not callable.")
                 raise NotImplementedError("OpenAI batch embedding function is not properly set up.")
 
-            openai_app_config = user_app_config
-            if model_spec.api_key:
+            if credentials_resolved is True:
+                if not (isinstance(api_key_override, str) and api_key_override.strip()):
+                    raise ValueError("Explicit embedding credential is required for openai.")
+                openai_app_config = copy.deepcopy(user_app_config)
+                openai_section = dict(openai_app_config.get("openai_api", {}) or {})
+                openai_section["api_key"] = api_key_override
+                if base_url_override is not None:
+                    openai_section["api_base_url"] = base_url_override
+                openai_app_config["openai_api"] = openai_section
+            else:
+                openai_app_config = user_app_config
+            if credentials_resolved is not True and model_spec.api_key:
                 openai_section = dict(user_app_config.get("openai_api", {}) or {})
                 if not openai_section.get("api_key"):
                     openai_section["api_key"] = model_spec.api_key
@@ -2036,15 +2051,19 @@ def create_embeddings_batch(
                 f"Creating {len(texts)} embeddings via local API ({model_spec.api_url}) with model {model_spec.model_name_or_path}"
             )
             headers = {"Content-Type": "application/json"}
-            if model_spec.api_key:
-                headers["Authorization"] = f"Bearer {model_spec.api_key}"
+            api_key = api_key_override if credentials_resolved is True else model_spec.api_key
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
 
             payload = {"texts": texts, "model": model_spec.model_name_or_path}
 
             # The outbound call is already wrapped by exponential backoff and the per-config rate limiter
             from tldw_Server_API.app.core.http_client import fetch as _fetch
 
-            resp = _fetch(method="POST", url=model_spec.api_url, headers=headers, json=payload, timeout=60)
+            request_url = (
+                base_url_override if credentials_resolved is True and base_url_override else model_spec.api_url
+            )
+            resp = _fetch(method="POST", url=request_url, headers=headers, json=payload, timeout=60)
             if resp.status_code >= 400:
                 resp.raise_for_status()
             response_data = resp.json()
@@ -2117,6 +2136,10 @@ async def create_embeddings_batch_async(
     texts: list[str],
     user_app_config: dict[str, Any],
     model_id_override: str | None = None,
+    *,
+    api_key_override: str | None = None,
+    base_url_override: str | None = None,
+    credentials_resolved: bool = False,
 ) -> list[list[float]]:
     """
     Async wrapper for create_embeddings_batch.
@@ -2135,7 +2158,16 @@ async def create_embeddings_batch_async(
     # Run the synchronous function in a thread pool to avoid blocking
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(
-        None, create_embeddings_batch, texts, user_app_config, model_id_override  # Use default executor
+        None,
+        partial(
+            create_embeddings_batch,
+            texts,
+            user_app_config,
+            model_id_override,
+            api_key_override=api_key_override,
+            base_url_override=base_url_override,
+            credentials_resolved=credentials_resolved,
+        ),
     )
 
 
@@ -2143,6 +2175,10 @@ def create_embedding(
     text: str,
     user_app_config: dict[str, Any],
     model_id_override: str | None = None,
+    *,
+    api_key_override: str | None = None,
+    base_url_override: str | None = None,
+    credentials_resolved: bool = False,
 ) -> list[float]:
     """
     Creates an embedding for a single text using the batch function.
@@ -2171,7 +2207,12 @@ def create_embedding(
 
     # The create_embeddings_batch function is already decorated with rate limiter and backoff
     embeddings_list = create_embeddings_batch(
-        texts=[text], user_app_config=user_app_config, model_id_override=model_id_override  # Pass override if provided
+        texts=[text],
+        user_app_config=user_app_config,
+        model_id_override=model_id_override,
+        api_key_override=api_key_override,
+        base_url_override=base_url_override,
+        credentials_resolved=credentials_resolved,
     )
 
     if not embeddings_list or not embeddings_list[0]:

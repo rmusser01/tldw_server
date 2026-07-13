@@ -1,6 +1,10 @@
+import asyncio
+
 import pytest
 
+from tldw_Server_API.app.core.Embeddings import async_embeddings
 from tldw_Server_API.app.core.Embeddings.async_embeddings import AsyncEmbeddingService
+from tldw_Server_API.app.core.exceptions import NetworkError
 from tldw_Server_API.app.core.Embeddings.connection_pool import get_pool_manager
 from tldw_Server_API.app.core.Embeddings.simplified_config import (
     BatchingConfig,
@@ -163,3 +167,138 @@ async def test_cache_key_includes_openai_api_url_override(monkeypatch):
     expected_key = f"openai:text-embedding-3-small:{text_hash}:https://example.test/v1"
     assert service.cache.get_keys[-1] == expected_key
     assert service.cache.set_keys[-1] == expected_key
+
+
+def _fallback_config():
+    return EmbeddingsConfig(
+        providers=[
+            ProviderConfig(
+                name="openai",
+                api_key="server-key",
+                fallback_provider="huggingface",
+                models=["text-embedding-3-small"],
+            ),
+            ProviderConfig(
+                name="huggingface",
+                api_key="fallback-key",
+                models=["fallback-model"],
+                fallback_model="fallback-model",
+            ),
+        ],
+        batching=BatchingConfig(enabled=True),
+        security=SecurityConfig(enable_rate_limiting=False),
+        default_provider="openai",
+        default_model="text-embedding-3-small",
+    )
+
+
+@pytest.mark.asyncio
+async def test_explicit_concurrent_calls_keep_keys_and_urls_isolated(monkeypatch):
+    service = AsyncEmbeddingService(config=_fallback_config())
+    service.cache = DummyCache()
+    pool = get_pool_manager().get_pool("openai")
+    seen = []
+
+    async def fake_request(*_args, **kwargs):
+        await asyncio.sleep(0)
+        seen.append((kwargs["headers"]["Authorization"], kwargs["url"]))
+        marker = 1.0 if kwargs["headers"]["Authorization"] == "Bearer key-a" else 2.0
+        return {"data": [{"embedding": [marker]}]}
+
+    async def fail_batch(*_args, **_kwargs):
+        raise AssertionError("explicit credential calls must bypass batching")
+
+    monkeypatch.setattr(pool, "request", fake_request)
+    monkeypatch.setattr(service.batcher, "submit_request", fail_batch)
+
+    first, second = await asyncio.gather(
+        service.create_embedding(
+            "one",
+            provider="openai",
+            use_cache=False,
+            api_key_override="key-a",
+            base_url_override="https://a.example/v1",
+            credentials_resolved=True,
+        ),
+        service.create_embedding(
+            "two",
+            provider="openai",
+            use_cache=False,
+            api_key_override="key-b",
+            base_url_override="https://b.example/v1",
+            credentials_resolved=True,
+        ),
+    )
+
+    assert first == [1.0]
+    assert second == [2.0]
+    assert set(seen) == {
+        ("Bearer key-a", "https://a.example/v1/embeddings"),
+        ("Bearer key-b", "https://b.example/v1/embeddings"),
+    }
+    assert service.providers["openai"].api_key == "server-key"
+
+
+@pytest.mark.asyncio
+async def test_explicit_missing_key_never_falls_back(monkeypatch):
+    service = AsyncEmbeddingService(config=_fallback_config())
+    service.cache = DummyCache()
+
+    async def fail_fallback(*_args, **_kwargs):
+        raise AssertionError("credential failure must not fall back")
+
+    monkeypatch.setattr(service, "_try_fallback_providers", fail_fallback)
+
+    with pytest.raises(async_embeddings.EmbeddingCredentialError):
+        await service.create_embedding(
+            "hello",
+            provider="openai",
+            use_cache=False,
+            api_key_override=" ",
+            credentials_resolved=True,
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [401, 403])
+async def test_explicit_auth_failure_never_falls_back(monkeypatch, status):
+    service = AsyncEmbeddingService(config=_fallback_config())
+    service.cache = DummyCache()
+    pool = get_pool_manager().get_pool("openai")
+
+    async def fail_request(*_args, **_kwargs):
+        raise NetworkError(f"HTTP {status}: denied")
+
+    async def fail_fallback(*_args, **_kwargs):
+        raise AssertionError("authentication failure must not fall back")
+
+    monkeypatch.setattr(pool, "request", fail_request)
+    monkeypatch.setattr(service, "_try_fallback_providers", fail_fallback)
+
+    with pytest.raises(NetworkError):
+        await service.create_embedding(
+            "hello",
+            provider="openai",
+            use_cache=False,
+            api_key_override="bad-key",
+            credentials_resolved=True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_legacy_network_failure_can_use_fallback(monkeypatch):
+    service = AsyncEmbeddingService(config=_fallback_config())
+    service.cache = DummyCache()
+
+    async def primary_failure(**_kwargs):
+        raise RuntimeError("network unavailable")
+
+    async def fallback_success(**_kwargs):
+        return [0.4, 0.5]
+
+    monkeypatch.setattr(service.providers["openai"], "create_embedding", primary_failure)
+    monkeypatch.setattr(service.providers["huggingface"], "create_embedding", fallback_success)
+
+    result = await service.create_embedding("hello", provider="openai", use_cache=False, use_batching=False)
+
+    assert result == [0.4, 0.5]

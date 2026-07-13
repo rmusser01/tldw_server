@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import copy
 import contextlib
 import inspect
 import json as _json
@@ -1824,11 +1825,10 @@ def _build_adapter_request_from_chat_args(chat_args: dict[str, Any]) -> tuple[st
         resolve_provider_api_key_from_config,
         resolve_provider_model,
     )
+    from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
 
     provider = normalize_provider(
-        chat_args.get("api_endpoint")
-        or chat_args.get("api_provider")
-        or chat_args.get("provider")
+        chat_args.get("api_endpoint") or chat_args.get("api_provider") or chat_args.get("provider")
     )
     provider = _resolve_chat_provider_name(provider)
     if not provider:
@@ -1837,17 +1837,31 @@ def _build_adapter_request_from_chat_args(chat_args: dict[str, Any]) -> tuple[st
     _reject_local_request_url_overrides(provider, chat_args)
     is_local_provider = _is_local_chat_provider(provider)
 
+    credentials_resolved = chat_args.get("credentials_resolved") is True
     explicit_app_config = chat_args.get("app_config")
-    app_config = explicit_app_config if explicit_app_config is not None else (
-        None if is_local_provider else ensure_app_config(None)
-    )
+    if credentials_resolved:
+        app_config = copy.deepcopy(explicit_app_config) if explicit_app_config is not None else None
+    else:
+        app_config = (
+            explicit_app_config
+            if explicit_app_config is not None
+            else (None if is_local_provider else ensure_app_config(None))
+        )
     model = chat_args.get("model")
     if model is None and app_config is not None:
         model = resolve_provider_model(provider, app_config)
     if not model and not is_local_provider:
         raise ChatConfigurationError(provider=provider, message="Model is required for provider.")
 
-    api_key = chat_args.get("api_key") or resolve_provider_api_key_from_config(provider, app_config)
+    if credentials_resolved:
+        api_key = chat_args.get("api_key")
+        if provider_requires_api_key(provider) and not (isinstance(api_key, str) and api_key.strip()):
+            raise ChatConfigurationError(
+                provider=provider,
+                message="API key is required for provider.",
+            )
+    else:
+        api_key = chat_args.get("api_key") or resolve_provider_api_key_from_config(provider, app_config)
     messages_payload = chat_args.get("messages_payload") or chat_args.get("messages") or []
 
     request: dict[str, Any] = {
@@ -1878,6 +1892,7 @@ def _build_adapter_request_from_chat_args(chat_args: dict[str, Any]) -> tuple[st
         "model",
         "api_key",
         "app_config",
+        "credentials_resolved",
         "base_url",
         "api_base_url",
         "request",
