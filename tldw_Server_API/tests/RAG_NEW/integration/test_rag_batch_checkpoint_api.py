@@ -131,6 +131,73 @@ def test_rag_batch_creates_checkpoint(client_with_overrides, monkeypatch, tmp_pa
     assert status_map.get(1) == "ok"
 
 
+def test_rag_batch_ownerless_checkpoint_persists_no_credential_scope(
+    client_with_overrides,
+    monkeypatch,
+    tmp_path,
+):
+    cp_mod = _set_checkpoint_dir(monkeypatch, tmp_path)
+    manager = cp_mod.CheckpointManager()
+
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+    import tldw_Server_API.app.core.RAG.rag_service.unified_pipeline as up
+
+    monkeypatch.setattr(
+        rag_ep,
+        "_trusted_credential_runtime_scope",
+        lambda *args, **kwargs: (None, [], [], False),  # noqa: ARG005
+    )
+
+    async def fake_pipeline(query: str, **kwargs):  # noqa: ARG001
+        return up.UnifiedSearchResult(documents=[], query=query, errors=[])
+
+    monkeypatch.setattr(up, "unified_rag_pipeline", fake_pipeline)
+
+    response = client_with_overrides.post(
+        "/api/v1/rag/batch",
+        json={"queries": ["system"], "enable_checkpoint": True},
+    )
+
+    assert response.status_code == 200, response.text
+    checkpoint = manager.load_by_id(response.json()["checkpoint_id"])
+    assert checkpoint.metadata == {}
+
+
+@pytest.mark.parametrize(
+    ("team_ids", "org_ids"),
+    [
+        ([7], []),
+        ([], [11]),
+    ],
+)
+def test_rag_batch_checkpoint_rejects_ownerless_membership_scope(
+    client_with_overrides,
+    monkeypatch,
+    tmp_path,
+    team_ids,
+    org_ids,
+):
+    cp_mod = _set_checkpoint_dir(monkeypatch, tmp_path)
+    manager = cp_mod.CheckpointManager()
+
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+
+    monkeypatch.setattr(
+        rag_ep,
+        "_trusted_credential_runtime_scope",
+        lambda *args, **kwargs: (None, team_ids, org_ids, False),  # noqa: ARG005
+    )
+
+    response = client_with_overrides.post(
+        "/api/v1/rag/batch",
+        json={"queries": ["orphan"], "enable_checkpoint": True},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["error_code"] == "credential_scope_revoked"
+    assert manager.list_checkpoints() == []
+
+
 def test_rag_batch_checkpoint_records_errors(client_with_overrides, monkeypatch, tmp_path):
     cp_mod = _set_checkpoint_dir(monkeypatch, tmp_path)
     manager = cp_mod.CheckpointManager()

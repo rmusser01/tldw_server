@@ -11,6 +11,7 @@ import inspect
 import json
 import os
 import time
+from contextlib import ExitStack
 from typing import Any, Optional
 from uuid import uuid4
 
@@ -30,11 +31,17 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     rbac_rate_limit,
 )
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import require_within_limit
-from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
+    get_chacha_db_for_owner,
+    get_chacha_db_for_user,
+)
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
 
 # Dependencies
-from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import (
+    get_media_db_for_user,
+    managed_media_db_for_owner,
+)
 from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
 
 # Schemas
@@ -480,6 +487,28 @@ _CHECKPOINT_SCOPE_FIELDS = frozenset({"owner_user_id", "team_ids", "org_ids"})
 _CHECKPOINT_QUERY_FAILURE = "batch_query_failed"
 
 
+def _checkpoint_creation_metadata(
+    credential_scope: tuple[int | None, list[int], list[int], bool],
+) -> dict[str, Any]:
+    """Persist only a valid owner-bound credential identity."""
+    owner_user_id, team_ids, org_ids, _ = credential_scope
+    if owner_user_id is None:
+        if team_ids or org_ids:
+            raise ByokResolutionError("credential_scope_revoked", "credential_scope")
+        return {}
+    if type(owner_user_id) is not int or owner_user_id <= 0:
+        raise ByokResolutionError("credential_scope_revoked", "credential_scope")
+    if any(type(item) is not int or item <= 0 for item in [*team_ids, *org_ids]):
+        raise ByokResolutionError("credential_scope_revoked", "credential_scope")
+    return {
+        _CHECKPOINT_CREDENTIAL_SCOPE_KEY: {
+            "owner_user_id": owner_user_id,
+            "team_ids": list(team_ids),
+            "org_ids": list(org_ids),
+        }
+    }
+
+
 def _checkpoint_admin_authorized(principal: AuthPrincipal) -> bool:
     """Return whether current principal has an explicit checkpoint admin claim."""
     roles = {str(role).strip().lower() for role in principal.roles}
@@ -545,20 +574,29 @@ async def _checkpoint_resume_credential_scope(
             team_memberships = await orgs_teams.list_active_team_memberships_for_user(
                 owner_user_id
             )
-            active_team_ids = {
-                int(membership["team_id"]) for membership in team_memberships
-            }
+            active_team_ids = set()
+            for membership in team_memberships:
+                if not isinstance(membership, dict):
+                    raise ValueError("invalid team membership row")
+                team_id = membership.get("team_id")
+                if type(team_id) is not int or team_id <= 0:
+                    raise ValueError("invalid team membership row")
+                active_team_ids.add(team_id)
 
         active_org_ids: set[int] = set()
         if org_ids:
             org_memberships = await orgs_teams.list_org_memberships_for_user(
                 owner_user_id
             )
-            active_org_ids = {
-                int(membership["org_id"])
-                for membership in org_memberships
-                if str(membership.get("status") or "").strip().lower() == "active"
-            }
+            active_org_ids = set()
+            for membership in org_memberships:
+                if not isinstance(membership, dict):
+                    raise ValueError("invalid organization membership row")
+                org_id = membership.get("org_id")
+                if type(org_id) is not int or org_id <= 0:
+                    raise ValueError("invalid organization membership row")
+                if str(membership.get("status") or "").strip().lower() == "active":
+                    active_org_ids.add(org_id)
     except Exception:  # noqa: BLE001 - fail closed when membership state is unavailable
         logger.warning("Checkpoint credential scope membership lookup unavailable")
         raise HTTPException(
@@ -1675,17 +1713,12 @@ async def unified_batch_endpoint(
             checkpoint_config = _sanitize_checkpoint_config_for_persistence(kwargs)
             checkpoint_config["queries"] = list(request.queries)
             checkpoint_config["max_concurrent"] = request.max_concurrent
+            checkpoint_metadata = _checkpoint_creation_metadata(credential_scope)
             checkpoint_state = checkpoint_manager.create(
                 "rag_batch",
                 total_items=len(request.queries or []),
                 config=checkpoint_config,
-                metadata={
-                    _CHECKPOINT_CREDENTIAL_SCOPE_KEY: {
-                        "owner_user_id": credential_scope[0],
-                        "team_ids": credential_scope[1],
-                        "org_ids": credential_scope[2],
-                    }
-                },
+                metadata=checkpoint_metadata,
             )
             checkpoint_id = checkpoint_state.checkpoint_id
         # Process batch
@@ -1915,6 +1948,7 @@ async def resume_batch_endpoint(
 ):
     """Resume a batch RAG operation from a previously saved checkpoint."""
     credential_runtime: ProviderCredentialRuntime | None = None
+    owner_resource_stack = ExitStack()
 
     try:
         from tldw_Server_API.app.core.RAG.rag_service.checkpoint import CheckpointManager
@@ -1973,6 +2007,33 @@ async def resume_batch_endpoint(
                 total_time=0.0,
             )
 
+        owner_user_id = credential_scope[0]
+        execution_user = current_user
+        execution_media_db = media_db
+        execution_chacha_db = chacha_db
+        execution_prompts_db = prompts_db
+        if owner_user_id is not None and current_user.id_int != owner_user_id:
+            execution_user = User(
+                id=owner_user_id,
+                username=f"checkpoint-owner-{owner_user_id}",
+                email=None,
+            )
+            try:
+                execution_media_db = owner_resource_stack.enter_context(
+                    managed_media_db_for_owner(owner_user_id)
+                )
+                execution_chacha_db = await get_chacha_db_for_owner(owner_user_id)
+                execution_prompts_db = await get_prompts_db_for_user(
+                    request_raw,
+                    execution_user,
+                )
+            except Exception:  # noqa: BLE001 - owner resources must fail closed
+                logger.warning("Checkpoint owner resources are unavailable")
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="checkpoint_owner_resources_unavailable",
+                ) from None
+
         credential_runtime = _build_credential_runtime_for_scope(
             user_id=credential_scope[0],
             team_ids=credential_scope[1],
@@ -1981,23 +2042,34 @@ async def resume_batch_endpoint(
         )
 
         max_concurrent = checkpoint.config.get("max_concurrent", 5)
+        resume_config = dict(checkpoint.config)
+        if owner_user_id is not None:
+            resume_config["user_id"] = str(owner_user_id)
+            resume_config["feedback_user_id"] = str(owner_user_id)
 
         db_paths = {
-            "media_db_path": media_db.db_path if media_db else None,
-            "notes_db_path": chacha_db.db_path if chacha_db else None,
-            "character_db_path": chacha_db.db_path if chacha_db else None,
-            "kanban_db_path": _resolve_kanban_db_path(current_user, checkpoint.config.get("user_id")),
-            "prompts_db_path": getattr(prompts_db, "db_path_str", None) if prompts_db else None,
+            "media_db_path": execution_media_db.db_path if execution_media_db else None,
+            "notes_db_path": execution_chacha_db.db_path if execution_chacha_db else None,
+            "character_db_path": execution_chacha_db.db_path if execution_chacha_db else None,
+            "kanban_db_path": _resolve_kanban_db_path(
+                execution_user,
+                resume_config.get("user_id"),
+            ),
+            "prompts_db_path": (
+                getattr(execution_prompts_db, "db_path_str", None)
+                if execution_prompts_db
+                else None
+            ),
         }
         resume_request = _build_resume_batch_request(
-            checkpoint.config,
+            resume_config,
             remaining_queries=remaining_queries,
             max_concurrent=max_concurrent,
         )
         batch_bundle = _build_batch_request_bundle(
             request=resume_request,
             db_paths=db_paths,
-            current_user=current_user,
+            current_user=execution_user,
         )
         kwargs = dict(batch_bundle.pipeline_kwargs)
         kwargs["credential_runtime"] = credential_runtime
@@ -2038,9 +2110,9 @@ async def resume_batch_endpoint(
             max_concurrent=max_concurrent,
             on_query_done=_on_query_done,
             query_indices=remaining_indices,
-            media_db=media_db,
-            chacha_db=chacha_db,
-            prompts_db=prompts_db,
+            media_db=execution_media_db,
+            chacha_db=execution_chacha_db,
+            prompts_db=execution_prompts_db,
             **kwargs,
         )
 
@@ -2098,8 +2170,14 @@ async def resume_batch_endpoint(
             detail="Batch resume failed due to an internal error.",
         ) from e
     finally:
-        if credential_runtime is not None:
-            await credential_runtime.close()
+        try:
+            if credential_runtime is not None:
+                await credential_runtime.close()
+        finally:
+            try:
+                owner_resource_stack.close()
+            except Exception:  # noqa: BLE001 - cleanup must not leak backend details
+                logger.warning("Checkpoint owner resource cleanup failed")
 
 
 @router.post(
