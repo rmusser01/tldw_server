@@ -4,7 +4,7 @@ title: Consolidate provider credential runtime for Chat and Knowledge QA
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-13 20:21'
+updated_date: '2026-07-13 21:16'
 labels: []
 dependencies: []
 documentation:
@@ -23,7 +23,7 @@ Design and implement a shared execution-scoped provider credential runtime used 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 Approved design specification is written, reviewed, and linked from this task.
-- [ ] #2 Invalid credentials, credential-store failures, and revoked background scope fail closed.
+- [x] #2 Invalid credentials, credential-store failures, and revoked background scope fail closed.
 - [x] #3 RAG semantic cache reuses documents but never cached generated answers.
 - [ ] #4 Streaming credential errors use sanitized structured codes and do not trigger non-stream fallback.
 - [ ] #5 Focused backend/frontend tests and Bandit pass for touched scope.
@@ -70,6 +70,8 @@ Docs/superpowers/plans/2026-07-12-shared-provider-credential-runtime-implementat
 2026-07-13: Independent final spec/security and quality/simplicity reviews approved Task 8A at 2dd1019009 with no unresolved findings.
 
 2026-07-13: Task 9 complete. Commits 2a418f0728, 693056059f, acb0092068, and 70085147ca make semantic caching retrieval-only and tenant-safe: legacy/generated answers and generation-only document metadata are removed; persisted payloads are strict finite JSON; direct/fake cache payloads use the same sanitizer; namespace identities and filenames are collision-resistant; semantic matches are bounded and never expose raw cached queries; cache identity covers the effective base retrieval configuration; immutable trusted base-retrieval snapshots prevent double processing; advanced secondary retrieval, auto-temporal, explicit include-ID, research-loop, and classification external-prefetch paths fail closed from caching; failed base retrieval fallback evidence is never stored. TDD included regressions for punctuation/case/safe-mimic collisions, non-finite values, malformed matches, FTS/date/late-chunk identity, raw pre-transform snapshots, bypass provenance, and failed-execution fallback. Final root verification: exact Task 9 suite 132 passed; full RAG_NEW/unit 866 passed, 3 skipped; Ruff and py_compile clean; Bandit 0 findings/0 errors across 8,538 production LOC; diff and production sentinel scans clean. Independent specification and quality/security reviews approved 70085147ca with no open findings.
+
+2026-07-13: Task 10 complete. Commits e36c3538dd, 55d81d3b3f, and c4df083458 bind new RAG batch checkpoints to server-derived owner/team/org metadata, authorize owner or explicit admin before runtime creation and early completion, reload strict current memberships, recompute base-URL authority, keep legacy ownerless checkpoints on server credentials, and persist only bounded result error codes. Review hardening aligns owner credentials, media/notes/prompts/Kanban paths, request/cache identity, and the ambient content ScopeContext for both self-resume and delegated-admin resume; delegated admin bypass is removed, caller scope is restored after runtime/media cleanup, malformed membership rows and orphan ownerless scopes fail closed, and ownerless server checkpoints omit credential metadata. Fresh root verification: checkpoint/resume suite 85 passed; adjacent provider-credential suite 19 passed; Ruff and py_compile clean; Bandit 0 findings/0 errors over 2,345 production LOC; diff check clean. Independent final specification and quality/security reviews approved c4df083458 with no open findings.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

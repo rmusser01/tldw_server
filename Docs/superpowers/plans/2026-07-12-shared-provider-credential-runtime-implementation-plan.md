@@ -576,25 +576,25 @@ git commit -m "fix(rag): make semantic cache retrieval-only"
 - Modify: `tldw_Server_API/tests/RAG_NEW/integration/test_rag_batch_checkpoint_api.py`
 - Modify: `tldw_Server_API/tests/RAG_NEW/integration/test_rag_batch_resume_api.py`
 
-- [ ] **Step 1: Write failing ownership/resume tests**
+- [x] **Step 1: Write failing ownership/resume tests**
 
 Assert new checkpoint metadata contains trusted owner and active scope IDs but no runtime/secret or cached base-URL authority. Owner mismatch returns 403; admin authorization is explicit; revoked membership fails closed; matching owner reconstructs a fresh runtime; current base-URL override authority is recomputed from the resuming principal and revocation takes effect; legacy ownerless checkpoints use system/server context and are never rebound to the resumer.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/RAG/test_checkpoint.py tldw_Server_API/tests/RAG_NEW/integration/test_rag_batch_checkpoint_api.py tldw_Server_API/tests/RAG_NEW/integration/test_rag_batch_resume_api.py -q`
 
 Expected: FAIL because checkpoints have no trusted owner binding.
 
-- [ ] **Step 3: Persist identity metadata and revalidate on resume**
+- [x] **Step 3: Persist identity metadata and revalidate on resume**
 
-Use existing checkpoint `metadata`, not a new persistence system. At create time store only server-derived owner/team/org identifiers. At resume, verify ownership or the repository's existing explicit admin claims (`principal.is_admin`, role `admin`, or permission `*`/`system.configure`), reload current memberships, intersect/revalidate active scope, recompute `is_trusted_base_url_principal(principal)`, and then construct a fresh runtime. Do not persist authority; the runtime also reapplies the current provider allowlist and egress validation. Sanitize stored result errors to bounded codes.
+Use existing checkpoint `metadata`, not a new persistence system. At create time store only server-derived owner/team/org identifiers. At resume, verify ownership or the repository's existing explicit admin claims (`principal.is_admin`, role `admin`, or permission `*`/`system.configure`), reload current memberships, intersect/revalidate active scope, recompute `is_trusted_base_url_principal(principal)`, and then construct a fresh runtime. Bind owner resources, request identity, cache identity, and the ambient content scope to the same revalidated checkpoint owner/team/org scope for both self-resume and delegated-admin resume; remove delegated admin bypass and restore the caller scope after cleanup. Do not persist authority; the runtime also reapplies the current provider allowlist and egress validation. Sanitize stored result errors to bounded codes, reject malformed membership rows, and omit credential metadata for valid ownerless server-context checkpoints.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run the Step 2 command. Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/RAG/rag_service/checkpoint.py tldw_Server_API/app/api/v1/endpoints/rag_unified.py tldw_Server_API/tests/RAG/test_checkpoint.py tldw_Server_API/tests/RAG_NEW/integration
