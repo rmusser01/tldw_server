@@ -298,7 +298,7 @@ git commit -m "refactor(chat): use shared provider credential runtime"
 
 **Tests:** New RAG credential tests plus focused existing component/integration tests.
 
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 5: Create and propagate RAG runtimes at endpoint boundaries
 
@@ -492,25 +492,25 @@ git commit -m "fix(rag): use current credentials for query embeddings"
 - Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_research_agent.py`
 - Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_post_verifier.py`
 
-- [ ] **Step 1: Write failing residual-call tests**
+- [x] **Step 1: Write failing residual-call tests**
 
 Assert runtime-bound HyDE LLM generation supplies the resolved provider handle and explicit no-config-fallback marker, while its documented optional failure uses the heuristic with bounded coverage metadata. Assert the optional agentic LLM planner receives the original runtime and degrades with bounded metadata on credential failure. Assert the research agent's local-database action passes the runtime into its query-time retriever. Cancellation must propagate and legacy no-runtime callers must remain compatible.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/RAG_NEW/unit/test_hyde.py tldw_Server_API/tests/RAG_NEW/unit/test_agentic_execution.py tldw_Server_API/tests/RAG_NEW/unit/test_research_agent.py tldw_Server_API/tests/RAG_NEW/unit/test_post_verifier.py -q`
 
 Expected: FAIL because these residual callers still construct provider calls or retrievers without the shared runtime.
 
-- [ ] **Step 3: Bind residual provider calls to the runtime**
+- [x] **Step 3: Bind residual provider calls to the runtime**
 
-Add an async runtime-bound HyDE generation path that resolves the effective provider, passes the exact key/provider-scoped config/explicit marker to SGL, records use after a completed provider call, propagates cancellation, and exposes only bounded optional-stage degradation. Keep the legacy synchronous helper for no-runtime callers. Pass the original runtime into the agentic planner's `AnswerGenerator` and into the research action's `MultiDatabaseRetriever`; credential failures may degrade only where the existing stage is explicitly optional, with bounded metadata and no implicit server fallback.
+Add an async runtime-bound HyDE generation path that resolves the effective provider, passes non-empty query input plus the exact key/provider-scoped config/explicit marker to the real SGL dispatch, uses an explicit model only when supplied so provider-scoped configuration chooses compatible defaults, records use only for allowlisted textual response shapes after a completed provider call, rejects error dictionaries and arbitrary objects without coercing or exposing them, propagates cancellation, and exposes only bounded optional-stage degradation. Translate SGL `SummaryProviderError` codes so missing credentials, invalid configuration, authentication, scope revocation, and store failure retain the shared allowlisted taxonomy instead of collapsing to generic unavailability. Keep the legacy synchronous helper for no-runtime callers. Unified and adaptive post-verifier HyDE call sites pass their effective generation/HyDE provider and model into the async helper; they must not substitute `None` and silently resolve OpenAI when an explicit provider exists. Pass the original runtime into the agentic planner's `AnswerGenerator` and into the research action's real `MultiDatabaseRetriever` interface: build `db_paths` and adapters for its constructor, pass `RetrievalConfig(max_results=..., use_fts=True, use_vector=True)` to `retrieve`, and preserve source/path normalization. Treat server-supplied `db_context` and pipeline `user_id` as authoritative: action-model parameters may choose query/source/top-k only and cannot override database paths, adapters, user identity, or runtime. Normalize parsed research action names, schema-allowlisted parameter mappings, source lists, and every numeric limit immediately after parsing so malformed provider output degrades cleanly before emit/dedup/signature/context logic. Each dedup signature must include all normalized fields that change an action's result, including image/video query and result count, so distinct requests cannot reuse stale results. Credential failures may degrade only where the existing stage is explicitly optional, with bounded metadata and no implicit server fallback. The local action and outer registry must map typed and unexpected exceptions to allowlisted codes/static messages rather than serializing or logging `str(exc)`/`repr(exc)`.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run the Step 2 command. Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/RAG/rag_service/hyde.py tldw_Server_API/app/core/RAG/rag_service/agentic_execution.py tldw_Server_API/app/core/RAG/rag_service/research_agent.py tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py tldw_Server_API/app/core/RAG/rag_service/post_generation_verifier.py tldw_Server_API/tests/RAG_NEW/unit/test_hyde.py tldw_Server_API/tests/RAG_NEW/unit/test_agentic_execution.py tldw_Server_API/tests/RAG_NEW/unit/test_research_agent.py tldw_Server_API/tests/RAG_NEW/unit/test_post_verifier.py
