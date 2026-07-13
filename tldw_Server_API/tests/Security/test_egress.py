@@ -542,6 +542,33 @@ class TestEgressPolicy:
             for fields, _message in captured_logger.debug_logs
         )
 
+    def test_sensitive_dns_failure_redacts_structured_host(
+        self: "TestEgressPolicy",
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Sensitive endpoint DNS failures retain taxonomy without the real host."""
+        captured_logger = _CapturedLogger()
+        private_host = "credential-derived.private.example"
+
+        def _failing_getaddrinfo(*_args: object, **_kwargs: object) -> list[object]:
+            raise OSError("resolver failed")
+
+        monkeypatch.setattr(egress.socket, "getaddrinfo", _failing_getaddrinfo)
+        monkeypatch.setattr(egress, "logger", captured_logger)
+
+        assert egress._getaddrinfo_with_timeout(
+            private_host,
+            timeout_s=0.5,
+            sensitive_observability=True,
+        ) == []
+        assert any(
+            fields.get("event") == "dns_resolver_error"
+            and fields.get("host") == "sensitive_endpoint"
+            and fields.get("exception_type") == "OSError"
+            for fields, _message in captured_logger.debug_logs
+        )
+        assert private_host not in repr(captured_logger.debug_logs)
+
     def test_dns_slot_wait_rejects_nan_config(
         self: "TestEgressPolicy",
         monkeypatch: pytest.MonkeyPatch,

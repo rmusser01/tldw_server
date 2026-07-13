@@ -108,6 +108,52 @@ def test_sensitive_sync_request_uses_real_url_without_observability_disclosure(
         assert sensitive_fragment not in observability
 
 
+def test_sensitive_egress_dns_failure_redacts_full_loguru_record_and_resets_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.Security import egress
+
+    endpoint = "https://credential-derived.private.example/secret/path?tenant=private"
+    log_records: list[dict[str, Any]] = []
+
+    def fail_dns(*_args: object, **_kwargs: object) -> list[object]:
+        raise OSError("deterministic resolver failure")
+
+    monkeypatch.setattr(http_client, "is_explicit_pytest_runtime", lambda: False)
+    monkeypatch.setattr(http_client, "env_flag_enabled", lambda _name: False)
+    monkeypatch.setattr(http_client, "is_test_mode", lambda: False)
+    monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
+    monkeypatch.setattr(egress.socket, "getaddrinfo", fail_dns)
+    sink_id = logger.add(
+        lambda message: log_records.append(dict(message.record)),
+        level="DEBUG",
+        backtrace=True,
+        diagnose=True,
+    )
+
+    try:
+        with pytest.raises(http_client.EgressPolicyError) as exc_info:
+            http_client.fetch(
+                method="GET",
+                url=endpoint,
+                retry=http_client.RetryPolicy(attempts=1),
+                sensitive_observability=True,
+            )
+    finally:
+        logger.remove(sink_id)
+
+    assert str(exc_info.value) == "Sensitive endpoint denied by egress policy"
+    assert http_client._SENSITIVE_HTTP_LOG_CONTEXT.get() is False
+    rendered_records = repr(log_records)
+    for sensitive_fragment in (
+        "credential-derived.private.example",
+        "secret/path",
+        "tenant=private",
+        endpoint,
+    ):
+        assert sensitive_fragment not in rendered_records
+
+
 def test_sensitive_log_filter_does_not_hide_concurrent_public_request(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

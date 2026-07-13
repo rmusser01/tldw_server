@@ -25,11 +25,12 @@ import socket  # noqa: E402
 import ssl  # noqa: E402
 import threading  # noqa: E402
 import time  # noqa: E402
-from collections.abc import AsyncIterator, Iterable, Iterator  # noqa: E402
+from collections.abc import AsyncIterator, Callable, Iterable, Iterator  # noqa: E402
 from contextlib import asynccontextmanager, contextmanager, suppress  # noqa: E402
 from dataclasses import dataclass  # noqa: E402
 from datetime import datetime, timezone  # noqa: E402
 from email.utils import parsedate_to_datetime  # noqa: E402
+from functools import wraps  # noqa: E402
 from pathlib import Path  # noqa: E402
 from types import SimpleNamespace  # noqa: E402
 from typing import Any, Protocol, TypedDict  # noqa: E402
@@ -188,6 +189,24 @@ def _install_sensitive_http_log_filter() -> None:
         for handler in log.handlers:
             if _SENSITIVE_HTTP_LOG_FILTER not in handler.filters:
                 handler.addFilter(_SENSITIVE_HTTP_LOG_FILTER)
+
+
+def _with_sensitive_http_log_context(
+    function: Callable[..., httpx.Response],
+) -> Callable[..., httpx.Response]:
+    """Activate sensitive logging before any request validation runs."""
+    @wraps(function)
+    def wrapped(*args: Any, **kwargs: Any) -> httpx.Response:
+        if kwargs.get("sensitive_observability") is not True:
+            return function(*args, **kwargs)
+        _install_sensitive_http_log_filter()
+        token = _SENSITIVE_HTTP_LOG_CONTEXT.set(True)
+        try:
+            return function(*args, **kwargs)
+        finally:
+            _SENSITIVE_HTTP_LOG_CONTEXT.reset(token)
+
+    return wrapped
 
 
 def _httpx_timeout_from_defaults() -> httpx.Timeout:
@@ -1159,6 +1178,8 @@ def _validate_egress_or_raise(
     policy_kwargs: dict[str, Any] = {"block_private_override": block_override}
     if configured_endpoint is not None:
         policy_kwargs["configured_endpoint"] = configured_endpoint
+    if sensitive_observability:
+        policy_kwargs["sensitive_observability"] = True
     if pinned_ips:
         policy_kwargs["pinned_resolved_ips"] = pinned_ips
     res = evaluate_url_policy(url, **policy_kwargs)
@@ -3299,6 +3320,7 @@ async def apost(
                 await ac.aclose()
 
 
+@_with_sensitive_http_log_context
 def _fetch_httpx_response(
     *,
     method: str,
@@ -3416,11 +3438,6 @@ def _fetch_httpx_response(
     if sc is None:
         sc = _get_httpx_client(proxies=proxies)
         need_close = False
-
-    sensitive_log_token = None
-    if sensitive_observability:
-        _install_sensitive_http_log_filter()
-        sensitive_log_token = _SENSITIVE_HTTP_LOG_CONTEXT.set(True)
 
     try:
         with tm.span(
@@ -3617,8 +3634,6 @@ def _fetch_httpx_response(
         )
         raise RetryExhaustedError("All retry attempts exhausted")  # noqa: TRY003
     finally:
-        if sensitive_log_token is not None:
-            _SENSITIVE_HTTP_LOG_CONTEXT.reset(sensitive_log_token)
         if need_close:
             with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                 sc.close()

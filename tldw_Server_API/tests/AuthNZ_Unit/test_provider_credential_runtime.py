@@ -444,6 +444,32 @@ async def test_touch_failure_does_not_log_credential_derived_exception_text() ->
 
 
 @pytest.mark.asyncio
+async def test_failed_usage_persistence_remains_retryable() -> None:
+    touches = 0
+
+    async def touch() -> None:
+        nonlocal touches
+        touches += 1
+        if touches == 1:
+            raise RuntimeError(f"{SECRET}: private durable touch detail")
+
+    async def resolver(provider: str, **_kwargs) -> ResolvedByokCredentials:
+        return _resolution(provider, touch=touch)
+
+    runtime = _runtime(resolver)
+    handle = await runtime.resolve("openai")
+
+    await runtime.mark_used(handle)
+    assert touches == 1
+    assert runtime._cache["openai"].used is False
+
+    await runtime.mark_used(handle)
+    assert touches == 2
+    assert runtime._cache["openai"].used is True
+    await runtime.close()
+
+
+@pytest.mark.asyncio
 async def test_app_config_is_copied_from_resolution_and_between_handles() -> None:
     resolved = _resolution(
         "openai",

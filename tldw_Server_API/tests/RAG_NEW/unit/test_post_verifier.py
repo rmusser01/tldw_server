@@ -553,6 +553,59 @@ async def test_claim_retrieval_reports_bounded_embedding_credential_degradation(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_claim_retrieval_latches_first_provider_failure(monkeypatch):
+    dispatches = 0
+    callback_results: list[list[Document]] = []
+
+    class _MediaRetriever:
+        async def retrieve_hybrid(self, **_kwargs):
+            nonlocal dispatches
+            dispatches += 1
+            raise ChatConfigurationError(
+                "secret endpoint configuration detail",
+                provider="local_api",
+                error_code="provider_configuration_invalid",
+            )
+
+    class _MultiDatabaseRetriever:
+        def __init__(self, *args, **kwargs):
+            self.retrievers = {verifier_module.DataSource.MEDIA_DB: _MediaRetriever()}
+
+    class _ClaimsEngine:
+        async def run(self, **kwargs):
+            callback_results.append(await kwargs["retrieve_fn"]("first claim"))
+            callback_results.append(await kwargs["retrieve_fn"]("second claim"))
+            return {
+                "claims": [{"id": "c1"}],
+                "summary": {"supported": 1, "refuted": 0, "nei": 0},
+            }
+
+    verifier = PostGenerationVerifier(credential_runtime=object())
+
+    async def build_claims_engine():
+        return _ClaimsEngine(), None, {"used": False}
+
+    monkeypatch.setattr(verifier_module, "ClaimsEngine", object)
+    monkeypatch.setattr(verifier_module, "MultiDatabaseRetriever", _MultiDatabaseRetriever)
+    monkeypatch.setattr(verifier, "_build_claims_engine", build_claims_engine)
+
+    outcome = await verifier.verify_and_maybe_fix(
+        query="What is RAG?",
+        answer="RAG is X.",
+        base_documents=_base_docs(),
+        media_db_path="media.db",
+    )
+
+    assert dispatches == 1
+    assert callback_results == [[], []]
+    assert outcome.total_claims == 1
+    assert outcome.unsupported_ratio == 0.0
+    assert outcome.embedding_coverage == "degraded"
+    assert outcome.embedding_failure_code == "provider_configuration_invalid"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_adaptive_retrieval_reports_bounded_embedding_auth_degradation(monkeypatch):
     class _MediaRetriever:
         async def retrieve_hybrid(self, **kwargs):

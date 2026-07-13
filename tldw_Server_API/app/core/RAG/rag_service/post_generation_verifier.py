@@ -317,6 +317,7 @@ class PostGenerationVerifier:
         # Run or reuse claims verification
         claims_payload: list[dict[str, Any]] | None = existing_claims
         summary_payload: dict[str, Any] | None = existing_summary
+        claim_retrieval_provider_failed = False
         try:
             if (claims_payload is None or summary_payload is None):
                 if self._claims_runner is not None:
@@ -334,6 +335,9 @@ class PostGenerationVerifier:
 
                     # Build a claim-level retrieval function
                     async def _retrieve_for_claim(c_text: str, top: int = 5):
+                        nonlocal claim_retrieval_provider_failed
+                        if claim_retrieval_provider_failed:
+                            return []
                         try:
                             if MultiDatabaseRetriever is None:
                                 return base_documents[:top]
@@ -360,6 +364,10 @@ class PostGenerationVerifier:
                             # Other sources could be added similarly
                             docs = sorted(docs, key=lambda d: getattr(d, 'score', 0.0), reverse=True)
                             return docs[:top]
+                        except (ByokResolutionError, ChatAPIError) as exc:
+                            claim_retrieval_provider_failed = True
+                            _record_embedding_degradation(outcome, exc)
+                            return []
                         except Exception as exc:  # noqa: BLE001 - retrieval fallback should be safe
                             _record_embedding_degradation(outcome, exc)
                             return base_documents[:top]

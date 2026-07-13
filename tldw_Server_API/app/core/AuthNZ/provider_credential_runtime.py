@@ -176,18 +176,6 @@ class _ResolvedEntry:
         generation: int,
         resolution: ResolvedByokCredentials,
     ) -> None:
-        touch_callback = resolution._touch_cb
-        if touch_callback is not None:
-
-            async def touch_without_leaking_failure() -> None:
-                try:
-                    await touch_callback()
-                except asyncio.CancelledError:
-                    raise
-                except Exception:  # noqa: BLE001 - refresh failures retain the current entry
-                    return
-
-            resolution._touch_cb = touch_without_leaking_failure
         self.generation = generation
         self.identity = object()
         self.resolution = resolution
@@ -412,7 +400,14 @@ class ProviderCredentialRuntime:
         entry: _ResolvedEntry,
     ) -> None:
         """Persist usage before publishing the entry as used."""
-        await entry.resolution.touch_last_used()
+        try:
+            touch_callback = entry.resolution._touch_cb
+            if touch_callback is not None:
+                await touch_callback()
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - usage persistence is best-effort and retryable
+            return
         if self._cache.get(provider) is entry:
             entry.used = True
 

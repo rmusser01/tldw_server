@@ -728,6 +728,8 @@ class AsyncEmbeddingService:
             # Ensure explicit provider overrides reach the async providers directly.
             if explicit_provider and provider in {"openai", "huggingface"}:
                 use_batching = False
+            if provider == "local_api":
+                use_batching = False
         if explicit_credentials:
             use_batching = False
             if provider in {"openai", "huggingface"} and not (
@@ -745,7 +747,7 @@ class AsyncEmbeddingService:
         text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
         cache_key = f"{provider}:{model}:{text_hash}"
         if effective_base_url:
-            cache_key = f"{cache_key}:{effective_base_url}"
+            cache_key = f"{cache_key}:{hashlib.sha256(effective_base_url.encode('utf-8')).hexdigest()}"
 
         # Check cache
         if use_cache:
@@ -816,7 +818,7 @@ class AsyncEmbeddingService:
             ):
                 actual_base_url = actual_provider_config.api_url
             if actual_base_url:
-                cache_key = f"{cache_key}:{actual_base_url}"
+                cache_key = f"{cache_key}:{hashlib.sha256(actual_base_url.encode('utf-8')).hexdigest()}"
             await self.cache.set_async(cache_key, embedding)
 
         return embedding

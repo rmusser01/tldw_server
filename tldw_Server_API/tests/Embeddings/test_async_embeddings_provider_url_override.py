@@ -153,13 +153,14 @@ async def test_openai_api_url_used_for_default_provider(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_cache_key_includes_openai_api_url_override(monkeypatch):
+async def test_configured_endpoint_cache_key_uses_only_stable_digest(monkeypatch):
+    endpoint = "https://configured-private.example/secret/path?tenant=private"
     config = EmbeddingsConfig(
         providers=[
             ProviderConfig(
                 name="openai",
                 api_key="sk-test",
-                api_url="https://example.test/v1",
+                api_url=endpoint,
             )
         ],
         batching=BatchingConfig(enabled=False),
@@ -192,9 +193,59 @@ async def test_cache_key_includes_openai_api_url_override(monkeypatch):
     import hashlib
 
     text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
-    expected_key = f"openai:text-embedding-3-small:{text_hash}:https://example.test/v1"
+    endpoint_digest = hashlib.sha256(endpoint.encode("utf-8")).hexdigest()
+    expected_key = f"openai:text-embedding-3-small:{text_hash}:{endpoint_digest}"
     assert service.cache.get_keys[-1] == expected_key
     assert service.cache.set_keys[-1] == expected_key
+    assert "configured-private.example" not in expected_key
+    assert "secret/path" not in expected_key
+    assert "tenant=private" not in expected_key
+
+
+@pytest.mark.asyncio
+async def test_runtime_endpoint_cache_key_uses_digest_and_segregates_endpoints(monkeypatch):
+    service = AsyncEmbeddingService(config=_fallback_config())
+    service.cache = SharedMemoryCache()
+    dispatched_endpoints: list[str] = []
+
+    async def provider_success(**kwargs):
+        endpoint = kwargs["base_url_override"]
+        dispatched_endpoints.append(endpoint)
+        return [1.0 if "runtime-a" in endpoint else 2.0]
+
+    monkeypatch.setattr(service.providers["openai"], "create_embedding", provider_success)
+    endpoint_a = "https://runtime-a.private/secret/path?tenant=one"
+    endpoint_b = "https://runtime-b.private/secret/path?tenant=two"
+
+    first = await service.create_embedding(
+        "same text",
+        provider="openai",
+        api_key_override="runtime-key",
+        base_url_override=endpoint_a,
+        credentials_resolved=True,
+    )
+    second = await service.create_embedding(
+        "same text",
+        provider="openai",
+        api_key_override="runtime-key",
+        base_url_override=endpoint_b,
+        credentials_resolved=True,
+    )
+
+    assert first == [1.0]
+    assert second == [2.0]
+    assert dispatched_endpoints == [endpoint_a, endpoint_b]
+    assert service.cache.get_keys[0] != service.cache.get_keys[1]
+    assert service.cache.get_keys == service.cache.set_keys
+    rendered_keys = repr(service.cache.get_keys)
+    for sensitive_fragment in (
+        "runtime-a.private",
+        "runtime-b.private",
+        "secret/path",
+        "tenant=one",
+        "tenant=two",
+    ):
+        assert sensitive_fragment not in rendered_keys
 
 
 @pytest.mark.asyncio
@@ -248,6 +299,67 @@ async def test_legacy_local_api_cache_identity_includes_configured_endpoint(monk
     ]
     assert shared_cache.get_keys[0] != shared_cache.get_keys[1]
     assert shared_cache.set_keys[0] != shared_cache.set_keys[1]
+    assert "local-a.example" not in repr(shared_cache.get_keys)
+    assert "local-b.example" not in repr(shared_cache.get_keys)
+
+
+@pytest.mark.asyncio
+async def test_configured_local_api_bypasses_global_batcher_for_each_endpoint(monkeypatch):
+    shared_cache = SharedMemoryCache()
+    direct_calls: list[str] = []
+    batch_calls: list[tuple[str, str]] = []
+
+    async def batch_submit(*, text, provider, **_kwargs):
+        batch_calls.append((text, provider))
+        return [99.0]
+
+    def make_service(configured_name: str, endpoint: str, marker: float):
+        config = EmbeddingsConfig(
+            providers=[
+                ProviderConfig(
+                    name=configured_name,
+                    api_url=endpoint,
+                    models=["local-model"],
+                )
+            ],
+            batching=BatchingConfig(enabled=True),
+            security=SecurityConfig(enable_rate_limiting=False),
+            default_provider=configured_name,
+            default_model="local-model",
+        )
+        service = AsyncEmbeddingService(config=config)
+        service.cache = shared_cache
+        service.batcher.enabled = True
+        monkeypatch.setattr(service.batcher, "submit_request", batch_submit)
+
+        async def provider_success(**_kwargs):
+            direct_calls.append(endpoint)
+            return [marker]
+
+        monkeypatch.setattr(service.providers["local_api"], "create_embedding", provider_success)
+        return service
+
+    first_service = make_service(
+        "local_api",
+        "https://local-a.private/embeddings?tenant=one",
+        1.0,
+    )
+    second_service = make_service(
+        "local",
+        "https://local-b.private/embeddings?tenant=two",
+        2.0,
+    )
+
+    first = await first_service.create_embedding("same text", use_batching=True)
+    second = await second_service.create_embedding("same text", use_batching=True)
+
+    assert first == [1.0]
+    assert second == [2.0]
+    assert direct_calls == [
+        "https://local-a.private/embeddings?tenant=one",
+        "https://local-b.private/embeddings?tenant=two",
+    ]
+    assert batch_calls == []
 
 
 def _fallback_config():

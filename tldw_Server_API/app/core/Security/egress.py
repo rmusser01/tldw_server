@@ -34,6 +34,7 @@ DNS_RESOLVER_SLOT_WAIT_SECONDS_ENV = "WORKFLOWS_EGRESS_DNS_SLOT_WAIT_SECONDS"
 
 _DNS_RESOLVER_MAX_OUTSTANDING_DEFAULT = 64
 _DNS_RESOLVER_SLOT_WAIT_SECONDS_DEFAULT = 0.05
+_SENSITIVE_LOG_HOST = "sensitive_endpoint"
 
 
 def _log_invalid_dns_config(name: str, raw: object, default: int | float, reason: str) -> None:
@@ -281,13 +282,18 @@ def _dns_slot_wait_seconds(timeout_s: float) -> float:
     return min(configured, timeout_s)
 
 
-def _release_dns_resolver_slot(host: str, reason: str) -> None:
+def _release_dns_resolver_slot(
+    host: str,
+    reason: str,
+    *,
+    sensitive_observability: bool = False,
+) -> None:
     """Release one DNS resolver slot and log impossible double-release cases."""
     try:
         _DNS_RESOLVER_SLOTS.release()
     except ValueError as exc:
         logger.bind(
-            host=host,
+            host=_SENSITIVE_LOG_HOST if sensitive_observability else host,
             reason=reason,
             exception_type=type(exc).__name__,
             event="dns_resolver_slot_release_failed",
@@ -299,11 +305,17 @@ def _remaining_dns_budget(start_time: float, timeout_s: float) -> float:
     return max(0.0, timeout_s - (time.monotonic() - start_time))
 
 
-def _getaddrinfo_with_timeout(host: str, timeout_s: float = 2.0) -> list[tuple]:
+def _getaddrinfo_with_timeout(
+    host: str,
+    timeout_s: float = 2.0,
+    *,
+    sensitive_observability: bool = False,
+) -> list[tuple]:
     """Resolve a host with fail-closed timeout and DNS worker saturation guards."""
+    log_host = _SENSITIVE_LOG_HOST if sensitive_observability else host
     if not math.isfinite(timeout_s) or timeout_s <= 0:
         logger.bind(
-            host=host,
+            host=log_host,
             timeout_s=timeout_s,
             event="dns_resolver_invalid_timeout",
         ).warning("Invalid DNS resolver timeout; failing closed")
@@ -318,7 +330,7 @@ def _getaddrinfo_with_timeout(host: str, timeout_s: float = 2.0) -> list[tuple]:
     )
     if not acquired:
         logger.bind(
-            host=host,
+            host=log_host,
             slot_wait_s=slot_wait_s,
             elapsed_s=time.monotonic() - start_time,
             timeout_s=timeout_s,
@@ -328,9 +340,13 @@ def _getaddrinfo_with_timeout(host: str, timeout_s: float = 2.0) -> list[tuple]:
 
     remaining_s = _remaining_dns_budget(start_time, timeout_s)
     if remaining_s <= 0:
-        _release_dns_resolver_slot(host, "timeout budget exhausted before worker start")
+        _release_dns_resolver_slot(
+            host,
+            "timeout budget exhausted before worker start",
+            sensitive_observability=sensitive_observability,
+        )
         logger.bind(
-            host=host,
+            host=log_host,
             elapsed_s=time.monotonic() - start_time,
             timeout_s=timeout_s,
             event="dns_resolver_timeout_budget_exhausted",
@@ -354,26 +370,36 @@ def _getaddrinfo_with_timeout(host: str, timeout_s: float = 2.0) -> list[tuple]:
         except (OSError, ValueError) as exc:
             error.append(exc)
         finally:
-            _release_dns_resolver_slot(host, "worker completion")
+            _release_dns_resolver_slot(
+                host,
+                "worker completion",
+                sensitive_observability=sensitive_observability,
+            )
 
     thread = threading.Thread(target=_worker, daemon=True)
     try:
         thread.start()
     except RuntimeError as exc:
-        _release_dns_resolver_slot(host, "thread start failure")
-        logger.bind(
-            host=host,
+        _release_dns_resolver_slot(
+            host,
+            "thread start failure",
+            sensitive_observability=sensitive_observability,
+        )
+        bound_logger = logger.bind(
+            host=log_host,
             exception_type=type(exc).__name__,
             event="dns_resolver_worker_start_failed",
-        ).opt(
-            exception=exc
-        ).warning("DNS resolver worker could not start; failing closed")
+        )
+        if sensitive_observability:
+            bound_logger.warning("DNS resolver worker could not start; failing closed")
+        else:
+            bound_logger.opt(exception=exc).warning("DNS resolver worker could not start; failing closed")
         return []
 
     remaining_s = _remaining_dns_budget(start_time, timeout_s)
     if remaining_s <= 0:
         logger.bind(
-            host=host,
+            host=log_host,
             elapsed_s=time.monotonic() - start_time,
             timeout_s=timeout_s,
             event="dns_resolver_timeout",
@@ -382,7 +408,7 @@ def _getaddrinfo_with_timeout(host: str, timeout_s: float = 2.0) -> list[tuple]:
     thread.join(remaining_s)
     if thread.is_alive():
         logger.bind(
-            host=host,
+            host=log_host,
             elapsed_s=time.monotonic() - start_time,
             timeout_s=timeout_s,
             event="dns_resolver_timeout",
@@ -391,7 +417,7 @@ def _getaddrinfo_with_timeout(host: str, timeout_s: float = 2.0) -> list[tuple]:
     if error:
         exc = error[0]
         logger.bind(
-            host=host,
+            host=log_host,
             exception_type=type(exc).__name__,
             event="dns_resolver_error",
         ).debug("DNS resolver failed; failing closed")
@@ -399,7 +425,12 @@ def _getaddrinfo_with_timeout(host: str, timeout_s: float = 2.0) -> list[tuple]:
     return result[0] if result else []
 
 
-def resolve_host_ips(host: str, timeout_s: float = 2.0) -> tuple[str, ...]:
+def resolve_host_ips(
+    host: str,
+    timeout_s: float = 2.0,
+    *,
+    sensitive_observability: bool = False,
+) -> tuple[str, ...]:
     """Resolve a host to every A/AAAA address within a bounded timeout.
 
     The wrapper deliberately does not read egress profiles or allowlists. It
@@ -407,7 +438,14 @@ def resolve_host_ips(host: str, timeout_s: float = 2.0) -> tuple[str, ...]:
     or result-shape error fails closed as an empty tuple.
     """
     try:
-        infos = _getaddrinfo_with_timeout(host, timeout_s=timeout_s)
+        if sensitive_observability:
+            infos = _getaddrinfo_with_timeout(
+                host,
+                timeout_s=timeout_s,
+                sensitive_observability=True,
+            )
+        else:
+            infos = _getaddrinfo_with_timeout(host, timeout_s=timeout_s)
         if not infos:
             return ()
 
@@ -427,17 +465,32 @@ def resolve_host_ips(host: str, timeout_s: float = 2.0) -> tuple[str, ...]:
         # Preserve order but deduplicate
         return tuple(dict.fromkeys(addrs))
     except (OSError, TypeError, ValueError) as exc:
-        logger.debug(
-            "Host resolution failed for {} with {}; treating as unsafe",
-            host,
-            type(exc).__name__,
-        )
+        if sensitive_observability:
+            logger.bind(
+                host=_SENSITIVE_LOG_HOST,
+                exception_type=type(exc).__name__,
+            ).debug("Host resolution failed; treating as unsafe")
+        else:
+            logger.debug(
+                "Host resolution failed for {} with {}; treating as unsafe",
+                host,
+                type(exc).__name__,
+            )
         return ()
 
 
-def _resolve_host_ips(host: str) -> list[str]:
+def _resolve_host_ips(
+    host: str,
+    *,
+    sensitive_observability: bool = False,
+) -> list[str]:
     """Compatibility wrapper for callers expecting a mutable address list."""
-    return list(resolve_host_ips(host))
+    return list(
+        resolve_host_ips(
+            host,
+            sensitive_observability=sensitive_observability,
+        )
+    )
 
 
 def _is_private_ip(ip: str) -> bool:
@@ -467,14 +520,21 @@ def _same_resolved_ip_set(left: Sequence[str], right: Sequence[str]) -> bool:
     return {str(ip).strip() for ip in left if str(ip).strip()} == {str(ip).strip() for ip in right if str(ip).strip()}
 
 
-def _resolve_and_check_private(host: str) -> tuple[bool, list[str]]:
+def _resolve_and_check_private(
+    host: str,
+    *,
+    sensitive_observability: bool = False,
+) -> tuple[bool, list[str]]:
     ips: list[str] = []
     # If the host is already an IP address, check directly
     try:
         ipaddress.ip_address(host)
         ips = [host]
     except ValueError:
-        ips = _resolve_host_ips(host)
+        if sensitive_observability:
+            ips = _resolve_host_ips(host, sensitive_observability=True)
+        else:
+            ips = _resolve_host_ips(host)
 
     if not ips:
         return False, []
@@ -485,11 +545,17 @@ def _resolve_and_check_private(host: str) -> tuple[bool, list[str]]:
     return True, ips
 
 
-def _resolve_host_or_literal(host: str) -> list[str]:
+def _resolve_host_or_literal(
+    host: str,
+    *,
+    sensitive_observability: bool = False,
+) -> list[str]:
     """Return a literal address or every DNS answer for a scoped hostname."""
     try:
         return [str(ipaddress.ip_address(host))]
     except ValueError:
+        if sensitive_observability:
+            return _resolve_host_ips(host, sensitive_observability=True)
         return _resolve_host_ips(host)
 
 
@@ -554,6 +620,7 @@ def evaluate_url_policy(
     resolved_ips_override: Sequence[str] | None = None,
     pinned_resolved_ips: Sequence[str] | None = None,
     configured_endpoint: ConfiguredEndpointScope | None = None,
+    sensitive_observability: bool = False,
 ) -> URLPolicyResult:
     """Evaluate whether a URL passes the egress policy."""
     try:
@@ -653,7 +720,10 @@ def evaluate_url_policy(
         raw_ips = (
             list(resolved_ips_override)
             if resolved_ips_override is not None
-            else _resolve_host_or_literal(host)
+            else _resolve_host_or_literal(
+                host,
+                sensitive_observability=sensitive_observability,
+            )
         )
         resolved_ips = _normalize_scoped_resolved_ips(raw_ips)
         if not resolved_ips:
@@ -686,7 +756,13 @@ def evaluate_url_policy(
                     "address_forbidden",
                 )
         else:
-            ok, ips = _resolve_and_check_private(host)
+            if sensitive_observability:
+                ok, ips = _resolve_and_check_private(
+                    host,
+                    sensitive_observability=True,
+                )
+            else:
+                ok, ips = _resolve_and_check_private(host)
             resolved_ips = _normalize_resolved_ips(ips)
             if not ok:
                 if not resolved_ips:
