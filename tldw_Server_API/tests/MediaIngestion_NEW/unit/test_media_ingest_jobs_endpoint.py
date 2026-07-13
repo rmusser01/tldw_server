@@ -1407,6 +1407,123 @@ def test_ambiguous_create_and_lookup_failure_preserves_pending_reservation(
     assert manager.list_jobs(domain="media_ingest", owner_user_id="1", limit=10) == []
 
 
+def test_pending_url_retry_reuses_stored_reservation_and_creates_idempotently(
+    media_ingest_jobs_client,
+    monkeypatch,
+):
+    manager, store, run = _seed_occurrence_run()
+    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
+    from tldw_Server_API.app.core.Jobs import manager as jobs_manager
+
+    original_create = ingest_jobs._create_media_ingest_job
+    original_lookup = jobs_manager.JobManager.get_job_by_idempotency
+    create_calls: list[dict] = []
+    lookup_calls = 0
+
+    def create_after_ambiguous_first_request(**kwargs):
+        create_calls.append(kwargs)
+        if len(create_calls) == 1:
+            raise RuntimeError("job commit outcome unavailable")
+        return original_create(**kwargs)
+
+    def lookup_unavailable_then_empty(self, **kwargs):
+        nonlocal lookup_calls
+        lookup_calls += 1
+        if lookup_calls == 1:
+            raise RuntimeError("jobs lookup unavailable")
+        return original_lookup(self, **kwargs)
+
+    monkeypatch.setattr(ingest_jobs, "_create_media_ingest_job", create_after_ambiguous_first_request, raising=True)
+    monkeypatch.setattr(
+        jobs_manager.JobManager,
+        "get_job_by_idempotency",
+        lookup_unavailable_then_empty,
+        raising=True,
+    )
+    data = _run_submit_data(run.run_id)
+
+    first = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=data,
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+    pending = store.get_run_item("1", run.run_id, "occ-url-1")
+    second = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=data,
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert first.status_code == 207, first.text
+    assert first.json()["submissions"][0]["error_code"] == "occurrence_binding_pending"
+    assert pending.state == "submit_pending"
+    assert second.status_code == 200, second.text
+    assert len(create_calls) == 2
+    assert create_calls[1]["batch_id"] == pending.batch_id
+    assert create_calls[1]["payload"]["batch_id"] == pending.batch_id
+    assert create_calls[1]["payload"]["idempotency_key"] == create_calls[0]["payload"]["idempotency_key"]
+    jobs = manager.list_jobs(domain="media_ingest", owner_user_id="1", limit=10)
+    assert len(jobs) == 1
+    assert second.json()["submissions"][0]["batch_id"] == pending.batch_id
+    assert store.get_run_item("1", run.run_id, "occ-url-1").job_id == jobs[0]["id"]
+
+
+def test_pending_url_retry_remains_pending_when_create_is_ambiguous_again(
+    media_ingest_jobs_client,
+    monkeypatch,
+):
+    manager, store, run = _seed_occurrence_run()
+    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
+    from tldw_Server_API.app.core.Jobs import manager as jobs_manager
+
+    original_lookup = jobs_manager.JobManager.get_job_by_idempotency
+    create_calls: list[dict] = []
+    lookup_calls = 0
+
+    def ambiguous_create(**kwargs):
+        create_calls.append(kwargs)
+        raise RuntimeError("job commit outcome unavailable")
+
+    def unavailable_empty_unavailable(self, **kwargs):
+        nonlocal lookup_calls
+        lookup_calls += 1
+        if lookup_calls in {1, 3}:
+            raise RuntimeError("jobs lookup unavailable")
+        return original_lookup(self, **kwargs)
+
+    monkeypatch.setattr(ingest_jobs, "_create_media_ingest_job", ambiguous_create, raising=True)
+    monkeypatch.setattr(
+        jobs_manager.JobManager,
+        "get_job_by_idempotency",
+        unavailable_empty_unavailable,
+        raising=True,
+    )
+    data = _run_submit_data(run.run_id)
+
+    first = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=data,
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+    pending_batch = store.get_run_item("1", run.run_id, "occ-url-1").batch_id
+    second = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=data,
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert first.status_code == 207, first.text
+    assert second.status_code == 207, second.text
+    assert second.json()["submissions"][0]["error_code"] == "occurrence_binding_pending"
+    assert len(create_calls) == 2
+    assert {call["batch_id"] for call in create_calls} == {pending_batch}
+    assert len({call["payload"]["idempotency_key"] for call in create_calls}) == 1
+    pending = store.get_run_item("1", run.run_id, "occ-url-1")
+    assert pending.state == "submit_pending"
+    assert pending.batch_id == pending_batch
+    assert manager.list_jobs(domain="media_ingest", owner_user_id="1", limit=10) == []
+
+
 def test_run_bound_file_commit_then_throw_preserves_accepted_staging(
     media_ingest_jobs_client,
     monkeypatch,
@@ -1444,7 +1561,155 @@ def test_run_bound_file_commit_then_throw_preserves_accepted_staging(
     shutil.rmtree(payload["temp_dir"], ignore_errors=True)
 
 
-def test_concurrent_retry_cannot_create_or_reset_another_submitters_reservation(
+def test_pending_file_retry_uses_current_validated_bytes_and_cleans_old_staging(
+    media_ingest_jobs_client,
+    monkeypatch,
+):
+    manager, store, run = _seed_occurrence_run(include_file=True)
+    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
+    from tldw_Server_API.app.core.Jobs import manager as jobs_manager
+
+    original_create = ingest_jobs._create_media_ingest_job
+    original_lookup = jobs_manager.JobManager.get_job_by_idempotency
+    original_save = ingest_jobs.save_uploaded_files
+    create_calls: list[dict] = []
+    staged_dirs: list[Path] = []
+    lookup_calls = 0
+
+    def create_after_ambiguous_first_request(**kwargs):
+        create_calls.append(kwargs)
+        if len(create_calls) == 1:
+            raise RuntimeError("job commit outcome unavailable")
+        return original_create(**kwargs)
+
+    def lookup_unavailable_then_empty(self, **kwargs):
+        nonlocal lookup_calls
+        lookup_calls += 1
+        if lookup_calls == 1:
+            raise RuntimeError("jobs lookup unavailable")
+        return original_lookup(self, **kwargs)
+
+    async def capture_staging(*args, temp_dir, **kwargs):
+        staged_dirs.append(Path(temp_dir))
+        return await original_save(*args, temp_dir=temp_dir, **kwargs)
+
+    monkeypatch.setattr(ingest_jobs, "_create_media_ingest_job", create_after_ambiguous_first_request, raising=True)
+    monkeypatch.setattr(ingest_jobs, "save_uploaded_files", capture_staging, raising=True)
+    monkeypatch.setattr(
+        jobs_manager.JobManager,
+        "get_job_by_idempotency",
+        lookup_unavailable_then_empty,
+        raising=True,
+    )
+    data = {
+        "media_type": "audio",
+        "run_id": run.run_id,
+        "file_occurrence_ids": json.dumps(["occ-file-1"]),
+        "file_attempts": json.dumps([1]),
+    }
+
+    first = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=data,
+        files=[("files", ("clip.mp3", b"old!", "audio/mpeg"))],
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+    pending_batch = store.get_run_item("1", run.run_id, "occ-file-1").batch_id
+    assert first.status_code == 207, first.text
+    assert len(staged_dirs) == 1
+    assert staged_dirs[0].exists()
+
+    second = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=data,
+        files=[("files", ("clip.mp3", b"new!", "audio/mpeg"))],
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert second.status_code == 200, second.text
+    assert len(create_calls) == 2
+    assert len(staged_dirs) == 2
+    job = manager.get_job(second.json()["submissions"][0]["job_id"])
+    payload = json.loads(job["payload"]) if isinstance(job["payload"], str) else job["payload"]
+    assert create_calls[1]["batch_id"] == pending_batch
+    assert Path(payload["source"]).read_bytes() == b"new!"
+    assert Path(payload["temp_dir"]) == staged_dirs[1]
+    assert not staged_dirs[0].exists()
+    assert staged_dirs[1].exists()
+    assert store.get_run_item("1", run.run_id, "occ-file-1").job_id == job["id"]
+    shutil.rmtree(payload["temp_dir"], ignore_errors=True)
+
+
+def test_pending_file_retry_preserves_staging_of_job_found_during_reconciliation(
+    media_ingest_jobs_client,
+    monkeypatch,
+):
+    manager, store, run = _seed_occurrence_run(include_file=True)
+    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
+    from tldw_Server_API.app.core.Jobs import manager as jobs_manager
+
+    original_create = ingest_jobs._create_media_ingest_job
+    original_lookup = jobs_manager.JobManager.get_job_by_idempotency
+    original_save = ingest_jobs.save_uploaded_files
+    staged_dirs: list[Path] = []
+    lookup_calls = 0
+
+    def commit_then_throw(**kwargs):
+        original_create(**kwargs)
+        raise RuntimeError("job commit outcome unavailable")
+
+    def unavailable_then_reconcile(self, **kwargs):
+        nonlocal lookup_calls
+        lookup_calls += 1
+        if lookup_calls == 1:
+            raise RuntimeError("jobs lookup unavailable")
+        return original_lookup(self, **kwargs)
+
+    async def capture_staging(*args, temp_dir, **kwargs):
+        staged_dirs.append(Path(temp_dir))
+        return await original_save(*args, temp_dir=temp_dir, **kwargs)
+
+    monkeypatch.setattr(ingest_jobs, "_create_media_ingest_job", commit_then_throw, raising=True)
+    monkeypatch.setattr(ingest_jobs, "save_uploaded_files", capture_staging, raising=True)
+    monkeypatch.setattr(
+        jobs_manager.JobManager,
+        "get_job_by_idempotency",
+        unavailable_then_reconcile,
+        raising=True,
+    )
+    data = {
+        "media_type": "audio",
+        "run_id": run.run_id,
+        "file_occurrence_ids": json.dumps(["occ-file-1"]),
+        "file_attempts": json.dumps([1]),
+    }
+
+    first = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=data,
+        files=[("files", ("clip.mp3", b"kept", "audio/mpeg"))],
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+    second = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=data,
+        files=[("files", ("clip.mp3", b"unused", "audio/mpeg"))],
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert first.status_code == 207, first.text
+    assert second.status_code == 200, second.text
+    assert len(staged_dirs) == 1
+    job = manager.get_job(second.json()["submissions"][0]["job_id"])
+    payload = json.loads(job["payload"]) if isinstance(job["payload"], str) else job["payload"]
+    assert Path(payload["temp_dir"]) == staged_dirs[0]
+    assert Path(payload["source"]).read_bytes() == b"kept"
+    assert staged_dirs[0].exists()
+    assert store.get_run_item("1", run.run_id, "occ-file-1").job_id == job["id"]
+    shutil.rmtree(payload["temp_dir"], ignore_errors=True)
+
+
+def test_concurrent_retry_cooperatively_creates_without_replacing_reservation(
     media_ingest_jobs_client,
     monkeypatch,
 ):
@@ -1456,16 +1721,17 @@ def test_concurrent_retry_cannot_create_or_reset_another_submitters_reservation(
     release_first = Event()
     calls_lock = Lock()
     create_calls = 0
+    create_inputs: list[tuple[str, str]] = []
 
     def controlled_create(**kwargs):
         nonlocal create_calls
         with calls_lock:
             create_calls += 1
             call_number = create_calls
-        if call_number != 1:
-            raise AssertionError("a pending retry must reconcile without creating")
-        first_entered.set()
-        assert release_first.wait(10)
+            create_inputs.append((kwargs["batch_id"], kwargs["payload"]["idempotency_key"]))
+        if call_number == 1:
+            first_entered.set()
+            assert release_first.wait(10)
         return original_create(**kwargs)
 
     monkeypatch.setattr(ingest_jobs, "_create_media_ingest_job", controlled_create, raising=True)
@@ -1490,13 +1756,91 @@ def test_concurrent_retry_cannot_create_or_reset_another_submitters_reservation(
             release_first.set()
         first = first_future.result(timeout=10)
 
-    assert second.status_code == 207, second.text
-    assert second.json()["submissions"][0]["error_code"] == "occurrence_binding_pending"
+    assert second.status_code == 200, second.text
     assert first.status_code == 200, first.text
-    assert create_calls == 1
+    assert create_calls == 2
+    assert len(set(create_inputs)) == 1
     jobs = manager.list_jobs(domain="media_ingest", owner_user_id="1", limit=10)
     assert len(jobs) == 1
+    assert first.json()["submissions"][0]["job_id"] == jobs[0]["id"]
+    assert second.json()["submissions"][0]["job_id"] == jobs[0]["id"]
+    assert first.json()["submissions"][0]["batch_id"] == create_inputs[0][0]
+    assert second.json()["submissions"][0]["batch_id"] == create_inputs[0][0]
     assert store.get_run_item("1", run.run_id, "occ-url-1").job_id == jobs[0]["id"]
+
+
+def test_pending_retry_rate_limit_stops_globally_without_resetting_stored_reservation(
+    media_ingest_jobs_client,
+    monkeypatch,
+):
+    manager, store, run = _seed_occurrence_run()
+    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
+    from tldw_Server_API.app.core.Jobs import manager as jobs_manager
+
+    original_lookup = jobs_manager.JobManager.get_job_by_idempotency
+    create_calls = 0
+    lookup_calls = 0
+
+    def ambiguous_then_limited(**_kwargs):
+        nonlocal create_calls
+        create_calls += 1
+        if create_calls == 1:
+            raise RuntimeError("job commit outcome unavailable")
+        limit = JobSubmissionLimitError(
+            "Quota exceeded: submits per minute",
+            code="jobs_submit_rate_limited",
+            retry_after=19,
+        )
+        raise HTTPException(
+            status_code=429,
+            detail=str(limit),
+            headers={"Retry-After": "19"},
+        ) from limit
+
+    def unavailable_then_empty(self, **kwargs):
+        nonlocal lookup_calls
+        lookup_calls += 1
+        if lookup_calls == 1:
+            raise RuntimeError("jobs lookup unavailable")
+        return original_lookup(self, **kwargs)
+
+    monkeypatch.setattr(ingest_jobs, "_create_media_ingest_job", ambiguous_then_limited, raising=True)
+    monkeypatch.setattr(
+        jobs_manager.JobManager,
+        "get_job_by_idempotency",
+        unavailable_then_empty,
+        raising=True,
+    )
+    first = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=_run_submit_data(run.run_id),
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+    pending_batch = store.get_run_item("1", run.run_id, "occ-url-1").batch_id
+
+    second = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=_run_submit_data(
+            run.run_id,
+            urls=[
+                "https://www.youtube.com/watch?v=alpha123456",
+                "https://www.youtube.com/watch?v=alpha123456",
+            ],
+            occurrence_ids=["occ-url-1", "occ-url-2"],
+            attempts=[1, 1],
+        ),
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert first.status_code == 207, first.text
+    assert second.status_code == 429, second.text
+    assert second.headers["Retry-After"] == "19"
+    assert create_calls == 2
+    pending = store.get_run_item("1", run.run_id, "occ-url-1")
+    assert pending.state == "submit_pending"
+    assert pending.batch_id == pending_batch
+    assert store.get_run_item("1", run.run_id, "occ-url-2").state == "staged"
+    assert manager.list_jobs(domain="media_ingest", owner_user_id="1", limit=10) == []
 
 
 def test_run_bound_rate_limit_stops_later_entries_and_returns_retry_after(

@@ -349,6 +349,13 @@ git commit -m "feat: bind media jobs to ingest occurrences (TASK-12110)"
 - [x] Stop chunks on typed global quota/rate failures and preserve retry metadata.
 - [x] Re-run Task 7 and prior-stage verification, then commit the follow-up.
 
+**Final recovery follow-up:** Complete
+
+- [x] Recover an exact preserved reservation by idempotently creating with its stored batch and identity.
+- [x] Cover two-request URL/file recovery, repeated ambiguity, concurrency ownership, and typed quota reset.
+- [x] Prove file recovery leaves only the authoritative committed staging path.
+- [x] Re-run focused, PostgreSQL, property, static, and Bandit verification, then commit.
+
 ### Task 8: Add run routes, reconciliation, event replay, cancellation, and retry
 
 - [ ] **Step 1: Write failing run-route tests**

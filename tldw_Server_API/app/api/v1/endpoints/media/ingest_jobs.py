@@ -7,6 +7,7 @@ import hmac
 import json
 import os
 import shutil
+import tempfile
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -328,6 +329,28 @@ def _derive_run_occurrence_idempotency(
         separators=(",", ":"),
     ).encode("utf-8")
     return f"playlist-ingest-v1:{hmac.new(key, message, hashlib.sha256).hexdigest()}"
+
+
+def _run_file_staging_prefix(*, batch_id: str, idempotency_identity: str) -> str:
+    """Return an opaque temp-dir prefix shared by retries of one reservation."""
+    marker = hashlib.sha256(f"{batch_id}\0{idempotency_identity}".encode()).hexdigest()[:24]
+    return f"media_ingest_job_{marker}_"
+
+
+def _cleanup_stale_run_file_staging(*, prefix: str, authoritative_temp_dir: Any) -> None:
+    """Remove sibling staging dirs only after the committed job path is known."""
+    if not isinstance(authoritative_temp_dir, str) or not authoritative_temp_dir:
+        return
+    try:
+        temp_root = Path(tempfile.gettempdir()).resolve()
+        authoritative = Path(authoritative_temp_dir).resolve()
+        if authoritative.parent != temp_root or not authoritative.name.startswith(prefix):
+            return
+        for candidate in temp_root.iterdir():
+            if candidate.name.startswith(prefix) and candidate.resolve() != authoritative:
+                _cleanup_dir(str(candidate))
+    except (OSError, RuntimeError):
+        logger.debug("Failed to reconcile media ingest staging directories")
 
 
 def _submission_rejected(
@@ -1039,14 +1062,28 @@ async def _submit_run_bound_media_ingest_jobs(
             )
             continue
 
-        if reserved.state == "submit_pending" and not owns_reservation:
-            existing = _find_exact_occurrence_job(
-                jm,
-                queue=selected_queue,
-                owner_user_id=owner,
-                batch_id=reserved_batch,
-                idempotency_key=identity,
-            )
+        recovering_reservation = reserved.state == "submit_pending" and not owns_reservation
+        if recovering_reservation:
+            try:
+                existing = _find_exact_occurrence_job(
+                    jm,
+                    queue=selected_queue,
+                    owner_user_id=owner,
+                    batch_id=reserved_batch,
+                    idempotency_key=identity,
+                )
+            except Exception:
+                submissions.append(
+                    _submission_rejected(
+                        occurrence_id=occurrence,
+                        batch_id=reserved_batch,
+                        attempt=attempt,
+                        code="occurrence_binding_pending",
+                        message="Accepted job binding is temporarily unavailable.",
+                        retryable=True,
+                    )
+                )
+                continue
             if existing is not None:
                 try:
                     bound = store.bind_run_item_job(
@@ -1060,30 +1097,29 @@ async def _submit_run_bound_media_ingest_jobs(
                     )
                 except Exception:
                     existing = None
-            if existing is None:
+            if existing is not None:
+                if entry["kind"] == "file":
+                    stored_payload = _normalize_payload(existing.get("payload"))
+                    _cleanup_stale_run_file_staging(
+                        prefix=_run_file_staging_prefix(
+                            batch_id=reserved_batch,
+                            idempotency_identity=identity,
+                        ),
+                        authoritative_temp_dir=stored_payload.get("temp_dir"),
+                    )
+                jobs.append(_job_item_from_row(existing, fallback_kind=str(entry["kind"]), idempotency_key=identity))
                 submissions.append(
-                    _submission_rejected(
+                    _submission_accepted(
                         occurrence_id=occurrence,
-                        batch_id=reserved_batch,
+                        batch_id=str(bound.batch_id or reserved_batch),
                         attempt=attempt,
-                        code="occurrence_binding_pending",
-                        message="Accepted job binding is temporarily unavailable.",
-                        retryable=True,
+                        job_id=int(existing["id"]),
                     )
                 )
                 continue
-            jobs.append(_job_item_from_row(existing, fallback_kind=str(entry["kind"]), idempotency_key=identity))
-            submissions.append(
-                _submission_accepted(
-                    occurrence_id=occurrence,
-                    batch_id=str(bound.batch_id or reserved_batch),
-                    attempt=attempt,
-                    job_id=int(existing["id"]),
-                )
-            )
-            continue
 
         temp_dir_path: str | None = None
+        file_staging_prefix: str | None = None
         if entry["kind"] == "url":
             source = str(reserved.source_url)
             payload = {
@@ -1096,8 +1132,12 @@ async def _submit_run_bound_media_ingest_jobs(
             }
         else:
             upload = uploads[int(entry["index"])]
+            file_staging_prefix = _run_file_staging_prefix(
+                batch_id=reserved_batch,
+                idempotency_identity=identity,
+            )
             try:
-                with TempDirManager(prefix="media_ingest_job_", cleanup=False) as temp_dir:
+                with TempDirManager(prefix=file_staging_prefix, cleanup=False) as temp_dir:
                     temp_dir_path = str(temp_dir)
                     saved_files, file_errors = await save_uploaded_files(
                         [upload],
@@ -1234,6 +1274,11 @@ async def _submit_run_bound_media_ingest_jobs(
                     )
                     errors.append("Accepted job binding is temporarily unavailable")
                     continue
+                if recovering_reservation and file_staging_prefix:
+                    _cleanup_stale_run_file_staging(
+                        prefix=file_staging_prefix,
+                        authoritative_temp_dir=stored_payload.get("temp_dir"),
+                    )
                 jobs.append(_job_item_from_row(existing, fallback_kind=str(entry["kind"]), idempotency_key=identity))
                 submissions.append(
                     _submission_accepted(
@@ -1315,6 +1360,11 @@ async def _submit_run_bound_media_ingest_jobs(
             )
             errors.append("Accepted job binding is temporarily unavailable")
             continue
+        if recovering_reservation and file_staging_prefix:
+            _cleanup_stale_run_file_staging(
+                prefix=file_staging_prefix,
+                authoritative_temp_dir=stored_payload.get("temp_dir"),
+            )
         effective_payload = stored_payload or payload
         jobs.append(
             MediaIngestJobItem(
