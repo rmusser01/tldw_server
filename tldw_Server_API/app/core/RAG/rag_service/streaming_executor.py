@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import os
 import types
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -8,6 +9,13 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.Chat.Chat_Deps import (
+    ChatAPIError,
+    ChatAuthenticationError,
+    ChatBadRequestError,
+    ChatConfigurationError,
+)
 from tldw_Server_API.app.core.RAG.rag_service.agentic_chunker import (
     agentic_rag_pipeline,
 )
@@ -26,6 +34,16 @@ RAGStreamEvent = dict[str, Any]
 PipelineCallable = Callable[..., Awaitable[Any]]
 GenerationCallable = Callable[..., Awaitable[Any]]
 _PUBLIC_STREAM_ERROR_MESSAGE = "Search failed due to an internal error."
+_RAG_PROVIDER_ERROR_MESSAGES = {
+    "provider_request_invalid": "The selected provider or model is invalid.",
+    "provider_authentication_failed": "The selected provider credentials could not be authenticated.",
+    "invalid_provider_credentials": "The selected provider credentials are invalid.",
+    "missing_provider_credentials": "The selected provider credentials are not configured.",
+    "credential_store_unavailable": "Provider credential storage is temporarily unavailable.",
+    "credential_scope_revoked": "The selected provider credential scope is no longer available.",
+    "provider_configuration_invalid": "The selected provider configuration is invalid.",
+    "provider_unavailable": "The selected provider is currently unavailable.",
+}
 
 _EXTRA_CONTROL_KEYS = {
     "build_agentic_execution_context",
@@ -41,6 +59,58 @@ def _pipeline_context(extra_context: dict[str, Any]) -> dict[str, Any]:
         for key, value in extra_context.items()
         if key not in _EXTRA_CONTROL_KEYS
     }
+
+
+def classify_rag_provider_error(exc: BaseException) -> tuple[str, int, str] | None:
+    """Return a bounded public code, status, and message for typed provider failures."""
+    if isinstance(exc, ByokResolutionError):
+        code = exc.code if exc.code in _RAG_PROVIDER_ERROR_MESSAGES else "provider_configuration_invalid"
+        return code, 503, _RAG_PROVIDER_ERROR_MESSAGES[code]
+    if isinstance(exc, ChatBadRequestError):
+        code = "provider_request_invalid"
+        return code, 400, _RAG_PROVIDER_ERROR_MESSAGES[code]
+    if isinstance(exc, ChatAuthenticationError):
+        code = "provider_authentication_failed"
+        return code, 502, _RAG_PROVIDER_ERROR_MESSAGES[code]
+    if isinstance(exc, ChatConfigurationError):
+        code = "provider_configuration_invalid"
+        return code, 503, _RAG_PROVIDER_ERROR_MESSAGES[code]
+    if isinstance(exc, ChatAPIError):
+        try:
+            upstream_status = int(exc.status_code)
+        except (TypeError, ValueError):
+            upstream_status = 0
+        if upstream_status == 400:
+            code, status_code = "provider_request_invalid", 400
+        elif upstream_status in {401, 403}:
+            code, status_code = "provider_authentication_failed", 502
+        else:
+            code, status_code = "provider_unavailable", 502
+        return code, status_code, _RAG_PROVIDER_ERROR_MESSAGES[code]
+    return None
+
+
+def rag_provider_error_event(exc: BaseException) -> RAGStreamEvent | None:
+    """Build a detail-free stream event for a typed provider failure."""
+    classified = classify_rag_provider_error(exc)
+    if classified is None:
+        return None
+    code, status_code, message = classified
+    return {
+        "type": "error",
+        "code": code,
+        "status_code": status_code,
+        "message": message,
+    }
+
+
+def _accepts_keyword(callable_obj: Callable[..., Any], keyword: str) -> bool:
+    """Return whether a transitional pipeline callable accepts a keyword."""
+    try:
+        parameters = inspect.signature(callable_obj).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(parameter.kind == inspect.Parameter.VAR_KEYWORD or parameter.name == keyword for parameter in parameters)
 
 
 def _value(
@@ -257,6 +327,12 @@ async def _run_agentic_prefetch(
         explain_only=bool(_value(agentic_payload, request_defaults, "explain_only", False)),
         resolved_request=resolved_request,
         retrieval_plan=retrieval_plan,
+        **(
+            {"credential_runtime": pipeline_kwargs.get("credential_runtime")}
+            if pipeline_kwargs.get("credential_runtime") is not None
+            and _accepts_keyword(agentic_pipeline, "credential_runtime")
+            else {}
+        ),
     )
 
     metadata = getattr(result, "metadata", {}) if result is not None else {}
@@ -378,6 +454,7 @@ async def _stream_generation_events(
     payload: dict[str, Any],
     request_defaults: dict[str, Any],
     generation_streamer: GenerationCallable,
+    credential_runtime: Any = None,
 ) -> AsyncIterator[RAGStreamEvent]:
     context = types.SimpleNamespace()
     context.documents = docs
@@ -386,6 +463,7 @@ async def _stream_generation_events(
         "generation": _generation_config(payload=payload, request_defaults=request_defaults)
     }
     context.metadata = {}
+    context.credential_runtime = credential_runtime
 
     await generation_streamer(
         context,
@@ -452,6 +530,8 @@ async def stream_rag_events(
             except asyncio.CancelledError:
                 raise
             except Exception as agentic_error:  # noqa: BLE001 - agentic streaming prefetch is best-effort
+                if classify_rag_provider_error(agentic_error) is not None:
+                    raise
                 logger.debug(
                     "Agentic streaming prefetch failed; continuing with empty contexts",
                     exc_info=agentic_error,
@@ -473,6 +553,8 @@ async def stream_rag_events(
             except asyncio.CancelledError:
                 raise
             except Exception as prefetch_error:  # noqa: BLE001 - retrieval prefetch is best-effort for streaming
+                if classify_rag_provider_error(prefetch_error) is not None:
+                    raise
                 logger.debug(
                     "RAG streaming standard prefetch failed; continuing with empty contexts",
                     exc_info=prefetch_error,
@@ -492,11 +574,19 @@ async def stream_rag_events(
             payload=payload,
             request_defaults=request_defaults,
             generation_streamer=generation_streamer,
+            credential_runtime=context.get("credential_runtime"),
         ):
             yield event
+    except asyncio.CancelledError:
+        raise
     except Exception as exc:  # noqa: BLE001 - streaming should surface error payload instead of crashing
-        logger.exception("RAG streaming failed")
-        yield {
-            "type": "error",
-            "message": _PUBLIC_STREAM_ERROR_MESSAGE,
-        }
+        provider_event = rag_provider_error_event(exc)
+        if provider_event is not None:
+            logger.warning("RAG streaming provider failure: {}", provider_event["code"])
+            yield provider_event
+        else:
+            logger.exception("RAG streaming failed")
+            yield {
+                "type": "error",
+                "message": _PUBLIC_STREAM_ERROR_MESSAGE,
+            }

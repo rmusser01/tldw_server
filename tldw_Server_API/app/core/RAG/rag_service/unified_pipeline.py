@@ -30,6 +30,8 @@ from typing import Any, Callable, Literal, Optional, cast
 
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     managed_media_database,
 )
@@ -50,6 +52,7 @@ from .generation_executor import execute_generation_phase
 from .retrieval_plan import RetrievalPlan
 
 _RERANK_DEBUG_DOCUMENT_CONTENT_MAX_CHARS = 500
+_RAG_PROVIDER_FAILURES = (ByokResolutionError, ChatAPIError)
 
 
 def _serialize_result_document(doc: Any) -> dict[str, Any]:
@@ -1625,6 +1628,7 @@ async def unified_rag_pipeline(
     index_namespace: Optional[str] = None,
     retrieval_plan: Optional[RetrievalPlan] = None,
     resolved_request: Optional[ResolvedRAGRequest] = None,
+    credential_runtime: Any = None,
 
     # ========== QUICK WINS ==========
     highlight_results: bool = False,
@@ -6697,6 +6701,7 @@ async def unified_rag_pipeline(
                             enable_monitoring=enable_monitoring,
                             enable_observability=enable_observability,
                             trace_id=trace_id,
+                            credential_runtime=credential_runtime,
                             enable_performance_analysis=enable_performance_analysis,
                             timeout_seconds=timeout_seconds,
                             highlight_results=highlight_results,
@@ -6816,6 +6821,8 @@ async def unified_rag_pipeline(
                     ValueError,
                     asyncio.TimeoutError,
                 ) as _er:
+                    if isinstance(_er, _RAG_PROVIDER_FAILURES):
+                        raise
                     result.errors.append(f"Adaptive rerun failed: {str(_er)}")
                     logger.debug(f"Adaptive rerun error: {_er}")
         except (
@@ -7058,6 +7065,8 @@ async def unified_rag_pipeline(
 
     except _EarlyReturn:
         pass
+    except _RAG_PROVIDER_FAILURES:
+        raise
     except (
         AttributeError,
         ConnectionError,
@@ -7268,6 +7277,7 @@ async def unified_batch_pipeline(
     on_progress: Optional[Callable[[int, int], Any]] = None,
     on_query_done: Optional[Callable[[int, str, Optional[UnifiedPipelineResult], Optional[BaseException]], Any]] = None,
     query_indices: Optional[list[int]] = None,
+    credential_runtime: Any = None,
     **kwargs
 ) -> list[UnifiedPipelineResult]:
     """
@@ -7287,6 +7297,8 @@ async def unified_batch_pipeline(
     Returns:
         List of results in the same order as queries
     """
+    if credential_runtime is not None:
+        kwargs["credential_runtime"] = credential_runtime
     semaphore = asyncio.Semaphore(max_concurrent)
 
     # Lightweight normalizer to dedupe/cluster identical queries
@@ -7466,6 +7478,12 @@ async def unified_batch_pipeline(
                     result = await task
                     head_results[head_idx] = result
                 except BaseException as exc:  # noqa: BLE001 - surface as error
+                    if isinstance(exc, _RAG_PROVIDER_FAILURES):
+                        for pending_task in pending:
+                            pending_task.cancel()
+                        if pending:
+                            await asyncio.gather(*pending, return_exceptions=True)
+                        raise
                     err = exc
                     head_results[head_idx] = exc
 
@@ -7515,6 +7533,10 @@ async def unified_batch_pipeline(
 
             tasks = [process_with_semaphore(q) for q in head_queries]
             head_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    for head_result in head_results:
+        if isinstance(head_result, _RAG_PROVIDER_FAILURES):
+            raise head_result
 
     # Build final results in original order, reusing unique results
     final_results: list[Optional[UnifiedPipelineResult]] = [None] * len(queries)

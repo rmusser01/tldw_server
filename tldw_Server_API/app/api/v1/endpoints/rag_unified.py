@@ -7,6 +7,7 @@ All features are accessible through explicit parameters.
 
 import asyncio
 import hashlib
+import inspect
 import json
 import os
 import time
@@ -37,7 +38,12 @@ from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import (
     UnifiedRAGResponse,
 )
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_READ
+from tldw_Server_API.app.core.AuthNZ.byok_helpers import is_trusted_base_url_principal
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import ProviderCredentialRuntime
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
+from tldw_Server_API.app.core.Chat.chat_service import resolve_provider_api_key
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.Prompts_DB import PromptsDatabase
@@ -72,8 +78,12 @@ from tldw_Server_API.app.core.RAG.rag_service.response_mapping import (
     rag_result_to_response,
 )
 from tldw_Server_API.app.core.RAG.rag_service.source_health import build_source_health_entries
-from tldw_Server_API.app.core.RAG.rag_service.streaming_executor import stream_rag_events
-from tldw_Server_API.app.core.config import get_config_value
+from tldw_Server_API.app.core.RAG.rag_service.streaming_executor import (
+    classify_rag_provider_error,
+    rag_provider_error_event,
+    stream_rag_events,
+)
+from tldw_Server_API.app.core.config import get_config_value, settings
 
 # Unified Pipeline
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import (
@@ -95,6 +105,96 @@ _READY_MEDIA_COLLECTION_STATUSES = frozenset({"completed", "skipped_existing"})
 _EMPTY_MEDIA_SCOPE_SENTINEL = -1
 _RAG_STREAM_DIAGNOSTIC_KEYS = frozenset({"error", "errors", "exception", "traceback", "stack"})
 _PUBLIC_RAG_STREAM_DIAGNOSTIC = "RAG processing diagnostic omitted"
+_RAG_PROVIDER_FAILURES = (ByokResolutionError, ChatAPIError)
+
+
+def _trusted_credential_runtime_scope(
+    request: Request,
+    current_user: Optional[User],
+) -> tuple[int | None, list[int], list[int], bool]:
+    """Derive an execution credential scope only from authenticated server state."""
+    request_state = getattr(request, "state", None)
+    auth_context = getattr(request_state, "auth", None)
+    principal = getattr(auth_context, "principal", None)
+
+    user_id = getattr(principal, "user_id", None)
+    if user_id is None:
+        user_id = getattr(current_user, "id_int", None)
+    if user_id is None:
+        try:
+            user_id = int(getattr(current_user, "id", None))
+        except (TypeError, ValueError):
+            user_id = None
+
+    def scoped_ids(kind: str) -> list[int]:
+        values = getattr(principal, f"{kind}_ids", None)
+        if values is None:
+            values = getattr(request_state, f"{kind}_ids", None)
+        members = sorted({int(value) for value in (values or ()) if value is not None})
+        active = getattr(principal, f"active_{kind}_id", None)
+        if active is None:
+            active = getattr(request_state, f"active_{kind}_id", None)
+        if active is None:
+            return members
+        active_id = int(active)
+        if active_id not in members:
+            raise ByokResolutionError("credential_scope_revoked", "credential_scope")
+        return [active_id]
+
+    return (
+        user_id,
+        scoped_ids("team"),
+        scoped_ids("org"),
+        is_trusted_base_url_principal(principal),
+    )
+
+
+def _build_credential_runtime(
+    request: Request,
+    current_user: Optional[User],
+) -> ProviderCredentialRuntime:
+    """Create one request-owned provider credential runtime."""
+    user_id, team_ids, org_ids, trusted_base_url_override = _trusted_credential_runtime_scope(request, current_user)
+
+    def fallback_resolver(provider: str) -> str | None:
+        api_key, _ = resolve_provider_api_key(
+            provider,
+            prefer_module_keys_in_tests=True,
+        )
+        return api_key
+
+    return ProviderCredentialRuntime(
+        user_id=user_id,
+        team_ids=team_ids,
+        org_ids=org_ids,
+        trusted_base_url_override=trusted_base_url_override,
+        fallback_resolver=fallback_resolver,
+    )
+
+
+def _rag_provider_http_exception(exc: BaseException) -> HTTPException:
+    """Map typed provider failures to a bounded downstream HTTP response."""
+    classified = classify_rag_provider_error(exc)
+    if classified is None:
+        classified = (
+            "provider_configuration_invalid",
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "The selected provider configuration is invalid.",
+        )
+    code, status_code, message = classified
+    return HTTPException(
+        status_code=status_code,
+        detail={"error_code": code, "message": message},
+    )
+
+
+def _accepts_keyword(callable_obj: Any, keyword: str) -> bool:
+    """Return whether a transitional pipeline callable accepts a keyword."""
+    try:
+        parameters = inspect.signature(callable_obj).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(parameter.kind == inspect.Parameter.VAR_KEYWORD or parameter.name == keyword for parameter in parameters)
 
 
 def _copy_rag_request_with_updates(
@@ -1112,6 +1212,11 @@ async def unified_search_endpoint(
     is accessible by setting the appropriate parameter.
     """
     try:
+        credential_runtime = _build_credential_runtime(request_raw, current_user)
+    except _RAG_PROVIDER_FAILURES as exc:
+        raise _rag_provider_http_exception(exc) from exc
+
+    try:
         request = _apply_media_collection_scope(request, collections_db)
         logger.info(f"Unified RAG search: query='{request.query}', user={current_user.username if current_user else 'anonymous'}")
         # Topic monitoring (non-blocking) for query text
@@ -1213,7 +1318,14 @@ async def unified_search_endpoint(
                     low_confidence_behavior=str(effective_payload.get("low_confidence_behavior", "continue")),
                     resolved_request=resolved_request,
                     retrieval_plan=retrieval_plan,
+                    **(
+                        {"credential_runtime": credential_runtime}
+                        if _accepts_keyword(agentic_rag_pipeline, "credential_runtime")
+                        else {}
+                    ),
                 )
+            except _RAG_PROVIDER_FAILURES:
+                raise
             except Exception as exc:  # noqa: BLE001 - agentic pipeline fallback must be resilient
                 logger.exception("Agentic RAG pipeline failed: {}", exc)
                 fallback_doc = {
@@ -1239,6 +1351,7 @@ async def unified_search_endpoint(
         else:
             # Execute unified pipeline with all parameters from request
             kwargs = dict(standard_bundle.pipeline_kwargs)
+            kwargs["credential_runtime"] = credential_runtime
             _sync_retriever_overrides_to_pipeline()
             result = await unified_rag_pipeline(**kwargs)
 
@@ -1259,6 +1372,8 @@ async def unified_search_endpoint(
         if result.errors and request.debug_mode:
             logger.warning(f"Errors during processing: {result.errors}")
 
+    except _RAG_PROVIDER_FAILURES as exc:
+        raise _rag_provider_http_exception(exc) from exc
     except HTTPException:
         raise
     except Exception as e:  # noqa: BLE001 - surface as HTTP 500 with context
@@ -1273,6 +1388,8 @@ async def unified_search_endpoint(
         ) from e
     else:
         return response
+    finally:
+        await credential_runtime.close()
 
 
 @router.post(
@@ -1345,6 +1462,11 @@ async def unified_batch_endpoint(
     Processes multiple queries concurrently with the same parameters.
     """
     try:
+        credential_runtime = _build_credential_runtime(request_raw, current_user)
+    except _RAG_PROVIDER_FAILURES as exc:
+        raise _rag_provider_http_exception(exc) from exc
+
+    try:
         requested_units = len(request.queries or [])
         limit_checker = require_within_limit(LimitCategory.RAG_QUERIES_DAY, requested_units)
         org_header = request_raw.headers.get("X-TLDW-Org-Id")
@@ -1387,6 +1509,7 @@ async def unified_batch_endpoint(
             current_user=current_user,
         )
         kwargs = dict(batch_bundle.pipeline_kwargs)
+        kwargs["credential_runtime"] = credential_runtime
         checkpoint_id: Optional[str] = None
         checkpoint_manager = None
         checkpoint_state = None
@@ -1507,12 +1630,16 @@ async def unified_batch_endpoint(
             checkpoint_id=checkpoint_id,
         )
 
+    except _RAG_PROVIDER_FAILURES as exc:
+        raise _rag_provider_http_exception(exc) from exc
     except Exception as e:  # noqa: BLE001 - surface as HTTP 500 with context
         logger.error(f"Batch search error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Batch search failed due to an internal error."
         ) from e
+    finally:
+        await credential_runtime.close()
 
 
 @router.get(
@@ -1638,6 +1765,11 @@ async def resume_batch_endpoint(
 ):
     """Resume a batch RAG operation from a previously saved checkpoint."""
     try:
+        credential_runtime = _build_credential_runtime(request_raw, current_user)
+    except _RAG_PROVIDER_FAILURES as exc:
+        raise _rag_provider_http_exception(exc) from exc
+
+    try:
         from tldw_Server_API.app.core.RAG.rag_service.checkpoint import CheckpointManager
 
         manager = CheckpointManager()
@@ -1710,6 +1842,7 @@ async def resume_batch_endpoint(
             current_user=current_user,
         )
         kwargs = dict(batch_bundle.pipeline_kwargs)
+        kwargs["credential_runtime"] = credential_runtime
 
         start_time = time.time()
 
@@ -1798,6 +1931,8 @@ async def resume_batch_endpoint(
             failed=failed,
             total_time=total_time,
         )
+    except _RAG_PROVIDER_FAILURES as exc:
+        raise _rag_provider_http_exception(exc) from exc
     except FileNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1814,6 +1949,8 @@ async def resume_batch_endpoint(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Batch resume failed due to an internal error.",
         ) from e
+    finally:
+        await credential_runtime.close()
 
 
 @router.post(
@@ -1887,8 +2024,14 @@ async def unified_search_stream_endpoint(
         "max_generation_tokens": request.max_generation_tokens,
         "top_k": request.top_k,
     }
+    try:
+        credential_runtime = _build_credential_runtime(request_raw, current_user)
+    except _RAG_PROVIDER_FAILURES as exc:
+        raise _rag_provider_http_exception(exc) from exc
+
     stream_context = {
         **stream_pipeline_kwargs,
+        "credential_runtime": credential_runtime,
         "build_agentic_execution_context": build_agentic_execution_context,
         "generate_streaming_response": generate_streaming_response,
         "request_defaults": request_defaults,
@@ -1896,17 +2039,30 @@ async def unified_search_stream_endpoint(
     }
 
     async def event_generator():
-        async for event in stream_rag_events(
-            resolved_request=resolved_request,
-            retrieval_plan=stream_bundle.retrieval_plan,
-            standard_pipeline=unified_rag_pipeline,
-            agentic_pipeline=agentic_rag_pipeline,
-            extra_context=stream_context,
-        ):
-            yield json.dumps(_sanitize_rag_stream_event(event)) + "\n"
+        try:
+            async for event in stream_rag_events(
+                resolved_request=resolved_request,
+                retrieval_plan=stream_bundle.retrieval_plan,
+                standard_pipeline=unified_rag_pipeline,
+                agentic_pipeline=agentic_rag_pipeline,
+                extra_context=stream_context,
+            ):
+                yield json.dumps(_sanitize_rag_stream_event(event)) + "\n"
+        except asyncio.CancelledError:
+            raise
+        except _RAG_PROVIDER_FAILURES as exc:
+            provider_event = rag_provider_error_event(exc)
+            if provider_event is not None:
+                yield json.dumps(_sanitize_rag_stream_event(provider_event)) + "\n"
+        finally:
+            await credential_runtime.close()
 
-    # lgtm[py/stack-trace-exposure]: stream events are sanitized before serialization.
-    return StreamingResponse(event_generator(), media_type="application/x-ndjson")
+    try:
+        # lgtm[py/stack-trace-exposure]: stream events are sanitized before serialization.
+        return StreamingResponse(event_generator(), media_type="application/x-ndjson")
+    except BaseException:
+        await credential_runtime.close()
+        raise
 
 
 @router.get(

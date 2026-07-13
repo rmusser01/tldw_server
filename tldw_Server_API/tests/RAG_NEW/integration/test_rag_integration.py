@@ -5,6 +5,7 @@ Tests the complete RAG pipeline with real components and databases.
 No mocking - uses actual implementations.
 """
 
+import inspect
 import warnings
 
 import pytest
@@ -27,6 +28,13 @@ from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import (
     RetrievalConfig
 )
 from tldw_Server_API.app.core.RAG.rag_service.semantic_cache import SemanticCache
+
+
+def test_internal_rag_caller_keeps_legacy_optional_runtime_contract():
+    """System callers may continue omitting the execution credential runtime."""
+    parameter = inspect.signature(unified_rag_pipeline).parameters["credential_runtime"]
+
+    assert parameter.default is None
 
 
 @pytest.mark.integration
