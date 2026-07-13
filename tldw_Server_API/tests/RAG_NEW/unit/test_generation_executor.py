@@ -141,6 +141,12 @@ async def test_unified_pipeline_propagates_runtime_to_direct_auxiliaries(
 
     async def fake_classifier(**kwargs: Any) -> QueryClassification:
         captured["classifier_runtime"] = kwargs.get("credential_runtime")
+        classification_metadata = kwargs.get("stage_metadata")
+        if isinstance(classification_metadata, dict):
+            classification_metadata.update(
+                failure_code="provider_unavailable",
+                verification_available=False,
+            )
         return QueryClassification(
             search_local_db=True,
             standalone_query="credential runtime",
@@ -183,6 +189,12 @@ async def test_unified_pipeline_propagates_runtime_to_direct_auxiliaries(
 
     async def fake_suggestions(**kwargs: Any) -> list[str]:
         captured["suggestion_runtime"] = kwargs.get("credential_runtime")
+        suggestion_metadata = kwargs.get("stage_metadata")
+        if isinstance(suggestion_metadata, dict):
+            suggestion_metadata.update(
+                failure_code="provider_unavailable",
+                verification_available=False,
+            )
         return ["What should I inspect next?"]
 
     monkeypatch.setattr(unified_pipeline_module, "MultiDatabaseRetriever", FakeRetriever)
@@ -193,7 +205,7 @@ async def test_unified_pipeline_propagates_runtime_to_direct_auxiliaries(
     monkeypatch.setattr(unified_pipeline_module, "EvidenceChainBuilder", FakeChainBuilder)
     monkeypatch.setattr(unified_pipeline_module, "generate_suggestions", fake_suggestions)
 
-    await unified_pipeline_module.unified_rag_pipeline(
+    result = await unified_pipeline_module.unified_rag_pipeline(
         query="credential runtime",
         sources=["media_db"],
         enable_cache=False,
@@ -216,6 +228,214 @@ async def test_unified_pipeline_propagates_runtime_to_direct_auxiliaries(
         item is runtime for item in captured["chain_runtimes"]
     )
     assert captured["suggestion_runtime"] is runtime
+    assert result.metadata["query_classification"]["verification_available"] is False
+    assert result.metadata["query_classification"]["failure_code"] == "provider_unavailable"
+    assert result.metadata["suggestion_generation"] == {
+        "failure_code": "provider_unavailable",
+        "verification_available": False,
+    }
+
+
+@pytest.mark.asyncio
+async def test_unified_dedicated_reformulation_copies_runtime_trust(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.RAG.rag_service import query_classifier
+
+    runtime = _RecordingCredentialRuntime()
+
+    class FakeRetriever:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        async def retrieve(self, *args: Any, **kwargs: Any) -> list[Document]:
+            return []
+
+    async def fake_reformulate(**kwargs: Any) -> str:
+        metadata = kwargs.get("stage_metadata")
+        if isinstance(metadata, dict):
+            metadata.update(
+                failure_code="provider_unavailable",
+                verification_available=False,
+            )
+        return kwargs["query"]
+
+    monkeypatch.setattr(unified_pipeline_module, "MultiDatabaseRetriever", FakeRetriever)
+    monkeypatch.setattr(query_classifier, "reformulate_query", fake_reformulate)
+
+    result = await unified_pipeline_module.unified_rag_pipeline(
+        query="what about it?",
+        chat_history=[{"role": "user", "content": "Explain credential runtimes."}],
+        sources=["media_db"],
+        enable_cache=False,
+        enable_query_classification=False,
+        enable_query_reformulation=True,
+        enable_generation=False,
+        enable_reranking=False,
+        enable_pre_retrieval_clarification=False,
+        credential_runtime=runtime,
+    )
+
+    assert result.metadata["query_reformulation"] == {
+        "failure_code": "provider_unavailable",
+        "verification_available": False,
+    }
+
+
+@pytest.mark.asyncio
+async def test_unified_research_unavailability_restores_standard_local_retrieval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _RecordingCredentialRuntime()
+    retrieved = Document(
+        id="local-fallback",
+        content="Local fallback evidence.",
+        source=DataSource.MEDIA_DB,
+        metadata={},
+    )
+    retriever_calls: list[str] = []
+
+    class FakeRetriever:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        async def retrieve(self, query: str, *args: Any, **kwargs: Any) -> list[Document]:
+            retriever_calls.append(query)
+            return [retrieved]
+
+    async def fake_classifier(**_kwargs: Any) -> QueryClassification:
+        return QueryClassification(
+            skip_search=False,
+            search_local_db=False,
+            search_web=False,
+            search_academic=True,
+            standalone_query="external-only research",
+            confidence=0.9,
+        )
+
+    async def fake_research_loop(**_kwargs: Any) -> Any:
+        return SimpleNamespace(
+            all_results=[],
+            total_iterations=1,
+            total_results=0,
+            total_duration_sec=0.0,
+            completed=False,
+            final_reasoning="provider unavailable",
+            metadata={
+                "action_dedup": {},
+                "url_dedup": {},
+                "provider_stage": {
+                    "failure_code": "provider_unavailable",
+                    "verification_available": False,
+                },
+            },
+            steps=[],
+        )
+
+    monkeypatch.setattr(unified_pipeline_module, "MultiDatabaseRetriever", FakeRetriever)
+    monkeypatch.setattr(unified_pipeline_module, "classify_and_reformulate", fake_classifier)
+    monkeypatch.setattr(unified_pipeline_module, "create_default_registry", lambda **_kwargs: object())
+    monkeypatch.setattr(unified_pipeline_module, "research_loop", fake_research_loop)
+
+    result = await unified_pipeline_module.unified_rag_pipeline(
+        query="external-only research",
+        sources=["media_db"],
+        enable_cache=False,
+        enable_query_classification=True,
+        enable_research_loop=True,
+        enable_generation=False,
+        enable_reranking=False,
+        enable_pre_retrieval_clarification=False,
+        credential_runtime=runtime,
+    )
+
+    assert retriever_calls == ["external-only research"]
+    assert result.documents
+    assert "retrieval_bypassed" not in result.metadata
+    assert (
+        result.metadata["classification_local_retrieval"]
+        == "fallback_after_research_unavailable"
+    )
+
+
+def test_research_unavailability_preserves_existing_full_stack_skip() -> None:
+    assert not unified_pipeline_module._should_restore_classification_local_retrieval(
+        skip_retrieval_stack=True,
+        skip_local_retrieval=True,
+        classification_local_retrieval="disabled",
+    )
+
+
+@pytest.mark.asyncio
+async def test_unified_citation_chain_shortcut_receives_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _RecordingCredentialRuntime()
+    captured: dict[str, Any] = {}
+    document = Document(
+        id="citation-runtime",
+        content="Citation evidence.",
+        source=DataSource.MEDIA_DB,
+        metadata={"title": "Citation Evidence"},
+    )
+
+    class FakeRetriever:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        async def retrieve(self, *args: Any, **kwargs: Any) -> list[Document]:
+            return [document]
+
+    class FakeCitationGenerator:
+        async def generate_citations_with_chains(self, **kwargs: Any) -> Any:
+            captured["citation_runtime"] = kwargs.get("credential_runtime")
+            captured["citation_provider"] = kwargs.get("llm_provider")
+            captured["citation_model"] = kwargs.get("llm_model")
+            dual = SimpleNamespace(
+                academic_citations=[],
+                chunk_citations=[],
+                inline_markers={},
+                citation_map={},
+            )
+            chain_result = SimpleNamespace(
+                chains=[],
+                overall_confidence=0.0,
+                multi_hop_detected=False,
+                metadata={
+                    "total_nodes": 0,
+                    "failure_code": "provider_unavailable",
+                    "verification_available": False,
+                },
+            )
+            return dual, chain_result
+
+    class UnexpectedChainBuilder:
+        def __init__(self, **_kwargs: Any) -> None:
+            raise AssertionError("citation chain result should skip the later builder")
+
+    monkeypatch.setattr(unified_pipeline_module, "MultiDatabaseRetriever", FakeRetriever)
+    monkeypatch.setattr(unified_pipeline_module, "CitationGenerator", FakeCitationGenerator)
+    monkeypatch.setattr(unified_pipeline_module, "EvidenceChainBuilder", UnexpectedChainBuilder)
+
+    result = await unified_pipeline_module.unified_rag_pipeline(
+        query="citation runtime",
+        sources=["media_db"],
+        generation_provider="anthropic",
+        generation_model="claude-test",
+        enable_cache=False,
+        enable_citations=True,
+        enable_evidence_chains=True,
+        enable_generation=False,
+        enable_reranking=False,
+        enable_pre_retrieval_clarification=False,
+        credential_runtime=runtime,
+    )
+
+    assert captured["citation_runtime"] is runtime
+    assert captured["citation_provider"] == "anthropic"
+    assert captured["citation_model"] == "claude-test"
+    assert result.metadata["evidence_chains"]["verification_available"] is False
+    assert result.metadata["evidence_chains"]["failure_code"] == "provider_unavailable"
 
 
 @pytest.mark.asyncio

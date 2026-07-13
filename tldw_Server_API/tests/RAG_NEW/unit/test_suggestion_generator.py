@@ -152,6 +152,7 @@ async def test_generate_suggestions_parses_fenced_json_with_think_tags(monkeypat
 @pytest.mark.asyncio
 async def test_generate_suggestions_uses_explicit_runtime_credentials(monkeypatch):
     runtime = _RecordingCredentialRuntime()
+    stage_metadata: dict[str, object] = {}
     captured = _install_explicit_chat_capture(
         monkeypatch,
         '["How is credential precedence tested?", "Which failures are terminal?"]',
@@ -164,6 +165,7 @@ async def test_generate_suggestions_uses_explicit_runtime_credentials(monkeypatc
         llm_model="claude-test",
         num_suggestions=2,
         credential_runtime=runtime,
+        stage_metadata=stage_metadata,
     )
 
     assert suggestions == [
@@ -175,6 +177,7 @@ async def test_generate_suggestions_uses_explicit_runtime_credentials(monkeypatc
     assert captured["kwargs"]["api_key"] == "runtime-only-key"
     assert captured["kwargs"]["app_config"] == runtime.handle.app_config
     assert captured["kwargs"]["credentials_resolved"] is True
+    assert stage_metadata == {"verification_available": True}
 
 
 @pytest.mark.asyncio
@@ -188,6 +191,7 @@ async def test_generate_suggestions_runtime_failure_uses_heuristic_without_failo
             raise RuntimeError("secret-key /private/credential-store.db")
 
     runtime = FailingRuntime()
+    stage_metadata: dict[str, object] = {}
     suggestions = await generate_suggestions(
         query="credential runtime",
         response_text="Credentials are resolved per effective provider.",
@@ -195,8 +199,13 @@ async def test_generate_suggestions_runtime_failure_uses_heuristic_without_failo
         llm_model="claude-test",
         num_suggestions=2,
         credential_runtime=runtime,
+        stage_metadata=stage_metadata,
     )
 
     assert len(suggestions) == 2
     assert runtime.resolved == ["anthropic"]
+    assert stage_metadata == {
+        "failure_code": "provider_unavailable",
+        "verification_available": False,
+    }
     assert "secret-key" not in str(suggestions)

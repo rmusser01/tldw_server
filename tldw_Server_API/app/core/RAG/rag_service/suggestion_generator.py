@@ -154,6 +154,7 @@ async def generate_suggestions(
     num_suggestions: int = 5,
     llm_timeout_sec: float = 3.0,
     credential_runtime: Any = None,
+    stage_metadata: dict[str, Any] | None = None,
 ) -> list[str]:
     """Generate follow-up question suggestions based on query and response.
 
@@ -167,6 +168,7 @@ async def generate_suggestions(
         llm_timeout_sec: Max time to wait for suggestion LLM before deterministic
             fallback suggestions are returned.
         credential_runtime: Optional request-scoped provider credential runtime.
+        stage_metadata: Optional runtime-only trust metadata output.
 
     Returns:
         List of follow-up question strings. Falls back to heuristic
@@ -247,12 +249,20 @@ async def generate_suggestions(
         # Parse JSON array from response
         suggestions = _parse_suggestions(response_content, num_suggestions)
         if suggestions:
+            if credential_runtime is not None and stage_metadata is not None:
+                stage_metadata.pop("failure_code", None)
+                stage_metadata["verification_available"] = True
             return _finalize_suggestions(suggestions, query, num_suggestions)
 
     except Exception as exc:
         logger.debug(f"Suggestion generation LLM call failed: {_safe_exception_type(exc)}")
 
     # Fallback to heuristic suggestions
+    if credential_runtime is not None and stage_metadata is not None:
+        stage_metadata.update(
+            failure_code="provider_unavailable",
+            verification_available=False,
+        )
     return _finalize_suggestions([], query, num_suggestions)
 
 

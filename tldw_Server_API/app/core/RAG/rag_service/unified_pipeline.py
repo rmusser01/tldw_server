@@ -1476,6 +1476,20 @@ def _resolve_sqlite_rag_db_path(
     return normalized
 
 
+def _should_restore_classification_local_retrieval(
+    *,
+    skip_retrieval_stack: bool,
+    skip_local_retrieval: bool,
+    classification_local_retrieval: Any,
+) -> bool:
+    """Return whether research failure may re-enable classification-disabled local retrieval."""
+    return (
+        not skip_retrieval_stack
+        and skip_local_retrieval
+        and classification_local_retrieval == "disabled"
+    )
+
+
 async def unified_rag_pipeline(
     # ========== REQUIRED PARAMETERS ==========
     query: str,
@@ -2649,13 +2663,17 @@ async def unified_rag_pipeline(
                 _cls_start = time.time()
                 _cls_provider = classifier_provider or generation_provider or "openai"
                 _cls_model = classifier_model or generation_model
+                _classification_stage_metadata: dict[str, Any] = {}
                 _classification = await classify_and_reformulate(
                     query=query,
                     chat_history=chat_history,
                     llm_provider=_cls_provider,
                     llm_model=_cls_model,
                     **(
-                        {"credential_runtime": credential_runtime}
+                        {
+                            "credential_runtime": credential_runtime,
+                            "stage_metadata": _classification_stage_metadata,
+                        }
                         if credential_runtime is not None
                         else {}
                     ),
@@ -2670,6 +2688,7 @@ async def unified_rag_pipeline(
                     "detected_intent": _classification.detected_intent,
                     "confidence": _classification.confidence,
                     "reasoning": _classification.reasoning,
+                    **_classification_stage_metadata,
                 }
 
                 # Apply classification decisions
@@ -2741,13 +2760,17 @@ async def unified_rag_pipeline(
                 _ref_start = time.time()
                 _ref_provider = classifier_provider or generation_provider or "openai"
                 _ref_model = classifier_model or generation_model
+                _reformulation_stage_metadata: dict[str, Any] = {}
                 reformulated = await _reformulate_q(
                     query=query,
                     chat_history=chat_history,
                     llm_provider=_ref_provider,
                     llm_model=_ref_model,
                     **(
-                        {"credential_runtime": credential_runtime}
+                        {
+                            "credential_runtime": credential_runtime,
+                            "stage_metadata": _reformulation_stage_metadata,
+                        }
                         if credential_runtime is not None
                         else {}
                     ),
@@ -2755,6 +2778,10 @@ async def unified_rag_pipeline(
                 if reformulated and reformulated != query:
                     result.metadata["reformulated_query"] = reformulated
                     _sync_effective_query(reformulated)
+                if _reformulation_stage_metadata:
+                    result.metadata["query_reformulation"] = dict(
+                        _reformulation_stage_metadata
+                    )
                 result.timings["query_reformulation"] = time.time() - _ref_start
             except Exception as _ref_exc:
                 logger.warning(f"Query reformulation failed: {_ref_exc!r}")
@@ -2925,6 +2952,17 @@ async def unified_rag_pipeline(
                     _skip_retrieval_stack = True
                     _skip_retrieval_reason = "research_loop"
                     result.metadata["research_retrieval_bypassed"] = True
+                elif _should_restore_classification_local_retrieval(
+                    skip_retrieval_stack=_skip_retrieval_stack,
+                    skip_local_retrieval=_skip_local_retrieval,
+                    classification_local_retrieval=result.metadata.get(
+                        "classification_local_retrieval"
+                    ),
+                ):
+                    _skip_local_retrieval = False
+                    result.metadata["classification_local_retrieval"] = (
+                        "fallback_after_research_unavailable"
+                    )
 
             except Exception as _res_exc:
                 logger.warning(f"Research loop failed, falling back to standard pipeline: {_res_exc!r}")
@@ -5705,6 +5743,15 @@ async def unified_rag_pipeline(
                             style=style_enum if style_enum is not None else CitationStyle.MLA if CitationStyle else None,
                             include_chunks=bool(enable_chunk_citations),
                             max_citations=min(len(result.documents), (rerank_top_k or top_k or 10)),
+                            **(
+                                {
+                                    "credential_runtime": credential_runtime,
+                                    "llm_provider": generation_provider,
+                                    "llm_model": generation_model,
+                                }
+                                if credential_runtime is not None
+                                else {}
+                            ),
                         )
                         if chain_result:
                             evidence_chain_result = chain_result
@@ -6258,6 +6305,7 @@ async def unified_rag_pipeline(
                     if enable_suggestions and generate_suggestions is not None and result.generated_answer:
                         try:
                             _suggestions_start = time.time()
+                            _suggestion_stage_metadata: dict[str, Any] = {}
                             _suggestions = await generate_suggestions(
                                 query=query,
                                 response_text=str(result.generated_answer),
@@ -6267,12 +6315,19 @@ async def unified_rag_pipeline(
                                 num_suggestions=num_suggestions,
                                 llm_timeout_sec=3.0,
                                 **(
-                                    {"credential_runtime": credential_runtime}
+                                    {
+                                        "credential_runtime": credential_runtime,
+                                        "stage_metadata": _suggestion_stage_metadata,
+                                    }
                                     if credential_runtime is not None
                                     else {}
                                 ),
                             )
                             result.metadata["suggestions"] = _suggestions
+                            if _suggestion_stage_metadata:
+                                result.metadata["suggestion_generation"] = dict(
+                                    _suggestion_stage_metadata
+                                )
                             result.timings["suggestions"] = time.time() - _suggestions_start
                         except Exception as _sug_exc:
                             logger.debug(f"Suggestion generation failed: {_sug_exc!r}")

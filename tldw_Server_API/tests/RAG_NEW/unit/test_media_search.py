@@ -202,6 +202,7 @@ async def test_search_videos_fallback_log_sanitizes_exception_repr(
 @pytest.mark.asyncio
 async def test_media_reformulation_uses_explicit_runtime_credentials(monkeypatch):
     runtime = _RecordingCredentialRuntime()
+    stage_metadata: dict[str, object] = {}
     captured = _install_explicit_chat_capture(monkeypatch, "credential runtime diagram")
 
     result = await ms._reformulate_query(
@@ -210,6 +211,7 @@ async def test_media_reformulation_uses_explicit_runtime_credentials(monkeypatch
         llm_provider="anthropic",
         llm_model="claude-test",
         credential_runtime=runtime,
+        stage_metadata=stage_metadata,
     )
 
     assert result == "credential runtime diagram"
@@ -218,3 +220,43 @@ async def test_media_reformulation_uses_explicit_runtime_credentials(monkeypatch
     assert captured["kwargs"]["api_key"] == "runtime-only-key"
     assert captured["kwargs"]["app_config"] == runtime.handle.app_config
     assert captured["kwargs"]["credentials_resolved"] is True
+    assert stage_metadata == {"verification_available": True}
+
+
+@pytest.mark.asyncio
+async def test_image_search_preserves_results_and_reformulation_unavailability(
+    monkeypatch,
+):
+    import tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs as web_apis
+
+    class FailingRuntime:
+        async def resolve(self, _provider):
+            raise RuntimeError("secret-key /private/credential-store.db")
+
+    stage_metadata: dict[str, object] = {}
+
+    def fake_websearch(**_kwargs):
+        return {
+            "results": [
+                {
+                    "title": "Credential architecture",
+                    "url": "https://example.com/credential-architecture",
+                }
+            ]
+        }
+
+    monkeypatch.setattr(web_apis, "perform_websearch", fake_websearch)
+
+    images = await ms.search_images(
+        "credential architecture",
+        credential_runtime=FailingRuntime(),
+        stage_metadata=stage_metadata,
+    )
+
+    assert images and images[0]["title"] == "Credential architecture"
+    assert stage_metadata == {
+        "failure_code": "provider_unavailable",
+        "verification_available": False,
+    }
+    assert "secret-key" not in str(stage_metadata)
+    assert "/private/" not in str(stage_metadata)

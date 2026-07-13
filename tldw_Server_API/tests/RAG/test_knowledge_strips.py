@@ -10,6 +10,7 @@ These tests cover:
 """
 
 import asyncio
+import builtins
 import pytest
 from dataclasses import dataclass
 from typing import Any, Dict, List
@@ -344,6 +345,39 @@ class TestKnowledgeStripsProcessor:
         assert result.strips[0].relevance_score == pytest.approx(0.92, rel=1e-6)
 
     @pytest.mark.asyncio
+    async def test_legacy_analyzer_keeps_six_positional_call_without_kwargs(self):
+        calls: list[tuple[Any, ...]] = []
+
+        def legacy_analyze(api_name, input_data, custom_prompt, api_key, system_message, temp):
+            calls.append(
+                (api_name, input_data, custom_prompt, api_key, system_message, temp)
+            )
+            return '[{"strip_num": 1, "relevance": 0.87}]'
+
+        docs = [
+            Document(
+                id="legacy-doc",
+                content="Historical analyzer compatibility.",
+                source=DataSource.MEDIA_DB,
+                metadata={},
+            )
+        ]
+        processor = KnowledgeStripsProcessor(
+            strip_size_tokens=200,
+            min_relevance_score=0.0,
+            analyze_fn=legacy_analyze,
+        )
+
+        result = await processor.process("compatibility", docs)
+
+        assert len(calls) == 1
+        assert calls[0][0] == "openai"
+        assert calls[0][1] == ""
+        assert "Historical analyzer compatibility" in calls[0][2]
+        assert calls[0][3] is None
+        assert result.strips[0].relevance_score == pytest.approx(0.87, rel=1e-6)
+
+    @pytest.mark.asyncio
     async def test_llm_scoring_fallback_log_sanitizes_exception_details(self):
         """LLM fallback logs should not expose raw scorer exception details."""
         secret_path = "/private/rag-knowledge-strips.db?token=strip-secret-token"
@@ -553,6 +587,40 @@ class TestProcessKnowledgeStrips:
         assert metadata["failure_code"] == "provider_unavailable"
         assert "secret-key" not in str(metadata)
         assert "/private/" not in str(metadata)
+
+    @pytest.mark.asyncio
+    async def test_runtime_llm_import_failure_records_unavailable_trust(
+        self,
+        monkeypatch,
+        sample_documents,
+    ):
+        runtime = _RecordingCredentialRuntime()
+        real_import = builtins.__import__
+
+        def fail_sgl_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == (
+                "tldw_Server_API.app.core.LLM_Calls."
+                "Summarization_General_Lib"
+            ):
+                raise ImportError("provider module unavailable")
+            return real_import(name, globals, locals, fromlist, level)
+
+        monkeypatch.setattr(builtins, "__import__", fail_sgl_import)
+
+        docs, metadata = await process_knowledge_strips(
+            query="Python programming",
+            documents=sample_documents,
+            strip_size_tokens=200,
+            min_relevance=0.0,
+            max_strips=10,
+            use_llm_grading=True,
+            llm_provider="anthropic",
+            credential_runtime=runtime,
+        )
+
+        assert docs
+        assert metadata["verification_available"] is False
+        assert metadata["failure_code"] == "provider_unavailable"
 
 
 class TestDocumentRebuilding:

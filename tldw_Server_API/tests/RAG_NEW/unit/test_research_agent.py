@@ -396,3 +396,46 @@ async def test_default_registry_passes_runtime_to_media_actions(monkeypatch):
 
     assert output.success is True
     assert captured["credential_runtime"] is runtime
+
+
+@pytest.mark.parametrize(
+    ("action_name", "search_name", "media_type"),
+    [
+        ("image_search", "search_images", "images"),
+        ("video_search", "search_videos", "videos"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_media_action_preserves_results_and_reformulation_trust(
+    monkeypatch,
+    action_name,
+    search_name,
+    media_type,
+):
+    from tldw_Server_API.app.core.RAG.rag_service import media_search
+
+    runtime = _RecordingCredentialRuntime()
+
+    async def fake_media_search(**kwargs):
+        kwargs["stage_metadata"].update(
+            failure_code="provider_unavailable",
+            verification_available=False,
+        )
+        return [{"title": "Architecture", "url": "https://example.com/image"}]
+
+    monkeypatch.setattr(media_search, search_name, fake_media_search)
+    registry = create_default_registry(
+        enable_image_search=True,
+        enable_video_search=True,
+        credential_runtime=runtime,
+    )
+
+    output = await registry.execute(action_name, {"query": "architecture diagram"})
+
+    assert output.success is True
+    assert output.result_count == 1
+    assert output.metadata == {
+        "type": media_type,
+        "failure_code": "provider_unavailable",
+        "verification_available": False,
+    }

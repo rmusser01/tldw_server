@@ -379,29 +379,40 @@ Respond with a JSON array of objects.
 JSON:"""
 
             try:
-                raw_response = await asyncio.to_thread(
-                    analyze_fn,
-                    self.llm_provider,
-                    prompt,
-                    None,
-                    (
-                        self.credential_handle.api_key
-                        if self.credential_handle is not None
-                        else None
-                    ),
-                    "You are a relevance grader. Output valid JSON only.",
-                    0.1,
-                    model_override=self.llm_model,
-                    **(
-                        {
-                            "app_config": self.credential_handle.app_config,
-                            "credentials_resolved": True,
-                            "raise_on_error": True,
-                        }
-                        if self.credential_handle is not None
-                        else {}
-                    ),
-                )
+                if self.credential_handle is None and self.llm_model is None:
+                    raw_response = await asyncio.to_thread(
+                        analyze_fn,
+                        "openai",
+                        "",
+                        prompt,
+                        None,
+                        "You are a relevance grader. Output valid JSON only.",
+                        0.1,
+                    )
+                else:
+                    call_kwargs: dict[str, Any] = {}
+                    if self.llm_model is not None:
+                        call_kwargs["model_override"] = self.llm_model
+                    if self.credential_handle is not None:
+                        call_kwargs.update(
+                            app_config=self.credential_handle.app_config,
+                            credentials_resolved=True,
+                            raise_on_error=True,
+                        )
+                    raw_response = await asyncio.to_thread(
+                        analyze_fn,
+                        self.llm_provider,
+                        prompt,
+                        None,
+                        (
+                            self.credential_handle.api_key
+                            if self.credential_handle is not None
+                            else None
+                        ),
+                        "You are a relevance grader. Output valid JSON only.",
+                        0.1,
+                        **call_kwargs,
+                    )
                 if (
                     self.credential_handle is not None
                     and isinstance(raw_response, str)
@@ -547,6 +558,7 @@ async def process_knowledge_strips(
             analyze_fn = _analyze
         except ImportError:
             logger.warning("LLM module not available for strip grading")
+            credential_failure = credential_runtime is not None
         except Exception:
             logger.warning("LLM strip grading credentials unavailable")
             credential_failure = True

@@ -624,8 +624,12 @@ def _create_image_search_action(credential_runtime: Any = None) -> ResearchActio
 
         try:
             from .media_search import search_images
+            stage_metadata: dict[str, Any] = {}
             runtime_kwargs = (
-                {"credential_runtime": credential_runtime}
+                {
+                    "credential_runtime": credential_runtime,
+                    "stage_metadata": stage_metadata,
+                }
                 if credential_runtime is not None
                 else {}
             )
@@ -642,7 +646,7 @@ def _create_image_search_action(credential_runtime: Any = None) -> ResearchActio
                 success=True,
                 results=images,
                 result_count=len(images),
-                metadata={"type": "images"},
+                metadata={"type": "images", **stage_metadata},
             )
         except Exception as exc:
             return ActionOutput(action_name="image_search", success=False, error=str(exc))
@@ -678,8 +682,12 @@ def _create_video_search_action(credential_runtime: Any = None) -> ResearchActio
 
         try:
             from .media_search import search_videos
+            stage_metadata: dict[str, Any] = {}
             runtime_kwargs = (
-                {"credential_runtime": credential_runtime}
+                {
+                    "credential_runtime": credential_runtime,
+                    "stage_metadata": stage_metadata,
+                }
                 if credential_runtime is not None
                 else {}
             )
@@ -696,7 +704,7 @@ def _create_video_search_action(credential_runtime: Any = None) -> ResearchActio
                 success=True,
                 results=videos,
                 result_count=len(videos),
-                metadata={"type": "videos"},
+                metadata={"type": "videos", **stage_metadata},
             )
         except Exception as exc:
             return ActionOutput(action_name="video_search", success=False, error=str(exc))

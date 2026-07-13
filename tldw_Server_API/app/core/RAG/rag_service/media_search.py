@@ -67,6 +67,7 @@ async def _reformulate_query(
     llm_provider: str,
     llm_model: str | None,
     credential_runtime: Any = None,
+    stage_metadata: dict[str, Any] | None = None,
 ) -> str:
     """Use an LLM to reformulate a query for media search."""
     try:
@@ -119,10 +120,25 @@ async def _reformulate_query(
             text = str(raw)
 
         reformulated = text.strip().strip('"\'')
-        return reformulated if reformulated else query
+        if reformulated:
+            if credential_runtime is not None and stage_metadata is not None:
+                stage_metadata.pop("failure_code", None)
+                stage_metadata["verification_available"] = True
+            return reformulated
+        if credential_runtime is not None and stage_metadata is not None:
+            stage_metadata.update(
+                failure_code="provider_unavailable",
+                verification_available=False,
+            )
+        return query
 
     except Exception:
         logger.debug("Media query reformulation failed; using original query")
+        if credential_runtime is not None and stage_metadata is not None:
+            stage_metadata.update(
+                failure_code="provider_unavailable",
+                verification_available=False,
+            )
         return query
 
 
@@ -137,6 +153,7 @@ async def search_images(
     max_results: int = 10,
     search_engine: str = "duckduckgo",
     credential_runtime: Any = None,
+    stage_metadata: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Search for relevant images.
 
@@ -150,13 +167,17 @@ async def search_images(
         max_results: Maximum number of image results.
         search_engine: Web search engine to use.
         credential_runtime: Optional request-scoped provider credential runtime.
+        stage_metadata: Optional runtime-only reformulation trust metadata output.
 
     Returns:
         List of image result dicts with keys: title, url, thumbnail_url, source, width, height.
     """
     # Reformulate query for image search
     runtime_kwargs = (
-        {"credential_runtime": credential_runtime}
+        {
+            "credential_runtime": credential_runtime,
+            "stage_metadata": stage_metadata,
+        }
         if credential_runtime is not None
         else {}
     )
@@ -222,6 +243,7 @@ async def search_videos(
     max_results: int = 10,
     search_engine: str = "duckduckgo",
     credential_runtime: Any = None,
+    stage_metadata: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Search for relevant videos (primarily YouTube).
 
@@ -235,13 +257,17 @@ async def search_videos(
         max_results: Maximum number of video results.
         search_engine: Web search engine to use.
         credential_runtime: Optional request-scoped provider credential runtime.
+        stage_metadata: Optional runtime-only reformulation trust metadata output.
 
     Returns:
         List of video result dicts with keys: title, url, thumbnail_url, source, description.
     """
     # Reformulate query for video search
     runtime_kwargs = (
-        {"credential_runtime": credential_runtime}
+        {
+            "credential_runtime": credential_runtime,
+            "stage_metadata": stage_metadata,
+        }
         if credential_runtime is not None
         else {}
     )

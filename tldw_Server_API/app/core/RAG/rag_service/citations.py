@@ -796,6 +796,9 @@ class CitationGenerator:
         style: CitationStyle = CitationStyle.MLA,
         include_chunks: bool = True,
         max_citations: int = 10,
+        credential_runtime: Any = None,
+        llm_provider: Optional[str] = None,
+        llm_model: Optional[str] = None,
     ) -> tuple[DualCitationResult, Optional[Any]]:
         """
         Generate citations with evidence chain building.
@@ -807,6 +810,9 @@ class CitationGenerator:
             style: Academic citation style
             include_chunks: Whether to include chunk-level citations
             max_citations: Maximum number of citations
+            credential_runtime: Optional request-scoped provider credential runtime
+            llm_provider: Effective provider for evidence-chain extraction
+            llm_model: Effective model for evidence-chain extraction
 
         Returns:
             Tuple of (DualCitationResult, ChainBuildResult or None)
@@ -825,7 +831,16 @@ class CitationGenerator:
         try:
             from .evidence_chains import EvidenceChainBuilder
 
-            builder = EvidenceChainBuilder()
+            runtime_kwargs = (
+                {
+                    "credential_runtime": credential_runtime,
+                    "llm_provider": llm_provider,
+                    "llm_model": llm_model,
+                }
+                if credential_runtime is not None
+                else {}
+            )
+            builder = EvidenceChainBuilder(**runtime_kwargs)
             chain_result = await builder.build_chains(
                 query=query,
                 documents=documents,
