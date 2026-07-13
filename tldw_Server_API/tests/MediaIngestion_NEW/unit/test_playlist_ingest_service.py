@@ -16,12 +16,20 @@ class _OwnerMediaDB:
         self.rows: list[dict] = []
         self.lookup_calls: list[list[str]] = []
         self.before_lookup = None
+        self.metadata_calls: list[dict] = []
+        self.metadata_error: Exception | None = None
 
     def get_media_by_urls(self, urls, **_kwargs):
         self.lookup_calls.append(list(urls))
         if self.before_lookup is not None:
             self.before_lookup()
         return list(self.rows)
+
+    def apply_media_metadata_patch(self, media_id, **patch):
+        self.metadata_calls.append({"media_id": media_id, **patch})
+        if self.metadata_error is not None:
+            raise self.metadata_error
+        return {"media_id": media_id, "new_media_version": 2}
 
     def close_connection(self) -> None:
         return None
@@ -542,7 +550,84 @@ def test_create_run_accepts_current_library_override_and_persists_patch(service_
     assert item.action == "update_metadata_only"
     assert item.duplicate_policy == "update_metadata_only"
     assert item.metadata_patch == {"title": "Reviewed title"}
-    assert item.media_id is None
+    assert item.state == "terminal"
+    assert item.outcome == "metadata_updated"
+    assert item.media_id == 17
+    assert media_db.metadata_calls == [{"media_id": 17, "title": "Reviewed title"}]
+
+
+@pytest.mark.parametrize(
+    ("policy", "patch", "expected_outcome"),
+    [
+        ("skip", None, "skipped_existing"),
+        ("include_existing", None, "included_existing"),
+        (
+            "update_metadata_only",
+            {"title": "Reviewed", "author": "Speaker", "keywords_add": ["tag"]},
+            "metadata_updated",
+        ),
+    ],
+)
+def test_create_run_resolves_nonprocessing_duplicate_actions_without_media_jobs(
+    service_context,
+    policy,
+    patch,
+    expected_outcome,
+):
+    service, store, manager, media_db = service_context
+    direct = _direct_input("occ-direct", "https://example.com/existing")
+    media_db.rows = [{"id": 17, "url": "https://example.com/existing"}]
+    override = {
+        "duplicate_policy": policy,
+        "existing_media_id": 17,
+    }
+    if patch is not None:
+        override["metadata_patch"] = patch
+
+    created = service.create_run(
+        "owner-1",
+        inputs=[direct],
+        review_overrides={"occ-direct": override},
+    )
+
+    item = store.list_run_items("owner-1", created.run_id)[0]
+    events = list(store.list_run_events("owner-1", created.run_id))
+    assert item.state == "terminal"
+    assert item.outcome == expected_outcome
+    assert item.media_id == 17
+    assert events[-1].event_type == "duplicate_action_resolved"
+    assert events[-1].outcome == expected_outcome
+    assert _table_count(manager, "jobs") == 0
+    assert media_db.metadata_calls == ([{"media_id": 17, **patch}] if patch is not None else [])
+
+
+def test_create_run_metadata_conflict_becomes_terminal_failure_without_job(service_context):
+    service, store, manager, media_db = service_context
+    direct = _direct_input("occ-direct", "https://example.com/existing")
+    media_db.rows = [{"id": 17, "url": "https://example.com/existing"}]
+    from tldw_Server_API.app.core.DB_Management.media_db.errors import ConflictError
+
+    media_db.metadata_error = ConflictError("Media", 17)
+
+    created = service.create_run(
+        "owner-1",
+        inputs=[direct],
+        review_overrides={
+            "occ-direct": {
+                "duplicate_policy": "update_metadata_only",
+                "existing_media_id": 17,
+                "metadata_patch": {"title": "Reviewed"},
+            }
+        },
+    )
+
+    item = store.list_run_items("owner-1", created.run_id)[0]
+    events = list(store.list_run_events("owner-1", created.run_id))
+    assert item.state == "terminal"
+    assert item.outcome == "metadata_update_failed"
+    assert item.media_id == 17
+    assert events[-1].outcome == "metadata_update_failed"
+    assert _table_count(manager, "jobs") == 0
 
 
 def test_create_run_in_run_repeat_requires_occurrence_bound_override(service_context):
@@ -575,6 +660,31 @@ def test_create_run_in_run_repeat_requires_occurrence_bound_override(service_con
     )
     items = list(store.list_run_items("owner-1", created.run_id, limit=10))
     assert [item.action for item in items] == ["ingest", "overwrite"]
+
+
+def test_create_run_in_run_skip_is_terminal_without_media_id_or_job(service_context):
+    service, store, manager, _media_db = service_context
+    inputs = [
+        _direct_input("occ-first", "https://youtu.be/abc"),
+        _direct_input("occ-repeat", "https://www.youtube.com/watch?v=abc"),
+    ]
+
+    created = service.create_run(
+        "owner-1",
+        inputs=inputs,
+        review_overrides={
+            "occ-repeat": {
+                "duplicate_policy": "skip",
+                "duplicate_of_occurrence_id": "occ-first",
+            }
+        },
+    )
+
+    repeated = store.list_run_items("owner-1", created.run_id, limit=10)[1]
+    assert repeated.state == "terminal"
+    assert repeated.outcome == "skipped_existing"
+    assert repeated.media_id is None
+    assert _table_count(manager, "jobs") == 0
 
 
 def test_create_run_in_run_repeat_uses_existing_generic_url_normalization(service_context):

@@ -107,6 +107,166 @@ def test_apply_media_item_update_rejects_missing_media() -> None:
         )
 
 
+def test_apply_media_metadata_patch_rebinds_on_media_database() -> None:
+    from tldw_Server_API.app.core.DB_Management.media_db.media_database import MediaDatabase
+
+    media_item_update_ops_module = _load_media_item_update_ops_module()
+
+    assert MediaDatabase.apply_media_metadata_patch is media_item_update_ops_module.apply_media_metadata_patch
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {},
+        {"title": "   "},
+        {"author": "   "},
+        {"keywords_add": ("", "  ")},
+    ],
+)
+def test_apply_media_metadata_patch_rejects_empty_patch(kwargs) -> None:
+    media_item_update_ops_module = _load_media_item_update_ops_module()
+
+    with pytest.raises(InputError):
+        media_item_update_ops_module.apply_media_metadata_patch(
+            SimpleNamespace(),
+            media_id=9,
+            **kwargs,
+        )
+
+
+def test_apply_media_metadata_patch_has_no_forbidden_field_surface() -> None:
+    media_item_update_ops_module = _load_media_item_update_ops_module()
+
+    with pytest.raises(TypeError, match="unexpected keyword argument 'content'"):
+        media_item_update_ops_module.apply_media_metadata_patch(
+            SimpleNamespace(),
+            media_id=9,
+            content="must not be mutable",
+        )
+
+
+def test_apply_media_metadata_patch_updates_allowlist_and_unions_keywords() -> None:
+    media_item_update_ops_module = _load_media_item_update_ops_module()
+    fetch_rows = [
+        {
+            **_media_row(title="Current Title", content="existing body", version=3),
+            "author": "Current Author",
+        },
+        {
+            **_media_row(title="Reviewed Title", content="existing body", version=4),
+            "author": "Reviewed Author",
+        },
+    ]
+    execute_calls: list[tuple[str, tuple[object, ...]]] = []
+    keyword_calls: list[tuple[int, list[str], object]] = []
+    fts_calls: list[tuple[object, int, str, str, str | None, str | None]] = []
+    sync_calls: list[tuple[str, str, str, int, dict[str, object]]] = []
+
+    def _execute(_conn, query, params):
+        execute_calls.append((" ".join(query.split()), params))
+        return SimpleNamespace(rowcount=1)
+
+    def _update_keywords(media_id, keywords, conn=None):
+        keyword_calls.append((media_id, keywords, conn))
+
+    def _update_fts_media(conn, media_id, title, content, *, old_title=None, old_content=None):
+        fts_calls.append((conn, media_id, title, content, old_title, old_content))
+
+    def _log_sync_event(_conn, entity, entity_uuid, operation, version, payload):
+        sync_calls.append((entity, entity_uuid, operation, version, payload))
+
+    db = SimpleNamespace(
+        client_id="api-client",
+        transaction=lambda: _Txn(),
+        _get_current_utc_timestamp_str=lambda: "2026-03-22T20:00:00Z",
+        _fetchone_with_connection=lambda _conn, _query, _params: fetch_rows.pop(0),
+        _fetchall_with_connection=lambda _conn, _query, _params: [
+            {"keyword": "Existing"},
+            {"keyword": "Tag"},
+        ],
+        _execute_with_connection=_execute,
+        update_keywords_for_media=_update_keywords,
+        _update_fts_media=_update_fts_media,
+        _log_sync_event=_log_sync_event,
+    )
+
+    result = media_item_update_ops_module.apply_media_metadata_patch(
+        db,
+        media_id=9,
+        title="  Reviewed Title  ",
+        author=" Reviewed Author ",
+        keywords_add=("existing", "NEW", "new"),
+    )
+
+    assert result == {"media_id": 9, "new_media_version": 4}
+    assert execute_calls == [
+        (
+            "UPDATE Media SET last_modified = ?, version = ?, client_id = ?, title = ?, author = ? WHERE id = ? AND version = ?",
+            (
+                "2026-03-22T20:00:00Z",
+                4,
+                "api-client",
+                "Reviewed Title",
+                "Reviewed Author",
+                9,
+                3,
+            ),
+        )
+    ]
+    assert keyword_calls == [(9, ["Existing", "Tag", "NEW"], "conn")]
+    assert fts_calls == [("conn", 9, "Reviewed Title", "existing body", "Current Title", "existing body")]
+    assert sync_calls == [
+        (
+            "Media",
+            "media-uuid",
+            "update",
+            4,
+            (
+                fetch_rows[0]
+                if fetch_rows
+                else {
+                    **_media_row(title="Reviewed Title", content="existing body", version=4),
+                    "author": "Reviewed Author",
+                }
+            ),
+        )
+    ]
+
+
+def test_apply_media_metadata_patch_conflict_rolls_back_all_side_effects() -> None:
+    media_item_update_ops_module = _load_media_item_update_ops_module()
+    keyword_calls: list[object] = []
+    fts_calls: list[object] = []
+    sync_calls: list[object] = []
+    db = SimpleNamespace(
+        client_id="api-client",
+        transaction=lambda: _Txn(),
+        _get_current_utc_timestamp_str=lambda: "2026-03-22T20:00:00Z",
+        _fetchone_with_connection=lambda _conn, _query, _params: {
+            **_media_row(version=7),
+            "author": "Current Author",
+        },
+        _fetchall_with_connection=lambda _conn, _query, _params: [{"keyword": "Existing"}],
+        _execute_with_connection=lambda *_args, **_kwargs: SimpleNamespace(rowcount=0),
+        update_keywords_for_media=lambda *_args, **_kwargs: keyword_calls.append(True),
+        _update_fts_media=lambda *_args, **_kwargs: fts_calls.append(True),
+        _log_sync_event=lambda *_args, **_kwargs: sync_calls.append(True),
+    )
+
+    with pytest.raises(ConflictError):
+        media_item_update_ops_module.apply_media_metadata_patch(
+            db,
+            media_id=9,
+            title="Reviewed",
+            keywords_add=("new",),
+        )
+
+    assert keyword_calls == []
+    assert fts_calls == []
+    assert sync_calls == []
+
+
 def test_apply_media_item_update_rejects_optimistic_conflict() -> None:
     media_item_update_ops_module = _load_media_item_update_ops_module()
     fetch_rows = [_media_row()]

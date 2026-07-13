@@ -20,10 +20,131 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import 
     MEDIA_NONCRITICAL_EXCEPTIONS,
 )
 
-
 _MEDIA_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = MEDIA_NONCRITICAL_EXCEPTIONS
 _COLLECTIONS_DB = load_collections_database_cls()
 _OWNED_UPDATE_FIELDS = frozenset({"title", "author", "type", "content"})
+
+
+def apply_media_metadata_patch(
+    self: Any,
+    media_id: int,
+    title: str | None = None,
+    author: str | None = None,
+    keywords_add: tuple[str, ...] = (),
+) -> dict[str, int]:
+    """Apply the reviewed metadata-only allowlist in one Media DB transaction."""
+    if type(media_id) is not int or media_id < 1:
+        raise InputError("media_id must be a positive integer")  # noqa: TRY003
+
+    def _text(value: str | None, field: str) -> str | None:
+        if value is None:
+            return None
+        if type(value) is not str or not value.strip():
+            raise InputError(f"{field} must be a non-empty string")  # noqa: TRY003
+        return value.strip()
+
+    title_value = _text(title, "title")
+    author_value = _text(author, "author")
+    if isinstance(keywords_add, (str, bytes)):
+        raise InputError("keywords_add must contain non-empty strings")  # noqa: TRY003
+    additions: list[str] = []
+    seen_additions: set[str] = set()
+    for keyword in keywords_add:
+        if type(keyword) is not str or not keyword.strip():
+            raise InputError("keywords_add must contain non-empty strings")  # noqa: TRY003
+        normalized = keyword.strip()
+        folded = normalized.casefold()
+        if folded not in seen_additions:
+            additions.append(normalized)
+            seen_additions.add(folded)
+    if title_value is None and author_value is None and not additions:
+        raise InputError("At least one metadata patch field is required")  # noqa: TRY003
+
+    try:
+        with self.transaction() as conn:
+            current = self._fetchone_with_connection(
+                conn,
+                """
+                SELECT id, uuid, title, author, content, version
+                FROM Media
+                WHERE id = ? AND deleted = 0 AND is_trash = 0
+                """,
+                (media_id,),
+            )
+            if not current:
+                raise InputError(f"Media {media_id} not found or inactive/trashed.")  # noqa: TRY003, TRY301
+            keyword_rows = self._fetchall_with_connection(
+                conn,
+                """
+                SELECT k.keyword
+                FROM Keywords k
+                JOIN MediaKeywords mk ON mk.keyword_id = k.id
+                WHERE mk.media_id = ? AND k.deleted = 0
+                ORDER BY k.keyword
+                """,
+                (media_id,),
+            )
+            keywords = [str(row["keyword"]) for row in keyword_rows]
+            seen = {keyword.casefold() for keyword in keywords}
+            for keyword in additions:
+                if keyword.casefold() not in seen:
+                    keywords.append(keyword)
+                    seen.add(keyword.casefold())
+
+            current_version = int(current["version"])
+            next_version = current_version + 1
+            now = self._get_current_utc_timestamp_str()
+            assignments = ["last_modified = ?", "version = ?", "client_id = ?"]
+            params: list[Any] = [now, next_version, self.client_id]
+            if title_value is not None:
+                assignments.append("title = ?")
+                params.append(title_value)
+            if author_value is not None:
+                assignments.append("author = ?")
+                params.append(author_value)
+            result = self._execute_with_connection(
+                conn,
+                f"UPDATE Media SET {', '.join(assignments)} WHERE id = ? AND version = ?",  # nosec B608
+                (*params, media_id, current_version),
+            )
+            if getattr(result, "rowcount", 0) != 1:
+                raise ConflictError("Media", media_id)  # noqa: TRY301
+
+            if additions:
+                self.update_keywords_for_media(media_id, keywords, conn=conn)
+            if title_value is not None:
+                self._update_fts_media(
+                    conn,
+                    media_id,
+                    title_value,
+                    current.get("content"),
+                    old_title=current.get("title"),
+                    old_content=current.get("content"),
+                )
+            updated = (
+                self._fetchone_with_connection(
+                    conn,
+                    "SELECT * FROM Media WHERE id = ?",
+                    (media_id,),
+                )
+                or {}
+            )
+            self._log_sync_event(
+                conn,
+                "Media",
+                current["uuid"],
+                "update",
+                next_version,
+                dict(updated),
+            )
+        return {"media_id": media_id, "new_media_version": next_version}
+    except (InputError, ConflictError, DatabaseError, TypeError):
+        raise
+    except sqlite3.Error as exc:
+        raise DatabaseError(f"Media metadata patch failed: {exc}") from exc  # noqa: TRY003
+    except _MEDIA_NONCRITICAL_EXCEPTIONS as exc:
+        raise DatabaseError(f"Unexpected media metadata patch error: {exc}") from exc  # noqa: TRY003
+
 
 
 def apply_media_item_update(
@@ -223,4 +344,4 @@ def apply_media_item_update(
         }
 
 
-__all__ = ["apply_media_item_update"]
+__all__ = ["apply_media_item_update", "apply_media_metadata_patch"]

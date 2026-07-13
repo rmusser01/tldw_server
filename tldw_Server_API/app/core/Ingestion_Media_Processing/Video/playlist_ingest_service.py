@@ -693,6 +693,7 @@ class PlaylistIngestService:
                 )
                 continue
             item["action"] = validated_override.duplicate_policy.value
+            item["existing_media_id"] = current_evidence.existing_media_id
             item["metadata_patch"] = (
                 validated_override.metadata_patch.model_dump(exclude_none=True)
                 if validated_override.metadata_patch is not None
@@ -709,14 +710,71 @@ class PlaylistIngestService:
         if review_items:
             raise ReviewRequiredError(review_items)
 
-        manifest = [{key: value for key, value in item.items() if key != "lookup_urls"} for item in resolved]
-        return self._store.create_validated_run(
+        manifest = [
+            {
+                **{key: value for key, value in item.items() if key not in {"lookup_urls", "existing_media_id"}},
+                **(
+                    {"media_id": item["existing_media_id"]}
+                    if item.get("existing_media_id") is not None
+                    and item.get("action") in {"skip", "include_existing", "update_metadata_only"}
+                    else {}
+                ),
+            }
+            for item in resolved
+        ]
+        created = self._store.create_validated_run(
             owner,
             items=manifest,
             processing_options=request.processing_options,
             playlist_summaries=request.playlist_summaries,
             collection_id=request.collection_id,
         )
+        self._resolve_nonprocessing_actions(owner, created.run_id, manifest)
+        return self._store.get_run(owner, created.run_id)
+
+    def _resolve_nonprocessing_actions(
+        self,
+        owner_user_id: str,
+        run_id: str,
+        items: Sequence[Mapping[str, Any]],
+    ) -> None:
+        """Finish reviewed library-duplicate actions without creating media jobs."""
+        metadata_db = None
+        try:
+            for item in items:
+                action = item.get("action")
+                media_id = item.get("media_id")
+                if action not in {"skip", "include_existing", "update_metadata_only"}:
+                    continue
+                if action != "skip" and media_id is None:
+                    continue
+                if action == "skip":
+                    outcome = "skipped_existing"
+                elif action == "include_existing":
+                    outcome = "included_existing"
+                else:
+                    try:
+                        if metadata_db is None:
+                            metadata_db = self._media_db_factory(owner_user_id)
+                        metadata_db.apply_media_metadata_patch(
+                            int(media_id),
+                            **dict(item.get("metadata_patch") or {}),
+                        )
+                    except Exception:  # noqa: BLE001 - the run records a safe terminal failure
+                        outcome = "metadata_update_failed"
+                    else:
+                        outcome = "metadata_updated"
+                self._store.resolve_nonprocessing_run_item(
+                    owner_user_id,
+                    run_id,
+                    str(item["occurrence_id"]),
+                    outcome=outcome,
+                    media_id=int(media_id) if media_id is not None else None,
+                )
+        finally:
+            if metadata_db is not None:
+                with contextlib.suppress(Exception):
+                    metadata_db.close_connection()
 
 
 __all__ = [

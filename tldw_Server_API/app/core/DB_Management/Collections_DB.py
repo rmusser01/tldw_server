@@ -3222,6 +3222,123 @@ class CollectionsDatabase:
             raise DatabaseError("Failed to insert media collection")
         return self.get_media_collection(collection_id)
 
+    def create_media_collection_with_items(
+        self,
+        *,
+        name: str,
+        kind: str,
+        items: Iterable[dict[str, Any]],
+        description: str | None = None,
+        source_url: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        default_tags: Iterable[str] | None = None,
+    ) -> MediaCollectionRow:
+        """Create one collection and its ordered planned items atomically."""
+        name_value = str(name or "").strip()
+        kind_value = str(kind or "").strip()
+        if not name_value:
+            raise ValueError("media_collection_name_required")
+        if not kind_value:
+            raise ValueError("media_collection_kind_required")
+        if metadata is not None and not isinstance(metadata, dict):
+            raise ValueError("media_collection_metadata_must_be_object")
+
+        item_values: list[dict[str, Any]] = []
+        ordinals: set[int] = set()
+        for index, item in enumerate(items, start=1):
+            if not isinstance(item, dict):
+                raise ValueError("media_collection_item_must_be_object")
+            source = str(item.get("source_url") or "").strip()
+            if not source:
+                raise ValueError("media_collection_item_source_url_required")
+            ordinal = int(item.get("ordinal", index))
+            if ordinal < 1:
+                raise ValueError("media_collection_item_ordinal_invalid")
+            if ordinal in ordinals:
+                raise ValueError("media_collection_item_ordinal_duplicate")
+            ordinals.add(ordinal)
+            item_metadata = item.get("metadata")
+            if item_metadata is not None and not isinstance(item_metadata, dict):
+                raise ValueError("media_collection_item_metadata_must_be_object")
+            item_values.append(
+                {
+                    "source_url": source,
+                    "normalized_source_id": str(item.get("normalized_source_id") or "").strip() or None,
+                    "source_kind": str(item.get("source_kind") or "").strip() or None,
+                    "ordinal": ordinal,
+                    "title": str(item.get("title") or "").strip() or None,
+                    "speaker": str(item.get("speaker") or "").strip() or None,
+                    "published_at": str(item.get("published_at") or "").strip() or None,
+                    "track": str(item.get("track") or "").strip() or None,
+                    "duplicate_status": str(item.get("duplicate_status") or "unknown").strip() or "unknown",
+                    "status": self._normalize_collection_status(str(item.get("status") or "planned")),
+                    "metadata_json": self._json_dumps_or_none(item_metadata or {}),
+                    "tags_json": self._json_dumps_or_none(self._normalize_string_list(item.get("tags"))),
+                }
+            )
+
+        now = _utcnow_iso()
+        with self.transaction() as conn:
+            collection_result = self._execute_insert(
+                """
+                INSERT INTO media_collections (
+                    user_id, name, kind, description, source_url, metadata_json,
+                    default_tags_json, deleted, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    self.user_id,
+                    name_value,
+                    kind_value,
+                    description.strip() if isinstance(description, str) and description.strip() else None,
+                    source_url.strip() if isinstance(source_url, str) and source_url.strip() else None,
+                    self._json_dumps_or_none(metadata or {}),
+                    self._json_dumps_or_none(self._normalize_string_list(default_tags)),
+                    self._coerce_bool_flag(False, postgres=self.backend_type == BackendType.POSTGRESQL),
+                    now,
+                    now,
+                ),
+                connection=conn,
+            )
+            collection_id = self._extract_lastrowid(collection_result)
+            if not collection_id:
+                raise DatabaseError("Failed to insert media collection")
+            for item in item_values:
+                result = self._execute_insert(
+                    """
+                    INSERT INTO media_collection_items (
+                        user_id, collection_id, ordinal, source_url, normalized_source_id,
+                        source_kind, title, speaker, published_at, track, duplicate_status,
+                        status, retry_count, warnings_json, metadata_json, tags_json,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        self.user_id,
+                        collection_id,
+                        item["ordinal"],
+                        item["source_url"],
+                        item["normalized_source_id"],
+                        item["source_kind"],
+                        item["title"],
+                        item["speaker"],
+                        item["published_at"],
+                        item["track"],
+                        item["duplicate_status"],
+                        item["status"],
+                        self._json_dumps_or_none([]),
+                        item["metadata_json"],
+                        item["tags_json"],
+                        now,
+                        now,
+                    ),
+                    connection=conn,
+                )
+                if not self._extract_lastrowid(result):
+                    raise DatabaseError("Failed to insert media collection item")
+        return self.get_media_collection(collection_id)
+
+
     def get_media_collection(self, collection_id: int) -> MediaCollectionRow:
         """Return collection metadata plus ordered membership."""
         row = self.backend.execute(

@@ -226,7 +226,7 @@ git commit -m "feat: expose playlist preflight resources (TASK-12110)"
 
 **Tests:** Service tests, Media DB patch tests, Collections DB transaction tests, action-resolution properties.
 
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 5: Validate and create ingest runs atomically
 
@@ -272,25 +272,25 @@ git commit -m "feat: validate playlist ingest runs (TASK-12112)"
 
 ### Task 6: Execute non-processing duplicate policies and optional collection planning
 
-- [ ] **Step 1: Write failing atomicity tests**
+- [x] **Step 1: Write failing atomicity tests**
 
 Add tests proving `skip`, `include_existing`, and `update_metadata_only` create zero media jobs and distinct outcomes. Test allowlisted title/author/keyword union, empty/forbidden patches, optimistic conflict rollback, and collection-plus-items rollback.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/DB_Management/test_media_db_media_item_update_ops.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_service.py -k "metadata or collection or duplicate" -q`
 
 Expected: FAIL because the atomic patch and action executor are missing.
 
-- [ ] **Step 3: Add the narrow Media DB patch**
+- [x] **Step 3: Add the narrow Media DB patch**
 
 Implement `apply_media_metadata_patch(media_id, title=None, author=None, keywords_add=())` in `media_item_update_ops.py`. In one Media DB transaction, fetch the active row/version and current keywords, validate non-empty values, union keywords case-insensitively, update title/author/version, update FTS when title changes, update keyword links with the same connection, and log one sync event. Do not expose content/type/analysis mutation.
 
-- [ ] **Step 4: Add transactional collection planning and action execution**
+- [x] **Step 4: Add transactional collection planning and action execution**
 
 Add one `CollectionsDatabase.create_media_collection_with_items(...)` method using its existing transaction helpers. In the service, execute non-processing actions after the run transaction exists: set terminal outcome/media ID, resolve optional planned items, and append events. On error, use `metadata_update_failed`; never silently fall back to a media job.
 
-- [ ] **Step 5: Run tests and commit**
+- [x] **Step 5: Run tests and commit**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/DB_Management/test_media_db_media_item_update_ops.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_service.py -q`
 
@@ -298,7 +298,7 @@ Expected: PASS.
 
 ```bash
 git add tldw_Server_API/app/core/DB_Management/media_db/runtime/media_item_update_ops.py tldw_Server_API/app/core/DB_Management/media_db/media_database_impl.py tldw_Server_API/app/core/DB_Management/Collections_DB.py tldw_Server_API/app/core/Ingestion_Media_Processing/Video/playlist_ingest_service.py tldw_Server_API/tests
-git commit -m "feat: resolve playlist duplicate actions (TASK-12110)"
+git commit -m "feat: resolve playlist duplicate actions (TASK-12112)"
 ```
 
 ## Stage 4: Processing jobs, status, cancellation, and retry

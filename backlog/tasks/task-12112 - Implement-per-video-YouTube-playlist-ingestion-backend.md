@@ -40,6 +40,10 @@ modified_files:
 - tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_endpoint.py
 - tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_preflight_endpoint.py
 - tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_service.py
+- tldw_Server_API/app/core/DB_Management/Collections_DB.py
+- tldw_Server_API/app/core/DB_Management/media_db/runtime/media_item_update_ops.py
+- tldw_Server_API/tests/Collections/test_conference_media_collections.py
+- tldw_Server_API/tests/DB_Management/test_media_db_media_item_update_ops.py
 ---
 
 ## Description
@@ -47,7 +51,7 @@ modified_files:
 <!-- SECTION:DESCRIPTION:BEGIN -->
 Execute the approved backend implementation plan for owner-scoped asynchronous YouTube playlist inspection, occurrence materialization, ingest runs, duplicate-action resolution, Jobs/worker integration, status/events/cancellation/retry, cleanup, and capability rollout.
 
-Progress through Backend Task 4: version-2 playlist preflight POST/summary/items/materialization/DELETE routes, transactional capacity admission and job bind/publish, owner isolation, safe cursor/error mapping, legacy compatibility, and read permission/rate boundaries are implemented and independently under review. Task 4 TDD: initial RED 13/13 missing-route/service failures; review RED 3 failures/1 pass for read dependencies and invalid cursors. Final focused verification: 25 passed. Broad verification: 141 passed, 6 PostgreSQL fixture-policy skips. PostgreSQL advisory-lock ordering passed; live concurrency collected and policy-skipped. Black, Ruff, compileall, git diff checks, and Bandit passed with zero Bandit findings.
+Backend Task 6 is complete under strict TDD. Added an allowlisted optimistic Media metadata patch with same-transaction keyword/FTS/sync updates; atomic collection-plus-planned-item creation; and zero-job terminal resolution for skip, include-existing, and metadata-only duplicate actions, including safe metadata failure outcomes and in-run duplicate skips. Verification: initial focused RED 15/15 failed, incremental in-run RED 1/1 failed, focused GREEN 84/84 passed, broader Task 1-6 non-property matrix collected 322 and exited 0 with 11 environment-policy PostgreSQL skips, isolated property suite 3/3 passed, git diff --check passed, and Bandit reported zero findings.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

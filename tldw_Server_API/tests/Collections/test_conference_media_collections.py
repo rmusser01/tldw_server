@@ -239,6 +239,70 @@ def test_media_collections_can_be_listed_updated_and_soft_deleted(
     assert listed_after_delete == []
 
 
+def test_create_media_collection_with_items_is_one_atomic_bulk_operation(
+    collections_db: CollectionsDatabase,
+) -> None:
+    created = collections_db.create_media_collection_with_items(
+        name="Playlist plan",
+        kind="playlist_ingest",
+        source_url="https://www.youtube.com/playlist?list=PLatomic",
+        items=[
+            {
+                "source_url": "https://www.youtube.com/watch?v=one",
+                "normalized_source_id": "youtube:video:one",
+                "source_kind": "youtube_video",
+                "ordinal": 1,
+                "title": "One",
+            },
+            {
+                "source_url": "https://www.youtube.com/watch?v=two",
+                "normalized_source_id": "youtube:video:two",
+                "source_kind": "youtube_video",
+                "ordinal": 2,
+                "title": "Two",
+            },
+        ],
+    )
+
+    assert created.name == "Playlist plan"
+    assert [item.ordinal for item in created.items] == [1, 2]
+    assert [item.status for item in created.items] == ["planned", "planned"]
+    assert [item.title for item in created.items] == ["One", "Two"]
+
+
+def test_create_media_collection_with_items_rolls_back_collection_and_memberships(
+    collections_db: CollectionsDatabase,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_execute = collections_db.backend.execute
+    item_inserts = 0
+
+    def fail_second_item(query, params=(), connection=None):
+        nonlocal item_inserts
+        if "INSERT INTO media_collection_items" in query:
+            item_inserts += 1
+            if item_inserts == 2:
+                raise RuntimeError("synthetic item insert failure")
+        return original_execute(query, params, connection=connection)
+
+    monkeypatch.setattr(collections_db.backend, "execute", fail_second_item)
+
+    with pytest.raises(RuntimeError, match="synthetic item insert failure"):
+        collections_db.create_media_collection_with_items(
+            name="Must roll back",
+            kind="playlist_ingest",
+            items=[
+                {"source_url": "https://example.com/one", "ordinal": 1},
+                {"source_url": "https://example.com/two", "ordinal": 2},
+            ],
+        )
+
+    monkeypatch.setattr(collections_db.backend, "execute", original_execute)
+    collections, total = collections_db.list_media_collections(kind="playlist_ingest")
+    assert total == 0
+    assert collections == []
+
+
 def test_media_collections_router_exposes_collection_crud(
     collections_db: CollectionsDatabase,
     monkeypatch: pytest.MonkeyPatch,
