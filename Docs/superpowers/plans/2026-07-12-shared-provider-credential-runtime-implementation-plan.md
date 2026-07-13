@@ -607,16 +607,21 @@ git commit -m "fix(rag): bind checkpoint resume to trusted owner scope"
 - Create: `tldw_Server_API/tests/fixtures/rag_terminal_stream_events.json`
 - Modify: `tldw_Server_API/app/core/RAG/rag_service/streaming_executor.py`
 - Modify: `tldw_Server_API/app/api/v1/endpoints/rag_unified.py`
+- Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_streaming_executor.py`
+- Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_rag_provider_credentials.py`
 - Modify: `tldw_Server_API/tests/RAG_NEW/integration/test_rag_stream_parity.py`
 - Create: `apps/packages/ui/src/services/rag/stream-contract.ts`
 - Create: `apps/packages/ui/src/services/rag/__tests__/stream-contract.test.ts`
+- Modify: `apps/packages/ui/src/services/background-proxy.ts`
+- Modify: `apps/packages/ui/src/services/__tests__/background-proxy.test.ts`
+- Modify: `apps/packages/ui/src/services/__tests__/tldw-api-client.rag-query-length.test.ts`
 - Modify: `apps/packages/ui/src/services/tldw/domains/chat-rag.ts`
 - Modify: `apps/packages/ui/src/components/Option/KnowledgeQA/KnowledgeQAProvider.tsx`
 - Modify: `apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/KnowledgeQAProvider.streaming.test.tsx`
 
-- [ ] **Step 1: Create shared contract cases and failing tests**
+- [x] **Step 1: Create shared contract cases and failing tests**
 
-The JSON fixture must include valid `complete`, valid terminal credential error, valid certified pre-dispatch transport error, missing/unknown schema version, missing booleans, `upstream_dispatched=true` with fallback true, `output_emitted=true` with fallback true, malformed fields, and unknown event type. Python and TypeScript tests consume the same fixture.
+The JSON fixture must include valid `complete`, valid terminal credential error, valid certified pre-dispatch transport error, boolean/missing/unknown schema version, missing booleans, `upstream_dispatched=true` with fallback true, `output_emitted=true` with fallback true, malformed fields, and unknown event type. Python and TypeScript tests consume the same fixture.
 
 Required predicate:
 
@@ -629,28 +634,31 @@ export const mayReplayNonStream = (event: RagTerminalEvent): boolean =>
   event.allow_non_stream_fallback === true
 ```
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
-Run backend: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/RAG_NEW/integration/test_rag_stream_parity.py -q`
+Run backend: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/RAG_NEW/unit/test_streaming_executor.py tldw_Server_API/tests/RAG_NEW/unit/test_rag_provider_credentials.py tldw_Server_API/tests/RAG_NEW/integration/test_rag_stream_parity.py -q`
 
-Run frontend: `bunx vitest run apps/packages/ui/src/services/rag/__tests__/stream-contract.test.ts apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/KnowledgeQAProvider.streaming.test.tsx`
+Run frontend from `apps/packages/ui`: `bunx vitest run src/services/rag/__tests__/stream-contract.test.ts src/services/__tests__/background-proxy.test.ts src/services/__tests__/tldw-api-client.rag-query-length.test.ts src/components/Option/KnowledgeQA/__tests__/KnowledgeQAProvider.streaming.test.tsx`
 
 Expected: FAIL because events are unversioned and Knowledge QA falls back broadly.
 
-- [ ] **Step 3: Implement typed terminal events and strict replay**
+- [x] **Step 3: Implement typed terminal events and strict replay**
 
 Backend emits `schema_version`, `type`, `code`, `upstream_dispatched`, `output_emitted`, `allow_non_stream_fallback`, and sanitized `message` for every terminal event. Emit `complete` for clean empty upstream completion and record use; iterator creation/keepalive does not record use.
 
-Client parser rejects unknown/malformed/inconsistent events as terminal no-replay errors. `ragSearchStream` must not silently ignore malformed terminal-looking JSON. Knowledge QA calls standard search only when `mayReplayNonStream(event)` is exactly true; provider 502/503 never clears tldw auth because application auth remains 401-only.
+Client parser rejects unknown/malformed/inconsistent events as terminal no-replay errors. `ragSearchStream` must not silently ignore malformed terminal-looking JSON. Knowledge QA records a terminal error, consumes through natural EOF, rejects any trailing output or second terminal, and only then calls standard search when `mayReplayNonStream(event)` is exactly true. Provider 502/503 never clears tldw auth because application auth remains 401-only.
 
-- [ ] **Step 4: Verify green**
+Once a non-idempotent stream request has been handed to the extension/background transport, `bgStream` must fail closed on timeout or early port failure instead of replaying the POST through direct fetch. Pre-dispatch fallback remains allowed, and safe/idempotent methods may retain transport fallback. Non-stream `ragSearch` must not replay the full request on a broad HTTP 500 because the client cannot certify that generation was never dispatched. Unknown backend dispatch state is represented conservatively as `upstream_dispatched=true`; only a narrowly certified pre-dispatch path may emit `false`. Preserve the existing provider `status_code` field as an optional compatibility extension while validating the versioned required fields strictly.
+
+- [x] **Step 4: Verify green**
 
 Run both Step 2 commands. Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
-git add tldw_Server_API/app/core/RAG tldw_Server_API/app/api/v1/endpoints/rag_unified.py tldw_Server_API/tests/fixtures/rag_terminal_stream_events.json tldw_Server_API/tests/RAG_NEW/integration/test_rag_stream_parity.py apps/packages/ui/src/services/rag apps/packages/ui/src/services/tldw/domains/chat-rag.ts apps/packages/ui/src/components/Option/KnowledgeQA
+git add tldw_Server_API/app/core/RAG tldw_Server_API/app/api/v1/endpoints/rag_unified.py tldw_Server_API/tests/RAG_NEW/unit/test_streaming_executor.py tldw_Server_API/tests/RAG_NEW/unit/test_rag_provider_credentials.py tldw_Server_API/tests/RAG_NEW/integration/test_rag_stream_parity.py apps/packages/ui/src/services/rag apps/packages/ui/src/services/background-proxy.ts apps/packages/ui/src/services/__tests__/background-proxy.test.ts apps/packages/ui/src/services/__tests__/tldw-api-client.rag-query-length.test.ts apps/packages/ui/src/services/tldw/domains/chat-rag.ts apps/packages/ui/src/components/Option/KnowledgeQA
+git add -f tldw_Server_API/tests/fixtures/rag_terminal_stream_events.json
 git commit -m "fix(knowledge): fail closed on terminal RAG stream errors"
 ```
 

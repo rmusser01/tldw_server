@@ -4,7 +4,7 @@ title: Consolidate provider credential runtime for Chat and Knowledge QA
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-13 21:16'
+updated_date: '2026-07-13 22:26'
 labels: []
 dependencies: []
 documentation:
@@ -25,7 +25,7 @@ Design and implement a shared execution-scoped provider credential runtime used 
 - [x] #1 Approved design specification is written, reviewed, and linked from this task.
 - [x] #2 Invalid credentials, credential-store failures, and revoked background scope fail closed.
 - [x] #3 RAG semantic cache reuses documents but never cached generated answers.
-- [ ] #4 Streaming credential errors use sanitized structured codes and do not trigger non-stream fallback.
+- [x] #4 Streaming credential errors use sanitized structured codes and do not trigger non-stream fallback.
 - [ ] #5 Focused backend/frontend tests and Bandit pass for touched scope.
 - [ ] #6 Chat and all provider-backed RAG call paths, including query-time hosted embeddings, use the shared credential runtime with explicit no-fallback semantics.
 <!-- AC:END -->
@@ -72,6 +72,8 @@ Docs/superpowers/plans/2026-07-12-shared-provider-credential-runtime-implementat
 2026-07-13: Task 9 complete. Commits 2a418f0728, 693056059f, acb0092068, and 70085147ca make semantic caching retrieval-only and tenant-safe: legacy/generated answers and generation-only document metadata are removed; persisted payloads are strict finite JSON; direct/fake cache payloads use the same sanitizer; namespace identities and filenames are collision-resistant; semantic matches are bounded and never expose raw cached queries; cache identity covers the effective base retrieval configuration; immutable trusted base-retrieval snapshots prevent double processing; advanced secondary retrieval, auto-temporal, explicit include-ID, research-loop, and classification external-prefetch paths fail closed from caching; failed base retrieval fallback evidence is never stored. TDD included regressions for punctuation/case/safe-mimic collisions, non-finite values, malformed matches, FTS/date/late-chunk identity, raw pre-transform snapshots, bypass provenance, and failed-execution fallback. Final root verification: exact Task 9 suite 132 passed; full RAG_NEW/unit 866 passed, 3 skipped; Ruff and py_compile clean; Bandit 0 findings/0 errors across 8,538 production LOC; diff and production sentinel scans clean. Independent specification and quality/security reviews approved 70085147ca with no open findings.
 
 2026-07-13: Task 10 complete. Commits e36c3538dd, 55d81d3b3f, and c4df083458 bind new RAG batch checkpoints to server-derived owner/team/org metadata, authorize owner or explicit admin before runtime creation and early completion, reload strict current memberships, recompute base-URL authority, keep legacy ownerless checkpoints on server credentials, and persist only bounded result error codes. Review hardening aligns owner credentials, media/notes/prompts/Kanban paths, request/cache identity, and the ambient content ScopeContext for both self-resume and delegated-admin resume; delegated admin bypass is removed, caller scope is restored after runtime/media cleanup, malformed membership rows and orphan ownerless scopes fail closed, and ownerless server checkpoints omit credential metadata. Fresh root verification: checkpoint/resume suite 85 passed; adjacent provider-credential suite 19 passed; Ruff and py_compile clean; Bandit 0 findings/0 errors over 2,345 production LOC; diff check clean. Independent final specification and quality/security reviews approved c4df083458 with no open findings.
+
+2026-07-13: Task 11 complete. Commit 5c7d8a11ce adds a shared versioned terminal RAG stream contract, explicit clean completion, sanitized provider errors, exact EOF-before-replay validation, and fail-closed frontend/background transport behavior. Unsafe stream POSTs never direct-fetch replay after background handoff; standard RAG no longer retries arbitrary HTTP 500 responses; malformed/unknown terminal events fail closed; optional provider status_code compatibility is retained. Final root verification: backend 79 passed; frontend 80 passed; Ruff and py_compile clean; Bandit 0 findings/0 errors across 3,014 production LOC; diff checks clean. Independent specification and quality/security re-reviews approved with no open findings.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
