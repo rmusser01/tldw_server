@@ -1014,12 +1014,15 @@ async def _handle_job(job: dict[str, Any], jm: JobManager, progress: _ProgressSt
         progress.message = "finalize"
         jm.update_job_progress(job_id, progress_percent=progress.percent, progress_message=progress.message)
 
-        if not isinstance(results, list) or len(results) != 1:
-            raise MediaIngestJobError("media_ingest_result_count_invalid", retryable=False)
-        result_item = results[0]
-        if not isinstance(result_item, dict):
-            raise MediaIngestJobError("media_ingest_result_invalid", retryable=False)
-        media_id = result_item.get("db_id")
+        if has_occurrence_binding:
+            if not isinstance(results, list) or len(results) != 1:
+                raise MediaIngestJobError("media_ingest_result_count_invalid", retryable=False)
+            result_item = results[0]
+            if not isinstance(result_item, dict):
+                raise MediaIngestJobError("media_ingest_result_invalid", retryable=False)
+        else:
+            result_item = results[0] if results else {}
+        media_id = result_item.get("db_id") if isinstance(result_item, dict) else None
 
         if media_id and getattr(form_data, "generate_embeddings", False):
             asyncio.create_task(
@@ -1035,38 +1038,47 @@ async def _handle_job(job: dict[str, Any], jm: JobManager, progress: _ProgressSt
         progress.message = "completed"
         jm.update_job_progress(job_id, progress_percent=progress.percent, progress_message=progress.message)
 
-        final_chunking_plan = chunking_plan
-        result_metadata = result_item.get("metadata")
-        if isinstance(result_metadata, dict) and isinstance(
-            result_metadata.get("chunking_plan"),
-            dict,
-        ):
-            final_chunking_plan = result_metadata["chunking_plan"]
-        job_result = {
-            "status": result_item.get("status"),
-            "media_id": result_item.get("db_id"),
-            "media_uuid": result_item.get("media_uuid"),
-            "error": result_item.get("error"),
-            "warnings": result_item.get("warnings"),
-            "db_message": result_item.get("db_message"),
-        }
-        if has_occurrence_binding:
-            job_result.update(
-                {
-                    "run_id": run_id,
-                    "occurrence_id": occurrence_id,
-                    "attempt": occurrence_attempt,
-                }
+        if isinstance(result_item, dict):
+            final_chunking_plan = chunking_plan
+            result_metadata = result_item.get("metadata")
+            if isinstance(result_metadata, dict) and isinstance(
+                result_metadata.get("chunking_plan"),
+                dict,
+            ):
+                final_chunking_plan = result_metadata["chunking_plan"]
+            job_result = {
+                "status": result_item.get("status"),
+                "media_id": result_item.get("db_id"),
+                "media_uuid": result_item.get("media_uuid"),
+                "error": result_item.get("error"),
+                "warnings": result_item.get("warnings"),
+                "db_message": result_item.get("db_message"),
+            }
+            if has_occurrence_binding:
+                job_result.update(
+                    {
+                        "run_id": run_id,
+                        "occurrence_id": occurrence_id,
+                        "attempt": occurrence_attempt,
+                    }
+                )
+            if final_chunking_plan is not None:
+                job_result["chunking_plan"] = final_chunking_plan
+            _sync_collection_item_terminal_result(
+                user_id=user_id,
+                item_id=planned_item_id,
+                latest_job_id=latest_job_id,
+                result_item=result_item,
             )
-        if final_chunking_plan is not None:
-            job_result["chunking_plan"] = final_chunking_plan
-        _sync_collection_item_terminal_result(
+            return job_result
+        _mark_collection_item_status(
             user_id=user_id,
             item_id=planned_item_id,
+            status="failed",
             latest_job_id=latest_job_id,
-            result_item=result_item,
+            error_summary="No result produced",
         )
-        return job_result
+        return {"status": "Error", "error": "No result produced"}
 
     except Exception as exc:
         _mark_collection_item_status(

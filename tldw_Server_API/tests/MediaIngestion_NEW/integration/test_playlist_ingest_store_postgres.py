@@ -95,10 +95,12 @@ def test_postgres_occurrence_job_reservation_and_binding_match_sqlite(pg_temp_db
             "idempotency_key": identity,
             "source": reserved.source_url,
             "source_kind": "url",
+            "options": {"overwrite_existing": False},
         },
         batch_group="pg-job-batch",
         owner_user_id="pg-job-owner",
         idempotency_key=identity,
+        available_at=datetime(9999, 12, 31, 23, 59, 59, tzinfo=timezone.utc),
     )
     exact = manager.get_job_by_idempotency(
         domain="media_ingest",
@@ -370,6 +372,77 @@ def test_postgres_validated_mixed_manifest_matches_sqlite_contract(pg_temp_db, m
     assert len(events) == 2
     assert store.get_run("pg-manifest-owner", run.run_id).version == 2
     assert manager.list_jobs(domain="media_ingest", owner_user_id="pg-manifest-owner", limit=10) == []
+
+
+def test_postgres_live_staging_reference_is_owner_scoped(pg_temp_db, monkeypatch):
+    monkeypatch.setenv("TEST_MODE", "true")
+    dsn = str(pg_temp_db["dsn"])
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestStore,
+    )
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    from tldw_Server_API.app.core.Jobs.pg_migrations import ensure_jobs_tables_pg
+
+    ensure_jobs_tables_pg(dsn)
+    clock = _FixedClock()
+    store = PlaylistIngestStore(JobManager(backend="postgres", db_url=dsn, clock=clock))
+
+    def create_staged_run(occurrence_id: str, batch_id: str, identity: str):
+        run = store.create_validated_run(
+            "pg-staging-owner",
+            items=[
+                {
+                    "occurrence_id": occurrence_id,
+                    "input_kind": "file_stub",
+                    "source_url": None,
+                    "normalized_source_id": None,
+                    "source_kind": "file",
+                    "display_metadata": {"name": f"{occurrence_id}.mp3"},
+                    "state": "awaiting_upload",
+                    "action": "ingest",
+                    "metadata_patch": None,
+                }
+            ],
+        )
+        store.prepare_run_item_job_submission(
+            "pg-staging-owner",
+            run.run_id,
+            occurrence_id,
+            attempt=1,
+            batch_id=batch_id,
+            idempotency_identity=identity,
+            submission_queue="default",
+            source_kind="file",
+            planned_item_id=None,
+        )
+        store.record_run_item_staging(
+            "pg-staging-owner",
+            run.run_id,
+            occurrence_id,
+            attempt=1,
+            batch_id=batch_id,
+            idempotency_identity=identity,
+            temp_dir="/tmp/media_ingest_job_pg_shared_alias",
+        )
+        return run
+
+    expired = create_staged_run("pg-expired", "pg-expired-batch", "playlist-ingest-v1:pg-expired")
+    clock.advance(timedelta(days=8))
+    create_staged_run("pg-live", "pg-live-batch", "playlist-ingest-v1:pg-live")
+
+    assert store.has_live_run_item_staging_reference(
+        "pg-staging-owner",
+        "/tmp/media_ingest_job_pg_shared_alias",
+        excluding_run_id=expired.run_id,
+        excluding_occurrence_id="pg-expired",
+    )
+    assert not store.has_live_run_item_staging_reference(
+        "pg-other-owner",
+        "/tmp/media_ingest_job_pg_shared_alias",
+        excluding_run_id=expired.run_id,
+        excluding_occurrence_id="pg-expired",
+    )
 
 
 def test_postgres_validated_manifest_rejects_stale_materialization_authority(pg_temp_db, monkeypatch):

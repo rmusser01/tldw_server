@@ -9,6 +9,7 @@ import secrets
 import sqlite3
 import time
 import uuid as _uuid
+from collections.abc import Mapping
 from contextvars import ContextVar
 from datetime import datetime
 from datetime import timezone as _tz
@@ -968,6 +969,49 @@ class JobManager:
                 return value
         return value
 
+    def normalize_job_binding_view(
+        self,
+        job: Mapping[str, Any] | None,
+        *,
+        owner_user_id: str,
+    ) -> dict[str, Any] | None:
+        """Return a minimal decrypted binding view for one owner-authorized job row.
+
+        This internal coordination view deliberately excludes result/error fields and
+        must not be logged or returned from HTTP handlers.
+        """
+        if not isinstance(job, Mapping):
+            return None
+        try:
+            job_id = int(job.get("id"))
+        except (TypeError, ValueError):
+            return None
+        if job_id < 1 or str(job.get("owner_user_id") or "") != str(owner_user_id):
+            return None
+        raw_payload = self._parse_json_value(job.get("payload"))
+        encrypted_payload = isinstance(raw_payload, dict) and (
+            raw_payload.get("_enc") == "aesgcm:v1" or isinstance(raw_payload.get("_encrypted"), dict)
+        )
+        payload = self._maybe_decrypt_json(raw_payload)
+        if encrypted_payload and payload is raw_payload:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        return {
+            "id": job_id,
+            "uuid": job.get("uuid"),
+            "owner_user_id": str(owner_user_id),
+            "domain": job.get("domain"),
+            "queue": job.get("queue"),
+            "job_type": job.get("job_type"),
+            "status": job.get("status"),
+            "available_at": job.get("available_at"),
+            "batch_group": job.get("batch_group"),
+            "idempotency_key": job.get("idempotency_key"),
+            "created_at": job.get("created_at"),
+            "payload": dict(payload),
+        }
+
     @staticmethod
     def _decode_archive_blob(value: Any) -> Any:
         """Decode compressed archive payload/result values."""
@@ -1409,6 +1453,11 @@ class JobManager:
                     now=_now_dt,
                     max_queued_quota=self._quota_get("JOBS_QUOTA_MAX_QUEUED", domain, owner_user_id),
                     submits_per_minute_quota=self._quota_get("JOBS_QUOTA_SUBMITS_PER_MIN", domain, owner_user_id),
+                    quota_lock_key=(
+                        self._pg_advisory_key("quota", str(domain), str(owner_user_id))
+                        if owner_user_id
+                        else None
+                    ),
                     counters_enabled=JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")),
                 )
                 d = self._map_admission_result(result)

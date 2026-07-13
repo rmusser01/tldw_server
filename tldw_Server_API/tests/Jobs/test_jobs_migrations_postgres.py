@@ -1,4 +1,3 @@
-
 import pytest
 
 psycopg = pytest.importorskip("psycopg")
@@ -25,8 +24,17 @@ EXPECTED_PLAYLIST_COLUMNS = {
     "playlist_materialization_items": {"materialization_id", "occurrence_id", "ordinal", "normalized_source_id"},
     "media_ingest_runs": {"run_id", "owner_user_id", "status", "expires_at"},
     "media_ingest_run_items": {
-        "run_id", "occurrence_id", "ordinal", "normalized_source_id", "duplicate_policy", "state", "outcome",
-        "job_id", "attempt",
+        "run_id",
+        "occurrence_id",
+        "ordinal",
+        "normalized_source_id",
+        "duplicate_policy",
+        "state",
+        "outcome",
+        "job_id",
+        "attempt",
+        "submission_queue",
+        "staging_temp_dir",
     },
     "media_ingest_run_events": {"event_id", "run_id", "occurrence_id", "job_id", "state", "outcome"},
 }
@@ -73,7 +81,6 @@ def _setup(jobs_pg_dsn):
 
 def test_pg_forward_migration_adds_missing_columns_and_partial_indexes(jobs_pg_dsn):
 
-
     ensure_jobs_tables_pg(jobs_pg_dsn)
     with psycopg.connect(jobs_pg_dsn, autocommit=True) as conn:
         with conn.cursor() as cur:
@@ -89,17 +96,43 @@ def test_pg_forward_migration_adds_missing_columns_and_partial_indexes(jobs_pg_d
     with psycopg.connect(jobs_pg_dsn) as conn:
         with conn.cursor() as cur:
             # Column should exist now
-            cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name='jobs' AND column_name='progress_message'")
+            cur.execute(
+                "SELECT column_name FROM information_schema.columns WHERE table_name='jobs' AND column_name='progress_message'"
+            )
             row = cur.fetchone()
             assert row is not None
             # idx_jobs_acquire_order partial index exists and is queued-only
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT indexname, indexdef FROM pg_indexes
                 WHERE schemaname = current_schema() AND tablename = 'jobs' AND indexname = 'idx_jobs_acquire_order'
-            """)
+            """
+            )
             row2 = cur.fetchone()
             assert row2 is not None
             assert "status = 'queued'" in (row2[1] or "")
+
+
+def test_pg_forward_migration_adds_playlist_submission_authority_columns(jobs_pg_dsn):
+    ensure_jobs_tables_pg(jobs_pg_dsn)
+    with psycopg.connect(jobs_pg_dsn, autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute("ALTER TABLE media_ingest_run_items DROP COLUMN IF EXISTS submission_queue")
+        cur.execute("ALTER TABLE media_ingest_run_items DROP COLUMN IF EXISTS staging_temp_dir")
+
+    ensure_jobs_tables_pg(jobs_pg_dsn)
+
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT column_name FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name = 'media_ingest_run_items'
+              AND column_name = ANY(%s)
+            """,
+            (["submission_queue", "staging_temp_dir"],),
+        )
+        columns = {row[0] for row in cur.fetchall()}
+    assert columns == {"submission_queue", "staging_temp_dir"}
 
 
 def test_postgres_schema_has_playlist_ingest_tables(jobs_pg_dsn):
@@ -130,7 +163,11 @@ def test_postgres_schema_has_playlist_ingest_tables(jobs_pg_dsn):
             for table in EXPECTED_PLAYLIST_TABLES
         }
         jsonb_by_table = {
-            table: {column for row_table, column, data_type in catalog_columns if row_table == table and data_type == "jsonb"}
+            table: {
+                column
+                for row_table, column, data_type in catalog_columns
+                if row_table == table and data_type == "jsonb"
+            }
             for table in EXPECTED_PLAYLIST_TABLES
         }
 
@@ -168,13 +205,25 @@ def test_postgres_schema_has_playlist_ingest_tables(jobs_pg_dsn):
     event_constraints = " ".join(constraints["media_ingest_run_events"])
     duplicate_policies = {"skip", "include_existing", "update_metadata_only", "overwrite"}
     run_states = {
-        "staged", "preparing", "awaiting_upload", "submit_pending", "queued", "running",
-        "cancellation_requested", "status_unavailable", "terminal",
+        "staged",
+        "preparing",
+        "awaiting_upload",
+        "submit_pending",
+        "queued",
+        "running",
+        "cancellation_requested",
+        "status_unavailable",
+        "terminal",
     }
     run_outcomes = {
-        "completed", "included_existing",
-        "metadata_updated", "skipped_existing", "submit_failed", "processing_failed",
-        "metadata_update_failed", "cancelled",
+        "completed",
+        "included_existing",
+        "metadata_updated",
+        "skipped_existing",
+        "submit_failed",
+        "processing_failed",
+        "metadata_update_failed",
+        "cancelled",
     }
     for value in duplicate_policies | run_states | run_outcomes:
         assert value in run_item_constraints

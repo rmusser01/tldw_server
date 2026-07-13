@@ -298,6 +298,8 @@ CREATE TABLE IF NOT EXISTS media_ingest_run_items (
   batch_id TEXT,
   attempt INTEGER NOT NULL DEFAULT 1 CHECK (attempt >= 1),
   idempotency_identity TEXT,
+  submission_queue TEXT,
+  staging_temp_dir TEXT,
   planned_collection_item_id BIGINT,
   progress_percent REAL CHECK (progress_percent IS NULL OR (progress_percent >= 0 AND progress_percent <= 100)),
   progress_message TEXT,
@@ -361,6 +363,7 @@ CREATE INDEX IF NOT EXISTS idx_media_ingest_run_events_job ON media_ingest_run_e
 -- A unique index is created outside the DDL block using autocommit.
 """
 
+
 def ensure_jobs_tables_pg(db_url: str) -> str:
     """Ensure the jobs table exists in the given PostgreSQL database.
 
@@ -372,9 +375,13 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
         raise RuntimeError("psycopg is required for PostgreSQL Jobs backend. Install extras 'db_postgres'.") from e
 
     from .pg_util import negotiate_pg_dsn
+
     _dsn = negotiate_pg_dsn(db_url)
     try:
         with psycopg.connect(_dsn) as conn, conn.cursor() as cur:
+            # JobManager construction can race in worker/test processes. Keep the
+            # multi-statement schema bootstrap in one cluster-local critical section.
+            cur.execute("SELECT pg_advisory_xact_lock(hashtext('tldw_jobs_schema_bootstrap'))")
             cur.execute(JOBS_POSTGRES_DDL)
             # Additional objects: queue controls, attachments, SLA policies
             cur.execute(
@@ -433,6 +440,8 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
                 f.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS error_class TEXT")
                 f.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS error_stack JSONB")
                 f.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS batch_group TEXT")
+                f.execute("ALTER TABLE media_ingest_run_items ADD COLUMN IF NOT EXISTS submission_queue TEXT")
+                f.execute("ALTER TABLE media_ingest_run_items ADD COLUMN IF NOT EXISTS staging_temp_dir TEXT")
                 # Forward-migrate archive table compressed columns (if table exists)
                 try:
                     f.execute("ALTER TABLE jobs_archive ADD COLUMN IF NOT EXISTS payload_compressed BYTEA")
@@ -448,12 +457,18 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
             with psycopg.connect(_dsn, autocommit=True) as c2:
                 with c2.cursor() as k:
                     # Ready vs scheduled scans
-                    k.execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_jobs_status_available_at ON jobs(status, available_at)")
+                    k.execute(
+                        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_jobs_status_available_at ON jobs(status, available_at)"
+                    )
                     # Composite unique for idempotency (NULLs are allowed and do not conflict)
-                    k.execute("CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_jobs_idempotent_unique ON jobs(domain, queue, job_type, idempotency_key)")
+                    k.execute(
+                        "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_jobs_idempotent_unique ON jobs(domain, queue, job_type, idempotency_key)"
+                    )
                     # Optional partial index to speed common hot-path queries
                     with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-                        k.execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_jobs_hot ON jobs(domain, queue, job_type, priority, available_at, created_at) WHERE status IN ('queued','processing')")
+                        k.execute(
+                            "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_jobs_hot ON jobs(domain, queue, job_type, priority, available_at, created_at) WHERE status IN ('queued','processing')"
+                        )
                     # Acquisition ordering index: priority ASC (lower number = higher priority),
                     # then available/created, then id; queued only. The ORDER BY in queries
                     # is explicit; this index simply supports that access pattern.
@@ -478,6 +493,7 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
             import os as _os
 
             import psycopg  # noqa: F401
+
             if _is_truthy(_os.getenv("JOBS_PG_RLS_ENABLE", "")):
                 with psycopg.connect(_dsn, autocommit=True) as _c_rls, _c_rls.cursor() as _p:
                     with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
@@ -523,12 +539,14 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
     # Optionally enable RLS policies for domain scoping when requested
     try:
         import os as _os_rls
+
         if _is_truthy(_os_rls.getenv("JOBS_PG_RLS_ENABLE", "")):
             with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
                 ensure_jobs_rls_policies_pg(db_url)
     except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
         pass
     return db_url
+
 
 def ensure_job_events_pg(db_url: str) -> None:
     """Ensure the job_events table and indexes exist in Postgres."""
@@ -537,6 +555,7 @@ def ensure_job_events_pg(db_url: str) -> None:
     except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
         return
     from .pg_util import negotiate_pg_dsn
+
     _dsn = negotiate_pg_dsn(db_url)
     _rls_debug = _is_truthy(os.getenv("JOBS_PG_RLS_DEBUG", ""))
     try:
@@ -581,6 +600,7 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
     import re as _re
 
     from .pg_util import negotiate_pg_dsn
+
     _dsn = negotiate_pg_dsn(db_url)
     debug = _is_truthy(os.getenv("JOBS_PG_RLS_DEBUG", ""))
     try:
@@ -603,11 +623,10 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                     except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
                         pass
                     cur.execute(f"GRANT USAGE ON SCHEMA {schema_name} TO {role}")
-                    cur.execute(
-                        f"GRANT SELECT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {schema_name} TO {role}"
-                    )
+                    cur.execute(f"GRANT SELECT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {schema_name} TO {role}")
                 except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
                     pass
+
             def _enable_rls(table: str) -> None:
                 with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
                     cur.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
@@ -749,10 +768,10 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                           )
                         )
                         """
-                job_attachments_select_policy_sql = job_attachments_select_policy_template.format_map(locals())  # nosec B608
-                cur.execute(
-                    job_attachments_select_policy_sql
-                )
+                job_attachments_select_policy_sql = job_attachments_select_policy_template.format_map(
+                    locals()
+                )  # nosec B608
+                cur.execute(job_attachments_select_policy_sql)
                 cur.execute("DROP POLICY IF EXISTS job_attachments_modify ON job_attachments")
                 job_attachments_modify_policy_template = """
                         CREATE POLICY job_attachments_modify ON job_attachments FOR ALL
@@ -765,10 +784,10 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                           )
                         )
                         """
-                job_attachments_modify_policy_sql = job_attachments_modify_policy_template.format_map(locals())  # nosec B608
-                cur.execute(
-                    job_attachments_modify_policy_sql
-                )
+                job_attachments_modify_policy_sql = job_attachments_modify_policy_template.format_map(
+                    locals()
+                )  # nosec B608
+                cur.execute(job_attachments_modify_policy_sql)
             except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
                 pass
             # job_dependencies policies (join to jobs for domain/owner)
@@ -785,10 +804,10 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                           )
                         )
                         """
-                job_dependencies_select_policy_sql = job_dependencies_select_policy_template.format_map(locals())  # nosec B608
-                cur.execute(
-                    job_dependencies_select_policy_sql
-                )
+                job_dependencies_select_policy_sql = job_dependencies_select_policy_template.format_map(
+                    locals()
+                )  # nosec B608
+                cur.execute(job_dependencies_select_policy_sql)
                 cur.execute("DROP POLICY IF EXISTS job_dependencies_modify ON job_dependencies")
                 job_dependencies_modify_policy_template = """
                         CREATE POLICY job_dependencies_modify ON job_dependencies FOR ALL
@@ -801,10 +820,10 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                           )
                         )
                         """
-                job_dependencies_modify_policy_sql = job_dependencies_modify_policy_template.format_map(locals())  # nosec B608
-                cur.execute(
-                    job_dependencies_modify_policy_sql
-                )
+                job_dependencies_modify_policy_sql = job_dependencies_modify_policy_template.format_map(
+                    locals()
+                )  # nosec B608
+                cur.execute(job_dependencies_modify_policy_sql)
             except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
                 pass
             # job_sla_policies policies (domain only)
@@ -895,6 +914,7 @@ def ensure_job_counters_pg(db_url: str) -> None:
     # Normalize DSN to include timeouts and libpq options, similar to other helpers
     try:
         from .pg_util import normalize_pg_dsn
+
         _dsn = normalize_pg_dsn(db_url)
     except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
         _dsn = db_url
@@ -917,6 +937,8 @@ def ensure_job_counters_pg(db_url: str) -> None:
                     """
                 )
                 with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-                    cur.execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_job_counters_domain_queue ON job_counters(domain, queue)")
+                    cur.execute(
+                        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_job_counters_domain_queue ON job_counters(domain, queue)"
+                    )
     except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
         return

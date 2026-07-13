@@ -1,3 +1,6 @@
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
+
 import pytest
 
 psycopg = pytest.importorskip("psycopg")
@@ -8,6 +11,46 @@ from tldw_Server_API.app.core.Jobs.manager import JobManager
 pytestmark = [
     pytest.mark.pg_jobs,
 ]
+
+
+def _run_two_concurrent_creates(*, dsn: str, domain: str) -> list[str]:
+    barrier = Barrier(2)
+    managers = [JobManager(backend="postgres", db_url=dsn) for _index in range(2)]
+
+    def create(index: int) -> str:
+        barrier.wait(timeout=30)
+        try:
+            managers[index].create_job(
+                domain=domain,
+                queue="default",
+                job_type=f"concurrent-{index}",
+                payload={},
+                owner_user_id="concurrent-owner",
+            )
+            return "created"
+        except BadRequestError as exc:
+            return str(exc.code)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        return list(pool.map(create, range(2)))
+
+
+def test_pg_max_queued_quota_is_atomic_under_concurrent_submissions(monkeypatch, jobs_pg_dsn):
+    monkeypatch.setenv("JOBS_QUOTA_MAX_QUEUED", "1")
+
+    results = _run_two_concurrent_creates(dsn=jobs_pg_dsn, domain="quota-race-queued")
+
+    assert results.count("created") == 1
+    assert results.count("jobs_max_queued") == 1
+
+
+def test_pg_submit_rate_quota_is_atomic_under_concurrent_submissions(monkeypatch, jobs_pg_dsn):
+    monkeypatch.setenv("JOBS_QUOTA_SUBMITS_PER_MIN", "1")
+
+    results = _run_two_concurrent_creates(dsn=jobs_pg_dsn, domain="quota-race-rate")
+
+    assert results.count("created") == 1
+    assert results.count("jobs_submit_rate_limited") == 1
 
 
 def test_pg_max_queued_quota(monkeypatch, jobs_pg_dsn):

@@ -21,26 +21,71 @@ EXPECTED_PLAYLIST_TABLES = {
 
 EXPECTED_PLAYLIST_COLUMNS = {
     "playlist_preflights": {
-        "preflight_id", "owner_user_id", "status", "job_id", "summary_json", "error_json", "expires_at",
+        "preflight_id",
+        "owner_user_id",
+        "status",
+        "job_id",
+        "summary_json",
+        "error_json",
+        "expires_at",
     },
     "playlist_preflight_items": {
-        "preflight_id", "owner_user_id", "occurrence_id", "ordinal", "normalized_source_id", "display_metadata_json",
+        "preflight_id",
+        "owner_user_id",
+        "occurrence_id",
+        "ordinal",
+        "normalized_source_id",
+        "display_metadata_json",
     },
     "playlist_materializations": {
-        "materialization_id", "preflight_id", "owner_user_id", "status", "expires_at",
+        "materialization_id",
+        "preflight_id",
+        "owner_user_id",
+        "status",
+        "expires_at",
     },
     "playlist_materialization_items": {
-        "materialization_id", "owner_user_id", "occurrence_id", "ordinal", "normalized_source_id", "display_metadata_json",
+        "materialization_id",
+        "owner_user_id",
+        "occurrence_id",
+        "ordinal",
+        "normalized_source_id",
+        "display_metadata_json",
     },
     "media_ingest_runs": {
-        "run_id", "owner_user_id", "status", "processing_options_json", "playlist_summaries_json", "batch_ids_json", "expires_at",
+        "run_id",
+        "owner_user_id",
+        "status",
+        "processing_options_json",
+        "playlist_summaries_json",
+        "batch_ids_json",
+        "expires_at",
     },
     "media_ingest_run_items": {
-        "run_id", "owner_user_id", "occurrence_id", "ordinal", "normalized_source_id", "duplicate_policy",
-        "metadata_patch_json", "state", "outcome", "job_id", "attempt", "display_metadata_json",
+        "run_id",
+        "owner_user_id",
+        "occurrence_id",
+        "ordinal",
+        "normalized_source_id",
+        "duplicate_policy",
+        "metadata_patch_json",
+        "state",
+        "outcome",
+        "job_id",
+        "attempt",
+        "display_metadata_json",
+        "submission_queue",
+        "staging_temp_dir",
     },
     "media_ingest_run_events": {
-        "event_id", "run_id", "owner_user_id", "occurrence_id", "job_id", "state", "outcome", "attrs_json",
+        "event_id",
+        "run_id",
+        "owner_user_id",
+        "occurrence_id",
+        "job_id",
+        "state",
+        "outcome",
+        "attrs_json",
     },
 }
 
@@ -81,7 +126,6 @@ PLAYLIST_JSON_COLUMNS = {
 
 def test_sqlite_schema_has_expected_columns_and_indexes(tmp_path):
 
-
     db_path = ensure_jobs_tables(tmp_path / "jobs_mig.db")
     conn = sqlite3.connect(db_path)
     try:
@@ -119,14 +163,24 @@ def test_sqlite_schema_has_playlist_ingest_tables(tmp_path):
     ensure_jobs_tables(db_path)
 
     with sqlite3.connect(db_path) as conn:
-        tables = {
-            row[0]
-            for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table'"
-            ).fetchall()
-        }
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()}
 
     assert tables >= EXPECTED_PLAYLIST_TABLES
+
+
+def test_sqlite_forward_migration_adds_playlist_submission_authority_columns(tmp_path):
+    db_path = ensure_jobs_tables(tmp_path / "jobs_playlist_upgrade.db")
+    with sqlite3.connect(db_path) as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(media_ingest_run_items)")}
+        for column in ("submission_queue", "staging_temp_dir"):
+            if column in columns:
+                conn.execute(f"ALTER TABLE media_ingest_run_items DROP COLUMN {column}")
+
+    ensure_jobs_tables(db_path)
+
+    with sqlite3.connect(db_path) as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(media_ingest_run_items)")}
+    assert {"submission_queue", "staging_temp_dir"} <= columns
 
 
 def test_sqlite_playlist_ingest_catalog_has_required_columns_indexes_and_uniques(tmp_path):
@@ -137,12 +191,7 @@ def test_sqlite_playlist_ingest_catalog_has_required_columns_indexes_and_uniques
             columns = {row[1] for row in conn.execute(f"PRAGMA table_info('{table}')").fetchall()}
             assert columns >= expected_columns
 
-        indexes = {
-            row[0]
-            for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'index'"
-            ).fetchall()
-        }
+        indexes = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'").fetchall()}
         assert indexes >= EXPECTED_PLAYLIST_INDEXES
         assert indexes.isdisjoint(REDUNDANT_PLAYLIST_INDEXES)
 
@@ -163,10 +212,7 @@ def test_sqlite_playlist_ingest_catalog_has_required_columns_indexes_and_uniques
         }
         for table, expected in expected_uniques.items():
             unique_columns = {
-                tuple(
-                    row[2]
-                    for row in conn.execute(f"PRAGMA index_info('{index_row[1]}')").fetchall()
-                )
+                tuple(row[2] for row in conn.execute(f"PRAGMA index_info('{index_row[1]}')").fetchall())
                 for index_row in conn.execute(f"PRAGMA index_list('{table}')").fetchall()
                 if index_row[2]
             }
@@ -229,8 +275,14 @@ def test_sqlite_playlist_ingest_resource_ids_reject_null(tmp_path, insert_sql, v
             "playlist_preflight_items",
             "display_metadata_json",
             (
-                "preflight_id", "owner_user_id", "occurrence_id", "ordinal", "occurrence_index_for_source",
-                "source_kind", "availability", "duplicate_status",
+                "preflight_id",
+                "owner_user_id",
+                "occurrence_id",
+                "ordinal",
+                "occurrence_index_for_source",
+                "source_kind",
+                "availability",
+                "duplicate_status",
             ),
             ("preflight-1", "owner-1", "occ-1", 1, 1, "youtube", "available", "new"),
             id="playlist-preflight-items-display-metadata",
@@ -376,11 +428,27 @@ def test_playlist_ingest_sqlite_postgres_ddl_has_focused_static_parity():
         assert declaration in postgres_ddl
 
     for value in {
-        "skip", "include_existing", "update_metadata_only", "overwrite",
-        "staged", "preparing", "awaiting_upload", "submit_pending", "queued", "running",
-        "cancellation_requested", "status_unavailable", "terminal", "completed", "included_existing",
-        "metadata_updated", "skipped_existing", "submit_failed", "processing_failed",
-        "metadata_update_failed", "cancelled",
+        "skip",
+        "include_existing",
+        "update_metadata_only",
+        "overwrite",
+        "staged",
+        "preparing",
+        "awaiting_upload",
+        "submit_pending",
+        "queued",
+        "running",
+        "cancellation_requested",
+        "status_unavailable",
+        "terminal",
+        "completed",
+        "included_existing",
+        "metadata_updated",
+        "skipped_existing",
+        "submit_failed",
+        "processing_failed",
+        "metadata_update_failed",
+        "cancelled",
     }:
         assert f"'{value}'" in sqlite_ddl
         assert f"'{value}'" in postgres_ddl
@@ -390,8 +458,7 @@ def test_playlist_ingest_sqlite_postgres_ddl_has_focused_static_parity():
         assert "state TEXT NOT NULL CHECK (state IN" in ddl
         assert "outcome TEXT CHECK (outcome IS NULL OR outcome IN" in ddl
         assert (
-            "CHECK ((state = 'terminal' AND outcome IS NOT NULL) "
-            "OR (state <> 'terminal' AND outcome IS NULL))"
+            "CHECK ((state = 'terminal' AND outcome IS NOT NULL) " "OR (state <> 'terminal' AND outcome IS NULL))"
         ) in ddl
         assert (
             "CHECK ((state IS NULL AND outcome IS NULL) "
@@ -425,13 +492,15 @@ def test_jobs_migrations_uses_shared_sqlite_policy_helper(tmp_path):
 
     importlib.reload(jobs_migrations)
 
-    assert calls == [{
-        "use_wal": True,
-        "synchronous": "NORMAL",
-        "busy_timeout_ms": 5000,
-        "foreign_keys": False,
-        "temp_store": None,
-    }]
+    assert calls == [
+        {
+            "use_wal": True,
+            "synchronous": "NORMAL",
+            "busy_timeout_ms": 5000,
+            "foreign_keys": False,
+            "temp_store": None,
+        }
+    ]
 
 
 def test_ensure_jobs_tables_sanitizes_schema_failure_log(tmp_path, monkeypatch):

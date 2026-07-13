@@ -370,6 +370,50 @@ git commit -m "feat: bind media jobs to ingest occurrences (TASK-12110)"
 - [x] Keep exact committed-job reconciliation authoritative over the prior create exception.
 - [x] Re-run focused, PostgreSQL, property, static, and Bandit verification, update TASK-12112, and commit.
 
+**Quality-review safety follow-up:** Complete
+
+- [x] **Group A — Bound decoding and legacy-worker compatibility**
+
+  In `test_media_ingest_jobs_endpoint.py` and `test_media_ingest_jobs_worker.py`, add behavior tests for malformed, non-list, over-500, and encoded-over-256-KiB arrays, plus `JSONDecodeError`, `RecursionError`, and `MemoryError` sanitization before run lookup or upload staging. Add legacy worker cases proving zero results retain the old empty-dict projection, multiple results use the first item, and a non-dict first result returns the old safe error, while occurrence-bound jobs remain exactly-one-dict strict.
+
+  RED: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest_jobs_endpoint.py -k "run_bound and (encoded or malformed or recursion or memory or more_than_500)" tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest_jobs_worker.py -k "legacy_media_worker or bound_media_worker_requires" -q` — expected failures are unbounded/unsanitized decoding and changed legacy projection.
+
+  Implement the 256-KiB pre-decode cap, immediate top-level-list/500-element checks, exact exception handling, and conditional worker projection in `ingest_jobs.py` and `media_ingest_jobs_worker.py`. GREEN: rerun the RED command, then both complete test files.
+
+- [x] **Group B — Durable reservation authority, encrypted binding views, and migration parity**
+
+  In the SQLite/PostgreSQL migration tests, playlist store tests, endpoint tests, and PostgreSQL store parity tests, add upgrade coverage for nullable `submission_queue` and `staging_temp_dir`, dataclass/row-converter parity, old rows with `submission_queue IS NULL`, secret rotation, heavy/default queue config drift, mixed URL/file ingest+overwrite actions, malicious opposite client options, and encrypted URL/file create/retry/bind cleanup. New reservations atomically persist the current HMAC identity and queue selected by `_resolve_media_ingest_queue`; pending/queued retries return the stored identity without recomputing it and always use the stored queue. For an upgraded NULL queue reservation, adopt the queue of one exact existing job when present; otherwise initialize the current resolver choice once with a CAS, after which configuration is never consulted for that reservation.
+
+  Add a public owner-authorized, job-scoped `JobManager` binding-view normalizer that returns only immutable job metadata plus a safely decrypted dict payload. It must fail closed on owner/payload mismatch, never log decrypted content, and never serialize the view into responses. New create results, idempotent-create results, exact lookups, endpoint file cleanup, and store binding all use this normalized view. Per-entry copied options force `overwrite_existing = (reserved.action == "overwrite")` for URL and file submissions; store binding defensively verifies the decrypted option against the reserved action.
+
+  RED: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Jobs/test_jobs_migrations_sqlite.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_store.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest_jobs_endpoint.py -k "submission_queue or staging_temp_dir or rotation or queue_drift or overwrite or encrypted" -q` — expected failures are absent columns/record fields, recomputed authority, shared options, and encrypted-envelope rejection.
+
+  Modify `migrations.py`, `pg_migrations.py`, `manager.py`, `playlist_ingest_store.py`, and `ingest_jobs.py`. GREEN: rerun the RED command, then the complete SQLite migration/store/endpoint files and `RUN_JOBS=1 python -m pytest tldw_Server_API/tests/Jobs/test_jobs_migrations_postgres.py tldw_Server_API/tests/MediaIngestion_NEW/integration/test_playlist_ingest_store_postgres.py -k "submission_queue or encrypted or binding" -q`.
+
+- [x] **Group C — Non-acquirable creation, transactional bind/publish, and release repair**
+
+  Following the existing preflight sentinel, create occurrence jobs with far-future `available_at`. In the store binding transaction, recheck the unexpired accepting run, exact attempt/reservation/queue/action, normalized binding view, and held Jobs row; atomically bind the run item and publish via database-clock `available_at`. Add an idempotent repair branch for a deliberately seeded `queued` run item whose exact job remains held: retry revalidates owner/run/occurrence/attempt/queue/payload and performs release-only CAS. Already-published exact jobs are a no-op; expired/nonaccepting runs and ambiguous rows remain held.
+
+  RED: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_store.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest_jobs_endpoint.py -k "held or acquisition_before_bind or bind_publish or release_repair or run_expired_during_bind" -q` — expected failures show a pre-bind acquisition and absent repair. Modify only the existing create helper/available-at field and store bind transaction; add no new Jobs state/framework. GREEN: rerun RED plus complete store/endpoint/worker files, then `RUN_JOBS=1 python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/integration/test_playlist_ingest_store_postgres.py -k "bind_publish or held or release" -q`.
+
+- [x] **Group D — PostgreSQL quota serialization and structured quota codes**
+
+  In `test_jobs_quotas_postgres.py`, add barrier-synchronized real-PostgreSQL tests proving concurrent max-queued and submissions-per-minute requests admit no more than the configured limit. In `JobManager.create_job`, within the existing transaction and before both counts and insert, take one stable `pg_advisory_xact_lock` keyed by the exact owner/domain quota scope; all submissions use that fixed single-lock order, and SQLite is unchanged. Endpoint tests assert a typed quota failure uses `detail.code` and `detail.message` in the global 429 payload and the same code in a structured rejected submission if that response path is used; no raw-message matching.
+
+  RED: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && RUN_JOBS=1 python -m pytest tldw_Server_API/tests/Jobs/test_jobs_quotas_postgres.py -k "concurrent and (max_queued or submits_per_minute)" -q` and `python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest_jobs_endpoint.py -k "quota_code" -q` — expected failures are quota oversubscription and absent `detail.code`. GREEN: rerun both, the complete SQLite/PostgreSQL quota files, and endpoint tests.
+
+- [x] **Group E — Persisted, bounded abandoned-staging cleanup and complete verification**
+
+  Persist each reservation's exact `staging_temp_dir` immediately after its task-specific directory is created. A bounded store query supplies at most the configured deletion cap of owner-scoped `submit_pending` candidates older than the retention cutoff; cleanup never discovers candidates by walking the temp root. For each candidate, require the resolved path's parent to equal `tempfile.gettempdir()`, its basename to match the reservation-derived prefix, and no live run-item or Jobs binding view to reference it. Delete only that exact directory, then CAS-clear the exact stored path. Live reservations/jobs and bound authoritative paths survive; malformed/cross-owner/out-of-root paths fail closed.
+
+  RED: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_store.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest_jobs_endpoint.py -k "abandoned_staging or staging_cleanup" -q` — expected failures are no persisted candidates or retention cleanup. Modify the store and existing run-bound endpoint mutation seam only. GREEN: rerun RED and complete endpoint/store files.
+
+  Final gate: run endpoint/store/worker/manager/migration/encryption/cleanup suites, the complete Task 1–7 and property matrix, `/process-videos` legacy coverage, explicitly enabled real PostgreSQL concurrency/encryption, Black, Ruff, compileall, `git diff --check`, and Bandit on every touched production path. Record exact RED/GREEN evidence and any pre-existing baseline in TASK-12112, then commit coherent follow-up(s) with `TASK-12112` in each message.
+
+  Verification evidence: endpoint `109 passed`; store `122 passed`; worker plus SQLite migrations `70 passed`; PostgreSQL migrations, quota concurrency, and playlist-store integration `21 passed`. Ruff, Black, compileall, and `git diff --check` exited zero. Bandit scanned all six touched production paths and reported zero findings. Focused RED/GREEN evidence is recorded in TASK-12112.
+
+  Independent-review remediation: lifecycle-safe already-bound retries; fail-closed encrypted binding views; retain staging metadata after deletion failure; reuse completed staging across cooperative retries; reject shared-path deletion and case-insensitive manifest-name collisions; keep pre-record retries pending; release only exact owner reservations after confirmed pre-manifest cleanup with a NULL-staging CAS; strengthen overwrite, malformed-JSON, and file-race coverage. Status: Complete. Independent re-review found no remaining Critical or Important issues.
+
 ### Task 8: Add run routes, reconciliation, event replay, cancellation, and retry
 
 - [ ] **Step 1: Write failing run-route tests**

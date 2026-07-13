@@ -1757,7 +1757,7 @@ async def test_playlist_preflight_worker_unexpected_extraction_failure_blocks_wi
     assert "do-not-expose" not in str(exc_info.value)
 
 
-async def _run_bound_media_worker(monkeypatch, tmp_path, results):
+async def _run_bound_media_worker(monkeypatch, tmp_path, results, *, occurrence_bound=True):
     import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
     from tldw_Server_API.app.core.Jobs.manager import JobManager
 
@@ -1784,21 +1784,27 @@ async def _run_bound_media_worker(monkeypatch, tmp_path, results):
     )
 
     jm = JobManager(db_path=tmp_path / "jobs.db")
+    payload = {
+        "batch_id": "batch-task7",
+        "media_type": "video",
+        "source": "https://www.youtube.com/watch?v=alpha123456",
+        "source_kind": "url",
+        "input_ref": "https://www.youtube.com/watch?v=alpha123456",
+        "options": {"media_type": "video"},
+    }
+    if occurrence_bound:
+        payload.update(
+            {
+                "run_id": "run-task7",
+                "occurrence_id": "occ-task7",
+                "attempt": 3,
+            }
+        )
     row = jm.create_job(
         domain="media_ingest",
         queue="default",
         job_type="media_ingest_item",
-        payload={
-            "batch_id": "batch-task7",
-            "media_type": "video",
-            "source": "https://www.youtube.com/watch?v=alpha123456",
-            "source_kind": "url",
-            "input_ref": "https://www.youtube.com/watch?v=alpha123456",
-            "run_id": "run-task7",
-            "occurrence_id": "occ-task7",
-            "attempt": 3,
-            "options": {"media_type": "video"},
-        },
+        payload=payload,
         owner_user_id="1",
     )
     return worker, jm, jm.get_job(int(row["id"]))
@@ -1832,6 +1838,39 @@ async def test_bound_media_worker_requires_exactly_one_dict_result(
 
     assert str(exc_info.value) == expected_code
     assert exc_info.value.retryable is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("results", "expected"),
+    [
+        ([], {"status": None, "media_id": None, "error": None}),
+        (
+            [
+                {"status": "Success", "db_id": 11},
+                {"status": "Success", "db_id": 22},
+            ],
+            {"status": "Success", "media_id": 11, "error": None},
+        ),
+        (["not-a-result-object"], {"status": "Error", "error": "No result produced"}),
+    ],
+)
+async def test_legacy_media_worker_retains_first_result_projection(
+    monkeypatch,
+    tmp_path,
+    results,
+    expected,
+):
+    worker, jm, job = await _run_bound_media_worker(
+        monkeypatch,
+        tmp_path,
+        results,
+        occurrence_bound=False,
+    )
+
+    result = await worker._handle_job(job, jm, worker._ProgressState())
+
+    assert {key: result.get(key) for key in expected} == expected
 
 
 @pytest.mark.asyncio

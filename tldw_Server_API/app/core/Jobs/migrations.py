@@ -333,6 +333,8 @@ CREATE TABLE IF NOT EXISTS media_ingest_run_items (
   batch_id TEXT,
   attempt INTEGER NOT NULL DEFAULT 1 CHECK (attempt >= 1),
   idempotency_identity TEXT,
+  submission_queue TEXT,
+  staging_temp_dir TEXT,
   planned_collection_item_id INTEGER,
   progress_percent REAL CHECK (progress_percent IS NULL OR (progress_percent >= 0 AND progress_percent <= 100)),
   progress_message TEXT,
@@ -407,6 +409,7 @@ def ensure_jobs_tables(db_path: Path | None = None) -> Path:
         # Anchor default path to project root to avoid CWD effects
         try:
             from tldw_Server_API.app.core.Utils.Utils import get_project_root as _gpr
+
             db_path = (Path(_gpr()) / "Databases" / "jobs.db").resolve()
         except _JOBS_PATH_EXCEPTIONS:
             db_path = (Path(__file__).resolve().parents[5] / "Databases" / "jobs.db").resolve()
@@ -415,6 +418,7 @@ def ensure_jobs_tables(db_path: Path | None = None) -> Path:
             db_path = Path(db_path)
             if not db_path.is_absolute():
                 from tldw_Server_API.app.core.Utils.Utils import get_project_root as _gpr
+
                 db_path = (Path(_gpr()) / db_path).resolve()
         except _JOBS_PATH_EXCEPTIONS:
             db_path = Path(db_path)
@@ -440,6 +444,10 @@ def ensure_jobs_tables(db_path: Path | None = None) -> Path:
                 conn.execute("ALTER TABLE jobs ADD COLUMN batch_group TEXT")
             with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
                 conn.execute("ALTER TABLE jobs_archive ADD COLUMN batch_group TEXT")
+            with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
+                conn.execute("ALTER TABLE media_ingest_run_items ADD COLUMN submission_queue TEXT")
+            with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
+                conn.execute("ALTER TABLE media_ingest_run_items ADD COLUMN staging_temp_dir TEXT")
             conn.commit()
         try:
             logger.info(f"Ensured Jobs schema at {Path(db_path).resolve()}")

@@ -3,6 +3,7 @@ import shutil
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Event, Lock
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -413,7 +414,10 @@ def test_submit_media_ingest_jobs_returns_429_for_concurrent_job_limit(
     )
 
     assert resp.status_code == 429, resp.text
-    assert resp.json()["detail"] == "User 1 has reached the maximum concurrent job limit (5)"
+    assert resp.json()["detail"] == {
+        "code": "jobs_concurrent_limit",
+        "message": "User 1 has reached the maximum concurrent job limit (5)",
+    }
 
 
 def test_submit_media_ingest_jobs_marks_planned_item_submit_failed_on_job_error(
@@ -692,7 +696,7 @@ def test_submit_media_ingest_jobs_routes_heavy_request_to_heavy_queue_when_route
     assert captured == ["media-heavy"]
 
 
-def _seed_occurrence_run(*, owner_id="1", include_file=False, planned=False):
+def _seed_occurrence_run(*, owner_id="1", include_file=False, planned=False, file_action="ingest"):
     from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
         PlaylistIngestStore,
@@ -734,7 +738,7 @@ def _seed_occurrence_run(*, owner_id="1", include_file=False, planned=False):
                 "source_kind": "file",
                 "display_metadata": {"name": "clip.mp3", "size_bytes": 4},
                 "state": "awaiting_upload",
-                "action": "ingest",
+                "action": file_action,
                 "metadata_patch": None,
             }
         )
@@ -803,6 +807,57 @@ def test_run_bound_url_submit_uses_server_authority_and_derived_idempotency(
     assert not derived & {"attacker-key-1", "attacker-key-2"}
     assert all(key.startswith("playlist-ingest-v1:") for key in derived)
     assert [item.state for item in store.list_run_items("1", run.run_id)] == ["queued", "queued"]
+
+
+def test_run_bound_mixed_actions_force_independent_overwrite_options(media_ingest_jobs_client):
+    manager, _store, run = _seed_occurrence_run()
+    data = _run_submit_data(
+        run.run_id,
+        urls=[
+            "https://www.youtube.com/watch?v=alpha123456",
+            "https://www.youtube.com/watch?v=alpha123456",
+        ],
+        occurrence_ids=["occ-url-1", "occ-url-2"],
+        attempts=[1, 1],
+    )
+    data["overwrite_existing"] = "true"
+
+    response = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=data,
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert response.status_code == 200, response.text
+    jobs = manager.list_jobs(domain="media_ingest", owner_user_id="1", limit=10)
+    by_occurrence = {job["payload"]["occurrence_id"]: job["payload"] for job in jobs}
+    assert by_occurrence["occ-url-1"]["options"]["overwrite_existing"] is False
+    assert by_occurrence["occ-url-2"]["options"]["overwrite_existing"] is True
+    assert by_occurrence["occ-url-1"]["options"] is not by_occurrence["occ-url-2"]["options"]
+
+
+def test_run_bound_file_overwrite_action_overrides_opposite_client_option(
+    media_ingest_jobs_client,
+):
+    manager, _store, run = _seed_occurrence_run(include_file=True, file_action="overwrite")
+
+    response = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data={
+            "media_type": "audio",
+            "run_id": run.run_id,
+            "overwrite_existing": "false",
+            "file_occurrence_ids": json.dumps(["occ-file-1"]),
+            "file_attempts": json.dumps([1]),
+        },
+        files=[("files", ("clip.mp3", b"test", "audio/mpeg"))],
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert response.status_code == 200, response.text
+    job = manager.list_jobs(domain="media_ingest", owner_user_id="1", limit=10)[0]
+    assert job["payload"]["options"]["overwrite_existing"] is True
+    shutil.rmtree(job["payload"]["temp_dir"], ignore_errors=True)
 
 
 def test_run_bound_submit_isolates_source_mismatch_without_blocking_valid_occurrence(
@@ -1018,7 +1073,91 @@ def test_run_bound_submit_rejects_more_than_500_items_before_run_lookup(media_in
     )
 
     assert response.status_code == 422, response.text
-    assert "between 1 and 500" in response.text
+    assert response.json()["detail"] == "occurrence_ids must contain no more than 500 items."
+
+
+def test_run_bound_submit_rejects_encoded_array_over_256_kib_before_json_decode(
+    media_ingest_jobs_client,
+    monkeypatch,
+):
+    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
+
+    original_loads = ingest_jobs.json.loads
+    decoded_oversize = False
+
+    def guarded_loads(value, *args, **kwargs):
+        nonlocal decoded_oversize
+        if isinstance(value, str) and len(value.encode("utf-8")) > 256 * 1024:
+            decoded_oversize = True
+            raise AssertionError("oversized binding array must not reach json.loads")
+        return original_loads(value, *args, **kwargs)
+
+    monkeypatch.setattr(ingest_jobs.json, "loads", guarded_loads, raising=True)
+    response = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data={
+            "media_type": "video",
+            "run_id": "does-not-exist",
+            "urls": "https://www.youtube.com/watch?v=alpha123456",
+            "occurrence_ids": "[" + (" " * (256 * 1024)) + "]",
+            "attempts": json.dumps([1]),
+        },
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"] == "occurrence_ids encoded array is too large."
+    assert decoded_oversize is False
+
+
+@pytest.mark.parametrize("encoded", ["{}", '"occ-url-1"', "null", "["])
+def test_run_bound_submit_requires_encoded_top_level_list(media_ingest_jobs_client, encoded):
+    response = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data={
+            "media_type": "video",
+            "run_id": "does-not-exist",
+            "urls": "https://www.youtube.com/watch?v=alpha123456",
+            "occurrence_ids": encoded,
+            "attempts": json.dumps([1]),
+        },
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"] == "occurrence_ids must be an array."
+
+
+@pytest.mark.parametrize("failure", [RecursionError("deep"), MemoryError("large")])
+def test_run_bound_submit_sanitizes_json_decoder_resource_failures(
+    media_ingest_jobs_client,
+    monkeypatch,
+    failure,
+):
+    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
+
+    original_loads = ingest_jobs.json.loads
+
+    def failing_loads(value, *args, **kwargs):
+        if value == '["decoder-failure"]':
+            raise failure
+        return original_loads(value, *args, **kwargs)
+
+    monkeypatch.setattr(ingest_jobs.json, "loads", failing_loads, raising=True)
+    response = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data={
+            "media_type": "video",
+            "run_id": "does-not-exist",
+            "urls": "https://www.youtube.com/watch?v=alpha123456",
+            "occurrence_ids": '["decoder-failure"]',
+            "attempts": json.dumps([1]),
+        },
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"] == "occurrence_ids must be an array."
 
 
 def test_run_bound_file_submit_aligns_identity_before_staging(
@@ -1088,21 +1227,21 @@ def test_run_bound_file_length_mismatch_does_not_stage_or_leak(
     assert store.get_run_item("1", run.run_id, "occ-file-1").state == "awaiting_upload"
 
 
-def test_run_bound_file_job_failure_cleans_own_staging_and_preserves_reservation_for_retry(
+def test_run_bound_file_job_failure_preserves_completed_staging_for_retry(
     media_ingest_jobs_client,
     monkeypatch,
 ):
     manager, store, run = _seed_occurrence_run(include_file=True)
     from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
 
-    cleaned: list[str] = []
+    staged_dirs: list[Path] = []
     create_calls: list[dict] = []
-    original_cleanup = ingest_jobs._cleanup_dir
     original_create = ingest_jobs._create_media_ingest_job
+    original_save = ingest_jobs.save_uploaded_files
 
-    def record_cleanup(path):
-        cleaned.append(path)
-        original_cleanup(path)
+    async def record_staging(*args, temp_dir, **kwargs):
+        staged_dirs.append(Path(temp_dir))
+        return await original_save(*args, temp_dir=temp_dir, **kwargs)
 
     def fail_once(**kwargs):
         create_calls.append(kwargs)
@@ -1110,7 +1249,7 @@ def test_run_bound_file_job_failure_cleans_own_staging_and_preserves_reservation
             raise RuntimeError("private token=do-not-leak")
         return original_create(**kwargs)
 
-    monkeypatch.setattr(ingest_jobs, "_cleanup_dir", record_cleanup, raising=True)
+    monkeypatch.setattr(ingest_jobs, "save_uploaded_files", record_staging, raising=True)
     monkeypatch.setattr(ingest_jobs, "_create_media_ingest_job", fail_once, raising=True)
 
     data = {
@@ -1142,16 +1281,17 @@ def test_run_bound_file_job_failure_cleans_own_staging_and_preserves_reservation
     assert second.status_code == 200, second.text
     assert len(create_calls) == 2
     assert {call["batch_id"] for call in create_calls} == {pending.batch_id}
-    assert cleaned and not Path(cleaned[0]).exists()
+    assert len(staged_dirs) == 1
+    assert staged_dirs[0].exists()
     jobs = manager.list_jobs(domain="media_ingest", owner_user_id="1", limit=10)
     assert len(jobs) == 1
     payload = json.loads(jobs[0]["payload"]) if isinstance(jobs[0]["payload"], str) else jobs[0]["payload"]
-    assert Path(payload["source"]).read_bytes() == b"next"
+    assert Path(payload["source"]).read_bytes() == b"test"
     assert store.get_run_item("1", run.run_id, "occ-file-1").job_id == jobs[0]["id"]
     shutil.rmtree(payload["temp_dir"], ignore_errors=True)
 
 
-def test_run_bound_upload_staging_failure_preserves_reservation_for_retry(
+def test_run_bound_upload_staging_failure_releases_reservation_for_retry(
     media_ingest_jobs_client,
     monkeypatch,
 ):
@@ -1195,12 +1335,75 @@ def test_run_bound_upload_staging_failure_preserves_reservation_for_retry(
     assert first.status_code == 207, first.text
     assert first.json()["submissions"][0]["error_code"] == "upload_staging_failed"
     assert "private" not in first.text
-    assert pending.state == "submit_pending"
-    assert pending.batch_id == first.json()["submissions"][0]["batch_id"]
+    assert pending.state == "awaiting_upload"
+    assert pending.batch_id is None
+    assert pending.staging_temp_dir is None
     assert len(staged_dirs) == 2
     assert not staged_dirs[0].exists()
     assert second.status_code == 200, second.text
-    assert second.json()["submissions"][0]["batch_id"] == pending.batch_id
+    assert second.json()["submissions"][0]["batch_id"] != first.json()["submissions"][0]["batch_id"]
+    job = manager.get_job(second.json()["submissions"][0]["job_id"])
+    payload = json.loads(job["payload"]) if isinstance(job["payload"], str) else job["payload"]
+    assert Path(payload["source"]).read_bytes() == b"new!"
+    assert Path(payload["temp_dir"]) == staged_dirs[1]
+    shutil.rmtree(payload["temp_dir"], ignore_errors=True)
+
+
+def test_run_bound_staging_pointer_failure_releases_reservation_for_retry(
+    media_ingest_jobs_client,
+    monkeypatch,
+):
+    manager, store, run = _seed_occurrence_run(include_file=True)
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video import playlist_ingest_store
+
+    original_record = playlist_ingest_store.PlaylistIngestStore.record_run_item_staging
+    staged_dirs: list[Path] = []
+    record_calls = 0
+
+    def fail_once(self, *args, temp_dir, **kwargs):
+        nonlocal record_calls
+        record_calls += 1
+        staged_dirs.append(Path(temp_dir))
+        if record_calls == 1:
+            raise RuntimeError("private staging pointer failure")
+        return original_record(self, *args, temp_dir=temp_dir, **kwargs)
+
+    monkeypatch.setattr(
+        playlist_ingest_store.PlaylistIngestStore,
+        "record_run_item_staging",
+        fail_once,
+        raising=True,
+    )
+    data = {
+        "media_type": "audio",
+        "run_id": run.run_id,
+        "file_occurrence_ids": json.dumps(["occ-file-1"]),
+        "file_attempts": json.dumps([1]),
+    }
+
+    first = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=data,
+        files=[("files", ("clip.mp3", b"old!", "audio/mpeg"))],
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+    pending = store.get_run_item("1", run.run_id, "occ-file-1")
+    second = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=data,
+        files=[("files", ("clip.mp3", b"new!", "audio/mpeg"))],
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert first.status_code == 207, first.text
+    assert first.json()["submissions"][0]["error_code"] == "upload_staging_failed"
+    assert "private" not in first.text
+    assert pending.state == "awaiting_upload"
+    assert pending.batch_id is None
+    assert pending.staging_temp_dir is None
+    assert len(staged_dirs) == 2
+    assert not staged_dirs[0].exists()
+    assert second.status_code == 200, second.text
     job = manager.get_job(second.json()["submissions"][0]["job_id"])
     payload = json.loads(job["payload"]) if isinstance(job["payload"], str) else job["payload"]
     assert Path(payload["source"]).read_bytes() == b"new!"
@@ -1646,6 +1849,202 @@ def test_pending_url_retry_remains_pending_when_create_is_ambiguous_again(
     assert manager.list_jobs(domain="media_ingest", owner_user_id="1", limit=10) == []
 
 
+def test_pending_url_retry_reuses_stored_identity_after_secret_rotation(
+    media_ingest_jobs_client,
+    monkeypatch,
+):
+    manager, store, run = _seed_occurrence_run()
+    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
+
+    original_create = ingest_jobs._create_media_ingest_job
+    keys = iter([b"old-signing-secret", b"new-signing-secret"])
+    create_calls = 0
+
+    def ambiguous_then_create(**kwargs):
+        nonlocal create_calls
+        create_calls += 1
+        if create_calls == 1:
+            raise RuntimeError("job commit outcome unavailable")
+        return original_create(**kwargs)
+
+    monkeypatch.setattr(ingest_jobs, "derive_hmac_key", lambda: next(keys), raising=True)
+    monkeypatch.setattr(ingest_jobs, "_create_media_ingest_job", ambiguous_then_create, raising=True)
+    data = _run_submit_data(run.run_id)
+
+    first = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=data,
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+    reserved = store.get_run_item("1", run.run_id, "occ-url-1")
+    second = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=data,
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert first.status_code == 207, first.text
+    assert second.status_code == 200, second.text
+    jobs = manager.list_jobs(domain="media_ingest", owner_user_id="1", limit=10)
+    assert len(jobs) == 1
+    assert jobs[0]["idempotency_key"] == reserved.idempotency_identity
+    assert store.get_run_item("1", run.run_id, "occ-url-1").job_id == jobs[0]["id"]
+
+
+def test_pending_url_retry_reuses_stored_queue_after_config_drift(
+    media_ingest_jobs_client,
+    monkeypatch,
+):
+    manager, store, run = _seed_occurrence_run()
+    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
+
+    original_create = ingest_jobs._create_media_ingest_job
+    create_calls = 0
+
+    def ambiguous_then_create(**kwargs):
+        nonlocal create_calls
+        create_calls += 1
+        if create_calls == 1:
+            raise RuntimeError("job commit outcome unavailable")
+        return original_create(**kwargs)
+
+    monkeypatch.setenv("MEDIA_INGEST_JOBS_DEFAULT_QUEUE", "default")
+    monkeypatch.setattr(ingest_jobs, "_create_media_ingest_job", ambiguous_then_create, raising=True)
+    data = _run_submit_data(run.run_id)
+
+    first = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=data,
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+    reserved = store.get_run_item("1", run.run_id, "occ-url-1")
+    monkeypatch.setenv("MEDIA_INGEST_JOBS_DEFAULT_QUEUE", "low")
+    second = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=data,
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert first.status_code == 207, first.text
+    assert second.status_code == 200, second.text
+    jobs = manager.list_jobs(domain="media_ingest", owner_user_id="1", limit=10)
+    assert len(jobs) == 1
+    assert jobs[0]["queue"] == reserved.submission_queue == "default"
+
+
+def test_run_bound_initial_queue_uses_existing_heavy_route(media_ingest_jobs_client, monkeypatch):
+    manager, store, run = _seed_occurrence_run()
+    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
+
+    monkeypatch.setenv("MEDIA_INGEST_JOBS_DEFAULT_QUEUE", "default")
+    monkeypatch.setenv("MEDIA_INGEST_JOBS_ROUTE_HEAVY", "true")
+    monkeypatch.setenv("MEDIA_INGEST_JOBS_HEAVY_QUEUE", "low")
+    monkeypatch.setattr(ingest_jobs, "_heavy_media_ingest_worker_available", lambda: True, raising=True)
+
+    response = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=_run_submit_data(run.run_id),
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert response.status_code == 200, response.text
+    job = manager.list_jobs(domain="media_ingest", owner_user_id="1", limit=10)[0]
+    assert job["queue"] == "low"
+    assert store.get_run_item("1", run.run_id, "occ-url-1").submission_queue == "low"
+
+
+def test_run_bound_job_is_not_acquirable_before_store_binding(
+    media_ingest_jobs_client,
+    monkeypatch,
+):
+    manager, _store, run = _seed_occurrence_run()
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video import playlist_ingest_store
+
+    original_bind = playlist_ingest_store.PlaylistIngestStore.bind_run_item_job
+    acquired_before_bind = []
+
+    def acquire_then_bind(self, *args, **kwargs):
+        acquired_before_bind.append(
+            manager.acquire_next_job(
+                domain="media_ingest",
+                queue="default",
+                worker_id="racing-worker",
+                lease_seconds=30,
+            )
+        )
+        return original_bind(self, *args, **kwargs)
+
+    monkeypatch.setattr(
+        playlist_ingest_store.PlaylistIngestStore,
+        "bind_run_item_job",
+        acquire_then_bind,
+        raising=True,
+    )
+
+    response = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=_run_submit_data(run.run_id),
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert acquired_before_bind == [None]
+
+
+def test_run_bound_encrypted_url_payload_binds_successfully(
+    media_ingest_jobs_client,
+    monkeypatch,
+):
+    manager, store, run = _seed_occurrence_run()
+    monkeypatch.setenv("JOBS_ENCRYPT_MEDIA_INGEST", "true")
+    monkeypatch.setenv(
+        "WORKFLOWS_ARTIFACT_ENC_KEY",
+        "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo0NTY3ODkwMTIzNDU2Nzg5MDEy"[:44],
+    )
+
+    response = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=_run_submit_data(run.run_id),
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert response.status_code == 200, response.text
+    record = response.json()["submissions"][0]
+    assert store.get_run_item("1", run.run_id, "occ-url-1").job_id == record["job_id"]
+    assert manager.get_job(record["job_id"])["payload"]["occurrence_id"] == "occ-url-1"
+
+
+def test_run_bound_encrypted_file_payload_preserves_authoritative_staging(
+    media_ingest_jobs_client,
+    monkeypatch,
+):
+    manager, store, run = _seed_occurrence_run(include_file=True)
+    monkeypatch.setenv("JOBS_ENCRYPT_MEDIA_INGEST", "true")
+    monkeypatch.setenv(
+        "WORKFLOWS_ARTIFACT_ENC_KEY",
+        "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo0NTY3ODkwMTIzNDU2Nzg5MDEy"[:44],
+    )
+
+    response = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data={
+            "media_type": "audio",
+            "run_id": run.run_id,
+            "file_occurrence_ids": json.dumps(["occ-file-1"]),
+            "file_attempts": json.dumps([1]),
+        },
+        files=[("files", ("clip.mp3", b"test", "audio/mpeg"))],
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert response.status_code == 200, response.text
+    record = response.json()["submissions"][0]
+    payload = manager.get_job(record["job_id"])["payload"]
+    assert Path(payload["source"]).exists()
+    assert store.get_run_item("1", run.run_id, "occ-file-1").job_id == record["job_id"]
+    shutil.rmtree(payload["temp_dir"], ignore_errors=True)
+
+
 def test_run_bound_file_commit_then_throw_preserves_accepted_staging(
     media_ingest_jobs_client,
     monkeypatch,
@@ -1683,7 +2082,7 @@ def test_run_bound_file_commit_then_throw_preserves_accepted_staging(
     shutil.rmtree(payload["temp_dir"], ignore_errors=True)
 
 
-def test_pending_file_retry_uses_current_validated_bytes_and_cleans_old_staging(
+def test_pending_file_retry_reuses_completed_validated_staging(
     media_ingest_jobs_client,
     monkeypatch,
 ):
@@ -1740,6 +2139,15 @@ def test_pending_file_retry_uses_current_validated_bytes_and_cleans_old_staging(
     assert first.status_code == 207, first.text
     assert len(staged_dirs) == 1
     assert staged_dirs[0].exists()
+    assert (staged_dirs[0] / ingest_jobs._RUN_FILE_STAGING_MANIFEST).is_file()
+    assert (
+        ingest_jobs._read_run_file_staging_manifest(
+            temp_dir=str(staged_dirs[0]),
+            batch_id=str(pending_batch),
+            idempotency_identity=str(store.get_run_item("1", run.run_id, "occ-file-1").idempotency_identity),
+        )
+        is not None
+    )
 
     second = media_ingest_jobs_client.post(
         "/api/v1/media/ingest/jobs",
@@ -1750,16 +2158,277 @@ def test_pending_file_retry_uses_current_validated_bytes_and_cleans_old_staging(
 
     assert second.status_code == 200, second.text
     assert len(create_calls) == 2
-    assert len(staged_dirs) == 2
+    assert len(staged_dirs) == 1
     job = manager.get_job(second.json()["submissions"][0]["job_id"])
     payload = json.loads(job["payload"]) if isinstance(job["payload"], str) else job["payload"]
     assert create_calls[1]["batch_id"] == pending_batch
-    assert Path(payload["source"]).read_bytes() == b"new!"
-    assert Path(payload["temp_dir"]) == staged_dirs[1]
-    assert not staged_dirs[0].exists()
-    assert staged_dirs[1].exists()
+    assert Path(payload["source"]).read_bytes() == b"old!"
+    assert Path(payload["temp_dir"]) == staged_dirs[0]
+    assert staged_dirs[0].exists()
     assert store.get_run_item("1", run.run_id, "occ-file-1").job_id == job["id"]
     shutil.rmtree(payload["temp_dir"], ignore_errors=True)
+
+
+def test_pending_file_retry_with_incomplete_manifest_preserves_prior_directory(
+    media_ingest_jobs_client,
+    monkeypatch,
+):
+    _manager, store, run = _seed_occurrence_run(include_file=True)
+    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
+    from tldw_Server_API.app.core.Jobs import manager as jobs_manager
+
+    original_lookup = jobs_manager.JobManager.get_job_by_idempotency
+    original_save = ingest_jobs.save_uploaded_files
+    staged_dirs: list[Path] = []
+    lookup_calls = 0
+
+    def ambiguous_create(**_kwargs):
+        raise RuntimeError("job commit outcome unavailable")
+
+    def unavailable_then_empty(self, **kwargs):
+        nonlocal lookup_calls
+        lookup_calls += 1
+        if lookup_calls == 1:
+            raise RuntimeError("jobs lookup unavailable")
+        return original_lookup(self, **kwargs)
+
+    async def capture_staging(*args, temp_dir, **kwargs):
+        staged_dirs.append(Path(temp_dir))
+        return await original_save(*args, temp_dir=temp_dir, **kwargs)
+
+    monkeypatch.setattr(ingest_jobs, "_create_media_ingest_job", ambiguous_create, raising=True)
+    monkeypatch.setattr(ingest_jobs, "save_uploaded_files", capture_staging, raising=True)
+    monkeypatch.setattr(
+        jobs_manager.JobManager,
+        "get_job_by_idempotency",
+        unavailable_then_empty,
+        raising=True,
+    )
+    data = {
+        "media_type": "audio",
+        "run_id": run.run_id,
+        "file_occurrence_ids": json.dumps(["occ-file-1"]),
+        "file_attempts": json.dumps([1]),
+    }
+
+    first = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=data,
+        files=[("files", ("clip.mp3", b"old!", "audio/mpeg"))],
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+    prior = store.get_run_item("1", run.run_id, "occ-file-1").staging_temp_dir
+    assert first.status_code == 207, first.text
+    assert prior is not None and Path(prior).exists()
+    (Path(prior) / ingest_jobs._RUN_FILE_STAGING_MANIFEST).unlink()
+    second = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=data,
+        files=[("files", ("clip.mp3", b"new!", "audio/mpeg"))],
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert second.status_code == 207, second.text
+    assert second.json()["submissions"][0]["error_code"] == "occurrence_binding_pending"
+    assert len(staged_dirs) == 1
+    assert Path(prior).exists()
+    assert store.get_run_item("1", run.run_id, "occ-file-1").staging_temp_dir == prior
+    shutil.rmtree(prior, ignore_errors=True)
+
+
+def test_abandoned_staging_cleanup_deletes_only_unreferenced_exact_candidates(tmp_path, monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
+
+    monkeypatch.setattr(ingest_jobs.tempfile, "gettempdir", lambda: str(tmp_path), raising=True)
+    orphan_identity = "playlist-ingest-v1:orphan"
+    live_identity = "playlist-ingest-v1:live"
+    orphan_batch = "batch-orphan"
+    live_batch = "batch-live"
+    orphan_prefix = ingest_jobs._run_file_staging_prefix(
+        batch_id=orphan_batch,
+        idempotency_identity=orphan_identity,
+    )
+    live_prefix = ingest_jobs._run_file_staging_prefix(
+        batch_id=live_batch,
+        idempotency_identity=live_identity,
+    )
+    orphan_dir = tmp_path / f"{orphan_prefix}one"
+    live_dir = tmp_path / f"{live_prefix}one"
+    unrelated_dir = tmp_path / "media_ingest_job_unrelated"
+    for directory in (orphan_dir, live_dir, unrelated_dir):
+        directory.mkdir()
+    candidates = [
+        SimpleNamespace(
+            run_id="run-orphan",
+            occurrence_id="occ-orphan",
+            attempt=1,
+            batch_id=orphan_batch,
+            idempotency_identity=orphan_identity,
+            submission_queue="default",
+            staging_temp_dir=str(orphan_dir),
+        ),
+        SimpleNamespace(
+            run_id="run-live",
+            occurrence_id="occ-live",
+            attempt=1,
+            batch_id=live_batch,
+            idempotency_identity=live_identity,
+            submission_queue="default",
+            staging_temp_dir=str(live_dir),
+        ),
+    ]
+    cleared: list[str] = []
+
+    class _Store:
+        def list_abandoned_run_item_staging(self, *_args, **_kwargs):
+            return candidates
+
+        def has_live_run_item_staging_reference(self, *_args, **_kwargs):
+            return False
+
+        def clear_run_item_staging(self, _owner, run_id, _occurrence_id, **_kwargs):
+            cleared.append(run_id)
+            return True
+
+    class _Jobs:
+        def get_job_by_idempotency(self, **kwargs):
+            return {"id": 7} if kwargs["idempotency_key"] == live_identity else None
+
+        def list_jobs(self, **_kwargs):
+            return []
+
+        def normalize_job_binding_view(self, job, *, owner_user_id):
+            return job if job.get("owner_user_id") == owner_user_id else None
+
+    deleted = ingest_jobs._cleanup_abandoned_run_file_staging(
+        store=_Store(),
+        jm=_Jobs(),
+        owner_user_id="1",
+        retention_seconds=3600,
+        limit=10,
+    )
+
+    assert deleted == 1
+    assert cleared == ["run-orphan"]
+    assert not orphan_dir.exists()
+    assert live_dir.exists()
+    assert unrelated_dir.exists()
+
+
+def test_abandoned_staging_cleanup_keeps_metadata_when_exact_deletion_fails(tmp_path, monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
+
+    monkeypatch.setattr(ingest_jobs.tempfile, "gettempdir", lambda: str(tmp_path), raising=True)
+    identity = "playlist-ingest-v1:permission"
+    batch = "batch-permission"
+    prefix = ingest_jobs._run_file_staging_prefix(batch_id=batch, idempotency_identity=identity)
+    staging_dir = tmp_path / f"{prefix}one"
+    staging_dir.mkdir()
+    candidate = SimpleNamespace(
+        run_id="run-permission",
+        occurrence_id="occ-permission",
+        attempt=1,
+        batch_id=batch,
+        idempotency_identity=identity,
+        submission_queue="default",
+        staging_temp_dir=str(staging_dir),
+    )
+    cleared: list[str] = []
+
+    class _Store:
+        def list_abandoned_run_item_staging(self, *_args, **_kwargs):
+            return [candidate]
+
+        def has_live_run_item_staging_reference(self, *_args, **_kwargs):
+            return False
+
+        def clear_run_item_staging(self, *_args, **_kwargs):
+            cleared.append("cleared")
+            return True
+
+    class _Jobs:
+        def get_job_by_idempotency(self, **_kwargs):
+            return None
+
+        def list_jobs(self, **_kwargs):
+            return []
+
+        def normalize_job_binding_view(self, job, *, owner_user_id):
+            return job if job.get("owner_user_id") == owner_user_id else None
+
+    def deny_delete(*_args, **_kwargs):
+        raise PermissionError("busy")
+
+    monkeypatch.setattr(ingest_jobs.shutil, "rmtree", deny_delete, raising=True)
+
+    deleted = ingest_jobs._cleanup_abandoned_run_file_staging(
+        store=_Store(),
+        jm=_Jobs(),
+        owner_user_id="1",
+        retention_seconds=3600,
+        limit=10,
+    )
+
+    assert deleted == 0
+    assert cleared == []
+    assert staging_dir.exists()
+
+
+@pytest.mark.parametrize("reference_kind", ["run_item", "job"])
+def test_abandoned_staging_cleanup_preserves_aliased_live_path(tmp_path, monkeypatch, reference_kind):
+    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
+
+    monkeypatch.setattr(ingest_jobs.tempfile, "gettempdir", lambda: str(tmp_path), raising=True)
+    identity = "playlist-ingest-v1:alias"
+    batch = "batch-alias"
+    prefix = ingest_jobs._run_file_staging_prefix(batch_id=batch, idempotency_identity=identity)
+    staging_dir = tmp_path / f"{prefix}one"
+    staging_dir.mkdir()
+    candidate = SimpleNamespace(
+        run_id="run-alias",
+        occurrence_id="occ-alias",
+        attempt=1,
+        batch_id=batch,
+        idempotency_identity=identity,
+        submission_queue="default",
+        staging_temp_dir=str(staging_dir),
+    )
+    cleared: list[str] = []
+
+    class _Store:
+        def list_abandoned_run_item_staging(self, *_args, **_kwargs):
+            return [candidate]
+
+        def has_live_run_item_staging_reference(self, *_args, **_kwargs):
+            return reference_kind == "run_item"
+
+        def clear_run_item_staging(self, *_args, **_kwargs):
+            cleared.append("cleared")
+            return True
+
+    class _Jobs:
+        def get_job_by_idempotency(self, **_kwargs):
+            return None
+
+        def list_jobs(self, **_kwargs):
+            if reference_kind != "job":
+                return []
+            return [{"id": 7, "owner_user_id": "1", "payload": {"temp_dir": str(staging_dir)}}]
+
+        def normalize_job_binding_view(self, job, *, owner_user_id):
+            return job if job.get("owner_user_id") == owner_user_id else None
+
+    deleted = ingest_jobs._cleanup_abandoned_run_file_staging(
+        store=_Store(),
+        jm=_Jobs(),
+        owner_user_id="1",
+        retention_seconds=3600,
+        limit=10,
+    )
+
+    assert deleted == 0
+    assert cleared == []
+    assert staging_dir.exists()
 
 
 def test_pending_file_retry_preserves_staging_of_job_found_during_reconciliation(
@@ -1889,6 +2558,280 @@ def test_concurrent_retry_cooperatively_creates_without_replacing_reservation(
     assert first.json()["submissions"][0]["batch_id"] == create_inputs[0][0]
     assert second.json()["submissions"][0]["batch_id"] == create_inputs[0][0]
     assert store.get_run_item("1", run.run_id, "occ-url-1").job_id == jobs[0]["id"]
+
+
+@pytest.mark.parametrize("original_commits_first", [True, False])
+def test_concurrent_file_retry_cannot_delete_shared_completed_staging(
+    media_ingest_jobs_client,
+    monkeypatch,
+    original_commits_first,
+):
+    manager, store, run = _seed_occurrence_run(include_file=True)
+    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
+
+    original_create = ingest_jobs._create_media_ingest_job
+    original_save = ingest_jobs.save_uploaded_files
+    first_entered = Event()
+    release_first = Event()
+    first_committed = Event()
+    calls_lock = Lock()
+    create_calls = 0
+    staged_dirs: list[Path] = []
+
+    async def capture_staging(*args, temp_dir, **kwargs):
+        staged_dirs.append(Path(temp_dir))
+        return await original_save(*args, temp_dir=temp_dir, **kwargs)
+
+    def controlled_create(**kwargs):
+        nonlocal create_calls
+        with calls_lock:
+            create_calls += 1
+            call_number = create_calls
+        if call_number == 1:
+            first_entered.set()
+            assert release_first.wait(10)
+            row = original_create(**kwargs)
+            first_committed.set()
+            return row
+        if original_commits_first:
+            release_first.set()
+            assert first_committed.wait(10)
+            return original_create(**kwargs)
+        row = original_create(**kwargs)
+        release_first.set()
+        return row
+
+    monkeypatch.setattr(ingest_jobs, "save_uploaded_files", capture_staging, raising=True)
+    monkeypatch.setattr(ingest_jobs, "_create_media_ingest_job", controlled_create, raising=True)
+    data = {
+        "media_type": "audio",
+        "run_id": run.run_id,
+        "file_occurrence_ids": json.dumps(["occ-file-1"]),
+        "file_attempts": json.dumps([1]),
+    }
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        first_future = pool.submit(
+            media_ingest_jobs_client.post,
+            "/api/v1/media/ingest/jobs",
+            data=data,
+            files=[("files", ("clip.mp3", b"original", "audio/mpeg"))],
+            headers={"X-API-KEY": "test-api-key-12345"},
+        )
+        assert first_entered.wait(10)
+        with TestClient(media_ingest_jobs_client.app) as second_client:
+            second = second_client.post(
+                "/api/v1/media/ingest/jobs",
+                data=data,
+                files=[("files", ("clip.mp3", b"retry", "audio/mpeg"))],
+                headers={"X-API-KEY": "test-api-key-12345"},
+            )
+        first = first_future.result(timeout=10)
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert create_calls == 2
+    assert len(staged_dirs) == 1
+    job = manager.get_job(first.json()["submissions"][0]["job_id"])
+    payload = json.loads(job["payload"]) if isinstance(job["payload"], str) else job["payload"]
+    assert Path(payload["temp_dir"]) == staged_dirs[0]
+    assert Path(payload["source"]).read_bytes() == b"original"
+    assert staged_dirs[0].exists()
+    assert second.json()["submissions"][0]["job_id"] == job["id"]
+    assert store.get_run_item("1", run.run_id, "occ-file-1").job_id == job["id"]
+    shutil.rmtree(payload["temp_dir"], ignore_errors=True)
+
+
+def test_original_file_create_failure_preserves_staging_until_retry_commits(
+    media_ingest_jobs_client,
+    monkeypatch,
+):
+    manager, store, run = _seed_occurrence_run(include_file=True)
+    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
+
+    original_create = ingest_jobs._create_media_ingest_job
+    original_save = ingest_jobs.save_uploaded_files
+    first_entered = Event()
+    fail_first = Event()
+    retry_waiting = Event()
+    allow_retry_commit = Event()
+    calls_lock = Lock()
+    create_calls = 0
+    staged_dirs: list[Path] = []
+
+    async def capture_staging(*args, temp_dir, **kwargs):
+        staged_dirs.append(Path(temp_dir))
+        return await original_save(*args, temp_dir=temp_dir, **kwargs)
+
+    def controlled_create(**kwargs):
+        nonlocal create_calls
+        with calls_lock:
+            create_calls += 1
+            call_number = create_calls
+        if call_number == 1:
+            first_entered.set()
+            assert fail_first.wait(10)
+            raise RuntimeError("first creator failed")
+        retry_waiting.set()
+        assert allow_retry_commit.wait(10)
+        return original_create(**kwargs)
+
+    monkeypatch.setattr(ingest_jobs, "save_uploaded_files", capture_staging, raising=True)
+    monkeypatch.setattr(ingest_jobs, "_create_media_ingest_job", controlled_create, raising=True)
+    data = {
+        "media_type": "audio",
+        "run_id": run.run_id,
+        "file_occurrence_ids": json.dumps(["occ-file-1"]),
+        "file_attempts": json.dumps([1]),
+    }
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first_future = pool.submit(
+            media_ingest_jobs_client.post,
+            "/api/v1/media/ingest/jobs",
+            data=data,
+            files=[("files", ("clip.mp3", b"shared", "audio/mpeg"))],
+            headers={"X-API-KEY": "test-api-key-12345"},
+        )
+        assert first_entered.wait(10)
+        with TestClient(media_ingest_jobs_client.app) as second_client:
+            second_future = pool.submit(
+                second_client.post,
+                "/api/v1/media/ingest/jobs",
+                data=data,
+                files=[("files", ("clip.mp3", b"unused", "audio/mpeg"))],
+                headers={"X-API-KEY": "test-api-key-12345"},
+            )
+            assert retry_waiting.wait(10)
+            fail_first.set()
+            first = first_future.result(timeout=10)
+            allow_retry_commit.set()
+            second = second_future.result(timeout=10)
+
+    assert first.status_code == 207, first.text
+    assert second.status_code == 200, second.text
+    assert create_calls == 2
+    assert len(staged_dirs) == 1
+    job = manager.get_job(second.json()["submissions"][0]["job_id"])
+    payload = json.loads(job["payload"]) if isinstance(job["payload"], str) else job["payload"]
+    assert Path(payload["temp_dir"]) == staged_dirs[0]
+    assert Path(payload["source"]).read_bytes() == b"shared"
+    assert staged_dirs[0].exists()
+    assert store.get_run_item("1", run.run_id, "occ-file-1").job_id == job["id"]
+    shutil.rmtree(payload["temp_dir"], ignore_errors=True)
+
+
+def test_file_retry_waits_while_original_has_not_recorded_staging(
+    media_ingest_jobs_client,
+    monkeypatch,
+):
+    manager, store, run = _seed_occurrence_run(include_file=True)
+    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video import playlist_ingest_store
+
+    original_record = playlist_ingest_store.PlaylistIngestStore.record_run_item_staging
+    original_save = ingest_jobs.save_uploaded_files
+    first_record_entered = Event()
+    release_first_record = Event()
+    calls_lock = Lock()
+    record_calls = 0
+    staged_dirs: list[Path] = []
+
+    def controlled_record(self, *args, **kwargs):
+        nonlocal record_calls
+        with calls_lock:
+            record_calls += 1
+            call_number = record_calls
+        if call_number == 1:
+            first_record_entered.set()
+            assert release_first_record.wait(10)
+        return original_record(self, *args, **kwargs)
+
+    async def capture_staging(*args, temp_dir, **kwargs):
+        staged_dirs.append(Path(temp_dir))
+        return await original_save(*args, temp_dir=temp_dir, **kwargs)
+
+    monkeypatch.setattr(
+        playlist_ingest_store.PlaylistIngestStore,
+        "record_run_item_staging",
+        controlled_record,
+        raising=True,
+    )
+    monkeypatch.setattr(ingest_jobs, "save_uploaded_files", capture_staging, raising=True)
+    data = {
+        "media_type": "audio",
+        "run_id": run.run_id,
+        "file_occurrence_ids": json.dumps(["occ-file-1"]),
+        "file_attempts": json.dumps([1]),
+    }
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        first_future = pool.submit(
+            media_ingest_jobs_client.post,
+            "/api/v1/media/ingest/jobs",
+            data=data,
+            files=[("files", ("clip.mp3", b"original", "audio/mpeg"))],
+            headers={"X-API-KEY": "test-api-key-12345"},
+        )
+        assert first_record_entered.wait(10)
+        try:
+            with TestClient(media_ingest_jobs_client.app) as second_client:
+                second = second_client.post(
+                    "/api/v1/media/ingest/jobs",
+                    data=data,
+                    files=[("files", ("clip.mp3", b"retry", "audio/mpeg"))],
+                    headers={"X-API-KEY": "test-api-key-12345"},
+                )
+        finally:
+            release_first_record.set()
+        first = first_future.result(timeout=10)
+
+    assert second.status_code == 207, second.text
+    assert second.json()["submissions"][0]["error_code"] == "occurrence_binding_pending"
+    assert first.status_code == 200, first.text
+    assert record_calls == 1
+    assert len(staged_dirs) == 1
+    job = manager.get_job(first.json()["submissions"][0]["job_id"])
+    payload = json.loads(job["payload"]) if isinstance(job["payload"], str) else job["payload"]
+    assert Path(payload["source"]).read_bytes() == b"original"
+    assert Path(payload["temp_dir"]) == staged_dirs[0]
+    assert store.get_run_item("1", run.run_id, "occ-file-1").job_id == job["id"]
+    shutil.rmtree(payload["temp_dir"], ignore_errors=True)
+
+
+@pytest.mark.parametrize("reserved_name", [".tldw-upload.json", ".TLDW-UPLOAD.json"])
+def test_staging_manifest_writer_rejects_reserved_upload_filename(
+    tmp_path,
+    monkeypatch,
+    reserved_name,
+):
+    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
+
+    monkeypatch.setattr(ingest_jobs.tempfile, "gettempdir", lambda: str(tmp_path), raising=True)
+    batch_id = "batch-manifest-collision"
+    identity = "playlist-ingest-v1:manifest-collision"
+    prefix = ingest_jobs._run_file_staging_prefix(
+        batch_id=batch_id,
+        idempotency_identity=identity,
+    )
+    staging_dir = tmp_path / f"{prefix}one"
+    staging_dir.mkdir()
+    uploaded = staging_dir / reserved_name
+    uploaded.write_bytes(b"original upload bytes")
+
+    with pytest.raises(ValueError, match="invalid staged upload"):
+        ingest_jobs._write_run_file_staging_manifest(
+            temp_dir=str(staging_dir),
+            batch_id=batch_id,
+            idempotency_identity=identity,
+            saved_file={
+                "path": uploaded,
+                "original_filename": reserved_name,
+                "input_ref": reserved_name,
+            },
+        )
+
+    assert uploaded.read_bytes() == b"original upload bytes"
 
 
 def test_original_failure_cannot_release_reservation_after_retry_creates_job(
@@ -2223,7 +3166,10 @@ def test_run_bound_rate_limit_preserves_reservation_for_retry_and_stops_later_en
 
     assert first.status_code == 429, first.text
     assert first.headers["Retry-After"] == "17"
-    assert first.json()["detail"] == "Quota exceeded: submits per minute"
+    assert first.json()["detail"] == {
+        "code": "jobs_submit_rate_limited",
+        "message": "Quota exceeded: submits per minute",
+    }
     assert pending.state == "submit_pending"
     assert pending.batch_id is not None
     assert store.get_run_item("1", run.run_id, "occ-url-2").state == "staged"
