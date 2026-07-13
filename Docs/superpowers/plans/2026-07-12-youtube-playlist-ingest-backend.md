@@ -363,6 +363,13 @@ git commit -m "feat: bind media jobs to ingest occurrences (TASK-12110)"
 - [x] Preserve run-bound submit-pending reservations on every retryable submission failure while leaving legacy non-run behavior unchanged.
 - [x] Re-run focused, PostgreSQL, property, static, and Bandit verification, update TASK-12112, and commit.
 
+**Cooperative-retry status propagation follow-up:** Complete
+
+- [x] Add RED coverage proving generic HTTP 429/503 remains global after a preserved-reservation retry confirms no exact job.
+- [x] Preserve Retry-After, stop later entries, and leave the exact reservation submit-pending.
+- [x] Keep exact committed-job reconciliation authoritative over the prior create exception.
+- [x] Re-run focused, PostgreSQL, property, static, and Bandit verification, update TASK-12112, and commit.
+
 ### Task 8: Add run routes, reconciliation, event replay, cancellation, and retry
 
 - [ ] **Step 1: Write failing run-route tests**

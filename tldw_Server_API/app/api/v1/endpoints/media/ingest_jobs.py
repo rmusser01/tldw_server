@@ -1273,7 +1273,7 @@ async def _submit_run_bound_media_ingest_jobs(
 
             if temp_dir_path:
                 _cleanup_dir(temp_dir_path)
-            if owns_reservation and isinstance(exc, HTTPException) and exc.status_code in {429, 503}:
+            if isinstance(exc, HTTPException) and exc.status_code in {429, 503}:
                 raise
             if not owns_reservation:
                 submissions.append(
