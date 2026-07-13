@@ -45,6 +45,8 @@ modified_files:
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
 Execute the approved backend implementation plan for owner-scoped asynchronous YouTube playlist inspection, occurrence materialization, ingest runs, duplicate-action resolution, Jobs/worker integration, status/events/cancellation/retry, cleanup, and capability rollout.
+
+Progress through Backend Task 4: version-2 playlist preflight POST/summary/items/materialization/DELETE routes, transactional capacity admission and job bind/publish, owner isolation, safe cursor/error mapping, legacy compatibility, and read permission/rate boundaries are implemented and independently under review. Task 4 TDD: initial RED 13/13 missing-route/service failures; review RED 3 failures/1 pass for read dependencies and invalid cursors. Final focused verification: 25 passed. Broad verification: 141 passed, 6 PostgreSQL fixture-policy skips. PostgreSQL advisory-lock ordering passed; live concurrency collected and policy-skipped. Black, Ruff, compileall, git diff checks, and Bandit passed with zero Bandit findings.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
