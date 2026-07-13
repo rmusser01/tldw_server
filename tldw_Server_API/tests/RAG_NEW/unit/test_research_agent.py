@@ -750,6 +750,72 @@ async def test_research_loop_normalizes_all_action_numeric_limits(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("action_name", ["image_search", "video_search"])
+async def test_research_loop_media_dedup_uses_normalized_query_and_limit(
+    monkeypatch,
+    action_name,
+):
+    import tldw_Server_API.app.core.Chat.chat_service as chat_service
+
+    responses = iter(
+        [
+            '{"reasoning":"first","action":'
+            f'"{action_name}","params":{{"query":"alpha topic","max_results":2}}}}',
+            '{"reasoning":"different query","action":'
+            f'"{action_name}","params":{{"query":"beta topic","max_results":2}}}}',
+            '{"reasoning":"different limit","action":'
+            f'"{action_name}","params":{{"query":"beta topic","max_results":3}}}}',
+            '{"reasoning":"normalized duplicate","action":'
+            f'"{action_name}","params":{{"query":"  BETA   TOPIC  ","max_results":3}}}}',
+        ]
+    )
+    calls: list[dict[str, object]] = []
+
+    async def fake_chat_call_async(**_kwargs):
+        return next(responses)
+
+    async def capture_action(params):
+        calls.append(dict(params))
+        return ra.ActionOutput(
+            action_name=action_name,
+            success=True,
+            results=[{"id": str(len(calls))}],
+            result_count=1,
+        )
+
+    monkeypatch.setattr(chat_service, "perform_chat_api_call_async", fake_chat_call_async)
+    registry = ra.ActionRegistry()
+    registry.register(
+        ra.ResearchAction(
+            name=action_name,
+            description="media action",
+            schema={},
+            enabled=lambda _classification: True,
+            execute=capture_action,
+        )
+    )
+    classification = QueryClassification(
+        skip_search=False,
+        standalone_query="media dedup",
+    )
+
+    output = await ra.research_loop(
+        query="media dedup",
+        classification=classification,
+        mode="speed",
+        max_iterations=4,
+        registry=registry,
+    )
+
+    assert calls == [
+        {"query": "alpha topic", "max_results": 2},
+        {"query": "beta topic", "max_results": 2},
+        {"query": "beta topic", "max_results": 3},
+    ]
+    assert output.metadata["action_dedup"]["duplicates_skipped"] == 1
+
+
+@pytest.mark.asyncio
 async def test_research_loop_normalizes_known_action_name_case(monkeypatch):
     import tldw_Server_API.app.core.Chat.chat_service as chat_service
 

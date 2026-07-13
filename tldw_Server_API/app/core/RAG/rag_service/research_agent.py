@@ -1267,6 +1267,18 @@ async def research_loop(
                 _normalized_tuple(params.get("sources") or []),
                 params.get("top_k", 10),
             )
+        if action_name == "image_search":
+            return (
+                action_name,
+                q,
+                params.get("max_results", 10),
+            )
+        if action_name == "video_search":
+            return (
+                action_name,
+                q,
+                params.get("max_results", 10),
+            )
         return (action_name,)
 
     async def _emit(event_type: str, data: dict[str, Any]) -> None:
