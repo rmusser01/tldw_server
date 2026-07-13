@@ -928,6 +928,57 @@ def test_postgres_snapshot_replacement_locks_mutable_unexpired_parent(store, mon
     assert locked_read.rstrip().endswith("FOR UPDATE")
 
 
+def test_postgres_preflight_admission_uses_transaction_advisory_lock_before_capacity_counts(
+    store,
+    monkeypatch,
+):
+    queries: list[tuple[str, tuple]] = []
+
+    class _Result:
+        rowcount = 1
+
+        def __init__(self, row=None):
+            self.row = row
+
+        def fetchone(self):
+            return self.row
+
+    @contextmanager
+    def fake_connection(*, write):
+        assert write is True
+        yield object()
+
+    def fake_query(_db, sql, params=()):
+        queries.append((sql, tuple(params)))
+        if "COUNT(*) AS active_count" in sql:
+            return _Result({"active_count": 0})
+        return _Result()
+
+    store._postgres = True
+    monkeypatch.setattr(store, "_connection", fake_connection)
+    monkeypatch.setattr(store, "_query", fake_query)
+    monkeypatch.setattr(store, "get_preflight", lambda *_args: object())
+
+    store.reserve_preflight(
+        "owner-1",
+        source_url="https://www.youtube.com/playlist?list=PLlock",
+        source_kind="youtube_playlist",
+        playlist_id="PLlock",
+        expires_at=NOW + timedelta(hours=1),
+        global_capacity=2,
+        owner_capacity=1,
+    )
+
+    advisory_index = next(index for index, (sql, _params) in enumerate(queries) if "pg_advisory_xact_lock" in sql)
+    count_indexes = [index for index, (sql, _params) in enumerate(queries) if "COUNT(*) AS active_count" in sql]
+    insert_index = next(
+        index for index, (sql, _params) in enumerate(queries) if "INSERT INTO playlist_preflights" in sql
+    )
+    assert len(count_indexes) == 2
+    assert advisory_index < min(count_indexes) < insert_index
+    assert queries[advisory_index][1] == (store._jobs._pg_advisory_key("playlist_preflight_admission"),)
+
+
 def test_postgres_ready_guard_locks_preflight_then_exact_active_lease(store, monkeypatch):
     queries: list[tuple[str, tuple]] = []
 

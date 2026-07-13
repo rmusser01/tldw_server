@@ -6,6 +6,7 @@ import base64
 import hashlib
 import hmac
 import json
+import os
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -39,6 +40,10 @@ class PlaylistIngestNotFoundError(LookupError):
 
 class PlaylistIngestConflictError(RuntimeError):
     """Raised when immutable or compare-and-set state has changed."""
+
+
+class PlaylistPreflightCapacityError(RuntimeError):
+    """Raised when transactional preflight admission has no free slot."""
 
 
 class PlaylistPreflightLeaseLostError(PlaylistIngestConflictError):
@@ -498,6 +503,232 @@ class PlaylistIngestStore:
                 ),
             )
         return self.get_preflight(owner, preflight_id)
+
+    def reserve_preflight(
+        self,
+        owner_user_id: str,
+        *,
+        source_url: str,
+        source_kind: str,
+        expires_at: datetime,
+        global_capacity: int,
+        owner_capacity: int,
+        playlist_id: str | None = None,
+    ) -> PlaylistPreflightRecord:
+        """Atomically reserve bounded global and owner preflight capacity."""
+        owner = self._owner(owner_user_id)
+        if type(global_capacity) is not int or global_capacity < 1:
+            raise ValueError("global_capacity must be positive")
+        if type(owner_capacity) is not int or owner_capacity < 1:
+            raise ValueError("owner_capacity must be positive")
+        preflight_id = str(uuid4())
+        now = self._now()
+        expires = self._future_expiry(expires_at, now=now)
+        with self._connection(write=True) as db:
+            if self._postgres:
+                self._query(
+                    db,
+                    "SELECT pg_advisory_xact_lock(?)",
+                    (self._jobs._pg_advisory_key("playlist_preflight_admission"),),
+                )
+            global_row = self._query(
+                db,
+                """
+                SELECT COUNT(*) AS active_count FROM playlist_preflights
+                WHERE status IN ('pending', 'running') AND expires_at > ?
+                """,
+                (self._db_datetime(now),),
+            ).fetchone()
+            owner_row = self._query(
+                db,
+                """
+                SELECT COUNT(*) AS active_count FROM playlist_preflights
+                WHERE owner_user_id = ? AND status IN ('pending', 'running')
+                  AND expires_at > ?
+                """,
+                (owner, self._db_datetime(now)),
+            ).fetchone()
+            if (
+                int(self._row_dict(global_row)["active_count"]) >= global_capacity
+                or int(self._row_dict(owner_row)["active_count"]) >= owner_capacity
+            ):
+                raise PlaylistPreflightCapacityError("preflight_busy")
+            self._query(
+                db,
+                """
+                INSERT INTO playlist_preflights (
+                    preflight_id, owner_user_id, status, source_url, source_kind,
+                    playlist_id, job_id, created_at, updated_at, expires_at
+                ) VALUES (?, ?, 'pending', ?, ?, ?, NULL, ?, ?, ?)
+                """,
+                (
+                    preflight_id,
+                    owner,
+                    str(source_url),
+                    str(source_kind),
+                    playlist_id,
+                    self._db_datetime(now),
+                    self._db_datetime(now),
+                    self._db_datetime(expires),
+                ),
+            )
+        return self.get_preflight(owner, preflight_id)
+
+    def bind_preflight_job(
+        self,
+        owner_user_id: str,
+        preflight_id: str,
+        job_id: int,
+    ) -> PlaylistPreflightRecord:
+        """Bind and publish one scheduled internal job in the same transaction."""
+        owner = self._owner(owner_user_id)
+        if type(job_id) is not int or job_id < 1:
+            raise ValueError("job_id must be positive")
+        now = self._now()
+        with self._connection(write=True) as db:
+            preflight_query = (
+                """
+                SELECT status, job_id FROM playlist_preflights
+                WHERE owner_user_id = ? AND preflight_id = ? AND expires_at > ?
+                FOR UPDATE
+                """
+                if self._postgres
+                else """
+                SELECT status, job_id FROM playlist_preflights
+                WHERE owner_user_id = ? AND preflight_id = ? AND expires_at > ?
+                """
+            )
+            preflight = self._query(
+                db,
+                preflight_query,
+                (owner, str(preflight_id), self._db_datetime(now)),
+            ).fetchone()
+            if preflight is None:
+                raise self._not_found()
+            preflight_data = self._row_dict(preflight)
+            if str(preflight_data["status"]) != "pending" or preflight_data.get("job_id") is not None:
+                raise PlaylistIngestConflictError("preflight job is already bound")
+
+            job_query = (
+                """
+                SELECT id, owner_user_id, domain, queue, job_type, status, available_at
+                FROM jobs WHERE id = ? FOR UPDATE
+                """
+                if self._postgres
+                else """
+                SELECT id, owner_user_id, domain, queue, job_type, status, available_at
+                FROM jobs WHERE id = ?
+                """
+            )
+            job = self._query(db, job_query, (job_id,)).fetchone()
+            if job is None:
+                raise PlaylistIngestConflictError("preflight job is unavailable")
+            job_data = self._row_dict(job)
+            available_at = self._datetime(job_data["available_at"])
+            if (
+                str(job_data.get("owner_user_id") or "") != owner
+                or str(job_data.get("domain") or "") != "media_ingest"
+                or str(job_data.get("job_type") or "") != "playlist_preflight"
+                or str(job_data.get("status") or "") != "queued"
+                or available_at <= now
+            ):
+                raise PlaylistIngestConflictError("preflight job is unavailable")
+
+            self._query(
+                db,
+                """
+                UPDATE playlist_preflights SET job_id = ?, updated_at = ?
+                WHERE owner_user_id = ? AND preflight_id = ? AND job_id IS NULL
+                """,
+                (job_id, self._db_datetime(now), owner, str(preflight_id)),
+            )
+            published = self._query(
+                db,
+                """
+                UPDATE jobs SET available_at = ?, updated_at = ?
+                WHERE id = ? AND owner_user_id = ? AND status = 'queued'
+                """,
+                (
+                    self._db_datetime(now),
+                    self._db_datetime(now),
+                    job_id,
+                    owner,
+                ),
+            )
+            if published.rowcount != 1:
+                raise PlaylistIngestConflictError("preflight job is unavailable")
+            if self._jobs._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")):
+                if self._postgres:
+                    self._query(
+                        db,
+                        """
+                        UPDATE job_counters
+                        SET ready_count = ready_count + 1,
+                            scheduled_count = GREATEST(scheduled_count - 1, 0),
+                            updated_at = NOW()
+                        WHERE domain = ? AND queue = ? AND job_type = ?
+                        """,
+                        ("media_ingest", str(job_data["queue"]), "playlist_preflight"),
+                    )
+                else:
+                    self._query(
+                        db,
+                        """
+                        UPDATE job_counters
+                        SET ready_count = ready_count + 1,
+                            scheduled_count = CASE
+                                WHEN scheduled_count > 0 THEN scheduled_count - 1 ELSE 0 END,
+                            updated_at = DATETIME('now')
+                        WHERE domain = ? AND queue = ? AND job_type = ?
+                        """,
+                        ("media_ingest", str(job_data["queue"]), "playlist_preflight"),
+                    )
+        return self.get_preflight(owner, preflight_id)
+
+    def expire_preflight(
+        self,
+        owner_user_id: str,
+        preflight_id: str,
+        *,
+        status: str = "cancelled",
+    ) -> int | None:
+        """Expire one owner resource and return its linked job for cancellation."""
+        owner = self._owner(owner_user_id)
+        if status not in {"blocked", "cancelled", "expired"}:
+            raise ValueError("invalid terminal preflight status")
+        now = self._now()
+        with self._connection(write=True) as db:
+            query = (
+                """
+                SELECT job_id FROM playlist_preflights
+                WHERE owner_user_id = ? AND preflight_id = ? FOR UPDATE
+                """
+                if self._postgres
+                else """
+                SELECT job_id FROM playlist_preflights
+                WHERE owner_user_id = ? AND preflight_id = ?
+                """
+            )
+            row = self._query(db, query, (owner, str(preflight_id))).fetchone()
+            if row is None:
+                raise self._not_found()
+            self._query(
+                db,
+                """
+                UPDATE playlist_preflights
+                SET status = ?, updated_at = ?, expires_at = ?
+                WHERE owner_user_id = ? AND preflight_id = ?
+                """,
+                (
+                    status,
+                    self._db_datetime(now),
+                    self._db_datetime(now),
+                    owner,
+                    str(preflight_id),
+                ),
+            )
+            job_id = self._row_dict(row).get("job_id")
+        return int(job_id) if job_id is not None else None
 
     def get_preflight(self, owner_user_id: str, preflight_id: str) -> PlaylistPreflightRecord:
         """Return one owner-scoped preflight or the generic not-found error."""
@@ -1364,5 +1595,6 @@ __all__ = [
     "PlaylistMaterializationRecord",
     "PlaylistPage",
     "PlaylistPreflightLeaseLostError",
+    "PlaylistPreflightCapacityError",
     "PlaylistPreflightRecord",
 ]

@@ -1,6 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
-from threading import Event
+from threading import Event, Lock
 
 import pytest
 
@@ -94,6 +94,55 @@ def test_playlist_store_postgres_matches_sqlite_contract(pg_temp_db, monkeypatch
     )
     assert store.list_run_events("pg-owner", run.run_id)[0].event_id == event.event_id
     assert store.get_run("pg-owner", run.run_id).version == 2
+
+
+def test_postgres_preflight_admission_serializes_empty_capacity_predicate(pg_temp_db, monkeypatch):
+    monkeypatch.setenv("TEST_MODE", "true")
+    monkeypatch.setenv("PLAYLIST_PREFLIGHT_GLOBAL_CAPACITY", "1")
+    monkeypatch.setenv("PLAYLIST_PREFLIGHT_OWNER_CAPACITY", "1")
+    dsn = str(pg_temp_db["dsn"])
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
+        PlaylistIngestService,
+        PlaylistPreflightBusyError,
+    )
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    from tldw_Server_API.app.core.Jobs.pg_migrations import ensure_jobs_tables_pg
+
+    ensure_jobs_tables_pg(dsn)
+    barrier = Event()
+    ready_count = 0
+    ready_lock = Lock()
+
+    def create() -> str:
+        nonlocal ready_count
+        manager = JobManager(backend="postgres", db_url=dsn, clock=_FixedClock())
+        with ready_lock:
+            ready_count += 1
+            if ready_count == 2:
+                barrier.set()
+        assert barrier.wait(10)
+        try:
+            return (
+                PlaylistIngestService(manager)
+                .create_preflight(
+                    "pg-capacity-owner",
+                    url="https://www.youtube.com/playlist?list=PLpgcapacity",
+                    max_items=20,
+                    timeout_seconds=10,
+                )
+                .preflight_id
+            )
+        except PlaylistPreflightBusyError:
+            return "busy"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _index: create(), range(2)))
+
+    manager = JobManager(backend="postgres", db_url=dsn, clock=_FixedClock())
+    assert results.count("busy") == 1
+    assert len([result for result in results if result != "busy"]) == 1
+    assert len(manager.list_jobs(domain="media_ingest", owner_user_id="pg-capacity-owner", limit=10)) == 1
 
 
 def test_postgres_ready_snapshot_guard_rejects_cancelled_linked_job(pg_temp_db, monkeypatch):

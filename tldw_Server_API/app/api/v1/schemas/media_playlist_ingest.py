@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from enum import Enum
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -10,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 MAX_METADATA_PATCH_TEXT_LENGTH = 500
 MAX_METADATA_PATCH_KEYWORDS = 100
 MAX_METADATA_PATCH_KEYWORD_LENGTH = 128
+MAX_PLAYLIST_PREFLIGHT_SELECTIONS = 500
 
 
 class DuplicatePolicy(str, Enum):
@@ -142,3 +145,146 @@ class RunItemSnapshot(BaseModel):
         if (self.state is RunItemState.TERMINAL) != (self.outcome is not None):
             raise ValueError("outcome is required exactly when state is terminal")
         return self
+
+
+class PlaylistPreflightCreateRequest(BaseModel):
+    """Bounded asynchronous playlist inspection request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    url: str = Field(..., min_length=1, max_length=8192)
+    max_items: int = Field(default=100, ge=1, le=500)
+    timeout_seconds: int = Field(default=20, ge=1, le=60)
+
+    @field_validator("url", mode="before")
+    @classmethod
+    def _strip_url(cls, value: object) -> object:
+        if type(value) is not str:
+            raise ValueError("url must be a string")
+        return value.strip()
+
+
+class PlaylistPreflightLimits(BaseModel):
+    """Safe admission limits advertised with an accepted resource."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_items: int = Field(..., ge=1, le=500)
+    global_capacity: int = Field(..., ge=1)
+    owner_capacity: int = Field(..., ge=1)
+
+
+class PlaylistPreflightAcceptedResponse(BaseModel):
+    """Versioned response returned after durable resource/job binding."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: Literal[2] = 2
+    preflight_id: str
+    status: Literal["pending"] = "pending"
+    status_url: str
+    items_url: str
+    expires_at: datetime
+    limits: PlaylistPreflightLimits
+
+
+class PlaylistPreflightSummaryResponse(BaseModel):
+    """Owner-scoped asynchronous preflight status."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: Literal[2] = 2
+    preflight_id: str
+    status: Literal["pending", "running", "ready", "blocked", "cancelled", "expired"]
+    source_url: str
+    source_kind: str
+    playlist_id: str | None = None
+    summary: dict[str, Any] | None = None
+    error: dict[str, str] | None = None
+    created_at: datetime
+    updated_at: datetime
+    expires_at: datetime
+
+
+class PlaylistPreflightItemResponse(BaseModel):
+    """One immutable server-issued playlist occurrence."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    occurrence_id: str
+    ordinal: int = Field(..., ge=1)
+    occurrence_index_for_source: int | None = Field(default=None, ge=1)
+    source_url: str | None = None
+    normalized_source_id: str | None = None
+    source_kind: str
+    availability: str | None = None
+    duplicate_status: str | None = None
+    duplicate_of_occurrence_id: str | None = None
+    selected_by_default: bool | None = None
+    display_metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class PlaylistPreflightItemsPageResponse(BaseModel):
+    """Bounded immutable preflight item page."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: Literal[2] = 2
+    preflight_id: str
+    items: list[PlaylistPreflightItemResponse]
+    next_cursor: str | None = None
+
+
+class PlaylistMaterializationCreateRequest(BaseModel):
+    """Only server occurrence identities may be selected for materialization."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    occurrence_ids: list[str] = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_PLAYLIST_PREFLIGHT_SELECTIONS,
+    )
+
+    @field_validator("occurrence_ids", mode="before")
+    @classmethod
+    def _validate_occurrence_ids(cls, value: object) -> object:
+        if type(value) is not list:
+            raise ValueError("occurrence_ids must be a list")
+        normalized: list[str] = []
+        for occurrence_id in value:
+            if type(occurrence_id) is not str:
+                raise ValueError("occurrence_ids entries must be strings")
+            trimmed = occurrence_id.strip()
+            if not trimmed or len(trimmed) > 255:
+                raise ValueError("occurrence_ids entries must be between 1 and 255 characters")
+            normalized.append(trimmed)
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("occurrence_ids must be unique")
+        return normalized
+
+
+class PlaylistMaterializationItemResponse(BaseModel):
+    """Compact authoritative identity copied from a completed snapshot."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    occurrence_id: str
+    ordinal: int = Field(..., ge=1)
+    source_url: str
+    normalized_source_id: str | None = None
+    source_kind: str
+    display_metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class PlaylistMaterializationResponse(BaseModel):
+    """Owner-bound materialization for a staged Quick Ingest draft."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: Literal[2] = 2
+    materialization_id: str
+    preflight_id: str
+    status: Literal["ready"] = "ready"
+    items: list[PlaylistMaterializationItemResponse]
+    expires_at: datetime

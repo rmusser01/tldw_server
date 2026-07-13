@@ -34,6 +34,11 @@ modified_files:
 - tldw_Server_API/app/services/media_ingest_jobs_worker.py
 - tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_preflight.py
 - tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest_jobs_worker.py
+- tldw_Server_API/app/api/v1/endpoints/media/playlist_ingest.py
+- tldw_Server_API/app/api/v1/endpoints/media/__init__.py
+- tldw_Server_API/app/core/Ingestion_Media_Processing/Video/playlist_ingest_service.py
+- tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_endpoint.py
+- tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_preflight_endpoint.py
 ---
 
 ## Description
