@@ -33,6 +33,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import ConflictError
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
     _PREFLIGHT_JOB_SENTINEL,
     MediaIngestRunRecord,
+    PlaylistIngestConflictError,
     PlaylistIngestNotFoundError,
     PlaylistIngestStore,
     PlaylistItemRecord,
@@ -94,6 +95,14 @@ class PlaylistSelectionError(ValueError):
 
 class PlaylistRunValidationError(ValueError):
     """Raised with a stable code when a run request is invalid."""
+
+
+class PlaylistRunPendingError(PlaylistIngestConflictError):
+    """Raised when an existing run still has an ambiguous zero-job action."""
+
+    def __init__(self, run_id: str) -> None:
+        self.run_id = str(run_id)
+        super().__init__("duplicate_action_pending")
 
 
 class PlaylistPreflightRequiredError(PlaylistRunValidationError):
@@ -783,17 +792,90 @@ class PlaylistIngestService:
                     request.new_collection,
                     collections_db,
                 )
-            self._resolve_nonprocessing_actions(
-                owner,
-                created.run_id,
-                manifest,
-                collections_db=collections_db,
-            )
+            try:
+                self._resolve_nonprocessing_actions(
+                    owner,
+                    created.run_id,
+                    manifest,
+                    collections_db=collections_db,
+                )
+            except PlaylistRunValidationError:
+                raise
+            except Exception as exc:
+                raise PlaylistRunPendingError(created.run_id) from exc
         finally:
             if collections_db is not None:
                 with contextlib.suppress(Exception):
                     collections_db.close()
-        return self._store.get_run(owner, created.run_id)
+        return self._resolved_run_or_pending(owner, created.run_id)
+
+    def reconcile_nonprocessing_actions(
+        self,
+        owner_user_id: str,
+        run_id: str,
+    ) -> MediaIngestRunRecord:
+        """Resume one owner-scoped run's preparing actions for status/SSE callers."""
+        owner = self._store._owner(owner_user_id)
+        run = self._store.get_run(owner, run_id)
+        records = list(self._store.list_run_items(owner, run.run_id, limit=500))
+        items = [
+            {
+                "occurrence_id": item.occurrence_id,
+                "action": item.action,
+                "media_id": item.media_id,
+                "metadata_patch": item.metadata_patch,
+                "planned_collection_item_id": item.planned_collection_item_id,
+            }
+            for item in records
+        ]
+        collections_db = None
+        try:
+            if any(
+                item["action"] in {"include_existing", "update_metadata_only"}
+                and item["planned_collection_item_id"] is not None
+                and record.state != "terminal"
+                for item, record in zip(items, records, strict=True)
+            ):
+                collections_db = self._collections_db_factory(owner)
+            self._resolve_nonprocessing_actions(
+                owner,
+                run.run_id,
+                items,
+                collections_db=collections_db,
+            )
+        except (PlaylistIngestNotFoundError, PlaylistRunValidationError):
+            raise
+        except Exception as exc:
+            raise PlaylistRunPendingError(run.run_id) from exc
+        finally:
+            if collections_db is not None:
+                with contextlib.suppress(Exception):
+                    collections_db.close()
+        return self._resolved_run_or_pending(owner, run.run_id)
+
+    def _resolved_run_or_pending(
+        self,
+        owner_user_id: str,
+        run_id: str,
+    ) -> MediaIngestRunRecord:
+        """Return a run only when every zero-job action is terminal."""
+        try:
+            items = self._store.list_run_items(owner_user_id, run_id, limit=500)
+        except PlaylistIngestNotFoundError:
+            raise
+        except Exception as exc:
+            raise PlaylistRunPendingError(run_id) from exc
+        if any(
+            item.action in {"skip", "include_existing", "update_metadata_only"} and item.state != "terminal"
+            for item in items
+        ):
+            raise PlaylistRunPendingError(run_id)
+        try:
+            return self._store.get_run(owner_user_id, run_id)
+        except PlaylistIngestNotFoundError:
+            raise
+        except Exception as exc:
+            raise PlaylistRunPendingError(run_id) from exc
 
     def _create_and_attach_collection_plan(
         self,
@@ -987,8 +1069,9 @@ class PlaylistIngestService:
                             or current_membership.latest_job_id is not None
                             or current_membership.latest_run_id is not None
                         ):
-                            continue
-                        resolved_membership = current_membership
+                            outcome = "metadata_update_failed"
+                        else:
+                            resolved_membership = current_membership
                 try:
                     self._store.resolve_nonprocessing_run_item(
                         owner_user_id,
@@ -1042,6 +1125,7 @@ __all__ = [
     "PlaylistPreflightBusyError",
     "PlaylistPreflightIncompleteError",
     "PlaylistPreflightUnavailableError",
+    "PlaylistRunPendingError",
     "PlaylistRunValidationError",
     "PlaylistSelectionError",
     "ReviewRequiredError",

@@ -1752,8 +1752,27 @@ def test_nonprocessing_action_outcome_mapping_is_enforced(
             outcome=outcome,
             media_id=media_id,
         )
-
     assert store.get_run_item("1", run.run_id, "occ-direct").state != "terminal"
+
+
+def test_include_existing_can_terminalize_with_safe_action_failure(store):
+    run = store.create_validated_run(
+        "1",
+        items=[_validated_direct_record(action="include_existing")],
+    )
+    store.prepare_nonprocessing_run_item("1", run.run_id, "occ-direct")
+
+    resolved = store.resolve_nonprocessing_run_item(
+        "1",
+        run.run_id,
+        "occ-direct",
+        outcome="metadata_update_failed",
+        media_id=17,
+    )
+
+    assert resolved.state == "terminal"
+    assert resolved.outcome == "metadata_update_failed"
+    assert store.get_run("1", run.run_id).status == "completed"
 
 
 def test_nonprocessing_action_requires_preparing_and_exact_terminal_retry_is_idempotent(store):

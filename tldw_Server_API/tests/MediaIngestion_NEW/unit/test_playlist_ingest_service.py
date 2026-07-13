@@ -55,6 +55,7 @@ class _OwnerCollectionsDB:
         self.create_error: Exception | None = None
         self.create_commit_then_error_once: Exception | None = None
         self.resolve_error: Exception | None = None
+        self.get_error: Exception | None = None
         self.restore_error: Exception | None = None
         self.discard_error: Exception | None = None
         self.restore_calls: list[dict] = []
@@ -112,6 +113,8 @@ class _OwnerCollectionsDB:
         return resolved
 
     def get_media_collection_item(self, item_id):
+        if self.get_error is not None:
+            raise self.get_error
         return self.items[item_id]
 
     def restore_media_collection_item_plan(self, item_id, **kwargs):
@@ -851,28 +854,61 @@ def test_create_run_metadata_commit_then_error_retries_idempotently(service_cont
     assert _table_count(manager, "jobs") == 0
 
 
-def test_create_run_repeated_ambiguous_metadata_failure_stays_recoverable(service_context):
+def test_create_run_ambiguous_metadata_raises_pending_and_later_reconciles_same_run(
+    service_context,
+):
     service, store, manager, media_db = service_context
     media_db.rows = [{"id": 17, "url": "https://example.com/existing"}]
     media_db.metadata_error = RuntimeError("private unknown write state")
 
-    created = service.create_run(
-        "owner-1",
-        inputs=[_direct_input("occ-direct", "https://example.com/existing")],
-        review_overrides={
-            "occ-direct": {
-                "duplicate_policy": "update_metadata_only",
-                "existing_media_id": 17,
-                "metadata_patch": {"title": "Reviewed"},
-            }
-        },
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
+        PlaylistRunPendingError,
+    )
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestNotFoundError,
     )
 
-    item = store.get_run_item("owner-1", created.run_id, "occ-direct")
+    with pytest.raises(PlaylistRunPendingError) as pending:
+        service.create_run(
+            "owner-1",
+            inputs=[_direct_input("occ-direct", "https://example.com/existing")],
+            review_overrides={
+                "occ-direct": {
+                    "duplicate_policy": "update_metadata_only",
+                    "existing_media_id": 17,
+                    "metadata_patch": {"title": "Reviewed"},
+                }
+            },
+        )
+
+    run_id = pending.value.run_id
+    assert str(pending.value) == "duplicate_action_pending"
+    item = store.get_run_item("owner-1", run_id, "occ-direct")
     assert item.state == "preparing"
     assert item.outcome is None
     assert len(media_db.metadata_calls) == 2
     assert _table_count(manager, "jobs") == 0
+
+    with pytest.raises(PlaylistIngestNotFoundError):
+        service.reconcile_nonprocessing_actions("owner-2", run_id)
+    assert len(media_db.metadata_calls) == 2
+
+    media_db.metadata_error = None
+    reconciled = service.reconcile_nonprocessing_actions("owner-1", run_id)
+    assert reconciled.run_id == run_id
+    assert reconciled.status == "completed"
+    item = store.get_run_item("owner-1", run_id, "occ-direct")
+    assert item.state == "terminal"
+    assert item.outcome == "metadata_updated"
+    assert media_db.metadata_mutations == 1
+    assert len(media_db.metadata_calls) == 3
+
+    replayed = service.reconcile_nonprocessing_actions("owner-1", run_id)
+    assert replayed == reconciled
+    assert len(media_db.metadata_calls) == 3
+    assert [event.event_type for event in store.list_run_events("owner-1", run_id)].count(
+        "duplicate_action_resolved"
+    ) == 1
 
 
 def test_create_run_in_run_repeat_requires_occurrence_bound_override(service_context):
@@ -1068,9 +1104,11 @@ def test_create_run_collection_membership_failure_terminalizes_complete_action_w
 
     item = store.list_run_items("owner-1", created.run_id)[0]
     events = list(store.list_run_events("owner-1", created.run_id))
-    assert item.state == "preparing"
-    assert item.outcome is None
-    assert events[-1].event_type == "duplicate_action_preparing"
+    assert created.status == "completed"
+    assert item.state == "terminal"
+    assert item.outcome == "metadata_update_failed"
+    assert events[-1].event_type == "duplicate_action_resolved"
+    assert events[-1].outcome == "metadata_update_failed"
     assert media_db.metadata_calls == expected_metadata_calls
     assert collections_db.resolve_calls == [
         {
@@ -1080,6 +1118,70 @@ def test_create_run_collection_membership_failure_terminalizes_complete_action_w
         }
     ]
     assert collections_db.restore_calls == []
+    assert _table_count(manager, "jobs") == 0
+
+
+def test_create_run_ambiguous_membership_readback_raises_pending_without_job(service_context):
+    service, store, manager, media_db = service_context
+    collections_db = service.test_collections_db
+    collections_db.resolve_error = RuntimeError("private membership write state")
+    collections_db.get_error = RuntimeError("private membership read state")
+    media_db.rows = [{"id": 17, "url": "https://example.com/existing"}]
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
+        PlaylistRunPendingError,
+    )
+
+    with pytest.raises(PlaylistRunPendingError) as pending:
+        service.create_run(
+            "owner-1",
+            inputs=[_direct_input("occ-existing", "https://example.com/existing")],
+            review_overrides={
+                "occ-existing": {
+                    "duplicate_policy": "include_existing",
+                    "existing_media_id": 17,
+                }
+            },
+            new_collection={"name": "Ambiguous membership readback"},
+        )
+
+    item = store.get_run_item("owner-1", pending.value.run_id, "occ-existing")
+    assert item.state == "preparing"
+    assert item.outcome is None
+    assert _table_count(manager, "jobs") == 0
+
+
+def test_create_run_prepare_store_failure_raises_sanitized_pending_identity(
+    service_context,
+    monkeypatch,
+):
+    service, store, manager, media_db = service_context
+    media_db.rows = [{"id": 17, "url": "https://example.com/existing"}]
+    monkeypatch.setattr(
+        service._store,
+        "prepare_nonprocessing_run_item",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("private store detail")),
+    )
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
+        PlaylistRunPendingError,
+    )
+
+    with pytest.raises(PlaylistRunPendingError) as pending:
+        service.create_run(
+            "owner-1",
+            inputs=[_direct_input("occ-existing", "https://example.com/existing")],
+            review_overrides={
+                "occ-existing": {
+                    "duplicate_policy": "include_existing",
+                    "existing_media_id": 17,
+                }
+            },
+        )
+
+    assert str(pending.value) == "duplicate_action_pending"
+    assert "private" not in str(pending.value)
+    assert store.get_run_item("owner-1", pending.value.run_id, "occ-existing").state == "staged"
     assert _table_count(manager, "jobs") == 0
 
 
@@ -1118,14 +1220,19 @@ def test_create_run_finalization_failure_restores_exact_resolved_membership(serv
         lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("private finalization detail")),
     )
 
-    created = service.create_run(
-        "owner-1",
-        inputs=[_direct_input("occ-existing", "https://example.com/existing")],
-        review_overrides={"occ-existing": {"duplicate_policy": "include_existing", "existing_media_id": 17}},
-        new_collection={"name": "Finalization failure"},
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
+        PlaylistRunPendingError,
     )
 
-    item = store.list_run_items("owner-1", created.run_id)[0]
+    with pytest.raises(PlaylistRunPendingError) as pending:
+        service.create_run(
+            "owner-1",
+            inputs=[_direct_input("occ-existing", "https://example.com/existing")],
+            review_overrides={"occ-existing": {"duplicate_policy": "include_existing", "existing_media_id": 17}},
+            new_collection={"name": "Finalization failure"},
+        )
+
+    item = store.list_run_items("owner-1", pending.value.run_id)[0]
     assert item.state == "preparing"
     assert collections_db.resolve_calls == [{"item_id": 701, "media_id": 17, "status": "skipped_existing"}]
     assert collections_db.restore_calls == [
@@ -1135,6 +1242,19 @@ def test_create_run_finalization_failure_restores_exact_resolved_membership(serv
             "expected_status": "skipped_existing",
             "expected_updated_at": "2026-07-12T12:00:01+00:00",
         }
+    ]
+    assert _table_count(manager, "jobs") == 0
+
+    monkeypatch.undo()
+    reconciled = service.reconcile_nonprocessing_actions("owner-1", pending.value.run_id)
+    item = store.list_run_items("owner-1", pending.value.run_id)[0]
+    assert reconciled.run_id == pending.value.run_id
+    assert reconciled.status == "completed"
+    assert item.state == "terminal"
+    assert item.outcome == "included_existing"
+    assert collections_db.resolve_calls == [
+        {"item_id": 701, "media_id": 17, "status": "skipped_existing"},
+        {"item_id": 701, "media_id": 17, "status": "skipped_existing"},
     ]
     assert _table_count(manager, "jobs") == 0
 

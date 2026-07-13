@@ -70,6 +70,38 @@ def test_postgres_duplicate_action_state_matches_sqlite_contract(pg_temp_db, mon
     assert resolved == repeated
     assert store.get_run("pg-action-owner", run.run_id).status == "completed"
 
+    failed_run = store.create_validated_run(
+        "pg-action-owner",
+        items=[
+            {
+                "occurrence_id": "pg-failed-action-occ",
+                "input_kind": "direct_url",
+                "source_url": "https://example.com/failed-existing",
+                "normalized_source_id": "url:https://example.com/failed-existing",
+                "source_kind": "generic_url",
+                "display_metadata": {"title": "Failed existing"},
+                "state": "staged",
+                "action": "include_existing",
+                "metadata_patch": None,
+            }
+        ],
+    )
+    store.prepare_nonprocessing_run_item(
+        "pg-action-owner",
+        failed_run.run_id,
+        "pg-failed-action-occ",
+    )
+    failed = store.resolve_nonprocessing_run_item(
+        "pg-action-owner",
+        failed_run.run_id,
+        "pg-failed-action-occ",
+        outcome="metadata_update_failed",
+        media_id=18,
+    )
+
+    assert failed.outcome == "metadata_update_failed"
+    assert store.get_run("pg-action-owner", failed_run.run_id).status == "completed"
+
 
 def test_playlist_store_postgres_matches_sqlite_contract(pg_temp_db, monkeypatch):
     monkeypatch.setenv("TEST_MODE", "true")

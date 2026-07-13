@@ -2311,7 +2311,7 @@ class PlaylistIngestStore:
             action = item.get("duplicate_policy")
             allowed = {
                 "skip": {"skipped_existing"},
-                "include_existing": {"included_existing"},
+                "include_existing": {"included_existing", "metadata_update_failed"},
                 "update_metadata_only": {"metadata_updated", "metadata_update_failed"},
             }
             if action not in allowed or outcome not in allowed[action] or (action != "skip" and media_id is None):
