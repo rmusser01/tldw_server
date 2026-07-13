@@ -69,6 +69,7 @@ Known unrelated/tooling baselines:
 - Frontend typecheck remains nonzero only for the untouched pre-existing QuickIngestWizardModal.tsx:1813 overflowY TS2322 diagnostic; no touched-file diagnostics.
 - Installed ESLint 9.39.2 cannot run from repo root because no root eslint.config file exists; no packages were installed or substituted.
 - Existing extension build warnings (duplicate imports, circular chunks, chunk size, stale browser data) remain; build exits zero.
+Pull request: https://github.com/rmusser01/tldw_server/pull/2719 (draft pending the required human-written Change summary).
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
