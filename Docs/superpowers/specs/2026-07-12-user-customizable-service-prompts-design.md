@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-12
 
-**Status:** Approved in brainstorming; pending independent spec review
+**Status:** Approved in brainstorming and independent spec review (round 2)
 
 **Backlog:** TASK-12112
 
@@ -12,7 +12,7 @@
 
 tldw_server should let each authenticated user customize a curated set of prompts that backend services apply automatically when creating or analyzing content. The capability will appear in a dedicated **Service Prompts** settings page shared by the WebUI and browser-extension options app.
 
-The selected architecture is a typed `ServicePromptRegistry` backed by immutable server defaults and versioned per-user overrides. Services resolve prompts through one governed resolver rather than reading files or embedding strings directly. The design preserves existing explicit request overrides and deployment prompt files, validates prompt variables, supports deterministic previews, keeps revision history, pins queued work to an immutable prompt revision, and integrates with the existing context-integrity system.
+The selected architecture is a typed `ServicePromptRegistry` backed by immutable server defaults and versioned per-user overrides. Services resolve prompts through one governed resolver rather than reading files or embedding strings directly. The design preserves existing explicit request overrides and deployment prompt files, validates prompt variables, supports deterministic previews, keeps revision history, pins queued work to an immutable full-bundle pin set, and integrates with the existing context-integrity system.
 
 This feature is deliberately separate from:
 
@@ -71,7 +71,7 @@ The WebUI and extension already share route, settings, service, and component co
 - Coordinated prompt parts are edited and versioned atomically.
 - Required variables are strict; softer quality diagnostics are warnings.
 - Preview uses deterministic safe sample values and never calls an LLM.
-- Saved overrides are server-side and account-scoped.
+- Saved overrides are server-side and account-scoped. Saving creates a pending revision; model use requires a separate explicit operator approval under the existing context-integrity policy.
 - Full revision history is retained subject to normal storage quotas and lifecycle policy.
 - User overrides remain pinned when the server default changes.
 - Queued work pins its prompt at enqueue time.
@@ -117,29 +117,36 @@ Consumers resolve prompts using a typed context rather than a bare user ID. It c
 
 - Canonical owner identity, when user-owned
 - Operation/workflow identifier
-- Optional explicit override and its kind: `literal` or `template`
-- Optional immutable prompt pin
+- Optional explicit overrides keyed by named editable part
+- For each explicit part, its kind: `literal` or `template`
+- Optional immutable prompt pin set
 - Request, trace, and job identifiers as safe metadata
+
+Definitions declare which named parts map to legacy fields such as `system_prompt` and `custom_prompt`, whether each part accepts literal or template input, and how omitted parts are filled. A partial explicit override replaces only its named editable parts. Other editable parts continue through normal precedence, while locked parts can never be replaced.
+
+`literal` means the supplied text is used as the final value for that editable part without placeholder parsing. `template` means the constrained renderer substitutes the definition's declared variables. The migration inventory must preserve the semantics of every existing explicit field rather than guessing from its name.
 
 Userless maintenance activity deliberately uses the server default. Store errors or missing ownership never cause an accidental cross-user or default fallback.
 
 ### Resolution precedence
 
-The resolver selects content in this order:
+The resolver selects each named editable part in this order:
 
 1. Explicit request override
-2. Authorized pinned revision or snapshot
+2. Authorized pinned bundle snapshot
 3. Active per-user override
 4. Deployment default, including existing environment/file overrides
 5. Packaged default
 
-All parts are resolved before the resolver computes the atomic server-default bundle digest. That bundle digest drives revision provenance and upstream-change detection.
+An active user override is atomic: when selected, it supplies its complete set of editable parts. Explicit overrides may then replace a declared subset part by part. Locked parts always come from the resolved server-managed definition.
+
+All parts are resolved before the resolver computes the atomic server-default bundle digest. That bundle digest drives revision provenance and upstream-change detection. `bypass_stored_overrides` skips only stored user overrides; it does not suppress pre-existing explicit request fields. This preserves explicit overrides as the highest-precedence request choice.
 
 The immutable `ResolvedServicePrompt` contains rendered or render-ready named parts plus safe provenance:
 
 - Definition ID and schema version
-- Source kind
-- User revision or snapshot reference, when applicable
+- Per-part source kinds
+- User revision and explicit-override provenance, when applicable
 - Server-default bundle digest
 - Canonical content digest
 - Assembly order and locked-section markers
@@ -172,11 +179,12 @@ One mutable state record per definition contains:
 
 - Definition ID
 - Active revision ID or null
+- Current pending revision ID or null
 - Monotonically increasing generation
 - Last acknowledged server-default digest
 - Updated timestamp
 
-The generation changes for save, restore, reset, and default-change acknowledgement. It is the optimistic-concurrency token even when the active revision remains null.
+The generation changes for pending save, approval, rejection/supersession, restore, reset, and default-change acknowledgement. It is the optimistic-concurrency token even when the active revision remains null. A user may have at most one current pending revision per definition; a newer pending save explicitly supersedes the previous pending revision without activating either one. Reset supersedes any pending revision and clears the active revision in the same repository transaction.
 
 ### Immutable revisions
 
@@ -185,7 +193,7 @@ Each revision contains:
 - Revision ID and sequence number
 - Definition ID
 - Atomic editable parts
-- Action: save, restore, or reset
+- Origin action: save or restore
 - Registry schema version
 - Base server-default bundle digest
 - Canonical content digest
@@ -194,20 +202,17 @@ Each revision contains:
 
 Revision content is immutable. Integrity/activation status is tracked separately so the content row never changes.
 
-Reset clears the active pointer but preserves history. Restore revalidates an older revision against the current definition and creates a new revision; it never rewinds the pointer. An incompatible historical revision returns an actionable compatibility report.
+Reset clears the active pointer but preserves history. Reset, acknowledgement, approval, rejection, and supersession are immutable state-history events rather than content revisions. They are visible in combined history but are not restorable. Restore revalidates an older content revision against the current definition and creates a new pending revision; it never rewinds the pointer. An incompatible historical revision returns an actionable compatibility report.
 
 ### Content-addressed snapshots
 
-Active user revisions are already immutable, so queued jobs can pin them directly. Content-addressed snapshots are created only when an immutable stored source does not already exist, notably:
-
-- Effective server defaults that must survive a later deployment change
-- Explicit per-request prompt overrides used by queued work
+Every queued job pins the complete resolved template bundle, including editable parts, locked fragments, assembly order, and safe provenance. This is necessary because partial explicit overrides and locked server fragments can otherwise change independently after enqueue. Content-addressed snapshots deduplicate identical resolved bundles by canonical digest.
 
 Snapshots contain prompt templates and safe provenance only. They do not contain rendered source documents, runtime variable values, credentials, or other job input.
 
-### Prompt pins and mutation receipts
+### Prompt pin sets and mutation receipts
 
-A prompt pin binds a definition, owner, immutable revision/snapshot reference, and digest to queued work. It begins pending and is bound to the returned job UUID after enqueue.
+A prompt pin set atomically binds one or more definition snapshots, their owner, a one-time submission ID, and an overall set digest to queued work. Each item records the definition ID, full-bundle snapshot reference/digest, and source flags needed by operator modes. The whole set is committed in one per-user Prompt-database transaction before job creation.
 
 Mutation receipts map a client mutation ID to the completed result so safe network retries do not create duplicate revisions or misleading concurrency errors.
 
@@ -215,24 +220,34 @@ Mutation receipts map a client mutation ID to the completed result so safe netwo
 
 Mutations use `expected_generation`. A stale generation returns a conflict and preserves the client's draft.
 
-Activation follows:
+Activation follows the existing context-integrity approval policy:
 
 1. Validate the draft against the current registry contract.
 2. Append an immutable pending revision.
-3. Register and verify the exact canonical digest with context integrity.
-4. Advance the active state and generation only after acceptance.
+3. Present an escaped canonical diff for explicit non-model operator review.
+4. On approval, re-check the revision digest and manifest version, sign/register the new approved manifest version, and record the approval event.
+5. Compare the pending revision ID and state generation again, then advance the active state and generation only after approval succeeds.
 
-If integrity registration fails, the prior effective revision remains active. In hardened deployments requiring an external trust decision, the new revision may remain pending approval.
+An owner save does not itself count as integrity approval. In single-user mode the same person is normally both owner and local operator, but activation still requires a distinct explicit confirmation. In multi-user mode, an authorized operator/admin approves the owner's pending revision through the context-integrity review flow; this governance action does not transfer ownership or create an administrator-wide override.
+
+Per-user ownership is therefore an execution and mutation boundary, not secrecy from an authorized integrity reviewer. The review surface may disclose the pending revision's escaped canonical diff only to principals holding the existing context-integrity approval privilege. Ordinary administrators and other users do not gain read access through the Service Prompts API.
+
+If approval fails, the digest changes during review, or no authorized operator approves, the prior effective revision remains active and the new revision remains pending or is rejected. This design follows, and does not supersede, `2026-06-25-context-integrity-skills-prompts-design.md`.
 
 ### Cross-database enqueue protocol
 
-Prompt storage and Jobs storage do not share a transaction. Enqueue therefore uses a small saga:
+Prompt storage and Jobs storage do not share a transaction. Enqueue therefore uses a one-time submission ID and compare-and-set binding:
 
-1. Commit the prompt pin.
-2. Enqueue the owner-scoped job referencing the pin ID and digest.
-3. Bind the pin to the returned job UUID.
+1. Before enqueue, the job producer declares every service-prompt definition that the job can use.
+2. Resolve and snapshot all declared definitions, then commit one complete pin set with owner, submission ID, item digests, and set digest.
+3. Enqueue the owner-scoped job with the pin-set ID, submission ID, and set digest.
+4. Compare-and-set bind the pin set to the returned job UUID.
 
-A reconciler repairs binding failures and garbage-collects unreferenced pins only after a grace period and a check of active and retained jobs. A job never becomes runnable before its referenced pin exists. Workers verify owner, definition, digest, and integrity state before use.
+If a worker acquires the job before step 4 finishes, the worker may atomically perform the same compare-and-set binding only when owner, submission ID, pin-set ID, and set digest all match. Execution begins only after the pin set is bound to that exact job UUID. A second job cannot reuse the set.
+
+A reconciler repairs binding failures and garbage-collects unreferenced pin sets only after a grace period and a check of active and retained jobs. Workers verify the set digest and every item before beginning any stage. If one item fails, no prompt in the set is used.
+
+Jobs with data-dependent prompt selection must pin all possible registered candidates plus the versioned selection policy before enqueue. A queued workflow that cannot declare a finite prompt requirement set is not eligible for migration until refactored.
 
 Pinned jobs are retained according to Jobs retention. Referenced revisions and snapshots cannot be removed. Revision history is cursor-paginated and subject to account storage quotas.
 
@@ -249,12 +264,13 @@ The server exposes:
   "service_prompts": {
     "enabled": true,
     "mode": "enabled",
-    "contract_version": 1
+    "contract_version": 1,
+    "can_approve_pending": false
   }
 }
 ```
 
-Clients use this to distinguish supported, unavailable, read-only, bypass, and incompatible servers.
+Clients use this to distinguish supported, unavailable, read-only, `bypass_stored_overrides`, and incompatible servers.
 
 ### Endpoints
 
@@ -277,30 +293,34 @@ Clients use this to distinguish supported, unavailable, read-only, bypass, and i
   - Never invokes an LLM
 
 - `PUT /{definition_id}/override`
-  - Saves all editable parts atomically
+  - Saves all editable parts atomically as the current pending revision
   - Requires expected generation and client mutation ID
+  - Does not activate the revision
 
 - `POST /{definition_id}/reset`
-  - Clears the active override after validation and concurrency checks
+  - Supersedes any pending revision and clears the active override after concurrency checks, returning to an already trusted server default
 
 - `POST /{definition_id}/acknowledge-default`
   - Records acknowledgement of the current server-default digest without rewriting prompt content
 
-- `GET /{definition_id}/revisions`
-  - Cursor-paginated metadata history without bodies
+- `GET /{definition_id}/history`
+  - Cursor-paginated combined content-revision and state-event history without bodies
+  - Reset and acknowledgement events are marked non-restorable
 
 - `GET /{definition_id}/revisions/{revision_id}`
   - Owner-scoped revision detail with private/no-store caching
 
 - `POST /{definition_id}/revisions/{revision_id}/restore`
-  - Validates the historical revision against the current contract and creates a new active revision
+  - Validates the historical revision against the current contract and creates a new pending revision
+
+Approval and rejection reuse the context-integrity review API and signed-manifest flow rather than introducing a second trust mechanism. The Service Prompts detail response links to the applicable pending asset and reports whether the current principal can approve it. In single-user mode the UI may offer a distinct **Review and approve** step, but it must remain a separate explicit action after save and must use the same integrity API.
 
 Preview and mutation endpoints share runtime validation, body limits, rate limits, idempotency behavior, and stable machine-readable error codes.
 
 ### API failure semantics
 
 - `422`: invalid draft with part-specific diagnostics
-- `409`: stale generation or incompatible restore
+- `409`: stale generation, incompatible restore, or pending-revision conflict
 - `413`: template or request body too large
 - `403`: authenticated principal lacks access
 - `404`: capability/definition is unavailable to this principal
@@ -313,11 +333,11 @@ Quarantined or incompatible expected content fails closed with a recovery code. 
 
 Synchronous services resolve once at their public service boundary. Existing explicit request prompt fields remain supported and take precedence. A migration must preserve whether an existing field is literal final text or a template.
 
-Queued endpoints commit a pin before enqueue. Job payloads and job-status responses contain only safe references and digests, never raw prompt bodies. Workers distinguish:
+Queued endpoints declare their finite prompt requirements and commit one complete pin set before enqueue. Job payloads and job-status responses contain only safe references and digests, never raw prompt bodies. Workers bind the set to their exact job UUID before using any item and distinguish:
 
 - Temporary prompt-store unavailability: retryable
-- Missing or digest-mismatched pin: permanent integrity failure
-- Override execution held by operator mode: held/retryable without substituting a different prompt
+- Missing or digest-mismatched pin set/item: permanent integrity failure
+- Stored-override execution held by operator mode: held/retryable without substituting a different prompt
 
 Editing, resetting, acknowledging, or upgrading defaults does not alter already pinned work.
 
@@ -359,7 +379,7 @@ The editor shows:
 - Server-default, customized, and effective provenance
 - Part-by-part plain-text comparison with unchanged regions collapsed
 - Deterministic preview and assembly order
-- Save, reset, acknowledgement, history, and restore actions
+- Save pending revision, reset, acknowledgement, history, restore, and approval-status actions
 
 The UI does not add a heavyweight code-editor dependency. Prompt text and diffs are escaped plain text and are never rendered as rich Markdown or HTML.
 
@@ -371,7 +391,8 @@ The UI does not add a heavyweight code-editor dependency. Prompt text and diffs 
 - Retry and Copy Draft actions; no automatic device persistence
 - Conflict handling that preserves the local draft and offers reload/copy, never automatic merge
 - Upstream-change banner with Compare, Keep override, and Use server default actions
-- Success messaging that changes apply to new work while queued jobs keep their pins
+- Save messaging that the draft is pending explicit approval and does not yet affect runtime
+- Approval/reset messaging that active changes apply to new work while queued jobs keep their pin sets
 - Explicit disconnected, unsupported-server, read-only, bypass, pending-approval, quarantined, and incompatible states
 
 “Keep override” stores the acknowledged default digest. “Use server default” clears the override rather than copying the default, so later server-default updates continue to flow through.
@@ -431,7 +452,7 @@ Private account backups include service-prompt state and history. Shareable Chat
 
 Server defaults use existing exact-byte file verification. User revisions and snapshots use canonical asset identities scoped by owner, definition, and immutable version. At use time, the resolver verifies the exact bytes or row version consumed.
 
-Out-of-band mutations are quarantined. Normal-mode owner saves can activate after local integrity acceptance. Hardened deployments may require external approval and keep a revision pending while the previous effective revision remains active.
+Out-of-band mutations are quarantined. Every owner save remains pending until an explicit authorized operator approval updates the signed trust manifest. This requirement applies in normal and single-user modes; in single-user mode the owner/operator performs a separate non-model confirmation. Hardened deployments may additionally require an external trust decision. The previous effective revision remains active throughout review.
 
 Review and settings surfaces never render untrusted content as rich HTML or feed it into model-assisted review.
 
@@ -443,6 +464,15 @@ The legacy `prompt_loader` remains for locked and not-yet-migrated prompts. A mi
 
 Existing module/key and `TLDW_PROMPT_FILE_*` mappings become deployment-default providers for eligible parts. The registry computes the atomic bundle after resolving every part. Hidden deployment defaults reveal only safe provenance and digest state.
 
+Deployment-default failure behavior is intentionally stricter for migrated definitions than the legacy loader:
+
+- An unset or blank environment override is not configured, so resolution proceeds to the packaged default.
+- A configured nonblank override that is missing, unreadable, invalidly encoded, or integrity-blocked makes that required part and the atomic server-default bundle unavailable. The resolver does not fall through to packaged content.
+- The operator recovers by fixing/removing the configured override or approving the expected asset; the UI/API reports a safe unavailable state without the path or body.
+- Optional parts may be omitted only when the registry definition explicitly marks them optional.
+
+Locked and not-yet-migrated consumers retain legacy fallback behavior until their domain migration. Domain compatibility tests must assert the stricter behavior at the migration boundary.
+
 ### Chat and reusable prompts
 
 `preferences.chat.system_prompt`, composer prompt selection, and conversation-specific system prompts remain under Chat settings. Prompt Library and Prompt Studio records retain their existing APIs and user experiences. No new precedence is introduced between those systems and Service Prompts.
@@ -453,7 +483,7 @@ Expose an operator-controlled mode:
 
 - `enabled`: normal read/write and runtime behavior
 - `read_only`: existing overrides execute, but mutations are blocked
-- `bypass_new_work`: new work visibly uses server defaults; jobs pinned to user content are held rather than silently substituted
+- `bypass_stored_overrides`: explicit request fields still apply, but stored user overrides are skipped for new work and the remaining parts visibly use server defaults; existing pin sets containing stored-override content are held rather than silently substituted
 
 Mode changes are visible through capabilities, UI state, logs, and safe audit metadata. They never rewrite or delete history.
 
@@ -538,7 +568,7 @@ Each domain change includes registry entries, consumer migrations, eligibility-m
 - Detail/revision no-store behavior
 - Preview/save validator parity
 - Stale generation, idempotent retry, limits, rate limits, and safe errors
-- Hidden, quarantined, pending, read-only, bypass, and unsupported states
+- Hidden, quarantined, pending, read-only, `bypass_stored_overrides`, and unsupported states
 
 ### Runtime and job integration tests
 
@@ -547,7 +577,7 @@ Each domain change includes registry entries, consumer migrations, eligibility-m
 - Reset returns to the current server default
 - Default changes do not rewrite user revisions
 - Queued work stays pinned after edits, reset, acknowledgement, or upgrade
-- Missing/tampered pins fail permanently; temporary stores retry
+- Missing/tampered pin sets or items fail permanently; temporary stores retry
 - Provider message arrays are byte-equivalent with no override
 
 ### Frontend tests
@@ -591,7 +621,7 @@ The implementation plan should decide, without changing this product contract:
 - Exact capability endpoint integration point
 - Domain-by-domain stable ID catalog from the completed eligibility inventory
 - Which existing diff component is reused by the settings editor
-- The concrete Jobs held/retry representation for `bypass_new_work`
+- The concrete Jobs held/retry representation for `bypass_stored_overrides`
 
 ## Acceptance Criteria
 

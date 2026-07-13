@@ -1,7 +1,7 @@
 ---
 id: TASK-12112
 title: Design user-customizable service prompt registry and settings
-status: In Progress
+status: Done
 labels:
 - prompts
 - design
@@ -24,31 +24,31 @@ Design a governed, per-user Service Prompt Registry that exposes a curated allow
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Document the Service Prompt Registry architecture, ownership boundaries, precedence, persistence, revision, and job-pinning contracts.
-- [ ] #2 Define the authenticated API and shared WebUI/browser-extension settings experience, including validation, preview, comparison, reset, history, conflicts, capability states, and responsive behavior.
-- [ ] #3 Define the allowlist eligibility policy, context-integrity behavior, privacy/security safeguards, failure semantics, deployment-default compatibility, and explicit exclusions.
-- [ ] #4 Define a broad content-facing migration inventory strategy, reviewable rollout slices, verification matrix, and measurable completion gates.
-- [ ] #5 Review the written design through the required independent spec-document-reviewer loop and record the approved spec.
+- [x] #1 Document the Service Prompt Registry architecture, ownership boundaries, precedence, persistence, revision, and job-pinning contracts.
+- [x] #2 Define the authenticated API and shared WebUI/browser-extension settings experience, including validation, preview, comparison, reset, history, conflicts, capability states, and responsive behavior.
+- [x] #3 Define the allowlist eligibility policy, context-integrity behavior, privacy/security safeguards, failure semantics, deployment-default compatibility, and explicit exclusions.
+- [x] #4 Define a broad content-facing migration inventory strategy, reviewable rollout slices, verification matrix, and measurable completion gates.
+- [x] #5 Review the written design through the required independent spec-document-reviewer loop and record the approved spec.
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+Design spec written at Docs/superpowers/specs/2026-07-12-user-customizable-service-prompts-design.md and initially committed in 5d55b88cee. Independent spec review round 1 found four planning blockers covering context-integrity approval, multi-part explicit overrides/operator bypass, deployment-default failures, and multi-prompt job pinning. The spec was revised to resolve all four. Review round 2 approved the spec with no blocking issues. Verification: git diff --check passed for the documentation changes; no code or runtime configuration changed. Bandit and runtime test suites were skipped as not applicable to this docs-only design task. No known blockers remain.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Designed a governed per-user Service Prompt Registry and shared WebUI/browser-extension settings experience. The approved spec defines curated eligibility, atomic multi-part definitions, per-part explicit override semantics, strict deployment-default failure behavior, versioned pending revisions with explicit context-integrity operator approval, deterministic preview, history/reset/restore, atomic full-bundle job pin sets, API/capability contracts, responsive UI states, security/privacy boundaries, broad domain rollout slices, and verification gates.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
