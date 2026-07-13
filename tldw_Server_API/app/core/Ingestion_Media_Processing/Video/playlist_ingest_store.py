@@ -1585,10 +1585,15 @@ class PlaylistIngestStore:
         if self._postgres:
             requested_sql = """
                 SELECT materialization_id, occurrence_id, request_ordinal
-                FROM jsonb_to_recordset(?::jsonb) WITH ORDINALITY AS r(
-                    materialization_id text,
-                    occurrence_id text,
-                    request_ordinal bigint
+                FROM ROWS FROM (
+                    jsonb_to_recordset(?::jsonb) AS (
+                        materialization_id text,
+                        occurrence_id text
+                    )
+                ) WITH ORDINALITY AS requested(
+                    materialization_id,
+                    occurrence_id,
+                    request_ordinal
                 )
             """
             lock_sql = "FOR SHARE OF m, mi" if lock else ""

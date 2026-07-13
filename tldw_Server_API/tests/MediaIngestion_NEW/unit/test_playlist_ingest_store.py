@@ -148,6 +148,9 @@ def test_bulk_materialization_resolution_uses_one_fixed_shape_collection_bind(
     assert len(calls) == 1
     sql, params = calls[0]
     assert shredder in sql
+    if postgres:
+        assert "FROM ROWS FROM (" in sql
+        assert ") WITH ORDINALITY AS requested(" in sql
     assert len(params) == 3
     assert len(json.loads(params[0])) == 500
     assert sql.count("?") == 3

@@ -50,6 +50,7 @@ def test_playlist_store_postgres_matches_sqlite_contract(pg_temp_db, monkeypatch
                 "ordinal": ordinal,
                 "occurrence_index_for_source": 1,
                 "source_url": f"https://example.com/pg-video/{ordinal}",
+                "normalized_source_id": f"url:https://example.com/pg-video/{ordinal}",
                 "source_kind": "url",
                 "availability": "available",
                 "duplicate_status": "not_found",
@@ -76,6 +77,24 @@ def test_playlist_store_postgres_matches_sqlite_contract(pg_temp_db, monkeypatch
         preflight_id=preflight.preflight_id,
         occurrence_ids=["pg-occ-3", "pg-occ-1"],
     )
+    locked_run = store.create_validated_run(
+        "pg-owner",
+        items=[
+            {
+                "occurrence_id": "pg-occ-3",
+                "input_kind": "materialized_playlist_item",
+                "materialization_id": materialized.materialization_id,
+                "source_url": "https://example.com/pg-video/3",
+                "normalized_source_id": "url:https://example.com/pg-video/3",
+                "source_kind": "url",
+                "display_metadata": {"title": "PG video 3"},
+                "state": "staged",
+                "action": "ingest",
+                "metadata_patch": None,
+            }
+        ],
+    )
+    assert store.list_run_items("pg-owner", locked_run.run_id)[0].occurrence_id == "pg-occ-3"
     run = store.create_run("pg-owner", materialization_ids=[materialized.id])
     assert store.compare_and_set_run_item_state(
         "pg-owner",
