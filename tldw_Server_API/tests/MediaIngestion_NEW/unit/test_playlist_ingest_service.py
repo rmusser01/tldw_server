@@ -911,6 +911,82 @@ def test_create_run_ambiguous_metadata_raises_pending_and_later_reconciles_same_
     ) == 1
 
 
+def test_reconcile_initial_get_run_failure_is_pending_without_side_effects(
+    service_context,
+    monkeypatch,
+):
+    service, store, manager, media_db = service_context
+    created = service.create_run(
+        "owner-1",
+        inputs=[_direct_input("occ-direct", "https://example.com/video")],
+        review_overrides={},
+    )
+    original_get_run = service._store.get_run
+    original_list_run_items = service._store.list_run_items
+    before_run = original_get_run("owner-1", created.run_id)
+    before_items = tuple(original_list_run_items("owner-1", created.run_id))
+    before_events = tuple(store.list_run_events("owner-1", created.run_id))
+    monkeypatch.setattr(
+        service._store,
+        "get_run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("private get-run detail")),
+    )
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
+        PlaylistRunPendingError,
+    )
+
+    with pytest.raises(PlaylistRunPendingError) as pending:
+        service.reconcile_nonprocessing_actions("owner-1", created.run_id)
+
+    assert pending.value.run_id == created.run_id
+    assert str(pending.value) == "duplicate_action_pending"
+    assert "private" not in str(pending.value)
+    assert original_get_run("owner-1", created.run_id) == before_run
+    assert tuple(original_list_run_items("owner-1", created.run_id)) == before_items
+    assert tuple(store.list_run_events("owner-1", created.run_id)) == before_events
+    assert media_db.metadata_calls == []
+    assert _table_count(manager, "jobs") == 0
+
+
+def test_reconcile_initial_list_items_failure_is_pending_without_side_effects(
+    service_context,
+    monkeypatch,
+):
+    service, store, manager, media_db = service_context
+    created = service.create_run(
+        "owner-1",
+        inputs=[_direct_input("occ-direct", "https://example.com/video")],
+        review_overrides={},
+    )
+    original_get_run = service._store.get_run
+    original_list_run_items = service._store.list_run_items
+    before_run = original_get_run("owner-1", created.run_id)
+    before_items = tuple(original_list_run_items("owner-1", created.run_id))
+    before_events = tuple(store.list_run_events("owner-1", created.run_id))
+    monkeypatch.setattr(
+        service._store,
+        "list_run_items",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("private item-read detail")),
+    )
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
+        PlaylistRunPendingError,
+    )
+
+    with pytest.raises(PlaylistRunPendingError) as pending:
+        service.reconcile_nonprocessing_actions("owner-1", created.run_id)
+
+    assert pending.value.run_id == created.run_id
+    assert str(pending.value) == "duplicate_action_pending"
+    assert "private" not in str(pending.value)
+    assert original_get_run("owner-1", created.run_id) == before_run
+    assert tuple(original_list_run_items("owner-1", created.run_id)) == before_items
+    assert tuple(store.list_run_events("owner-1", created.run_id)) == before_events
+    assert media_db.metadata_calls == []
+    assert _table_count(manager, "jobs") == 0
+
+
 def test_create_run_in_run_repeat_requires_occurrence_bound_override(service_context):
     service, store, manager, _media_db = service_context
     inputs = [

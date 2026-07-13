@@ -814,20 +814,20 @@ class PlaylistIngestService:
     ) -> MediaIngestRunRecord:
         """Resume one owner-scoped run's preparing actions for status/SSE callers."""
         owner = self._store._owner(owner_user_id)
-        run = self._store.get_run(owner, run_id)
-        records = list(self._store.list_run_items(owner, run.run_id, limit=500))
-        items = [
-            {
-                "occurrence_id": item.occurrence_id,
-                "action": item.action,
-                "media_id": item.media_id,
-                "metadata_patch": item.metadata_patch,
-                "planned_collection_item_id": item.planned_collection_item_id,
-            }
-            for item in records
-        ]
         collections_db = None
         try:
+            run = self._store.get_run(owner, run_id)
+            records = list(self._store.list_run_items(owner, run.run_id, limit=500))
+            items = [
+                {
+                    "occurrence_id": item.occurrence_id,
+                    "action": item.action,
+                    "media_id": item.media_id,
+                    "metadata_patch": item.metadata_patch,
+                    "planned_collection_item_id": item.planned_collection_item_id,
+                }
+                for item in records
+            ]
             if any(
                 item["action"] in {"include_existing", "update_metadata_only"}
                 and item["planned_collection_item_id"] is not None
@@ -844,7 +844,7 @@ class PlaylistIngestService:
         except PlaylistIngestNotFoundError:
             raise
         except Exception as exc:
-            raise PlaylistRunPendingError(run.run_id) from exc
+            raise PlaylistRunPendingError(run_id) from exc
         finally:
             if collections_db is not None:
                 with contextlib.suppress(Exception):
