@@ -2,7 +2,12 @@ import inspect
 
 import pytest
 
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatProviderError
+from tldw_Server_API.app.core.Chat.Chat_Deps import (
+    ChatAuthenticationError,
+    ChatConfigurationError,
+    ChatProviderError,
+    ChatRateLimitError,
+)
 from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib as sgl
 from tldw_Server_API.app.core.LLM_Calls import chat_calls
 import tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter as openai_mod
@@ -283,6 +288,42 @@ def test_typed_chat_provider_error_is_sanitized(monkeypatch):
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("adapter_error", "expected_code"),
+    [
+        (ChatAuthenticationError(message=SECRET, provider="openai"), "authentication"),
+        (ChatConfigurationError(message=SECRET, provider="openai"), "configuration"),
+        (ChatRateLimitError(message=SECRET, provider="openai"), "rate_limit"),
+        (ChatProviderError(message=SECRET, status_code=403, provider="openai"), "authentication"),
+        (ChatProviderError(message=SECRET, status_code=429, provider="openai"), "rate_limit"),
+    ],
+)
+def test_chat_error_taxonomy_is_preserved_without_upstream_details(
+    monkeypatch,
+    adapter_error,
+    expected_code,
+):
+    monkeypatch.setattr(sgl, "get_registry", lambda: _Registry(_Adapter(error=adapter_error)))
+
+    with pytest.raises(sgl.SummaryProviderError) as exc_info:
+        sgl.analyze(
+            "openai",
+            "hello",
+            None,
+            api_key="key",
+            model_override="gpt-test",
+            app_config={},
+            credentials_resolved=True,
+            raise_on_error=True,
+        )
+
+    assert exc_info.value.code == expected_code
+    assert exc_info.value.__cause__ is None
+    assert SECRET not in str(exc_info.value)
+    assert SECRET not in repr(exc_info.value)
+
+
+@pytest.mark.unit
 def test_dispatch_failure_is_typed_for_runtime_callers(monkeypatch):
     class BrokenRegistry:
         def get_adapter(self, _provider):
@@ -331,6 +372,36 @@ def test_partial_stream_then_failure_raises_typed_error(monkeypatch):
     with pytest.raises(sgl.SummaryProviderError) as exc_info:
         next(result)
     assert exc_info.value.code == "provider_failure"
+    assert SECRET not in repr(exc_info.value)
+
+
+@pytest.mark.unit
+def test_partial_stream_authentication_failure_preserves_safe_taxonomy(monkeypatch):
+    adapter = _Adapter(
+        lines=[
+            'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n',
+            ChatAuthenticationError(message=SECRET, provider="openai"),
+        ]
+    )
+    monkeypatch.setattr(sgl, "get_registry", lambda: _Registry(adapter))
+    result = sgl.analyze(
+        "openai",
+        "hello",
+        None,
+        api_key="key",
+        model_override="gpt-test",
+        streaming=True,
+        app_config={},
+        credentials_resolved=True,
+        raise_on_error=True,
+    )
+
+    assert next(result) == "partial"
+    with pytest.raises(sgl.SummaryProviderError) as exc_info:
+        next(result)
+    assert exc_info.value.code == "authentication"
+    assert exc_info.value.__cause__ is None
+    assert SECRET not in str(exc_info.value)
     assert SECRET not in repr(exc_info.value)
 
 

@@ -21,7 +21,12 @@ import os
 from collections.abc import Generator
 from typing import Any, Callable, Optional, Union
 
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
+from tldw_Server_API.app.core.Chat.Chat_Deps import (
+    ChatAPIError,
+    ChatAuthenticationError,
+    ChatConfigurationError,
+    ChatRateLimitError,
+)
 from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
 from tldw_Server_API.app.core.Chat.streaming_utils import _extract_text_from_upstream_sse
 
@@ -104,6 +109,9 @@ _SUMMARY_ERROR_CODES = frozenset(
         "adapter_unavailable",
         "missing_model",
         "missing_credentials",
+        "authentication",
+        "configuration",
+        "rate_limit",
         "provider_failure",
     }
 )
@@ -117,6 +125,22 @@ class SummaryProviderError(Exception):
         normalized = "".join(char for char in str(provider or "").lower() if char.isalnum() or char in ".-_")[:64]
         self.provider = normalized or "unknown"
         super().__init__(f"Summary provider error: {self.code} ({self.provider})")
+
+
+def _summary_error_code(exc: BaseException) -> str:
+    """Map chat adapter failures to a bounded, detail-free summary taxonomy."""
+    if isinstance(exc, ChatAuthenticationError):
+        return "authentication"
+    if isinstance(exc, ChatConfigurationError):
+        return "configuration"
+    if isinstance(exc, ChatRateLimitError):
+        return "rate_limit"
+    if isinstance(exc, ChatAPIError):
+        if exc.status_code in {401, 403}:
+            return "authentication"
+        if exc.status_code == 429:
+            return "rate_limit"
+    return "provider_failure"
 
 
 def _summary_failure(
@@ -262,10 +286,10 @@ def _summarize_via_adapter(
                         return
                     if text_chunk:
                         yield text_chunk
-            except _SUMMARY_ADAPTER_EXCEPTIONS:
+            except _SUMMARY_ADAPTER_EXCEPTIONS as exc:
                 if raise_on_error:
                     logging.error(f"Adapter streaming failed for {provider}")
-                    raise SummaryProviderError(code="provider_failure", provider=provider) from None
+                    raise SummaryProviderError(code=_summary_error_code(exc), provider=provider) from None
                 logging.error(f"Adapter streaming failed for {provider}")
                 yield f"Error: Provider streaming failed for '{provider}'."
             finally:
@@ -279,10 +303,10 @@ def _summarize_via_adapter(
     try:
         response = adapter.chat(request, timeout=timeout)
         return extract_response_content(response) or str(response)
-    except _SUMMARY_ADAPTER_EXCEPTIONS:
+    except _SUMMARY_ADAPTER_EXCEPTIONS as exc:
         if raise_on_error:
             logging.error(f"Adapter summarization failed for {provider}")
-            raise SummaryProviderError(code="provider_failure", provider=provider) from None
+            raise SummaryProviderError(code=_summary_error_code(exc), provider=provider) from None
         logging.error(f"Adapter summarization failed for {provider}")
         return f"Error: Provider request failed for '{provider}'."
 

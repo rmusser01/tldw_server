@@ -69,14 +69,56 @@ class EmbeddingEndpointError(ValueError):
         super().__init__(f"Embedding endpoint is required for provider '{self.provider}'")
 
 
-def _is_auth_failure(exc: Exception) -> bool:
-    status = getattr(exc, "status_code", None)
-    response = getattr(exc, "response", None)
+class EmbeddingProviderError(RuntimeError):
+    """Sanitized failure returned by an execution-scoped embedding provider."""
+
+    _CODES = frozenset({"authentication", "provider_failure"})
+
+    def __init__(self, provider: str, *, code: str, status_code: int | None = None) -> None:
+        normalized = "".join(
+            char for char in str(provider or "").strip().lower() if char.isalnum() or char in ".-_"
+        )[:64]
+        self.provider = normalized or "unknown"
+        self.code = code if code in self._CODES else "provider_failure"
+        self.status_code = status_code if isinstance(status_code, int) and 100 <= status_code <= 599 else None
+        status_suffix = f", status={self.status_code}" if self.status_code is not None else ""
+        super().__init__(f"Embedding provider error: {self.code} ({self.provider}{status_suffix})")
+
+
+def _embedding_error_status(value: Any) -> int | None:
+    """Extract only a bounded HTTP status from an exception or provider payload."""
+    if isinstance(value, dict):
+        for key in ("status_code", "status"):
+            try:
+                status = int(value.get(key))
+            except (TypeError, ValueError):
+                continue
+            if 100 <= status <= 599:
+                return status
+        nested = value.get("error")
+        if isinstance(nested, dict):
+            return _embedding_error_status(nested)
+        return None
+
+    status = getattr(value, "status_code", None)
+    response = getattr(value, "response", None)
     if status is None and response is not None:
         status = getattr(response, "status_code", None)
-    if status in {401, 403}:
-        return True
-    return any(f"HTTP {candidate}" in str(exc) for candidate in (401, 403))
+    try:
+        parsed = int(status)
+    except (TypeError, ValueError):
+        parsed = None
+    if isinstance(parsed, int) and 100 <= parsed <= 599:
+        return parsed
+    message = str(value)
+    for candidate in (401, 403, 429):
+        if f"HTTP {candidate}" in message:
+            return candidate
+    return None
+
+
+def _is_auth_failure(exc: Exception) -> bool:
+    return _embedding_error_status(exc) in {401, 403}
 
 
 def _normalize_embedding_response(payload: Any) -> list[float]:
@@ -230,6 +272,14 @@ class AsyncOpenAIProvider(AsyncEmbeddingProvider):
             if isinstance(data, dict) and "error" in data:
                 status = "failure"
                 self.metrics.log_error(self.provider_name, "APIError")
+                if credentials_resolved is True:
+                    error_status = _embedding_error_status(data)
+                    error_code = "authentication" if error_status in {401, 403} else "provider_failure"
+                    raise EmbeddingProviderError(
+                        self.provider_name,
+                        code=error_code,
+                        status_code=error_status,
+                    ) from None
                 raise ValueError(str(data.get("error")))
             if isinstance(data, dict) and data.get("data"):
                 return data["data"][0]["embedding"]
@@ -315,6 +365,14 @@ class AsyncHuggingFaceProvider(AsyncEmbeddingProvider):
                 json_data=payload,
             )
             # Usage is already recorded in check_rate_limit_async
+            if credentials_resolved is True and isinstance(data, dict) and "error" in data:
+                error_status = _embedding_error_status(data)
+                error_code = "authentication" if error_status in {401, 403} else "provider_failure"
+                raise EmbeddingProviderError(
+                    self.provider_name,
+                    code=error_code,
+                    status_code=error_status,
+                ) from None
             return _normalize_embedding_response(data)
         except _ASYNC_EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
             self.metrics.log_error(self.provider_name, str(type(e).__name__))
@@ -700,7 +758,17 @@ class AsyncEmbeddingService:
                     call_kwargs["base_url_override"] = effective_base_url
                 embedding = await provider_instance.create_embedding(**call_kwargs)
             except _ASYNC_EMBEDDINGS_PROVIDER_EXCEPTIONS as e:
-                if explicit_credentials or _is_auth_failure(e):
+                if isinstance(e, EmbeddingProviderError):
+                    raise
+                if explicit_credentials:
+                    error_status = _embedding_error_status(e)
+                    error_code = "authentication" if error_status in {401, 403} else "provider_failure"
+                    raise EmbeddingProviderError(
+                        provider,
+                        code=error_code,
+                        status_code=error_status,
+                    ) from None
+                if _is_auth_failure(e):
                     raise
                 # Try fallback provider
                 embedding, actual_provider, actual_model = await self._try_fallback_providers(

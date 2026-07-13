@@ -7,7 +7,6 @@ from __future__ import annotations
 
 #
 import asyncio
-import copy
 import configparser
 import hashlib
 import json
@@ -114,6 +113,7 @@ from tldw_Server_API.app.core.Embeddings.audit_adapter import (
     log_memory_limit_exceeded,
     log_model_evicted,
 )
+from tldw_Server_API.app.core.Embeddings.async_embeddings import EmbeddingProviderError
 from tldw_Server_API.app.core.exceptions import InvalidStoragePathError, NetworkError, RetryExhaustedError
 from tldw_Server_API.app.core.LLM_Calls.chat_calls import get_openai_embeddings_batch
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram  # Keep your existing metrics
@@ -161,6 +161,12 @@ _EMBEDDINGS_STORAGE_ALLOWLIST_ROOT = Path(_allowlist_root_env or resolve_repo_re
 
 
 def _get_http_status_from_exception(exc: Exception) -> int | None:
+    direct_status = getattr(exc, "status_code", None)
+    try:
+        if direct_status is not None:
+            return int(direct_status)
+    except (TypeError, ValueError):
+        pass
     response = getattr(exc, "response", None)
     if response is None:
         return None
@@ -169,6 +175,58 @@ def _get_http_status_from_exception(exc: Exception) -> int | None:
         return int(status)
     except (TypeError, ValueError):
         return None
+
+
+def _get_explicit_openai_embeddings_batch(
+    texts: list[str],
+    *,
+    model: str,
+    api_key: str,
+    base_url: str,
+    dimensions: int | None,
+) -> list[list[float]]:
+    """Call OpenAI embeddings without exposing explicit credentials to legacy config paths."""
+    from tldw_Server_API.app.core.http_client import RetryPolicy, fetch
+
+    endpoint = base_url if base_url.rstrip("/").endswith("/embeddings") else f"{base_url.rstrip('/')}/embeddings"
+    payload: dict[str, Any] = {"input": texts, "model": model}
+    if dimensions is not None:
+        payload["dimensions"] = dimensions
+    response = None
+    try:
+        response = fetch(
+            method="POST",
+            url=endpoint,
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=60,
+            retry=RetryPolicy(attempts=1),
+        )
+        status_code = int(getattr(response, "status_code", 0) or 0)
+        if status_code >= 400:
+            code = "authentication" if status_code in {401, 403} else "provider_failure"
+            raise EmbeddingProviderError("openai", code=code, status_code=status_code) from None
+        data = response.json()
+        rows = data.get("data") if isinstance(data, dict) else None
+        if not isinstance(rows, list) or len(rows) != len(texts):
+            raise EmbeddingProviderError("openai", code="provider_failure") from None
+        embeddings = []
+        for row in rows:
+            embedding = row.get("embedding") if isinstance(row, dict) else None
+            if not isinstance(embedding, list):
+                raise EmbeddingProviderError("openai", code="provider_failure") from None
+            embeddings.append(embedding)
+        return embeddings
+    except EmbeddingProviderError:
+        raise
+    except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as exc:
+        status_code = _get_http_status_from_exception(exc)
+        code = "authentication" if status_code in {401, 403} else "provider_failure"
+        raise EmbeddingProviderError("openai", code=code, status_code=status_code) from None
+    finally:
+        if response is not None:
+            with contextlib.suppress(_EMBEDDINGS_NONCRITICAL_EXCEPTIONS):
+                response.close()
 
 
 def _is_probable_network_error(exc: Exception) -> bool:
@@ -2012,35 +2070,35 @@ def create_embeddings_batch(
             logger.debug(
                 f"Creating embeddings for {len(texts)} texts via OpenAI API with model {model_spec.model_name_or_path}"
             )
-            if not callable(get_openai_embeddings_batch):  # Basic check
-                logger.error("`get_openai_embeddings_batch` is not available or not callable.")
-                raise NotImplementedError("OpenAI batch embedding function is not properly set up.")
-
             if credentials_resolved is True:
                 if not (isinstance(api_key_override, str) and api_key_override.strip()):
                     raise ValueError("Explicit embedding credential is required for openai.")
-                openai_app_config = copy.deepcopy(user_app_config)
-                openai_section = dict(openai_app_config.get("openai_api", {}) or {})
-                openai_section["api_key"] = api_key_override
-                openai_section["api_base_url"] = base_url_override or _EXPLICIT_OPENAI_API_BASE
-                openai_app_config["openai_api"] = openai_section
+                embeddings_list = _get_explicit_openai_embeddings_batch(
+                    texts,
+                    model=model_spec.model_name_or_path,
+                    api_key=api_key_override,
+                    base_url=base_url_override or _EXPLICIT_OPENAI_API_BASE,
+                    dimensions=model_spec.dimensions,
+                )
             else:
                 openai_app_config = user_app_config
-            if credentials_resolved is not True and model_spec.api_key:
-                openai_section = dict(user_app_config.get("openai_api", {}) or {})
-                if not openai_section.get("api_key"):
-                    openai_section["api_key"] = model_spec.api_key
-                if openai_section != user_app_config.get("openai_api", {}):
-                    openai_app_config = {**user_app_config, "openai_api": openai_section}
+                if not callable(get_openai_embeddings_batch):  # Basic check
+                    logger.error("`get_openai_embeddings_batch` is not available or not callable.")
+                    raise NotImplementedError("OpenAI batch embedding function is not properly set up.")
+                if model_spec.api_key:
+                    openai_section = dict(user_app_config.get("openai_api", {}) or {})
+                    if not openai_section.get("api_key"):
+                        openai_section["api_key"] = model_spec.api_key
+                    if openai_section != user_app_config.get("openai_api", {}):
+                        openai_app_config = {**user_app_config, "openai_api": openai_section}
 
-            # Pass the full user_app_config as it might contain API keys or other necessary settings
-            # for get_openai_embeddings_batch
-            embeddings_list = get_openai_embeddings_batch(
-                texts,
-                model=model_spec.model_name_or_path,
-                app_config=openai_app_config,  # Or pass only relevant parts if get_openai_embeddings_batch is refactored
-                dimensions=model_spec.dimensions,
-            )
+                # Legacy calls retain configuration-based credential resolution.
+                embeddings_list = get_openai_embeddings_batch(
+                    texts,
+                    model=model_spec.model_name_or_path,
+                    app_config=openai_app_config,
+                    dimensions=model_spec.dimensions,
+                )
 
         elif provider.lower() == "local_api":
             if not isinstance(model_spec, LocalAPICfg):

@@ -1,6 +1,7 @@
 import asyncio
 
 import pytest
+from loguru import logger
 
 from tldw_Server_API.app.core.Embeddings import async_embeddings
 from tldw_Server_API.app.core.Embeddings.async_embeddings import AsyncEmbeddingService
@@ -12,6 +13,9 @@ from tldw_Server_API.app.core.Embeddings.simplified_config import (
     ProviderConfig,
     SecurityConfig,
 )
+
+
+SECRET = "upstream-secret-body"
 
 
 class DummyCache:
@@ -275,7 +279,7 @@ async def test_explicit_auth_failure_never_falls_back(monkeypatch, status):
     monkeypatch.setattr(pool, "request", fail_request)
     monkeypatch.setattr(service, "_try_fallback_providers", fail_fallback)
 
-    with pytest.raises(NetworkError):
+    with pytest.raises(async_embeddings.EmbeddingProviderError) as exc_info:
         await service.create_embedding(
             "hello",
             provider="openai",
@@ -283,6 +287,57 @@ async def test_explicit_auth_failure_never_falls_back(monkeypatch, status):
             api_key_override="bad-key",
             credentials_resolved=True,
         )
+
+    assert exc_info.value.code == "authentication"
+    assert exc_info.value.provider == "openai"
+    assert exc_info.value.status_code == status
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("provider", "status"),
+    [("openai", 401), ("huggingface", 403)],
+)
+async def test_explicit_error_payload_is_typed_sanitized_and_never_falls_back(
+    monkeypatch,
+    provider,
+    status,
+):
+    service = AsyncEmbeddingService(config=_fallback_config())
+    service.cache = DummyCache()
+    pool = get_pool_manager().get_pool(provider)
+    log_messages = []
+    sink_id = logger.add(log_messages.append, format="{message}")
+
+    async def error_payload(*_args, **_kwargs):
+        return {"error": {"message": f"{SECRET} denied", "status": status}}
+
+    async def fail_fallback(*_args, **_kwargs):
+        raise AssertionError("explicit provider payload failure must not fall back")
+
+    monkeypatch.setattr(pool, "request", error_payload)
+    monkeypatch.setattr(service, "_try_fallback_providers", fail_fallback)
+
+    try:
+        with pytest.raises(async_embeddings.EmbeddingProviderError) as exc_info:
+            await service.create_embedding(
+                "hello",
+                model="text-embedding-3-small" if provider == "openai" else "fallback-model",
+                provider=provider,
+                use_cache=False,
+                api_key_override="bad-key",
+                credentials_resolved=True,
+            )
+    finally:
+        logger.remove(sink_id)
+
+    assert exc_info.value.code == "authentication"
+    assert exc_info.value.provider == provider
+    assert exc_info.value.status_code == status
+    assert exc_info.value.__cause__ is None
+    assert SECRET not in str(exc_info.value)
+    assert SECRET not in repr(exc_info.value)
+    assert SECRET not in "".join(log_messages)
 
 
 @pytest.mark.asyncio

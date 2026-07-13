@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import pytest
+from loguru import logger
 
+from tldw_Server_API.app.core.Embeddings import async_embeddings
 from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create as ec
+
+
+SECRET = "upstream-secret-body"
 
 
 def _config(tmp_path, provider, **model_fields):
@@ -30,11 +35,27 @@ def test_explicit_openai_key_overrides_model_and_server_keys(monkeypatch, tmp_pa
     model_id, config = _config(tmp_path, "openai", api_key="model-spec-key")
     seen = []
 
-    def fake_openai(texts, *, model, app_config, dimensions):
-        seen.append(app_config)
-        return [[0.1, 0.2] for _ in texts]
+    class Response:
+        status_code = 200
 
-    monkeypatch.setattr(ec, "get_openai_embeddings_batch", fake_openai)
+        def json(self):
+            return {"data": [{"embedding": [0.1, 0.2]}]}
+
+        def close(self):
+            return None
+
+    def fake_fetch(**kwargs):
+        seen.append(kwargs)
+        return Response()
+
+    monkeypatch.setattr("tldw_Server_API.app.core.http_client.fetch", fake_fetch)
+    monkeypatch.setattr(
+        ec,
+        "get_openai_embeddings_batch",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("explicit credentials must bypass the legacy helper")
+        ),
+    )
 
     result = ec.create_embeddings_batch(
         ["hello"],
@@ -45,9 +66,67 @@ def test_explicit_openai_key_overrides_model_and_server_keys(monkeypatch, tmp_pa
     )
 
     assert result == [[0.1, 0.2]]
-    assert seen[0]["openai_api"]["api_key"] == "explicit-key"
-    assert seen[0]["openai_api"]["api_base_url"] == "https://api.openai.com/v1"
+    assert seen[0]["url"] == "https://api.openai.com/v1/embeddings"
+    assert seen[0]["headers"]["Authorization"] == "Bearer explicit-key"
+    assert seen[0]["json"] == {"input": ["hello"], "model": "test-model"}
+    assert seen[0]["retry"].attempts == 1
     assert config["openai_api"]["api_key"] == "server-config-key"
+
+
+@pytest.mark.unit
+def test_explicit_openai_auth_failure_is_sanitized_and_not_retried(monkeypatch, tmp_path):
+    monkeypatch.setattr(ec, "_EMBEDDINGS_STORAGE_ALLOWLIST_ROOT", tmp_path.resolve())
+    model_id, config = _config(tmp_path, "openai", api_key="model-spec-key")
+    seen = []
+    log_messages = []
+    sink_id = logger.add(log_messages.append, format="{message}")
+
+    class Response:
+        status_code = 401
+
+        def json(self):
+            return {"error": {"message": SECRET}}
+
+        def close(self):
+            return None
+
+    def fake_fetch(**kwargs):
+        seen.append(kwargs)
+        return Response()
+
+    monkeypatch.setattr("tldw_Server_API.app.core.http_client.fetch", fake_fetch)
+    monkeypatch.setattr(
+        ec,
+        "get_openai_embeddings_batch",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("explicit credentials must bypass the legacy helper")
+        ),
+    )
+
+    try:
+        with pytest.raises(async_embeddings.EmbeddingProviderError) as exc_info:
+            ec.create_embeddings_batch(
+                ["hello"],
+                config,
+                model_id,
+                api_key_override="explicit-key",
+                base_url_override="https://explicit.example/v1",
+                credentials_resolved=True,
+            )
+    finally:
+        logger.remove(sink_id)
+
+    assert len(seen) == 1
+    assert seen[0]["url"] == "https://explicit.example/v1/embeddings"
+    assert seen[0]["headers"]["Authorization"] == "Bearer explicit-key"
+    assert seen[0]["retry"].attempts == 1
+    assert exc_info.value.code == "authentication"
+    assert exc_info.value.provider == "openai"
+    assert exc_info.value.status_code == 401
+    assert exc_info.value.__cause__ is None
+    assert SECRET not in str(exc_info.value)
+    assert SECRET not in repr(exc_info.value)
+    assert SECRET not in "".join(log_messages)
 
 
 @pytest.mark.unit
