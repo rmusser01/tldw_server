@@ -1,6 +1,6 @@
 # Legacy Single-User API Key Refresh Migration
 
-**Backlog task:** TASK-12950
+**Backlog task:** TASK-12953
 
 **Status:** Independently re-reviewed; pending requester confirmation
 

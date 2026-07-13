@@ -1,7 +1,7 @@
 ---
-id: TASK-12950
+id: TASK-12953
 title: Preserve legacy single-user API key across media-page refresh
-status: Done
+status: In Progress
 labels:
 - auth
 - webui
@@ -11,14 +11,15 @@ priority: high
 references:
 - TASK-12106
 - TASK-12127
+- https://github.com/rmusser01/tldw_server/pull/2719
+documentation:
+- Docs/superpowers/specs/2026-07-12-legacy-api-key-refresh-migration-design.md
 modified_files:
 - apps/packages/ui/src/services/tldw/TldwApiClient.ts
 - apps/packages/ui/src/services/__tests__/tldw-api-client.quickstart-auth.test.ts
 - apps/tldw-frontend/e2e/helpers/manual-api-key-fixture.ts
 - apps/tldw-frontend/e2e/manual-api-key-persistence.spec.ts
 - apps/tldw-frontend/e2e/extension-api-key-persistence.spec.ts
-documentation:
-- Docs/superpowers/specs/2026-07-12-legacy-api-key-refresh-migration-design.md
 ---
 
 ## Description
@@ -39,21 +40,21 @@ Latest dev scrubs pre-migration single-user tldwConfig records that contain a va
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-
+Implementation complete on PR #2719. Review remediation and final verification are tracked in TASK-12952. Keep this task In Progress until the requester supplies the required human-written PR Change summary.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Implementation and verification completed on 2026-07-12 at HEAD 1fcb60243c73798d65c54fafdeb0d4d8107dde90.
+Replacement for the auth-refresh task that was originally created as TASK-12950 before latest dev independently assigned TASK-12950 to Quick Ingest. The unrelated Quick Ingest task from dev must remain unchanged. This replacement remains In Progress until PR review remediation is verified and the required human-written Change summary is provided.
 
-Implementation:
+Implementation completed before review remediation:
 - Tightened TldwApiClient.initialize() to migrate only exact eligible advanced/remote pre-metadata single-user credentials into complete manual/device/origin metadata.
 - Preserved fail-closed handling for hosted/quickstart transports, malformed or placeholder credentials, invalid origins, and active cookie/environment/runtime replacement auth.
 - Added WebUI and packaged Chrome MV3 /media hard-refresh regressions with exact offset-scoped authenticated GET /api/v1/media assertions.
 - Packaged extension coverage seeds the released JSON-serialized chrome.storage.sync legacy record, verifies sync removal, and verifies exact migrated local state before and after reload.
 
-Fresh verification:
+Pre-review verification:
 - Shared auth Vitest matrix: 3 files, 50 tests passed.
 - Ambient NEXT_PUBLIC_X_API_KEY isolation: 22/22 passed.
 - Ambient VITE_TLDW_API_KEY isolation: 22/22 passed.
@@ -62,20 +63,22 @@ Fresh verification:
 - Packaged extension persistence Playwright: 3/3 passed.
 - Extension compile: passed with no diagnostics.
 - git diff --check for committed and working changes: passed.
-- No generated artifacts are tracked or newly untracked.
+- No generated artifacts were tracked or newly untracked.
 - Bandit: not applicable because no Python files were touched.
 
 Known unrelated/tooling baselines:
-- Frontend typecheck remains nonzero only for the untouched pre-existing QuickIngestWizardModal.tsx:1813 overflowY TS2322 diagnostic; no touched-file diagnostics.
-- Installed ESLint 9.39.2 cannot run from repo root because no root eslint.config file exists; no packages were installed or substituted.
-- Existing extension build warnings (duplicate imports, circular chunks, chunk size, stale browser data) remain; build exits zero.
-Pull request: https://github.com/rmusser01/tldw_server/pull/2719 (draft pending the required human-written Change summary).
+- Frontend typecheck was nonzero only for the untouched pre-existing QuickIngestWizardModal.tsx:1813 overflowY TS2322 diagnostic; no touched-file diagnostics.
+- Installed ESLint 9.39.2 could not run from repo root because no root eslint.config file existed; no packages were installed or substituted.
+- Existing extension build warnings (duplicate imports, circular chunks, chunk size, stale browser data) remained while the build exited zero.
+
+PR: https://github.com/rmusser01/tldw_server/pull/2719.
+Review remediation is tracked in TASK-12952; append the fresh post-rebase verification here before final handoff.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Fixed legacy single-user API-key loss on /media refresh for both the WebUI and browser extension. Eligible pre-metadata advanced/remote credentials now migrate once to the existing origin-bound manual device format, while hosted/quickstart and higher-precedence authentication remain fail-closed. Browser regressions cover hard reload in the WebUI and the released extension chrome.storage.sync-to-local migration path. All task-specific unit, browser, build, and extension compile checks pass; unrelated repository typecheck/lint baselines are documented in Implementation Notes.
+Fixed legacy single-user API-key loss on /media refresh for both the WebUI and browser extension. Eligible pre-metadata advanced/remote credentials migrate once to the existing origin-bound manual device format, while hosted/quickstart and higher-precedence authentication remain fail-closed. Browser regressions cover hard reload in the WebUI and the released extension chrome.storage.sync-to-local migration path.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
@@ -86,4 +89,5 @@ Fixed legacy single-user API-key loss on /media refresh for both the WebUI and b
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
+- [ ] #7 Human-written PR Change summary provided
 <!-- DOD:END -->
