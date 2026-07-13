@@ -1,7 +1,7 @@
 ---
 id: TASK-12112
 title: Design user-customizable service prompt registry and settings
-status: Done
+status: In Progress
 labels:
 - prompts
 - design
@@ -28,13 +28,15 @@ Design a governed, per-user Service Prompt Registry that exposes a curated allow
 - [x] #2 Define the authenticated API and shared WebUI/browser-extension settings experience, including validation, preview, comparison, reset, history, conflicts, capability states, and responsive behavior.
 - [x] #3 Define the allowlist eligibility policy, context-integrity behavior, privacy/security safeguards, failure semantics, deployment-default compatibility, and explicit exclusions.
 - [x] #4 Define a broad content-facing migration inventory strategy, reviewable rollout slices, verification matrix, and measurable completion gates.
-- [x] #5 Review the written design through the required independent spec-document-reviewer loop and record the approved spec.
+- [ ] #5 Review the written design through the required independent spec-document-reviewer loop and record the approved spec.
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Design spec written at Docs/superpowers/specs/2026-07-12-user-customizable-service-prompts-design.md and initially committed in 5d55b88cee. Independent spec review round 1 found four planning blockers covering context-integrity approval, multi-part explicit overrides/operator bypass, deployment-default failures, and multi-prompt job pinning. The spec was revised to resolve all four. Review round 2 approved the spec with no blocking issues. Verification: git diff --check passed for the documentation changes; no code or runtime configuration changed. Bandit and runtime test suites were skipped as not applicable to this docs-only design task. No known blockers remain.
+Reopened at the human review gate for an additional implementation-risk audit requested by the user. Audit focus: hidden server-default confidentiality in full-bundle execution snapshots, approval-time schema/default races, catalog ETag invalidation, reset safety when defaults are unavailable, explicit request snapshot trust/retention, tenant-scoped deduplication, and broad-release launch semantics.
+Independent review pass 3 found two remaining blockers: execution artifacts lacked a cryptographic authenticator independent of their storage, and backup import did not deterministically reconcile exported active/pending revisions with the one-current-pending invariant. The spec now requires externally anchored authenticated component/pin/binding envelopes with verification-key retention, and imports all revisions as unapproved history with no active/pending pointers until owner preview/resubmission. The three-pass independent review cap is reached, so the amended spec is returned to the human requester for final approval rather than starting an unbounded fourth automated review.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -45,10 +47,10 @@ Designed a governed per-user Service Prompt Registry and shared WebUI/browser-ex
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [x] #1 Acceptance criteria completed
+- [ ] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [x] #5 Final summary added
-- [x] #6 Known skips or blockers documented
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->

@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-12
 
-**Status:** Approved in brainstorming and independent spec review (round 2)
+**Status:** Approved in brainstorming; amended after three independent review passes; pending human final approval
 
 **Backlog:** TASK-12112
 
@@ -169,7 +169,7 @@ It uses a linear parser, reports part/variable/line/column diagnostics without e
 
 ## Persistence
 
-Service-prompt records live behind a dedicated repository using each user's existing Prompts database boundary. They are not Prompt Library rows and do not appear in ordinary Prompt search, Prompt Studio, MCP prompt listings, or Prompt exports.
+Persistent user-authored service-prompt state and revisions live behind a dedicated repository using each user's existing Prompts database boundary. Execution-only snapshots and pin sets live in a separate server-managed protected execution store because they may contain hidden deployment instructions or request-bound literal content. Neither record family appears in ordinary Prompt search, Prompt Studio, MCP prompt listings, or Prompt exports.
 
 The conceptual data model contains the following record types. The implementation plan may consolidate physical tables if it preserves these contracts.
 
@@ -184,7 +184,9 @@ One mutable state record per definition contains:
 - Last acknowledged server-default digest
 - Updated timestamp
 
-The generation changes for pending save, approval, rejection/supersession, restore, reset, and default-change acknowledgement. It is the optimistic-concurrency token even when the active revision remains null. A user may have at most one current pending revision per definition; a newer pending save explicitly supersedes the previous pending revision without activating either one. Reset supersedes any pending revision and clears the active revision in the same repository transaction.
+The generation changes for pending save, approval, rejection/supersession, restore, reset, and default-change acknowledgement. It is the optimistic-concurrency token even when the active revision remains null. A user may have at most one current pending revision per definition; a newer pending save explicitly supersedes the previous pending revision without activating either one. After the resolver verifies a trusted server default, reset supersedes any pending revision and clears the active revision in the same repository transaction.
+
+A separate per-user `catalog_generation` metadata value increments in the same transaction as every definition-state or pending-state change. The catalog ETag combines the current registry/server-default catalog digest, capability/operator mode, and this user catalog generation. This gives the list endpoint an O(1) invalidation token without relying on timestamps or scanning every revision.
 
 ### Immutable revisions
 
@@ -206,13 +208,31 @@ Reset clears the active pointer but preserves history. Reset, acknowledgement, a
 
 ### Content-addressed snapshots
 
-Every queued job pins the complete resolved template bundle, including editable parts, locked fragments, assembly order, and safe provenance. This is necessary because partial explicit overrides and locked server fragments can otherwise change independently after enqueue. Content-addressed snapshots deduplicate identical resolved bundles by canonical digest.
+Every queued job logically pins the complete resolved template bundle, including editable parts, locked fragments, assembly order, and safe provenance. This is necessary because partial explicit overrides and locked server fragments can otherwise change independently after enqueue.
 
-Snapshots contain prompt templates and safe provenance only. They do not contain rendered source documents, runtime variable values, credentials, or other job input.
+The physical snapshot is a protected component manifest:
+
+- User-authored and explicit-request parts are stored as owner-scoped execution components.
+- Visible and hidden server-managed parts reference immutable protected server-asset snapshots by asset ID and digest.
+- The manifest records assembly order and one canonical full-bundle digest.
+
+Server-managed components may be deduplicated globally by trusted asset digest. User-authored and explicit-request components may be deduplicated only within the same owner scope; APIs never reveal whether another owner has matching content. Hidden server-managed bytes are never copied into a per-user Prompts database.
+
+Template snapshots do not contain rendered source documents or runtime variable values. A queued explicit `literal` override is an exception because the literal itself is the exact prompt part to reproduce; it is treated as sensitive request-bound job input, protected and retained under Jobs policy, and excluded from user prompt history and backups.
+
+The protected execution store is not exposed through Service Prompts detail/history APIs or user exports. It uses the server's Jobs encryption-at-rest facility when enabled and retains components only as long as active/retained jobs reference them.
+
+Encryption is optional confidentiality, not the integrity boundary. Every execution component, component manifest, pin set, and later job-binding record must carry a signature, MAC, authenticated-encryption tag, or equivalent cryptographic authenticator whose key/trust anchor is held outside the protected execution store. A colocated digest alone is insufficient.
+
+The canonical authenticated envelope covers owner, submission ID, definition/component identifiers, component digests, full-bundle/set digest, source flags, creation/expiry metadata, and key ID. Binding produces a second authenticated record covering the original envelope digest and exact job UUID. Workers verify the trust anchor, both authenticators, expiry, owner, job binding, and all content digests before using any item.
+
+Default mode may use an online execution-artifact signing/MAC key managed by context integrity or the existing Jobs key facility. Hardened mode requires that online key's identity/public verification material to be anchored by the external approved trust state; if no trusted execution-artifact signer is available, prompt-bearing queued work fails before job creation. Key rotation retains verification material for at least the maximum retained-job lifetime.
+
+Automatic authentication of a request-bound explicit override proves enqueue provenance and immutability; it does not grant reusable prompt approval or replace the operator approval required for persistent Service Prompt revisions.
 
 ### Prompt pin sets and mutation receipts
 
-A prompt pin set atomically binds one or more definition snapshots, their owner, a one-time submission ID, and an overall set digest to queued work. Each item records the definition ID, full-bundle snapshot reference/digest, and source flags needed by operator modes. The whole set is committed in one per-user Prompt-database transaction before job creation.
+A prompt pin set atomically binds one or more logical full-bundle manifests, their owner, a one-time submission ID, and an overall set digest to queued work. Each item records the definition ID, protected manifest reference/digest, and source flags needed by operator modes. The whole set is committed in one protected-execution-store transaction before job creation.
 
 Mutation receipts map a client mutation ID to the completed result so safe network retries do not create duplicate revisions or misleading concurrency errors.
 
@@ -225,25 +245,27 @@ Activation follows the existing context-integrity approval policy:
 1. Validate the draft against the current registry contract.
 2. Append an immutable pending revision.
 3. Present an escaped canonical diff for explicit non-model operator review.
-4. On approval, re-check the revision digest and manifest version, sign/register the new approved manifest version, and record the approval event.
-5. Compare the pending revision ID and state generation again, then advance the active state and generation only after approval succeeds.
+4. On approval, re-resolve the current definition schema, part contract, locked assembly, and server-default bundle digest; then revalidate the pending revision.
+5. If the registry schema, locked assembly, or server-default bundle digest changed since save, refuse activation with `pending_revision_stale`. The owner must preview and resubmit against the new baseline, creating a new pending revision.
+6. Re-check the revision digest and manifest version, sign/register the new approved manifest version, and record the approval event.
+7. Compare the pending revision ID and state generation again, then advance the active state and generation only after approval succeeds.
 
 An owner save does not itself count as integrity approval. In single-user mode the same person is normally both owner and local operator, but activation still requires a distinct explicit confirmation. In multi-user mode, an authorized operator/admin approves the owner's pending revision through the context-integrity review flow; this governance action does not transfer ownership or create an administrator-wide override.
 
 Per-user ownership is therefore an execution and mutation boundary, not secrecy from an authorized integrity reviewer. The review surface may disclose the pending revision's escaped canonical diff only to principals holding the existing context-integrity approval privilege. Ordinary administrators and other users do not gain read access through the Service Prompts API.
 
-If approval fails, the digest changes during review, or no authorized operator approves, the prior effective revision remains active and the new revision remains pending or is rejected. This design follows, and does not supersede, `2026-06-25-context-integrity-skills-prompts-design.md`.
+If approval fails, the digest/baseline changes during review, or no authorized operator approves, the prior effective revision remains active and the new revision remains pending, stale, or rejected. This design follows, and does not supersede, `2026-06-25-context-integrity-skills-prompts-design.md`.
 
 ### Cross-database enqueue protocol
 
 Prompt storage and Jobs storage do not share a transaction. Enqueue therefore uses a one-time submission ID and compare-and-set binding:
 
 1. Before enqueue, the job producer declares every service-prompt definition that the job can use.
-2. Resolve and snapshot all declared definitions, then commit one complete pin set with owner, submission ID, item digests, and set digest.
+2. Resolve and snapshot all declared definitions, authenticate the canonical component manifests/pin-set envelope, then commit one complete pin set with owner, submission ID, item digests, set digest, and authenticator.
 3. Enqueue the owner-scoped job with the pin-set ID, submission ID, and set digest.
-4. Compare-and-set bind the pin set to the returned job UUID.
+4. Compare-and-set bind the pin set to the returned job UUID and persist an authenticated binding record.
 
-If a worker acquires the job before step 4 finishes, the worker may atomically perform the same compare-and-set binding only when owner, submission ID, pin-set ID, and set digest all match. Execution begins only after the pin set is bound to that exact job UUID. A second job cannot reuse the set.
+If a worker acquires the job before step 4 finishes, the worker may atomically perform the same compare-and-set binding and authenticated binding record only when owner, submission ID, pin-set ID, set digest, and original envelope authentication all match. Execution begins only after the pin set is cryptographically bound to that exact job UUID. A second job cannot reuse the set.
 
 A reconciler repairs binding failures and garbage-collects unreferenced pin sets only after a grace period and a check of active and retained jobs. Workers verify the set digest and every item before beginning any stage. If one item fails, no prompt in the set is used.
 
@@ -264,13 +286,14 @@ The server exposes:
   "service_prompts": {
     "enabled": true,
     "mode": "enabled",
+    "availability": "experimental",
     "contract_version": 1,
     "can_approve_pending": false
   }
 }
 ```
 
-Clients use this to distinguish supported, unavailable, read-only, `bypass_stored_overrides`, and incompatible servers.
+Clients use this to distinguish supported, unavailable, read-only, `bypass_stored_overrides`, incompatible, experimental, and general-availability servers.
 
 ### Endpoints
 
@@ -278,7 +301,7 @@ Clients use this to distinguish supported, unavailable, read-only, `bypass_store
   - Metadata and current-user state summaries
   - Search/filter inputs as needed
   - No prompt bodies
-  - Private composite ETag based on registry digest and user-state generation
+  - Private composite ETag based on registry/server-default catalog digest, capability/operator mode, and per-user catalog generation
 
 - `GET /{definition_id}`
   - Server-default, active, and effective editable parts when visible and trusted
@@ -298,10 +321,13 @@ Clients use this to distinguish supported, unavailable, read-only, `bypass_store
   - Does not activate the revision
 
 - `POST /{definition_id}/reset`
-  - Supersedes any pending revision and clears the active override after concurrency checks, returning to an already trusted server default
+  - First resolves and verifies the current server default
+  - Only then supersedes any pending revision and clears the active override after concurrency checks
+  - If the required server default is unavailable or quarantined, preserves active/pending state and returns a safe conflict/unavailable error
 
 - `POST /{definition_id}/acknowledge-default`
-  - Records acknowledgement of the current server-default digest without rewriting prompt content
+  - Records acknowledgement only for the currently resolved trusted server-default digest without rewriting prompt content
+  - Rejects unavailable, quarantined, or stale digests
 
 - `GET /{definition_id}/history`
   - Cursor-paginated combined content-revision and state-event history without bodies
@@ -320,7 +346,7 @@ Preview and mutation endpoints share runtime validation, body limits, rate limit
 ### API failure semantics
 
 - `422`: invalid draft with part-specific diagnostics
-- `409`: stale generation, incompatible restore, or pending-revision conflict
+- `409`: stale generation, incompatible restore, pending-revision conflict/staleness, unsafe reset, or stale acknowledgement digest
 - `413`: template or request body too large
 - `403`: authenticated principal lacks access
 - `404`: capability/definition is unavailable to this principal
@@ -332,6 +358,8 @@ Quarantined or incompatible expected content fails closed with a recovery code. 
 ## Runtime and Job Behavior
 
 Synchronous services resolve once at their public service boundary. Existing explicit request prompt fields remain supported and take precedence. A migration must preserve whether an existing field is literal final text or a template.
+
+Explicit request overrides retain their existing request-authorization semantics. They are request data, not reusable saved prompt versions, and do not require the separate operator approval used for persistent Service Prompt overrides. For queued work, the authenticated enqueue request authorizes creation of a one-job execution component; the protected store binds it to the owner/submission/job and verifies its digest at use. It cannot be discovered, restored, rebound, or reused as a saved prompt.
 
 Queued endpoints declare their finite prompt requirements and commit one complete pin set before enqueue. Job payloads and job-status responses contain only safe references and digests, never raw prompt bodies. Workers bind the set to their exact job UUID before using any item and distinguish:
 
@@ -377,7 +405,7 @@ The editor shows:
 - Visible locked sections as read-only text
 - Hidden locked sections as labeled server-managed markers
 - Server-default, customized, and effective provenance
-- Part-by-part plain-text comparison with unchanged regions collapsed
+- Part-by-part plain-text comparison of visible content with unchanged regions collapsed; hidden components expose only changed/unchanged markers and safe digests
 - Deterministic preview and assembly order
 - Save pending revision, reset, acknowledgement, history, restore, and approval-status actions
 
@@ -446,11 +474,26 @@ Prompt content is not secret storage. The UI warns against credentials. Bodies a
 
 Audit metadata includes actor, definition ID, action, revision/digest, result, and timestamp.
 
-Private account backups include service-prompt state and history. Shareable Chatbooks, ordinary Prompt exports, and MCP prompt catalogs exclude service prompts by default unless a later explicitly approved portability design changes that boundary.
+Private account backups include only user-authored service-prompt content revisions and state-history provenance. They exclude execution snapshots, pin sets, hidden server-managed bytes, mutation receipts, integrity-review artifacts, and transferable active/pending trust state.
+
+On import:
+
+1. Preserve every imported content revision as owner-visible historical content marked `unapproved_import`.
+2. Preserve exported state events only as non-operative provenance; do not replay activation, approval, reset, acknowledgement, or pending pointers.
+3. Initialize the local definition state with `active_revision_id = null`, `pending_revision_id = null`, no acknowledged default digest, and a fresh local generation.
+4. Do not automatically choose between the formerly active and formerly pending exported revisions.
+5. Let the owner select one imported historical revision, preview it against the current local registry/server default, and use restore/resubmit to create the sole current local pending revision.
+6. Require normal local explicit operator approval before activation.
+
+This avoids trusting another deployment's state, preserves all user-authored choices, and keeps the one-current-pending invariant deterministic.
+
+Shareable Chatbooks, ordinary Prompt exports, and MCP prompt catalogs exclude service prompts by default unless a later explicitly approved portability design changes that boundary.
 
 ### Context integrity
 
-Server defaults use existing exact-byte file verification. User revisions and snapshots use canonical asset identities scoped by owner, definition, and immutable version. At use time, the resolver verifies the exact bytes or row version consumed.
+Server defaults use existing exact-byte file verification. Persistent user revisions use canonical asset identities scoped by owner, definition, and immutable version. At use time, the resolver verifies the exact bytes or row version consumed.
+
+Request-bound execution components are not reusable DB prompt versions. They preserve the existing ability to send explicit request prompts, while their externally anchored authenticated envelope, owner/submission/job binding, and canonical digest prevent post-enqueue mutation or cross-job reuse. Server-managed hidden components remain protected context assets and must be trusted before a pin set can reference them.
 
 Out-of-band mutations are quarantined. Every owner save remains pending until an explicit authorized operator approval updates the signed trust manifest. This requirement applies in normal and single-user modes; in single-user mode the owner/operator performs a separate non-model confirmation. Hardened deployments may additionally require an external trust decision. The previous effective revision remains active throughout review.
 
@@ -510,7 +553,8 @@ This umbrella design is implemented through separate Backlog tasks and reviewabl
 ### Slice 3: Persistence, integrity, and API
 
 - Per-user repository and migrations
-- Revisions, generations, acknowledgement, receipts, snapshots, and pins
+- Revisions, generations, acknowledgement, and receipts in the per-user store
+- Protected execution components, manifests, pin sets, retention, and encryption boundaries
 - Two-phase integrity activation
 - Cross-database enqueue reconciliation
 - Authenticated API and capability contract
@@ -535,7 +579,8 @@ Each domain change includes registry entries, consumer migrations, eligibility-m
 
 ### Launch and completion gates
 
-- The settings route launches only when the capability contract and at least one complete domain are available.
+- Development deployments may expose the route with `availability: experimental` after the capability contract and at least one complete domain are available; the nav must label that state as experimental/beta.
+- The first general/public release uses `availability: general` only after every approved broad content-facing domain is complete, matching the selected broad-first-release scope.
 - A domain is complete only when every eligible call site uses the resolver and remaining prompt sources are explicitly locked or deferred.
 - Broad-release completion requires all approved content-facing domains.
 - Existing no-override provider messages are byte-equivalent unless separately approved.
@@ -550,8 +595,10 @@ Each domain change includes registry entries, consumer migrations, eligibility-m
 - Placeholder parsing, escaped braces, invalid syntax, deterministic rendering, budgets, and locked assembly
 - Resolution precedence, literal/template explicit overrides, server-default bundles, userless activity, and hidden defaults
 - Revision immutability, generation conflicts, idempotency receipts, acknowledgement, reset, and compatible/incompatible restore
-- Two-phase integrity activation and prior-effective-state preservation
-- Pin creation, binding, reconciliation, retention, and garbage collection
+- Approval-time registry/default revalidation, stale-pending refusal, two-phase integrity activation, and prior-effective-state preservation
+- Catalog-generation increments and composite ETag invalidation
+- Trusted-default preconditions for reset and acknowledgement
+- Protected snapshot/component creation, owner-scoped deduplication, authenticated envelopes/bindings, key rotation, reconciliation, retention, and garbage collection
 - Operator modes and stable failure codes
 
 ### Property-based tests
@@ -569,6 +616,7 @@ Each domain change includes registry entries, consumer migrations, eligibility-m
 - Preview/save validator parity
 - Stale generation, idempotent retry, limits, rate limits, and safe errors
 - Hidden, quarantined, pending, read-only, `bypass_stored_overrides`, and unsupported states
+- Experimental versus general capability availability
 
 ### Runtime and job integration tests
 
@@ -578,6 +626,9 @@ Each domain change includes registry entries, consumer migrations, eligibility-m
 - Default changes do not rewrite user revisions
 - Queued work stays pinned after edits, reset, acknowledgement, or upgrade
 - Missing/tampered pin sets or items fail permanently; temporary stores retry
+- Queued explicit request overrides remain request-authorized, job-bound, non-discoverable, and non-reusable
+- Hidden server-managed bytes never enter per-user Prompt databases, APIs, or backups
+- Offline protected-store tampering cannot succeed by changing content and a colocated digest together
 - Provider message arrays are byte-equivalent with no override
 
 ### Frontend tests
@@ -608,6 +659,8 @@ Each domain change includes registry entries, consumer migrations, eligibility-m
 - Storage quota and mutation abuse
 - Fresh and migrated per-user Prompts databases
 - Private backup/restore and older-version ignore behavior
+- Imported revisions become unapproved history with no active/current-pending pointer; owner resubmission creates the one local pending revision
+- Execution snapshots/pin sets and cryptographic key material are not exported
 - Bounded-cardinality metrics for definition ID, source kind, validation outcome, and latency
 - Touched-scope Bandit, frontend lint/type checks, and focused test suites
 
@@ -617,6 +670,7 @@ The implementation plan should decide, without changing this product contract:
 
 - Exact Python module and repository class names
 - Physical table consolidation and migration numbering
+- Protected execution-store backend, mandatory authentication, optional encryption, component-manifest, tenant-scoped deduplication, and verification-key retention details
 - Default storage quota and snapshot-retention durations
 - Exact capability endpoint integration point
 - Domain-by-domain stable ID catalog from the completed eligibility inventory
