@@ -148,7 +148,7 @@ def parse_permission_rule(
             rule_type="skill",
             outcome=outcome,
             source=source,
-            pattern=normalized_specifier,
+            pattern=normalized_specifier.lower(),
             reason_code=reason_code,
         )
     if tool_name == "Agent":
@@ -378,7 +378,7 @@ def _normalize_subject_value(subject_type: PermissionRuleSubject, value: str) ->
         return _normalize_path_pattern(normalized)
     if subject_type == "domain":
         return _normalize_domain_pattern(normalized)
-    if subject_type == "mcp":
+    if subject_type in {"mcp", "skill"}:
         return normalized.lower()
     return normalized
 

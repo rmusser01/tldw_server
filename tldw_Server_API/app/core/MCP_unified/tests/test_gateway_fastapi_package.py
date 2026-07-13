@@ -207,6 +207,19 @@ class _CustomToolListGatewayRuntime(_FakeGatewayRuntime):
         return self._tools
 
 
+class _SkillsRenderGatewayRuntime(_CustomToolListGatewayRuntime):
+    """Fake backend that accepts the real skills.render argument shape."""
+
+    async def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        context: Any,
+    ) -> dict[str, Any]:
+        self.call_requests.append((name, arguments, context))
+        return {"content": [{"type": "text", "text": f"{name}:{arguments['skill_name']}"}]}
+
+
 class _FakeLogger:
     def __init__(self) -> None:
         self.opt_calls: list[dict[str, Any]] = []
@@ -3254,6 +3267,40 @@ def _web_fetch_tool_descriptor() -> dict[str, Any]:
     }
 
 
+def _skills_render_tool_descriptor() -> dict[str, Any]:
+    return {
+        "name": "skills.render",
+        "description": "Render a Skill without executing it.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"skill_name": {"type": "string"}},
+            "required": ["skill_name"],
+        },
+        "metadata": {"category": "knowledge", "capability": "skills.render"},
+    }
+
+
+def _skill_rule_runtime_with_grant_store(permission_rules: list[Any]) -> tuple[Any, Any, Any]:
+    from mcp_unified.gateway.profile_runtime import ProfileAwareGatewayRuntime
+    from mcp_unified.policy_grants import InMemoryPolicyGrantStore
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    backend = _SkillsRenderGatewayRuntime([_skills_render_tool_descriptor()])
+    profile = _profile_with_allowed_tools_and_permission_rules(
+        "reviewer",
+        allowed_tools=["skills.render"],
+        permission_rules=permission_rules,
+    )
+    grant_store = InMemoryPolicyGrantStore()
+    runtime = ProfileAwareGatewayRuntime(
+        backend,
+        profile_store=InMemoryProfileStore([profile]),
+        default_profile_id="reviewer",
+        policy_grant_store=grant_store,
+    )
+    return runtime, backend, grant_store
+
+
 def _ask_rule_runtime_with_grant_store() -> tuple[Any, Any, Any]:
     from mcp_unified.gateway.profile_runtime import ProfileAwareGatewayRuntime
     from mcp_unified.policy_grants import InMemoryPolicyGrantStore
@@ -3273,6 +3320,76 @@ def _ask_rule_runtime_with_grant_store() -> tuple[Any, Any, Any]:
         policy_grant_store=grant_store,
     )
     return runtime, backend, grant_store
+
+
+def test_gateway_profile_runtime_blocks_skill_permission_denial() -> None:
+    runtime, backend, _grant_store = _skill_rule_runtime_with_grant_store(
+        [{"pattern": "Skill(secret-*)", "outcome": "deny"}]
+    )
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        denied = _post_tool_call(
+            client,
+            "skills.render",
+            {"skill_name": "secret-plan"},
+            "skill-denied",
+        )
+
+    body = denied.json()
+    _assert_jsonrpc_error(body, code=-32001, request_id="skill-denied")
+    assert body["error"]["data"]["status"] == "denied"
+    assert body["error"]["data"]["provenance"]["subject_type"] == "skill"
+    assert backend.call_requests == []
+
+
+def test_gateway_profile_runtime_skill_permission_ask_requires_approval() -> None:
+    runtime, backend, _grant_store = _skill_rule_runtime_with_grant_store(
+        [{"pattern": "Skill(review-*)", "outcome": "ask"}]
+    )
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        denied = _post_tool_call(
+            client,
+            "skills.render",
+            {"skill_name": "Review-Paper"},
+            "skill-ask",
+        )
+
+    body = denied.json()
+    _assert_jsonrpc_error(body, code=-32001, request_id="skill-ask")
+    assert body["error"]["data"]["status"] == "approval_required"
+    assert body["error"]["data"]["provenance"]["approval"]["subject_type"] == "skill"
+    assert backend.call_requests == []
+
+
+def test_gateway_profile_runtime_skill_approval_lease_delegates_with_redacted_marker() -> None:
+    runtime, backend, grant_store = _skill_rule_runtime_with_grant_store(
+        [{"pattern": "Skill(review-*)", "outcome": "ask"}]
+    )
+    grant = grant_store.create_grant(
+        profile_id="reviewer",
+        grant_type="approval",
+        subject_type="skill",
+        value="REVIEW-PAPER",
+        ttl_seconds=900,
+    )
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        allowed = _post_tool_call(
+            client,
+            "skills.render",
+            {"skill_name": "Review-Paper"},
+            "skill-lease",
+        )
+
+    assert allowed.json().get("error") is None
+    assert len(backend.call_requests) == 1
+    markers = backend.call_requests[-1][2].metadata.get("mcp_policy_approval_grants")
+    assert markers
+    assert grant.grant_id not in json.dumps(markers)
 
 
 def test_gateway_profile_runtime_ask_denial_reports_approval_availability() -> None:

@@ -31,6 +31,7 @@ DOMAIN_ARGUMENT_KEYS = frozenset({"url", "uri", "domain", "host", "base_url"})
 DOMAIN_ARGUMENT_LIST_KEYS = frozenset({"urls", "uris", "domains", "hosts"})
 COMMAND_ARGUMENT_KEYS = frozenset({"command", "cmd", "shell_command"})
 COMMAND_ARGV_KEYS = frozenset({"argv"})
+SKILL_ARGUMENT_KEYS = frozenset({"skill_name"})
 
 
 class PermissionSubjectLimitError(Exception):
@@ -79,6 +80,9 @@ def extract_permission_rule_subjects(
                 if len(argv) > MAX_COMMAND_ARGV_TOKENS:
                     raise PermissionSubjectLimitError("max_command_argv_tokens")
                 _append_permission_subject(subjects, "command", " ".join(argv), argv)
+        elif normalized_key in SKILL_ARGUMENT_KEYS:
+            for item in _string_values(value):
+                _append_permission_subject(subjects, "skill", item.lower(), None)
     return subjects
 
 
@@ -137,5 +141,6 @@ __all__ = [
     "PATH_ARGUMENT_KEYS",
     "PATH_ARGUMENT_LIST_KEYS",
     "PermissionSubjectLimitError",
+    "SKILL_ARGUMENT_KEYS",
     "extract_permission_rule_subjects",
 ]

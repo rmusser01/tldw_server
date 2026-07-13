@@ -10,7 +10,7 @@ from mcp_unified.profiles.path_grants import PATH_GRANT_ACTIONS, normalize_path_
 from mcp_unified.profiles.permission_rules import normalize_permission_subject_value
 
 POLICY_GRANT_TYPES = frozenset({"approval", "path"})
-APPROVAL_SUBJECT_TYPES = frozenset({"tool", "path", "domain", "command", "mcp"})
+APPROVAL_SUBJECT_TYPES = frozenset({"tool", "path", "domain", "command", "mcp", "skill"})
 
 
 @dataclass(frozen=True, slots=True)
