@@ -137,6 +137,53 @@ class ReviewOverride(BaseModel):
         return self
 
 
+class ReviewOverrideEnvelope(BaseModel):
+    """Bounded raw Review choice whose semantics are checked after refresh."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    duplicate_policy: str = Field(..., min_length=1, max_length=64)
+    metadata_patch: dict[str, Any] | None = Field(default=None, max_length=10)
+    existing_media_id: int | None = Field(default=None, ge=1)
+    duplicate_of_occurrence_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_RUN_IDENTITY_LENGTH,
+    )
+
+    @field_validator("duplicate_policy", "duplicate_of_occurrence_id", mode="before")
+    @classmethod
+    def _strip_override_text(cls, value: object) -> object:
+        if value is None:
+            return None
+        if type(value) is not str:
+            raise ValueError("review override text must be a string")
+        return value.strip()
+
+    @field_validator("metadata_patch", mode="before")
+    @classmethod
+    def _bound_raw_patch(cls, value: object) -> object:
+        if value is None:
+            return None
+        if type(value) is not dict:
+            raise ValueError("metadata_patch must be an object")
+        try:
+            encoded = json.dumps(value, sort_keys=True, separators=(",", ":"))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("metadata_patch must be JSON serializable") from exc
+        if len(encoded) > 8192:
+            raise ValueError("metadata_patch is too large")
+        for patch_value in value.values():
+            if isinstance(patch_value, dict):
+                raise ValueError("metadata_patch must be shallow")
+            if isinstance(patch_value, list) and (
+                len(patch_value) > MAX_METADATA_PATCH_KEYWORDS
+                or any(isinstance(entry, (dict, list)) for entry in patch_value)
+            ):
+                raise ValueError("metadata_patch lists must be bounded and shallow")
+        return value
+
+
 class CompactRunDisplayMetadata(BaseModel):
     """Bounded display-only metadata accepted in a run manifest."""
 
@@ -244,7 +291,7 @@ class PlaylistIngestRunCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     inputs: list[PlaylistIngestRunInput] = Field(..., min_length=1, max_length=MAX_PLAYLIST_PREFLIGHT_SELECTIONS)
-    review_overrides: dict[str, ReviewOverride] = Field(
+    review_overrides: dict[str, ReviewOverrideEnvelope] = Field(
         default_factory=dict, max_length=MAX_PLAYLIST_PREFLIGHT_SELECTIONS
     )
     processing_options: dict[str, Any] | None = Field(default=None, max_length=100)
@@ -305,6 +352,8 @@ class ReviewRequiredItem(BaseModel):
         "duplicate_action_required",
         "duplicate_no_longer_present",
         "duplicate_target_changed",
+        "invalid_duplicate_override",
+        "unknown_review_override",
     ]
     evidence: DuplicateEvidence
     allowed_actions: list[DuplicatePolicy] = Field(default_factory=list, max_length=4)

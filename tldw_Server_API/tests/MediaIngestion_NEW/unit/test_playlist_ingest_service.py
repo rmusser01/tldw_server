@@ -243,6 +243,49 @@ def test_create_run_direct_playlist_requires_preflight_without_side_effects(serv
 @pytest.mark.parametrize(
     "url",
     [
+        "https://www.youtube.com/watch?v=abc%26list%3DPL123",
+        "https://www.youtube.com/watch?v=abc%3Flist%3DPL123",
+        "https://www.youtube.com/watch?v=abc%2526list%253DPL123",
+        "https://www.youtube.com/watch?v=abc%3Blist%3DPL123",
+    ],
+)
+def test_create_run_encoded_youtube_playlist_injection_requires_preflight(service_context, url):
+    service, _store, manager, media_db = service_context
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
+        PlaylistPreflightRequiredError,
+    )
+
+    with pytest.raises(PlaylistPreflightRequiredError, match="playlist_preflight_required"):
+        service.create_run(
+            "owner-1",
+            inputs=[_direct_input("occ-encoded-playlist", url)],
+            review_overrides={},
+        )
+
+    assert media_db.lookup_calls == []
+    assert _table_count(manager, "media_ingest_runs") == 0
+
+
+def test_create_run_normal_youtube_video_control_is_staged(service_context):
+    service, store, _manager, media_db = service_context
+
+    created = service.create_run(
+        "owner-1",
+        inputs=[_direct_input("occ-video", "https://youtu.be/abc_123-Z")],
+        review_overrides={},
+    )
+
+    item = store.list_run_items("owner-1", created.run_id)[0]
+    assert item.source_url == "https://www.youtube.com/watch?v=abc_123-Z"
+    assert item.normalized_source_id == "youtube:video:abc_123-Z"
+    assert item.action == "ingest"
+    assert media_db.lookup_calls == [["https://www.youtube.com/watch?v=abc_123-Z"]]
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
         "ftp://example.com/video",
         "https://user:password@example.com/video",
         "https://example.com/video#fragment",
@@ -329,7 +372,6 @@ def test_create_run_validates_missing_extra_and_stale_review_overrides(service_c
     media_db.rows = [{"id": 17, "url": "https://example.com/existing"}]
 
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
-        PlaylistRunValidationError,
         ReviewRequiredError,
     )
 
@@ -339,12 +381,16 @@ def test_create_run_validates_missing_extra_and_stale_review_overrides(service_c
         ("occ-direct", "duplicate_action_required")
     ]
 
-    with pytest.raises(PlaylistRunValidationError, match="unknown_review_override"):
+    with pytest.raises(ReviewRequiredError) as extra:
         service.create_run(
             "owner-1",
             inputs=[direct],
             review_overrides={"unknown": {"duplicate_policy": "skip", "existing_media_id": 17}},
         )
+    assert [(item.occurrence_id, item.reason) for item in extra.value.items] == [
+        ("occ-direct", "duplicate_action_required"),
+        ("unknown", "unknown_review_override"),
+    ]
 
     media_db.rows = []
     with pytest.raises(ReviewRequiredError) as stale:
@@ -355,6 +401,110 @@ def test_create_run_validates_missing_extra_and_stale_review_overrides(service_c
         )
     assert stale.value.items[0].reason == "duplicate_no_longer_present"
     assert _table_count(manager, "media_ingest_runs") == 0
+
+
+@pytest.mark.parametrize(
+    ("override", "reason"),
+    [
+        ({"duplicate_policy": "launch_missiles", "existing_media_id": 17}, "invalid_duplicate_override"),
+        ({"duplicate_policy": "update_metadata_only", "existing_media_id": 17}, "invalid_duplicate_override"),
+        (
+            {
+                "duplicate_policy": "update_metadata_only",
+                "existing_media_id": 17,
+                "metadata_patch": {},
+            },
+            "invalid_duplicate_override",
+        ),
+        (
+            {
+                "duplicate_policy": "update_metadata_only",
+                "existing_media_id": 17,
+                "metadata_patch": {"content": "forbidden"},
+            },
+            "invalid_duplicate_override",
+        ),
+        (
+            {
+                "duplicate_policy": "skip",
+                "existing_media_id": 17,
+                "metadata_patch": {"title": "not allowed"},
+            },
+            "invalid_duplicate_override",
+        ),
+        (
+            {
+                "duplicate_policy": "include_existing",
+                "existing_media_id": 17,
+                "metadata_patch": {"title": "not allowed"},
+            },
+            "invalid_duplicate_override",
+        ),
+        (
+            {
+                "duplicate_policy": "overwrite",
+                "existing_media_id": 17,
+                "metadata_patch": {"title": 42},
+            },
+            "invalid_duplicate_override",
+        ),
+    ],
+)
+def test_create_run_duplicate_override_semantics_are_reviewed_after_fresh_lookup(
+    service_context,
+    override,
+    reason,
+):
+    service, _store, manager, media_db = service_context
+    direct = _direct_input("occ-direct", "https://example.com/existing")
+    media_db.rows = [{"id": 17, "url": "https://example.com/existing"}]
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
+        ReviewRequiredError,
+    )
+
+    with pytest.raises(ReviewRequiredError) as exc_info:
+        service.create_run(
+            "owner-1",
+            inputs=[direct],
+            review_overrides={"occ-direct": override},
+        )
+
+    assert [(item.occurrence_id, item.reason) for item in exc_info.value.items] == [("occ-direct", reason)]
+    assert [action.value for action in exc_info.value.items[0].allowed_actions] == [
+        "skip",
+        "include_existing",
+        "update_metadata_only",
+        "overwrite",
+    ]
+    assert media_db.lookup_calls == [["https://example.com/existing"]]
+    assert _table_count(manager, "media_ingest_runs") == 0
+    assert _table_count(manager, "media_ingest_run_items") == 0
+    assert _table_count(manager, "media_ingest_run_events") == 0
+    assert _table_count(manager, "jobs") == 0
+
+
+def test_create_run_overwrite_with_valid_patch_control(service_context):
+    service, store, _manager, media_db = service_context
+    direct = _direct_input("occ-direct", "https://example.com/existing")
+    media_db.rows = [{"id": 17, "url": "https://example.com/existing"}]
+
+    created = service.create_run(
+        "owner-1",
+        inputs=[direct],
+        review_overrides={
+            "occ-direct": {
+                "duplicate_policy": "overwrite",
+                "existing_media_id": 17,
+                "metadata_patch": {"title": "Reviewed overwrite"},
+            }
+        },
+    )
+
+    item = store.list_run_items("owner-1", created.run_id)[0]
+    assert item.action == "overwrite"
+    assert item.metadata_patch == {"title": "Reviewed overwrite"}
+    assert media_db.lookup_calls == [["https://example.com/existing"]]
 
 
 def test_create_run_accepts_current_library_override_and_persists_patch(service_context):

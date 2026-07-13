@@ -21,6 +21,7 @@ from tldw_Server_API.app.api.v1.schemas.media_playlist_ingest import (
     FileStubInput,
     MaterializedPlaylistItemInput,
     PlaylistIngestRunCreateRequest,
+    ReviewOverride,
     ReviewRequiredItem,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.api import get_media_by_urls
@@ -437,6 +438,20 @@ class PlaylistIngestService:
         canonical_url = normalize_media_dedupe_url(source_url)
         if canonical_url is None or len(canonical_url) > 8192:
             raise PlaylistRunValidationError("invalid_direct_url")
+        try:
+            canonical_classification = classify_playlist_url(canonical_url)
+        except ValueError as exc:
+            raise PlaylistRunValidationError("invalid_direct_url") from exc
+        if canonical_classification.is_playlist:
+            raise PlaylistPreflightRequiredError("playlist_preflight_required")
+        if (
+            classified.source_kind == "youtube_video"
+            and classified.video_id is not None
+            and _YOUTUBE_ID.fullmatch(classified.video_id) is None
+        ):
+            if "list" in classified.video_id.lower():
+                raise PlaylistPreflightRequiredError("playlist_preflight_required")
+            raise PlaylistRunValidationError("invalid_direct_url")
         return {
             "occurrence_id": item.occurrence_id,
             "input_kind": item.input_kind,
@@ -615,8 +630,6 @@ class PlaylistIngestService:
         resolved = self._resolve_run_inputs(owner, request.inputs)
         evidence = self._fresh_duplicate_evidence(owner, resolved)
         occurrence_ids = {item["occurrence_id"] for item in resolved}
-        if set(request.review_overrides) - occurrence_ids:
-            raise PlaylistRunValidationError("unknown_review_override")
 
         review_items: list[ReviewRequiredItem] = []
         for item, current_evidence in zip(resolved, evidence, strict=True):
@@ -643,14 +656,25 @@ class PlaylistIngestService:
                     )
                 )
                 continue
+            try:
+                validated_override = ReviewOverride.model_validate(override.model_dump())
+            except ValidationError:
+                review_items.append(
+                    self._review_required_item(
+                        occurrence_id,
+                        "invalid_duplicate_override",
+                        current_evidence,
+                    )
+                )
+                continue
             target_matches = (
                 current_evidence.kind == "library"
-                and override.existing_media_id == current_evidence.existing_media_id
-                and override.duplicate_of_occurrence_id is None
+                and validated_override.existing_media_id == current_evidence.existing_media_id
+                and validated_override.duplicate_of_occurrence_id is None
             ) or (
                 current_evidence.kind == "in_run"
-                and override.duplicate_of_occurrence_id == current_evidence.duplicate_of_occurrence_id
-                and override.existing_media_id is None
+                and validated_override.duplicate_of_occurrence_id == current_evidence.duplicate_of_occurrence_id
+                and validated_override.existing_media_id is None
             )
             if not target_matches:
                 review_items.append(
@@ -661,9 +685,19 @@ class PlaylistIngestService:
                     )
                 )
                 continue
-            item["action"] = override.duplicate_policy.value
+            item["action"] = validated_override.duplicate_policy.value
             item["metadata_patch"] = (
-                override.metadata_patch.model_dump(exclude_none=True) if override.metadata_patch is not None else None
+                validated_override.metadata_patch.model_dump(exclude_none=True)
+                if validated_override.metadata_patch is not None
+                else None
+            )
+        for occurrence_id in sorted(set(request.review_overrides) - occurrence_ids):
+            review_items.append(
+                self._review_required_item(
+                    occurrence_id,
+                    "unknown_review_override",
+                    DuplicateEvidence(kind="none"),
+                )
             )
         if review_items:
             raise ReviewRequiredError(review_items)

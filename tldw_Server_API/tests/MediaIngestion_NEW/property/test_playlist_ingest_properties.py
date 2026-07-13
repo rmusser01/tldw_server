@@ -129,7 +129,10 @@ def test_invalid_owner_cursor_pairs_use_the_same_not_found_contract(tmp_path, mo
 
 
 @pytest.mark.property
-@settings(max_examples=12, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@settings(
+    max_examples=12,
+    suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.too_slow],
+)
 @given(
     occurrences=st.lists(
         st.tuples(
