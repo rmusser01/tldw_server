@@ -28,11 +28,13 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import
     async_resolve_chunking_options_and_plan,
     attach_chunking_plan_to_result,
 )
+from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import redact_url_for_log
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.testing import env_flag_enabled
 
 # Keep fallback imports for compatibility mode
 from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import (
+    ContentMetadataHandler,
     recursive_scrape,
     scrape_and_summarize_multiple,
     scrape_article,
@@ -552,10 +554,25 @@ async def process_web_scraping_task(
 
                     # Persist each article in the DB
                     media_ids = []
+                    errors: list[str] = []
                     for article in result_list:
                         # We'll treat article['content'] as the main text
                         # Combine content and metadata
-                        content_text = article.get("content", "")
+                        content_text = article.get("content")
+                        body_text = (
+                            ContentMetadataHandler.strip_metadata(content_text)
+                            if isinstance(content_text, str)
+                            else content_text
+                        )
+                        if not isinstance(body_text, str) or not body_text.strip():
+                            error_msg = f"No extracted content: {article.get('url', 'Unknown URL')}"
+                            logger.warning(
+                                f"No extracted content: {redact_url_for_log(article.get('url', 'Unknown URL'))}"
+                            )
+                            errors.append(error_msg)
+                            continue
+                        content_text = body_text
+
                         chunk_options = None
                         chunking_plan = None
                         if perform_chunking:
@@ -662,6 +679,7 @@ async def process_web_scraping_task(
                     "total_articles": len(result_list),
                     "engine": "legacy_fallback",
                     "fallback_context": fallback_context,
+                    "errors": errors if errors else None,
                 }
 
         except HTTPException:

@@ -4,6 +4,7 @@ from contextlib import contextmanager
 import pytest
 
 import tldw_Server_API.app.services.enhanced_web_scraping_service as enhanced_svc_mod
+from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import ContentMetadataHandler
 from tldw_Server_API.app.services.enhanced_web_scraping_service import WebScrapingService
 
 
@@ -32,6 +33,32 @@ class _FakeDB:
         self.closed = True
 
 
+class _LoggerStub:
+    def __init__(self):
+        self.warnings: list[str] = []
+
+    def warning(self, message, *args, **kwargs):  # noqa: ARG002
+        self.warnings.append(str(message).format(*args))
+
+    def __getattr__(self, _name):
+        return lambda *args, **kwargs: None
+
+
+@pytest.mark.unit
+def test_content_metadata_handler_falls_back_for_deeply_nested_envelope():
+    nested_value = "[" * 2000 + "0" + "]" * 2000
+    content = f'[METADATA]{{"value":{nested_value}}}[/METADATA]'
+
+    assert ContentMetadataHandler.has_metadata(content) is False
+    assert ContentMetadataHandler.strip_metadata(content) == content
+
+
+@pytest.mark.unit
+def test_content_metadata_handler_ignores_non_string_input():
+    assert ContentMetadataHandler.has_metadata(None) is False
+    assert ContentMetadataHandler.strip_metadata(None) is None
+
+
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_store_persistent_persists_crawl_metadata_when_available(monkeypatch):
@@ -48,6 +75,7 @@ async def test_store_persistent_persists_crawl_metadata_when_available(monkeypat
     monkeypatch.setattr(
         enhanced_svc_mod,
         "get_user_media_db_path",
+        # Test-only path; the managed database is mocked, so no filesystem write occurs.
         lambda _: "/tmp/test-media.db",  # nosec B108
     )
     monkeypatch.setattr(
@@ -106,3 +134,113 @@ async def test_store_persistent_persists_crawl_metadata_when_available(monkeypat
     assert safe_metadata["crawl_depth"] == 2
     assert safe_metadata["crawl_parent_url"] == "https://example.com"
     assert safe_metadata["crawl_score"] == pytest.approx(0.75)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_store_persistent_skips_articles_without_body_content(monkeypatch):
+    service = WebScrapingService()
+    fake_db = _FakeDB()
+    logger_stub = _LoggerStub()
+
+    @contextmanager
+    def _fake_managed_media_database(*args, **kwargs):  # noqa: ARG001
+        try:
+            yield fake_db
+        finally:
+            fake_db.close_connection()
+
+    monkeypatch.setattr(
+        enhanced_svc_mod,
+        "get_user_media_db_path",
+        # Test-only path; the managed database is mocked, so no filesystem write occurs.
+        lambda _: "/tmp/test-media.db",  # nosec B108
+    )
+    monkeypatch.setattr(
+        enhanced_svc_mod,
+        "managed_media_database",
+        _fake_managed_media_database,
+    )
+    monkeypatch.setattr(
+        enhanced_svc_mod,
+        "get_metrics_registry",
+        lambda: _MetricsStub(),
+    )
+    monkeypatch.setattr(enhanced_svc_mod, "logger", logger_stub)
+
+    result = {
+        "method": "Individual URLs",
+        "articles": [
+            {
+                "url": "https://example.com/valid",
+                "content": "Actual body content",
+                "extraction_successful": True,
+            },
+            {
+                "url": "https://example.com/literal-markers",
+                "content": "Documentation mentions [METADATA] and [/METADATA]",
+                "extraction_successful": True,
+            },
+            {
+                "url": "https://example.com/wrapped",
+                "content": '[METADATA]{"source":"old"}[/METADATA]\nWrapped body',
+                "extraction_successful": True,
+            },
+            {
+                "url": "https://example.com/missing",
+                "content": None,
+                "extraction_successful": True,
+            },
+            {
+                "url": "https://example.com/non-string",
+                "content": 42,
+                "extraction_successful": True,
+            },
+            {
+                "url": "https://user:password@example.com/blank?token=secret#fragment",
+                "content": "  \n",
+                "extraction_successful": True,
+            },
+            {
+                "url": "https://example.com/envelope",
+                "content": '[METADATA]{"url":"https://example.com/envelope"}[/METADATA]\n  ',
+                "extraction_successful": True,
+            },
+            {
+                "url": "https://example.com/crafted-envelope",
+                "content": '[METADATA]{"note":"[/METADATA]"}[/METADATA]\n ',
+                "extraction_successful": True,
+            },
+        ],
+    }
+
+    persisted = await service._store_persistent(
+        result=result,
+        keywords="",
+        user_id=7,
+        perform_chunking=False,
+        chunking_mode=None,
+        auto_chunking_goal="balanced",
+        auto_chunking_use_llm=False,
+    )
+
+    assert persisted["status"] == "persist-ok"
+    assert persisted["stored_articles"] == 3
+    assert persisted["media_ids"] == [1, 2, 3]
+    assert len(fake_db.calls) == 3
+    assert "Actual body content" in fake_db.calls[0]["content"]
+    assert "Documentation mentions [METADATA] and [/METADATA]" in fake_db.calls[1]["content"]
+    assert fake_db.calls[2]["content"].count("[METADATA]") == 1
+    assert "Wrapped body" in fake_db.calls[2]["content"]
+    assert '"source":"old"' not in fake_db.calls[2]["content"]
+    assert persisted["errors"] == [
+        "No extracted content: https://example.com/missing",
+        "No extracted content: https://example.com/non-string",
+        "No extracted content: https://user:password@example.com/blank?token=secret#fragment",
+        "No extracted content: https://example.com/envelope",
+        "No extracted content: https://example.com/crafted-envelope",
+    ]
+    warning_text = "\n".join(logger_stub.warnings)
+    assert "password" not in warning_text
+    assert "token=secret" not in warning_text
+    assert "#fragment" not in warning_text

@@ -1005,10 +1005,10 @@ def _jsonld_score_candidate(node: dict[str, Any]) -> tuple[int, int]:
     return score, content_len
 
 
-def _jsonld_has_content(result: dict[str, Any]) -> bool:
+def _jsonld_has_body(result: dict[str, Any]) -> bool:
+    """Return whether an extraction result contains nonblank body text."""
     content = result.get("content")
-    summary = result.get("summary")
-    return any(isinstance(value, str) and value.strip() for value in (content, summary))
+    return isinstance(content, str) and bool(content.strip())
 
 
 def _collect_jsonld_nodes(data: Any) -> list[dict[str, Any]]:
@@ -1211,7 +1211,7 @@ def extract_jsonld_entities(html_text: str, url: str) -> dict[str, Any]:
     if content:
         result["content"] = content
 
-    result["extraction_successful"] = _jsonld_has_content(result)
+    result["extraction_successful"] = _jsonld_has_body(result)
     return result
 
 
@@ -2467,6 +2467,7 @@ def extract_article_with_pipeline(
     allow_llm_extraction: bool = True,
 ) -> dict[str, Any]:
     trace: list[dict[str, Any]] = []
+    jsonld_summary: Optional[str] = None
     order, unknown = _normalize_strategy_order(strategy_order)
     if not allow_llm_extraction:
         order = [strategy for strategy in order if strategy != "llm"]
@@ -2478,10 +2479,18 @@ def extract_article_with_pipeline(
         *,
         strategy: Optional[str],
     ) -> dict[str, Any]:
+        summary = result.get("summary")
+        if (
+            result.get("extraction_successful")
+            and jsonld_summary
+            and (not isinstance(summary, str) or not summary.strip())
+        ):
+            result["summary"] = jsonld_summary
         final = _attach_trace(result, trace, strategy, order)
         if _should_clear_caches("end"):
             clear_extraction_caches()
         return final
+
     for strategy in unknown:
         trace.append(_trace_entry(strategy, "skipped", "unknown_strategy"))
 
@@ -2491,6 +2500,9 @@ def extract_article_with_pipeline(
         if strategy == "jsonld":
             with _strategy_throttle(strategy):
                 result = extract_jsonld_entities(html, url)
+            summary = result.get("summary")
+            if isinstance(summary, str) and summary.strip():
+                jsonld_summary = summary
             last_result = result
             if result.get("extraction_successful"):
                 trace.append(_trace_entry(strategy, "success", "jsonld_extracted"))
@@ -3283,7 +3295,7 @@ async def scrape_and_summarize_multiple(
                         article['summary'] = "No content available to summarize."
                         logging.warning(f"No content to summarize for URL {url}")
                 else:
-                    article['summary'] = None
+                    article.setdefault('summary', None)
 
                 results.append(article)
             else:
@@ -4071,6 +4083,29 @@ class ContentMetadataHandler:
         return formatted_content
 
     @staticmethod
+    def _parse_metadata_envelope(content: str) -> Optional[tuple[dict[str, Any], str]]:
+        """Parse a canonical leading metadata envelope and return its body."""
+        if not isinstance(content, str):
+            return None
+        envelope = content.lstrip()
+        if not envelope.startswith(ContentMetadataHandler.METADATA_START):
+            return None
+
+        metadata_text = envelope[len(ContentMetadataHandler.METADATA_START) :].lstrip()
+        try:
+            metadata, metadata_end = json.JSONDecoder().raw_decode(metadata_text)
+        except (json.JSONDecodeError, RecursionError):
+            return None
+        if not isinstance(metadata, dict):
+            return None
+
+        remainder = metadata_text[metadata_end:].lstrip()
+        if not remainder.startswith(ContentMetadataHandler.METADATA_END):
+            return None
+        clean_content = remainder[len(ContentMetadataHandler.METADATA_END) :].strip()
+        return metadata, clean_content
+
+    @staticmethod
     def extract_metadata(content: str) -> tuple[dict[str, Any], str]:
         """
         Extract metadata and content separately.
@@ -4081,16 +4116,8 @@ class ContentMetadataHandler:
         Returns:
             Tuple of (metadata dict, clean content)
         """
-        try:
-            metadata_start = content.index(ContentMetadataHandler.METADATA_START) + len(
-                ContentMetadataHandler.METADATA_START)
-            metadata_end = content.index(ContentMetadataHandler.METADATA_END)
-            metadata_json = content[metadata_start:metadata_end].strip()
-            metadata = json.loads(metadata_json)
-            clean_content = content[metadata_end + len(ContentMetadataHandler.METADATA_END):].strip()
-            return metadata, clean_content
-        except (ValueError, json.JSONDecodeError):
-            return {}, content
+        parsed = ContentMetadataHandler._parse_metadata_envelope(content)
+        return parsed if parsed is not None else ({}, content)
 
     @staticmethod
     def has_metadata(content: str) -> bool:
@@ -4103,8 +4130,7 @@ class ContentMetadataHandler:
         Returns:
             bool: True if metadata is present
         """
-        return (ContentMetadataHandler.METADATA_START in content and
-                ContentMetadataHandler.METADATA_END in content)
+        return ContentMetadataHandler._parse_metadata_envelope(content) is not None
 
     @staticmethod
     def strip_metadata(content: str) -> str:
@@ -4117,11 +4143,8 @@ class ContentMetadataHandler:
         Returns:
             Content without metadata
         """
-        try:
-            metadata_end = content.index(ContentMetadataHandler.METADATA_END)
-            return content[metadata_end + len(ContentMetadataHandler.METADATA_END):].strip()
-        except ValueError:
-            return content
+        parsed = ContentMetadataHandler._parse_metadata_envelope(content)
+        return parsed[1] if parsed is not None else content
 
     @staticmethod
     def get_content_hash(content: str) -> str:
