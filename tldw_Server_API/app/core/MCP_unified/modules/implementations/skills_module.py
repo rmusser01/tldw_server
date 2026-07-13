@@ -22,6 +22,7 @@ DEFAULT_LIST_PAGE_SIZE = 50
 MAX_LIST_PAGE_SIZE = 100
 MAX_QUERY_CHARS = 200
 MAX_ARGUMENT_CHARS = 10_000
+MAX_SKILL_NAME_CHARS = 64
 HARD_MAX_RENDERED_SKILL_CHARS = 100_000
 
 T = TypeVar("T")
@@ -38,6 +39,10 @@ class _RenderedSkillTooLarge(ValueError):
 
 class _ContextIntegrityBlocked(PermissionError):
     """Bounded public render-time integrity rejection."""
+
+
+class _DatabaseCloseFailed(Exception):
+    """Internal marker for a logged request-scoped database close failure."""
 
 
 def _clamped_integer(value: Any, *, default: int, minimum: int, maximum: int) -> int:
@@ -80,7 +85,12 @@ class SkillsModule(BaseModule):
 
     async def get_tools(self) -> list[dict[str, Any]]:
         """Return the exact read-only Skills tool catalog."""
-        return [
+        skill_name_schema = {
+            "type": "string",
+            "maxLength": MAX_SKILL_NAME_CHARS,
+            "pattern": SKILL_NAME_PATTERN.pattern,
+        }
+        tools = [
             create_tool_definition(
                 name="skills.list",
                 description="List model-visible Skills metadata.",
@@ -110,7 +120,7 @@ class SkillsModule(BaseModule):
                 name="skills.get",
                 description="Get metadata for one model-visible Skill.",
                 parameters={
-                    "properties": {"name": {"type": "string"}},
+                    "properties": {"name": dict(skill_name_schema)},
                     "required": ["name"],
                 },
                 metadata={"category": "retrieval", "readOnlyHint": True},
@@ -120,7 +130,7 @@ class SkillsModule(BaseModule):
                 description="Render one model-visible Skill without model or tool execution.",
                 parameters={
                     "properties": {
-                        "skill_name": {"type": "string"},
+                        "skill_name": dict(skill_name_schema),
                         "arguments": {
                             "type": "string",
                             "maxLength": MAX_ARGUMENT_CHARS,
@@ -132,6 +142,9 @@ class SkillsModule(BaseModule):
                 metadata={"category": "retrieval", "readOnlyHint": True},
             ),
         ]
+        for tool in tools:
+            tool["inputSchema"]["additionalProperties"] = False
+        return tools
 
     async def execute_tool(
         self,
@@ -182,8 +195,8 @@ class SkillsModule(BaseModule):
             raise ValueError(f"unexpected arguments for {tool_name}")
 
         if tool_name == "skills.list":
-            query = arguments.get("q")
-            if query is not None:
+            if "q" in arguments:
+                query = arguments["q"]
                 if not isinstance(query, str):
                     raise ValueError("q must be a string")
                 if len(query) > MAX_QUERY_CHARS:
@@ -225,7 +238,11 @@ class SkillsModule(BaseModule):
 
     @staticmethod
     def _validate_skill_name(field: str, value: Any) -> None:
-        if not isinstance(value, str) or not SKILL_NAME_PATTERN.fullmatch(value.strip().lower()):
+        if (
+            not isinstance(value, str)
+            or len(value) > MAX_SKILL_NAME_CHARS
+            or not SKILL_NAME_PATTERN.fullmatch(value.strip().lower())
+        ):
             raise ValueError(f"{field} must be a valid skill name")
 
     async def _list_skills(
@@ -330,10 +347,15 @@ class SkillsModule(BaseModule):
         operation: ServiceOperation[T],
     ) -> T:
         user_id, chacha_path = self._trusted_user_context(context)
-        db: CharactersRAGDB | None = None
         try:
-            db, service = await self._construct_service(user_id, chacha_path)
-            return await self._await_retained(operation(service))
+            return await self._await_retained(
+                self._service_lifecycle(
+                    user_id,
+                    chacha_path,
+                    operation_name,
+                    operation,
+                )
+            )
         except asyncio.CancelledError:
             raise
         except _SkillNotFound:
@@ -346,17 +368,39 @@ class SkillsModule(BaseModule):
             raise _SkillNotFound("skill_not_found") from None
         except ContextIntegrityBlocked:
             raise _ContextIntegrityBlocked("context_integrity_blocked") from None
+        except _DatabaseCloseFailed:
+            raise RuntimeError("skills_unavailable") from None
         except Exception as exc:  # noqa: BLE001 - public boundary sanitizes every unexpected failure
             self._log_failure(operation_name, user_id, exc)
             raise RuntimeError("skills_unavailable") from None
+
+    async def _service_lifecycle(
+        self,
+        user_id: int,
+        chacha_path: Path,
+        operation_name: str,
+        operation: ServiceOperation[T],
+    ) -> T:
+        """Own construction, operation, and cleanup inside one retained task."""
+        db: CharactersRAGDB | None = None
+        operation_succeeded = False
+        try:
+            db, service = await asyncio.to_thread(
+                self._construct_service_sync,
+                user_id,
+                chacha_path,
+            )
+            result = await operation(service)
+            operation_succeeded = True
+            return result
         finally:
             if db is not None:
                 try:
-                    await self._close_database(db)
-                except asyncio.CancelledError:
-                    raise
-                except Exception as exc:  # noqa: BLE001 - cleanup failures must remain bounded
+                    await asyncio.to_thread(db.close_all_connections)
+                except Exception as exc:  # noqa: BLE001 - cleanup failures stay bounded
                     self._log_failure(operation_name, user_id, exc)
+                    if operation_succeeded:
+                        raise _DatabaseCloseFailed from None
 
     @staticmethod
     def _trusted_user_context(context: Any) -> tuple[int, Path]:
@@ -382,25 +426,6 @@ class SkillsModule(BaseModule):
             raise PermissionError("skills_user_context_required")
         return user_id, Path(raw_path)
 
-    async def _construct_service(
-        self,
-        user_id: int,
-        chacha_path: Path,
-    ) -> tuple[CharactersRAGDB, SkillsService]:
-        task = asyncio.create_task(
-            asyncio.to_thread(self._construct_service_sync, user_id, chacha_path)
-        )
-        try:
-            return await asyncio.shield(task)
-        except asyncio.CancelledError:
-            constructed: tuple[CharactersRAGDB, SkillsService] | None = None
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                constructed = await task
-            if constructed is not None:
-                with contextlib.suppress(Exception):
-                    await self._close_database(constructed[0])
-            raise
-
     def _construct_service_sync(
         self,
         user_id: int,
@@ -421,24 +446,25 @@ class SkillsModule(BaseModule):
 
     @staticmethod
     async def _await_retained(awaitable: Awaitable[T]) -> T:
-        """Await an operation without letting request cancellation orphan its worker."""
+        """Wait through every cancellation delivery before propagating cancellation."""
         task = asyncio.create_task(awaitable)
-        try:
-            return await asyncio.shield(task)
-        except asyncio.CancelledError:
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await task
-            raise
+        cancellation: asyncio.CancelledError | None = None
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError as exc:
+                if cancellation is None:
+                    cancellation = exc
+            except Exception:
+                if cancellation is None:
+                    raise
 
-    @staticmethod
-    async def _close_database(db: CharactersRAGDB) -> None:
-        task = asyncio.create_task(asyncio.to_thread(db.close_all_connections))
-        try:
-            await asyncio.shield(task)
-        except asyncio.CancelledError:
-            with contextlib.suppress(Exception):
-                await task
-            raise
+        if cancellation is not None:
+            if not task.cancelled():
+                with contextlib.suppress(Exception):
+                    task.result()
+            raise cancellation
+        return task.result()
 
     @staticmethod
     def _log_failure(operation: str, user_id: int, exc: Exception) -> None:

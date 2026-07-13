@@ -25,7 +25,11 @@ from tldw_Server_API.app.core.MCP_unified.modules.implementations.skills_module 
 from tldw_Server_API.app.core.MCP_unified.protocol_types import RequestContext
 from tldw_Server_API.app.core.Skills.exceptions import SkillNotFoundError
 from tldw_Server_API.app.core.Skills.skill_executor import SkillExecutionResult, SkillExecutor
-from tldw_Server_API.app.core.Skills.skills_service import SkillMetadata, SkillsService
+from tldw_Server_API.app.core.Skills.skills_service import (
+    SKILL_NAME_PATTERN,
+    SkillMetadata,
+    SkillsService,
+)
 
 
 @dataclass
@@ -157,6 +161,11 @@ async def test_tool_catalog_is_exact_and_read_only() -> None:
     assert list_tool["inputSchema"]["properties"]["limit"]["default"] == 17
     assert list_tool["inputSchema"]["properties"]["q"]["maxLength"] == 200
     assert tools[2]["inputSchema"]["properties"]["arguments"]["maxLength"] == 10_000
+    assert all(tool["inputSchema"]["additionalProperties"] is False for tool in tools)
+    for tool, field in ((tools[1], "name"), (tools[2], "skill_name")):
+        name_schema = tool["inputSchema"]["properties"][field]
+        assert name_schema["maxLength"] == 64
+        assert name_schema["pattern"] == SKILL_NAME_PATTERN.pattern
 
 
 @pytest.mark.parametrize(
@@ -207,11 +216,22 @@ async def test_settings_use_defaults_for_invalid_types_and_clamp_integers(
         ("skills.list", {"limit": 0}, "limit must be 1..100"),
         ("skills.list", {"limit": 101}, "limit must be 1..100"),
         ("skills.list", {"q": "q" * 201}, "q must be at most 200 characters"),
+        ("skills.list", {"q": None}, "q must be a string"),
         ("skills.list", {"q": 1}, "q must be a string"),
         ("skills.get", {}, "name must be a valid skill name"),
         ("skills.get", {"name": "Invalid_Name"}, "name must be a valid skill name"),
+        (
+            "skills.get",
+            {"name": f" {'a' * 63} "},
+            "name must be a valid skill name",
+        ),
         ("skills.render", {}, "skill_name must be a valid skill name"),
         ("skills.render", {"skill_name": True}, "skill_name must be a valid skill name"),
+        (
+            "skills.render",
+            {"skill_name": f" {'a' * 63} "},
+            "skill_name must be a valid skill name",
+        ),
         (
             "skills.render",
             {"skill_name": "valid", "arguments": "x" * 10_001},
@@ -880,15 +900,33 @@ async def test_storage_failure_log_excludes_exception_message_content_and_path(
     assert str(tmp_path) not in log_text
 
 
+@pytest.mark.parametrize("blocked_phase", ["construction", "service", "closure"])
 @pytest.mark.asyncio
-async def test_cancellation_waits_for_worker_before_database_close(
+async def test_repeated_cancellation_waits_for_lifecycle_and_database_close(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    blocked_phase: str,
 ) -> None:
     TrackingDB.instances = []
-    worker_started = threading.Event()
-    release_worker = threading.Event()
-    worker_finished = threading.Event()
+    phase_started = threading.Event()
+    release_phase = threading.Event()
+    phase_finished = threading.Event()
+
+    def block_phase() -> None:
+        phase_started.set()
+        release_phase.wait(timeout=5)
+        phase_finished.set()
+
+    class BlockingDB(TrackingDB):
+        def __init__(self, db_path: str | Path, client_id: str) -> None:
+            super().__init__(db_path, client_id)
+            if blocked_phase == "construction":
+                block_phase()
+
+        def close_all_connections(self) -> None:
+            if blocked_phase == "closure":
+                block_phase()
+            super().close_all_connections()
 
     class BlockingService(ScenarioService):
         async def list_model_visible_skills_page(
@@ -899,23 +937,11 @@ async def test_cancellation_waits_for_worker_before_database_close(
             offset: int = 0,
         ) -> tuple[list[SkillMetadata], int]:
             del q, limit, offset
+            if blocked_phase == "service":
+                await asyncio.to_thread(block_phase)
+            return [], 0
 
-            def block() -> tuple[list[SkillMetadata], int]:
-                worker_started.set()
-                release_worker.wait(timeout=5)
-                worker_finished.set()
-                return [], 0
-
-            return await asyncio.to_thread(block)
-
-    original_close = TrackingDB.close_all_connections
-
-    def ordered_close(self: TrackingDB) -> None:
-        self.closed_after_worker = worker_finished.is_set()
-        original_close(self)
-
-    monkeypatch.setattr(TrackingDB, "close_all_connections", ordered_close)
-    monkeypatch.setattr(skills_module, "CharactersRAGDB", TrackingDB)
+    monkeypatch.setattr(skills_module, "CharactersRAGDB", BlockingDB)
     monkeypatch.setattr(skills_module, "SkillsService", BlockingService)
     module = await _module()
     context = RequestContext(
@@ -924,17 +950,135 @@ async def test_cancellation_waits_for_worker_before_database_close(
         db_paths={"chacha": str(tmp_path / "ChaChaNotes.db")},
     )
     task = asyncio.create_task(module.execute_tool("skills.list", {}, context=context))
-    assert await asyncio.to_thread(worker_started.wait, 2)
+    assert await asyncio.to_thread(phase_started.wait, 2)
 
     task.cancel()
-    await asyncio.sleep(0.05)
-    assert task.done() is False
-    assert TrackingDB.instances[0].closed is False
+    await asyncio.sleep(0.02)
+    task.cancel()
+    await asyncio.sleep(0.02)
+    completed_before_release = task.done()
+    closed_before_release = TrackingDB.instances[0].closed
 
-    release_worker.set()
+    release_phase.set()
     with pytest.raises(asyncio.CancelledError):
         await task
 
-    assert worker_finished.is_set()
+    assert completed_before_release is False
+    assert closed_before_release is False
+    assert phase_finished.is_set()
     assert TrackingDB.instances[0].closed is True
-    assert TrackingDB.instances[0].closed_after_worker is True
+
+
+@pytest.mark.asyncio
+async def test_successful_operation_close_failure_is_logged_and_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    class CloseFailingDB(TrackingDB):
+        def close_all_connections(self) -> None:
+            super().close_all_connections()
+            raise OSError("SENTINEL_CLOSE /sentinel/close/path")
+
+    TrackingDB.instances = []
+    ScenarioService.scenario = "list"
+    monkeypatch.setattr(skills_module, "CharactersRAGDB", CloseFailingDB)
+    monkeypatch.setattr(skills_module, "SkillsService", ScenarioService)
+    module = await _module()
+    context = RequestContext(
+        request_id="close-failure",
+        user_id="7",
+        db_paths={"chacha": str(tmp_path / "ChaChaNotes.db")},
+    )
+    messages: list[str] = []
+    sink_id = logger.add(
+        messages.append,
+        format="{message}",
+        filter=lambda record: record["message"].startswith("skills operation="),
+    )
+
+    try:
+        with pytest.raises(RuntimeError, match="^skills_unavailable$"):
+            await module.execute_tool("skills.list", {}, context=context)
+    finally:
+        logger.remove(sink_id)
+
+    log_text = "".join(messages)
+    assert "skills operation=skills.list user_id=7 exception=OSError" in log_text
+    assert "SENTINEL_CLOSE" not in log_text
+    assert "/sentinel/close/path" not in log_text
+    assert str(tmp_path) not in log_text
+
+
+@pytest.mark.asyncio
+async def test_bounded_operation_error_takes_precedence_over_close_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    class CloseFailingDB(TrackingDB):
+        def close_all_connections(self) -> None:
+            super().close_all_connections()
+            raise OSError("private close failure")
+
+    TrackingDB.instances = []
+    ScenarioService.scenario = "not_found"
+    monkeypatch.setattr(skills_module, "CharactersRAGDB", CloseFailingDB)
+    monkeypatch.setattr(skills_module, "SkillsService", ScenarioService)
+    module = await _module()
+    context = RequestContext(
+        request_id="bounded-precedence",
+        user_id="1",
+        db_paths={"chacha": str(tmp_path / "ChaChaNotes.db")},
+    )
+
+    with pytest.raises(ValueError, match="^skill_not_found$"):
+        await module.execute_tool("skills.get", {"name": "missing"}, context=context)
+
+
+@pytest.mark.asyncio
+async def test_cancellation_preserves_cancelled_error_when_close_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    close_started = threading.Event()
+    release_close = threading.Event()
+
+    class BlockingCloseFailingDB(TrackingDB):
+        def close_all_connections(self) -> None:
+            close_started.set()
+            release_close.wait(timeout=5)
+            super().close_all_connections()
+            raise OSError("SENTINEL_CLOSE /sentinel/close/path")
+
+    TrackingDB.instances = []
+    ScenarioService.scenario = "list"
+    monkeypatch.setattr(skills_module, "CharactersRAGDB", BlockingCloseFailingDB)
+    monkeypatch.setattr(skills_module, "SkillsService", ScenarioService)
+    module = await _module()
+    context = RequestContext(
+        request_id="cancel-close-failure",
+        user_id="9",
+        db_paths={"chacha": str(tmp_path / "ChaChaNotes.db")},
+    )
+    messages: list[str] = []
+    sink_id = logger.add(
+        messages.append,
+        format="{message}",
+        filter=lambda record: record["message"].startswith("skills operation="),
+    )
+    task = asyncio.create_task(module.execute_tool("skills.list", {}, context=context))
+    assert await asyncio.to_thread(close_started.wait, 2)
+
+    try:
+        task.cancel()
+        await asyncio.sleep(0.02)
+        release_close.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        release_close.set()
+        logger.remove(sink_id)
+
+    log_text = "".join(messages)
+    assert "skills operation=skills.list user_id=9 exception=OSError" in log_text
+    assert "SENTINEL_CLOSE" not in log_text
+    assert "/sentinel/close/path" not in log_text
