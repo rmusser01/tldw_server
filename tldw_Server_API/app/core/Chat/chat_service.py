@@ -1882,9 +1882,6 @@ def _build_adapter_request_from_chat_args(chat_args: dict[str, Any]) -> tuple[st
         "api_key": api_key,
         "app_config": app_config,
     }
-    if credentials_resolved:
-        request["credentials_resolved"] = True
-
     base_url_override = _resolve_base_url_override(provider, chat_args)
     if base_url_override:
         request["base_url"] = base_url_override

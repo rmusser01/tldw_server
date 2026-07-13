@@ -38,7 +38,7 @@ def test_explicit_credentials_bypass_resolvers_and_copy_config(monkeypatch):
     assert request["api_key"] == "explicit-key"
     assert request["app_config"] == supplied_config
     assert request["app_config"] is not supplied_config
-    assert request["credentials_resolved"] is True
+    assert "credentials_resolved" not in request
 
 
 def test_explicit_missing_hosted_key_fails_safely(monkeypatch):
@@ -130,7 +130,6 @@ def test_explicit_absent_config_cannot_trigger_adapter_config_reload(monkeypatch
         )
     )
     adapter_request = {**request, "app_config": dict(request["app_config"])}
-    adapter_request.pop("credentials_resolved")
 
     result = moonshot_adapter.MoonshotAdapter().chat(adapter_request)
 
@@ -138,7 +137,7 @@ def test_explicit_absent_config_cannot_trigger_adapter_config_reload(monkeypatch
     assert session.urls == ["https://api.moonshot.cn/v1/chat/completions"]
     assert type(request["app_config"]) is dict
     assert request["app_config"] == {"moonshot_api": {}}
-    assert request["credentials_resolved"] is True
+    assert "credentials_resolved" not in request
 
 
 def test_legacy_empty_config_still_allows_adapter_config_reload(monkeypatch):
@@ -180,7 +179,7 @@ def test_explicit_absent_config_is_plain_provider_scoped_mapping(provider, secti
 
     assert type(request["app_config"]) is dict
     assert dict(request["app_config"]) == {section: {}}
-    assert request["credentials_resolved"] is True
+    assert "credentials_resolved" not in request
 
 
 def test_explicit_missing_model_does_not_use_default_model_environment(monkeypatch):
