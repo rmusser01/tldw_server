@@ -126,7 +126,7 @@ Never copy another provider section, API key, authorization header, cookie, toke
 
 **Tests:** AuthNZ unit/SQLite, Chat service boundary, summarization, and embedding tests.
 
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 1: Make BYOK resolution outcomes explicit and fail closed
 
@@ -212,23 +212,23 @@ git commit -m "feat(auth): add execution-scoped provider credential runtime"
 - Create: `tldw_Server_API/tests/Chat/unit/test_chat_service_credential_policy.py`
 - Modify: `tldw_Server_API/tests/Embeddings/test_async_embeddings_provider_url_override.py`
 
-- [ ] **Step 1: Write failing boundary tests**
+- [x] **Step 1: Write failing boundary tests**
 
 Monkeypatch every server config/key resolver to raise. Verify `credentials_resolved=True` with a supplied key uses it, while `credentials_resolved=True` with a missing required key raises a sanitized configuration error without fallback. Verify the no-marker path keeps legacy behavior. For async embedding singletons, run two concurrent calls with different sentinel keys and assert headers never cross requests; credential/auth failures do not call `_try_fallback_providers`.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat/unit/test_chat_service_credential_policy.py tldw_Server_API/tests/Embeddings/test_async_embeddings_provider_url_override.py -q`
 
 Expected: FAIL because explicit-resolution parameters are not honored.
 
-- [ ] **Step 3: Implement minimal boundary changes**
+- [x] **Step 3: Implement minimal boundary changes**
 
 In `_build_adapter_request_from_chat_args`, use `api_key` exactly when `credentials_resolved is True`; otherwise retain existing lookup. In SGL, add keyword-only `app_config`, `credentials_resolved`, and `raise_on_error`; runtime-bound calls raise a sanitized `SummaryProviderError(code, provider)` while legacy calls translate it back to historical `Error:` strings. Do not include upstream bodies in the typed error.
 
 For embeddings, pass `api_key_override`, `base_url_override`, and `credentials_resolved` as per-call arguments down to provider methods. Never assign an override to `provider_instance.api_key`. Disable configured provider failover only for explicit credential/auth failures; preserve health fallback for legacy/non-credential failures.
 
-- [ ] **Step 4: Verify green and legacy compatibility**
+- [x] **Step 4: Verify green and legacy compatibility**
 
 Run the Step 2 command plus:
 
@@ -236,7 +236,7 @@ Run the Step 2 command plus:
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Chat/chat_service.py tldw_Server_API/app/core/LLM_Calls/Summarization_General_Lib.py tldw_Server_API/app/core/Embeddings tldw_Server_API/tests/Chat/unit/test_chat_service_credential_policy.py tldw_Server_API/tests/Embeddings

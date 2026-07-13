@@ -76,3 +76,9 @@ Docs/superpowers/plans/2026-07-12-shared-provider-credential-runtime-implementat
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+2026-07-13: Task 3 complete. Commits 67ee17d8e5, b6fedc208d, 3a6666e1bc, 6cf99c752c, and b9254fdc16 enforce exact execution-scoped credentials at Chat, summarization, and async/sync embedding boundaries; close downstream config/model/endpoint fallback gaps; preserve sanitized auth/config/rate taxonomy; and prevent upstream provider bodies from reaching explicit errors or logs. Final independent specification and code-quality reviews approved with no open Critical/Important issues. Reviewer verification: 60 focused/compatibility tests passed; Bandit 0 findings; py_compile, scoped Black, and git diff checks clean.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
