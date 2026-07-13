@@ -3,8 +3,10 @@
 # Unit tests for the SkillsService class
 #
 import tempfile
+import threading
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -176,6 +178,127 @@ Skill content here.
         """Test that getting a non-existent skill raises NotFoundError."""
         with pytest.raises(SkillNotFoundError):
             await service.get_skill("nonexistent")
+
+    @pytest.mark.asyncio
+    async def test_list_model_visible_skills_page_filters_and_counts_once(self, service, monkeypatch):
+        """Catalog pages use one matching registry query and visibility pass."""
+        await service.create_skill("visible", "---\nuser-invocable: true\n---\nVisible")
+        await service.create_skill("hidden", "---\nuser-invocable: false\n---\nHidden")
+        await service.create_skill(
+            "manual-only",
+            "---\ndisable-model-invocation: true\n---\nManual",
+        )
+        await service._sync_registry_async(force=True)
+        monkeypatch.setattr(service, "_sync_registry_async", AsyncMock())
+        calls = 0
+        integrity_calls: list[str] = []
+        original = service._get_db().list_skill_registry
+
+        def counted_list(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            return original(*args, **kwargs)
+
+        def allowed(name, *, purpose):
+            integrity_calls.append(name)
+            assert purpose == "skill_discovery"
+            return True
+
+        monkeypatch.setattr(service._get_db(), "list_skill_registry", counted_list)
+        monkeypatch.setattr(service, "_is_skill_allowed", allowed)
+
+        items, total = await service.list_model_visible_skills_page(limit=10, offset=0)
+
+        assert [item.name for item in items] == ["visible"]
+        assert total == 1
+        assert calls == 1
+        assert integrity_calls == ["visible"]
+
+    @pytest.mark.asyncio
+    async def test_get_model_visible_skill_metadata_hides_non_model_skills(self, service):
+        """Model-disabled skills are indistinguishable from missing catalog entries."""
+        await service.create_skill(
+            "manual-only",
+            "---\ndisable-model-invocation: true\n---\nManual",
+        )
+
+        with pytest.raises(SkillNotFoundError):
+            await service.get_model_visible_skill_metadata("manual-only")
+
+    @pytest.mark.asyncio
+    async def test_model_visible_metadata_hides_integrity_blocked_skills(self, service, monkeypatch):
+        """Integrity-blocked skills are excluded from page and exact discovery."""
+        await service.create_skill("blocked", "---\n---\nBlocked")
+        monkeypatch.setattr(service, "_is_skill_allowed", lambda *_args, **_kwargs: False)
+
+        items, total = await service.list_model_visible_skills_page()
+
+        assert items == []
+        assert total == 0
+        with pytest.raises(SkillNotFoundError):
+            await service.get_model_visible_skill_metadata("blocked")
+
+    @pytest.mark.asyncio
+    async def test_model_visible_metadata_omits_skill_content_and_supporting_files(self, service, monkeypatch):
+        """Catalog helpers return registry metadata without parsing a full skill."""
+        await service.create_skill(
+            "metadata-only",
+            "---\ndescription: Metadata only\n---\nSecret instructions",
+            supporting_files={"reference.md": "Private supporting text"},
+        )
+        monkeypatch.setattr(service, "_is_skill_allowed", lambda *_args, **_kwargs: True)
+        monkeypatch.setattr(
+            service,
+            "_parse_verified_skill_directory",
+            lambda *_args, **_kwargs: pytest.fail("metadata helpers must not parse full Skill directories"),
+        )
+        monkeypatch.setattr(
+            service,
+            "_parse_unchecked_skill_directory",
+            lambda *_args, **_kwargs: pytest.fail("metadata helpers must not parse full Skill directories"),
+        )
+
+        metadata = await service.get_model_visible_skill_metadata("metadata-only")
+        items, _ = await service.list_model_visible_skills_page()
+
+        assert [item.name for item in items] == ["metadata-only"]
+        assert metadata.description == "Metadata only"
+        assert metadata.directory_path
+        assert metadata.content_hash
+        for item in [metadata, *items]:
+            assert not hasattr(item, "content")
+            assert not hasattr(item, "raw_content")
+            assert not hasattr(item, "supporting_files")
+
+    @pytest.mark.asyncio
+    async def test_list_model_visible_skills_page_offloads_verified_load(self, service, monkeypatch):
+        """The catalog page's synchronous registry and integrity work leaves the event loop."""
+        event_loop_thread = threading.get_ident()
+        worker_threads: list[int] = []
+
+        def record_thread(*_args, **_kwargs):
+            worker_threads.append(threading.get_ident())
+            return [], 0
+
+        monkeypatch.setattr(service, "_list_model_visible_skills_page_sync", record_thread)
+
+        assert await service.list_model_visible_skills_page() == ([], 0)
+        assert worker_threads != [event_loop_thread]
+
+    @pytest.mark.asyncio
+    async def test_get_skill_verified_load_offload_preserves_content_and_supporting_files(self, service):
+        """Verified loads retain the established full-content response after offloading."""
+        await service.create_skill(
+            "verified-load",
+            "---\ndescription: Full payload\n---\nSkill instructions",
+            supporting_files={"reference.md": "Reference text"},
+        )
+
+        result = await service.get_skill("verified-load")
+
+        assert result["content"] == "Skill instructions"
+        assert result["raw_content"] == "---\ndescription: Full payload\n---\nSkill instructions"
+        assert result["supporting_files"] == {"reference.md": "Reference text"}
 
     @pytest.mark.asyncio
     async def test_list_skills(self, service):
