@@ -22,7 +22,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Optional, cast
 
 from loguru import logger
+
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError, ChatAuthenticationError
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import (
     SummaryProviderError,
 )
@@ -120,6 +122,25 @@ class VerificationOutcome:
     summary: dict[str, Any] | None = None
     verification_available: bool = True
     failure_code: str | None = None
+    embedding_coverage: str | None = None
+    embedding_failure_code: str | None = None
+
+
+def _record_embedding_degradation(
+    outcome: VerificationOutcome,
+    exc: Exception,
+) -> None:
+    """Expose only bounded credential failure metadata for optional retrieval."""
+    if isinstance(exc, ByokResolutionError):
+        code = exc.code
+    elif isinstance(exc, ChatAuthenticationError):
+        code = "invalid_provider_credentials"
+    elif isinstance(exc, ChatAPIError):
+        code = "provider_unavailable"
+    else:
+        return
+    outcome.embedding_coverage = "degraded"
+    outcome.embedding_failure_code = code
 
 
 class PostGenerationVerifier:
@@ -315,6 +336,7 @@ class PostGenerationVerifier:
                             mdr = MultiDatabaseRetriever(
                                 db_paths,
                                 user_id=user_id or "0",
+                                credential_runtime=self._credential_runtime,
                             )
                             med = mdr.retrievers.get(DataSource.MEDIA_DB)
                             docs: list[Document] = []
@@ -327,7 +349,8 @@ class PostGenerationVerifier:
                             # Other sources could be added similarly
                             docs = sorted(docs, key=lambda d: getattr(d, 'score', 0.0), reverse=True)
                             return docs[:top]
-                        except Exception:  # noqa: BLE001 - retrieval fallback should be safe
+                        except Exception as exc:  # noqa: BLE001 - retrieval fallback should be safe
+                            _record_embedding_degradation(outcome, exc)
                             return base_documents[:top]
 
                     try:
@@ -414,7 +437,11 @@ class PostGenerationVerifier:
             new_docs: list[Document] = base_documents[:]
             try:
                 if MultiDatabaseRetriever is not None and media_db_path:
-                    mdr = MultiDatabaseRetriever({"media_db": media_db_path}, user_id=user_id or "0")
+                    mdr = MultiDatabaseRetriever(
+                        {"media_db": media_db_path},
+                        user_id=user_id or "0",
+                        credential_runtime=self._credential_runtime,
+                    )
                     med = mdr.retrievers.get(DataSource.MEDIA_DB)
                     if med is not None:
                         rh = getattr(med, 'retrieve_hybrid', None)
@@ -443,7 +470,22 @@ class PostGenerationVerifier:
                             try:
                                 if generate_hypothetical_answer is not None and hyde_embed_text is not None:
                                     hypo = generate_hypothetical_answer(query, None, None)
-                                    vec = await hyde_embed_text(hypo)
+                                    hyde_metadata: dict[str, Any] = {}
+                                    vec = await hyde_embed_text(
+                                        hypo,
+                                        credential_runtime=self._credential_runtime,
+                                        stage_metadata=hyde_metadata,
+                                    )
+                                    if hyde_metadata.get("embedding_coverage") == "degraded":
+                                        outcome.embedding_coverage = "degraded"
+                                    failure_code = hyde_metadata.get("failure_code")
+                                    if failure_code in {
+                                        "invalid_provider_credentials",
+                                        "credential_store_unavailable",
+                                        "credential_scope_revoked",
+                                        "provider_unavailable",
+                                    }:
+                                        outcome.embedding_failure_code = failure_code
                                     if vec:
                                         hyde_vector = vec
                             except Exception:  # noqa: BLE001 - HyDE best-effort
@@ -465,7 +507,8 @@ class PostGenerationVerifier:
                                         prev = docs_union.get(getattr(d, "id", ""))
                                         if prev is None or float(getattr(d, "score", 0.0)) > float(getattr(prev, "score", 0.0)):
                                             docs_union[getattr(d, "id", "")] = d
-                                except Exception:  # noqa: BLE001 - per-query retrieval best-effort
+                                except Exception as exc:  # noqa: BLE001 - per-query retrieval best-effort
+                                    _record_embedding_degradation(outcome, exc)
                                     logger.debug("Adaptive per-query retrieval failed; continuing")
 
                             merged_docs = sorted(docs_union.values(), key=lambda x: getattr(x, "score", 0.0), reverse=True)
@@ -473,6 +516,7 @@ class PostGenerationVerifier:
                             # Apply simple diversity filter to reduce near-duplicates
                             new_docs = _select_diverse(merged_docs, k=max(5, min(15, top_k)))
             except Exception as e:  # noqa: BLE001 - fallback to base docs
+                _record_embedding_degradation(outcome, e)
                 logger.debug(f"Adaptive retrieval failed; using base docs. Reason: {_safe_exception_label(e)}")
                 new_docs = base_documents[:]
 

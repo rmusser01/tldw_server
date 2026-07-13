@@ -31,22 +31,12 @@ from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
-from tldw_Server_API.app.core.DB_Management.media_db.api import create_media_database
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import (
     SummaryProviderError,
 )
 
 from . import agentic_execution as _agentic_execution
 from .advanced_cache import AGENTIC_CACHE
-from .agentic_execution import (
-    AgenticConfig,
-    AgenticToolbox,
-    _get_media_db_for_structure,
-    assemble_ephemeral_chunk as _assemble_ephemeral_chunk,
-    build_agentic_derived_evidence,
-    decompose_query as _decompose_query,
-    tool_loop as _tool_loop,
-)
 from .database_retrievers import MultiDatabaseRetriever, RetrievalConfig
 from .evidence_models import RetrievedEvidence
 from .request_resolution import ResolvedRAGRequest
@@ -67,6 +57,13 @@ except ImportError:
 # Simple in-process caches (namespaced via adapter)
 _EPHEMERAL_CACHE: dict[str, Any] = {}
 _INTRA_DOC_VEC_CACHE = _agentic_execution._INTRA_DOC_VEC_CACHE
+AgenticConfig = _agentic_execution.AgenticConfig
+AgenticToolbox = _agentic_execution.AgenticToolbox
+_get_media_db_for_structure = _agentic_execution._get_media_db_for_structure
+build_agentic_derived_evidence = _agentic_execution.build_agentic_derived_evidence
+_assemble_ephemeral_chunk = _agentic_execution.assemble_ephemeral_chunk
+_decompose_query = _agentic_execution.decompose_query
+_tool_loop = _agentic_execution.tool_loop
 
 
 def _cache_get(key: str) -> dict[str, Any] | None:
@@ -271,7 +268,6 @@ async def agentic_rag_pipeline(
         retrieval_plan=retrieval_plan,
     )
     effective_query = str(resolved_request.query or query)
-    effective_sources = list(effective_retrieval_plan.sources or ("media_db",))
     effective_search_mode = effective_retrieval_plan.search_mode
     effective_top_k = max(1, int(effective_retrieval_plan.top_k or top_k or 10))
     effective_min_score = float(effective_retrieval_plan.min_score if effective_retrieval_plan.min_score is not None else min_score or 0.0)
@@ -306,6 +302,7 @@ async def agentic_rag_pipeline(
         user_id=str(resolved_request.user_id or "rag_agentic"),
         media_db=media_db,
         chacha_db=chacha_db,
+        credential_runtime=credential_runtime,
     )
 
     # 2) Coarse retrieval (prefer media-level)
@@ -352,6 +349,7 @@ async def agentic_rag_pipeline(
                 config=fb_cfg,
                 user_id=str(resolved_request.user_id or "rag_agentic"),
                 media_db=media_db,
+                credential_runtime=credential_runtime,
             )
             fallback_docs = await fb_retriever.retrieve(
                 query=effective_query,
@@ -472,7 +470,12 @@ async def agentic_rag_pipeline(
 
     key_raw = "|".join([effective_query.strip().lower()] + sorted(_hashable_doc(d) for d in docs[: cfg.top_k_docs]))
     cache_key = hashlib.sha256(key_raw.encode("utf-8")).hexdigest()
-    cached = _cache_get(cache_key)
+    agentic_embedding_metadata: dict[str, Any] = {}
+    use_ephemeral_cache = not (
+        credential_runtime is not None
+        and cfg.agentic_use_provider_embeddings_within
+    )
+    cached = _cache_get(cache_key) if use_ephemeral_cache else None
     if cached:
         chunk_text = cached.get("chunk_text", "")
         prov = cached.get("provenance", [])
@@ -488,11 +491,18 @@ async def agentic_rag_pipeline(
         # 4) Assemble ephemeral chunk (either tools or heuristics)
         tool_trace: list[dict[str, Any]] = []
         if cfg.enable_tools:
-            chunk_text, prov, tool_trace = await _tool_loop(docs, effective_query, cfg)
+            chunk_text, prov, tool_trace = await _tool_loop(
+                docs,
+                effective_query,
+                cfg,
+                credential_runtime=credential_runtime,
+                stage_metadata=agentic_embedding_metadata,
+            )
         else:
             chunk_text, prov = _assemble_ephemeral_chunk(docs, effective_query, cfg)
             tool_trace = []
-        _cache_set(cache_key, {"chunk_text": chunk_text, "provenance": prov}, cfg.cache_ttl_sec)
+        if use_ephemeral_cache:
+            _cache_set(cache_key, {"chunk_text": chunk_text, "provenance": prov}, cfg.cache_ttl_sec)
 
     # Represent the ephemeral chunk as a Document so the existing
     # generation and response formatting utilities can handle it.
@@ -565,6 +575,8 @@ async def agentic_rag_pipeline(
         security_report=None,
         total_time=0.0,
     )
+    if agentic_embedding_metadata:
+        result.metadata["agentic_embeddings"] = dict(agentic_embedding_metadata)
 
     # Attach lightweight coverage/precision metrics
     try:
@@ -811,6 +823,7 @@ async def agentic_rag_pipeline(
                                         user_id=str(resolved_request.user_id or "rag_agentic"),
                                         media_db=media_db,
                                         chacha_db=chacha_db,
+                                        credential_runtime=credential_runtime,
                                     )
                                     conf = RetrievalConfig(
                                         max_results=min(10, effective_top_k),
@@ -887,6 +900,18 @@ async def agentic_rag_pipeline(
                 failure_code = getattr(vres, "failure_code", None)
                 if failure_code:
                     result.metadata["post_verification"]["failure_code"] = failure_code
+                if getattr(vres, "embedding_coverage", None) == "degraded":
+                    result.metadata["post_verification"]["embedding_coverage"] = "degraded"
+                embedding_failure_code = getattr(vres, "embedding_failure_code", None)
+                if embedding_failure_code in {
+                    "invalid_provider_credentials",
+                    "credential_store_unavailable",
+                    "credential_scope_revoked",
+                    "provider_unavailable",
+                }:
+                    result.metadata["post_verification"]["embedding_failure_code"] = (
+                        embedding_failure_code
+                    )
                 # Gauge and gate behavior
                 try:
                     from tldw_Server_API.app.core.Metrics.metrics_manager import increment_counter, set_gauge

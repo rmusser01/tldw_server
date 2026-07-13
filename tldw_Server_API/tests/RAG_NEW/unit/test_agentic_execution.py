@@ -1,3 +1,6 @@
+from types import SimpleNamespace
+from typing import Any
+
 import pytest
 
 import tldw_Server_API.app.core.RAG.rag_service.agentic_execution as agentic_execution
@@ -12,8 +15,27 @@ from tldw_Server_API.app.core.RAG.rag_service.request_resolution import Resolved
 from tldw_Server_API.app.core.RAG.rag_service.retrieval_plan import RetrievalPlan
 from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
 
-
 pytestmark = pytest.mark.unit
+
+
+class _CredentialRuntime:
+    def __init__(self, provider: str, base_url: str = "https://agentic-embeddings.example/v1"):
+        section = "openai_api" if provider == "openai" else "huggingface_api"
+        self.handle = SimpleNamespace(
+            provider=provider,
+            api_key="runtime-agentic-key",
+            app_config={section: {"base_url": base_url}},
+            credentials_resolved=True,
+        )
+        self.resolved: list[str] = []
+        self.marked: list[Any] = []
+
+    async def resolve(self, provider: str):
+        self.resolved.append(provider)
+        return self.handle
+
+    async def mark_used(self, handle: Any) -> None:
+        self.marked.append(handle)
 
 
 def test_build_agentic_derived_evidence_tracks_actual_lineage_only():
@@ -119,3 +141,165 @@ def test_build_agentic_execution_context_derives_effective_payload_and_config() 
     assert agentic_config.coverage_target == 0.92
     assert agentic_config.enable_metrics is False
     assert agentic_config.debug_trace is True
+
+
+@pytest.mark.asyncio
+async def test_tool_loop_uses_runtime_credentials_for_hosted_provider_embeddings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core import config as core_config
+    from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create
+
+    runtime = _CredentialRuntime("openai")
+    captured: dict[str, Any] = {}
+    embedding_settings = {
+        "default_model_id": "openai:text-embedding-3-small",
+        "models": {
+            "openai:text-embedding-3-small": SimpleNamespace(provider="openai"),
+        },
+    }
+
+    def fake_create(texts, app_config, model_id_override=None, **kwargs):
+        captured.update(
+            texts=texts,
+            app_config=app_config,
+            model_id_override=model_id_override,
+            kwargs=kwargs,
+        )
+        return [[1.0, 0.0] for _ in texts]
+
+    monkeypatch.setattr(
+        core_config,
+        "load_comprehensive_config",
+        lambda: {"EMBEDDING_CONFIG": embedding_settings},
+    )
+    monkeypatch.setattr(Embeddings_Create, "create_embeddings_batch", fake_create)
+    agentic_execution._INTRA_DOC_VEC_CACHE.clear()
+    doc = Document(
+        id="agentic-provider-doc",
+        content="alpha paragraph\n\nbeta paragraph",
+        source=DataSource.MEDIA_DB,
+        metadata={},
+    )
+    cfg = AgenticConfig(
+        top_k_docs=1,
+        max_tool_calls=1,
+        enable_metrics=False,
+        agentic_use_provider_embeddings_within=True,
+        agentic_provider_embedding_model_id="openai:text-embedding-3-small",
+    )
+
+    await agentic_execution.tool_loop(
+        [doc],
+        "alpha",
+        cfg,
+        credential_runtime=runtime,
+    )
+
+    assert runtime.resolved == ["openai"]
+    assert runtime.marked == [runtime.handle]
+    assert captured["texts"][0] == "alpha"
+    assert captured["kwargs"] == {
+        "api_key_override": "runtime-agentic-key",
+        "base_url_override": "https://agentic-embeddings.example/v1",
+        "credentials_resolved": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_tool_loop_local_huggingface_embeddings_do_not_resolve_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core import config as core_config
+    from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create
+
+    runtime = _CredentialRuntime("openai")
+    captured: dict[str, Any] = {}
+    embedding_settings = {
+        "default_model_id": "huggingface:local-model",
+        "models": {
+            "huggingface:local-model": SimpleNamespace(provider="huggingface"),
+        },
+    }
+
+    def fake_create(texts, app_config, model_id_override=None, **kwargs):
+        captured["kwargs"] = kwargs
+        return [[1.0, 0.0] for _ in texts]
+
+    monkeypatch.setattr(
+        core_config,
+        "load_comprehensive_config",
+        lambda: {"EMBEDDING_CONFIG": embedding_settings},
+    )
+    monkeypatch.setattr(Embeddings_Create, "create_embeddings_batch", fake_create)
+    agentic_execution._INTRA_DOC_VEC_CACHE.clear()
+    cfg = AgenticConfig(
+        top_k_docs=1,
+        max_tool_calls=1,
+        enable_metrics=False,
+        agentic_use_provider_embeddings_within=True,
+        agentic_provider_embedding_model_id="huggingface:local-model",
+    )
+
+    await agentic_execution.tool_loop(
+        [Document(id="local", content="alpha", source=DataSource.MEDIA_DB, metadata={})],
+        "alpha",
+        cfg,
+        credential_runtime=runtime,
+    )
+
+    assert runtime.resolved == []
+    assert runtime.marked == []
+    assert captured["kwargs"] == {}
+
+
+@pytest.mark.asyncio
+async def test_agentic_provider_vector_cache_identity_includes_authorized_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core import config as core_config
+    from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create
+
+    calls: list[str] = []
+    embedding_settings = {
+        "default_model_id": "openai:text-embedding-3-small",
+        "models": {
+            "openai:text-embedding-3-small": SimpleNamespace(provider="openai"),
+        },
+    }
+
+    def fake_create(texts, app_config, model_id_override=None, **kwargs):
+        calls.append(kwargs["base_url_override"])
+        return [[1.0, 0.0] for _ in texts]
+
+    monkeypatch.setattr(
+        core_config,
+        "load_comprehensive_config",
+        lambda: {"EMBEDDING_CONFIG": embedding_settings},
+    )
+    monkeypatch.setattr(Embeddings_Create, "create_embeddings_batch", fake_create)
+    agentic_execution._INTRA_DOC_VEC_CACHE.clear()
+    cfg = AgenticConfig(
+        top_k_docs=1,
+        max_tool_calls=1,
+        enable_metrics=False,
+        agentic_use_provider_embeddings_within=True,
+        agentic_provider_embedding_model_id="openai:text-embedding-3-small",
+    )
+    doc = Document(id="cache-doc", content="alpha", source=DataSource.MEDIA_DB, metadata={})
+
+    await agentic_execution.tool_loop(
+        [doc],
+        "alpha",
+        cfg,
+        credential_runtime=_CredentialRuntime("openai", "https://endpoint-a.example/v1"),
+    )
+    await agentic_execution.tool_loop(
+        [doc],
+        "alpha",
+        cfg,
+        credential_runtime=_CredentialRuntime("openai", "https://endpoint-b.example/v1"),
+    )
+
+    assert calls == ["https://endpoint-a.example/v1", "https://endpoint-b.example/v1"]
+    assert all("runtime-agentic-key" not in key for key in agentic_execution._INTRA_DOC_VEC_CACHE)

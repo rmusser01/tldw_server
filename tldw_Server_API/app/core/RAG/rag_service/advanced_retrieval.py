@@ -17,11 +17,14 @@ Notes:
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 from dataclasses import dataclass
 from typing import Any
 
 from loguru import logger
+
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
 
 try:
     from .types import DataSource, Document
@@ -41,6 +44,8 @@ try:
     from tldw_Server_API.app.core.Embeddings.async_embeddings import get_async_embedding_service
 except ImportError:  # pragma: no cover - import guard for environments without embeddings
     get_async_embedding_service = None  # type: ignore
+
+from .hyde import _record_embedding_degraded, _resolve_runtime_embedding_call
 
 
 @dataclass
@@ -102,6 +107,8 @@ async def apply_multi_vector_passages(
     documents: list[Document],
     config: MultiVectorConfig | None = None,
     user_id: str | None = None,
+    credential_runtime: Any = None,
+    stage_metadata: dict[str, Any] | None = None,
 ) -> list[Document]:
     """
     Reorder documents using a ColBERT-style max-sim over span embeddings.
@@ -120,10 +127,49 @@ async def apply_multi_vector_passages(
 
     svc = get_async_embedding_service()
 
+    handle = None
+    call_kwargs: dict[str, Any] = {}
+    if credential_runtime is not None:
+        raw_provider = str(getattr(getattr(svc, "config", None), "default_provider", "") or "")
+        alias_resolver = getattr(svc, "_resolve_provider_alias", None)
+        provider = alias_resolver(raw_provider) if callable(alias_resolver) else raw_provider
+        provider = str(provider or "").strip().lower()
+        if provider in {"openai", "huggingface"}:
+            try:
+                handle, runtime_kwargs = await _resolve_runtime_embedding_call(
+                    credential_runtime,
+                    provider,
+                )
+                call_kwargs = {
+                    "provider": provider,
+                    "model": getattr(getattr(svc, "config", None), "default_model", None),
+                    **runtime_kwargs,
+                }
+            except asyncio.CancelledError:
+                raise
+            except (
+                ByokResolutionError,
+                AttributeError,
+                ConnectionError,
+                OSError,
+                RuntimeError,
+                TimeoutError,
+                TypeError,
+                ValueError,
+            ) as exc:
+                _record_embedding_degraded(stage_metadata, exc)
+                logger.warning("Query embedding failed; skipping multi-vector passages")
+                return documents
+
     # Embed query
     try:
-        q_vec = await svc.create_embedding(text=query, user_id=user_id)
-    except (AttributeError, ConnectionError, OSError, RuntimeError, TimeoutError, TypeError, ValueError):
+        q_vec = await svc.create_embedding(text=query, user_id=user_id, **call_kwargs)
+        if handle is not None:
+            await credential_runtime.mark_used(handle)
+    except asyncio.CancelledError:
+        raise
+    except (AttributeError, ConnectionError, OSError, RuntimeError, TimeoutError, TypeError, ValueError) as exc:
+        _record_embedding_degraded(stage_metadata, exc)
         logger.warning("Query embedding failed; skipping multi-vector passages")
         return documents
 
@@ -144,9 +190,12 @@ async def apply_multi_vector_passages(
     try:
         for i in range(0, len(all_spans), cfg.batch_size):
             batch = all_spans[i : i + cfg.batch_size]
-            vecs = await svc.create_embeddings_batch(batch, user_id=user_id)
+            vecs = await svc.create_embeddings_batch(batch, user_id=user_id, **call_kwargs)
             span_vectors.extend(vecs)
-    except (AttributeError, ConnectionError, OSError, RuntimeError, TimeoutError, TypeError, ValueError):
+    except asyncio.CancelledError:
+        raise
+    except (AttributeError, ConnectionError, OSError, RuntimeError, TimeoutError, TypeError, ValueError) as exc:
+        _record_embedding_degraded(stage_metadata, exc)
         logger.warning("Span embeddings failed; skipping multi-vector passages")
         return documents
 

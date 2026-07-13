@@ -5,14 +5,17 @@ Verifies that unsupported claims trigger adaptive retry metrics and that
 central metrics registry counters/histograms are updated.
 """
 
-import asyncio
+from typing import Any
+
 import pytest
 
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAuthenticationError
 from tldw_Server_API.app.core.Claims_Extraction import monitoring as claims_monitoring
+from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry
 from tldw_Server_API.app.core.RAG.rag_service import post_generation_verifier as verifier_module
 from tldw_Server_API.app.core.RAG.rag_service.post_generation_verifier import PostGenerationVerifier
-from tldw_Server_API.app.core.RAG.rag_service.types import Document, DataSource
-from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry
+from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
 
 
 class _CapturingLogger:
@@ -405,3 +408,139 @@ async def test_adaptive_recheck_fallback_log_redacts_exception_details(monkeypat
     assert out.new_answer == "A repaired answer."
     assert out.unsupported_ratio == 1.0
     _assert_no_sensitive_log_leak(logger.messages)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_adaptive_retrieval_threads_runtime_to_retriever_and_hyde_embedding(monkeypatch):
+    runtime = object()
+    captured: dict[str, Any] = {}
+
+    class _MediaRetriever:
+        async def retrieve_hybrid(self, **kwargs):
+            return _base_docs()
+
+    class _MultiDatabaseRetriever:
+        def __init__(self, *args, **kwargs):
+            captured["retrieval_runtime"] = kwargs.get("credential_runtime")
+            self.retrievers = {verifier_module.DataSource.MEDIA_DB: _MediaRetriever()}
+
+    async def fake_hyde_embedding(text: str, **kwargs):
+        captured["hyde_runtime"] = kwargs.get("credential_runtime")
+        captured["hyde_metadata"] = kwargs.get("stage_metadata")
+        kwargs["stage_metadata"].update(
+            embedding_coverage="degraded",
+            failure_code="credential_store_unavailable",
+        )
+        return [0.1, 0.2]
+
+    async def _unsupported_runner(**kwargs):
+        return {
+            "claims": [{"id": "c1"}, {"id": "c2"}],
+            "summary": {"supported": 0, "refuted": 1, "nei": 1},
+        }
+
+    monkeypatch.setattr(verifier_module, "MultiDatabaseRetriever", _MultiDatabaseRetriever)
+    monkeypatch.setattr(verifier_module, "generate_hypothetical_answer", lambda *args: "hypothesis")
+    monkeypatch.setattr(verifier_module, "hyde_embed_text", fake_hyde_embedding)
+    monkeypatch.setattr(verifier_module, "multi_strategy_expansion", None)
+    monkeypatch.setattr(verifier_module, "AnswerGenerator", None)
+
+    verifier = PostGenerationVerifier(
+        claims_runner=_unsupported_runner,
+        max_retries=1,
+        unsupported_threshold=0.10,
+        use_advanced_rewrites=True,
+        credential_runtime=runtime,
+    )
+    outcome = await verifier.verify_and_maybe_fix(
+        query="What is RAG?",
+        answer="RAG is X.",
+        base_documents=_base_docs(),
+        media_db_path="media.db",
+    )
+
+    assert captured["retrieval_runtime"] is runtime
+    assert captured["hyde_runtime"] is runtime
+    assert isinstance(captured["hyde_metadata"], dict)
+    assert outcome.embedding_coverage == "degraded"
+    assert outcome.embedding_failure_code == "credential_store_unavailable"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_claim_retrieval_reports_bounded_embedding_credential_degradation(monkeypatch):
+    class _MediaRetriever:
+        async def retrieve_hybrid(self, **kwargs):
+            raise ByokResolutionError("credential_scope_revoked", "openai")
+
+    class _MultiDatabaseRetriever:
+        def __init__(self, *args, **kwargs):
+            self.retrievers = {verifier_module.DataSource.MEDIA_DB: _MediaRetriever()}
+
+    class _ClaimsEngine:
+        async def run(self, **kwargs):
+            await kwargs["retrieve_fn"]("claim")
+            return {
+                "claims": [{"id": "c1"}],
+                "summary": {"supported": 1, "refuted": 0, "nei": 0},
+            }
+
+    verifier = PostGenerationVerifier(credential_runtime=object())
+
+    async def build_claims_engine():
+        return _ClaimsEngine(), None, {"used": False}
+
+    monkeypatch.setattr(verifier_module, "ClaimsEngine", object)
+    monkeypatch.setattr(verifier_module, "MultiDatabaseRetriever", _MultiDatabaseRetriever)
+    monkeypatch.setattr(verifier, "_build_claims_engine", build_claims_engine)
+
+    outcome = await verifier.verify_and_maybe_fix(
+        query="What is RAG?",
+        answer="RAG is X.",
+        base_documents=_base_docs(),
+        media_db_path="media.db",
+    )
+
+    assert outcome.embedding_coverage == "degraded"
+    assert outcome.embedding_failure_code == "credential_scope_revoked"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_adaptive_retrieval_reports_bounded_embedding_auth_degradation(monkeypatch):
+    class _MediaRetriever:
+        async def retrieve_hybrid(self, **kwargs):
+            raise ChatAuthenticationError("secret detail", provider="openai")
+
+    class _MultiDatabaseRetriever:
+        def __init__(self, *args, **kwargs):
+            self.retrievers = {verifier_module.DataSource.MEDIA_DB: _MediaRetriever()}
+
+    async def unsupported_runner(**kwargs):
+        return {
+            "claims": [{"id": "c1"}],
+            "summary": {"supported": 0, "refuted": 1, "nei": 0},
+        }
+
+    monkeypatch.setattr(verifier_module, "MultiDatabaseRetriever", _MultiDatabaseRetriever)
+    monkeypatch.setattr(verifier_module, "generate_hypothetical_answer", None)
+    monkeypatch.setattr(verifier_module, "hyde_embed_text", None)
+    monkeypatch.setattr(verifier_module, "multi_strategy_expansion", None)
+    monkeypatch.setattr(verifier_module, "AnswerGenerator", None)
+
+    verifier = PostGenerationVerifier(
+        claims_runner=unsupported_runner,
+        max_retries=1,
+        unsupported_threshold=0.1,
+        credential_runtime=object(),
+    )
+    outcome = await verifier.verify_and_maybe_fix(
+        query="What is RAG?",
+        answer="RAG is X.",
+        base_documents=_base_docs(),
+        media_db_path="media.db",
+    )
+
+    assert outcome.embedding_coverage == "degraded"
+    assert outcome.embedding_failure_code == "invalid_provider_credentials"

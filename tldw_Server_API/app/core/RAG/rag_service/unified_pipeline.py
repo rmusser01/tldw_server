@@ -26,6 +26,7 @@ import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
+from functools import partial
 from types import SimpleNamespace
 from typing import Any, Callable, Literal, Optional, cast
 
@@ -51,8 +52,14 @@ from tldw_Server_API.app.core.testing import (
     is_truthy as _shared_is_truthy,
 )
 
-from .retrieval_executor import execute_retrieval_phase
 from .generation_executor import execute_generation_phase
+from .hyde import (
+    _embedding_provider_from_config,
+    _mark_runtime_used_for_embeddings,
+    _resolve_runtime_embedding_call,
+    _run_sync_embedding_call,
+)
+from .retrieval_executor import execute_retrieval_phase
 from .retrieval_plan import RetrievalPlan
 
 _RERANK_DEBUG_DOCUMENT_CONTENT_MAX_CHARS = 500
@@ -372,8 +379,8 @@ def otel_span(name: str, *args, **kwargs):
 # Core types
 import contextlib
 
-from .metrics_collector import MetricsCollector, QueryMetrics
 from .evidence_models import RetrievedEvidence
+from .metrics_collector import MetricsCollector, QueryMetrics
 from .post_retrieval_coordinator import coordinate_standard_result_evidence
 from .request_resolution import (
     ResolvedRAGRequest,
@@ -1361,11 +1368,13 @@ def _filter_workspace_artifacts(
             or visibility == "workspace"
         )
 
-        should_filter = False
-        if is_workspace_artifact and not requested_workspace:
-            should_filter = True
-        elif requested_workspace and doc_workspace and doc_workspace != requested_workspace:
-            should_filter = True
+        should_filter = (
+            is_workspace_artifact and not requested_workspace
+        ) or (
+            bool(requested_workspace)
+            and bool(doc_workspace)
+            and doc_workspace != requested_workspace
+        )
 
         if should_filter:
             source = _document_canonical_source(doc)
@@ -2377,7 +2386,7 @@ async def unified_rag_pipeline(
         except ValueError as exc:
             result.errors.append(f"invalid_source: {exc}")
             result.metadata["source_validation_error"] = str(exc)
-            raise _EarlyReturn()
+            raise _EarlyReturn() from exc
 
         if (
             sql_retriever is None
@@ -2403,6 +2412,8 @@ async def unified_rag_pipeline(
 
         def _build_multi_retriever(db_paths: dict[str, str]):
             base_kwargs: dict[str, Any] = {"user_id": user_id or "0", "media_db": media_db}
+            if credential_runtime is not None:
+                base_kwargs["credential_runtime"] = credential_runtime
             if chacha_db is not None:
                 base_kwargs["chacha_db"] = chacha_db
             prompts_db = kwargs.get("prompts_db")
@@ -2431,6 +2442,8 @@ async def unified_rag_pipeline(
                     return MultiDatabaseRetriever(db_paths, **variant)
                 except TypeError:
                     continue
+            if credential_runtime is not None:
+                raise TypeError("MultiDatabaseRetriever does not accept credential runtime")
             try:
                 return MultiDatabaseRetriever(db_paths, user_id=user_id or "0")
             except TypeError:
@@ -3406,7 +3419,17 @@ async def unified_rag_pipeline(
                 except (ImportError, AttributeError, OSError, TypeError, ValueError):
                     pass
                 hypo = generate_hypothetical_answer(query, hyde_provider, hyde_model)
-                vec = await hyde_embed_text(hypo)
+                hyde_embedding_metadata: dict[str, Any] = {}
+                if credential_runtime is None:
+                    vec = await hyde_embed_text(hypo)
+                else:
+                    vec = await hyde_embed_text(
+                        hypo,
+                        credential_runtime=credential_runtime,
+                        stage_metadata=hyde_embedding_metadata,
+                    )
+                if hyde_embedding_metadata:
+                    result.metadata["hyde_embedding"] = hyde_embedding_metadata
                 if vec:
                     hyde_vector = vec
                     result.metadata["hyde_applied"] = True
@@ -4208,12 +4231,23 @@ async def unified_rag_pipeline(
                         max_spans_per_doc=int(mv_max_spans or 8),
                         flatten_to_spans=bool(mv_flatten_to_spans or False),
                     )
-                    mv_docs = await apply_multi_vector_passages(
-                        query=query,
-                        documents=result.documents,
-                        config=cfg,
-                        user_id=user_id,
-                    )
+                    multi_vector_embedding_metadata: dict[str, Any] = {}
+                    multi_vector_kwargs: dict[str, Any] = {
+                        "query": query,
+                        "documents": result.documents,
+                        "config": cfg,
+                        "user_id": user_id,
+                    }
+                    if credential_runtime is not None:
+                        multi_vector_kwargs.update(
+                            credential_runtime=credential_runtime,
+                            stage_metadata=multi_vector_embedding_metadata,
+                        )
+                    mv_docs = await apply_multi_vector_passages(**multi_vector_kwargs)
+                    if multi_vector_embedding_metadata:
+                        result.metadata.setdefault("multi_vector", {}).update(
+                            multi_vector_embedding_metadata
+                        )
                     if mv_docs:
                         result.documents = mv_docs[: top_k]
                         result.metadata.setdefault("multi_vector", {})
@@ -7090,6 +7124,18 @@ async def unified_rag_pipeline(
                 failure_code = getattr(vres, "failure_code", None)
                 if failure_code:
                     result.metadata["post_verification"]["failure_code"] = failure_code
+                if getattr(vres, "embedding_coverage", None) == "degraded":
+                    result.metadata["post_verification"]["embedding_coverage"] = "degraded"
+                embedding_failure_code = getattr(vres, "embedding_failure_code", None)
+                if embedding_failure_code in {
+                    "invalid_provider_credentials",
+                    "credential_store_unavailable",
+                    "credential_scope_revoked",
+                    "provider_unavailable",
+                }:
+                    result.metadata["post_verification"]["embedding_failure_code"] = (
+                        embedding_failure_code
+                    )
                 # Gauge for NLI unsupported ratio
                 try:
                     from tldw_Server_API.app.core.Metrics.metrics_manager import set_gauge
@@ -7940,12 +7986,31 @@ async def unified_batch_pipeline(
             )
             # Get embeddings for representative texts
             cfg = get_embedding_config()
-            vectors = await asyncio.get_running_loop().run_in_executor(
-                None,
-                create_embeddings_batch,
-                rep_texts,
-                cfg,
-                None,
+            provider = _embedding_provider_from_config(cfg)
+            handle = None
+            call_kwargs: dict[str, Any] = {}
+            if credential_runtime is not None and provider == "openai":
+                handle, call_kwargs = await _resolve_runtime_embedding_call(
+                    credential_runtime,
+                    provider,
+                )
+            vectors = await _run_sync_embedding_call(
+                partial(
+                    create_embeddings_batch,
+                    rep_texts,
+                    cfg,
+                    None,
+                    **call_kwargs,
+                ),
+                on_success=(
+                    partial(
+                        _mark_runtime_used_for_embeddings,
+                        credential_runtime=credential_runtime,
+                        handle=handle,
+                    )
+                    if handle is not None
+                    else None
+                ),
             )
             # Normalize vectors to unit length for cosine
             def _norm(v):
@@ -7986,8 +8051,10 @@ async def unified_batch_pipeline(
                     if _cos(vi, vj) >= thr:
                         clusters[i].append(j)
                         used.add(j)
-        except Exception as exc:  # noqa: BLE001 - best-effort clustering; never fail batch
-            logger.warning(f"Batch query clustering disabled due to error: {exc}")
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - best-effort clustering; never fail batch
+            logger.warning("Batch query clustering disabled due to embedding failure")
             # Fallback: each unique becomes its own cluster
             clusters = {i: [i] for i in range(len(unique_keys))}
 
