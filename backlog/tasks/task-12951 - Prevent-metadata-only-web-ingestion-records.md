@@ -1,7 +1,7 @@
 ---
 id: TASK-12951
 title: Prevent metadata-only web ingestion records
-status: Done
+status: In Progress
 labels:
 - bug
 - web-scraping
@@ -40,6 +40,8 @@ Fix web ingestion so description-only JSON-LD does not short-circuit full-page e
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation completed using TDD and subagent-driven review. Final post-rebase verification on current origin/dev: 44 focused tests passed; Black passed for task-owned test files; Ruff passed for all touched files except the unchanged pre-existing I001/F841 findings in Article_Extractor_Lib.py; current origin/dev already has unrelated Black debt in both service files and Black proposed no changes to TASK-12951-added service lines; compileall passed; Bandit reported 0 findings and 0 errors; git diff checks passed; final whole-range review found no issues. The post-rebase scrape_article test double was aligned with the upstream allow_llm_extraction keyword. Known skip: the full repository suite was not run because verification was scoped to affected web-ingestion and adjacent persistence suites.
 Draft PR created: https://github.com/rmusser01/tldw_server/pull/2718. The PR remains draft pending the repository-required human-authored Change summary.
+PR #2718 review remediation started: rebasing/auditing against latest origin/dev, adding test-first regressions for normalized wrapped-body persistence and safe URL logging, and addressing all actionable inline feedback.
+PR review remediation implemented test-first. Added non-string envelope handling, normalized-body persistence for enhanced and legacy paths, redacted warning-log URLs while preserving raw per-URL response errors, unit markers, helper docstring, and explicit B108 suppression rationale. Kept the existing nullable `errors` response key to preserve compatibility with the enhanced service and approved response contract. Verification: 40 focused/adjacent tests passed; Black passed on changed tests; Ruff passed on touched files with only the two documented pre-existing Article_Extractor_Lib I001/F841 findings excluded; compileall and git diff checks passed; Bandit production scan reported 0 findings and 0 errors.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

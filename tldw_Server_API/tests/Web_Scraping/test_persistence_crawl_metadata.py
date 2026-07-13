@@ -33,6 +33,17 @@ class _FakeDB:
         self.closed = True
 
 
+class _LoggerStub:
+    def __init__(self):
+        self.warnings: list[str] = []
+
+    def warning(self, message, *args, **kwargs):  # noqa: ARG002
+        self.warnings.append(str(message).format(*args))
+
+    def __getattr__(self, _name):
+        return lambda *args, **kwargs: None
+
+
 @pytest.mark.unit
 def test_content_metadata_handler_falls_back_for_deeply_nested_envelope():
     nested_value = "[" * 2000 + "0" + "]" * 2000
@@ -40,6 +51,12 @@ def test_content_metadata_handler_falls_back_for_deeply_nested_envelope():
 
     assert ContentMetadataHandler.has_metadata(content) is False
     assert ContentMetadataHandler.strip_metadata(content) == content
+
+
+@pytest.mark.unit
+def test_content_metadata_handler_ignores_non_string_input():
+    assert ContentMetadataHandler.has_metadata(None) is False
+    assert ContentMetadataHandler.strip_metadata(None) is None
 
 
 @pytest.mark.unit
@@ -58,6 +75,7 @@ async def test_store_persistent_persists_crawl_metadata_when_available(monkeypat
     monkeypatch.setattr(
         enhanced_svc_mod,
         "get_user_media_db_path",
+        # Test-only path; the managed database is mocked, so no filesystem write occurs.
         lambda _: "/tmp/test-media.db",  # nosec B108
     )
     monkeypatch.setattr(
@@ -123,6 +141,7 @@ async def test_store_persistent_persists_crawl_metadata_when_available(monkeypat
 async def test_store_persistent_skips_articles_without_body_content(monkeypatch):
     service = WebScrapingService()
     fake_db = _FakeDB()
+    logger_stub = _LoggerStub()
 
     @contextmanager
     def _fake_managed_media_database(*args, **kwargs):  # noqa: ARG001
@@ -134,6 +153,7 @@ async def test_store_persistent_skips_articles_without_body_content(monkeypatch)
     monkeypatch.setattr(
         enhanced_svc_mod,
         "get_user_media_db_path",
+        # Test-only path; the managed database is mocked, so no filesystem write occurs.
         lambda _: "/tmp/test-media.db",  # nosec B108
     )
     monkeypatch.setattr(
@@ -146,6 +166,7 @@ async def test_store_persistent_skips_articles_without_body_content(monkeypatch)
         "get_metrics_registry",
         lambda: _MetricsStub(),
     )
+    monkeypatch.setattr(enhanced_svc_mod, "logger", logger_stub)
 
     result = {
         "method": "Individual URLs",
@@ -161,6 +182,11 @@ async def test_store_persistent_skips_articles_without_body_content(monkeypatch)
                 "extraction_successful": True,
             },
             {
+                "url": "https://example.com/wrapped",
+                "content": '[METADATA]{"source":"old"}[/METADATA]\nWrapped body',
+                "extraction_successful": True,
+            },
+            {
                 "url": "https://example.com/missing",
                 "content": None,
                 "extraction_successful": True,
@@ -171,7 +197,7 @@ async def test_store_persistent_skips_articles_without_body_content(monkeypatch)
                 "extraction_successful": True,
             },
             {
-                "url": "https://example.com/blank",
+                "url": "https://user:password@example.com/blank?token=secret#fragment",
                 "content": "  \n",
                 "extraction_successful": True,
             },
@@ -199,15 +225,22 @@ async def test_store_persistent_skips_articles_without_body_content(monkeypatch)
     )
 
     assert persisted["status"] == "persist-ok"
-    assert persisted["stored_articles"] == 2
-    assert persisted["media_ids"] == [1, 2]
-    assert len(fake_db.calls) == 2
+    assert persisted["stored_articles"] == 3
+    assert persisted["media_ids"] == [1, 2, 3]
+    assert len(fake_db.calls) == 3
     assert "Actual body content" in fake_db.calls[0]["content"]
     assert "Documentation mentions [METADATA] and [/METADATA]" in fake_db.calls[1]["content"]
+    assert fake_db.calls[2]["content"].count("[METADATA]") == 1
+    assert "Wrapped body" in fake_db.calls[2]["content"]
+    assert '"source":"old"' not in fake_db.calls[2]["content"]
     assert persisted["errors"] == [
         "No extracted content: https://example.com/missing",
         "No extracted content: https://example.com/non-string",
-        "No extracted content: https://example.com/blank",
+        "No extracted content: https://user:password@example.com/blank?token=secret#fragment",
         "No extracted content: https://example.com/envelope",
         "No extracted content: https://example.com/crafted-envelope",
     ]
+    warning_text = "\n".join(logger_stub.warnings)
+    assert "password" not in warning_text
+    assert "token=secret" not in warning_text
+    assert "#fragment" not in warning_text

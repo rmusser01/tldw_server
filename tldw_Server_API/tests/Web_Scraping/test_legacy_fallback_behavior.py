@@ -50,6 +50,17 @@ class _UsageLog:
         pass
 
 
+class _LoggerStub:
+    def __init__(self):
+        self.warnings: list[str] = []
+
+    def warning(self, message, *args, **kwargs):  # noqa: ARG002
+        self.warnings.append(str(message).format(*args))
+
+    def __getattr__(self, _name):
+        return lambda *args, **kwargs: None
+
+
 @pytest.fixture(autouse=True)
 def _enable_legacy_web_scraping_fallback(monkeypatch):
     monkeypatch.setenv("TLDW_ENABLE_LEGACY_WEB_SCRAPING_FALLBACK", "1")
@@ -483,6 +494,7 @@ async def test_fallback_persist_uses_media_repository_api(monkeypatch, tmp_path)
 @pytest.mark.asyncio
 async def test_fallback_persist_skips_articles_without_body_content(monkeypatch, tmp_path):
     _force_fallback(monkeypatch)
+    logger_stub = _LoggerStub()
 
     class _FakeDbNoLegacyInsert:
         def __init__(self):
@@ -518,6 +530,12 @@ async def test_fallback_persist_skips_articles_without_body_content(monkeypatch,
                 "extraction_successful": True,
             },
             {
+                "url": "https://example.com/wrapped",
+                "title": "Wrapped",
+                "content": '[METADATA]{"source":"old"}[/METADATA]\nWrapped body',
+                "extraction_successful": True,
+            },
+            {
                 "url": "https://example.com/none",
                 "content": None,
                 "extraction_successful": True,
@@ -528,7 +546,7 @@ async def test_fallback_persist_skips_articles_without_body_content(monkeypatch,
                 "extraction_successful": True,
             },
             {
-                "url": "https://example.com/whitespace",
+                "url": "https://user:password@example.com/whitespace?token=secret#fragment",
                 "content": "  \n",
                 "extraction_successful": True,
             },
@@ -563,6 +581,7 @@ async def test_fallback_persist_skips_articles_without_body_content(monkeypatch,
         lambda db: fake_repo,
         raising=False,
     )
+    monkeypatch.setattr(ws_service, "logger", logger_stub)
 
     result = await ws_service.process_web_scraping_task(
         **_base_kwargs(
@@ -575,22 +594,25 @@ async def test_fallback_persist_skips_articles_without_body_content(monkeypatch,
     )
 
     assert result["status"] == "persist-ok"
-    assert result["media_ids"] == [71]
-    assert result["total_articles"] == 5
-    assert len(fake_repo.calls) == 1
+    assert result["media_ids"] == [71, 71]
+    assert result["total_articles"] == 6
+    assert len(fake_repo.calls) == 2
     assert fake_repo.calls[0]["url"] == "https://example.com/valid"
+    assert fake_repo.calls[1]["content"] == "Wrapped body"
     assert result["errors"] == [
         "No extracted content: https://example.com/none",
         "No extracted content: https://example.com/number",
-        "No extracted content: https://example.com/whitespace",
+        "No extracted content: https://user:password@example.com/whitespace?token=secret#fragment",
         "No extracted content: https://example.com/envelope",
     ]
+    warning_text = "\n".join(logger_stub.warnings)
+    assert "password" not in warning_text
+    assert "token=secret" not in warning_text
+    assert "#fragment" not in warning_text
 
 
 @pytest.mark.unit
-def test_process_web_scraping_endpoint_fallback_contract_error_for_url_level_controls(
-    client_user_only, monkeypatch
-):
+def test_process_web_scraping_endpoint_fallback_contract_error_for_url_level_controls(client_user_only, monkeypatch):
     _force_fallback(monkeypatch)
 
     payload = {
@@ -608,9 +630,7 @@ def test_process_web_scraping_endpoint_fallback_contract_error_for_url_level_con
 
 
 @pytest.mark.unit
-def test_process_web_scraping_endpoint_rejects_when_legacy_fallback_disabled(
-    client_user_only, monkeypatch
-):
+def test_process_web_scraping_endpoint_rejects_when_legacy_fallback_disabled(client_user_only, monkeypatch):
     _force_fallback(monkeypatch)
     monkeypatch.setenv("TLDW_ENABLE_LEGACY_WEB_SCRAPING_FALLBACK", "0")
 

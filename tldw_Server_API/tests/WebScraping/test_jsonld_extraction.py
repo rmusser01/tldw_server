@@ -6,6 +6,8 @@ from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import (
     extract_jsonld_entities,
 )
 
+pytestmark = pytest.mark.unit
+
 DESCRIPTION_ONLY_JSONLD = """
 <html>
   <head>

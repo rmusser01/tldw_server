@@ -28,6 +28,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import
     async_resolve_chunking_options_and_plan,
     attach_chunking_plan_to_result,
 )
+from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import redact_url_for_log
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.testing import env_flag_enabled
 
@@ -565,9 +566,12 @@ async def process_web_scraping_task(
                         )
                         if not isinstance(body_text, str) or not body_text.strip():
                             error_msg = f"No extracted content: {article.get('url', 'Unknown URL')}"
-                            logger.warning(error_msg)
+                            logger.warning(
+                                f"No extracted content: {redact_url_for_log(article.get('url', 'Unknown URL'))}"
+                            )
                             errors.append(error_msg)
                             continue
+                        content_text = body_text
 
                         chunk_options = None
                         chunking_plan = None

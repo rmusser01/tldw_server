@@ -779,7 +779,9 @@ class WebScrapingService:
                 )
                 if not isinstance(body_text, str) or not body_text.strip():
                     error_msg = f"No extracted content: {article.get('url', 'Unknown URL')}"
-                    logger.warning(error_msg)
+                    logger.warning(
+                        f"No extracted content: {redact_url_for_log(article.get('url', 'Unknown URL'))}"
+                    )
                     errors.append(error_msg)
                     continue
 
@@ -822,7 +824,7 @@ class WebScrapingService:
 
                     content_with_metadata = ContentMetadataHandler.format_content_with_metadata(
                         url=article.get("url", ""),
-                        content=content_text,
+                        content=body_text,
                         pipeline=article.get("method", "enhanced"),
                         additional_metadata={
                             "date": article.get("date", ""),

@@ -1006,6 +1006,7 @@ def _jsonld_score_candidate(node: dict[str, Any]) -> tuple[int, int]:
 
 
 def _jsonld_has_body(result: dict[str, Any]) -> bool:
+    """Return whether an extraction result contains nonblank body text."""
     content = result.get("content")
     return isinstance(content, str) and bool(content.strip())
 
@@ -4084,6 +4085,8 @@ class ContentMetadataHandler:
     @staticmethod
     def _parse_metadata_envelope(content: str) -> Optional[tuple[dict[str, Any], str]]:
         """Parse a canonical leading metadata envelope and return its body."""
+        if not isinstance(content, str):
+            return None
         envelope = content.lstrip()
         if not envelope.startswith(ContentMetadataHandler.METADATA_START):
             return None
