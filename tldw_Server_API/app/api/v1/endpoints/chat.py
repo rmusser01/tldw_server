@@ -880,39 +880,66 @@ def _extract_routing_requested_capabilities(
     }
 
 
+_PROVIDER_CREDENTIAL_MESSAGES = {
+    "provider_authentication_failed": "The selected provider credentials could not be authenticated.",
+    "invalid_provider_credentials": "The selected provider credentials are invalid.",
+    "credential_store_unavailable": "Provider credential storage is temporarily unavailable.",
+    "credential_scope_revoked": "The selected provider credential scope is no longer available.",
+    "provider_configuration_invalid": "The selected provider configuration is invalid.",
+}
+
+
+class _SanitizedProviderStreamError(Exception):
+    """Typed internal signal whose string form is safe for the SSE executor."""
+
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(f"{code}: {_PROVIDER_CREDENTIAL_MESSAGES[code]}")
+
+
+def _provider_credential_error_code(exc: BaseException) -> str | None:
+    """Return an allow-listed public code for a typed credential failure."""
+    if isinstance(exc, ChatAuthenticationError):
+        return "provider_authentication_failed"
+    if isinstance(exc, ChatConfigurationError):
+        return "provider_configuration_invalid"
+    if isinstance(exc, ByokResolutionError):
+        return exc.code if exc.code in _PROVIDER_CREDENTIAL_MESSAGES else "provider_configuration_invalid"
+    try:
+        status_code = int(getattr(exc, "status_code", 0) or 0)
+    except (TypeError, ValueError):
+        return None
+    if status_code == status.HTTP_401_UNAUTHORIZED:
+        return "provider_authentication_failed"
+    return None
+
+
 def _provider_credential_http_exception(exc: BaseException) -> HTTPException:
     """Map internal credential failures to bounded downstream-provider errors."""
-    if isinstance(exc, ChatAuthenticationError):
+    code = _provider_credential_error_code(exc) or "provider_configuration_invalid"
+    return _provider_credential_http_exception_for_code(code)
+
+
+def _provider_credential_http_exception_for_code(code: str) -> HTTPException:
+    """Build a bounded downstream-provider response for an allow-listed code."""
+    if code not in _PROVIDER_CREDENTIAL_MESSAGES:
+        code = "provider_configuration_invalid"
+    if code == "provider_authentication_failed":
         return HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={
-                "error_code": "provider_authentication_failed",
-                "message": "The selected provider credentials could not be authenticated.",
-            },
-        )
-    if isinstance(exc, ByokResolutionError):
-        messages = {
-            "invalid_provider_credentials": "The selected provider credentials are invalid.",
-            "credential_store_unavailable": "Provider credential storage is temporarily unavailable.",
-            "credential_scope_revoked": "The selected provider credential scope is no longer available.",
-        }
-        code = (
-            exc.code
-            if exc.code in messages
-            else "provider_configuration_invalid"
-        )
-        return HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
                 "error_code": code,
-                "message": messages.get(code, "The selected provider configuration is invalid."),
+                "message": _PROVIDER_CREDENTIAL_MESSAGES[code],
             },
         )
     return HTTPException(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         detail={
-            "error_code": "provider_configuration_invalid",
-            "message": "The selected provider configuration is invalid.",
+            "error_code": code,
+            "message": _PROVIDER_CREDENTIAL_MESSAGES.get(
+                code,
+                _PROVIDER_CREDENTIAL_MESSAGES["provider_configuration_invalid"],
+            ),
         },
     )
 
@@ -961,19 +988,185 @@ def _trusted_credential_runtime_scope(
 def _attach_credential_runtime_cleanup(
     response: Any,
     runtime: ProviderCredentialRuntime,
+    initial_chunks: tuple[Any, ...] = (),
+    stream_error_state: dict[str, Any] | None = None,
 ) -> Any:
     """Keep credentials alive through streaming and release them on termination."""
     body_iterator = response.body_iterator
 
     async def iterator():
+        has_output = False
+        error_emitted = False
+
+        async def emit(chunk: Any):
+            nonlocal has_output, error_emitted
+            error_code, chunk_has_output, _ = _inspect_provider_stream_chunk(chunk)
+            has_output = has_output or chunk_has_output
+            error_emitted = error_emitted or error_code is not None
+            yield chunk
+            pending_code = (stream_error_state or {}).get("code")
+            if has_output and pending_code and not error_emitted:
+                error_emitted = True
+                yield _provider_stream_error_frame_for_code(pending_code)
+
         try:
+            for chunk in initial_chunks:
+                async for emitted_chunk in emit(chunk):
+                    yield emitted_chunk
             async for chunk in body_iterator:
-                yield chunk
+                async for emitted_chunk in emit(chunk):
+                    yield emitted_chunk
         finally:
             await runtime.close()
 
     response.body_iterator = iterator()
     return response
+
+
+def _provider_stream_error_frame_for_code(code: str) -> str:
+    """Build a canonical sanitized SSE error frame."""
+    if code not in _PROVIDER_CREDENTIAL_MESSAGES:
+        code = "provider_configuration_invalid"
+    payload = {
+        "error": {
+            "code": code,
+            "type": code,
+            "message": _PROVIDER_CREDENTIAL_MESSAGES[code],
+        }
+    }
+    return f"data: {json.dumps(payload)}\n\n"
+
+
+def _sanitized_provider_stream_error(exc: BaseException) -> _SanitizedProviderStreamError | None:
+    """Return a bounded stream error for a typed provider credential failure."""
+    code = _provider_credential_error_code(exc)
+    if code is None:
+        return None
+    return _SanitizedProviderStreamError(code)
+
+
+def _sanitize_provider_stream_call(
+    call_func: Callable[[], Any],
+    error_state: dict[str, Any],
+) -> Callable[[], Any]:
+    """Sanitize typed credential failures raised while creating or iterating a stream."""
+
+    def sanitized_call():
+        try:
+            stream = call_func()
+        except BaseException as exc:
+            sanitized_error = _sanitized_provider_stream_error(exc)
+            if sanitized_error is None:
+                raise
+            error_state["code"] = sanitized_error.code
+            raise sanitized_error from None
+
+        if hasattr(stream, "__aiter__"):
+
+            async def async_iterator():
+                try:
+                    async for chunk in stream:
+                        error_state["output_started"] = True
+                        yield chunk
+                except BaseException as exc:
+                    sanitized_error = _sanitized_provider_stream_error(exc)
+                    if sanitized_error is None:
+                        raise
+                    error_state["code"] = sanitized_error.code
+                    raise sanitized_error from None
+
+            return async_iterator()
+
+        def sync_iterator():
+            try:
+                for chunk in stream:
+                    error_state["output_started"] = True
+                    yield chunk
+            except BaseException as exc:
+                sanitized_error = _sanitized_provider_stream_error(exc)
+                if sanitized_error is None:
+                    raise
+                error_state["code"] = sanitized_error.code
+                raise sanitized_error from None
+
+        return sync_iterator()
+
+    return sanitized_call
+
+
+def _inspect_provider_stream_chunk(chunk: Any) -> tuple[str | None, bool, bool]:
+    """Inspect an SSE chunk for a typed error, provider output, or completion."""
+    raw_chunk = chunk.decode("utf-8", errors="replace") if isinstance(chunk, bytes) else str(chunk)
+    error_code: str | None = None
+    has_output = False
+    is_complete = False
+    for raw_line in raw_chunk.splitlines():
+        line = raw_line.strip()
+        if not line.startswith("data:"):
+            continue
+        payload_text = line[len("data:") :].strip()
+        if payload_text == "[DONE]":
+            is_complete = True
+            continue
+        try:
+            payload = json.loads(payload_text)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        error = payload.get("error")
+        if isinstance(error, dict):
+            candidate = error.get("code") or error.get("type")
+            if candidate in _PROVIDER_CREDENTIAL_MESSAGES:
+                error_code = str(candidate)
+            else:
+                message = str(error.get("message") or "")
+                for code, safe_message in _PROVIDER_CREDENTIAL_MESSAGES.items():
+                    if safe_message in message:
+                        error_code = code
+                        break
+        choices = payload.get("choices")
+        if not isinstance(choices, list):
+            continue
+        for choice in choices:
+            if not isinstance(choice, dict):
+                continue
+            delta = choice.get("delta")
+            if isinstance(delta, str) and delta:
+                has_output = True
+            elif isinstance(delta, dict) and any(
+                delta.get(field) not in (None, "", [], {}) for field in ("content", "tool_calls", "function_call")
+            ):
+                has_output = True
+    return error_code, has_output, is_complete
+
+
+async def _prime_provider_stream_response(
+    response: Any,
+    error_state: dict[str, Any],
+) -> tuple[tuple[Any, ...], str | None, bool, bool]:
+    """Read through stream metadata until provider output, a typed error, or completion."""
+    buffered: list[Any] = []
+    body_iterator = response.body_iterator
+    while True:
+        try:
+            chunk = await body_iterator.__anext__()
+        except StopAsyncIteration:
+            return tuple(buffered), None, False, True
+        buffered.append(chunk)
+        pending_code = error_state.get("code")
+        if pending_code and not error_state.get("output_started"):
+            return tuple(buffered), str(pending_code), False, False
+        error_code, has_output, is_complete = _inspect_provider_stream_chunk(chunk)
+        if error_code is not None or has_output or is_complete:
+            return tuple(buffered), error_code, has_output, is_complete
+
+
+async def _close_provider_stream_response(response: Any) -> None:
+    """Close a primed response iterator before retrying or returning an HTTP error."""
+    close = getattr(response.body_iterator, "aclose", None)
+    if callable(close):
+        await close()
 
 
 async def _select_auto_chat_llm_router_choice(
@@ -2607,9 +2800,14 @@ async def create_chat_completion(
                 request_id=request_id,
                 credential_runtime=credential_runtime,
             )
-        except (ByokResolutionError, ChatAuthenticationError, ChatConfigurationError) as exc:
+        except BaseException as exc:
             await credential_runtime.close()
-            raise _provider_credential_http_exception(exc) from exc
+            if isinstance(
+                exc,
+                (ByokResolutionError, ChatAuthenticationError, ChatConfigurationError),
+            ):
+                raise _provider_credential_http_exception(exc) from exc
+            raise
         if routing_decision is None:
             await credential_runtime.close()
             candidate_count = int((routing_debug or {}).get("candidate_count") or 0)
@@ -2638,18 +2836,22 @@ async def create_chat_completion(
 
     request_model_was_explicit = bool(str(getattr(request_data, "model", None) or "").strip())
 
-    (
-        metrics_provider,
-        metrics_model,
-        selected_provider,
-        selected_model,
-        provider_debug,
-    ) = resolve_provider_and_model(
-        request_data=request_data,
-        metrics_default_provider=DEFAULT_LLM_PROVIDER,
-        normalize_default_provider=_get_default_provider(),
-        routing_decision=routing_decision,
-    )
+    try:
+        (
+            metrics_provider,
+            metrics_model,
+            selected_provider,
+            selected_model,
+            provider_debug,
+        ) = resolve_provider_and_model(
+            request_data=request_data,
+            metrics_default_provider=DEFAULT_LLM_PROVIDER,
+            normalize_default_provider=_get_default_provider(),
+            routing_decision=routing_decision,
+        )
+    except BaseException:
+        await credential_runtime.close()
+        raise
 
     provider = metrics_provider
     model = metrics_model
@@ -2666,7 +2868,7 @@ async def create_chat_completion(
             context = AuditContext(
                 user_id=user_id,
                 request_id=request_id,
-                ip_address=request.client.host if request and hasattr(request, 'client') else None,
+                ip_address=request.client.host if request and hasattr(request, "client") else None,
                 endpoint="/chat/completions",
                 method="POST",
             )
@@ -2681,7 +2883,7 @@ async def create_chat_completion(
                     "streaming": request_data.stream,
                     "has_tools": bool(request_data.tools),
                     "conversation_id": request_data.conversation_id,
-                }
+                },
             )
         except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as log_error:
             logger.warning(f"Failed to log audit event: {log_error}")
@@ -2703,13 +2905,14 @@ async def create_chat_completion(
     _billing_enforcer: LimitEnforcer | None = None
     _billing_enforcer_entered = False
 
-    _track_request_cm = metrics.track_request(
-        provider=provider,
-        model=model,
-        streaming=request_data.stream,
-        client_id=client_id
-    )
-    span = await _track_request_cm.__aenter__()
+    try:
+        _track_request_cm = metrics.track_request(
+            provider=provider, model=model, streaming=request_data.stream, client_id=client_id
+        )
+        span = await _track_request_cm.__aenter__()
+    except BaseException:
+        await credential_runtime.close()
+        raise
     try:
         # Authentication is enforced via get_request_user dependency (JWT or X-API-KEY).
         # If it fails, FastAPI raises 401 before reaching here. No further checks needed.
@@ -2801,7 +3004,7 @@ async def create_chat_completion(
                             # Track moderation for metrics
                             with contextlib.suppress(_CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS):
                                 metrics.track_moderation_input(str(req_user_id or client_id), inj_mod['action'], category=(inj_mod.get('category') or "default"))
-                            # Audit moderation decision
+                                # Audit moderation decision
                                 await write_mandatory_moderation_audit(
                                     audit_service=audit_service,
                                     audit_context=context,
@@ -3417,6 +3620,9 @@ async def create_chat_completion(
 
             target_api_provider = provider  # Already determined (possibly adjusted above)
             credential_handle = await credential_runtime.resolve(target_api_provider)
+            credential_handles = {
+                target_api_provider.strip().lower(): credential_handle,
+            }
             provider_api_key = credential_handle.api_key
             app_config_override = credential_handle.app_config
 
@@ -3428,8 +3634,10 @@ async def create_chat_completion(
             try:
                 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
             except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+
                 def provider_requires_api_key(_provider: str) -> bool:  # type: ignore[misc]
                     return True
+
             # Allow explicit mock forcing in tests even if provider key is absent
             _force_mock = _shared_is_truthy(os.getenv("CHAT_FORCE_MOCK", ""))
             if provider_requires_api_key(target_api_provider) and not provider_api_key and not _force_mock:
@@ -3472,13 +3680,11 @@ async def create_chat_completion(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail=availability_error,
                     )
-            # Additional deterministic behavior for tests: if a clearly invalid key is provided, fail fast with 401.
-            # This avoids depending on external network calls in CI and matches integration test expectations.
+            # Avoid external calls for deterministic invalid-key sentinels in tests.
             if _test_mode_flag and provider_api_key and provider_requires_api_key(target_api_provider):
-                # Treat keys with obvious invalid patterns as authentication failures in test mode.
                 invalid_patterns = ("invalid-", "test-invalid-", "bad-key-", "dummy-invalid-")
                 if any(str(provider_api_key).lower().startswith(p) for p in invalid_patterns):
-                    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
+                    raise _provider_credential_http_exception_for_code("provider_authentication_failed")
 
             # --- Character/Conversation Context, History, and Current Turn ---
             continuation_runtime: dict[str, Any] = {}
@@ -3799,11 +4005,10 @@ async def create_chat_completion(
                     target_provider,
                     force_refresh=force_oauth_refresh,
                 )
+                credential_handles[target_provider.strip().lower()] = refreshed_handle
                 provider_api_key_new = refreshed_handle.api_key
                 if provider_requires_api_key(target_provider) and not provider_api_key_new:
-                    logger.error(
-                        f"API key for provider '{target_provider}' is missing or not configured (fallback)."
-                    )
+                    logger.error(f"API key for provider '{target_provider}' is missing or not configured (fallback).")
                     record_byok_missing_credentials(target_provider, operation="chat")
                     raise HTTPException(
                         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -3856,13 +4061,16 @@ async def create_chat_completion(
 
             if provider_manager:
                 disabled_overrides = {
-                    name for name, override in get_llm_provider_overrides_snapshot().items()
+                    name
+                    for name, override in get_llm_provider_overrides_snapshot().items()
                     if override.is_enabled is False
                 }
                 # Check if the requested provider is healthy first
                 # Use the circuit breaker check if the provider is registered
-                if provider in provider_manager.circuit_breakers and \
-                   provider_manager.circuit_breakers[provider].can_attempt_call():
+                if (
+                    provider in provider_manager.circuit_breakers
+                    and provider_manager.circuit_breakers[provider].can_attempt_call()
+                ):
                     selected_provider = provider
                     logger.info(f"Using requested provider {selected_provider} (health check passed)")
                 elif allow_provider_fallback_for_request:
@@ -3872,19 +4080,23 @@ async def create_chat_completion(
                     )
                     if healthy_provider:
                         selected_provider = healthy_provider
-                        logger.warning(f"Requested provider {provider} is unhealthy or not registered, using {selected_provider} instead (fallback enabled)")
+                        logger.warning(
+                            f"Requested provider {provider} is unhealthy or not registered, using {selected_provider} instead (fallback enabled)"
+                        )
                     else:
                         selected_provider = provider
                         logger.warning(f"No healthy providers available, using {provider} anyway")
                 else:
                     # Fallback disabled - use requested provider even if unhealthy
                     selected_provider = provider
-                    logger.info(f"Using requested provider {selected_provider} (fallback disabled, health check not performed)")
+                    logger.info(
+                        f"Using requested provider {selected_provider} (fallback disabled, health check not performed)"
+                    )
 
             # Update provider in cleaned_args
             # Note: chat_api_call expects 'api_endpoint', not 'api_provider'
             # Update the api_endpoint with the selected provider after health check
-            cleaned_args['api_endpoint'] = selected_provider
+            cleaned_args["api_endpoint"] = selected_provider
             if selected_provider != provider:
                 try:
                     refreshed_args, refreshed_model = await rebuild_call_params_for_provider(selected_provider)
@@ -3895,6 +4107,12 @@ async def create_chat_completion(
                     model = refreshed_model or model
                 except HTTPException:
                     raise
+                except (
+                    ByokResolutionError,
+                    ChatAuthenticationError,
+                    ChatConfigurationError,
+                ) as refresh_exc:
+                    raise _provider_credential_http_exception(refresh_exc) from refresh_exc
                 except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as refresh_exc:
                     logger.error(
                         "Failed to rebuild call params for fallback provider '{}': {}",
@@ -4082,6 +4300,13 @@ async def create_chat_completion(
             else:
                 llm_call_func = partial(perform_chat_api_call, **cleaned_args)
 
+            selected_credential_handle = credential_handles.get(selected_provider.strip().lower())
+            selected_openai_oauth = bool(
+                selected_provider.strip().lower() == "openai"
+                and selected_credential_handle is not None
+                and selected_credential_handle.auth_source == "oauth"
+            )
+
             def _is_auth_401_error(exc: BaseException) -> bool:
                 try:
                     status_code = int(getattr(exc, "status_code", 0) or 0)
@@ -4109,17 +4334,14 @@ async def create_chat_completion(
                 except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
                     pass
 
-            if (
-                target_api_provider == "openai"
-                and credential_handle.auth_source == "oauth"
-            ):
-                oauth_retry_state = {"attempted": False}
+            oauth_retry_state = {"attempted": False}
+            if selected_openai_oauth and not request_data.stream:
                 base_llm_call_func = llm_call_func
 
                 def _run_refresh_on_endpoint_loop() -> tuple[dict[str, Any], str | None]:
                     future = asyncio.run_coroutine_threadsafe(
                         rebuild_call_params_for_provider(
-                            target_api_provider,
+                            selected_provider,
                             force_oauth_refresh=True,
                         ),
                         current_loop,
@@ -4221,44 +4443,123 @@ async def create_chat_completion(
                 )
 
             if request_data.stream:
-                stream_response = await execute_streaming_call(
-                    current_loop=current_loop,
-                    cleaned_args=cleaned_args,
-                    selected_provider=selected_provider,
-                    provider=provider,
-                    model=model,
-                    request_json=request_json,
-                    request=request,
-                    metrics=metrics,
-                    provider_manager=provider_manager,
-                    templated_llm_payload=templated_llm_payload,
-                    should_persist=should_persist,
-                    final_conversation_id=final_conversation_id,
-                    character_card_for_context=character_card_for_context,
-                    chat_db=chat_db,
-                    save_message_fn=_save_message_turn_to_db,
-                    system_message_id=system_message_id,
-                    audit_service=audit_service,
-                    audit_context=context,
-                    client_id=user_id,
-                    queue_execution_enabled=QUEUED_EXECUTION,
-                    enable_provider_fallback=allow_provider_fallback_for_request,
-                    llm_call_func=llm_call_func,
-                    refresh_provider_params=rebuild_call_params_for_provider,
-                    moderation_getter=_get_moderation_with_guardian,
-                    on_success=_mark_provider_used,
-                    on_stream_full_reply=_on_stream_full_reply_for_persona_telemetry,
-                    rg_commit_cb=_build_streaming_commit_cb(
-                        _rg_handle_id, request, _billing_enforcer, billing_org_id,
-                    ),
-                    rg_refund_cb=(
-                        (lambda **_kwargs: (request.app.state.rg_governor.commit(_rg_handle_id, actuals={"tokens": 0}) if getattr(request.app.state, "rg_governor", None) and _rg_handle_id else None))
-                        if _rg_handle_id else None
-                    ),
-                    self_monitoring_service=_self_mon_service,
-                    assistant_parent_message_id=assistant_parent_message_id,
-                    continuation_metadata=continuation_meta,
-                )
+
+                async def _execute_stream_response(
+                    active_call_func: Callable[[], Any],
+                    error_state: dict[str, Any],
+                ):
+                    return await execute_streaming_call(
+                        current_loop=current_loop,
+                        cleaned_args=cleaned_args,
+                        selected_provider=selected_provider,
+                        provider=provider,
+                        model=model,
+                        request_json=request_json,
+                        request=request,
+                        metrics=metrics,
+                        provider_manager=provider_manager,
+                        templated_llm_payload=templated_llm_payload,
+                        should_persist=should_persist,
+                        final_conversation_id=final_conversation_id,
+                        character_card_for_context=character_card_for_context,
+                        chat_db=chat_db,
+                        save_message_fn=_save_message_turn_to_db,
+                        system_message_id=system_message_id,
+                        audit_service=audit_service,
+                        audit_context=context,
+                        client_id=user_id,
+                        queue_execution_enabled=QUEUED_EXECUTION,
+                        enable_provider_fallback=allow_provider_fallback_for_request,
+                        llm_call_func=_sanitize_provider_stream_call(
+                            active_call_func,
+                            error_state,
+                        ),
+                        refresh_provider_params=rebuild_call_params_for_provider,
+                        moderation_getter=_get_moderation_with_guardian,
+                        on_success=_mark_provider_used,
+                        on_stream_full_reply=_on_stream_full_reply_for_persona_telemetry,
+                        rg_commit_cb=_build_streaming_commit_cb(
+                            _rg_handle_id,
+                            request,
+                            _billing_enforcer,
+                            billing_org_id,
+                        ),
+                        rg_refund_cb=(
+                            (
+                                lambda **_kwargs: (
+                                    request.app.state.rg_governor.commit(_rg_handle_id, actuals={"tokens": 0})
+                                    if getattr(request.app.state, "rg_governor", None) and _rg_handle_id
+                                    else None
+                                )
+                            )
+                            if _rg_handle_id
+                            else None
+                        ),
+                        self_monitoring_service=_self_mon_service,
+                        assistant_parent_message_id=assistant_parent_message_id,
+                        continuation_metadata=continuation_meta,
+                    )
+
+                while True:
+                    stream_error_state: dict[str, Any] = {}
+                    stream_response = await _execute_stream_response(
+                        llm_call_func,
+                        stream_error_state,
+                    )
+                    (
+                        primed_chunks,
+                        stream_error_code,
+                        stream_has_output,
+                        stream_complete,
+                    ) = await _prime_provider_stream_response(
+                        stream_response,
+                        stream_error_state,
+                    )
+                    if stream_error_code is None:
+                        if stream_complete and not stream_has_output:
+                            await _mark_provider_used(selected_provider)
+                        if oauth_retry_state["attempted"]:
+                            _record_openai_oauth_retry("success")
+                        break
+
+                    if stream_error_state.get("output_started"):
+                        # The HTTP response has to remain a stream once the provider has
+                        # produced anything. The sanitized error is replayed with the
+                        # primed chunks, without retrying or replaying provider output.
+                        break
+
+                    await _close_provider_stream_response(stream_response)
+                    if (
+                        stream_error_code == "provider_authentication_failed"
+                        and selected_openai_oauth
+                        and not oauth_retry_state["attempted"]
+                    ):
+                        oauth_retry_state["attempted"] = True
+                        logger.info(
+                            "OpenAI OAuth auth failure detected before stream output; "
+                            "forcing refresh and retrying once."
+                        )
+                        try:
+                            refreshed_args, refreshed_model = await rebuild_call_params_for_provider(
+                                selected_provider,
+                                force_oauth_refresh=True,
+                            )
+                        except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+                            _record_openai_oauth_retry("refresh_failed")
+                            raise _provider_credential_http_exception_for_code(stream_error_code)
+                        refreshed_key = refreshed_args.get("api_key")
+                        if not isinstance(refreshed_key, str) or not refreshed_key.strip():
+                            _record_openai_oauth_retry("refresh_missing_api_key")
+                            raise _provider_credential_http_exception_for_code(stream_error_code)
+                        cleaned_args = refreshed_args
+                        model = refreshed_model or model
+                        llm_call_func = partial(perform_chat_api_call, **cleaned_args)
+                        continue
+
+                    if oauth_retry_state["attempted"]:
+                        _record_openai_oauth_retry("retry_auth_failed")
+                    raise _provider_credential_http_exception_for_code(stream_error_code)
+
                 if persona_debug_requested and persona_debug_meta and persona_debug_meta.get("debug_id"):
                     try:
                         stream_response.headers["X-TLDW-Persona-Debug-ID"] = str(persona_debug_meta["debug_id"])
@@ -4267,11 +4568,16 @@ async def create_chat_completion(
                 alias_headers = _build_persona_alias_deprecation_headers(persona_alias_used)
                 for header_key, header_value in alias_headers.items():
                     stream_response.headers[header_key] = header_value
-                _attach_credential_runtime_cleanup(stream_response, credential_runtime)
+                _attach_credential_runtime_cleanup(
+                    stream_response,
+                    credential_runtime,
+                    primed_chunks,
+                    stream_error_state,
+                )
                 credential_runtime_owned_by_stream = True
                 return stream_response
 
-            else: # Non-streaming
+            else:  # Non-streaming
                 encoded_payload = await execute_non_stream_call(
                     current_loop=current_loop,
                     cleaned_args=cleaned_args,
@@ -4661,7 +4967,6 @@ async def create_chat_completion(
                 else:
                     client_detail = "An internal server error occurred."
             raise HTTPException(status_code=err_status, detail=client_detail) from e_chat
-
 
     finally:
         exc_type, exc_value, exc_tb = sys.exc_info()
