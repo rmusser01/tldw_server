@@ -427,28 +427,84 @@ git commit -m "fix(rag): credentialize auxiliary provider calls"
 ### Task 8: Credentialize hosted query-time embeddings
 
 **Files:**
+- Modify: `tldw_Server_API/app/core/AuthNZ/provider_credential_runtime.py`
+- Modify: `tldw_Server_API/app/core/Chat/Chat_Deps.py`
+- Modify: `tldw_Server_API/app/core/Embeddings/async_embeddings.py`
+- Modify: `tldw_Server_API/app/core/Embeddings/Embeddings_Server/Embeddings_Create.py`
+- Modify: `tldw_Server_API/app/core/http_client.py`
+- Modify: `tldw_Server_API/app/core/Security/egress.py`
 - Modify: `tldw_Server_API/app/core/RAG/rag_service/hyde.py`
 - Modify: `tldw_Server_API/app/core/RAG/rag_service/advanced_retrieval.py`
 - Modify: `tldw_Server_API/app/core/RAG/rag_service/database_retrievers.py`
 - Modify: `tldw_Server_API/app/core/RAG/rag_service/agentic_execution.py`
+- Modify: `tldw_Server_API/app/core/RAG/rag_service/agentic_chunker.py`
+- Modify: `tldw_Server_API/app/core/RAG/rag_service/post_generation_verifier.py`
+- Modify: `tldw_Server_API/app/core/RAG/rag_service/streaming_executor.py`
 - Modify: `tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py:7320-7345`
 - Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_hyde.py`
 - Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_advanced_retrieval_sanitizers.py`
 - Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_agentic_execution.py`
+- Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_agentic_chunker_sanitizers.py`
+- Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_post_verifier.py`
+- Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_rag_provider_credentials.py`
+- Modify: `tldw_Server_API/tests/AuthNZ_Unit/test_provider_credential_runtime.py`
+- Modify: `tldw_Server_API/tests/Embeddings/test_async_embeddings_provider_url_override.py`
+- Modify: `tldw_Server_API/tests/Embeddings/test_embeddings_create_credential_policy.py`
+- Create: `tldw_Server_API/tests/http_client/test_http_client_sensitive_observability.py`
+- Modify: `tldw_Server_API/tests/Security/test_egress.py`
 
-- [ ] **Step 1: Write failing hosted/local embedding tests**
+- [x] **Step 1: Write failing hosted/local embedding tests**
 
-Assert hosted OpenAI/HuggingFace query embeddings resolve the provider handle and never read configured singleton/model-spec keys. Assert local embeddings and precomputed vectors do not resolve credentials. Required retrieval embeddings fail closed; optional expansion embeddings degrade with reduced coverage metadata. Credential errors never invoke embedding-provider failover.
+Assert hosted OpenAI/HuggingFace query embeddings resolve the provider handle and never read configured singleton/model-spec keys. Assert local embeddings and precomputed vectors do not resolve credentials. Required retrieval embeddings fail closed; optional expansion embeddings degrade with reduced coverage metadata. A resolved hosted-provider handle with no key maps to bounded `missing_provider_credentials`, distinct from invalid credentials and invalid configuration. Credential errors never invoke embedding-provider failover.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
-Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/RAG_NEW/unit/test_hyde.py tldw_Server_API/tests/RAG_NEW/unit/test_advanced_retrieval_sanitizers.py tldw_Server_API/tests/RAG_NEW/unit/test_agentic_execution.py tldw_Server_API/tests/RAG_NEW/unit/test_rag_provider_credentials.py -q`
+Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/AuthNZ_Unit/test_provider_credential_runtime.py tldw_Server_API/tests/Embeddings/test_async_embeddings_provider_url_override.py tldw_Server_API/tests/Embeddings/test_embeddings_create_credential_policy.py tldw_Server_API/tests/http_client/test_http_client_sensitive_observability.py tldw_Server_API/tests/Security/test_egress.py tldw_Server_API/tests/RAG_NEW/unit/test_hyde.py tldw_Server_API/tests/RAG_NEW/unit/test_advanced_retrieval_sanitizers.py tldw_Server_API/tests/RAG_NEW/unit/test_agentic_execution.py tldw_Server_API/tests/RAG_NEW/unit/test_agentic_chunker_sanitizers.py tldw_Server_API/tests/RAG_NEW/unit/test_post_verifier.py tldw_Server_API/tests/RAG_NEW/unit/test_rag_provider_credentials.py -q`
 
 Expected: FAIL because query embeddings use server-configured providers.
 
-- [ ] **Step 3: Pass per-call embedding credentials**
+- [x] **Step 3: Pass per-call embedding credentials**
 
-Resolve the actual provider encoded by the selected embedding model/config. Pass key/base URL/explicit marker into async or synchronous embedding functions. Leave offline ingestion/indexing untouched. Include authorized endpoint overrides in cache identity; never include the key or credential source.
+Resolve the actual provider encoded by the selected embedding model/config. Pass key/base URL/explicit marker into async or synchronous embedding functions. Leave offline ingestion/indexing untouched. Include a one-way digest of the effective configured or overridden endpoint in every cache identity; never persist the raw endpoint, key, or credential source in cache keys, including for legacy/no-runtime `local_api` calls. Bind provider selection, endpoint, and a key-scrubbed embedding-config snapshot atomically for synchronous agentic dispatch; do not reload configuration between resolution and use. Runtime-explicit synchronous failures use bounded typed errors and static logging that cannot capture API-key kwargs, endpoints, response bodies, or traceback locals; credential/auth failures are not retried by the generic embedding decorator. Add an explicit shared-HTTP-client sensitive-endpoint observability option and use it for runtime-authorized synchronous embedding calls so Loguru fields, metrics labels, retry logs, and OpenTelemetry span attributes never contain the credential-derived host/path/full URL while transport and egress validation still use the real endpoint. Propagate sensitive mode through the egress evaluator and DNS worker logging boundary, redact its structured host fields, and activate it before the first egress/DNS/pinning check through cleanup so pre-transport policy failures cannot expose the endpoint. The DNS worker catches unexpected resolver exceptions, records only bounded type/state, fails closed, and never lets a secret-bearing exception reach `threading.excepthook`. Runtime-bound local embedding calls must explicitly suppress configured hosted-provider fallback without resolving a credential for the local provider. A configured `local_api` endpoint must either direct-dispatch with that endpoint or use a queue fingerprint that carries it safely; it must never be represented only in cache identity while the global batcher calls a different server. Async hosted calls record credential usage from a provider-success callback inside the embedding service so endpoint-scoped cache hits do not advance last-used state; the callback is cancellation-safe through the shared runtime. Make shared `mark_used` persistence single-flight and cancellation-safe so a completed provider call cannot set an in-memory used flag while its durable touch is interrupted or failed; a failed durable touch leaves the handle retryable and a later `mark_used` attempts persistence again without exposing raw details. Preserve bounded `missing_provider_credentials` and `provider_configuration_invalid` codes in required and optional paths. Required provider failures must bypass generic circuit handling, generic retry, raw-detail catches, and FTS fallback at unified and agentic retrieval boundaries; ordinary retrieval failures retain existing resilience/fallback behavior. Optional expansion, PRF, decomposition, follow-up, numeric-fidelity, evidence-gap, per-claim, and standalone post-generation verifier retrieval callbacks catch the same typed provider failures locally, trip a request-scoped failure latch on the first typed provider error, prevent all later sequential callbacks from dispatching, avoid launching new optional concurrent batches once latched, emit only bounded degraded coverage/failure metadata, and return no expansion documents rather than terminating an otherwise completed answer. The standalone verifier uses one latch across claim retrieval and later adaptive-repair retrieval; after the latch trips it skips regeneration and recheck, never sets `fixed` or `new_answer`, and retains the original answer plus base documents. If a typed failure occurs inside an advanced adaptive query loop, discard any partial/empty adaptive union, restore base documents, stop repair, and preserve bounded taxonomy. Agentic within-document provider embeddings stop after the first provider failure and hash-fallback remaining documents; setup time counts against the deadline, and no optional planner/tool work begins after the budget is exhausted.
+Thread the original runtime through native agentic tool-loop construction and post-generation adaptive HyDE/retriever paths before resolving any hosted embedding handle.
+
+- [x] **Step 4: Verify green**
+
+Run the Step 2 command. Expected: PASS.
+
+- [x] **Step 5: Commit**
+
+```bash
+git add tldw_Server_API/app/core/AuthNZ/provider_credential_runtime.py tldw_Server_API/app/core/Chat/Chat_Deps.py tldw_Server_API/app/core/Embeddings/async_embeddings.py tldw_Server_API/app/core/Embeddings/Embeddings_Server/Embeddings_Create.py tldw_Server_API/app/core/http_client.py tldw_Server_API/app/core/Security/egress.py tldw_Server_API/app/core/RAG/rag_service/hyde.py tldw_Server_API/app/core/RAG/rag_service/advanced_retrieval.py tldw_Server_API/app/core/RAG/rag_service/database_retrievers.py tldw_Server_API/app/core/RAG/rag_service/agentic_execution.py tldw_Server_API/app/core/RAG/rag_service/agentic_chunker.py tldw_Server_API/app/core/RAG/rag_service/post_generation_verifier.py tldw_Server_API/app/core/RAG/rag_service/streaming_executor.py tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py tldw_Server_API/tests/AuthNZ_Unit/test_provider_credential_runtime.py tldw_Server_API/tests/Embeddings/test_async_embeddings_provider_url_override.py tldw_Server_API/tests/Embeddings/test_embeddings_create_credential_policy.py tldw_Server_API/tests/http_client/test_http_client_sensitive_observability.py tldw_Server_API/tests/Security/test_egress.py tldw_Server_API/tests/RAG_NEW/unit/test_hyde.py tldw_Server_API/tests/RAG_NEW/unit/test_advanced_retrieval_sanitizers.py tldw_Server_API/tests/RAG_NEW/unit/test_agentic_execution.py tldw_Server_API/tests/RAG_NEW/unit/test_agentic_chunker_sanitizers.py tldw_Server_API/tests/RAG_NEW/unit/test_post_verifier.py tldw_Server_API/tests/RAG_NEW/unit/test_rag_provider_credentials.py
+git commit -m "fix(rag): use current credentials for query embeddings"
+```
+
+### Task 8A: Close residual HyDE, agentic-planner, and research-action callers
+
+**Files:**
+- Modify: `tldw_Server_API/app/core/RAG/rag_service/hyde.py`
+- Modify: `tldw_Server_API/app/core/RAG/rag_service/agentic_execution.py`
+- Modify: `tldw_Server_API/app/core/RAG/rag_service/research_agent.py`
+- Modify: `tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py`
+- Modify: `tldw_Server_API/app/core/RAG/rag_service/post_generation_verifier.py`
+- Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_hyde.py`
+- Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_agentic_execution.py`
+- Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_research_agent.py`
+- Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_post_verifier.py`
+
+- [ ] **Step 1: Write failing residual-call tests**
+
+Assert runtime-bound HyDE LLM generation supplies the resolved provider handle and explicit no-config-fallback marker, while its documented optional failure uses the heuristic with bounded coverage metadata. Assert the optional agentic LLM planner receives the original runtime and degrades with bounded metadata on credential failure. Assert the research agent's local-database action passes the runtime into its query-time retriever. Cancellation must propagate and legacy no-runtime callers must remain compatible.
+
+- [ ] **Step 2: Verify red**
+
+Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/RAG_NEW/unit/test_hyde.py tldw_Server_API/tests/RAG_NEW/unit/test_agentic_execution.py tldw_Server_API/tests/RAG_NEW/unit/test_research_agent.py tldw_Server_API/tests/RAG_NEW/unit/test_post_verifier.py -q`
+
+Expected: FAIL because these residual callers still construct provider calls or retrievers without the shared runtime.
+
+- [ ] **Step 3: Bind residual provider calls to the runtime**
+
+Add an async runtime-bound HyDE generation path that resolves the effective provider, passes the exact key/provider-scoped config/explicit marker to SGL, records use after a completed provider call, propagates cancellation, and exposes only bounded optional-stage degradation. Keep the legacy synchronous helper for no-runtime callers. Pass the original runtime into the agentic planner's `AnswerGenerator` and into the research action's `MultiDatabaseRetriever`; credential failures may degrade only where the existing stage is explicitly optional, with bounded metadata and no implicit server fallback.
 
 - [ ] **Step 4: Verify green**
 
@@ -457,8 +513,8 @@ Run the Step 2 command. Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add tldw_Server_API/app/core/RAG/rag_service tldw_Server_API/tests/RAG_NEW/unit
-git commit -m "fix(rag): use current credentials for query embeddings"
+git add tldw_Server_API/app/core/RAG/rag_service/hyde.py tldw_Server_API/app/core/RAG/rag_service/agentic_execution.py tldw_Server_API/app/core/RAG/rag_service/research_agent.py tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py tldw_Server_API/app/core/RAG/rag_service/post_generation_verifier.py tldw_Server_API/tests/RAG_NEW/unit/test_hyde.py tldw_Server_API/tests/RAG_NEW/unit/test_agentic_execution.py tldw_Server_API/tests/RAG_NEW/unit/test_research_agent.py tldw_Server_API/tests/RAG_NEW/unit/test_post_verifier.py
+git commit -m "fix(rag): close residual provider runtime callers"
 ```
 
 ## Stage 4: Persistence and Knowledge QA stream contract
