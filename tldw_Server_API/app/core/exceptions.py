@@ -61,6 +61,15 @@ class BadRequestError(ValueError):
     """Raised when a caller provides invalid arguments for an operation."""
 
 
+class JobSubmissionLimitError(BadRequestError):
+    """Raised when a Jobs submission limit rejects the whole request."""
+
+    def __init__(self, message: str, *, code: str, retry_after: int | None = None) -> None:
+        super().__init__(message)
+        self.code = code
+        self.retry_after = retry_after
+
+
 class InvalidMetadataOrderKeyError(ValueError):
     """Raised when a metadata order key cannot be safely used."""
 

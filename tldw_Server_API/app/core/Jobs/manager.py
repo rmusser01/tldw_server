@@ -23,7 +23,7 @@ from tldw_Server_API.app.core.DB_Management.jobs_sql_fragments import (
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     configure_sqlite_connection,
 )
-from tldw_Server_API.app.core.exceptions import BadRequestError
+from tldw_Server_API.app.core.exceptions import BadRequestError, JobSubmissionLimitError
 from tldw_Server_API.app.core.Security.crypto import (
     decrypt_json_blob,
     decrypt_json_blob_with_key,
@@ -1145,7 +1145,17 @@ class JobManager:
 
         if result.outcome is OperationOutcome.ADMISSION_REJECTED:
             if result.admission_rejection_reason is AdmissionRejectionReason.QUOTA_EXCEEDED:
-                raise ValueError(result.message or "Quota exceeded")  # noqa: TRY003
+                message = result.message or "Quota exceeded"
+                if "submits per minute" in message.lower():
+                    raise JobSubmissionLimitError(
+                        message,
+                        code="jobs_submit_rate_limited",
+                        retry_after=60,
+                    )
+                raise JobSubmissionLimitError(
+                    message,
+                    code="jobs_max_queued",
+                )
             raise ValueError(result.message or "Admission rejected")  # noqa: TRY003
         if result.row is None:
             raise RuntimeError("Job admission did not return a row")  # noqa: TRY003
@@ -1294,9 +1304,10 @@ class JobManager:
                 scheduler = _get_fair_share()
                 active_count = self._count_active_jobs_for_user(owner_user_id)
                 if not scheduler.can_submit(owner_user_id, active_count):
-                    raise BadRequestError(
+                    raise JobSubmissionLimitError(
                         f"User {owner_user_id} has reached the maximum concurrent job limit "
-                        f"({scheduler.max_per_user})"
+                        f"({scheduler.max_per_user})",
+                        code="jobs_concurrent_limit",
                     )
                 fair_priority = scheduler.calculate_priority(owner_user_id, active_count)
                 fair_priority_mapped = self._map_fair_share_score_to_priority(fair_priority)
@@ -1625,6 +1636,47 @@ class JobManager:
                 return d
         finally:
             conn.close()
+
+    def get_job_by_idempotency(
+        self,
+        *,
+        domain: str,
+        queue: str,
+        job_type: str,
+        idempotency_key: str,
+        owner_user_id: str,
+        batch_group: str,
+    ) -> dict[str, Any] | None:
+        """Fetch one exact owner/batch-scoped idempotent Jobs row."""
+        conn = self._connect()
+        try:
+            if self.backend == "postgres":
+                with self._pg_cursor(conn) as cur:
+                    cur.execute(
+                        """
+                        SELECT id FROM jobs
+                        WHERE domain = %s AND queue = %s AND job_type = %s
+                          AND idempotency_key = %s AND owner_user_id = %s
+                          AND batch_group = %s
+                        """,
+                        (domain, queue, job_type, idempotency_key, owner_user_id, batch_group),
+                    )
+                    row = cur.fetchone()
+                    job_id = int(row["id"]) if row else None
+            else:
+                row = conn.execute(
+                    """
+                    SELECT id FROM jobs
+                    WHERE domain = ? AND queue = ? AND job_type = ?
+                      AND idempotency_key = ? AND owner_user_id = ?
+                      AND batch_group = ?
+                    """,
+                    (domain, queue, job_type, idempotency_key, owner_user_id, batch_group),
+                ).fetchone()
+                job_id = int(row["id"]) if row else None
+        finally:
+            conn.close()
+        return self.get_job(job_id) if job_id is not None else None
 
     def get_job_by_uuid(self, job_uuid: str) -> dict[str, Any] | None:
         """Fetch a job by UUID string.

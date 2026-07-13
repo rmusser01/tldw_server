@@ -1,15 +1,17 @@
 import json
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Event, Lock
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
-from tldw_Server_API.app.core.exceptions import BadRequestError
+from tldw_Server_API.app.core.exceptions import BadRequestError, JobSubmissionLimitError
 
 pytestmark = pytest.mark.unit
 
@@ -394,7 +396,10 @@ def test_submit_media_ingest_jobs_returns_429_for_concurrent_job_limit(
     from tldw_Server_API.app.core.Jobs import manager as jobs_manager
 
     def fake_create_job(self, **_kwargs):
-        raise BadRequestError("User 1 has reached the maximum concurrent job limit (5)")
+        raise JobSubmissionLimitError(
+            "User 1 has reached the maximum concurrent job limit (5)",
+            code="jobs_concurrent_limit",
+        )
 
     monkeypatch.setattr(jobs_manager.JobManager, "create_job", fake_create_job, raising=True)
 
@@ -1193,3 +1198,344 @@ def test_run_bound_ambiguous_repeat_reconciles_original_job(
     assert len(jobs) == 1
     assert second.json()["submissions"][0]["job_id"] == jobs[0]["id"]
     assert store.get_run_item("1", run.run_id, "occ-url-1").job_id == jobs[0]["id"]
+
+
+@pytest.mark.parametrize(
+    "occurrences",
+    [
+        [1],
+        [True],
+        [1.5],
+        [{}],
+        [[]],
+        [None],
+        [""],
+        [" occ-url-1"],
+        ["occ-url-1 "],
+        ["x" * 256],
+    ],
+)
+def test_run_bound_url_identity_array_rejects_noncanonical_elements_before_run_lookup(
+    media_ingest_jobs_client,
+    occurrences,
+):
+    response = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data={
+            "media_type": "video",
+            "run_id": "missing-run",
+            "urls": "https://www.youtube.com/watch?v=alpha123456",
+            "occurrence_ids": json.dumps(occurrences),
+            "attempts": json.dumps([1]),
+        },
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"] == "occurrence_ids contains an invalid identifier."
+
+
+@pytest.mark.parametrize(
+    "attempts",
+    [
+        [True],
+        [1.0],
+        [{}],
+        [[]],
+        [None],
+        ["+1"],
+        ["-1"],
+        [" 1"],
+        ["1 "],
+        ["01"],
+        ["9" * 5000],
+    ],
+)
+def test_run_bound_url_integer_array_rejects_ambiguous_values_before_run_lookup(
+    media_ingest_jobs_client,
+    attempts,
+):
+    response = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data={
+            "media_type": "video",
+            "run_id": "missing-run",
+            "urls": "https://www.youtube.com/watch?v=alpha123456",
+            "occurrence_ids": json.dumps(["occ-url-1"]),
+            "attempts": json.dumps(attempts),
+        },
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"] == "attempts must contain positive integers."
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("file_occurrence_ids", [1]),
+        ("file_occurrence_ids", [" occ-file-1"]),
+        ("file_occurrence_ids", [{}]),
+        ("file_attempts", [" 1"]),
+        ("file_attempts", [True]),
+        ("file_attempts", ["9" * 5000]),
+        ("file_planned_item_ids", [1.0]),
+        ("file_planned_item_ids", [{}]),
+    ],
+)
+def test_run_bound_file_arrays_reject_invalid_elements_before_staging(
+    media_ingest_jobs_client,
+    monkeypatch,
+    field,
+    value,
+):
+    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
+
+    stage_calls = 0
+
+    async def fail_if_staged(*_args, **_kwargs):
+        nonlocal stage_calls
+        stage_calls += 1
+        raise AssertionError("strict array validation must happen before staging")
+
+    monkeypatch.setattr(ingest_jobs, "save_uploaded_files", fail_if_staged, raising=True)
+    data = {
+        "media_type": "audio",
+        "run_id": "missing-run",
+        "file_occurrence_ids": json.dumps(["occ-file-1"]),
+        "file_attempts": json.dumps([1]),
+    }
+    data[field] = json.dumps(value)
+
+    response = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=data,
+        files=[("files", ("clip.mp3", b"test", "audio/mpeg"))],
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert response.status_code == 422, response.text
+    assert stage_calls == 0
+
+
+def test_run_bound_url_commit_then_throw_reconciles_original_job(
+    media_ingest_jobs_client,
+    monkeypatch,
+):
+    manager, store, run = _seed_occurrence_run()
+    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
+
+    original_create = ingest_jobs._create_media_ingest_job
+
+    def commit_then_throw(**kwargs):
+        original_create(**kwargs)
+        raise RuntimeError("commit outcome unknown: token=private")
+
+    monkeypatch.setattr(ingest_jobs, "_create_media_ingest_job", commit_then_throw, raising=True)
+
+    response = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=_run_submit_data(run.run_id),
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert response.status_code == 200, response.text
+    jobs = manager.list_jobs(domain="media_ingest", owner_user_id="1", limit=10)
+    assert len(jobs) == 1
+    assert response.json()["submissions"][0]["job_id"] == jobs[0]["id"]
+    assert store.get_run_item("1", run.run_id, "occ-url-1").job_id == jobs[0]["id"]
+    assert "private" not in response.text
+
+
+def test_run_bound_url_commit_then_http_503_reconciles_original_job(
+    media_ingest_jobs_client,
+    monkeypatch,
+):
+    manager, store, run = _seed_occurrence_run()
+    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
+
+    original_create = ingest_jobs._create_media_ingest_job
+
+    def commit_then_unavailable(**kwargs):
+        original_create(**kwargs)
+        raise HTTPException(status_code=503, detail="job store unavailable")
+
+    monkeypatch.setattr(ingest_jobs, "_create_media_ingest_job", commit_then_unavailable, raising=True)
+
+    response = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=_run_submit_data(run.run_id),
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert response.status_code == 200, response.text
+    jobs = manager.list_jobs(domain="media_ingest", owner_user_id="1", limit=10)
+    assert len(jobs) == 1
+    assert response.json()["submissions"][0]["job_id"] == jobs[0]["id"]
+    assert store.get_run_item("1", run.run_id, "occ-url-1").job_id == jobs[0]["id"]
+
+
+def test_ambiguous_create_and_lookup_failure_preserves_pending_reservation(
+    media_ingest_jobs_client,
+    monkeypatch,
+):
+    manager, store, run = _seed_occurrence_run()
+    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
+    from tldw_Server_API.app.core.Jobs import manager as jobs_manager
+
+    def ambiguous_create(**_kwargs):
+        raise RuntimeError("job commit outcome unavailable")
+
+    def unavailable_lookup(self, **_kwargs):
+        raise RuntimeError("jobs lookup unavailable")
+
+    monkeypatch.setattr(ingest_jobs, "_create_media_ingest_job", ambiguous_create, raising=True)
+    monkeypatch.setattr(jobs_manager.JobManager, "get_job_by_idempotency", unavailable_lookup, raising=True)
+
+    response = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=_run_submit_data(run.run_id),
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert response.status_code == 207, response.text
+    assert response.json()["submissions"][0]["error_code"] == "occurrence_binding_pending"
+    pending = store.get_run_item("1", run.run_id, "occ-url-1")
+    assert pending.state == "submit_pending"
+    assert pending.batch_id == response.json()["submissions"][0]["batch_id"]
+    assert manager.list_jobs(domain="media_ingest", owner_user_id="1", limit=10) == []
+
+
+def test_run_bound_file_commit_then_throw_preserves_accepted_staging(
+    media_ingest_jobs_client,
+    monkeypatch,
+):
+    manager, store, run = _seed_occurrence_run(include_file=True)
+    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
+
+    original_create = ingest_jobs._create_media_ingest_job
+
+    def commit_then_throw(**kwargs):
+        original_create(**kwargs)
+        raise RuntimeError("commit outcome unknown: token=private")
+
+    monkeypatch.setattr(ingest_jobs, "_create_media_ingest_job", commit_then_throw, raising=True)
+
+    response = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data={
+            "media_type": "audio",
+            "run_id": run.run_id,
+            "file_occurrence_ids": json.dumps(["occ-file-1"]),
+            "file_attempts": json.dumps([1]),
+        },
+        files=[("files", ("clip.mp3", b"test", "audio/mpeg"))],
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert response.status_code == 200, response.text
+    record = response.json()["submissions"][0]
+    job = manager.get_job(record["job_id"])
+    payload = json.loads(job["payload"]) if isinstance(job["payload"], str) else job["payload"]
+    assert Path(payload["source"]).exists()
+    assert store.get_run_item("1", run.run_id, "occ-file-1").job_id == record["job_id"]
+    assert "private" not in response.text
+    shutil.rmtree(payload["temp_dir"], ignore_errors=True)
+
+
+def test_concurrent_retry_cannot_create_or_reset_another_submitters_reservation(
+    media_ingest_jobs_client,
+    monkeypatch,
+):
+    manager, store, run = _seed_occurrence_run()
+    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
+
+    original_create = ingest_jobs._create_media_ingest_job
+    first_entered = Event()
+    release_first = Event()
+    calls_lock = Lock()
+    create_calls = 0
+
+    def controlled_create(**kwargs):
+        nonlocal create_calls
+        with calls_lock:
+            create_calls += 1
+            call_number = create_calls
+        if call_number != 1:
+            raise AssertionError("a pending retry must reconcile without creating")
+        first_entered.set()
+        assert release_first.wait(10)
+        return original_create(**kwargs)
+
+    monkeypatch.setattr(ingest_jobs, "_create_media_ingest_job", controlled_create, raising=True)
+    data = _run_submit_data(run.run_id)
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        first_future = pool.submit(
+            media_ingest_jobs_client.post,
+            "/api/v1/media/ingest/jobs",
+            data=data,
+            headers={"X-API-KEY": "test-api-key-12345"},
+        )
+        assert first_entered.wait(10)
+        try:
+            with TestClient(media_ingest_jobs_client.app) as second_client:
+                second = second_client.post(
+                    "/api/v1/media/ingest/jobs",
+                    data=data,
+                    headers={"X-API-KEY": "test-api-key-12345"},
+                )
+        finally:
+            release_first.set()
+        first = first_future.result(timeout=10)
+
+    assert second.status_code == 207, second.text
+    assert second.json()["submissions"][0]["error_code"] == "occurrence_binding_pending"
+    assert first.status_code == 200, first.text
+    assert create_calls == 1
+    jobs = manager.list_jobs(domain="media_ingest", owner_user_id="1", limit=10)
+    assert len(jobs) == 1
+    assert store.get_run_item("1", run.run_id, "occ-url-1").job_id == jobs[0]["id"]
+
+
+def test_run_bound_rate_limit_stops_later_entries_and_returns_retry_after(
+    media_ingest_jobs_client,
+    monkeypatch,
+):
+    manager, store, run = _seed_occurrence_run()
+    from tldw_Server_API.app.core.Jobs import manager as jobs_manager
+
+    create_calls = 0
+
+    def rate_limited_create(self, **_kwargs):
+        nonlocal create_calls
+        create_calls += 1
+        raise JobSubmissionLimitError(
+            "Quota exceeded: submits per minute",
+            code="jobs_submit_rate_limited",
+            retry_after=17,
+        )
+
+    monkeypatch.setattr(jobs_manager.JobManager, "create_job", rate_limited_create, raising=True)
+    response = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=_run_submit_data(
+            run.run_id,
+            urls=[
+                "https://www.youtube.com/watch?v=alpha123456",
+                "https://www.youtube.com/watch?v=alpha123456",
+            ],
+            occurrence_ids=["occ-url-1", "occ-url-2"],
+            attempts=[1, 1],
+        ),
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert response.status_code == 429, response.text
+    assert response.headers["Retry-After"] == "17"
+    assert response.json()["detail"] == "Quota exceeded: submits per minute"
+    assert create_calls == 1
+    assert manager.list_jobs(domain="media_ingest", owner_user_id="1", limit=10) == []
+    assert store.get_run_item("1", run.run_id, "occ-url-1").state == "staged"
+    assert store.get_run_item("1", run.run_id, "occ-url-2").state == "staged"

@@ -2465,12 +2465,20 @@ class PlaylistIngestStore:
         occurrence_id: str,
         *,
         attempt: int,
+        batch_id: str,
         idempotency_identity: str,
     ) -> MediaIngestRunItemRecord:
         """Release an exact reservation when no media job was accepted."""
         owner = self._owner(owner_user_id)
         if type(attempt) is not int or attempt < 1:
             raise ValueError("attempt must be a positive integer")
+        run_identity = self._run_text(run_id, "run_id", max_length=_MAX_RUN_IDENTITY_LENGTH)
+        occurrence = self._run_text(
+            occurrence_id,
+            "occurrence_id",
+            max_length=_MAX_RUN_IDENTITY_LENGTH,
+        )
+        batch = self._run_text(batch_id, "batch_id", max_length=_MAX_RUN_IDENTITY_LENGTH)
         identity = self._run_text(
             idempotency_identity,
             "idempotency_identity",
@@ -2491,7 +2499,7 @@ class PlaylistIngestStore:
                   AND {expiry_sql}
                 {lock}
                 """,  # nosec B608
-                (owner, str(run_id), str(occurrence_id), self._db_datetime(now)),
+                (owner, run_identity, occurrence, self._db_datetime(now)),
             ).fetchone()
             if row is None:
                 raise self._not_found()
@@ -2502,11 +2510,12 @@ class PlaylistIngestStore:
             if (
                 str(data["state"]) != "submit_pending"
                 or int(data["attempt"]) != attempt
+                or data.get("batch_id") != batch
                 or data.get("idempotency_identity") != identity
                 or data.get("job_id") is not None
             ):
-                raise PlaylistIngestConflictError("occurrence submission no longer matches")
-            self._query(
+                raise PlaylistIngestConflictError("occurrence reservation no longer matches")
+            updated = self._query(
                 db,
                 """
                 UPDATE media_ingest_run_items
@@ -2514,33 +2523,38 @@ class PlaylistIngestStore:
                     updated_at = ?
                 WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
                   AND state = 'submit_pending' AND attempt = ?
-                  AND idempotency_identity = ? AND job_id IS NULL
+                  AND batch_id = ? AND idempotency_identity = ? AND job_id IS NULL
                 """,
                 (
                     reset_state,
                     self._db_datetime(now),
                     owner,
-                    str(run_id),
-                    str(occurrence_id),
+                    run_identity,
+                    occurrence,
                     attempt,
+                    batch,
                     identity,
                 ),
             )
-            self._query(
+            if updated.rowcount != 1:
+                raise PlaylistIngestConflictError("occurrence reservation no longer matches")
+            bumped = self._query(
                 db,
                 """
                 UPDATE media_ingest_runs SET version = version + 1, updated_at = ?
                 WHERE owner_user_id = ? AND run_id = ? AND version = ?
                 """,
-                (self._db_datetime(now), owner, str(run_id), int(data["run_version"])),
+                (self._db_datetime(now), owner, run_identity, int(data["run_version"])),
             )
+            if bumped.rowcount != 1:
+                raise PlaylistIngestConflictError("run version no longer matches")
             item_row = self._query(
                 db,
                 """
                 SELECT * FROM media_ingest_run_items
                 WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
                 """,
-                (owner, str(run_id), str(occurrence_id)),
+                (owner, run_identity, occurrence),
             ).fetchone()
         return self._run_item_record(item_row)
 

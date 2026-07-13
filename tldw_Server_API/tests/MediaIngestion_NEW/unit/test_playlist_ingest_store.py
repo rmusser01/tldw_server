@@ -2024,6 +2024,7 @@ def test_file_job_submission_failure_resets_exact_pending_reservation(store):
         run.run_id,
         "occ-file",
         attempt=1,
+        batch_id="batch-file",
         idempotency_identity="playlist-ingest-v1:file-derived",
     )
 
@@ -2031,3 +2032,35 @@ def test_file_job_submission_failure_resets_exact_pending_reservation(store):
     assert reset.job_id is None
     assert reset.batch_id is None
     assert store.get_run("1", run.run_id).batch_ids == []
+
+
+def test_pending_job_submission_reset_requires_exact_reservation_batch(store):
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestConflictError,
+    )
+
+    run = store.create_validated_run("1", items=[_validated_direct_record(occurrence_id="occ-job")])
+    store.prepare_run_item_job_submission(
+        "1",
+        run.run_id,
+        "occ-job",
+        attempt=1,
+        batch_id="batch-owner",
+        idempotency_identity="playlist-ingest-v1:derived",
+        source_kind="url",
+        planned_item_id=None,
+    )
+
+    with pytest.raises(PlaylistIngestConflictError, match="reservation"):
+        store.reset_run_item_job_submission(
+            "1",
+            run.run_id,
+            "occ-job",
+            attempt=1,
+            batch_id="batch-other",
+            idempotency_identity="playlist-ingest-v1:derived",
+        )
+
+    pending = store.get_run_item("1", run.run_id, "occ-job")
+    assert pending.state == "submit_pending"
+    assert pending.batch_id == "batch-owner"

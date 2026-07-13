@@ -26,6 +26,7 @@ def test_postgres_occurrence_job_reservation_and_binding_match_sqlite(pg_temp_db
     dsn = str(pg_temp_db["dsn"])
 
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestConflictError,
         PlaylistIngestStore,
     )
     from tldw_Server_API.app.core.Jobs.manager import JobManager
@@ -61,6 +62,27 @@ def test_postgres_occurrence_job_reservation_and_binding_match_sqlite(pg_temp_db
         source_kind="url",
         planned_item_id=None,
     )
+    repeated = store.prepare_run_item_job_submission(
+        "pg-job-owner",
+        run.run_id,
+        "pg-job-occ",
+        attempt=1,
+        batch_id="pg-other-batch",
+        idempotency_identity=identity,
+        source_kind="url",
+        planned_item_id=None,
+    )
+    assert repeated.batch_id == "pg-job-batch"
+    with pytest.raises(PlaylistIngestConflictError, match="reservation"):
+        store.reset_run_item_job_submission(
+            "pg-job-owner",
+            run.run_id,
+            "pg-job-occ",
+            attempt=1,
+            batch_id="pg-other-batch",
+            idempotency_identity=identity,
+        )
+    assert store.get_run_item("pg-job-owner", run.run_id, "pg-job-occ").state == "submit_pending"
     job = manager.create_job(
         domain="media_ingest",
         queue="default",
@@ -78,6 +100,24 @@ def test_postgres_occurrence_job_reservation_and_binding_match_sqlite(pg_temp_db
         owner_user_id="pg-job-owner",
         idempotency_key=identity,
     )
+    exact = manager.get_job_by_idempotency(
+        domain="media_ingest",
+        queue="default",
+        job_type="media_ingest_item",
+        idempotency_key=identity,
+        owner_user_id="pg-job-owner",
+        batch_group="pg-job-batch",
+    )
+    wrong_batch = manager.get_job_by_idempotency(
+        domain="media_ingest",
+        queue="default",
+        job_type="media_ingest_item",
+        idempotency_key=identity,
+        owner_user_id="pg-job-owner",
+        batch_group="pg-other-batch",
+    )
+    assert exact is not None and int(exact["id"]) == int(job["id"])
+    assert wrong_batch is None
     bound = store.bind_run_item_job(
         "pg-job-owner",
         run.run_id,

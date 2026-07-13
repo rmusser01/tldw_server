@@ -313,6 +313,8 @@ git commit -m "feat: resolve playlist duplicate actions (TASK-12112)"
 
 ### Task 7: Tighten media-job submission and worker boundaries
 
+**Specification review follow-up:** Complete
+
 - [x] **Step 1: Write failing endpoint and worker tests**
 
 Cover aligned URL/file occurrence arrays, length mismatch, owner/run/state validation, derived idempotency, repeated ambiguous submit, opaque playlist 422, client URL mismatch, canonical server-authoritative payload, and worker rejection when processing returns zero or multiple items.
@@ -341,6 +343,11 @@ Expected: PASS.
 git add tldw_Server_API/app/api/v1/endpoints/media/ingest_jobs.py tldw_Server_API/app/services/media_ingest_jobs_worker.py tldw_Server_API/tests/MediaIngestion_NEW/unit tldw_Server_API/tests/Media/test_media_ingest_jobs_endpoint_sanitization.py
 git commit -m "feat: bind media jobs to ingest occurrences (TASK-12110)"
 ```
+
+- [x] Strictly parse run-bound identity/integer arrays without coercion.
+- [x] Reconcile ambiguous job creation before exact-reservation reset.
+- [x] Stop chunks on typed global quota/rate failures and preserve retry metadata.
+- [x] Re-run Task 7 and prior-stage verification, then commit the follow-up.
 
 ### Task 8: Add run routes, reconciliation, event replay, cancellation, and retry
 

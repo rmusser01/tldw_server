@@ -41,7 +41,7 @@ from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_CREATE
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
-from tldw_Server_API.app.core.exceptions import BadRequestError
+from tldw_Server_API.app.core.exceptions import BadRequestError, JobSubmissionLimitError
 from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
     save_uploaded_files,
@@ -245,15 +245,23 @@ def _coerce_positive_int(value: Any) -> int | None:
 
 def _strict_positive_int_list(value: Any, *, name: str) -> list[int]:
     """Parse bounded canonical positive integers without bool/float coercion."""
-    values = _coerce_form_string_list(value)
+    values = _strict_run_bound_array(value, name=name)
     parsed: list[int] = []
     for raw in values:
-        if not raw.isascii() or not raw.isdigit() or raw.startswith("0"):
+        if type(raw) is int:
+            number = raw
+        elif type(raw) is str and raw == raw.strip() and len(raw) <= 10 and raw.isascii() and raw.isdigit():
+            if raw.startswith("0"):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"{name} must contain positive integers.",
+                )
+            number = int(raw)
+        else:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"{name} must contain positive integers.",
             )
-        number = int(raw)
         if number < 1 or number > 2_147_483_647:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -263,14 +271,39 @@ def _strict_positive_int_list(value: Any, *, name: str) -> list[int]:
     return parsed
 
 
+def _strict_run_bound_array(value: Any, *, name: str) -> list[Any]:
+    """Decode one repeated-form array or one JSON array without element coercion."""
+    if value is None:
+        return []
+    values = list(value) if type(value) in {list, tuple} else [value]
+    if len(values) == 1 and type(values[0]) is str and values[0].startswith("["):
+        try:
+            decoded = json.loads(values[0])
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"{name} must be an array.",
+            ) from exc
+        if type(decoded) is not list:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"{name} must be an array.",
+            )
+        return decoded
+    return values
+
+
 def _bounded_identity_list(value: Any, *, name: str) -> list[str]:
-    values = _coerce_form_string_list(value)
-    if any(len(item) > _MAX_RUN_BOUND_ID_LENGTH for item in values):
+    values = _strict_run_bound_array(value, name=name)
+    if any(
+        type(item) is not str or not item or item != item.strip() or len(item) > _MAX_RUN_BOUND_ID_LENGTH
+        for item in values
+    ):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"{name} contains an invalid identifier.",
         )
-    return values
+    return list(values)
 
 
 def _validate_aligned(values: list[Any], *, count: int, name: str, required: bool) -> None:
@@ -333,6 +366,43 @@ def _submission_accepted(
         batch_id=batch_id,
         retryable=False,
         attempt=attempt,
+    )
+
+
+def _job_item_from_row(
+    row: dict[str, Any],
+    *,
+    fallback_kind: str,
+    idempotency_key: str,
+) -> MediaIngestJobItem:
+    payload = _normalize_payload(row.get("payload"))
+    return MediaIngestJobItem(
+        id=int(row["id"]),
+        uuid=row.get("uuid"),
+        source=str(payload.get("source") or ""),
+        source_kind=str(payload.get("source_kind") or fallback_kind),
+        status=str(row.get("status") or "queued"),
+        collection_id=(str(payload["collection_id"]) if payload.get("collection_id") is not None else None),
+        planned_item_id=(str(payload["planned_item_id"]) if payload.get("planned_item_id") is not None else None),
+        idempotency_key=idempotency_key,
+    )
+
+
+def _find_exact_occurrence_job(
+    jm: JobManager,
+    *,
+    queue: str,
+    owner_user_id: str,
+    batch_id: str,
+    idempotency_key: str,
+) -> dict[str, Any] | None:
+    return jm.get_job_by_idempotency(
+        domain="media_ingest",
+        queue=queue,
+        job_type="media_ingest_item",
+        idempotency_key=idempotency_key,
+        owner_user_id=owner_user_id,
+        batch_group=batch_id,
     )
 
 
@@ -536,13 +606,17 @@ def _create_media_ingest_job(
             request_id=request_id,
             trace_id=trace_id,
         )
+    except JobSubmissionLimitError as exc:
+        message = str(exc).strip() or "Media ingest job submission limit exceeded"
+        headers = {"Retry-After": str(exc.retry_after)} if exc.retry_after is not None else None
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=message,
+            headers=headers,
+        ) from exc
     except BadRequestError as exc:
         message = str(exc).strip() or "Invalid media ingest job request"
-        normalized = message.lower()
-        status_code = (
-            status.HTTP_429_TOO_MANY_REQUESTS if "concurrent job limit" in normalized else status.HTTP_400_BAD_REQUEST
-        )
-        raise HTTPException(status_code=status_code, detail=message) from exc
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message) from exc
 
 
 def _principal_has_admin_claims(principal: AuthPrincipal) -> bool:
@@ -938,13 +1012,15 @@ async def _submit_run_bound_media_ingest_jobs(
             )
             continue
 
+        reserved_batch = str(reserved.batch_id or batch_id)
+        owns_reservation = reserved_batch == batch_id
         if reserved.state == "queued" and reserved.job_id is not None:
             existing = jm.get_job(reserved.job_id)
             if existing is None or str(existing.get("owner_user_id") or "") != owner:
                 submissions.append(
                     _submission_rejected(
                         occurrence_id=occurrence,
-                        batch_id=str(reserved.batch_id or batch_id),
+                        batch_id=reserved_batch,
                         attempt=attempt,
                         code="occurrence_binding_pending",
                         message="Accepted job binding is temporarily unavailable.",
@@ -952,32 +1028,61 @@ async def _submit_run_bound_media_ingest_jobs(
                     )
                 )
                 continue
-            payload = _normalize_payload(existing.get("payload"))
-            jobs.append(
-                MediaIngestJobItem(
-                    id=int(existing["id"]),
-                    uuid=existing.get("uuid"),
-                    source=str(payload.get("source") or ""),
-                    source_kind=str(payload.get("source_kind") or entry["kind"]),
-                    status=str(existing.get("status") or "queued"),
-                    collection_id=(str(payload["collection_id"]) if payload.get("collection_id") is not None else None),
-                    planned_item_id=(
-                        str(payload["planned_item_id"]) if payload.get("planned_item_id") is not None else None
-                    ),
-                    idempotency_key=identity,
-                )
-            )
+            jobs.append(_job_item_from_row(existing, fallback_kind=str(entry["kind"]), idempotency_key=identity))
             submissions.append(
                 _submission_accepted(
                     occurrence_id=occurrence,
-                    batch_id=str(reserved.batch_id or batch_id),
+                    batch_id=reserved_batch,
                     attempt=attempt,
                     job_id=int(existing["id"]),
                 )
             )
             continue
 
-        reserved_batch = str(reserved.batch_id or batch_id)
+        if reserved.state == "submit_pending" and not owns_reservation:
+            existing = _find_exact_occurrence_job(
+                jm,
+                queue=selected_queue,
+                owner_user_id=owner,
+                batch_id=reserved_batch,
+                idempotency_key=identity,
+            )
+            if existing is not None:
+                try:
+                    bound = store.bind_run_item_job(
+                        owner,
+                        run_identity,
+                        occurrence,
+                        attempt=attempt,
+                        job_id=int(existing["id"]),
+                        batch_id=reserved_batch,
+                        idempotency_identity=identity,
+                    )
+                except Exception:
+                    existing = None
+            if existing is None:
+                submissions.append(
+                    _submission_rejected(
+                        occurrence_id=occurrence,
+                        batch_id=reserved_batch,
+                        attempt=attempt,
+                        code="occurrence_binding_pending",
+                        message="Accepted job binding is temporarily unavailable.",
+                        retryable=True,
+                    )
+                )
+                continue
+            jobs.append(_job_item_from_row(existing, fallback_kind=str(entry["kind"]), idempotency_key=identity))
+            submissions.append(
+                _submission_accepted(
+                    occurrence_id=occurrence,
+                    batch_id=str(bound.batch_id or reserved_batch),
+                    attempt=attempt,
+                    job_id=int(existing["id"]),
+                )
+            )
+            continue
+
         temp_dir_path: str | None = None
         if entry["kind"] == "url":
             source = str(reserved.source_url)
@@ -1025,6 +1130,7 @@ async def _submit_run_bound_media_ingest_jobs(
                         run_identity,
                         occurrence,
                         attempt=attempt,
+                        batch_id=batch_id,
                         idempotency_identity=identity,
                     )
                 submissions.append(
@@ -1065,42 +1171,111 @@ async def _submit_run_bound_media_ingest_jobs(
             row_id = row.get("id")
             if row_id is None:
                 raise ValueError("job_create_failed")
-        except HTTPException as exc:
-            if temp_dir_path:
-                _cleanup_dir(temp_dir_path)
-            with contextlib.suppress(Exception):
-                store.reset_run_item_job_submission(
-                    owner,
-                    run_identity,
-                    occurrence,
-                    attempt=attempt,
-                    idempotency_identity=identity,
-                )
-            if exc.status_code in {429, 503}:
+        except Exception as exc:
+            if isinstance(exc, HTTPException) and isinstance(exc.__cause__, JobSubmissionLimitError):
+                if temp_dir_path:
+                    _cleanup_dir(temp_dir_path)
+                if owns_reservation:
+                    with contextlib.suppress(Exception):
+                        store.reset_run_item_job_submission(
+                            owner,
+                            run_identity,
+                            occurrence,
+                            attempt=attempt,
+                            batch_id=batch_id,
+                            idempotency_identity=identity,
+                        )
                 raise
-            submissions.append(
-                _submission_rejected(
-                    occurrence_id=occurrence,
+            try:
+                existing = _find_exact_occurrence_job(
+                    jm,
+                    queue=selected_queue,
+                    owner_user_id=owner,
                     batch_id=reserved_batch,
-                    attempt=attempt,
-                    code="job_submission_failed",
-                    message="Media ingest job submission failed.",
-                    retryable=True,
+                    idempotency_key=identity,
                 )
-            )
-            errors.append("Media ingest job submission failed")
-            continue
-        except Exception:
+            except Exception:
+                submissions.append(
+                    _submission_rejected(
+                        occurrence_id=occurrence,
+                        batch_id=reserved_batch,
+                        attempt=attempt,
+                        code="occurrence_binding_pending",
+                        message="Accepted job binding is temporarily unavailable.",
+                        retryable=True,
+                    )
+                )
+                errors.append("Accepted job binding is temporarily unavailable")
+                continue
+            if existing is not None:
+                stored_payload = _normalize_payload(existing.get("payload"))
+                if temp_dir_path and stored_payload.get("source") != payload.get("source"):
+                    _cleanup_dir(temp_dir_path)
+                try:
+                    bound = store.bind_run_item_job(
+                        owner,
+                        run_identity,
+                        occurrence,
+                        attempt=attempt,
+                        job_id=int(existing["id"]),
+                        batch_id=reserved_batch,
+                        idempotency_identity=identity,
+                    )
+                except Exception:
+                    submissions.append(
+                        _submission_rejected(
+                            occurrence_id=occurrence,
+                            batch_id=reserved_batch,
+                            attempt=attempt,
+                            code="occurrence_binding_pending",
+                            message="Accepted job binding is temporarily unavailable.",
+                            retryable=True,
+                        )
+                    )
+                    errors.append("Accepted job binding is temporarily unavailable")
+                    continue
+                jobs.append(_job_item_from_row(existing, fallback_kind=str(entry["kind"]), idempotency_key=identity))
+                submissions.append(
+                    _submission_accepted(
+                        occurrence_id=occurrence,
+                        batch_id=str(bound.batch_id or reserved_batch),
+                        attempt=attempt,
+                        job_id=int(existing["id"]),
+                    )
+                )
+                continue
+
             if temp_dir_path:
                 _cleanup_dir(temp_dir_path)
-            with contextlib.suppress(Exception):
-                store.reset_run_item_job_submission(
-                    owner,
-                    run_identity,
-                    occurrence,
-                    attempt=attempt,
-                    idempotency_identity=identity,
+            reset = False
+            if owns_reservation:
+                try:
+                    store.reset_run_item_job_submission(
+                        owner,
+                        run_identity,
+                        occurrence,
+                        attempt=attempt,
+                        batch_id=batch_id,
+                        idempotency_identity=identity,
+                    )
+                    reset = True
+                except Exception:
+                    logger.warning("Could not release media ingest reservation after job submission failure")
+            if reset and isinstance(exc, HTTPException) and exc.status_code in {429, 503}:
+                raise
+            if not reset:
+                submissions.append(
+                    _submission_rejected(
+                        occurrence_id=occurrence,
+                        batch_id=reserved_batch,
+                        attempt=attempt,
+                        code="occurrence_binding_pending",
+                        message="Accepted job binding is temporarily unavailable.",
+                        retryable=True,
+                    )
                 )
+                errors.append("Accepted job binding is temporarily unavailable")
+                continue
             submissions.append(
                 _submission_rejected(
                     occurrence_id=occurrence,
