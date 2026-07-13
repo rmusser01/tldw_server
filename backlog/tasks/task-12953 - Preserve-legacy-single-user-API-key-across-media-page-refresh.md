@@ -73,12 +73,13 @@ Known unrelated/tooling baselines:
 
 PR: https://github.com/rmusser01/tldw_server/pull/2719.
 Review remediation is tracked in TASK-12952; append the fresh post-rebase verification here before final handoff.
+Implementation and verification completed on 2026-07-12 at HEAD 1fcb60243c73798d65c54fafdeb0d4d8107dde90.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Fixed legacy single-user API-key loss on /media refresh for both the WebUI and browser extension. Eligible pre-metadata advanced/remote credentials migrate once to the existing origin-bound manual device format, while hosted/quickstart and higher-precedence authentication remain fail-closed. Browser regressions cover hard reload in the WebUI and the released extension chrome.storage.sync-to-local migration path.
+Fixed legacy single-user API-key loss on /media refresh for both the WebUI and browser extension. Eligible pre-metadata advanced/remote credentials migrate once to the existing origin-bound manual device format, while hosted/quickstart and higher-precedence authentication remain fail-closed. Browser regressions cover hard reload in the WebUI and the released extension chrome.storage.sync-to-local migration path. All task-specific unit, browser, build, and extension compile checks pass; unrelated repository typecheck/lint baselines are documented in Implementation Notes.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
