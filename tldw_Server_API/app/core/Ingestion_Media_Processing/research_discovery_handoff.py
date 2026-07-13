@@ -7,20 +7,20 @@ from collections.abc import Sequence
 from typing import Any
 
 from starlette import status
+from starlette.concurrency import run_in_threadpool
 from starlette.responses import JSONResponse
 
 from tldw_Server_API.app.core.DB_Management.media_db.dedupe_urls import normalize_media_dedupe_url
+from tldw_Server_API.app.core.exceptions import (
+    ResearchDiscoveryBadRequestError,
+    ResearchDiscoveryValidationError,
+)
 from tldw_Server_API.app.core.Ingestion_Media_Processing.persistence import add_media_persist
 from tldw_Server_API.app.core.Research.discovery.selection import (
     ResolvedDiscoverySelection,
     resolve_discovery_selections,
 )
 from tldw_Server_API.app.core.Utils.metadata_utils import normalize_safe_metadata
-from tldw_Server_API.app.core.exceptions import (
-    ResearchDiscoveryBadRequestError,
-    ResearchDiscoveryValidationError,
-)
-
 
 MAX_DISCOVERY_SELECTIONS = 5
 _SELECTION_KEYS = frozenset({"result_id", "candidate_id"})
@@ -102,7 +102,8 @@ async def add_research_discovery_pdfs(
 ) -> JSONResponse:
     """Resolve selected PDFs and process new items through existing Media persistence."""
     selections = validate_research_discovery_handoff(form_data=form_data, files=files)
-    resolved = resolve_discovery_selections(
+    resolved = await run_in_threadpool(
+        resolve_discovery_selections,
         owner_user_id=str(current_user.id),
         discovery_id=form_data.research_discovery_id.strip(),
         selections=selections,
@@ -164,20 +165,14 @@ async def add_research_discovery_pdfs(
         elif existing is not None:
             result = _duplicate_result(item, existing)
         else:
-            result = dict(
-                persisted_by_url.get(
-                    _normalized_url(item.url),
-                    {
-                        "status": "Error",
-                        "input_ref": item.url,
-                        "media_type": "pdf",
-                        "error": "Media persistence returned no result for selection.",
-                    },
-                )
+            persisted = persisted_by_url.get(
+                _normalized_url(item.url),
+                {
+                    "status": "Error",
+                    "error": "Media persistence returned no result for selection.",
+                },
             )
-            result["outcome"] = _outcome_for_persisted_result(result)
-            if result.get("error"):
-                result["error"] = _safe_outcome_error(result["outcome"])
+            result = _public_persisted_result(item, persisted)
         result["result_id"] = item.result_id
         result["candidate_id"] = item.candidate_id
         results.append(result)
@@ -241,7 +236,7 @@ def _media_identifier_value(key: str, value: str) -> str:
 
 def _access_is_restricted(access_status: str | None) -> bool:
     normalized = str(access_status or "").strip().lower()
-    return normalized in {"closed", "denied", "paywalled", "restricted"}
+    return normalized in {"closed", "denied", "embargoed", "paywalled", "private", "restricted"}
 
 
 def _trusted_metadata(item: ResolvedDiscoverySelection) -> dict[str, Any]:
@@ -305,6 +300,29 @@ def _policy_blocked_result(item: ResolvedDiscoverySelection) -> dict[str, Any]:
         "db_id": None,
         "media_uuid": None,
     }
+
+
+def _public_persisted_result(
+    item: ResolvedDiscoverySelection,
+    persisted: dict[str, Any],
+) -> dict[str, Any]:
+    """Build the stable public result without forwarding downstream diagnostics."""
+    outcome = _outcome_for_persisted_result(persisted)
+    result = {
+        "status": "Success" if outcome in {"created", "duplicate_existing"} else "Error",
+        "outcome": outcome,
+        "input_ref": item.url,
+        "processing_source": None,
+        "media_type": "pdf",
+        "metadata": _trusted_metadata(item),
+        "db_id": persisted.get("db_id"),
+        "media_uuid": persisted.get("media_uuid"),
+    }
+    if outcome == "duplicate_existing":
+        result["message"] = "Matching media already exists."
+    elif outcome != "created":
+        result["error"] = _safe_outcome_error(outcome)
+    return result
 
 
 def _outcome_for_persisted_result(result: dict[str, Any]) -> str:

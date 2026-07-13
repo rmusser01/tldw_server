@@ -371,3 +371,23 @@ git add Docs/superpowers/specs/2026-06-20-research-source-discovery-chokepoint-d
   backlog/tasks
 git commit -m "docs: finalize Research Discovery PDF handoff"
 ```
+
+## Stage 6: Rebase and Review Remediation
+
+**Goal:** Rebase the PR onto the latest `dev` and address every validated review finding without widening the Research/Media ownership boundary.
+
+**Success Criteria:** Snapshot parsing tolerates legacy nullable/blank optional fields and numeric provider identifiers; all restricted access states are rejected; SQLite selection resolution is offloaded from the async request path; download errors redact URL secrets and use a domain exception; persistence responses expose only an explicit public result shape; Backlog summary markers are valid; and current CI is green or any external blocker is documented.
+
+**Tests:** Add focused regression tests first, run the complete handoff suite, OpenAPI drift check, compile check, diff check, and Bandit on touched application files.
+
+**Status:** In Progress
+
+### Task 9: Address PR review findings
+
+- [x] Add failing regression tests for all validated findings.
+- [x] Apply minimal production fixes within the existing chokepoint boundary.
+- [x] Replace the rebased task-ID collision with unique `TASK-12954`; the replacement has one valid final-summary marker.
+- [x] Run focused and full verification, including OpenAPI and Bandit gates.
+- [ ] Commit, force-push with lease, reply to every review comment, and resolve addressed threads.
+
+Review remediation verification: 174 passed, 7 skipped, and 1 xpassed across 182 focused tests; Ruff, Black checks on the formatted touched files, compileall, OpenAPI drift, frontend OpenAPI type generation, and `git diff --check` passed. Bandit reported zero findings across 1,121 touched application LOC. The canonical OpenAPI fingerprint is updated to 1,982 paths and 2,874 schemas.

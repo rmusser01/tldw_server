@@ -2,20 +2,20 @@
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit
 
-from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
 from tldw_Server_API.app.core.exceptions import ResearchDiscoveryValidationError
 
 from .identity import build_fingerprint, has_unsafe_url_material, normalize_doi, safe_provider_metadata
 from .models import DiscoveryOACandidate, is_phase2a_media_handoff_candidate
 from .oa import build_candidate_id
-
 
 MAX_DISCOVERY_SELECTIONS = 5
 _ARXIV_VERSION_RE = re.compile(r"v\d+$", re.IGNORECASE)
@@ -150,7 +150,9 @@ def _resolve_selection(
         raise ResearchDiscoveryValidationError("research_discovery_snapshot_malformed")
 
     canonical_url = _optional_http_url(result.get("canonical_url"))
-    safe_metadata_raw = result.get("safe_metadata", {})
+    safe_metadata_raw = result.get("safe_metadata")
+    if safe_metadata_raw is None:
+        safe_metadata_raw = {}
     if not isinstance(safe_metadata_raw, Mapping):
         raise ResearchDiscoveryValidationError("research_discovery_snapshot_malformed")
 
@@ -204,7 +206,9 @@ def _parse_candidate(raw: Mapping[str, Any]) -> DiscoveryOACandidate:
 
 
 def _identifiers(result: Mapping[str, Any]) -> dict[str, str]:
-    provider_ids_raw = result.get("provider_ids", {})
+    provider_ids_raw = result.get("provider_ids")
+    if provider_ids_raw is None:
+        provider_ids_raw = {}
     if not isinstance(provider_ids_raw, Mapping):
         raise ResearchDiscoveryValidationError("research_discovery_snapshot_malformed")
     safe_provider_ids = safe_provider_metadata(dict(provider_ids_raw))
@@ -213,7 +217,7 @@ def _identifiers(result: Mapping[str, Any]) -> dict[str, str]:
     doi = normalize_doi(result.get("doi") or safe_provider_ids.get("doi"))
     if doi:
         identifiers["doi"] = doi
-    pmid = _optional_text(result.get("pmid") or safe_provider_ids.get("pmid"))
+    pmid = _optional_identifier_text(result.get("pmid") or safe_provider_ids.get("pmid"))
     if pmid:
         identifiers["pmid"] = pmid.lower()
     pmcid = _normalize_pmcid(result.get("pmcid") or safe_provider_ids.get("pmcid"))
@@ -225,7 +229,7 @@ def _identifiers(result: Mapping[str, Any]) -> dict[str, str]:
 
     for key, value in safe_provider_ids.items():
         key_text = _required_text(key)
-        value_text = _required_text(value)
+        value_text = _identifier_text(value)
         if key_text and value_text and key_text.lower() not in {"doi", "pmid", "pmcid", "arxiv_id"}:
             identifiers.setdefault(key_text.lower(), value_text)
     return dict(sorted(identifiers.items()))
@@ -238,10 +242,30 @@ def _required_text(value: Any) -> str | None:
 def _optional_text(value: Any) -> str | None:
     if value is None:
         return None
-    text = _required_text(value)
-    if text is None:
+    if not isinstance(value, str):
         raise ResearchDiscoveryValidationError("research_discovery_snapshot_malformed")
-    return text
+    return value.strip() or None
+
+
+def _optional_identifier_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = _identifier_text(value)
+    if text is not None or isinstance(value, str):
+        return text
+    raise ResearchDiscoveryValidationError("research_discovery_snapshot_malformed")
+
+
+def _identifier_text(value: Any) -> str | None:
+    if isinstance(value, str):
+        return value.strip() or None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float) and math.isfinite(value):
+        return str(value)
+    return None
 
 
 def _authors(value: Any) -> tuple[str, ...] | None:
@@ -289,7 +313,7 @@ def _optional_http_url(value: Any) -> str | None:
 
 
 def _normalize_pmcid(value: Any) -> str | None:
-    text = _optional_text(value)
+    text = _optional_identifier_text(value)
     if text is None:
         return None
     text = text.upper()
@@ -297,7 +321,7 @@ def _normalize_pmcid(value: Any) -> str | None:
 
 
 def _normalize_arxiv_id(value: Any) -> str | None:
-    text = _optional_text(value)
+    text = _optional_identifier_text(value)
     if text is None:
         return None
     text = re.sub(r"^https?://arxiv\.org/(?:abs|pdf)/", "", text, flags=re.IGNORECASE)

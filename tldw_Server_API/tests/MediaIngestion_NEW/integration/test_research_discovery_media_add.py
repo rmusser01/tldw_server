@@ -10,8 +10,8 @@ from fastapi import BackgroundTasks, HTTPException
 from starlette.responses import JSONResponse
 
 from tldw_Server_API.app.api.v1.schemas.media_request_models import AddMediaForm
-from tldw_Server_API.app.core.Research.discovery.selection import ResolvedDiscoverySelection
 from tldw_Server_API.app.core.exceptions import ResearchDiscoveryValidationError
+from tldw_Server_API.app.core.Research.discovery.selection import ResolvedDiscoverySelection
 
 pytestmark = pytest.mark.integration
 
@@ -68,6 +68,10 @@ async def test_handoff_resolves_server_metadata_and_calls_existing_persistence(m
         captured["resolve"] = kwargs
         return resolved
 
+    async def fake_run_in_threadpool(func, **kwargs):
+        captured["threadpool_func"] = func
+        return func(**kwargs)
+
     async def fake_persist(**kwargs):
         captured["persist"] = kwargs
         return JSONResponse(
@@ -80,6 +84,7 @@ async def test_handoff_resolves_server_metadata_and_calls_existing_persistence(m
         )
 
     monkeypatch.setattr(handoff, "resolve_discovery_selections", fake_resolve)
+    monkeypatch.setattr(handoff, "run_in_threadpool", fake_run_in_threadpool)
     monkeypatch.setattr(handoff, "add_media_persist", fake_persist)
     form = _form(
         selections=[("result-2", "candidate-2"), ("result-1", "candidate-1")],
@@ -103,6 +108,7 @@ async def test_handoff_resolves_server_metadata_and_calls_existing_persistence(m
         ("result-2", "candidate-2"),
         ("result-1", "candidate-1"),
     )
+    assert captured["threadpool_func"] is fake_resolve
     persistence_form = captured["persist"]["form_data"]
     assert persistence_form.urls == [item.url for item in resolved]
     assert persistence_form.title is None
@@ -191,10 +197,11 @@ async def test_handoff_normalizes_pmcid_for_existing_media_lookup(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_handoff_blocks_known_restricted_access_before_download(monkeypatch):
+@pytest.mark.parametrize("access_status", ["paywalled", "embargoed", "private"])
+async def test_handoff_blocks_known_restricted_access_before_download(monkeypatch, access_status):
     from tldw_Server_API.app.core.Ingestion_Media_Processing import research_discovery_handoff as handoff
 
-    item = replace(_resolved(1), access_status="paywalled")
+    item = replace(_resolved(1), access_status=access_status)
     monkeypatch.setattr(handoff, "resolve_discovery_selections", lambda **_kwargs: (item,))
 
     async def should_not_persist(**_kwargs):
@@ -285,6 +292,9 @@ async def test_handoff_returns_stable_error_without_downstream_details(monkeypat
                         "status": "Error",
                         "input_ref": item.url,
                         "error": "upstream failed with token=SECRET at /private/provider.key",
+                        "message": "token=SECRET",
+                        "db_message": "credential=SECRET",
+                        "warnings": ["api_key=SECRET"],
                     }
                 ]
             }
@@ -305,6 +315,19 @@ async def test_handoff_returns_stable_error_without_downstream_details(monkeypat
     assert result["outcome"] == "failed"
     assert result["error"] == "PDF ingestion failed."
     assert "SECRET" not in str(result)
+    assert set(result) == {
+        "candidate_id",
+        "db_id",
+        "error",
+        "input_ref",
+        "media_type",
+        "media_uuid",
+        "metadata",
+        "outcome",
+        "processing_source",
+        "result_id",
+        "status",
+    }
 
 
 @pytest.mark.asyncio
@@ -321,7 +344,9 @@ async def test_handoff_returns_200_when_persistence_warning_is_created(monkeypat
                     {
                         "status": "Warning",
                         "input_ref": item.url,
-                        "message": "Created with a non-fatal warning.",
+                        "message": "Created with token=SECRET.",
+                        "db_message": "credential=SECRET",
+                        "warnings": ["api_key=SECRET"],
                         "db_id": 12,
                     }
                 ]
@@ -341,7 +366,12 @@ async def test_handoff_returns_200_when_persistence_warning_is_created(monkeypat
     )
 
     assert response.status_code == 200
-    assert json.loads(response.body)["results"][0]["outcome"] == "created"
+    result = json.loads(response.body)["results"][0]
+    assert result["outcome"] == "created"
+    assert "SECRET" not in str(result)
+    assert "message" not in result
+    assert "db_message" not in result
+    assert "warnings" not in result
 
 
 @pytest.mark.asyncio

@@ -1,14 +1,12 @@
-import asyncio
-import io
 from pathlib import Path
 
 import pytest
 
+from tldw_Server_API.app.core.exceptions import DownloadError
 from tldw_Server_API.app.core.Ingestion_Media_Processing.download_utils import (
     _resolve_max_bytes,
     download_url_async,
 )
-
 
 pytestmark = pytest.mark.unit
 
@@ -24,6 +22,7 @@ def _allow_fake_client_egress(monkeypatch: pytest.MonkeyPatch) -> None:
 class _FakeResponse:
     def __init__(self, url: str, headers: dict[str, str], content: bytes):
         from types import SimpleNamespace
+
         self._url = SimpleNamespace(path=Path(url).name or "/")
         self.headers = headers
         self._content = content
@@ -185,10 +184,10 @@ async def test_download_url_removes_partial_file_after_streamed_overflow(tmp_pat
 async def test_download_url_rejects_non_pdf_mime_despite_pdf_suffix(tmp_path, content_type):
     client = _FakeAsyncClient(headers={"content-type": content_type}, body=b"not a pdf")
 
-    with pytest.raises(ValueError, match="content-type"):
+    with pytest.raises(DownloadError, match="content-type") as exc_info:
         await download_url_async(
             client=client,
-            url="https://example.org/paper.pdf",
+            url="https://example.org/paper.pdf?token=SECRET",
             target_dir=tmp_path,
             allowed_extensions={".pdf"},
             allowed_content_types={"application/pdf"},
@@ -196,4 +195,5 @@ async def test_download_url_rejects_non_pdf_mime_despite_pdf_suffix(tmp_path, co
             media_type_key="pdf",
         )
 
+    assert "SECRET" not in str(exc_info.value)
     assert list(tmp_path.iterdir()) == []

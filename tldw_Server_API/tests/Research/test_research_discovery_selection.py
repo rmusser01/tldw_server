@@ -108,6 +108,67 @@ def test_resolves_server_owned_pdf_selections_in_request_order(tmp_path):
     assert resolved[0].safe_metadata == {"journal": "Examples"}
 
 
+def test_resolves_legacy_nullable_and_blank_optional_fields(tmp_path):
+    from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
+    from tldw_Server_API.app.core.Research.discovery.selection import resolve_discovery_selections
+
+    db = ResearchSessionsDB(tmp_path / "research.db")
+    candidate = _candidate(
+        "r1",
+        "c1",
+        access_status="  ",
+        license_hint="",
+        content_type_hint=" ",
+    )
+    candidate["resolver_reference"] = " "
+    result = _result(
+        "r1",
+        "c1",
+        canonical_url=" ",
+        provider_ids=None,
+        safe_metadata=None,
+        oa_candidates=[candidate],
+    )
+    snapshot = _create_snapshot(db, results=[result])
+
+    resolved = resolve_discovery_selections(
+        owner_user_id="owner-1",
+        discovery_id=snapshot.id,
+        selections=(("r1", candidate["candidate_id"]),),
+        snapshot_db=db,
+    )[0]
+
+    assert resolved.canonical_url is None
+    assert resolved.access_status is None
+    assert resolved.license_hint is None
+    assert resolved.safe_metadata == {}
+
+
+def test_coerces_numeric_identifier_values_without_weakening_structural_fields(tmp_path):
+    from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
+    from tldw_Server_API.app.core.Research.discovery.selection import resolve_discovery_selections
+
+    db = ResearchSessionsDB(tmp_path / "research.db")
+    result = _result(
+        "r1",
+        "c1",
+        pmid=123,
+        provider_ids={"openalex_id": 456.5, "nested_metadata": {"ignored": True}},
+    )
+    snapshot = _create_snapshot(db, results=[result])
+
+    resolved = resolve_discovery_selections(
+        owner_user_id="owner-1",
+        discovery_id=snapshot.id,
+        selections=(_pair("r1", "c1"),),
+        snapshot_db=db,
+    )[0]
+
+    assert resolved.identifiers["pmid"] == "123"
+    assert resolved.identifiers["openalex_id"] == "456.5"
+    assert "nested_metadata" not in resolved.identifiers
+
+
 def test_resolved_selection_is_frozen(tmp_path):
     from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
     from tldw_Server_API.app.core.Research.discovery.selection import resolve_discovery_selections
@@ -196,8 +257,8 @@ def test_default_db_uses_owner_scoped_research_path(monkeypatch, tmp_path):
 @pytest.mark.parametrize("mode", ["missing", "expired", "foreign"])
 def test_unavailable_snapshots_share_one_public_error(tmp_path, mode):
     from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
-    from tldw_Server_API.app.core.Research.discovery.selection import resolve_discovery_selections
     from tldw_Server_API.app.core.exceptions import ResearchDiscoveryValidationError
+    from tldw_Server_API.app.core.Research.discovery.selection import resolve_discovery_selections
 
     db = ResearchSessionsDB(tmp_path / "research.db")
     if mode == "missing":
@@ -237,12 +298,16 @@ def test_unavailable_snapshots_share_one_public_error(tmp_path, mode):
             {"results": [_result("r1", "c1", fingerprint="doi:10.1000/tampered")]},
             "research_discovery_snapshot_malformed",
         ),
+        (
+            {"results": [_result("r1", "c1", title=123)]},
+            "research_discovery_snapshot_malformed",
+        ),
     ],
 )
 def test_rejects_malformed_snapshot_payloads(tmp_path, response_json, error):
     from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
-    from tldw_Server_API.app.core.Research.discovery.selection import resolve_discovery_selections
     from tldw_Server_API.app.core.exceptions import ResearchDiscoveryValidationError
+    from tldw_Server_API.app.core.Research.discovery.selection import resolve_discovery_selections
 
     db = ResearchSessionsDB(tmp_path / "research.db")
     snapshot = db.create_discovery_snapshot(
@@ -267,8 +332,8 @@ def test_rejects_malformed_snapshot_payloads(tmp_path, response_json, error):
 
 def test_rejects_tampered_candidate_identity(tmp_path):
     from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
-    from tldw_Server_API.app.core.Research.discovery.selection import resolve_discovery_selections
     from tldw_Server_API.app.core.exceptions import ResearchDiscoveryValidationError
+    from tldw_Server_API.app.core.Research.discovery.selection import resolve_discovery_selections
 
     db = ResearchSessionsDB(tmp_path / "research.db")
     tampered_id = "oa_candidate:tampered"
@@ -306,8 +371,8 @@ def test_rejects_tampered_candidate_identity(tmp_path):
 )
 def test_rejects_invalid_selection_pairs(tmp_path, selections, error):
     from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
-    from tldw_Server_API.app.core.Research.discovery.selection import resolve_discovery_selections
     from tldw_Server_API.app.core.exceptions import ResearchDiscoveryValidationError
+    from tldw_Server_API.app.core.Research.discovery.selection import resolve_discovery_selections
 
     db = ResearchSessionsDB(tmp_path / "research.db")
     snapshot = _create_snapshot(db)
@@ -333,8 +398,8 @@ def test_rejects_invalid_selection_pairs(tmp_path, selections, error):
 )
 def test_rejects_missing_or_mismatched_selection_pairs(tmp_path, selection, error):
     from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
-    from tldw_Server_API.app.core.Research.discovery.selection import resolve_discovery_selections
     from tldw_Server_API.app.core.exceptions import ResearchDiscoveryValidationError
+    from tldw_Server_API.app.core.Research.discovery.selection import resolve_discovery_selections
 
     db = ResearchSessionsDB(tmp_path / "research.db")
     snapshot = _create_snapshot(db, results=[_result("r1", "c1"), _result("r2", "c2")])
@@ -361,8 +426,8 @@ def test_rejects_missing_or_mismatched_selection_pairs(tmp_path, selection, erro
 )
 def test_rejects_candidates_outside_phase2a_pdf_contract(tmp_path, candidate_overrides):
     from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
-    from tldw_Server_API.app.core.Research.discovery.selection import resolve_discovery_selections
     from tldw_Server_API.app.core.exceptions import ResearchDiscoveryValidationError
+    from tldw_Server_API.app.core.Research.discovery.selection import resolve_discovery_selections
 
     db = ResearchSessionsDB(tmp_path / "research.db")
     snapshot = _create_snapshot(

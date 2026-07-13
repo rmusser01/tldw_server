@@ -10,6 +10,7 @@ import aiofiles
 from loguru import logger
 
 from tldw_Server_API.app.core.config import loaded_config_data
+from tldw_Server_API.app.core.exceptions import DownloadError
 from tldw_Server_API.app.core.http_client import (
     _validate_egress_or_raise,
 )
@@ -19,6 +20,7 @@ from tldw_Server_API.app.core.http_client import (
 from tldw_Server_API.app.core.http_client import (
     create_async_client as _create_async_client,
 )
+from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import redact_url_for_log
 from tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils import (
     resolve_safe_local_path,
 )
@@ -27,7 +29,6 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Upload_Sink import (
     EXT_TO_MEDIA_TYPE_KEY,
     _extension_candidates,
 )
-from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import redact_url_for_log
 from tldw_Server_API.app.core.testing import is_test_mode
 
 _DOWNLOAD_UTILS_NONCRITICAL_EXCEPTIONS = (
@@ -209,8 +210,9 @@ def _enforce_allowed_content_type(
     if allowed_content_types is None or content_type in allowed_content_types:
         return
     allowed_list = ", ".join(sorted(allowed_content_types))
-    raise ValueError(
-        f"Downloaded file from {url} has content-type '{content_type}' unsupported "
+    safe_url = redact_url_for_log(url)
+    raise DownloadError(
+        f"Downloaded file from {safe_url} has content-type '{content_type}' unsupported "
         f"for this endpoint (allowed: {allowed_list})."
     )
 
