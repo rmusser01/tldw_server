@@ -105,7 +105,7 @@ Verification before commit: initial RED was 11 failed / 49 passed; review-remedi
 
 ### Task 2: Route every playlist candidate through one inspection controller
 
-- [ ] **Step 1: Write failing behavior tests**
+- [x] **Step 1: Write failing behavior tests**
 
 Test mixed ordinary/playlist URLs, Add click, Enter, unavailable capability, inspection failure, multiple candidates with bounded concurrency, extension `playlist_preflight` seed, and a session duplicate index spanning queued direct URLs plus multiple playlists. Assert queue mutation never receives a candidate URL directly and Configure/Quick Process stays disabled while any candidate is unresolved.
 
@@ -120,17 +120,17 @@ it("blocks Add until every playlist candidate is materialized", async () => {
 })
 ```
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 Run: `cd apps/tldw-frontend && bunx vitest run ../packages/ui/src/components/Common/QuickIngest/__tests__/AddContentStep.playlist-ingest.test.tsx ../packages/ui/src/components/Common/QuickIngest/__tests__/AddContentStep.url-detection.test.ts --maxWorkers=1 --no-file-parallelism`
 
 Expected: FAIL because `handleAddUrls` still queues the playlist directly.
 
-- [ ] **Step 3: Implement `usePlaylistInspection` and delete the bypass**
+- [x] **Step 3: Implement `usePlaylistInspection` and delete the bypass**
 
 The hook owns candidate records keyed by the original line, a maximum concurrent inspection count, resource polling, cancel/retry, seed handling, and a session duplicate index built from existing queue rows plus all loaded candidates. `handleAddUrls` delegates parsed lines once: ordinary lines become staged rows; playlist lines become inspection records. Enter calls the same handler. Candidate detection remains the small trusted-host helper already tested in `AddContentStep.tsx`.
 
-- [ ] **Step 4: Run tests and commit**
+- [x] **Step 4: Run tests and commit**
 
 Run the command from Step 2.
 
@@ -140,6 +140,8 @@ Expected: PASS.
 git add apps/packages/ui/src/components/Common/QuickIngest/AddContentStep.tsx apps/packages/ui/src/components/Common/QuickIngest/usePlaylistInspection.ts apps/packages/ui/src/components/Common/QuickIngest/__tests__
 git commit -m "fix: require playlist inspection before queueing (TASK-12113)"
 ```
+
+Verification before commit: behavior RED was 13 failed / 7 passed; Strict Mode seed review RED was 1 failed / 25 passed; quality-remediation RED was 7 failed / 24 passed. Final focused Vitest passed 31/31. Targeted ESLint exited 0 with no errors, the two new files passed the frontend Prettier configuration, and `git diff --check` passed. Full TypeScript was not rerun because the repository-baseline audit reached its three-attempt cap in Task 1. Specification and code-quality re-reviews both approved the final Task 2 diff. Bandit is not applicable to this TypeScript-only task.
 
 ## Stage 2: Complete virtual preview and stable queue identity
 

@@ -4,7 +4,7 @@ title: Implement shared WebUI and extension per-video playlist ingestion
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-13 22:29'
+updated_date: '2026-07-13 23:37'
 labels:
   - webui
   - browser-extension
@@ -52,6 +52,8 @@ Begin only after TASK-12112 stabilizes the backend contract. Follow Docs/superpo
 Backend dependency TASK-12112 is complete at commit bc20c306d2. Frontend execution began with Impeccable product-context preflight passed; the shared Quick Ingest design remains restrained, state-literate, accessible, and visually consistent across WebUI and extension. Task 1 will add the version-2 client models and truthful capability gate test-first.
 
 Task 1 contract client and capability gate completed test-first. Initial RED: 11 failed / 49 passed; quality-remediation RED: 8 failed / 68 passed. Final focused Vitest: 76/76 passed. ESLint: exit 0 with zero errors; Prettier and git diff --check passed. Full TypeScript remains blocked by unrelated repository baseline after the three-attempt audit. Final specification re-review: compliant. Final code-quality re-review: approved. Touched scope: playlist-ingest client, media-domain methods, strict OpenAPI/capability gate, and focused tests. Bandit is not applicable to this TypeScript-only task.
+
+Task 2 mandatory inspection controller completed test-first. It removes the direct playlist queue bypass, shares Add/Enter/extension-seed handling, keeps ordinary URLs staged while blocking proceed actions, limits concurrent v2 inspections, preserves first-page truncation and session duplicate evidence, serializes DELETE-before-replacement cleanup, uses the established 1200 ms polling cadence, retains only sanitized typed errors, and announces localized async status changes accessibly. Behavior RED: 13 failed / 7 passed; Strict Mode seed review RED: 1 failed / 25 passed; quality-remediation RED: 7 failed / 24 passed. Final focused Vitest: 31/31 passed. ESLint: exit 0 with zero errors; new-file frontend Prettier check and git diff --check passed. Final specification re-review: compliant. Final code-quality re-review: approved. Full TypeScript was not rerun after the Task 1 three-attempt baseline cap. Bandit is not applicable to this TypeScript-only task.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

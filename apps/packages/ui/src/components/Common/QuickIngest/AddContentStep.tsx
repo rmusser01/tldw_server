@@ -14,7 +14,6 @@ import {
   Plus,
 } from "lucide-react"
 import type {
-  ConferenceDuplicatePolicy,
   DetectedMediaType,
   WizardQueueItem,
   QueueItemValidation,
@@ -22,17 +21,17 @@ import type {
 import { useIngestWizard } from "./IngestWizardContext"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { Alert as DesignSystemAlert, Badge } from "@/components/ui/primitives"
-import { tldwClient } from "@/services/tldw/TldwApiClient"
-import type { PlaylistPreflightResult } from "@/services/tldw/playlist-preflight"
 import { FileDropZone } from "./QueueTab/FileDropZone"
-import { PlaylistPreflightPanel } from "./PlaylistPreflightPanel"
 import { BatchMetadataPanel } from "./BatchMetadataPanel"
+import {
+  usePlaylistInspection,
+  type PlaylistInspectionCandidate,
+} from "./usePlaylistInspection"
 import {
   QUICK_INGEST_MAX_FILE_SIZE_LABEL,
   QUICK_INGEST_MAX_FILE_SIZE,
 } from "./constants"
 import { normalizeUrlForDedupe } from "@/entries/shared/ingest-payloads"
-import { isQuickIngestPlaylistPreflightDetail } from "@/utils/quick-ingest-open"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -139,9 +138,6 @@ export const detectPlaylistPreflightCandidate = (url: string): boolean => {
   }
 }
 
-const isDuplicatePreflightStatus = (status: string | undefined): boolean =>
-  status === "duplicate_existing" || status === "duplicate_in_batch"
-
 const isValidUrl = (raw: string): boolean => {
   const trimmed = raw.trim()
   if (!trimmed) return false
@@ -225,6 +221,85 @@ const PASSIVE_ALERT_PROPS = {
   "aria-live": "polite",
 } as const
 
+type QuickIngestText = (
+  key: string,
+  defaultValue: string,
+  options?: Record<string, unknown>
+) => string
+
+const playlistInspectionCopy = (
+  candidate: PlaylistInspectionCandidate,
+  qi: QuickIngestText
+): { label: string; message: string } => {
+  switch (candidate.status) {
+    case "ready":
+      return {
+        label: qi("playlistInspection.readyLabel", "Inspection ready"),
+        message: qi(
+          "playlistInspection.readyMessage",
+          "{{count}} playlist items loaded for review.",
+          { count: candidate.items.length }
+        ),
+      }
+    case "unavailable":
+      return {
+        label: qi("playlistInspection.unavailableLabel", "Inspection unavailable"),
+        message: qi(
+          "playlistInspection.unavailableMessage",
+          "Playlist inspection is unavailable on this server. Update the server or remove this playlist."
+        ),
+      }
+    case "failed":
+      return {
+        label: qi("playlistInspection.failedLabel", "Inspection failed"),
+        message:
+          candidate.error?.message ??
+          qi("playlistInspection.failedMessage", "Playlist inspection failed. Try again."),
+      }
+    case "blocked":
+      return {
+        label: qi("playlistInspection.blockedLabel", "Inspection blocked"),
+        message:
+          candidate.error?.message ??
+          qi(
+            "playlistInspection.blockedMessage",
+            "Playlist inspection was blocked. Remove it or try again."
+          ),
+      }
+    case "expired":
+      return {
+        label: qi("playlistInspection.expiredLabel", "Inspection expired"),
+        message:
+          candidate.error?.message ??
+          qi("playlistInspection.expiredMessage", "Playlist inspection expired. Try again."),
+      }
+    case "cancelled":
+      return {
+        label: qi("playlistInspection.cancelledLabel", "Inspection cancelled"),
+        message:
+          candidate.error?.message ??
+          qi("playlistInspection.cancelledMessage", "Playlist inspection was cancelled."),
+      }
+    default:
+      return {
+        label: qi("playlistInspection.inspectingLabel", "Inspecting playlist"),
+        message: qi(
+          "playlistInspection.inspectingMessage",
+          "Loading playlist details from the server."
+        ),
+      }
+  }
+}
+
+const playlistInspectionBadge = (
+  status: PlaylistInspectionCandidate["status"]
+): "info" | "success" | "warning" | "danger" => {
+  if (status === "ready") return "success"
+  if (status === "queued" || status === "inspecting") return "info"
+  if (status === "failed" || status === "blocked") return "danger"
+  return "warning"
+}
+
 type AddContentStepProps = {
   isOnlineForIngest?: boolean
   isCheckingConnection?: boolean
@@ -243,29 +318,26 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
   quickProcessWarning = null,
 }) => {
   const { t } = useTranslation(["option"])
-  const {
-    state,
-    setQueueItems,
-    setPlaylistPreflightSeed,
-    setConferenceBatchMetadata,
-    goNext,
-  } = useIngestWizard()
-  const {
-    queueItems,
-    conferenceBatchMetadata,
-    playlistPreflightSeed,
-    firstSourceAddMode,
-  } = state
+  const { state, setQueueItems, setPlaylistPreflightSeed, goNext } = useIngestWizard()
+  const { queueItems, playlistPreflightSeed, firstSourceAddMode } = state
 
   const [urlInput, setUrlInput] = useState("")
   const [pastedTextInput, setPastedTextInput] = useState("")
-  const [playlistPreflightUrl, setPlaylistPreflightUrl] = useState("")
-  const [playlistPreflight, setPlaylistPreflight] = useState<PlaylistPreflightResult | null>(null)
-  const [duplicatePolicy, setDuplicatePolicy] = useState<ConferenceDuplicatePolicy>("skip")
-  const [playlistPreflightLoading, setPlaylistPreflightLoading] = useState(false)
-  const [playlistPreflightError, setPlaylistPreflightError] = useState<string | null>(null)
-  const { capabilities } = useServerCapabilities()
-  const seededPlaylistUrlRef = React.useRef<string | null>(null)
+  const { capabilities, loading: capabilitiesLoading } = useServerCapabilities()
+  const clearPlaylistPreflightSeed = useCallback(
+    () => setPlaylistPreflightSeed(null),
+    [setPlaylistPreflightSeed]
+  )
+  const playlistInspection = usePlaylistInspection({
+    enabled:
+      capabilities === null && capabilitiesLoading
+        ? null
+        : capabilities?.hasMediaPlaylistIngestV2 === true,
+    queueItems,
+    seed: playlistPreflightSeed,
+    clearSeed: clearPlaylistPreflightSeed,
+  })
+  const addPlaylistCandidates = playlistInspection.addCandidates
   const shouldShowPastedTextInput = firstSourceAddMode === "paste_text"
   const shouldFocusUrlInput = firstSourceAddMode === "web_url"
 
@@ -310,8 +382,17 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
 
     if (lines.length === 0) return
 
-    const newItems: WizardQueueItem[] = []
+    const playlistCandidates: string[] = []
+    const ordinaryLines: string[] = []
     for (const url of lines) {
+      if (detectPlaylistPreflightCandidate(url)) {
+        playlistCandidates.push(url)
+      } else {
+        ordinaryLines.push(url)
+      }
+    }
+    const newItems: WizardQueueItem[] = []
+    for (const url of ordinaryLines) {
       const detectedType = detectTypeFromUrl(url)
       const item: WizardQueueItem = {
         id: crypto.randomUUID(),
@@ -325,13 +406,12 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
       newItems.push(item)
     }
 
-    setQueueItems([...queueItems, ...newItems])
+    if (newItems.length > 0) {
+      setQueueItems([...queueItems, ...newItems])
+    }
+    addPlaylistCandidates(playlistCandidates)
     setUrlInput("")
-    setPlaylistPreflight(null)
-    setPlaylistPreflightUrl("")
-    setDuplicatePolicy("skip")
-    setPlaylistPreflightError(null)
-  }, [urlInput, queueItems, setQueueItems])
+  }, [addPlaylistCandidates, queueItems, setQueueItems, urlInput])
 
   const handleAddPastedText = useCallback(() => {
     if (!pastedTextInput.trim()) return
@@ -354,175 +434,6 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
     setQueueItems([...queueItems, item])
     setPastedTextInput("")
   }, [pastedTextInput, queueItems, setQueueItems])
-
-  const playlistCandidateUrls = useMemo(
-    () =>
-      urlInput
-        .split("\n")
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .filter(detectPlaylistPreflightCandidate),
-    [urlInput]
-  )
-  const primaryPlaylistCandidateUrl = playlistCandidateUrls[0] || ""
-  const shouldOfferPlaylistPreflight =
-    Boolean(capabilities?.hasMediaPlaylistPreflight) && Boolean(primaryPlaylistCandidateUrl)
-
-  const handlePreviewPlaylist = useCallback(async () => {
-    if (!primaryPlaylistCandidateUrl) return
-    setPlaylistPreflightLoading(true)
-    setPlaylistPreflightError(null)
-    try {
-      const result = await tldwClient.preflightPlaylist({
-        url: primaryPlaylistCandidateUrl,
-        max_items: 100,
-        timeoutMs: 60_000
-      })
-      setPlaylistPreflight(result)
-      setPlaylistPreflightUrl(primaryPlaylistCandidateUrl)
-      setDuplicatePolicy("skip")
-    } catch (error) {
-      setPlaylistPreflight(null)
-      setPlaylistPreflightUrl(primaryPlaylistCandidateUrl)
-      setPlaylistPreflightError(
-        error instanceof Error && error.message
-          ? error.message
-          : "Playlist preview failed."
-      )
-    } finally {
-      setPlaylistPreflightLoading(false)
-    }
-  }, [primaryPlaylistCandidateUrl])
-
-  React.useEffect(() => {
-    if (!isQuickIngestPlaylistPreflightDetail(playlistPreflightSeed)) {
-      return
-    }
-
-    const seededUrl = playlistPreflightSeed.url.trim()
-    if (!seededUrl) return
-
-    seededPlaylistUrlRef.current = seededUrl
-    setUrlInput(seededUrl)
-    setPlaylistPreflight(null)
-    setPlaylistPreflightUrl("")
-    setDuplicatePolicy("skip")
-    setPlaylistPreflightError(null)
-    setPlaylistPreflightSeed(null)
-  }, [playlistPreflightSeed, setPlaylistPreflightSeed])
-
-  React.useEffect(() => {
-    if (!seededPlaylistUrlRef.current) return
-    if (!shouldOfferPlaylistPreflight) return
-    if (primaryPlaylistCandidateUrl !== seededPlaylistUrlRef.current) return
-
-    seededPlaylistUrlRef.current = null
-    void handlePreviewPlaylist()
-  }, [handlePreviewPlaylist, primaryPlaylistCandidateUrl, shouldOfferPlaylistPreflight])
-
-  const handleAddPreflightItems = useCallback(() => {
-    if (!playlistPreflight) return
-    const newItems: WizardQueueItem[] = []
-    const selectedItems = playlistPreflight.items.filter(
-      (item) => item.selected && item.sourceUrl
-    )
-    for (const preflightItem of selectedItems) {
-      const detectedType = detectTypeFromUrl(preflightItem.sourceUrl)
-      const item: WizardQueueItem = {
-        id: crypto.randomUUID(),
-        url: preflightItem.sourceUrl,
-        detectedType,
-        icon: ICON_NAME_MAP[detectedType],
-        fileSize: 0,
-        validation: { valid: true },
-        playlist: {
-          playlistId: playlistPreflight.playlistId,
-          playlistTitle: playlistPreflight.playlistTitle,
-          ordinal: preflightItem.ordinal,
-          normalizedSourceId: preflightItem.normalizedSourceId,
-          duplicateStatus: preflightItem.duplicateStatus
-        },
-        conferenceOverride: {
-          selected: true,
-          ...(isDuplicatePreflightStatus(preflightItem.duplicateStatus)
-            ? { duplicatePolicy }
-            : {})
-        }
-      }
-      item.validation = validateQueueItem(item, [...queueItems, ...newItems])
-      newItems.push(item)
-    }
-    if (newItems.length === 0) return
-    setQueueItems([...queueItems, ...newItems])
-    setConferenceBatchMetadata({
-      collectionName:
-        conferenceBatchMetadata?.collectionName ||
-        playlistPreflight.playlistTitle ||
-        "",
-      conferenceName: conferenceBatchMetadata?.conferenceName,
-      eventDate: conferenceBatchMetadata?.eventDate,
-      eventYear: conferenceBatchMetadata?.eventYear,
-      sharedTags: conferenceBatchMetadata?.sharedTags ?? [],
-      sourcePlaylistUrl:
-        conferenceBatchMetadata?.sourcePlaylistUrl || playlistPreflightUrl,
-    })
-    setUrlInput((current) =>
-      current
-        .split("\n")
-        .map((line) => line.trim())
-        .filter((line) => line && line !== playlistPreflightUrl)
-        .join("\n")
-    )
-    setPlaylistPreflight(null)
-    setPlaylistPreflightUrl("")
-    setDuplicatePolicy("skip")
-    setPlaylistPreflightError(null)
-  }, [
-    conferenceBatchMetadata,
-    duplicatePolicy,
-    playlistPreflight,
-    playlistPreflightUrl,
-    queueItems,
-    setConferenceBatchMetadata,
-    setQueueItems,
-  ])
-
-  const handlePreflightItemSelectionChange = useCallback(
-    (ordinal: number, selected: boolean) => {
-      setPlaylistPreflight((current) => {
-        if (!current) return current
-        const items = current.items.map((item) =>
-          item.ordinal === ordinal ? { ...item, selected } : item
-        )
-        return {
-          ...current,
-          selectedCount: items.filter((item) => item.selected && item.sourceUrl).length,
-          items
-        }
-      })
-    },
-    []
-  )
-
-  const handleDuplicatePolicyChange = useCallback(
-    (policy: ConferenceDuplicatePolicy) => {
-      setDuplicatePolicy(policy)
-      setPlaylistPreflight((current) => {
-        if (!current) return current
-        const items = current.items.map((item) => {
-          if (!item.sourceUrl) return { ...item, selected: false }
-          if (!isDuplicatePreflightStatus(item.duplicateStatus)) return item
-          return { ...item, selected: policy !== "skip" }
-        })
-        return {
-          ...current,
-          selectedCount: items.filter((item) => item.selected && item.sourceUrl).length,
-          items
-        }
-      })
-    },
-    []
-  )
 
   // Handle Enter key in URL input
   const handleUrlKeyDown = useCallback(
@@ -558,7 +469,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
     [selectedItems]
   )
   const invalidItemCount = selectedItems.length - validItemCount
-  const canProceed = validItemCount > 0
+  const canProceed = validItemCount > 0 && !playlistInspection.hasUnresolvedCandidates
   const canStartProcessing = canProceed && isOnlineForIngest && !isCheckingConnection
 
   const hasLargeFiles = useMemo(
@@ -675,22 +586,107 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
           </div>
         </div>
 
-        {shouldOfferPlaylistPreflight && (
-          <PlaylistPreflightPanel
-            candidateUrl={primaryPlaylistCandidateUrl}
-            loading={playlistPreflightLoading}
-            error={playlistPreflightError}
-            result={
-              playlistPreflightUrl === primaryPlaylistCandidateUrl
-                ? playlistPreflight
-                : null
-            }
-            onPreview={handlePreviewPlaylist}
-            onAddItems={handleAddPreflightItems}
-            onItemSelectionChange={handlePreflightItemSelectionChange}
-            duplicatePolicy={duplicatePolicy}
-            onDuplicatePolicyChange={handleDuplicatePolicyChange}
-          />
+        {playlistInspection.candidates.length > 0 && (
+          <section
+            aria-label={qi("playlistInspection.regionAria", "Playlist inspections")}
+            className="space-y-2"
+          >
+            <Typography.Text className="text-xs font-medium text-text-muted">
+              {qi("playlistInspection.title", "PLAYLIST INSPECTION")}
+            </Typography.Text>
+            {playlistInspection.candidates.map((candidate) => {
+              const copy = playlistInspectionCopy(candidate, qi)
+              const isActive = candidate.status === "queued" || candidate.status === "inspecting"
+              const canRetry =
+                ((candidate.status === "failed" || candidate.status === "blocked") &&
+                  candidate.error?.retryable === true) ||
+                candidate.status === "expired" ||
+                candidate.status === "cancelled"
+              return (
+                <div
+                  key={candidate.key}
+                  className="rounded-md border border-border bg-surface2/40 px-3 py-2"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium">{candidate.url}</div>
+                      <div
+                        className="mt-1 flex flex-wrap items-center gap-2"
+                        role="status"
+                        aria-live="polite"
+                        aria-atomic="true"
+                      >
+                        <Badge variant={playlistInspectionBadge(candidate.status)} size="sm">
+                          {copy.label}
+                        </Badge>
+                        <Typography.Text className="text-xs text-text-muted">
+                          {copy.message}
+                        </Typography.Text>
+                      </div>
+                    </div>
+                    <div className="flex flex-shrink-0 items-center gap-1">
+                      {isActive && (
+                        <Button
+                          size="small"
+                          onClick={() => playlistInspection.cancelCandidate(candidate.key)}
+                          aria-label={qi(
+                            "playlistInspection.cancelAria",
+                            "Cancel playlist inspection for {{url}}",
+                            { url: candidate.url }
+                          )}
+                        >
+                          {qi("playlistInspection.cancel", "Cancel")}
+                        </Button>
+                      )}
+                      {canRetry && (
+                        <Button
+                          size="small"
+                          onClick={() => playlistInspection.retryCandidate(candidate.key)}
+                          aria-label={qi(
+                            "playlistInspection.retryAria",
+                            "Retry playlist inspection for {{url}}",
+                            { url: candidate.url }
+                          )}
+                        >
+                          {qi("playlistInspection.retry", "Retry")}
+                        </Button>
+                      )}
+                      {!isActive && (
+                        <Button
+                          size="small"
+                          type="text"
+                          onClick={() => playlistInspection.removeCandidate(candidate.key)}
+                          aria-label={qi(
+                            "playlistInspection.removeAria",
+                            "Remove playlist inspection for {{url}}",
+                            { url: candidate.url }
+                          )}
+                        >
+                          {qi("playlistInspection.remove", "Remove")}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+            {playlistInspection.hasTruncatedCandidates && (
+              <Typography.Text className="block text-xs text-text-muted">
+                {qi("playlistInspection.moreNotLoaded", "More playlist items are not loaded yet.")}
+              </Typography.Text>
+            )}
+            {playlistInspection.sessionDuplicateCount > 0 && (
+              <DesignSystemAlert
+                variant="warning"
+                {...PASSIVE_ALERT_PROPS}
+                title={qi(
+                  "playlistInspection.sessionDuplicates",
+                  "{{count}} staged or inspected items overlap in this session.",
+                  { count: playlistInspection.sessionDuplicateCount }
+                )}
+              />
+            )}
+          </section>
         )}
       </div>
 
@@ -880,7 +876,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
 
       {/* Action buttons */}
       <div className="mt-4 flex items-center justify-end gap-2">
-        {hasItems && onQuickProcess && (
+        {(hasItems || playlistInspection.hasUnresolvedCandidates) && onQuickProcess && (
           <Button
             type="primary"
             onClick={onQuickProcess}
