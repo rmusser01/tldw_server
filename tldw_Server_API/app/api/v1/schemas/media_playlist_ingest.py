@@ -515,6 +515,168 @@ class RunItemSnapshot(BaseModel):
         return self
 
 
+class PlaylistIngestRunItemResponse(BaseModel):
+    """One authoritative owner-scoped run occurrence snapshot."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    occurrence_id: str
+    ordinal: int = Field(..., ge=1)
+    input_kind: str
+    source_url: str | None = None
+    normalized_source_id: str | None = None
+    source_kind: str | None = None
+    display_metadata: dict[str, Any] = Field(default_factory=dict)
+    action: str
+    state: RunItemState
+    outcome: RunItemOutcome | None = None
+    progress_percent: float | None = Field(default=None, ge=0, le=100)
+    progress_message: str | None = Field(default=None, max_length=1000)
+    job_id: int | None = Field(default=None, ge=1)
+    batch_id: str | None = None
+    media_id: int | None = Field(default=None, ge=1)
+    planned_collection_item_id: int | None = Field(default=None, ge=1)
+    attempt: int = Field(default=1, ge=1)
+    retryable: bool = False
+
+    @model_validator(mode="after")
+    def _validate_outcome(self) -> PlaylistIngestRunItemResponse:
+        if (self.state is RunItemState.TERMINAL) != (self.outcome is not None):
+            raise ValueError("outcome is required exactly when state is terminal")
+        return self
+
+
+class PlaylistIngestProcessingOccurrence(BaseModel):
+    """Authoritative occurrence fields needed for one bounded client submission."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    occurrence_id: str
+    ordinal: int = Field(..., ge=1)
+    input_kind: str
+    source_url: str | None = None
+    source_kind: str | None = None
+    display_metadata: dict[str, Any] = Field(default_factory=dict)
+    state: Literal["staged", "awaiting_upload"]
+    outcome: None = None
+    job_id: None = None
+    batch_id: None = None
+    attempt: int = Field(default=1, ge=1)
+    planned_collection_item_id: int | None = Field(default=None, ge=1)
+
+
+class PlaylistIngestRunSummaryResponse(BaseModel):
+    """Bounded aggregate snapshot for one owner-scoped ingest run."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: Literal[2] = 2
+    run_id: str
+    status: str
+    counts: dict[str, int]
+    version: int = Field(..., ge=1)
+    collection_id: int | None = Field(default=None, ge=1)
+    batch_ids: list[str] = Field(default_factory=list, max_length=MAX_PLAYLIST_PREFLIGHT_SELECTIONS)
+    created_at: datetime
+    updated_at: datetime
+    expires_at: datetime
+
+
+class PlaylistIngestRunCreateResponse(BaseModel):
+    """Created run plus authoritative processing occurrences for client chunks."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: Literal[2] = 2
+    run_id: str
+    status: str
+    version: int = Field(..., ge=1)
+    status_url: str
+    items_url: str
+    events_url: str
+    processing_occurrences: list[PlaylistIngestProcessingOccurrence]
+
+
+class PlaylistIngestRunItemsPageResponse(BaseModel):
+    """Bounded immutable-order run occurrence page."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: Literal[2] = 2
+    run_id: str
+    version: int = Field(..., ge=1)
+    items: list[PlaylistIngestRunItemResponse]
+    next_cursor: str | None = None
+
+
+class PlaylistIngestRunCancelRequest(BaseModel):
+    """Cancel selected run occurrences, or the whole run when omitted."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    occurrence_ids: list[str] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_PLAYLIST_PREFLIGHT_SELECTIONS,
+    )
+    reason: str | None = Field(default=None, min_length=1, max_length=500)
+
+    @field_validator("occurrence_ids", mode="before")
+    @classmethod
+    def _validate_cancel_occurrences(cls, value: object) -> object:
+        if value is None:
+            return None
+        if type(value) is not list:
+            raise ValueError("occurrence_ids must be a list")
+        normalized = []
+        for occurrence_id in value:
+            if type(occurrence_id) is not str:
+                raise ValueError("occurrence_ids entries must be strings")
+            candidate = occurrence_id.strip()
+            if not candidate or len(candidate) > MAX_RUN_IDENTITY_LENGTH:
+                raise ValueError("occurrence_ids entries are invalid")
+            normalized.append(candidate)
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("occurrence_ids must be unique")
+        return normalized
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def _strip_reason(cls, value: object) -> object:
+        if value is None:
+            return None
+        if type(value) is not str:
+            raise ValueError("reason must be a string")
+        return value.strip()
+
+
+class PlaylistIngestRunRetryRequest(BaseModel):
+    """Request deliberate retries for selected eligible occurrences."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    occurrence_ids: list[str] = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_PLAYLIST_PREFLIGHT_SELECTIONS,
+    )
+
+    _validate_retry_occurrences = field_validator("occurrence_ids", mode="before")(
+        PlaylistIngestRunCancelRequest._validate_cancel_occurrences.__func__
+    )
+
+
+class PlaylistIngestRunRetryResponse(BaseModel):
+    """Occurrences that won the retry CAS and are ready for resubmission."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: Literal[2] = 2
+    run_id: str
+    version: int = Field(..., ge=1)
+    processing_occurrences: list[PlaylistIngestProcessingOccurrence]
+
+
 class PlaylistPreflightCreateRequest(BaseModel):
     """Bounded asynchronous playlist inspection request."""
 

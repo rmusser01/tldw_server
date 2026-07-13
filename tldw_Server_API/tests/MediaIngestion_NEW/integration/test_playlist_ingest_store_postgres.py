@@ -157,6 +157,58 @@ def test_postgres_occurrence_job_reservation_and_binding_match_sqlite(pg_temp_db
     assert bound.job_id == int(job["id"])
     assert store.get_run("pg-job-owner", run.run_id).batch_ids == ["pg-job-batch"]
 
+    running = store.reconcile_run_item_job(
+        "pg-job-owner",
+        run.run_id,
+        "pg-job-occ",
+        expected_job_id=int(job["id"]),
+        expected_attempt=1,
+        state="running",
+        outcome=None,
+        progress_percent=45.0,
+        progress_message="download",
+        retryable=False,
+        media_id=None,
+    )
+    failed = store.reconcile_run_item_job(
+        "pg-job-owner",
+        run.run_id,
+        "pg-job-occ",
+        expected_job_id=int(job["id"]),
+        expected_attempt=1,
+        state="terminal",
+        outcome="processing_failed",
+        progress_percent=45.0,
+        progress_message="download",
+        retryable=True,
+        media_id=None,
+    )
+    retried, changed = store.retry_run_item(
+        "pg-job-owner",
+        run.run_id,
+        "pg-job-occ",
+        expected_attempt=1,
+        resolved_media_id=None,
+    )
+    cancelled = store.request_run_item_cancellation(
+        "pg-job-owner",
+        run.run_id,
+        "pg-job-occ",
+        expected_attempt=2,
+    )
+    minimum_event_id, maximum_event_id = store.run_event_bounds("pg-job-owner", run.run_id)
+
+    assert running.state == "running"
+    assert failed.outcome == "processing_failed"
+    assert changed is True
+    assert retried.state == "staged"
+    assert retried.attempt == 2
+    assert retried.job_id is None
+    assert cancelled.state == "terminal"
+    assert cancelled.outcome == "cancelled"
+    assert minimum_event_id is not None
+    assert maximum_event_id is not None and maximum_event_id >= minimum_event_id
+
 
 def test_postgres_duplicate_action_state_matches_sqlite_contract(pg_temp_db, monkeypatch):
     monkeypatch.setenv("TEST_MODE", "true")

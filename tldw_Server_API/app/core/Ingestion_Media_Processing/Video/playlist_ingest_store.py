@@ -2163,6 +2163,497 @@ class PlaylistIngestStore:
             ).fetchall()
         return PlaylistPage(tuple(self._event_record(row) for row in rows))
 
+    def run_event_bounds(self, owner_user_id: str, run_id: str) -> tuple[int | None, int | None]:
+        """Return the oldest and newest retained event IDs for one owned run."""
+        owner = self._owner(owner_user_id)
+        with self._connection(write=False) as db:
+            exists = self._query(
+                db,
+                f"""
+                SELECT 1 FROM media_ingest_runs
+                WHERE owner_user_id = ? AND run_id = ? AND {self._unexpired_sql()}
+                """,  # nosec B608
+                (owner, str(run_id), self._db_datetime(self._now())),
+            ).fetchone()
+            if exists is None:
+                raise self._not_found()
+            row = self._query(
+                db,
+                """
+                SELECT MIN(event_id) AS min_event_id, MAX(event_id) AS max_event_id
+                FROM media_ingest_run_events
+                WHERE owner_user_id = ? AND run_id = ?
+                """,
+                (owner, str(run_id)),
+            ).fetchone()
+        values = self._row_dict(row)
+        minimum = int(values["min_event_id"]) if values.get("min_event_id") is not None else None
+        maximum = int(values["max_event_id"]) if values.get("max_event_id") is not None else None
+        return minimum, maximum
+
+    def _run_status_after_item_change(
+        self,
+        db: Any,
+        *,
+        owner_user_id: str,
+        run_id: str,
+    ) -> str:
+        incomplete = self._query(
+            db,
+            """
+            SELECT state, job_id FROM media_ingest_run_items
+            WHERE owner_user_id = ? AND run_id = ? AND state <> 'terminal'
+            """,
+            (owner_user_id, run_id),
+        ).fetchall()
+        if not incomplete:
+            return "completed"
+        if any(
+            self._row_dict(row).get("job_id") is not None
+            or str(self._row_dict(row).get("state") or "")
+            in {"submit_pending", "queued", "running", "cancellation_requested", "status_unavailable"}
+            for row in incomplete
+        ):
+            return "running"
+        return "staged"
+
+    def reconcile_run_item_job(
+        self,
+        owner_user_id: str,
+        run_id: str,
+        occurrence_id: str,
+        *,
+        expected_job_id: int,
+        expected_attempt: int,
+        state: str,
+        outcome: str | None,
+        progress_percent: float | None,
+        progress_message: str | None,
+        retryable: bool,
+        media_id: int | None,
+    ) -> MediaIngestRunItemRecord:
+        """Apply an observed Jobs snapshot and append one event only on change."""
+        if state not in {
+            "queued",
+            "running",
+            "cancellation_requested",
+            "status_unavailable",
+            "terminal",
+        }:
+            raise ValueError("invalid reconciled state")
+        if (state == "terminal") != (outcome is not None):
+            raise ValueError("outcome is required exactly when state is terminal")
+        if outcome not in {None, "completed", "processing_failed", "cancelled"}:
+            raise ValueError("invalid reconciled outcome")
+        if progress_percent is not None and not 0 <= float(progress_percent) <= 100:
+            raise ValueError("progress_percent must be between 0 and 100")
+        if progress_message is not None and len(progress_message) > 1000:
+            raise ValueError("progress_message is too long")
+        if media_id is not None and (type(media_id) is not int or media_id < 1):
+            raise ValueError("media_id must be a positive integer")
+
+        owner = self._owner(owner_user_id)
+        now = self._now()
+        with self._connection(write=True) as db:
+            lock = " FOR UPDATE OF run, item" if self._postgres else ""
+            expiry_sql = "run.expires_at > ?" if self._postgres else "julianday(run.expires_at) > julianday(?)"
+            row = self._query(
+                db,
+                f"""
+                SELECT run.version AS run_version, run.status AS run_status, item.*
+                FROM media_ingest_runs AS run
+                JOIN media_ingest_run_items AS item
+                  ON item.owner_user_id = run.owner_user_id AND item.run_id = run.run_id
+                WHERE run.owner_user_id = ? AND run.run_id = ? AND item.occurrence_id = ?
+                  AND {expiry_sql}
+                {lock}
+                """,  # nosec B608
+                (owner, str(run_id), str(occurrence_id), self._db_datetime(now)),
+            ).fetchone()
+            if row is None:
+                raise self._not_found()
+            current = self._row_dict(row)
+            if int(current.get("job_id") or 0) != expected_job_id or int(current["attempt"]) != expected_attempt:
+                return self._run_item_record(row)
+            desired = (
+                state,
+                outcome,
+                float(progress_percent) if progress_percent is not None else None,
+                progress_message,
+                bool(retryable),
+                media_id,
+            )
+            existing = (
+                str(current["state"]),
+                current.get("outcome"),
+                float(current["progress_percent"]) if current.get("progress_percent") is not None else None,
+                current.get("progress_message"),
+                bool(current.get("retryable")),
+                int(current["media_id"]) if current.get("media_id") is not None else None,
+            )
+            if existing == desired:
+                return self._run_item_record(row)
+            if current.get("state") == "terminal":
+                return self._run_item_record(row)
+
+            updated = self._query(
+                db,
+                """
+                UPDATE media_ingest_run_items
+                SET state = ?, outcome = ?, progress_percent = ?, progress_message = ?,
+                    retryable = ?, media_id = ?, updated_at = ?
+                WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
+                  AND job_id = ? AND attempt = ? AND state <> 'terminal'
+                """,
+                (
+                    state,
+                    outcome,
+                    progress_percent,
+                    progress_message,
+                    bool(retryable),
+                    media_id,
+                    self._db_datetime(now),
+                    owner,
+                    str(run_id),
+                    str(occurrence_id),
+                    expected_job_id,
+                    expected_attempt,
+                ),
+            )
+            if updated.rowcount != 1:
+                raise PlaylistIngestConflictError("run item reconciliation changed")
+            run_status = self._run_status_after_item_change(
+                db,
+                owner_user_id=owner,
+                run_id=str(run_id),
+            )
+            bumped = self._query(
+                db,
+                """
+                UPDATE media_ingest_runs
+                SET status = ?, version = version + 1, updated_at = ?
+                WHERE owner_user_id = ? AND run_id = ? AND version = ?
+                """,
+                (
+                    run_status,
+                    self._db_datetime(now),
+                    owner,
+                    str(run_id),
+                    int(current["run_version"]),
+                ),
+            )
+            if bumped.rowcount != 1:
+                raise PlaylistIngestConflictError("run version no longer matches")
+            event_type = {
+                "queued": "occurrence_queued",
+                "running": "occurrence_running",
+                "cancellation_requested": "occurrence_cancellation_requested",
+                "status_unavailable": "occurrence_status_unavailable",
+                "terminal": "occurrence_terminal",
+            }[state]
+            self._query(
+                db,
+                """
+                INSERT INTO media_ingest_run_events (
+                    run_id, owner_user_id, occurrence_id, job_id, batch_id,
+                    event_type, state, outcome, progress_percent, progress_message,
+                    attrs_json, occurred_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(run_id),
+                    owner,
+                    str(occurrence_id),
+                    expected_job_id,
+                    current.get("batch_id"),
+                    event_type,
+                    state,
+                    outcome,
+                    progress_percent,
+                    progress_message,
+                    self._json_value({"attempt": expected_attempt, "run_status": run_status}),
+                    self._db_datetime(now),
+                ),
+            )
+            item_row = self._query(
+                db,
+                """
+                SELECT * FROM media_ingest_run_items
+                WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
+                """,
+                (owner, str(run_id), str(occurrence_id)),
+            ).fetchone()
+        return self._run_item_record(item_row)
+
+    def request_run_item_cancellation(
+        self,
+        owner_user_id: str,
+        run_id: str,
+        occurrence_id: str,
+        *,
+        expected_attempt: int,
+    ) -> MediaIngestRunItemRecord:
+        """Cancel unsent work or durably request cancellation for accepted work."""
+        owner = self._owner(owner_user_id)
+        now = self._now()
+        with self._connection(write=True) as db:
+            lock = " FOR UPDATE OF run, item" if self._postgres else ""
+            expiry_sql = "run.expires_at > ?" if self._postgres else "julianday(run.expires_at) > julianday(?)"
+            row = self._query(
+                db,
+                f"""
+                SELECT run.version AS run_version, run.status AS run_status, item.*
+                FROM media_ingest_runs AS run
+                JOIN media_ingest_run_items AS item
+                  ON item.owner_user_id = run.owner_user_id AND item.run_id = run.run_id
+                WHERE run.owner_user_id = ? AND run.run_id = ? AND item.occurrence_id = ?
+                  AND {expiry_sql}
+                {lock}
+                """,  # nosec B608
+                (owner, str(run_id), str(occurrence_id), self._db_datetime(now)),
+            ).fetchone()
+            if row is None:
+                raise self._not_found()
+            current = self._row_dict(row)
+            if int(current["attempt"]) != expected_attempt or current["state"] in {
+                "terminal",
+                "cancellation_requested",
+            }:
+                return self._run_item_record(row)
+            accepted = current.get("job_id") is not None
+            state = "cancellation_requested" if accepted else "terminal"
+            outcome = None if accepted else "cancelled"
+            updated = self._query(
+                db,
+                """
+                UPDATE media_ingest_run_items
+                SET state = ?, outcome = ?, retryable = ?,
+                    submission_lease_token = NULL, submission_lease_expires_at = NULL,
+                    updated_at = ?
+                WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
+                  AND attempt = ? AND state NOT IN ('terminal', 'cancellation_requested')
+                """,
+                (
+                    state,
+                    outcome,
+                    False,
+                    self._db_datetime(now),
+                    owner,
+                    str(run_id),
+                    str(occurrence_id),
+                    expected_attempt,
+                ),
+            )
+            if updated.rowcount != 1:
+                raise PlaylistIngestConflictError("run item cancellation changed")
+            run_status = self._run_status_after_item_change(
+                db,
+                owner_user_id=owner,
+                run_id=str(run_id),
+            )
+            bumped = self._query(
+                db,
+                """
+                UPDATE media_ingest_runs
+                SET status = ?, version = version + 1, updated_at = ?
+                WHERE owner_user_id = ? AND run_id = ? AND version = ?
+                """,
+                (
+                    run_status,
+                    self._db_datetime(now),
+                    owner,
+                    str(run_id),
+                    int(current["run_version"]),
+                ),
+            )
+            if bumped.rowcount != 1:
+                raise PlaylistIngestConflictError("run version no longer matches")
+            self._query(
+                db,
+                """
+                INSERT INTO media_ingest_run_events (
+                    run_id, owner_user_id, occurrence_id, job_id, batch_id,
+                    event_type, state, outcome, attrs_json, occurred_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(run_id),
+                    owner,
+                    str(occurrence_id),
+                    current.get("job_id"),
+                    current.get("batch_id"),
+                    "occurrence_cancellation_requested" if accepted else "occurrence_cancelled",
+                    state,
+                    outcome,
+                    self._json_value({"attempt": expected_attempt, "run_status": run_status}),
+                    self._db_datetime(now),
+                ),
+            )
+            item_row = self._query(
+                db,
+                """
+                SELECT * FROM media_ingest_run_items
+                WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
+                """,
+                (owner, str(run_id), str(occurrence_id)),
+            ).fetchone()
+        return self._run_item_record(item_row)
+
+    def retry_run_item(
+        self,
+        owner_user_id: str,
+        run_id: str,
+        occurrence_id: str,
+        *,
+        expected_attempt: int,
+        resolved_media_id: int | None,
+    ) -> tuple[MediaIngestRunItemRecord, bool]:
+        """Resolve existing media or CAS one eligible failure into a new attempt."""
+        if resolved_media_id is not None and (type(resolved_media_id) is not int or resolved_media_id < 1):
+            raise ValueError("resolved_media_id must be a positive integer")
+        owner = self._owner(owner_user_id)
+        now = self._now()
+        with self._connection(write=True) as db:
+            lock = " FOR UPDATE OF run, item" if self._postgres else ""
+            expiry_sql = "run.expires_at > ?" if self._postgres else "julianday(run.expires_at) > julianday(?)"
+            row = self._query(
+                db,
+                f"""
+                SELECT run.version AS run_version, run.status AS run_status, item.*
+                FROM media_ingest_runs AS run
+                JOIN media_ingest_run_items AS item
+                  ON item.owner_user_id = run.owner_user_id AND item.run_id = run.run_id
+                WHERE run.owner_user_id = ? AND run.run_id = ? AND item.occurrence_id = ?
+                  AND {expiry_sql}
+                {lock}
+                """,  # nosec B608
+                (owner, str(run_id), str(occurrence_id), self._db_datetime(now)),
+            ).fetchone()
+            if row is None:
+                raise self._not_found()
+            current = self._row_dict(row)
+            eligible = (
+                int(current["attempt"]) == expected_attempt
+                and current["state"] == "terminal"
+                and bool(current.get("retryable"))
+                and current.get("outcome") in {"submit_failed", "processing_failed", "metadata_update_failed"}
+            )
+            if not eligible:
+                return self._run_item_record(row), False
+
+            if resolved_media_id is not None:
+                state = "terminal"
+                outcome = "completed"
+                attempt = expected_attempt
+                event_type = "occurrence_retry_reconciled"
+                updated = self._query(
+                    db,
+                    """
+                    UPDATE media_ingest_run_items
+                    SET outcome = 'completed', media_id = ?, retryable = ?, updated_at = ?
+                    WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
+                      AND state = 'terminal' AND attempt = ? AND retryable = ?
+                    """,
+                    (
+                        resolved_media_id,
+                        False,
+                        self._db_datetime(now),
+                        owner,
+                        str(run_id),
+                        str(occurrence_id),
+                        expected_attempt,
+                        True,
+                    ),
+                )
+            else:
+                state = "awaiting_upload" if current.get("input_kind") == "file_stub" else "staged"
+                outcome = None
+                attempt = expected_attempt + 1
+                event_type = "occurrence_retry_ready"
+                updated = self._query(
+                    db,
+                    """
+                    UPDATE media_ingest_run_items
+                    SET state = ?, outcome = NULL, job_id = NULL, batch_id = NULL,
+                        attempt = ?, idempotency_identity = NULL, submission_queue = NULL,
+                        staging_temp_dir = NULL, submission_lease_token = NULL,
+                        submission_lease_expires_at = NULL, progress_percent = NULL,
+                        progress_message = NULL, retryable = ?, media_id = NULL,
+                        error_code = NULL, error_message = NULL, updated_at = ?
+                    WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
+                      AND state = 'terminal' AND attempt = ? AND retryable = ?
+                    """,
+                    (
+                        state,
+                        attempt,
+                        False,
+                        self._db_datetime(now),
+                        owner,
+                        str(run_id),
+                        str(occurrence_id),
+                        expected_attempt,
+                        True,
+                    ),
+                )
+            if updated.rowcount != 1:
+                return self.get_run_item(owner, str(run_id), str(occurrence_id)), False
+            run_status = self._run_status_after_item_change(
+                db,
+                owner_user_id=owner,
+                run_id=str(run_id),
+            )
+            bumped = self._query(
+                db,
+                """
+                UPDATE media_ingest_runs
+                SET status = ?, version = version + 1, updated_at = ?
+                WHERE owner_user_id = ? AND run_id = ? AND version = ?
+                """,
+                (
+                    run_status,
+                    self._db_datetime(now),
+                    owner,
+                    str(run_id),
+                    int(current["run_version"]),
+                ),
+            )
+            if bumped.rowcount != 1:
+                raise PlaylistIngestConflictError("run version no longer matches")
+            self._query(
+                db,
+                """
+                INSERT INTO media_ingest_run_events (
+                    run_id, owner_user_id, occurrence_id, event_type, state,
+                    outcome, attrs_json, occurred_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(run_id),
+                    owner,
+                    str(occurrence_id),
+                    event_type,
+                    state,
+                    outcome,
+                    self._json_value(
+                        {
+                            "attempt": attempt,
+                            "media_id": resolved_media_id,
+                            "run_status": run_status,
+                        }
+                    ),
+                    self._db_datetime(now),
+                ),
+            )
+            item_row = self._query(
+                db,
+                """
+                SELECT * FROM media_ingest_run_items
+                WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
+                """,
+                (owner, str(run_id), str(occurrence_id)),
+            ).fetchone()
+        return self._run_item_record(item_row), True
+
     def compare_and_set_run_item_state(
         self,
         owner_user_id: str,
@@ -3398,7 +3889,7 @@ class PlaylistIngestStore:
                 db,
                 """
                 UPDATE media_ingest_runs
-                SET batch_ids_json = ?, version = version + 1, updated_at = ?
+                SET status = 'running', batch_ids_json = ?, version = version + 1, updated_at = ?
                 WHERE owner_user_id = ? AND run_id = ? AND version = ?
                 """,
                 (self._json_value(batch_ids), self._db_datetime(now), owner, run_identity, version),

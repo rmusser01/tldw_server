@@ -309,7 +309,7 @@ git commit -m "feat: resolve playlist duplicate actions (TASK-12112)"
 
 **Tests:** Endpoint/worker tests, event replay tests, cancellation races, integration workflow.
 
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 7: Tighten media-job submission and worker boundaries
 
@@ -450,27 +450,29 @@ git commit -m "feat: bind media jobs to ingest occurrences (TASK-12110)"
 
 ### Task 8: Add run routes, reconciliation, event replay, cancellation, and retry
 
-- [ ] **Step 1: Write failing run-route tests**
+**Status:** Complete
+
+- [x] **Step 1: Write failing run-route tests**
 
 Cover run POST, summary, paginated items, SSE initial snapshot/replay/resync, a stream-only client observing job progress without polling, later chunk jobs appearing in the same stream, occurrence-scoped cancellation of unsent/accepted work, whole-run cancellation, `status_unavailable`, and retry after media reconciliation.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_endpoint.py -k run -q`
 
 Expected: FAIL because run routes are missing.
 
-- [ ] **Step 3: Implement run routes and reconciliation**
+- [x] **Step 3: Implement run routes and reconciliation**
 
 Run POST calls the service, executes terminal duplicate actions, and returns processing occurrences ready for bounded client chunks. Summary/items reconcile Jobs by stored mappings and append occurrence events only on actual changes. On every SSE cycle, call `reconcile_run_jobs(owner_id, run_id)` before reading new run events; it must query the current run/job mappings dynamically, compare state/progress/result, and transactionally append occurrence events/version changes. SSE then reads events by monotonically increasing ID; expired replay emits `resync_required`.
 
 Define `POST /ingest/runs/{run_id}/cancel` with optional body `{ occurrence_ids?: string[], reason?: string }`. Before a run exists, cancellation is client-local. Once a run exists, supplied occurrence IDs terminalize unsent items and cancel their accepted jobs; an omitted list cancels the whole run. Repeated requests are idempotent and completion may win the race.
 
-- [ ] **Step 4: Implement retry with media-first reconciliation**
+- [x] **Step 4: Implement retry with media-first reconciliation**
 
 Before incrementing attempt, query the current user's Media DB by normalized URL and planned item. If media exists, resolve terminally without a new job. Otherwise increment once with compare-and-set, clear the prior job mapping, and return the occurrence for resubmission.
 
-- [ ] **Step 5: Run tests and commit**
+- [x] **Step 5: Run tests and commit**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_endpoint.py tldw_Server_API/tests/MediaIngestion_NEW/integration/test_playlist_ingest_run_workflow.py -q`
 
@@ -478,8 +480,10 @@ Expected: PASS.
 
 ```bash
 git add tldw_Server_API/app/api/v1/endpoints/media/playlist_ingest.py tldw_Server_API/app/core/Ingestion_Media_Processing/Video/playlist_ingest_service.py tldw_Server_API/tests/MediaIngestion_NEW
-git commit -m "feat: track playlist ingest runs (TASK-12110)"
+git commit -m "feat: track playlist ingest runs (TASK-12112)"
 ```
+
+Final evidence: Task 8 route/workflow `64 passed`; complete Task 1–8 affected matrix `534 passed, 18 skipped`; Black and Ruff clean on eight touched Python files; four production modules compiled; `git diff --check` clean; Bandit zero findings across 7,267 LOC. The skips are fixture-declared PostgreSQL migration/store tests; the parity assertions were collected but not executed because the local fixture was unavailable. Independent reviews returned `✅ Spec compliant` and `Ready to proceed? Yes`.
 
 ## Stage 5: Capability rollout and release gates
 

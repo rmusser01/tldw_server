@@ -2102,6 +2102,55 @@ def test_run_completes_only_after_every_item_is_terminal(store):
     assert store.get_run("1", complete.run_id).status == "completed"
 
 
+def test_run_returns_to_staged_when_only_terminal_and_unsent_items_remain(store):
+    run = store.create_validated_run(
+        "1",
+        items=[
+            _validated_direct_record(occurrence_id="occ-bound"),
+            _validated_direct_record(
+                occurrence_id="occ-unsent",
+                source_url="https://example.com/unsent",
+                normalized_source_id="url:https://example.com/unsent",
+            ),
+        ],
+    )
+    with store._connection(write=True) as db:
+        store._query(
+            db,
+            """
+            UPDATE media_ingest_run_items
+            SET state = 'queued', job_id = 101
+            WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
+            """,
+            ("1", run.run_id, "occ-bound"),
+        )
+        store._query(
+            db,
+            "UPDATE media_ingest_runs SET status = 'running' WHERE owner_user_id = ? AND run_id = ?",
+            ("1", run.run_id),
+        )
+
+    store.reconcile_run_item_job(
+        "1",
+        run.run_id,
+        "occ-bound",
+        expected_job_id=101,
+        expected_attempt=1,
+        state="terminal",
+        outcome="completed",
+        progress_percent=100.0,
+        progress_message="done",
+        retryable=False,
+        media_id=55,
+    )
+
+    assert store.get_run("1", run.run_id).status == "staged"
+    assert {item.state for item in store.list_run_items("1", run.run_id, limit=10)} == {
+        "staged",
+        "terminal",
+    }
+
+
 def test_attach_collection_plan_rolls_back_every_mapping_on_failure(store, monkeypatch):
     run = store.create_validated_run(
         "1",

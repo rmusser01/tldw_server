@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
@@ -23,6 +24,17 @@ class _Clock:
         self.current += delta
 
 
+class _EndpointMediaDB:
+    def __init__(self) -> None:
+        self.rows: list[dict] = []
+
+    def get_media_by_urls(self, _urls, **_kwargs):
+        return list(self.rows)
+
+    def close_connection(self) -> None:
+        return None
+
+
 @pytest.fixture
 def preflight_api(tmp_path, monkeypatch):
     monkeypatch.setenv("TEST_MODE", "true")
@@ -35,6 +47,7 @@ def preflight_api(tmp_path, monkeypatch):
     from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
     from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
     from tldw_Server_API.app.api.v1.endpoints import media
+    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
     from tldw_Server_API.app.core.Jobs.manager import JobManager
 
     clock = _Clock()
@@ -51,8 +64,10 @@ def preflight_api(tmp_path, monkeypatch):
 
     app = FastAPI()
     app.include_router(media.router, prefix="/api/v1/media", tags=["media"])
+    app.include_router(ingest_jobs.router, prefix="/api/v1/media", tags=["media"])
     app.dependency_overrides[get_request_user] = current_user
     app.dependency_overrides[get_job_manager] = lambda: manager
+    app.dependency_overrides[ingest_jobs.get_job_manager] = lambda: manager
     with TestClient(app, headers={"X-API-KEY": "test-api-key-12345"}) as client:
         yield client, manager, clock, owner
 
@@ -73,6 +88,51 @@ def _create_preflight(client: TestClient, playlist_id: str = "PLresource") -> di
 def _closure_values(callable_obj) -> list[object]:
     closure = getattr(callable_obj, "__closure__", None) or ()
     return [cell.cell_contents for cell in closure]
+
+
+def _install_endpoint_media_db(monkeypatch) -> _EndpointMediaDB:
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video import playlist_ingest_service
+
+    media_db = _EndpointMediaDB()
+    monkeypatch.setattr(playlist_ingest_service, "_owner_media_db", lambda _owner: media_db)
+    return media_db
+
+
+def _create_run(client: TestClient, *occurrence_ids: str) -> dict:
+    response = client.post(
+        "/api/v1/media/ingest/runs",
+        json={
+            "inputs": [
+                {
+                    "input_kind": "direct_url",
+                    "occurrence_id": occurrence_id,
+                    "url": f"https://example.com/{occurrence_id}",
+                    "source_kind": "video",
+                    "display_metadata": {"title": occurrence_id},
+                }
+                for occurrence_id in occurrence_ids
+            ],
+            "review_overrides": {},
+            "processing_options": {"media_type": "video"},
+        },
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def _submit_run_occurrences(client: TestClient, run_id: str, *occurrence_ids: str) -> dict:
+    response = client.post(
+        "/api/v1/media/ingest/jobs",
+        data={
+            "media_type": "video",
+            "run_id": run_id,
+            "urls": [f"https://example.com/{occurrence_id}" for occurrence_id in occurrence_ids],
+            "occurrence_ids": json.dumps(list(occurrence_ids)),
+            "attempts": json.dumps([1] * len(occurrence_ids)),
+        },
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
 
 
 def _ready_snapshot(manager, owner: str, preflight_id: str) -> None:
@@ -780,3 +840,488 @@ def test_preflight_response_links_include_deployment_root_path(tmp_path, monkeyp
     assert response.status_code == 202, response.text
     assert response.json()["status_url"].startswith("/deployment/api/v1/media/playlist-preflights/")
     assert response.json()["items_url"] == f"{response.json()['status_url']}/items"
+
+
+def test_run_post_resolves_terminal_actions_and_returns_authoritative_processing_occurrences(
+    preflight_api,
+    monkeypatch,
+):
+    client, _manager, _clock, _owner = preflight_api
+    media_db = _install_endpoint_media_db(monkeypatch)
+    media_db.rows = [{"id": 41, "url": "https://example.com/existing"}]
+
+    response = client.post(
+        "/api/v1/media/ingest/runs",
+        json={
+            "inputs": [
+                {
+                    "input_kind": "direct_url",
+                    "occurrence_id": "occ-existing",
+                    "url": "https://example.com/existing",
+                    "display_metadata": {"title": "Existing"},
+                },
+                {
+                    "input_kind": "direct_url",
+                    "occurrence_id": "occ-new",
+                    "url": "https://example.com/new",
+                    "display_metadata": {"title": "New"},
+                },
+            ],
+            "review_overrides": {
+                "occ-existing": {
+                    "duplicate_policy": "skip",
+                    "existing_media_id": 41,
+                }
+            },
+            "processing_options": {"media_type": "video"},
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["contract_version"] == 2
+    assert body["status_url"].endswith(f"/ingest/runs/{body['run_id']}")
+    assert body["items_url"] == f"{body['status_url']}/items"
+    assert body["events_url"] == f"{body['status_url']}/events/stream"
+    assert body["processing_occurrences"] == [
+        {
+            "occurrence_id": "occ-new",
+            "ordinal": 2,
+            "input_kind": "direct_url",
+            "source_url": "https://example.com/new",
+            "source_kind": "generic_url",
+            "display_metadata": {"title": "New"},
+            "state": "staged",
+            "outcome": None,
+            "job_id": None,
+            "batch_id": None,
+            "attempt": 1,
+            "planned_collection_item_id": None,
+        }
+    ]
+
+    summary = client.get(body["status_url"])
+    assert summary.status_code == 200, summary.text
+    assert summary.json()["counts"] == {
+        "total": 2,
+        "staged": 1,
+        "terminal": 1,
+        "skipped_existing": 1,
+    }
+
+
+def test_run_summary_and_items_are_owner_scoped_and_paginated(preflight_api, monkeypatch):
+    client, _manager, _clock, owner = preflight_api
+    _install_endpoint_media_db(monkeypatch)
+    created = _create_run(client, "occ-one", "occ-two", "occ-three")
+
+    first = client.get(created["items_url"], params={"limit": 2})
+    assert first.status_code == 200, first.text
+    assert [item["occurrence_id"] for item in first.json()["items"]] == ["occ-one", "occ-two"]
+    assert first.json()["version"] >= 2
+    assert first.json()["next_cursor"]
+
+    second = client.get(
+        created["items_url"],
+        params={"limit": 2, "cursor": first.json()["next_cursor"]},
+    )
+    assert second.status_code == 200, second.text
+    assert [item["occurrence_id"] for item in second.json()["items"]] == ["occ-three"]
+    assert second.json()["next_cursor"] is None
+
+    owner["id"] = 2
+    assert client.get(created["status_url"]).status_code == 404
+    assert client.get(created["items_url"]).status_code == 404
+
+
+def test_run_summary_returns_to_staged_after_only_bound_item_completes(
+    preflight_api,
+    monkeypatch,
+):
+    client, manager, _clock, _owner = preflight_api
+    _install_endpoint_media_db(monkeypatch)
+    created = _create_run(client, "occ-bound", "occ-unsent")
+    submitted = _submit_run_occurrences(client, created["run_id"], "occ-bound")
+    job_id = int(submitted["submissions"][0]["job_id"])
+    claimed = manager.acquire_next_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="media_ingest_item",
+        worker_id="aggregate-status-worker",
+        lease_seconds=120,
+    )
+    assert claimed is not None
+    assert int(claimed["id"]) == job_id
+    assert manager.complete_job(
+        job_id,
+        result={
+            "run_id": created["run_id"],
+            "occurrence_id": "occ-bound",
+            "attempt": 1,
+            "media_id": 55,
+        },
+        enforce=False,
+    )
+
+    response = client.get(created["status_url"])
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "staged"
+    assert response.json()["counts"]["staged"] == 1
+    assert response.json()["counts"]["terminal"] == 1
+
+
+def test_run_occurrence_cancel_terminalizes_unsent_and_cancels_accepted_job(
+    preflight_api,
+    monkeypatch,
+):
+    client, manager, _clock, _owner = preflight_api
+    _install_endpoint_media_db(monkeypatch)
+    created = _create_run(client, "occ-accepted", "occ-unsent", "occ-keep")
+    submitted = _submit_run_occurrences(client, created["run_id"], "occ-accepted")
+    accepted_job_id = int(submitted["submissions"][0]["job_id"])
+    assert client.get(created["status_url"]).json()["status"] == "running"
+
+    response = client.post(
+        f"{created['status_url']}/cancel",
+        json={"occurrence_ids": ["occ-accepted", "occ-unsent"], "reason": "user_removed"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert manager.get_job(accepted_job_id)["status"] == "cancelled"
+    items = {item["occurrence_id"]: item for item in client.get(created["items_url"]).json()["items"]}
+    assert items["occ-accepted"]["state"] == "terminal"
+    assert items["occ-accepted"]["outcome"] == "cancelled"
+    assert items["occ-unsent"]["state"] == "terminal"
+    assert items["occ-unsent"]["outcome"] == "cancelled"
+    assert items["occ-keep"]["state"] == "staged"
+
+    repeated = client.post(
+        f"{created['status_url']}/cancel",
+        json={"occurrence_ids": ["occ-accepted", "occ-unsent"], "reason": "user_removed"},
+    )
+    assert repeated.status_code == 200, repeated.text
+    assert repeated.json()["version"] == response.json()["version"]
+
+
+def test_run_cancel_does_not_cancel_job_with_mismatched_payload_binding(
+    preflight_api,
+    monkeypatch,
+):
+    client, manager, _clock, _owner = preflight_api
+    _install_endpoint_media_db(monkeypatch)
+    created = _create_run(client, "occ-mismatch")
+    submitted = _submit_run_occurrences(client, created["run_id"], "occ-mismatch")
+    job_id = int(submitted["submissions"][0]["job_id"])
+    job = manager.get_job(job_id)
+    binding = manager.normalize_job_binding_view(job, owner_user_id="1")
+    assert binding is not None
+    payload = dict(binding["payload"])
+    payload["occurrence_id"] = "occ-other"
+    connection = manager._connect()
+    try:
+        connection.execute("UPDATE jobs SET payload = ? WHERE id = ?", (json.dumps(payload), job_id))
+        connection.commit()
+    finally:
+        connection.close()
+
+    response = client.post(
+        f"{created['status_url']}/cancel",
+        json={"occurrence_ids": ["occ-mismatch"]},
+    )
+
+    assert response.status_code == 200, response.text
+    assert manager.get_job(job_id)["status"] == "queued"
+    item = client.get(created["items_url"]).json()["items"][0]
+    assert item["state"] == "status_unavailable"
+    assert item["outcome"] is None
+
+
+def test_run_cancel_does_not_cancel_cross_owner_job_from_corrupt_stored_id(
+    preflight_api,
+    monkeypatch,
+):
+    client, manager, _clock, _owner = preflight_api
+    _install_endpoint_media_db(monkeypatch)
+    created = _create_run(client, "occ-cross-owner")
+    _submit_run_occurrences(client, created["run_id"], "occ-cross-owner")
+    item = client.get(created["items_url"]).json()["items"][0]
+    other_job = manager.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="media_ingest_item",
+        payload={
+            "run_id": created["run_id"],
+            "occurrence_id": "occ-cross-owner",
+            "attempt": 1,
+        },
+        owner_user_id="2",
+        batch_group=item["batch_id"],
+        idempotency_key="other-owner-job",
+    )
+    other_job_id = int(other_job["id"])
+    connection = manager._connect()
+    try:
+        connection.execute(
+            """
+            UPDATE media_ingest_run_items SET job_id = ?
+            WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
+            """,
+            (other_job_id, "1", created["run_id"], "occ-cross-owner"),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    response = client.post(
+        f"{created['status_url']}/cancel",
+        json={"occurrence_ids": ["occ-cross-owner"]},
+    )
+
+    assert response.status_code == 200, response.text
+    assert manager.get_job(other_job_id)["status"] == "queued"
+    current = client.get(created["items_url"]).json()["items"][0]
+    assert current["state"] == "status_unavailable"
+    assert current["outcome"] is None
+
+
+def test_run_cancel_without_occurrences_cancels_whole_run(preflight_api, monkeypatch):
+    client, _manager, _clock, _owner = preflight_api
+    _install_endpoint_media_db(monkeypatch)
+    created = _create_run(client, "occ-one", "occ-two")
+
+    response = client.post(f"{created['status_url']}/cancel", json={"reason": "stop_all"})
+
+    assert response.status_code == 200, response.text
+    items = client.get(created["items_url"]).json()["items"]
+    assert {(item["state"], item["outcome"]) for item in items} == {("terminal", "cancelled")}
+
+
+def test_run_cancel_without_body_cancels_whole_run(preflight_api, monkeypatch):
+    client, _manager, _clock, _owner = preflight_api
+    _install_endpoint_media_db(monkeypatch)
+    created = _create_run(client, "occ-one", "occ-two")
+
+    response = client.post(f"{created['status_url']}/cancel")
+
+    assert response.status_code == 200, response.text
+    items = client.get(created["items_url"]).json()["items"]
+    assert {(item["state"], item["outcome"]) for item in items} == {("terminal", "cancelled")}
+
+
+def test_run_cancel_openapi_body_is_an_optional_object(preflight_api):
+    client, _manager, _clock, _owner = preflight_api
+
+    operation = client.get("/openapi.json").json()["paths"]["/api/v1/media/ingest/runs/{run_id}/cancel"]["post"]
+    request_body = operation["requestBody"]
+    schema = request_body["content"]["application/json"]["schema"]
+
+    assert request_body["required"] is False
+    assert schema["type"] == "object"
+
+
+@pytest.mark.parametrize(
+    ("request_kwargs", "expected_status", "expected_detail"),
+    [
+        ({"params": {"after_id": 2**63}}, 422, None),
+        ({"headers": {"Last-Event-ID": str(2**63)}}, 400, "invalid_last_event_id"),
+    ],
+)
+def test_run_sse_rejects_cursors_outside_database_integer_range(
+    preflight_api,
+    monkeypatch,
+    request_kwargs,
+    expected_status,
+    expected_detail,
+):
+    client, _manager, _clock, _owner = preflight_api
+    monkeypatch.setenv("PLAYLIST_RUN_SSE_POLL_INTERVAL", "0.01")
+    monkeypatch.setenv("PLAYLIST_RUN_SSE_TEST_MAX_SECONDS", "0.05")
+    _install_endpoint_media_db(monkeypatch)
+    created = _create_run(client, "occ-cursor-range")
+
+    response = client.get(created["events_url"], **request_kwargs)
+
+    assert response.status_code == expected_status
+    if expected_detail is not None:
+        assert response.json()["detail"] == expected_detail
+
+
+@pytest.mark.parametrize(
+    ("raw_value", "expected"),
+    [
+        ("", 1.0),
+        ("invalid", 1.0),
+        ("0", 1.0),
+        ("-1", 1.0),
+        ("nan", 1.0),
+        ("inf", 1.0),
+        ("-inf", 1.0),
+        ("0.000001", 0.01),
+        ("120", 60.0),
+        ("0.25", 0.25),
+    ],
+)
+def test_run_sse_poll_seconds_are_finite_positive_and_bounded(
+    monkeypatch,
+    raw_value,
+    expected,
+):
+    from tldw_Server_API.app.api.v1.endpoints.media import playlist_ingest
+
+    monkeypatch.setenv("TLDW_PLAYLIST_INGEST_SSE_POLL_SECONDS", raw_value)
+
+    assert playlist_ingest._playlist_ingest_sse_poll_seconds() == expected
+
+
+@pytest.mark.parametrize("payload", [[], False, 0, ""])
+def test_run_cancel_rejects_falsy_non_object_body_without_mutation(
+    preflight_api,
+    monkeypatch,
+    payload,
+):
+    client, _manager, _clock, _owner = preflight_api
+    _install_endpoint_media_db(monkeypatch)
+    created = _create_run(client, "occ-one", "occ-two")
+
+    response = client.post(f"{created['status_url']}/cancel", json=payload)
+
+    assert response.status_code == 422, response.text
+    assert response.json() == {"detail": "invalid_run_cancel_request"}
+    items = client.get(created["items_url"]).json()["items"]
+    assert {(item["state"], item["outcome"]) for item in items} == {("staged", None)}
+
+
+def test_run_cancel_allows_completed_job_to_win_race(preflight_api, monkeypatch):
+    client, manager, _clock, _owner = preflight_api
+    _install_endpoint_media_db(monkeypatch)
+    created = _create_run(client, "occ-complete")
+    _submit_run_occurrences(client, created["run_id"], "occ-complete")
+    claimed = manager.acquire_next_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="media_ingest_item",
+        worker_id="completion-wins",
+        lease_seconds=120,
+    )
+    assert claimed is not None
+    assert manager.complete_job(
+        int(claimed["id"]),
+        result={
+            "run_id": created["run_id"],
+            "occurrence_id": "occ-complete",
+            "attempt": 1,
+            "media_id": 91,
+            "status": "Success",
+        },
+        enforce=False,
+    )
+
+    response = client.post(
+        f"{created['status_url']}/cancel",
+        json={"occurrence_ids": ["occ-complete"]},
+    )
+
+    assert response.status_code == 200, response.text
+    item = client.get(created["items_url"]).json()["items"][0]
+    assert item["state"] == "terminal"
+    assert item["outcome"] == "completed"
+    assert item["media_id"] == 91
+
+
+def test_run_summary_reports_status_unavailable_without_leaking_job_error(
+    preflight_api,
+    monkeypatch,
+):
+    client, manager, _clock, _owner = preflight_api
+    _install_endpoint_media_db(monkeypatch)
+    created = _create_run(client, "occ-lost")
+    submitted = _submit_run_occurrences(client, created["run_id"], "occ-lost")
+    job_id = int(submitted["submissions"][0]["job_id"])
+    connection = manager._connect()
+    try:
+        connection.execute(
+            "UPDATE jobs SET last_error = ?, error_message = ? WHERE id = ?",
+            ("postgres://secret@internal", "token=do-not-return", job_id),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    monkeypatch.setattr(manager, "get_job_or_archived", lambda *_args, **_kwargs: None)
+    summary = client.get(created["status_url"])
+
+    assert summary.status_code == 200, summary.text
+    item = client.get(created["items_url"]).json()["items"][0]
+    assert item["state"] == "status_unavailable"
+    assert item["outcome"] is None
+    assert "do-not-return" not in summary.text
+    assert "secret" not in summary.text
+
+
+def test_run_retry_resolves_media_before_incrementing_attempt(preflight_api, monkeypatch):
+    client, manager, _clock, _owner = preflight_api
+    media_db = _install_endpoint_media_db(monkeypatch)
+    created = _create_run(client, "occ-retry")
+    _submit_run_occurrences(client, created["run_id"], "occ-retry")
+    claimed = manager.acquire_next_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="media_ingest_item",
+        worker_id="retry-failure",
+        lease_seconds=120,
+    )
+    assert claimed is not None
+    assert manager.fail_job(int(claimed["id"]), error="private failure", retryable=False, enforce=False)
+    assert client.get(created["status_url"]).status_code == 200
+    media_db.rows = [{"id": 77, "url": "https://example.com/occ-retry"}]
+
+    response = client.post(
+        f"{created['status_url']}/retry",
+        json={"occurrence_ids": ["occ-retry"]},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["processing_occurrences"] == []
+    item = client.get(created["items_url"]).json()["items"][0]
+    assert item["state"] == "terminal"
+    assert item["outcome"] == "completed"
+    assert item["media_id"] == 77
+    assert item["attempt"] == 1
+    assert len(manager.list_jobs(domain="media_ingest", owner_user_id="1", limit=10)) == 1
+
+
+def test_run_retry_cas_increments_once_and_clears_prior_job_mapping(preflight_api, monkeypatch):
+    client, manager, _clock, _owner = preflight_api
+    _install_endpoint_media_db(monkeypatch)
+    created = _create_run(client, "occ-retry")
+    _submit_run_occurrences(client, created["run_id"], "occ-retry")
+    claimed = manager.acquire_next_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="media_ingest_item",
+        worker_id="retry-failure",
+        lease_seconds=120,
+    )
+    assert claimed is not None
+    assert manager.fail_job(int(claimed["id"]), error="failed", retryable=False, enforce=False)
+    assert client.get(created["status_url"]).status_code == 200
+
+    first = client.post(
+        f"{created['status_url']}/retry",
+        json={"occurrence_ids": ["occ-retry"]},
+    )
+    second = client.post(
+        f"{created['status_url']}/retry",
+        json={"occurrence_ids": ["occ-retry"]},
+    )
+
+    assert first.status_code == 200, first.text
+    assert first.json()["processing_occurrences"][0]["attempt"] == 2
+    assert first.json()["processing_occurrences"][0]["job_id"] is None
+    assert second.status_code == 200, second.text
+    assert second.json()["processing_occurrences"] == []
+    item = client.get(created["items_url"]).json()["items"][0]
+    assert item["attempt"] == 2
+    assert item["state"] == "staged"
+    assert item["job_id"] is None

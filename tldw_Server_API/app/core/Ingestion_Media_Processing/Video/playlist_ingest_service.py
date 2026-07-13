@@ -24,7 +24,7 @@ from tldw_Server_API.app.api.v1.schemas.media_playlist_ingest import (
     ReviewOverride,
     ReviewRequiredItem,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.api import get_media_by_urls
+from tldw_Server_API.app.core.DB_Management.media_db.api import get_media_by_id, get_media_by_urls
 from tldw_Server_API.app.core.DB_Management.media_db.dedupe_urls import (
     media_dedupe_url_candidates,
     normalize_media_dedupe_url,
@@ -32,6 +32,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.dedupe_urls import (
 from tldw_Server_API.app.core.DB_Management.media_db.errors import ConflictError, InputError
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
     _PREFLIGHT_JOB_SENTINEL,
+    MediaIngestRunItemRecord,
     MediaIngestRunRecord,
     PlaylistIngestConflictError,
     PlaylistIngestNotFoundError,
@@ -103,6 +104,10 @@ class PlaylistRunPendingError(PlaylistIngestConflictError):
     def __init__(self, run_id: str) -> None:
         self.run_id = str(run_id)
         super().__init__("duplicate_action_pending")
+
+
+class PlaylistRunStatusUnavailableError(PlaylistIngestConflictError):
+    """Raised when retry reconciliation cannot establish current owner media state."""
 
 
 class PlaylistPreflightRequiredError(PlaylistRunValidationError):
@@ -851,6 +856,264 @@ class PlaylistIngestService:
                     collections_db.close()
         return self._resolved_run_or_pending(owner, run.run_id)
 
+    @staticmethod
+    def _safe_progress_message(value: object) -> str | None:
+        if not isinstance(value, str):
+            return None
+        message = value.strip()
+        return message[:1000] if message else None
+
+    def _exact_run_item_job_binding(
+        self,
+        owner_user_id: str,
+        run_id: str,
+        item: MediaIngestRunItemRecord,
+        job: Mapping[str, Any] | None,
+        *,
+        expected_job_id: int,
+    ) -> dict[str, Any] | None:
+        """Return a Jobs binding only when every stored run authority matches."""
+        binding = self._jobs.normalize_job_binding_view(job, owner_user_id=owner_user_id)
+        payload = binding.get("payload") if binding is not None else None
+        if not (
+            binding is not None
+            and binding.get("id") == expected_job_id
+            and binding.get("domain") == "media_ingest"
+            and binding.get("queue") == item.submission_queue
+            and binding.get("job_type") == "media_ingest_item"
+            and binding.get("batch_group") == item.batch_id
+            and binding.get("idempotency_key") == item.idempotency_identity
+            and isinstance(payload, Mapping)
+            and payload.get("run_id") == run_id
+            and payload.get("occurrence_id") == item.occurrence_id
+            and type(payload.get("attempt")) is int
+            and payload.get("attempt") == item.attempt
+        ):
+            return None
+        return binding
+
+    def reconcile_run_jobs(
+        self,
+        owner_user_id: str,
+        run_id: str,
+    ) -> MediaIngestRunRecord:
+        """Reconcile every currently bound run occurrence from its exact Jobs row."""
+        owner = self._store._owner(owner_user_id)
+        with contextlib.suppress(PlaylistRunPendingError):
+            self.reconcile_nonprocessing_actions(owner, run_id)
+        run = self._store.get_run(owner, run_id)
+        items = list(self._store.list_run_items(owner, run.run_id, limit=500))
+        for item in items:
+            if item.job_id is None or item.state == "terminal":
+                continue
+            try:
+                job = self._jobs.get_job_or_archived(int(item.job_id), domain="media_ingest")
+                binding = self._exact_run_item_job_binding(
+                    owner,
+                    run.run_id,
+                    item,
+                    job,
+                    expected_job_id=int(item.job_id),
+                )
+            except Exception:  # noqa: BLE001 - a temporary status read failure is recoverable
+                job = None
+                binding = None
+            progress_percent = None
+            progress_message = None
+            media_id = None
+            retryable = False
+            outcome = None
+            if binding is None or not isinstance(job, Mapping):
+                state = "status_unavailable"
+            else:
+                raw_progress = job.get("progress_percent")
+                if type(raw_progress) in {int, float} and 0 <= float(raw_progress) <= 100:
+                    progress_percent = float(raw_progress)
+                progress_message = self._safe_progress_message(job.get("progress_message"))
+                job_status = str(binding.get("status") or "").lower()
+                if job_status == "queued":
+                    state = "cancellation_requested" if item.state == "cancellation_requested" else "queued"
+                elif job_status == "processing":
+                    state = "cancellation_requested" if item.state == "cancellation_requested" else "running"
+                elif job_status == "cancelled":
+                    state = "terminal"
+                    outcome = "cancelled"
+                elif job_status in {"failed", "quarantined"}:
+                    state = "terminal"
+                    outcome = "processing_failed"
+                    retryable = True
+                elif job_status == "completed":
+                    result = job.get("result")
+                    exact_result = (
+                        isinstance(result, Mapping)
+                        and result.get("run_id") == run.run_id
+                        and result.get("occurrence_id") == item.occurrence_id
+                        and type(result.get("attempt")) is int
+                        and result.get("attempt") == item.attempt
+                    )
+                    result_media_id = result.get("media_id") if exact_result else None
+                    if type(result_media_id) is int and result_media_id > 0:
+                        state = "terminal"
+                        outcome = "completed"
+                        media_id = result_media_id
+                    else:
+                        state = "terminal"
+                        outcome = "processing_failed"
+                        retryable = True
+                else:
+                    state = "status_unavailable"
+            self._store.reconcile_run_item_job(
+                owner,
+                run.run_id,
+                item.occurrence_id,
+                expected_job_id=int(item.job_id),
+                expected_attempt=item.attempt,
+                state=state,
+                outcome=outcome,
+                progress_percent=progress_percent,
+                progress_message=progress_message,
+                retryable=retryable,
+                media_id=media_id,
+            )
+        return self._store.get_run(owner, run.run_id)
+
+    def cancel_run(
+        self,
+        owner_user_id: str,
+        run_id: str,
+        *,
+        occurrence_ids: Sequence[str] | None,
+        reason: str | None,
+    ) -> MediaIngestRunRecord:
+        """Cancel selected occurrences, or every nonterminal occurrence when omitted."""
+        owner = self._store._owner(owner_user_id)
+        self.reconcile_run_jobs(owner, run_id)
+        items = list(self._store.list_run_items(owner, run_id, limit=500))
+        by_occurrence = {item.occurrence_id: item for item in items}
+        selected = list(by_occurrence) if occurrence_ids is None else list(occurrence_ids)
+        if any(occurrence_id not in by_occurrence for occurrence_id in selected):
+            raise PlaylistSelectionError("invalid_occurrence_selection")
+        for occurrence_id in selected:
+            item = by_occurrence[occurrence_id]
+            job = None
+            try:
+                if item.job_id is not None:
+                    job = self._jobs.get_job_or_archived(int(item.job_id), domain="media_ingest")
+                elif item.idempotency_identity and item.batch_id and item.submission_queue:
+                    job = self._jobs.get_job_by_idempotency(
+                        domain="media_ingest",
+                        queue=item.submission_queue,
+                        job_type="media_ingest_item",
+                        idempotency_key=item.idempotency_identity,
+                        owner_user_id=owner,
+                        batch_group=item.batch_id,
+                    )
+            except Exception:  # noqa: BLE001 - durable item fencing remains authoritative
+                job = None
+            changed = self._store.request_run_item_cancellation(
+                owner,
+                run_id,
+                occurrence_id,
+                expected_attempt=item.attempt,
+            )
+            if changed.state == "cancellation_requested" or (item.job_id is None and isinstance(job, Mapping)):
+                try:
+                    job_id = int(job.get("id")) if isinstance(job, Mapping) else int(changed.job_id)
+                    fresh_job = self._jobs.get_job_or_archived(job_id, domain="media_ingest")
+                    binding = self._exact_run_item_job_binding(
+                        owner,
+                        run_id,
+                        changed,
+                        fresh_job,
+                        expected_job_id=job_id,
+                    )
+                    if binding is None:
+                        continue
+                    self._jobs.cancel_job(job_id, reason=reason)
+                except Exception:  # noqa: BLE001 - the next reconciliation retries status observation
+                    logger.warning(
+                        "Playlist occurrence cancellation could not confirm Jobs state for run {} item {}",
+                        run_id,
+                        occurrence_id,
+                    )
+        return self.reconcile_run_jobs(owner, run_id)
+
+    def retry_run_items(
+        self,
+        owner_user_id: str,
+        run_id: str,
+        occurrence_ids: Sequence[str],
+    ) -> tuple[MediaIngestRunItemRecord, ...]:
+        """Media-first reconcile eligible failures, then CAS new attempts once."""
+        owner = self._store._owner(owner_user_id)
+        self.reconcile_run_jobs(owner, run_id)
+        items = {item.occurrence_id: item for item in self._store.list_run_items(owner, run_id, limit=500)}
+        selected = list(occurrence_ids)
+        if any(occurrence_id not in items for occurrence_id in selected):
+            raise PlaylistSelectionError("invalid_occurrence_selection")
+        eligible = [
+            items[occurrence_id]
+            for occurrence_id in selected
+            if items[occurrence_id].state == "terminal" and items[occurrence_id].retryable
+        ]
+        if not eligible:
+            return ()
+
+        urls = list(dict.fromkeys(item.source_url for item in eligible if item.source_url))
+        media_db = None
+        collections_db = None
+        try:
+            media_db = self._media_db_factory(owner)
+            rows = get_media_by_urls(media_db, urls) if urls else []
+            by_url: dict[str, int] = {}
+            for row in rows:
+                media_id = row.get("id")
+                if type(media_id) is not int or media_id < 1:
+                    continue
+                for candidate in media_dedupe_url_candidates(row.get("url")):
+                    by_url.setdefault(candidate, media_id)
+
+            retried: list[MediaIngestRunItemRecord] = []
+            for item in eligible:
+                resolved_media_id = next(
+                    (
+                        by_url[candidate]
+                        for candidate in media_dedupe_url_candidates(item.source_url)
+                        if candidate in by_url
+                    ),
+                    None,
+                )
+                if resolved_media_id is None and item.planned_collection_item_id is not None:
+                    if collections_db is None:
+                        collections_db = self._collections_db_factory(owner)
+                    planned = collections_db.get_media_collection_item(item.planned_collection_item_id)
+                    planned_media_id = getattr(planned, "media_id", None)
+                    if type(planned_media_id) is int and planned_media_id > 0:
+                        media = get_media_by_id(media_db, planned_media_id)
+                        if isinstance(media, Mapping) and type(media.get("id")) is int:
+                            resolved_media_id = int(media["id"])
+                updated, changed = self._store.retry_run_item(
+                    owner,
+                    run_id,
+                    item.occurrence_id,
+                    expected_attempt=item.attempt,
+                    resolved_media_id=resolved_media_id,
+                )
+                if changed and resolved_media_id is None:
+                    retried.append(updated)
+            return tuple(retried)
+        except (PlaylistIngestNotFoundError, PlaylistSelectionError):
+            raise
+        except Exception as exc:
+            raise PlaylistRunStatusUnavailableError("run_status_unavailable") from exc
+        finally:
+            if collections_db is not None:
+                with contextlib.suppress(Exception):
+                    collections_db.close()
+            if media_db is not None:
+                with contextlib.suppress(Exception):
+                    media_db.close_connection()
+
     def _resolved_run_or_pending(
         self,
         owner_user_id: str,
@@ -1124,6 +1387,7 @@ __all__ = [
     "PlaylistPreflightIncompleteError",
     "PlaylistPreflightUnavailableError",
     "PlaylistRunPendingError",
+    "PlaylistRunStatusUnavailableError",
     "PlaylistRunValidationError",
     "PlaylistSelectionError",
     "ReviewRequiredError",
