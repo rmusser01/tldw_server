@@ -38,7 +38,7 @@ def test_explicit_credentials_bypass_resolvers_and_copy_config(monkeypatch):
     assert request["api_key"] == "explicit-key"
     assert request["app_config"] == supplied_config
     assert request["app_config"] is not supplied_config
-    assert "credentials_resolved" not in request
+    assert request["credentials_resolved"] is True
 
 
 def test_explicit_missing_hosted_key_fails_safely(monkeypatch):
@@ -129,11 +129,16 @@ def test_explicit_absent_config_cannot_trigger_adapter_config_reload(monkeypatch
             credentials_resolved=True,
         )
     )
+    adapter_request = {**request, "app_config": dict(request["app_config"])}
+    adapter_request.pop("credentials_resolved")
 
-    result = moonshot_adapter.MoonshotAdapter().chat(request)
+    result = moonshot_adapter.MoonshotAdapter().chat(adapter_request)
 
     assert result["choices"][0]["message"]["content"] == "ok"
     assert session.urls == ["https://api.moonshot.cn/v1/chat/completions"]
+    assert type(request["app_config"]) is dict
+    assert request["app_config"] == {"moonshot_api": {}}
+    assert request["credentials_resolved"] is True
 
 
 def test_legacy_empty_config_still_allows_adapter_config_reload(monkeypatch):
@@ -152,3 +157,42 @@ def test_legacy_empty_config_still_allows_adapter_config_reload(monkeypatch):
     moonshot_adapter.MoonshotAdapter().chat(request)
 
     assert session.urls == ["https://legacy.example/v1/chat/completions"]
+
+
+@pytest.mark.parametrize(
+    ("provider", "section", "api_key"),
+    [
+        ("cohere", "cohere_api", "key"),
+        ("moonshot", "moonshot_api", "key"),
+        ("zai", "zai_api", "key"),
+        ("ollama", "ollama_api", None),
+    ],
+)
+def test_explicit_absent_config_is_plain_provider_scoped_mapping(provider, section, api_key):
+    _provider, request, _internal = chat_service._build_adapter_request_from_chat_args(
+        _args(
+            api_provider=provider,
+            api_key=api_key,
+            app_config=None,
+            credentials_resolved=True,
+        )
+    )
+
+    assert type(request["app_config"]) is dict
+    assert dict(request["app_config"]) == {section: {}}
+    assert request["credentials_resolved"] is True
+
+
+def test_explicit_missing_model_does_not_use_default_model_environment(monkeypatch):
+    monkeypatch.setenv("DEFAULT_MODEL_MOONSHOT", "server-env-model")
+
+    with pytest.raises(ChatConfigurationError, match="Model is required"):
+        chat_service._build_adapter_request_from_chat_args(
+            {
+                "api_provider": "moonshot",
+                "messages": [{"role": "user", "content": "hello"}],
+                "api_key": "explicit-key",
+                "app_config": None,
+                "credentials_resolved": True,
+            }
+        )

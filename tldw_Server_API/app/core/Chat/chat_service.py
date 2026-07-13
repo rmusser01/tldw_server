@@ -164,13 +164,6 @@ _CHAT_RUN_FIRST_METRIC_EXCEPTIONS: tuple[type[Exception], ...] = (
 )
 
 
-class _ResolvedAppConfig(dict[str, Any]):
-    """Empty resolved config that downstream adapters cannot treat as absent."""
-
-    def __bool__(self) -> bool:
-        return True
-
-
 _config = load_comprehensive_config()
 _chat_config: dict[str, str] = {}
 if _config and _config.has_section("Chat-Module"):
@@ -1832,6 +1825,7 @@ def _build_adapter_request_from_chat_args(chat_args: dict[str, Any]) -> tuple[st
         normalize_provider,
         resolve_provider_api_key_from_config,
         resolve_provider_model,
+        resolve_provider_section,
     )
     from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
 
@@ -1848,7 +1842,10 @@ def _build_adapter_request_from_chat_args(chat_args: dict[str, Any]) -> tuple[st
     credentials_resolved = chat_args.get("credentials_resolved") is True
     explicit_app_config = chat_args.get("app_config")
     if credentials_resolved:
-        app_config = _ResolvedAppConfig(copy.deepcopy(explicit_app_config or {}))
+        app_config = copy.deepcopy(explicit_app_config or {})
+        provider_section = resolve_provider_section(provider)
+        if provider_section:
+            app_config.setdefault(provider_section, {})
     else:
         app_config = (
             explicit_app_config
@@ -1857,7 +1854,13 @@ def _build_adapter_request_from_chat_args(chat_args: dict[str, Any]) -> tuple[st
         )
     model = chat_args.get("model")
     if model is None and app_config is not None:
-        model = resolve_provider_model(provider, app_config)
+        if credentials_resolved:
+            provider_config = app_config.get(resolve_provider_section(provider)) or {}
+            model = provider_config.get("model") or provider_config.get("model_id")
+            if provider == "mlx":
+                model = model or provider_config.get("model_path") or provider_config.get("mlx_model_path")
+        else:
+            model = resolve_provider_model(provider, app_config)
     if not model and not is_local_provider:
         raise ChatConfigurationError(provider=provider, message="Model is required for provider.")
 
@@ -1879,6 +1882,8 @@ def _build_adapter_request_from_chat_args(chat_args: dict[str, Any]) -> tuple[st
         "api_key": api_key,
         "app_config": app_config,
     }
+    if credentials_resolved:
+        request["credentials_resolved"] = True
 
     base_url_override = _resolve_base_url_override(provider, chat_args)
     if base_url_override:

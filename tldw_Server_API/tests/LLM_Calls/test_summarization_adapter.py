@@ -366,6 +366,13 @@ def test_explicit_absent_config_cannot_trigger_summary_adapter_reload(monkeypatc
         lambda: (_ for _ in ()).throw(AssertionError("adapter must not reload server config")),
     )
 
+    class CopyingMoonshotAdapter(moonshot_mod.MoonshotAdapter):
+        def chat(self, request, *, timeout=None):
+            copied_request = {**request, "app_config": dict(request["app_config"])}
+            return super().chat(copied_request, timeout=timeout)
+
+    monkeypatch.setattr(sgl, "get_registry", lambda: _Registry(CopyingMoonshotAdapter()))
+
     result = sgl.analyze(
         "moonshot",
         "hello",
@@ -400,3 +407,22 @@ def test_legacy_empty_config_still_allows_summary_adapter_reload(monkeypatch):
     )
 
     assert result == "legacy"
+
+
+@pytest.mark.unit
+def test_explicit_missing_summary_model_does_not_use_default_model_environment(monkeypatch):
+    monkeypatch.setenv("DEFAULT_MODEL_MOONSHOT", "server-env-model")
+    monkeypatch.setattr(sgl, "get_registry", lambda: _Registry(_Adapter()))
+
+    with pytest.raises(sgl.SummaryProviderError) as exc_info:
+        sgl.analyze(
+            "moonshot",
+            "hello",
+            None,
+            api_key="explicit-key",
+            app_config=None,
+            credentials_resolved=True,
+            raise_on_error=True,
+        )
+
+    assert exc_info.value.code == "missing_model"

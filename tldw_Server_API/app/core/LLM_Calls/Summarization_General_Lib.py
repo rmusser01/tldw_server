@@ -119,13 +119,6 @@ class SummaryProviderError(Exception):
         super().__init__(f"Summary provider error: {self.code} ({self.provider})")
 
 
-class _ResolvedAppConfig(dict[str, Any]):
-    """Empty resolved config that downstream adapters cannot treat as absent."""
-
-    def __bool__(self) -> bool:
-        return True
-
-
 def _summary_failure(
     *,
     code: str,
@@ -196,7 +189,10 @@ def _summarize_via_adapter(
         )
     explicit_credentials = credentials_resolved is True
     if explicit_credentials:
-        effective_app_config = _ResolvedAppConfig(copy.deepcopy(app_config or {}))
+        effective_app_config = copy.deepcopy(app_config or {})
+        provider_section = resolve_provider_section(provider)
+        if provider_section:
+            effective_app_config.setdefault(provider_section, {})
     else:
         effective_app_config = ensure_app_config(app_config if app_config is not None else loaded_config_data)
     adapter = get_registry().get_adapter(provider)
@@ -207,7 +203,15 @@ def _summarize_via_adapter(
             raise_on_error=raise_on_error,
             legacy_message=f"Error: LLM adapter unavailable for provider '{provider}'",
         )
-    model = model_override or resolve_provider_model(provider, effective_app_config)
+    if model_override:
+        model = model_override
+    elif explicit_credentials:
+        provider_config = effective_app_config.get(resolve_provider_section(provider)) or {}
+        model = provider_config.get("model") or provider_config.get("model_id")
+        if provider == "mlx":
+            model = model or provider_config.get("model_path") or provider_config.get("mlx_model_path")
+    else:
+        model = resolve_provider_model(provider, effective_app_config)
     if not model:
         return _summary_failure(
             code="missing_model",
