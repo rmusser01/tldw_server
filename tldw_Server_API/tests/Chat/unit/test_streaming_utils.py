@@ -742,6 +742,24 @@ class TestStreamingResponseHandlerIntegration:
 class TestSSENormalization:
     """Tests that upstream provider SSE frames are normalized to plain text chunks."""
 
+    @pytest.mark.parametrize("raw_text", ["id: assistant literal", "retry: assistant literal"])
+    async def test_raw_non_sse_control_prefix_is_assistant_content(self, raw_text):
+        handler = StreamingResponseHandler("conv_raw_control_prefix", "gpt-4")
+
+        async def provider_stream():
+            yield raw_text
+            yield "data: [DONE]\n\n"
+
+        messages = [message async for message in handler.safe_stream_generator(provider_stream())]
+        content_messages = [
+            json.loads(message[6 : message.index("\n")])
+            for message in messages
+            if message.startswith("data: ") and '"choices"' in message and '"content"' in message
+        ]
+
+        assert [message["choices"][0]["delta"]["content"] for message in content_messages] == [raw_text]
+        assert handler.full_response == [raw_text]
+
     @pytest.mark.parametrize("control_line", ["id: stream-7", "retry: 1500"])
     async def test_sse_control_only_line_is_not_assistant_content(self, control_line):
         handler = StreamingResponseHandler("conv_sse_control", "gpt-4")

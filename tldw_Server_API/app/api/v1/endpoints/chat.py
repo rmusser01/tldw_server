@@ -887,6 +887,7 @@ _PROVIDER_CREDENTIAL_MESSAGES = {
     "credential_store_unavailable": "Provider credential storage is temporarily unavailable.",
     "credential_scope_revoked": "The selected provider credential scope is no longer available.",
     "provider_configuration_invalid": "The selected provider configuration is invalid.",
+    "provider_unavailable": "The chat service provider is currently unavailable.",
 }
 _PROVIDER_STREAM_FALLBACK_ELIGIBLE = "_provider_stream_fallback_eligible"
 
@@ -896,7 +897,8 @@ class _SanitizedProviderStreamError(Exception):
 
     def __init__(self, code: str) -> None:
         self.code = code
-        super().__init__(f"{code}: {_PROVIDER_CREDENTIAL_MESSAGES[code]}")
+        public_code = "provider_unavailable" if code == _PROVIDER_STREAM_FALLBACK_ELIGIBLE else code
+        super().__init__(f"{public_code}: {_PROVIDER_CREDENTIAL_MESSAGES[public_code]}")
 
 
 class _ProviderCredentialTerminalError(RuntimeError):
@@ -941,7 +943,7 @@ def _provider_credential_http_exception_for_code(code: str) -> HTTPException:
     """Build a bounded downstream-provider response for an allow-listed code."""
     if code not in _PROVIDER_CREDENTIAL_MESSAGES:
         code = "provider_configuration_invalid"
-    if code == "provider_authentication_failed":
+    if code in {"provider_authentication_failed", "provider_unavailable"}:
         return HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={
@@ -1018,15 +1020,20 @@ def _attach_credential_runtime_cleanup(
         async def emit(chunk: Any):
             nonlocal has_output, error_emitted
             error_code, chunk_has_output, _ = _inspect_provider_stream_chunk(chunk)
+            if error_code == _PROVIDER_STREAM_FALLBACK_ELIGIBLE:
+                error_code = "provider_unavailable"
             has_output = has_output or chunk_has_output
             pending_code = (stream_error_state or {}).get("code")
-            if error_emitted and error_code == pending_code:
+            public_pending_code = (
+                "provider_unavailable" if pending_code == _PROVIDER_STREAM_FALLBACK_ELIGIBLE else pending_code
+            )
+            if error_emitted and error_code == public_pending_code:
                 return
             error_emitted = error_emitted or error_code is not None
             yield _provider_stream_error_frame_for_code(error_code) if error_code else chunk
-            if has_output and pending_code and not error_emitted:
+            if has_output and public_pending_code and not error_emitted:
                 error_emitted = True
-                yield _provider_stream_error_frame_for_code(pending_code)
+                yield _provider_stream_error_frame_for_code(public_pending_code)
 
         try:
             for chunk in initial_chunks:
@@ -1059,9 +1066,16 @@ def _provider_stream_error_frame_for_code(code: str) -> str:
 def _sanitized_provider_stream_error(exc: BaseException) -> _SanitizedProviderStreamError | None:
     """Return a bounded stream error for a typed provider credential failure."""
     code = _provider_credential_error_code(exc)
-    if code is None:
-        return None
-    return _SanitizedProviderStreamError(code)
+    if code is not None:
+        return _SanitizedProviderStreamError(code)
+    if isinstance(exc, ChatAPIError):
+        try:
+            status_code = int(getattr(exc, "status_code", 0) or 0)
+        except (TypeError, ValueError):
+            status_code = 0
+        if status_code >= 500:
+            return _SanitizedProviderStreamError(_PROVIDER_STREAM_FALLBACK_ELIGIBLE)
+    return None
 
 
 def _sanitize_provider_stream_call(
@@ -1126,14 +1140,17 @@ def _provider_stream_chunk_has_output(chunk: Any) -> bool:
     if has_output:
         return True
     raw_chunk = chunk.decode("utf-8", errors="replace") if isinstance(chunk, bytes) else str(chunk)
+    stripped_chunk = raw_chunk.lstrip("\ufeff\u200b\u200c\u200d\u2060")
+    is_sse_framed = (
+        "\n\n" in raw_chunk or "\r\n\r\n" in raw_chunk or stripped_chunk.startswith((":", "event:", "data:"))
+    )
     for raw_line in raw_chunk.splitlines():
         line = raw_line.strip()
         if (
             not line
             or line.startswith(":")
             or line.startswith("event:")
-            or line.startswith("id:")
-            or line.startswith("retry:")
+            or (is_sse_framed and line.startswith(("id:", "retry:")))
         ):
             continue
         if not line.startswith("data:"):
@@ -4579,16 +4596,17 @@ async def create_chat_completion(
                                 _record_openai_oauth_retry("success")
                             break
 
-                        if stream_error_code == _PROVIDER_STREAM_FALLBACK_ELIGIBLE:
+                        if (
+                            stream_error_code == _PROVIDER_STREAM_FALLBACK_ELIGIBLE
+                            and not stream_error_state.get("output_started")
+                            and not stream_has_output
+                        ):
                             await _close_provider_stream_response(stream_response)
                             fallback_provider = None
                             if allow_provider_fallback_for_request and provider_manager is not None:
                                 fallback_provider = provider_manager.get_available_provider(exclude=[selected_provider])
                             if not fallback_provider:
-                                raise HTTPException(
-                                    status_code=status.HTTP_502_BAD_GATEWAY,
-                                    detail="The chat service provider is currently unavailable.",
-                                )
+                                raise _provider_credential_http_exception_for_code("provider_unavailable")
                             try:
                                 refreshed_args, refreshed_model = await rebuild_call_params_for_provider(
                                     fallback_provider
@@ -4605,6 +4623,9 @@ async def create_chat_completion(
                             model = refreshed_model or model
                             llm_call_func = partial(perform_chat_api_call, **cleaned_args)
                             continue
+
+                        if stream_error_code == _PROVIDER_STREAM_FALLBACK_ELIGIBLE:
+                            stream_error_code = "provider_unavailable"
 
                         if stream_error_state.get("output_started"):
                             # The HTTP response has to remain a stream once the provider has

@@ -38,7 +38,8 @@ _STREAMING_NONCRITICAL_EXCEPTIONS = (
     json.JSONDecodeError,
 )
 
-_SSE_CONTROL_PREFIXES = (":", "event:", "id:", "retry:")
+_SSE_CONTROL_PREFIXES = (":", "event:")
+_SSE_FRAMED_CONTROL_PREFIXES = ("id:", "retry:")
 
 _config = load_comprehensive_config()
 # ConfigParser uses sections, check if Chat-Module section exists
@@ -162,9 +163,12 @@ def _extract_text_from_upstream_sse(chunk_str: str) -> tuple[Optional[str], Opti
 
     # Normalize common invisible prefixes (BOM, zero-width spaces) and trim whitespace
     s = chunk_str.lstrip("\ufeff\u200b\u200c\u200d\u2060").strip()
+    is_sse_framed = "\n\n" in chunk_str or "\r\n\r\n" in chunk_str or s.startswith((":", "event:", "data:"))
 
     # Ignore SSE control-only lines from upstream
-    if s.startswith(_SSE_CONTROL_PREFIXES) and "data:" not in s:
+    if (
+        s.startswith(_SSE_CONTROL_PREFIXES) or (is_sse_framed and s.startswith(_SSE_FRAMED_CONTROL_PREFIXES))
+    ) and "data:" not in s:
         return None, None, False
 
     # If any 'data:' line exists, try to parse; some providers send 'event:' + 'data:' pairs or multiple frames
@@ -176,12 +180,12 @@ def _extract_text_from_upstream_sse(chunk_str: str) -> tuple[Optional[str], Opti
             ls = line.lstrip("\ufeff\u200b\u200c\u200d\u2060").strip()
             if not ls:
                 continue
-            if ls.startswith(_SSE_CONTROL_PREFIXES):
+            if ls.startswith(_SSE_CONTROL_PREFIXES) or ls.startswith(_SSE_FRAMED_CONTROL_PREFIXES):
                 # Skip SSE control fields
                 continue
             if not ls.startswith("data:"):
                 continue
-            payload_str = ls[len("data:"):].strip()
+            payload_str = ls[len("data:") :].strip()
             if payload_str == "[DONE]":
                 saw_done = True
                 continue
@@ -579,6 +583,7 @@ class StreamingResponseHandler:
         save_callback: Optional[callable] = None,
         finalize_callback: Optional[callable] = None,
         before_success_callback: Optional[Callable[[], Any]] = None,
+        on_first_output: Optional[Callable[[], Any]] = None,
     ) -> AsyncIterator[str]:
         """
         Safely generate streaming responses with error handling and cleanup.
@@ -587,6 +592,7 @@ class StreamingResponseHandler:
             stream: The stream to process (sync or async iterator)
             save_callback: Optional callback to save the full response
             finalize_callback: Optional callback invoked on error/cancel to finalize state
+            on_first_output: Optional callback invoked once before transforming valid provider output
 
         Yields:
             SSE formatted messages
@@ -605,6 +611,14 @@ class StreamingResponseHandler:
             def iter_logical_lines(raw_chunk: str) -> list[str]:
                 return raw_chunk.splitlines() if ("\n" in raw_chunk or raw_chunk.count("data:") > 1) else [raw_chunk]
 
+            def is_sse_framed(raw_chunk: str) -> bool:
+                stripped_chunk = raw_chunk.lstrip("\ufeff\u200b\u200c\u200d\u2060")
+                return (
+                    "\n\n" in raw_chunk
+                    or "\r\n\r\n" in raw_chunk
+                    or stripped_chunk.startswith((":", "event:", "data:"))
+                )
+
             def append_content(text_piece: str) -> bool:
                 if not text_piece:
                     return True
@@ -621,16 +635,37 @@ class StreamingResponseHandler:
                 self.response_size += chunk_size
                 return True
 
-            def process_line(raw_line: str) -> tuple[list[str], bool]:
+            first_output_pending = False
+            first_output_notified = False
+
+            async def notify_first_output() -> None:
+                nonlocal first_output_pending, first_output_notified
+                if not first_output_pending or first_output_notified:
+                    return
+                first_output_pending = False
+                first_output_notified = True
+                if not callable(on_first_output):
+                    return
+                try:
+                    maybe_result = on_first_output()
+                    if hasattr(maybe_result, "__await__"):
+                        await maybe_result
+                except _STREAMING_NONCRITICAL_EXCEPTIONS as callback_error:
+                    logger.debug("First-output callback failed for {}: {}", self.conversation_id, callback_error)
+
+            def process_line(raw_line: str, *, sse_framed: bool) -> tuple[list[str], bool]:
+                nonlocal first_output_pending
                 outputs: list[str] = []
                 stripped_leading = raw_line.lstrip("\ufeff\u200b\u200c\u200d\u2060")
                 candidate = stripped_leading.strip()
                 if not candidate and not stripped_leading:
                     return outputs, False
-                if candidate.startswith(_SSE_CONTROL_PREFIXES):
+                if candidate.startswith(_SSE_CONTROL_PREFIXES) or (
+                    sse_framed and candidate.startswith(_SSE_FRAMED_CONTROL_PREFIXES)
+                ):
                     return outputs, False
                 if candidate.startswith("data:"):
-                    payload_str = candidate[len("data:"):].strip()
+                    payload_str = candidate[len("data:") :].strip()
                     if payload_str == "[DONE]":
                         # Defer terminal DONE until after stream_end metadata is emitted.
                         self.upstream_done_received = True
@@ -667,12 +702,16 @@ class StreamingResponseHandler:
 
                                 tool_calls_delta = delta.get("tool_calls")
                                 if tool_calls_delta:
+                                    first_output_pending = True
                                     self._accumulate_tool_calls(tool_calls_delta)
                                 function_call_delta = delta.get("function_call")
                                 if function_call_delta:
+                                    first_output_pending = True
                                     self._accumulate_function_call(function_call_delta)
                                 if "content" in delta and delta["content"] is not None:
                                     text_piece = str(delta["content"])
+                                    if text_piece:
+                                        first_output_pending = True
                                     try:
                                         if self.text_transform:
                                             text_piece = self.text_transform(text_piece)
@@ -690,7 +729,9 @@ class StreamingResponseHandler:
                                     except StopIteration:
                                         return outputs, True
                                     except _STREAMING_NONCRITICAL_EXCEPTIONS as transform_err:
-                                        logger.error(f"text_transform failed for {self.conversation_id}: {transform_err}")
+                                        logger.error(
+                                            f"text_transform failed for {self.conversation_id}: {transform_err}"
+                                        )
                                         err_payload = {
                                             "error": {
                                                 "message": "Stream transform failed",
@@ -721,6 +762,8 @@ class StreamingResponseHandler:
                 text_piece = stripped_leading
                 with contextlib.suppress(_STREAMING_NONCRITICAL_EXCEPTIONS):
                     text_piece = str(text_piece)
+                if text_piece:
+                    first_output_pending = True
                 try:
                     if self.text_transform:
                         text_piece = self.text_transform(text_piece)
@@ -763,7 +806,7 @@ class StreamingResponseHandler:
                 return outputs, False
 
             # Process the stream
-            async_stream = stream if hasattr(stream, '__aiter__') else None
+            async_stream = stream if hasattr(stream, "__aiter__") else None
             if async_stream is None and STREAMING_SYNC_BRIDGE_ENABLED:
                 async_stream = _async_iter_sync_stream(stream)
 
@@ -780,10 +823,12 @@ class StreamingResponseHandler:
                         break
 
                     try:
-                        raw_str = chunk.decode('utf-8', errors='replace') if isinstance(chunk, bytes) else str(chunk)
+                        raw_str = chunk.decode("utf-8", errors="replace") if isinstance(chunk, bytes) else str(chunk)
                         stop_stream = False
+                        sse_framed = is_sse_framed(raw_str)
                         for logical_line in iter_logical_lines(raw_str):
-                            outputs, should_stop = process_line(logical_line)
+                            outputs, should_stop = process_line(logical_line, sse_framed=sse_framed)
+                            await notify_first_output()
                             for out in outputs:
                                 yield out
                             if should_stop:
@@ -804,6 +849,7 @@ class StreamingResponseHandler:
                     f"Using blocking sync iterator for {self.conversation_id}. "
                     "Set STREAMING_SYNC_BRIDGE_ENABLED=true for non-blocking behavior."
                 )
+
                 def sync_iterator():
                     try:
                         for chunk in stream:
@@ -823,10 +869,12 @@ class StreamingResponseHandler:
                         break
 
                     try:
-                        raw_str = chunk.decode('utf-8', errors='replace') if isinstance(chunk, bytes) else str(chunk)
+                        raw_str = chunk.decode("utf-8", errors="replace") if isinstance(chunk, bytes) else str(chunk)
                         stop_stream = False
+                        sse_framed = is_sse_framed(raw_str)
                         for logical_line in iter_logical_lines(raw_str):
-                            outputs, should_stop = process_line(logical_line)
+                            outputs, should_stop = process_line(logical_line, sse_framed=sse_framed)
+                            await notify_first_output()
                             for out in outputs:
                                 yield out
                             if should_stop:
@@ -1093,6 +1141,7 @@ async def create_streaming_response_with_timeout(
     save_callback: Optional[callable] = None,
     finalize_callback: Optional[callable] = None,
     before_success_callback: Optional[Callable[[], Any]] = None,
+    on_first_output: Optional[Callable[[], Any]] = None,
     idle_timeout: int = STREAMING_IDLE_TIMEOUT,
     heartbeat_interval: int = HEARTBEAT_INTERVAL,
     text_transform: Optional[callable] = None,
@@ -1108,6 +1157,7 @@ async def create_streaming_response_with_timeout(
         model_name: Name of the model
         save_callback: Optional callback to save the response
         finalize_callback: Optional callback invoked on error/cancel to finalize state
+        on_first_output: Optional callback invoked once before transforming valid provider output
         idle_timeout: Timeout for idle connections
         heartbeat_interval: Interval for heartbeat messages
         system_message_id: Optional system message ID to echo in stream_end payload
@@ -1134,6 +1184,7 @@ async def create_streaming_response_with_timeout(
             save_callback,
             finalize_callback,
             before_success_callback,
+            on_first_output,
         )
         heartbeats_enabled = isinstance(heartbeat_interval, (int, float)) and heartbeat_interval > 0
         heartbeat_gen = handler.heartbeat_generator() if heartbeats_enabled else None

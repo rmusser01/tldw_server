@@ -18,6 +18,7 @@ from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
+    ChatAPIError,
     ChatAuthenticationError,
     ChatConfigurationError,
     ChatProviderError,
@@ -1535,7 +1536,7 @@ def test_streaming_delayed_sse_controls_do_not_cross_credential_handoff(
         yield "retry: 2500\n\n"
         await asyncio.sleep(0)
         yield ": keepalive\n\n"
-        await asyncio.sleep(0.01)
+        await asyncio.sleep(0)
         raise ChatAuthenticationError("sentinel delayed control auth", provider="openai")
 
     async def refreshed_stream():
@@ -1685,9 +1686,12 @@ def test_execution_fallback_lazy_stream_auth_uses_active_oauth_state(
         yield 'data: {"choices":[{"delta":{"content":"recovered"}}]}\n\n'
         yield "data: [DONE]\n\n"
 
-    def fallback_stream():
+    usage_before_failure = []
+
+    async def fallback_stream():
         if partial_output:
             yield 'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'
+            usage_before_failure.append(list(runtime_type.instances[0].marked_used))
         raise ChatAuthenticationError("sentinel fallback stream auth", provider="openai")
 
     with (
@@ -1716,6 +1720,8 @@ def test_execution_fallback_lazy_stream_auth_uses_active_oauth_state(
         assert "recovered" not in response.text
         assert provider_call.call_count == 2
         assert ("openai", True) not in runtime_type.instances[0].resolve_calls
+        assert runtime_type.instances[0].marked_used == ["openai"]
+        assert usage_before_failure == [["openai"]]
     else:
         assert "recovered" in response.text
         assert provider_call.call_count == 3
@@ -1914,8 +1920,11 @@ def test_streaming_auth_failure_after_output_is_sanitized_without_refresh(
         stream=True,
     )
 
-    def partial_stream():
+    usage_before_failure = []
+
+    async def partial_stream():
         yield 'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'
+        usage_before_failure.append(list(runtime_type.instances[0].marked_used))
         raise ChatAuthenticationError("sentinel post-output body", provider="openai")
 
     with (
@@ -1944,6 +1953,75 @@ def test_streaming_auth_failure_after_output_is_sanitized_without_refresh(
     assert len(data_frames) == 1
     assert response.text.index("partial") < response.text.index('"error"')
     assert ("openai", True) not in runtime_type.instances[0].resolve_calls
+    assert runtime_type.instances[0].marked_used == ["openai"]
+    assert usage_before_failure == [["openai"]]
+
+
+@pytest.mark.parametrize("error_type", [ChatProviderError, ChatAPIError])
+def test_streaming_provider_failure_after_output_is_sanitized_without_fallback(
+    authenticated_client,
+    mock_chacha_db,
+    setup_dependencies,
+    error_type,
+):
+    runtime_type = _credential_runtime_double()
+    provider_manager = MagicMock()
+    provider_manager.circuit_breakers = {"openai": SimpleNamespace(can_attempt_call=lambda: True)}
+    provider_manager.get_available_provider.return_value = "anthropic"
+    request_data = ChatCompletionRequest(
+        model="gpt-4o-mini",
+        api_provider="openai",
+        messages=[ChatCompletionUserMessageParam(role="user", content="Hello")],
+        stream=True,
+    )
+
+    usage_before_failure = []
+
+    async def partial_stream():
+        yield 'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'
+        usage_before_failure.append(list(runtime_type.instances[0].marked_used))
+        raise error_type(
+            "sentinel upstream outage body",
+            status_code=502,
+            provider="openai",
+        )
+
+    with (
+        patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
+        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch.object(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", True),
+        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
+        patch.dict(os.environ, {"MODERATION_STREAM_BUFFER_CHARS": "0"}),
+        patch.object(chat_endpoint, "perform_chat_api_call", return_value=partial_stream()) as provider_call,
+    ):
+        response = authenticated_client.post(
+            "/api/v1/chat/completions",
+            json=request_data.model_dump(),
+        )
+
+    error_frames = []
+    for line in response.text.splitlines():
+        if not line.startswith("data: ") or line == "data: [DONE]":
+            continue
+        payload = json.loads(line.removeprefix("data: "))
+        if isinstance(payload, dict) and "error" in payload:
+            error_frames.append(payload)
+
+    assert response.status_code == status.HTTP_200_OK
+    assert "partial" in response.text
+    assert len(error_frames) == 1
+    assert error_frames[0]["error"] == {
+        "code": "provider_unavailable",
+        "type": "provider_unavailable",
+        "message": "The chat service provider is currently unavailable.",
+    }
+    assert "provider_configuration_invalid" not in response.text
+    assert "sentinel upstream outage body" not in response.text
+    assert provider_call.call_count == 1
+    provider_manager.get_available_provider.assert_not_called()
+    assert runtime_type.instances[0].marked_used == ["openai"]
+    assert usage_before_failure == [["openai"]]
 
 
 def test_streaming_clean_empty_response_marks_runtime_used_once(

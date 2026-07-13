@@ -4878,6 +4878,7 @@ async def execute_streaming_call(
                 model_name=model,
                 save_callback=save_callback,
                 finalize_callback=_finalize_stream,
+                on_first_output=(lambda: on_success(selected_provider)) if callable(on_success) else None,
                 idle_timeout=CHAT_IDLE_TIMEOUT,
                 heartbeat_interval=CHAT_HEARTBEAT_INTERVAL,
                 text_transform=_out_transform,
