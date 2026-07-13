@@ -9,9 +9,11 @@ Reference directory: https://www.sourclip.com/resources/research-sources
 
 Add a shared research discovery chokepoint for open research graph sources. The new design consolidates the repo's scattered paper/source searches behind one internal module while preserving existing provider-specific endpoints as compatibility surfaces.
 
-The staged design focuses on open research graph discovery: OpenAlex, Semantic Scholar, Crossref, arXiv, PubMed, Zenodo, Figshare, OSF, and Unpaywall-style open-access resolution. Standalone search and Deep Research both consume the same normalized discovery service. Users can review search results, resolve open-access/full-text candidates, and hand approved selections to the existing Media ingestion surface. Deep Research uses the same service during collection and asks Media to ingest only after a source review checkpoint is approved. Phase 1 is implemented; the next plan should target the Phase 2 Media-owned ingest handoff unless the human requester explicitly asks for a broader multi-phase implementation plan.
+The staged design focuses on open research graph discovery: OpenAlex, Semantic Scholar, Crossref, arXiv, PubMed, Zenodo, Figshare, OSF, and Unpaywall-style open-access resolution. Standalone search and Deep Research both consume the same normalized discovery service. Users can review search results, resolve open-access/full-text candidates, and hand approved selections to the existing Media ingestion surface. Deep Research uses the same service during collection and asks Media to ingest only after a source review checkpoint is approved. Phase 1 is implemented; the next plan targets the Phase 2A Media-owned PDF handoff unless the human requester explicitly asks for a broader phase.
 
 Sourclip is used as inspiration and seed material for a curated local catalog. It is not a runtime dependency.
+
+Phase 2 is split into two reviewable slices. Phase 2A handles only stable, queryless PDF candidates through `/api/v1/media/add`. Phase 2B may add HTML full-text handoff only after discovery produces source-specific `html_full_text` candidates and Media has a bounded extraction-to-persistence path. Landing pages are not promoted to HTML full text.
 
 ## Goals
 
@@ -127,34 +129,34 @@ Existing `/api/v1/paper-search/*` endpoints remain provider-specific compatibili
 
 Discovery-time OA candidates are advisory. Media ingest must revalidate every candidate before download.
 
-### ResearchDiscoverySelectionResolver
+### Discovery Selection Resolution
 
-`ResearchDiscoverySelectionResolver` is the only Research-side handoff component for ingestable selections. It resolves server-owned discovery snapshot references into structured source descriptors for Media. It does not download content, parse files, extract text, check duplicates, persist Media DB records, or return ingest outcomes.
+`resolve_discovery_selections` is the only Research-side handoff component for ingestable selections. It is a small internal function, not a public endpoint or extensible service layer. It resolves server-owned discovery snapshot references into structured source descriptors for Media. It does not download content, parse files, extract text, check duplicates, persist Media DB records, or return ingest outcomes.
 
 Responsibilities:
 
 - validate snapshot integrity and user scoping for the authenticated user context supplied by Media
 - locate selected `{ result_id, candidate_id }` pairs in the server-owned snapshot
 - revalidate source fingerprint and selected OA/full-text candidate identity
-- return a bounded `MediaSourceCandidate` descriptor with normalized identifiers, candidate type, safe display URL or resolver reference, provenance, access/license hints, and safe metadata
-- preserve enough resolver/provider provenance for Media to re-resolve signed or expiring candidate URLs when needed
+- return one immutable resolved-selection descriptor per requested pair, containing normalized identifiers, candidate type, safe URL, provenance, access/license hints, and safe metadata
+- reject redacted or re-resolution-required candidates in Phase 2A; provider-specific re-resolution remains later work
 - reject unsupported candidate types before Media attempts ingestion
 
 ### Media-Owned Ingestion Handoff
 
-Standalone discovery ingest is not a Research API. Approved discovery selections are submitted through the existing Media ingestion surface, primarily `/api/v1/media/add` for the synchronous Phase 2 slice.
+Standalone discovery ingest is not a Research API. Approved discovery selections are submitted through the existing `/api/v1/media/add` surface for the synchronous Phase 2A slice. No compatibility wrapper or alternate Research route is added.
 
 Media responsibilities:
 
 - authenticate, rate-limit, and enforce quotas for the ingest request
-- call `ResearchDiscoverySelectionResolver` with authenticated user context only to resolve discovery references into source descriptors
-- check duplicate DOI, PMID, PMCID, arXiv id, provider id, canonical URL, and content fingerprint before downloading large files
+- call `resolve_discovery_selections` with authenticated user context only to resolve discovery references into source descriptors
+- check duplicate DOI, PMID, PMCID, arXiv id, provider id, and canonical URL before downloading large files; keep content-hash dedupe in the existing persistence path after extraction
 - enforce centralized egress/SSRF policy
 - validate URL scheme and host
 - validate content type and file size
 - validate access/license hints where available
-- process PDFs through the existing PDF/media pipeline
-- process HTML candidates through the existing web/context extraction pipeline, storing extracted content and metadata rather than full raw HTML snapshots
+- process Phase 2A PDFs through the existing PDF/media pipeline
+- defer HTML handoff until discovery emits real `html_full_text` candidates and the existing Media context-extraction output can be persisted through a bounded Media-owned path
 - persist Media DB references and per-item ingest outcomes
 - return partial success/failure results without exposing sensitive provider details
 
@@ -235,8 +237,9 @@ Candidate identity rules:
 - Signed, expiring, token-bearing, or otherwise secret-bearing candidate URLs must be sanitized before API response, persistence, and logs. Responses and snapshots should expose a safe display URL or opaque resolver reference, not the raw sensitive URL. The stored candidate should keep enough resolver/provider provenance to re-resolve the URL at ingest time.
 - Media handoff selections must identify both `result_id` and `candidate_id`; the system should not silently choose among multiple full-text candidates.
 - A result may expose `recommended_candidate_id` for UI convenience, but the Media ingest request/checkpoint approval still records the explicit candidate selected.
-- Phase 2 ingest eligibility is limited to `pdf` and `html_full_text` candidates. `landing_page`, `metadata_only`, `unknown`, and generic external search results are not ingestable in Phase 2.
-- A later phase may evaluate broader page-like candidates, but only through existing Media extraction paths, with no raw full-HTML storage and no new Research-owned ingestion path.
+- Phase 2A ingest eligibility is limited to `pdf` candidates with a safe URL where `url_redacted=false` and `requires_reresolution=false`.
+- Phase 2B may add source-specific `html_full_text` candidates. `landing_page`, `metadata_only`, `repository_file`, `unknown`, and generic external search results are not silently reclassified as full text.
+- Any later page-like handoff must use existing Media extraction paths, with no raw full-HTML storage and no new Research-owned ingestion path.
 
 Deduplication priority:
 
@@ -289,28 +292,30 @@ The server persists the normalized result snapshot for the authenticated user wi
 
 There is no `POST /api/v1/research/discovery/ingest` endpoint in this design.
 
-Standalone discovery ingest uses the existing Media ingestion surface, primarily `/api/v1/media/add` for the synchronous Phase 2 slice. The Media request may include discovery selection references such as:
+Standalone discovery ingest uses the existing `/api/v1/media/add` surface for the synchronous Phase 2A slice. The Media request includes:
 
 - `discovery_id`
 - selected ingest candidates as `{ result_id, candidate_id }`
+- `media_type=pdf`, required by the existing Media form contract and validated for Phase 2A
 - optional Media-owned target collection/tags/keywords fields, if those are already supported by Media ingest
 
-Media calls the internal `ResearchDiscoverySelectionResolver`, resolves the selections from the server-owned snapshot, and then continues through the existing Media duplicate, policy, extraction, and persistence path.
+Media calls the internal `resolve_discovery_selections` function, resolves the selections from the server-owned snapshot, and then continues through the existing Media duplicate, policy, extraction, and persistence path. The route branches into discovery handoff before the normal URL/file-required validation. Discovery references are mutually exclusive with client-supplied URLs and files.
 
-The Media endpoint verifies that the `discovery_id` belongs to the current user, is still within retention, and contains the requested `{ result_id, candidate_id }` pairs. Idempotency is keyed by owner user id, discovery id or Deep Research session id, normalized fingerprint, and selected candidate id, but Media owns the duplicate decision and returned Media DB references.
+The Media endpoint verifies that the `discovery_id` belongs to the current user, is still within retention, and contains the requested `{ result_id, candidate_id }` pairs. Missing, expired, and foreign-user snapshots share the same unavailable error. Media rejects duplicate normalized candidate URLs within one request, performs pre-download duplicate lookup using existing normalized identifier and URL queries, and leaves content-hash and race-safe duplicate handling to the existing persistence repository. Phase 2A does not add a handoff-specific idempotency table.
 
-The Phase 2 synchronous handoff must use conservative default bounds. Implementations may make these values configurable through Media-owned config, but raising them beyond these defaults requires explicit design review:
+The Phase 2A synchronous handoff must use conservative default bounds. Implementations may make these values configurable through Media-owned config, but raising them beyond these defaults requires explicit design review:
 
 - max 5 selected candidates per request
-- max 45 seconds per candidate
-- max 180 seconds total request time
 - max 50 MiB per PDF candidate
-- max 10 MiB per HTML candidate response before extraction
-- accepted MIME/content types limited to `application/pdf`, `text/html`, and `application/xhtml+xml`
+- accepted MIME/content type limited to `application/pdf`
+- URL policy is rechecked before fetch and across redirects by the centralized Media downloader
+- the 50 MiB limit is enforced both from response headers and while streaming, using the strictest of this cap and existing Media/user/org/storage limits
 - over-cap requests reject with validation errors instead of silent truncation or background enqueueing
 - per-item response includes `created`, `duplicate_existing`, `unsupported`, `policy_blocked`, `timeout`, and `failed` outcomes
 
-The discovery handoff must not expose a second set of parser, chunking, metadata override, HTML extraction, or persistence options. Any such options remain Media-owned and must use the existing Media request/config model.
+Phase 2A does not claim a hard wall-clock parser timeout: wrapping blocking parser work in `asyncio.wait_for` can return while work and persistence continue. Existing Media processing limits remain authoritative; hard cancellable deadlines belong in a later Jobs-backed slice. Network timeout failures are still reported as `timeout`.
+
+The discovery handoff does not expose a second set of parser, chunking, metadata override, or persistence options. Existing Media-owned PDF processing fields remain usable. Competing source and credential controls are rejected: client URLs, uploaded files, cookies, custom source headers, and crawler expansion settings must not influence a discovery handoff.
 
 ## Standalone Search Flow
 
@@ -321,9 +326,9 @@ The discovery handoff must not expose a second set of parser, chunking, metadata
 5. Results are normalized, deduped, ranked, and enriched with OA candidates.
 6. API persists a user-owned discovery snapshot and returns `discovery_id`, provenance-rich metadata, and Media ingest eligibility.
 7. User selects results and submits the `discovery_id` plus selected `{ result_id, candidate_id }` pairs through the existing Media ingestion surface.
-8. Media calls `ResearchDiscoverySelectionResolver` to resolve the selection from the user-owned discovery snapshot.
+8. Media calls `resolve_discovery_selections` to resolve the selection from the user-owned discovery snapshot.
 9. Media revalidates identifiers, policy, URLs, content, size, access hints, and duplicates.
-10. Approved PDFs are processed through the existing PDF/media pipeline; approved HTML full-text candidates are processed through the existing web/context extraction pipeline.
+10. Approved Phase 2A PDFs are processed through the existing PDF/media pipeline.
 11. Media persists successful items to Media DB and returns per-item outcomes.
 
 ## Deep Research Flow
@@ -339,7 +344,7 @@ Collection phase:
 After checkpoint approval:
 
 1. The approved `{ result_id, candidate_id }` ingest selections are resolved from the run's persisted source artifacts and submitted to a separate idempotent Media ingest job/phase.
-2. The ingest job uses Media ingestion services and calls `ResearchDiscoverySelectionResolver` only for discovery artifact/source descriptor resolution.
+2. The ingest job uses Media ingestion services and calls `resolve_discovery_selections` only for discovery artifact/source descriptor resolution.
 3. Partial ingest failures are recorded as warnings.
 4. Synthesis proceeds with metadata citations and Media DB references where ingest succeeded.
 
@@ -459,20 +464,26 @@ Phase 1 integration tests:
 
 ### Later-Phase Tests
 
-Standalone Media ingest handoff tests:
+Phase 2A PDF Media handoff tests:
 
 - discovery selection resolution from a user-owned snapshot
 - URL revalidation in Media
 - duplicate checks in Media
 - policy-blocked URLs
 - unsupported content types
-- size caps
-- max selection, per-item timeout, and total timeout enforcement
+- streamed PDF size and MIME caps
+- max selection enforcement
 - partial ingest failures
-- `landing_page`, `metadata_only`, `unknown`, and generic external search result candidates rejected as non-ingestable for Phase 2
-- HTML full-text candidates routed through the existing web/context extraction pipeline, not stored as full raw HTML
-- discovery handoff does not expose duplicate parser/chunking/HTML extraction/persistence knobs
+- `html_full_text`, `landing_page`, `metadata_only`, `repository_file`, `unknown`, redacted, and re-resolution-required candidates rejected as non-ingestable for Phase 2A
+- discovery handoff rejects competing source/credential inputs while retaining existing Media-owned PDF processing options
 - successful routing into existing Media DB ingestion helpers through the Media API
+
+Phase 2B HTML planning gates:
+
+- at least one provider emits a source-specific `html_full_text` candidate without reclassifying a landing page
+- Media exposes a bounded individual-URL context extraction path that persists extracted content through the caller-provided Media DB
+- HTML response limits are enforced before and during body consumption
+- tests prove no sitemap, recursive, URL-level, external-link, cookie, or custom-header expansion is possible
 
 Later-phase integration tests:
 
@@ -485,7 +496,9 @@ Later-phase integration tests:
 
 Phase 1: catalog, source router, discovery chokepoint, standalone search API, metadata and OA candidates only.
 
-Phase 2: review-gated standalone ingest through the existing Media ingestion surface, using existing PDF/media helpers and the existing web/context extraction pipeline for HTML full-text candidates.
+Phase 2A: review-gated standalone PDF ingest through `/api/v1/media/add`, using persisted discovery snapshots and existing PDF/media helpers.
+
+Phase 2B: source-specific HTML full-text candidate production plus bounded Media context extraction and persistence. This phase starts only after its planning gates are satisfied.
 
 Phase 3: Deep Research collection uses the discovery chokepoint and source review checkpoint exposes Media ingest eligibility.
 
@@ -495,7 +508,7 @@ Phase 5: existing compatibility endpoints delegate to the chokepoint where safe,
 
 ## Implementation Planning Scope
 
-Phase 1 is implemented. The next implementation plan should cover Phase 2 only by default: review-gated standalone Media ingest handoff for discovery-selected `pdf` and `html_full_text` candidates, using persisted discovery snapshots and existing Media extraction/persistence paths. Deep Research integration, compatibility wrapper delegation, and fallback site-search rollout should remain later phases unless the human requester asks for a larger plan.
+Phase 1 is implemented. The next implementation plan covers Phase 2A only: review-gated standalone PDF handoff through `/api/v1/media/add`, using persisted discovery snapshots and the existing Media PDF pipeline. HTML full-text handoff, Deep Research integration, compatibility wrapper delegation, and fallback site-search rollout remain later phases unless the human requester explicitly expands the scope.
 
 ## Acceptance Criteria
 
@@ -508,18 +521,20 @@ Phase 1 is implemented. The next implementation plan should cover Phase 2 only b
 - OA candidate URLs exposed in API responses and snapshots are safe URLs/display URLs or opaque resolver references; raw signed/token-bearing URLs are not exposed.
 - Fallback site search remains disabled by default and opt-in where configured.
 
-### Phase 2 Acceptance Criteria
+### Phase 2A Acceptance Criteria
 
 - No public research-owned ingest endpoint, router, or action service is added.
-- Discovery adds only an internal selection resolver that returns bounded source descriptors and does not download, parse, dedupe, persist, or return ingest outcomes.
+- Discovery adds only a small internal selection-resolution function that returns bounded source descriptors and does not download, parse, dedupe, persist, or return ingest outcomes.
 - Standalone discovery ingest is submitted through the existing Media ingestion surface.
 - Media owns public request authorization, quota/rate-limit checks, duplicate decisions, egress checks, content-type/size checks, extraction, persistence, and per-item outcomes.
 - Foreign-user, expired, missing, tampered, and unsupported discovery snapshot selections are rejected before any download.
-- Phase 2 accepts only `pdf` and `html_full_text` candidates.
-- HTML full-text candidates use the existing Media web/context extraction pipeline and do not store full raw HTML.
-- Synchronous handoff enforces the Phase 2 caps for candidate count, per-item timeout, total timeout, download size, and MIME/content type.
+- Phase 2A accepts only stable, non-redacted, non-re-resolution-required `pdf` candidates.
+- The existing `ingest_eligible` and `recommended_candidate_id` fields reflect the Phase 2A rule; no duplicate eligibility fields are added.
+- Discovery handoff requires `media_type=pdf`, is mutually exclusive with client URLs/files, and branches before normal URL/file-required validation.
+- Synchronous handoff enforces the Phase 2A caps for candidate count, streamed download size, and PDF MIME/content type.
 - Over-cap requests fail validation instead of silently truncating selections or enqueueing background work.
-- Tests prove the discovery handoff does not expose duplicate parser, chunking, HTML extraction, metadata override, or persistence options.
+- Tests prove the discovery handoff rejects competing source/credential controls while retaining existing Media-owned PDF processing options.
+- Responses keep the existing `/media/add` `{ "results": [...] }` envelope and add stable per-selection outcomes without creating another ingestion response surface.
 
 ### Overall Design Acceptance Criteria
 

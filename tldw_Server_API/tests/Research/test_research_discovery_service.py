@@ -206,6 +206,72 @@ async def test_search_attaches_additional_oa_resolver_candidates(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_oa_enrichment_recommends_stable_pdf_instead_of_landing_page(tmp_path):
+    from tldw_Server_API.app.core.Research.discovery.models import DiscoveryOACandidate
+
+    class FakeOAResolver:
+        def resolve_for_result(self, **_kwargs):
+            return [
+                DiscoveryOACandidate(
+                    candidate_id="a-landing",
+                    candidate_type="landing_page",
+                    safe_url="https://repo.example/article",
+                    resolver_reference=None,
+                    url_redacted=False,
+                    requires_reresolution=False,
+                    provider="test",
+                    access_status="open",
+                    license_hint=None,
+                    content_type_hint="text/html",
+                    rank=1,
+                    confidence=0.8,
+                    warnings=(),
+                ),
+                DiscoveryOACandidate(
+                    candidate_id="b-pdf",
+                    candidate_type="pdf",
+                    safe_url="https://repo.example/article.pdf",
+                    resolver_reference=None,
+                    url_redacted=False,
+                    requires_reresolution=False,
+                    provider="test",
+                    access_status="open",
+                    license_hint=None,
+                    content_type_hint="application/pdf",
+                    rank=2,
+                    confidence=0.9,
+                    warnings=(),
+                ),
+            ]
+
+    router = FakeRouter(
+        records=[
+            {
+                "source_id": "openalex",
+                "provider": "openalex",
+                "title": "Resolver candidate ordering",
+                "doi": "10.1000/resolver-order",
+            }
+        ],
+        statuses=[source_status("openalex", "ok", provider="openalex", result_count=1)],
+    )
+    from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
+    from tldw_Server_API.app.core.Research.discovery.service import ResearchDiscoveryService
+
+    db = ResearchSessionsDB(tmp_path / "research.db")
+    service = ResearchDiscoveryService(
+        router=router,
+        oa_resolver=FakeOAResolver(),
+        db_factory=lambda _owner_user_id: db,
+    )
+
+    response = await service.search(owner_user_id="user-1", query="resolver", source_ids=["openalex"])
+
+    assert response.results[0].recommended_candidate_id == "b-pdf"
+    assert response.results[0].ingest_eligible is True
+
+
+@pytest.mark.asyncio
 async def test_search_limits_results_before_oa_resolver_work(tmp_path):
     class CountingOAResolver:
         def __init__(self):

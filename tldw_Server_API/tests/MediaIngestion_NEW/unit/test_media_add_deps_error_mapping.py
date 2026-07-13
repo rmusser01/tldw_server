@@ -38,19 +38,11 @@ class _LoguruCapture:
 
     @property
     def debug_records(self):
-        return [
-            message.record
-            for message in self.records
-            if message.record["level"].name == "DEBUG"
-        ]
+        return [message.record for message in self.records if message.record["level"].name == "DEBUG"]
 
     @property
     def error_records(self):
-        return [
-            message.record
-            for message in self.records
-            if message.record["level"].name == "ERROR"
-        ]
+        return [message.record for message in self.records if message.record["level"].name == "ERROR"]
 
 
 def _render_log_record(record) -> str:
@@ -64,11 +56,7 @@ def _render_log_record(record) -> str:
 
 
 def _assert_debug_log_is_sanitized(capture: _LoguruCapture, expected_message: str):
-    matching_records = [
-        record
-        for record in capture.debug_records
-        if record["message"] == expected_message
-    ]
+    matching_records = [record for record in capture.debug_records if record["message"] == expected_message]
     assert len(matching_records) == 1
 
     record = matching_records[0]
@@ -81,11 +69,7 @@ def _assert_debug_log_is_sanitized(capture: _LoguruCapture, expected_message: st
 
 
 def _assert_error_log_is_sanitized(capture: _LoguruCapture, expected_message: str):
-    matching_records = [
-        record
-        for record in capture.error_records
-        if record["message"] == expected_message
-    ]
+    matching_records = [record for record in capture.error_records if record["message"] == expected_message]
     assert len(matching_records) == 1
 
     record = matching_records[0]
@@ -99,9 +83,7 @@ def _assert_error_log_is_sanitized(capture: _LoguruCapture, expected_message: st
 
 def _form_kwargs(**overrides):
     kwargs = {}
-    for name, parameter in inspect.signature(
-        media_add_deps.get_add_media_form
-    ).parameters.items():
+    for name, parameter in inspect.signature(media_add_deps.get_add_media_form).parameters.items():
         default = parameter.default
         if hasattr(default, "default"):
             kwargs[name] = default.default
@@ -134,15 +116,10 @@ async def test_get_add_media_form_sanitizes_unexpected_form_error(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_get_add_media_form_sanitizes_urls_json_fallback_debug_log():
-    raw_urls_value = (
-        "['https://example.test/watch?token=secret-token', "
-        "'/private/tmp/raw-secret-value.mp4']"
-    )
+    raw_urls_value = "['https://example.test/watch?token=secret-token', " "'/private/tmp/raw-secret-value.mp4']"
 
     with _LoguruCapture() as logs:
-        form = await media_add_deps.get_add_media_form(
-            **_form_kwargs(urls=[raw_urls_value])
-        )
+        form = await media_add_deps.get_add_media_form(**_form_kwargs(urls=[raw_urls_value]))
 
     assert form.urls == [raw_urls_value]
     _assert_debug_log_is_sanitized(
@@ -165,6 +142,22 @@ async def test_get_add_media_form_carries_collection_fallback_binding_fields():
     assert form.media_collection_id == 42
     assert form.media_collection_item_id == 88
     assert form.media_ingest_job_id == "1234"
+
+
+@pytest.mark.asyncio
+async def test_get_add_media_form_carries_discovery_reference_fields():
+    selections = '[{"result_id":"result-1","candidate_id":"candidate-1"}]'
+
+    form = await media_add_deps.get_add_media_form(
+        **_form_kwargs(
+            media_type="pdf",
+            research_discovery_id="rd_example",
+            research_discovery_selections=selections,
+        )
+    )
+
+    assert form.research_discovery_id == "rd_example"
+    assert form.research_discovery_selections == selections
 
 
 @pytest.mark.asyncio

@@ -12,7 +12,7 @@ import sqlite3
 import time
 from datetime import datetime, timezone
 from pathlib import Path as FilePath
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 from urllib.parse import urlparse
 
 from fastapi import BackgroundTasks, HTTPException, Request, UploadFile, status
@@ -1277,6 +1277,7 @@ _SAFE_METADATA_ALLOWED_KEYS = frozenset(
         "rights",
         "source_hash",
         "chunking_plan",
+        "provider_ids",
     }
 )
 
@@ -2612,6 +2613,9 @@ async def add_media_orchestrate(
     usage_log: Any,
     response: Any = None,
     request: Request | None = None,
+    max_download_bytes: int | None = None,
+    allowed_download_content_types: set[str] | None = None,
+    trusted_source_metadata_by_url: Mapping[str, dict[str, Any]] | None = None,
 ) -> Any:
     """
     Orchestration helper for the `/media/add` endpoint.
@@ -3151,6 +3155,9 @@ async def add_media_orchestrate(
                             db_path=db_path_for_workers,
                             client_id=client_id_for_workers,
                             user_id=(current_user.id if hasattr(current_user, "id") else None),
+                            max_download_bytes=max_download_bytes,
+                            allowed_download_content_types=allowed_download_content_types,
+                            trusted_source_metadata_by_url=trusted_source_metadata_by_url,
                         )
 
                 tasks = [_run_doc_item(source) for source in all_valid_input_sources]
@@ -3469,6 +3476,9 @@ async def add_media_persist(
     usage_log: Any,
     response: Any = None,
     request: Request | None = None,
+    max_download_bytes: int | None = None,
+    allowed_download_content_types: set[str] | None = None,
+    trusted_source_metadata_by_url: Mapping[str, dict[str, Any]] | None = None,
 ) -> Any:
     """
     Persistence entry point used by the modular `media/add` endpoint.
@@ -3486,6 +3496,9 @@ async def add_media_persist(
         usage_log=usage_log,
         response=response,
         request=request,
+        max_download_bytes=max_download_bytes,
+        allowed_download_content_types=allowed_download_content_types,
+        trusted_source_metadata_by_url=trusted_source_metadata_by_url,
     )
 
 
@@ -4737,6 +4750,9 @@ async def process_document_like_item(
     client_id: str,
     user_id: int | None = None,
     cancel_check: Callable[[], bool] | None = None,
+    max_download_bytes: int | None = None,
+    allowed_download_content_types: set[str] | None = None,
+    trusted_source_metadata_by_url: Mapping[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """
     Core helper that handles download/prep, processing, and DB persistence for
@@ -4827,7 +4843,9 @@ async def process_document_like_item(
                 target_dir=temp_dir,
                 allowed_extensions=allowed_extensions,
                 check_extension=check_extension,
-                media_type_key=None,
+                allowed_content_types=allowed_download_content_types,
+                max_bytes=max_download_bytes,
+                media_type_key=str(media_type),
             )
             if downloaded_path and isinstance(downloaded_path, FilePath) and downloaded_path.exists():
                 safe_downloaded_path = resolve_safe_local_path(
@@ -5397,6 +5415,14 @@ async def process_document_like_item(
         path_kind="url" if is_url else "upload",
         processor=f"{_coerce_ingestion_label(media_type)}_document_like_processor",
     )
+
+    if is_url and trusted_source_metadata_by_url:
+        trusted_metadata = trusted_source_metadata_by_url.get(processing_source)
+        if isinstance(trusted_metadata, dict):
+            extracted_metadata = final_result.get("metadata")
+            merged_metadata = dict(extracted_metadata) if isinstance(extracted_metadata, dict) else {}
+            merged_metadata.update(trusted_metadata)
+            final_result["metadata"] = merged_metadata
 
     if final_result.get("status") in ["Success", "Warning"]:
         try:
