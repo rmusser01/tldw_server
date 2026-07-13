@@ -913,6 +913,168 @@ async def test_media_ingest_worker_clears_stale_acquire_gate_on_start(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_media_ingest_worker_reclaims_crashed_job_then_cleans_claimed_owner(
+    monkeypatch,
+    tmp_path,
+):
+    from datetime import datetime, timedelta, timezone
+
+    import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestStore,
+    )
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    class _Clock:
+        def __init__(self) -> None:
+            self.current = datetime(2026, 7, 13, tzinfo=timezone.utc)
+
+        def now_utc(self):
+            return self.current
+
+    clock = _Clock()
+    manager = JobManager(db_path=tmp_path / "worker-recovery.db", clock=clock)
+    store = PlaylistIngestStore(manager)
+    preflight = store.create_preflight(
+        "owner-7",
+        source_url="https://www.youtube.com/playlist?list=PLworkerrecovery",
+        source_kind="youtube_playlist",
+        expires_at=clock.current + timedelta(seconds=1),
+    )
+    queued = manager.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="media_ingest_item",
+        payload={"source_kind": "url", "source": "https://example.com/recovered"},
+        owner_user_id="owner-7",
+    )
+    crashed = manager.acquire_next_job(
+        domain="media_ingest",
+        queue="default",
+        lease_seconds=1,
+        worker_id="crashed-worker",
+    )
+    assert crashed is not None
+    clock.current += timedelta(seconds=2)
+    connection = manager._connect()
+    try:
+        connection.execute(
+            "UPDATE jobs SET leased_until = DATETIME('now', '-1 second') WHERE id = ?",
+            (int(crashed["id"]),),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    handled: list[dict] = []
+
+    class _OneJobSDK:
+        def __init__(self, jm, cfg):
+            self.jm = jm
+            self.cfg = cfg
+
+        def stop(self):
+            return None
+
+        async def run(self, *, handler, **_kwargs):
+            reclaimed = self.jm.acquire_next_job(
+                domain=self.cfg.domain,
+                queue=self.cfg.queue,
+                lease_seconds=self.cfg.lease_seconds,
+                worker_id=self.cfg.worker_id,
+            )
+            assert reclaimed is not None
+            assert int(reclaimed["id"]) == int(queued["id"])
+            assert reclaimed["worker_id"] == self.cfg.worker_id
+            await handler(reclaimed)
+
+    async def fake_handle(job, _manager, _progress):
+        handled.append(job)
+        connection = manager._connect()
+        try:
+            remaining = connection.execute(
+                "SELECT COUNT(*) FROM playlist_preflights " "WHERE owner_user_id = ? AND preflight_id = ?",
+                ("owner-7", preflight.preflight_id),
+            ).fetchone()[0]
+        finally:
+            connection.close()
+        assert remaining == 0
+        return {}
+
+    monkeypatch.setenv("PLAYLIST_INGEST_CLEANUP_LIMIT", "1")
+    monkeypatch.setattr(worker, "_jobs_manager", lambda: manager)
+    monkeypatch.setattr(worker, "WorkerSDK", _OneJobSDK)
+    monkeypatch.setattr(worker, "_handle_job", fake_handle)
+
+    await worker.run_media_ingest_jobs_worker(worker_id="recovery-worker")
+
+    assert len(handled) == 1
+
+
+@pytest.mark.asyncio
+async def test_worker_cleanup_runs_off_loop_while_renewal_tick_continues_once(monkeypatch):
+    import asyncio
+    import threading
+
+    import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+
+    cleanup_started = threading.Event()
+    cleanup_release = threading.Event()
+    renewal_tick = threading.Event()
+    loop_progress_before_release: list[bool] = []
+    cleanup_calls: list[int] = []
+    acquisition_calls: list[int] = []
+    process_calls: list[int] = []
+
+    def blocking_cleanup(_manager, job):
+        cleanup_calls.append(int(job["id"]))
+        cleanup_started.set()
+        assert cleanup_release.wait(timeout=2)
+
+    def release_after_loop_progress():
+        assert cleanup_started.wait(timeout=2)
+        loop_progress_before_release.append(renewal_tick.wait(timeout=0.5))
+        cleanup_release.set()
+
+    class _OneJobSDK:
+        def __init__(self, _manager, _cfg):
+            pass
+
+        def stop(self):
+            return None
+
+        async def run(self, *, handler, **_kwargs):
+            acquisition_calls.append(1)
+
+            async def record_renewal_tick():
+                await asyncio.sleep(0)
+                renewal_tick.set()
+
+            renewal = asyncio.create_task(record_renewal_tick())
+            await handler({"id": 7, "owner_user_id": "owner-7"})
+            await renewal
+
+    async def fake_handle(job, _manager, _progress):
+        process_calls.append(int(job["id"]))
+        return {}
+
+    controller = threading.Thread(target=release_after_loop_progress, daemon=True)
+    controller.start()
+    monkeypatch.setattr(worker, "_jobs_manager", object)
+    monkeypatch.setattr(worker, "WorkerSDK", _OneJobSDK)
+    monkeypatch.setattr(worker, "_cleanup_expired_playlist_resources", blocking_cleanup)
+    monkeypatch.setattr(worker, "_handle_job", fake_handle)
+
+    await worker.run_media_ingest_jobs_worker(worker_id="nonblocking-cleanup-worker")
+    controller.join(timeout=2)
+
+    assert not controller.is_alive()
+    assert loop_progress_before_release == [True]
+    assert cleanup_calls == [7]
+    assert acquisition_calls == [1]
+    assert process_calls == [7]
+
+
+@pytest.mark.asyncio
 async def test_media_ingest_schedule_embeddings_marks_media_processed(monkeypatch):
     import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
 

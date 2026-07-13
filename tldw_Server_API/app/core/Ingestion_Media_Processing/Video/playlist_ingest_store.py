@@ -22,6 +22,8 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_s
     cleanup_exact_run_file_staging,
     validated_run_file_staging_dir,
 )
+from tldw_Server_API.app.core.Jobs.event_stream import emit_job_event
+from tldw_Server_API.app.core.Jobs.metrics import increment_cancelled
 
 _NOT_FOUND_MESSAGE = "playlist resource not found"
 _CURSOR_ORDER = "ordinal_asc"
@@ -38,7 +40,10 @@ _PREFLIGHT_JOB_TYPE = "playlist_preflight"
 _PREFLIGHT_JOB_SENTINEL = datetime(9999, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
 _PREFLIGHT_ORPHAN_CLAIM_SENTINEL = datetime(9999, 12, 31, 23, 59, 58, tzinfo=timezone.utc)
 _RUN_BOUND_JOB_SENTINEL = _PREFLIGHT_JOB_SENTINEL
+_EXPIRED_PARENT_SCAN_LIMIT = _MAX_PAGE_SIZE
 _STAGING_JOB_REFERENCE_SCAN_LIMIT = 100
+_STAGING_JOB_REFERENCE_TOTAL_SCAN_LIMIT = _MAX_PAGE_SIZE
+_STAGING_CLEANUP_CANDIDATE_LIMIT = 100
 _COMPACT_DISPLAY_METADATA_FIELDS = frozenset(
     {
         "title",
@@ -230,6 +235,14 @@ class _RunStagingCleanupCandidate:
     batch_id: str
     idempotency_identity: str
     temp_dir: str
+    attempt: int = 1
+    submission_queue: str = "default"
+
+
+@dataclass(frozen=True, slots=True)
+class _ExpiredRunJobProof:
+    deletable_run_ids: tuple[str, ...]
+    cancelled_jobs: tuple[dict[str, Any], ...]
 
 
 class PlaylistIngestStore:
@@ -3641,7 +3654,12 @@ class PlaylistIngestStore:
             return True
         cursor_created_at: datetime | None = None
         cursor_id: int | None = None
+        scanned = 0
         while True:
+            page_limit = min(
+                _STAGING_JOB_REFERENCE_SCAN_LIMIT,
+                _STAGING_JOB_REFERENCE_TOTAL_SCAN_LIMIT - scanned,
+            )
             jobs = self._jobs.list_jobs(
                 domain="media_ingest",
                 owner_user_id=owner_user_id,
@@ -3649,28 +3667,64 @@ class PlaylistIngestStore:
                 batch_group=candidate.batch_id,
                 created_before=cursor_created_at,
                 before_id=cursor_id,
-                limit=_STAGING_JOB_REFERENCE_SCAN_LIMIT,
+                limit=page_limit,
                 sort_by="created_at",
                 sort_order="desc",
             )
+            if len(jobs) > page_limit:
+                return True
             for job in jobs:
                 if job.get("status") == "cancelled" and job.get("cancellation_reason") == "expired_playlist_ingest_run":
                     continue
                 view = self._jobs.normalize_job_binding_view(job, owner_user_id=owner_user_id)
                 if view is None:
                     return True
-                referenced_temp_dir = view["payload"].get("temp_dir")
+                payload = view["payload"]
+                referenced_temp_dir = payload.get("temp_dir")
                 if referenced_temp_dir is None:
+                    identifies_candidate = (
+                        view.get("idempotency_key") == candidate.idempotency_identity
+                        or payload.get("run_id") == candidate.run_id
+                        or payload.get("occurrence_id") == candidate.occurrence_id
+                    )
+                    if identifies_candidate:
+                        return True
                     continue
                 referenced = validated_run_file_staging_dir(
                     temp_dir=referenced_temp_dir,
                     batch_id=str(view.get("batch_group") or ""),
                     idempotency_identity=str(view.get("idempotency_key") or ""),
                 )
-                if referenced is None or referenced == candidate_path:
+                if referenced is None:
                     return True
-            if len(jobs) < _STAGING_JOB_REFERENCE_SCAN_LIMIT:
+                available_at = view.get("available_at")
+                exact_held_candidate = (
+                    view.get("domain") == "media_ingest"
+                    and view.get("job_type") == "media_ingest_item"
+                    and view.get("status") == "queued"
+                    and available_at is not None
+                    and self._datetime(available_at) == _RUN_BOUND_JOB_SENTINEL
+                    and view.get("queue") == candidate.submission_queue
+                    and view.get("batch_group") == candidate.batch_id
+                    and view.get("idempotency_key") == candidate.idempotency_identity
+                    and payload.get("run_id") == candidate.run_id
+                    and payload.get("occurrence_id") == candidate.occurrence_id
+                    and type(payload.get("attempt")) is int
+                    and payload.get("attempt") == candidate.attempt
+                    and payload.get("batch_id") == candidate.batch_id
+                    and payload.get("idempotency_key") == candidate.idempotency_identity
+                )
+                if exact_held_candidate:
+                    if referenced == candidate_path:
+                        continue
+                    return True
+                if referenced == candidate_path:
+                    return True
+            scanned += len(jobs)
+            if len(jobs) < page_limit:
                 return False
+            if scanned >= _STAGING_JOB_REFERENCE_TOTAL_SCAN_LIMIT:
+                return True
             last_job = jobs[-1]
             try:
                 cursor_created_at = self._datetime(last_job["created_at"])
@@ -3682,8 +3736,10 @@ class PlaylistIngestStore:
         self,
         owner_user_id: str,
         candidates: Sequence[_RunStagingCleanupCandidate],
-    ) -> None:
-        """Retire committed expired-run staging only after fresh reference checks."""
+    ) -> int:
+        """Retire exact staging and CAS-clear only confirmed persisted pointers."""
+        failure_counts: dict[str, int] = {}
+        retired: list[_RunStagingCleanupCandidate] = []
         for candidate in candidates:
             try:
                 if self.has_live_run_item_staging_reference(
@@ -3693,19 +3749,49 @@ class PlaylistIngestStore:
                     excluding_occurrence_id=candidate.occurrence_id,
                 ) or self._has_live_job_staging_reference(owner_user_id, candidate):
                     continue
-                cleanup_exact_run_file_staging(
+                outcome = cleanup_exact_run_file_staging(
                     temp_dir=candidate.temp_dir,
                     batch_id=candidate.batch_id,
                     idempotency_identity=candidate.idempotency_identity,
                 )
+                if outcome in {"deleted", "absent"}:
+                    retired.append(candidate)
             except Exception as exc:  # noqa: BLE001 - post-commit cleanup must fail closed
-                logger.warning(
-                    "Skipped expired playlist staging retirement for run {} occurrence {} after {}",
-                    candidate.run_id,
-                    candidate.occurrence_id,
-                    type(exc).__name__,
-                )
+                error_type = type(exc).__name__
+                failure_counts[error_type] = failure_counts.get(error_type, 0) + 1
                 continue
+        for error_type, failure_count in failure_counts.items():
+            logger.bind(
+                error_code="playlist_staging_retirement_failed",
+                error_type=error_type,
+                failure_count=failure_count,
+            ).warning("Skipped expired playlist staging retirement")
+        if not retired:
+            return 0
+        cleared = 0
+        with self._connection(write=True) as db:
+            for candidate in retired:
+                updated = self._query(
+                    db,
+                    """
+                    UPDATE media_ingest_run_items
+                    SET staging_temp_dir = NULL, updated_at = ?
+                    WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
+                      AND batch_id = ? AND idempotency_identity = ?
+                      AND staging_temp_dir = ?
+                    """,
+                    (
+                        self._db_datetime(self._now()),
+                        owner_user_id,
+                        candidate.run_id,
+                        candidate.occurrence_id,
+                        candidate.batch_id,
+                        candidate.idempotency_identity,
+                        candidate.temp_dir,
+                    ),
+                )
+                cleared += int(updated.rowcount == 1)
+        return cleared
 
     def bind_run_item_job(
         self,
@@ -4412,9 +4498,14 @@ class PlaylistIngestStore:
         *,
         owner_user_id: str,
         cutoff: datetime | str,
-    ) -> int:
-        """Cancel exact run-bound jobs that are still queued behind the hold sentinel."""
+        run_ids: Sequence[str],
+        cancel_held: bool = True,
+    ) -> _ExpiredRunJobProof:
+        """Prove run deletion eligibility and cancel only exact held jobs."""
+        if not run_ids:
+            return _ExpiredRunJobProof((), ())
         expiry_predicate = "run.expires_at <= ?" if self._postgres else "julianday(run.expires_at) <= julianday(?)"
+        run_predicate = "run.run_id = ANY(?)" if self._postgres else "run.run_id IN (SELECT value FROM json_each(?))"
         lock = " FOR UPDATE OF item, job" if self._postgres else ""
         rows = self._query(
             db,
@@ -4439,19 +4530,27 @@ class PlaylistIngestStore:
                 AND job.idempotency_key = item.idempotency_identity
               )
             )
-            WHERE run.owner_user_id = ? AND {expiry_predicate}
-              AND item.state IN ('submit_pending', 'queued')
+            WHERE run.owner_user_id = ? AND {expiry_predicate} AND {run_predicate}
             ORDER BY item.run_id, item.occurrence_id
             {lock}
             """,  # nosec B608
-            (owner_user_id, cutoff),
+            (owner_user_id, cutoff, list(run_ids) if self._postgres else json.dumps(list(run_ids))),
         ).fetchall()
-        cancelled = 0
+        deletable_run_ids = set(run_ids)
+        held_jobs: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        cancelled_jobs: list[dict[str, Any]] = []
         for row in rows:
             data = self._row_dict(row)
-            view = self._jobs.normalize_job_binding_view(data, owner_user_id=owner_user_id)
+            run_id = str(data.get("run_id") or "")
+            try:
+                view = self._jobs.normalize_job_binding_view(data, owner_user_id=owner_user_id)
+            except Exception:  # noqa: BLE001 - ambiguous binding must retain only this run
+                deletable_run_ids.discard(run_id)
+                continue
             payload = view.get("payload") if view is not None else None
             available_at = view.get("available_at") if view is not None else None
+            if view is not None and view.get("status") in {"completed", "failed", "cancelled", "quarantined"}:
+                continue
             if (
                 view is None
                 or view.get("domain") != "media_ingest"
@@ -4468,6 +4567,14 @@ class PlaylistIngestStore:
                 or type(payload.get("attempt")) is not int
                 or payload.get("attempt") != int(data.get("attempt") or 0)
             ):
+                deletable_run_ids.discard(run_id)
+                continue
+            if cancel_held:
+                held_jobs.append((data, view))
+
+        for data, view in held_jobs:
+            run_id = str(data.get("run_id") or "")
+            if run_id not in deletable_run_ids:
                 continue
             updated = self._query(
                 db,
@@ -4495,8 +4602,17 @@ class PlaylistIngestStore:
                 ),
             )
             if updated.rowcount != 1:
-                continue
-            cancelled += 1
+                raise PlaylistIngestConflictError("held media job changed during cleanup")
+            cancelled_jobs.append(
+                {
+                    "id": int(view["id"]),
+                    "uuid": view.get("uuid"),
+                    "owner_user_id": owner_user_id,
+                    "domain": "media_ingest",
+                    "queue": str(view["queue"]),
+                    "job_type": "media_ingest_item",
+                }
+            )
             if self._jobs._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")):
                 self._query(
                     db,
@@ -4520,118 +4636,383 @@ class PlaylistIngestStore:
                     ),
                     (str(view["queue"]),),
                 )
-        return cancelled
+        return _ExpiredRunJobProof(
+            tuple(run_id for run_id in run_ids if run_id in deletable_run_ids),
+            tuple(cancelled_jobs),
+        )
+
+    def _select_expired_parent_ids(
+        self,
+        db: Any,
+        *,
+        owner_user_id: str,
+        cutoff: datetime | str,
+        limit: int,
+    ) -> list[tuple[str, str]]:
+        """Select one bounded oldest-first scan and lock exact PostgreSQL parents."""
+        if self._postgres:
+            candidates = self._query(
+                db,
+                """
+                SELECT resource_type, resource_id FROM (
+                    SELECT 'preflight'::text AS resource_type,
+                           preflight_id::text AS resource_id, expires_at
+                    FROM playlist_preflights
+                    WHERE owner_user_id = ? AND expires_at <= ?
+                    UNION ALL
+                    SELECT 'materialization'::text AS resource_type,
+                           materialization_id::text AS resource_id, expires_at
+                    FROM playlist_materializations
+                    WHERE owner_user_id = ? AND expires_at <= ?
+                    UNION ALL
+                    SELECT 'run'::text AS resource_type,
+                           run_id::text AS resource_id, expires_at
+                    FROM media_ingest_runs
+                    WHERE owner_user_id = ? AND expires_at <= ?
+                ) AS expired_parents
+                ORDER BY expires_at, resource_type, resource_id
+                LIMIT ?
+                """,
+                (
+                    owner_user_id,
+                    cutoff,
+                    owner_user_id,
+                    cutoff,
+                    owner_user_id,
+                    cutoff,
+                    limit,
+                ),
+            ).fetchall()
+        else:
+            candidates = self._query(
+                db,
+                """
+                SELECT resource_type, resource_id FROM (
+                    SELECT 'preflight' AS resource_type,
+                           preflight_id AS resource_id, julianday(expires_at) AS expires_at
+                    FROM playlist_preflights
+                    WHERE owner_user_id = ? AND julianday(expires_at) <= julianday(?)
+                    UNION ALL
+                    SELECT 'materialization' AS resource_type,
+                           materialization_id AS resource_id, julianday(expires_at) AS expires_at
+                    FROM playlist_materializations
+                    WHERE owner_user_id = ? AND julianday(expires_at) <= julianday(?)
+                    UNION ALL
+                    SELECT 'run' AS resource_type,
+                           run_id AS resource_id, julianday(expires_at) AS expires_at
+                    FROM media_ingest_runs
+                    WHERE owner_user_id = ? AND julianday(expires_at) <= julianday(?)
+                ) AS expired_parents
+                ORDER BY expires_at, resource_type, resource_id
+                LIMIT ?
+                """,
+                (
+                    owner_user_id,
+                    cutoff,
+                    owner_user_id,
+                    cutoff,
+                    owner_user_id,
+                    cutoff,
+                    limit,
+                ),
+            ).fetchall()
+        selected: list[tuple[str, str]] = []
+        for row in candidates:
+            data = self._row_dict(row)
+            resource_type = str(data.get("resource_type") or "")
+            resource_id = str(data.get("resource_id") or "")
+            if resource_type in {"preflight", "materialization", "run"} and resource_id:
+                selected.append((resource_type, resource_id))
+        if len(candidates) >= limit:
+            logger.bind(
+                error_code="playlist_expired_parent_scan_cap_reached",
+                candidate_count=len(candidates),
+                scan_limit=limit,
+            ).warning("Playlist expired parent scan reached bounded limit")
+        if self._postgres:
+            selected = self._lock_expired_parent_ids(
+                db,
+                owner_user_id=owner_user_id,
+                cutoff=cutoff,
+                parents=selected,
+            )
+        return selected
+
+    def _lock_expired_parent_ids(
+        self,
+        db: Any,
+        *,
+        owner_user_id: str,
+        cutoff: datetime | str,
+        parents: Sequence[tuple[str, str]],
+    ) -> list[tuple[str, str]]:
+        """Revalidate exact expired parents while preserving scan order."""
+        lock_specs = (
+            ("preflight", "playlist_preflights", "preflight_id"),
+            ("materialization", "playlist_materializations", "materialization_id"),
+            ("run", "media_ingest_runs", "run_id"),
+        )
+        locked_by_type: dict[str, set[str]] = {}
+        for resource_type, table, id_column in lock_specs:
+            resource_ids = [resource_id for kind, resource_id in parents if kind == resource_type]
+            if not resource_ids:
+                continue
+            if self._postgres:
+                rows = self._query(
+                    db,
+                    f"""
+                    SELECT {id_column} AS resource_id FROM {table}
+                    WHERE owner_user_id = ? AND {id_column} = ANY(?) AND expires_at <= ?
+                    ORDER BY {id_column} FOR UPDATE
+                    """,  # nosec B608 - table and column are fixed constants above
+                    (owner_user_id, resource_ids, cutoff),
+                ).fetchall()
+            else:
+                rows = self._query(
+                    db,
+                    f"""
+                    SELECT {id_column} AS resource_id FROM {table}
+                    WHERE owner_user_id = ?
+                      AND {id_column} IN (SELECT value FROM json_each(?))
+                      AND julianday(expires_at) <= julianday(?)
+                    ORDER BY {id_column}
+                    """,  # nosec B608 - table and column are fixed constants above
+                    (owner_user_id, json.dumps(resource_ids), cutoff),
+                ).fetchall()
+            locked_by_type[resource_type] = {str(self._row_dict(row)["resource_id"]) for row in rows}
+        return [
+            (resource_type, resource_id)
+            for resource_type, resource_id in parents
+            if resource_id in locked_by_type.get(resource_type, set())
+        ]
+
+    def _emit_expired_job_cancellation_lifecycle(
+        self,
+        cancelled_jobs: Sequence[Mapping[str, Any]],
+    ) -> None:
+        """Replay normal cancellation observers only after cleanup commits."""
+        failure_counts: dict[str, int] = {}
+        for cancelled_job in cancelled_jobs:
+            job = dict(cancelled_job)
+            callbacks = [
+                lambda job=job: self._jobs._update_gauges(
+                    domain=job["domain"],
+                    queue=job["queue"],
+                    job_type=job["job_type"],
+                ),
+                lambda job=job: increment_cancelled(job),
+                lambda job=job: emit_job_event(
+                    "job.cancelled",
+                    job=job,
+                    attrs={"reason": "expired_playlist_ingest_run", "terminal": True},
+                ),
+            ]
+            if job.get("uuid"):
+                callbacks.append(
+                    lambda job=job: self._jobs._cancel_dependent_jobs(
+                        job["uuid"],
+                        reason="expired_playlist_ingest_run",
+                    )
+                )
+            for callback in callbacks:
+                try:
+                    callback()
+                except Exception as exc:  # noqa: BLE001 - observers are post-commit best effort
+                    error_type = type(exc).__name__
+                    failure_counts[error_type] = failure_counts.get(error_type, 0) + 1
+        for error_type, failure_count in failure_counts.items():
+            logger.bind(
+                error_code="playlist_expired_job_lifecycle_failed",
+                error_type=error_type,
+                failure_count=failure_count,
+            ).warning("Playlist expired job lifecycle notification failed")
 
     def cleanup_expired_resources(
         self,
         owner_user_id: str,
         *,
         now: datetime | None = None,
+        limit: int = 100,
     ) -> dict[str, int]:
-        """Delete only expired playlist resources owned by the caller."""
+        """Delete a bounded set of expired playlist resources owned by the caller."""
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("limit must be between 1 and 100")
         owner = self._owner(owner_user_id)
         cutoff = self._db_datetime(now or self._now())
+        scanned_parents: list[tuple[str, str]] = []
         staging_candidates: list[_RunStagingCleanupCandidate] = []
+        staging_cancelled_jobs: tuple[dict[str, Any], ...] = ()
         with self._connection(write=True) as db:
+            scanned_parents = self._select_expired_parent_ids(
+                db,
+                owner_user_id=owner,
+                cutoff=cutoff,
+                limit=_EXPIRED_PARENT_SCAN_LIMIT,
+            )
+            scanned_run_ids = [resource_id for resource_type, resource_id in scanned_parents if resource_type == "run"]
+            run_job_proof = self._cancel_expired_run_held_jobs(
+                db,
+                owner_user_id=owner,
+                cutoff=cutoff,
+                run_ids=scanned_run_ids,
+                cancel_held=False,
+            )
+            eligible_run_id_set = set(run_job_proof.deletable_run_ids)
+            eligible_run_ids = [run_id for run_id in scanned_run_ids if run_id in eligible_run_id_set]
+            if eligible_run_ids and self._postgres:
+                staging_rows = self._query(
+                    db,
+                    """
+                    SELECT run_id, occurrence_id, attempt, batch_id,
+                           idempotency_identity, submission_queue, staging_temp_dir
+                    FROM media_ingest_run_items
+                    WHERE owner_user_id = ? AND run_id = ANY(?)
+                      AND staging_temp_dir IS NOT NULL
+                    ORDER BY run_id, occurrence_id
+                    LIMIT ?
+                    FOR UPDATE
+                    """,
+                    (owner, eligible_run_ids, _STAGING_CLEANUP_CANDIDATE_LIMIT),
+                ).fetchall()
+            elif eligible_run_ids:
+                staging_rows = self._query(
+                    db,
+                    """
+                    SELECT run_id, occurrence_id, attempt, batch_id,
+                           idempotency_identity, submission_queue, staging_temp_dir
+                    FROM media_ingest_run_items
+                    WHERE owner_user_id = ? AND staging_temp_dir IS NOT NULL
+                      AND run_id IN (SELECT value FROM json_each(?))
+                    ORDER BY run_id, occurrence_id
+                    LIMIT ?
+                    """,
+                    (owner, json.dumps(eligible_run_ids), _STAGING_CLEANUP_CANDIDATE_LIMIT),
+                ).fetchall()
+            else:
+                staging_rows = []
+            for row in staging_rows:
+                data = self._row_dict(row)
+                if (
+                    all(
+                        isinstance(data.get(field), str) and data[field]
+                        for field in (
+                            "run_id",
+                            "occurrence_id",
+                            "batch_id",
+                            "idempotency_identity",
+                            "submission_queue",
+                            "staging_temp_dir",
+                        )
+                    )
+                    and type(data.get("attempt")) is int
+                ):
+                    staging_candidates.append(
+                        _RunStagingCleanupCandidate(
+                            run_id=data["run_id"],
+                            occurrence_id=data["occurrence_id"],
+                            batch_id=data["batch_id"],
+                            idempotency_identity=data["idempotency_identity"],
+                            temp_dir=data["staging_temp_dir"],
+                            attempt=int(data["attempt"]),
+                            submission_queue=data["submission_queue"],
+                        )
+                    )
+            retirement_run_ids = list(dict.fromkeys(candidate.run_id for candidate in staging_candidates))
+            if retirement_run_ids:
+                cancellation_proof = self._cancel_expired_run_held_jobs(
+                    db,
+                    owner_user_id=owner,
+                    cutoff=cutoff,
+                    run_ids=retirement_run_ids,
+                )
+                fenced_run_ids = set(cancellation_proof.deletable_run_ids)
+                staging_candidates = [
+                    candidate for candidate in staging_candidates if candidate.run_id in fenced_run_ids
+                ]
+                staging_cancelled_jobs = cancellation_proof.cancelled_jobs
+        if staging_cancelled_jobs:
+            self._emit_expired_job_cancellation_lifecycle(staging_cancelled_jobs)
+        self._retire_expired_run_staging(owner, staging_candidates)
+
+        result = {"preflights": 0, "materializations": 0, "runs": 0}
+        final_cancelled_jobs: tuple[dict[str, Any], ...] = ()
+        with self._connection(write=True) as db:
+            locked_parents = self._lock_expired_parent_ids(
+                db,
+                owner_user_id=owner,
+                cutoff=cutoff,
+                parents=scanned_parents,
+            )
+            locked_run_ids = [resource_id for resource_type, resource_id in locked_parents if resource_type == "run"]
+            if locked_run_ids and self._postgres:
+                item_rows = self._query(
+                    db,
+                    """
+                    SELECT run_id, staging_temp_dir FROM media_ingest_run_items
+                    WHERE owner_user_id = ? AND run_id = ANY(?)
+                    ORDER BY run_id, occurrence_id FOR UPDATE
+                    """,
+                    (owner, locked_run_ids),
+                ).fetchall()
+            elif locked_run_ids:
+                item_rows = self._query(
+                    db,
+                    """
+                    SELECT run_id, staging_temp_dir FROM media_ingest_run_items
+                    WHERE owner_user_id = ?
+                      AND run_id IN (SELECT value FROM json_each(?))
+                    ORDER BY run_id, occurrence_id
+                    """,
+                    (owner, json.dumps(locked_run_ids)),
+                ).fetchall()
+            else:
+                item_rows = []
+            runs_with_staging = {
+                str(self._row_dict(row)["run_id"])
+                for row in item_rows
+                if self._row_dict(row).get("staging_temp_dir") is not None
+            }
+            final_candidates = [run_id for run_id in locked_run_ids if run_id not in runs_with_staging]
+            final_proof = self._cancel_expired_run_held_jobs(
+                db,
+                owner_user_id=owner,
+                cutoff=cutoff,
+                run_ids=final_candidates,
+                cancel_held=False,
+            )
+            deletable_run_ids = set(final_proof.deletable_run_ids)
+            selected_parents = [
+                (resource_type, resource_id)
+                for resource_type, resource_id in locked_parents
+                if resource_type != "run" or resource_id in deletable_run_ids
+            ][:limit]
+            selected_run_ids = [
+                resource_id for resource_type, resource_id in selected_parents if resource_type == "run"
+            ]
+            if selected_run_ids:
+                cancellation_proof = self._cancel_expired_run_held_jobs(
+                    db,
+                    owner_user_id=owner,
+                    cutoff=cutoff,
+                    run_ids=selected_run_ids,
+                )
+                final_run_ids = set(cancellation_proof.deletable_run_ids)
+                selected_parents = [
+                    (resource_type, resource_id)
+                    for resource_type, resource_id in selected_parents
+                    if resource_type != "run" or resource_id in final_run_ids
+                ]
+                final_cancelled_jobs = cancellation_proof.cancelled_jobs
+            preflight_ids = [
+                resource_id for resource_type, resource_id in selected_parents if resource_type == "preflight"
+            ]
+            materialization_ids = [
+                resource_id for resource_type, resource_id in selected_parents if resource_type == "materialization"
+            ]
+            selected_run_ids = [
+                resource_id for resource_type, resource_id in selected_parents if resource_type == "run"
+            ]
             if self._postgres:
-                preflight_rows = self._query(
-                    db,
-                    """
-                    SELECT preflight_id FROM playlist_preflights
-                    WHERE owner_user_id = ? AND expires_at <= ?
-                    ORDER BY preflight_id FOR UPDATE
-                    """,
-                    (owner, cutoff),
-                ).fetchall()
-                materialization_rows = self._query(
-                    db,
-                    """
-                    SELECT materialization_id FROM playlist_materializations
-                    WHERE owner_user_id = ? AND expires_at <= ?
-                    ORDER BY materialization_id FOR UPDATE
-                    """,
-                    (owner, cutoff),
-                ).fetchall()
-                run_rows = self._query(
-                    db,
-                    """
-                    SELECT run_id FROM media_ingest_runs
-                    WHERE owner_user_id = ? AND expires_at <= ?
-                    ORDER BY run_id FOR UPDATE
-                    """,
-                    (owner, cutoff),
-                ).fetchall()
-                preflight_ids = [str(self._row_dict(row)["preflight_id"]) for row in preflight_rows]
-                materialization_ids = [str(self._row_dict(row)["materialization_id"]) for row in materialization_rows]
-                run_ids = [str(self._row_dict(row)["run_id"]) for row in run_rows]
-
-                if run_ids:
-                    staging_rows = self._query(
-                        db,
-                        """
-                        SELECT run_id, occurrence_id, batch_id, idempotency_identity,
-                               staging_temp_dir
-                        FROM media_ingest_run_items
-                        WHERE owner_user_id = ? AND run_id = ANY(?)
-                          AND staging_temp_dir IS NOT NULL
-                        ORDER BY run_id, occurrence_id
-                        FOR UPDATE
-                        """,
-                        (owner, run_ids),
-                    ).fetchall()
-                    for row in staging_rows:
-                        data = self._row_dict(row)
-                        if all(
-                            isinstance(data.get(field), str) and data[field]
-                            for field in (
-                                "run_id",
-                                "occurrence_id",
-                                "batch_id",
-                                "idempotency_identity",
-                                "staging_temp_dir",
-                            )
-                        ):
-                            staging_candidates.append(
-                                _RunStagingCleanupCandidate(
-                                    run_id=data["run_id"],
-                                    occurrence_id=data["occurrence_id"],
-                                    batch_id=data["batch_id"],
-                                    idempotency_identity=data["idempotency_identity"],
-                                    temp_dir=data["staging_temp_dir"],
-                                )
-                            )
-                    self._cancel_expired_run_held_jobs(
-                        db,
-                        owner_user_id=owner,
-                        cutoff=cutoff,
-                    )
-                    self._query(
-                        db,
-                        """
-                        DELETE FROM media_ingest_run_events
-                        WHERE owner_user_id = ? AND run_id = ANY(?)
-                        """,
-                        (owner, run_ids),
-                    )
-                    self._query(
-                        db,
-                        """
-                        DELETE FROM media_ingest_run_items
-                        WHERE owner_user_id = ? AND run_id = ANY(?)
-                        """,
-                        (owner, run_ids),
-                    )
-                    runs = self._query(
-                        db,
-                        """
-                        DELETE FROM media_ingest_runs
-                        WHERE owner_user_id = ? AND run_id = ANY(?)
-                        """,
-                        (owner, run_ids),
-                    ).rowcount
-                else:
-                    runs = 0
-
                 if materialization_ids:
                     self._query(
                         db,
@@ -4641,17 +5022,16 @@ class PlaylistIngestStore:
                         """,
                         (owner, materialization_ids),
                     )
-                    materializations = self._query(
-                        db,
-                        """
-                        DELETE FROM playlist_materializations
-                        WHERE owner_user_id = ? AND materialization_id = ANY(?)
-                        """,
-                        (owner, materialization_ids),
-                    ).rowcount
-                else:
-                    materializations = 0
-
+                    result["materializations"] = int(
+                        self._query(
+                            db,
+                            """
+                            DELETE FROM playlist_materializations
+                            WHERE owner_user_id = ? AND materialization_id = ANY(?)
+                            """,
+                            (owner, materialization_ids),
+                        ).rowcount
+                    )
                 if preflight_ids:
                     self._query(
                         db,
@@ -4661,123 +5041,109 @@ class PlaylistIngestStore:
                         """,
                         (owner, preflight_ids),
                     )
-                    preflights = self._query(
+                    result["preflights"] = int(
+                        self._query(
+                            db,
+                            """
+                            DELETE FROM playlist_preflights
+                            WHERE owner_user_id = ? AND preflight_id = ANY(?)
+                            """,
+                            (owner, preflight_ids),
+                        ).rowcount
+                    )
+                if selected_run_ids:
+                    self._query(
+                        db,
+                        "DELETE FROM media_ingest_run_events WHERE owner_user_id = ? AND run_id = ANY(?)",
+                        (owner, selected_run_ids),
+                    )
+                    self._query(
+                        db,
+                        "DELETE FROM media_ingest_run_items WHERE owner_user_id = ? AND run_id = ANY(?)",
+                        (owner, selected_run_ids),
+                    )
+                    result["runs"] = int(
+                        self._query(
+                            db,
+                            "DELETE FROM media_ingest_runs WHERE owner_user_id = ? AND run_id = ANY(?)",
+                            (owner, selected_run_ids),
+                        ).rowcount
+                    )
+            else:
+                if materialization_ids:
+                    encoded_ids = json.dumps(materialization_ids)
+                    self._query(
                         db,
                         """
-                        DELETE FROM playlist_preflights
-                        WHERE owner_user_id = ? AND preflight_id = ANY(?)
+                        DELETE FROM playlist_materialization_items
+                        WHERE owner_user_id = ?
+                          AND materialization_id IN (SELECT value FROM json_each(?))
                         """,
-                        (owner, preflight_ids),
-                    ).rowcount
-                else:
-                    preflights = 0
-                result = {
-                    "preflights": int(preflights),
-                    "materializations": int(materializations),
-                    "runs": int(runs),
-                }
-            else:
-                staging_rows = self._query(
-                    db,
-                    """
-                    SELECT item.run_id, item.occurrence_id, item.batch_id,
-                           item.idempotency_identity, item.staging_temp_dir
-                    FROM media_ingest_run_items AS item
-                    JOIN media_ingest_runs AS run
-                      ON run.owner_user_id = item.owner_user_id AND run.run_id = item.run_id
-                    WHERE item.owner_user_id = ? AND item.staging_temp_dir IS NOT NULL
-                      AND julianday(run.expires_at) <= julianday(?)
-                    ORDER BY item.run_id, item.occurrence_id
-                    """,
-                    (owner, cutoff),
-                ).fetchall()
-                for row in staging_rows:
-                    data = self._row_dict(row)
-                    if all(
-                        isinstance(data.get(field), str) and data[field]
-                        for field in (
-                            "run_id",
-                            "occurrence_id",
-                            "batch_id",
-                            "idempotency_identity",
-                            "staging_temp_dir",
-                        )
-                    ):
-                        staging_candidates.append(
-                            _RunStagingCleanupCandidate(
-                                run_id=data["run_id"],
-                                occurrence_id=data["occurrence_id"],
-                                batch_id=data["batch_id"],
-                                idempotency_identity=data["idempotency_identity"],
-                                temp_dir=data["staging_temp_dir"],
-                            )
-                        )
-                self._cancel_expired_run_held_jobs(
-                    db,
-                    owner_user_id=owner,
-                    cutoff=cutoff,
-                )
-                self._query(
-                    db,
-                    f"""
-                    DELETE FROM media_ingest_run_events WHERE owner_user_id = ? AND run_id IN (
-                        SELECT run_id FROM media_ingest_runs WHERE owner_user_id = ? AND {self._expired_sql()}
+                        (owner, encoded_ids),
                     )
-                    """,  # nosec B608
-                    (owner, owner, cutoff),
-                )
-                self._query(
-                    db,
-                    f"""
-                    DELETE FROM media_ingest_run_items WHERE owner_user_id = ? AND run_id IN (
-                        SELECT run_id FROM media_ingest_runs WHERE owner_user_id = ? AND {self._expired_sql()}
+                    result["materializations"] = int(
+                        self._query(
+                            db,
+                            """
+                            DELETE FROM playlist_materializations
+                            WHERE owner_user_id = ?
+                              AND materialization_id IN (SELECT value FROM json_each(?))
+                            """,
+                            (owner, encoded_ids),
+                        ).rowcount
                     )
-                    """,  # nosec B608
-                    (owner, owner, cutoff),
-                )
-                runs = self._query(
-                    db,
-                    f"DELETE FROM media_ingest_runs WHERE owner_user_id = ? AND {self._expired_sql()}",  # nosec B608
-                    (owner, cutoff),
-                ).rowcount
-                self._query(
-                    db,
-                    f"""
-                    DELETE FROM playlist_materialization_items
-                    WHERE owner_user_id = ? AND materialization_id IN (
-                        SELECT materialization_id FROM playlist_materializations
-                        WHERE owner_user_id = ? AND {self._expired_sql()}
+                if preflight_ids:
+                    encoded_ids = json.dumps(preflight_ids)
+                    self._query(
+                        db,
+                        """
+                        DELETE FROM playlist_preflight_items
+                        WHERE owner_user_id = ?
+                          AND preflight_id IN (SELECT value FROM json_each(?))
+                        """,
+                        (owner, encoded_ids),
                     )
-                    """,  # nosec B608
-                    (owner, owner, cutoff),
-                )
-                materializations = self._query(
-                    db,
-                    f"DELETE FROM playlist_materializations WHERE owner_user_id = ? AND {self._expired_sql()}",  # nosec B608
-                    (owner, cutoff),
-                ).rowcount
-                self._query(
-                    db,
-                    f"""
-                    DELETE FROM playlist_preflight_items
-                    WHERE owner_user_id = ? AND preflight_id IN (
-                        SELECT preflight_id FROM playlist_preflights
-                        WHERE owner_user_id = ? AND {self._expired_sql()}
+                    result["preflights"] = int(
+                        self._query(
+                            db,
+                            """
+                            DELETE FROM playlist_preflights
+                            WHERE owner_user_id = ?
+                              AND preflight_id IN (SELECT value FROM json_each(?))
+                            """,
+                            (owner, encoded_ids),
+                        ).rowcount
                     )
-                    """,  # nosec B608
-                    (owner, owner, cutoff),
-                )
-                preflights = self._query(
-                    db,
-                    f"DELETE FROM playlist_preflights WHERE owner_user_id = ? AND {self._expired_sql()}",  # nosec B608
-                    (owner, cutoff),
-                ).rowcount
-                result = {
-                    "preflights": int(preflights),
-                    "materializations": int(materializations),
-                    "runs": int(runs),
-                }
-        self._retire_expired_run_staging(owner, staging_candidates)
+                if selected_run_ids:
+                    encoded_ids = json.dumps(selected_run_ids)
+                    self._query(
+                        db,
+                        """
+                        DELETE FROM media_ingest_run_events
+                        WHERE owner_user_id = ? AND run_id IN (SELECT value FROM json_each(?))
+                        """,
+                        (owner, encoded_ids),
+                    )
+                    self._query(
+                        db,
+                        """
+                        DELETE FROM media_ingest_run_items
+                        WHERE owner_user_id = ? AND run_id IN (SELECT value FROM json_each(?))
+                        """,
+                        (owner, encoded_ids),
+                    )
+                    result["runs"] = int(
+                        self._query(
+                            db,
+                            """
+                            DELETE FROM media_ingest_runs
+                            WHERE owner_user_id = ? AND run_id IN (SELECT value FROM json_each(?))
+                            """,
+                            (owner, encoded_ids),
+                        ).rowcount
+                    )
+        if final_cancelled_jobs:
+            self._emit_expired_job_cancellation_lifecycle(final_cancelled_jobs)
         return result
 
     def cleanup_expired(
@@ -4785,9 +5151,10 @@ class PlaylistIngestStore:
         owner_user_id: str,
         *,
         now: datetime | None = None,
+        limit: int = 100,
     ) -> dict[str, int]:
         """Backward-compatible alias for expired playlist resource cleanup."""
-        return self.cleanup_expired_resources(owner_user_id, now=now)
+        return self.cleanup_expired_resources(owner_user_id, now=now, limit=limit)
 
 
 __all__ = [

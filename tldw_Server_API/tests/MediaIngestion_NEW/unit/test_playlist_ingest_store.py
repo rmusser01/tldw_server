@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from threading import Event
 
 import pytest
 from pydantic import ValidationError
@@ -1425,11 +1426,21 @@ def test_postgres_cleanup_locks_all_expired_parents_before_child_deletes(store, 
 
     def fake_query(_db, sql, params=()):
         queries.append((sql, tuple(params)))
-        if "SELECT preflight_id" in sql:
-            return _Result([{"preflight_id": "pf-1"}])
-        if "SELECT materialization_id" in sql:
-            return _Result([{"materialization_id": "mat-1"}])
-        if "SELECT run_id" in sql:
+        if "UNION ALL" in sql:
+            return _Result(
+                [
+                    {"resource_type": "preflight", "resource_id": "pf-1"},
+                    {"resource_type": "materialization", "resource_id": "mat-1"},
+                    {"resource_type": "run", "resource_id": "run-1"},
+                ]
+            )
+        if "SELECT preflight_id AS resource_id" in sql:
+            return _Result([{"resource_id": "pf-1"}])
+        if "SELECT materialization_id AS resource_id" in sql:
+            return _Result([{"resource_id": "mat-1"}])
+        if "SELECT run_id AS resource_id" in sql:
+            return _Result([{"resource_id": "run-1"}])
+        if "SELECT run_id FROM media_ingest_runs" in sql:
             return _Result([{"run_id": "run-1"}])
         return _Result()
 
@@ -1439,11 +1450,13 @@ def test_postgres_cleanup_locks_all_expired_parents_before_child_deletes(store, 
 
     store.cleanup_expired("owner-1", now=NOW)
 
-    locked = [index for index, (sql, _params) in enumerate(queries) if "FOR UPDATE" in sql]
+    parent_locks = [
+        index for index, (sql, _params) in enumerate(queries) if "AS resource_id" in sql and "FOR UPDATE" in sql
+    ]
     first_delete = next(index for index, (sql, _params) in enumerate(queries) if "DELETE FROM" in sql)
-    assert len(locked) == 5
-    assert any("FROM media_ingest_run_items" in queries[index][0] for index in locked)
-    assert max(locked) < first_delete
+    assert len(parent_locks) == 6
+    assert max(parent_locks) < first_delete
+    assert any("FROM media_ingest_run_items" in sql and "FOR UPDATE" in sql for sql, _params in queries)
     assert all("owner-1" not in sql for sql, _params in queries)
 
 
@@ -1599,6 +1612,438 @@ def test_cleanup_expired_is_owner_safe(store):
     assert store.cleanup_expired("2", now=store.test_clock.now_utc())["preflights"] == 1
 
 
+def test_cleanup_expired_resources_is_bounded_across_parent_and_event_rows(store):
+    for index in range(2):
+        occurrence_id = f"cleanup-occ-{index}"
+        preflight = store.create_preflight(
+            "1",
+            source_url=f"https://www.youtube.com/playlist?list=PLcleanup{index}",
+            source_kind="youtube_playlist",
+            expires_at=NOW + timedelta(hours=1),
+        )
+        store.replace_preflight_snapshot(
+            "1",
+            preflight.preflight_id,
+            status="ready",
+            items=[
+                {
+                    **_preflight_item(occurrence_id, index + 1),
+                    "normalized_source_id": f"youtube:cleanup:{index}",
+                }
+            ],
+        )
+        materialized = store.create_materialization(
+            "1",
+            preflight_id=preflight.preflight_id,
+            occurrence_ids=[occurrence_id],
+            expires_at=NOW + timedelta(hours=1),
+        )
+        run = store.create_run(
+            "1",
+            materialization_ids=[materialized.id],
+            expires_at=NOW + timedelta(hours=1),
+        )
+        store.append_run_event("1", run.run_id, event_type="before-expiry")
+    store.test_clock.advance(timedelta(hours=2))
+
+    deleted = store.cleanup_expired_resources(
+        "1",
+        now=store.test_clock.now_utc(),
+        limit=1,
+    )
+
+    assert sum(deleted.values()) == 1
+    connection = store._jobs._connect()
+    try:
+        remaining_parents = sum(
+            connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]  # nosec B608
+            for table in (
+                "playlist_preflights",
+                "playlist_materializations",
+                "media_ingest_runs",
+            )
+        )
+        assert remaining_parents == 5
+        orphan_events = connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM media_ingest_run_events AS event
+            LEFT JOIN media_ingest_runs AS run
+              ON run.owner_user_id = event.owner_user_id AND run.run_id = event.run_id
+            WHERE event.owner_user_id = '1' AND run.run_id IS NULL
+            """
+        ).fetchone()[0]
+        assert orphan_events == 0
+    finally:
+        connection.close()
+
+    second = store.cleanup_expired_resources(
+        "1",
+        now=store.test_clock.now_utc(),
+        limit=1,
+    )
+    assert sum(second.values()) == 1
+
+
+def test_cleanup_global_budget_selects_oldest_parent_across_resource_types(store):
+    occurrence_id = "cleanup-global-budget"
+    preflight = store.create_preflight(
+        "1",
+        source_url="https://www.youtube.com/playlist?list=PLglobalbudget",
+        source_kind="youtube_playlist",
+        expires_at=NOW + timedelta(hours=1),
+    )
+    store.replace_preflight_snapshot(
+        "1",
+        preflight.preflight_id,
+        status="ready",
+        items=[_preflight_item(occurrence_id, 1)],
+    )
+    materialized = store.create_materialization(
+        "1",
+        preflight_id=preflight.preflight_id,
+        occurrence_ids=[occurrence_id],
+        expires_at=NOW + timedelta(hours=1),
+    )
+    run = store.create_run(
+        "1",
+        materialization_ids=[materialized.id],
+        expires_at=NOW + timedelta(hours=1),
+    )
+    with store._connection(write=True) as db:
+        store._query(
+            db,
+            "UPDATE playlist_preflights SET expires_at = ? WHERE preflight_id = ?",
+            (store._db_datetime(NOW - timedelta(hours=1)), preflight.preflight_id),
+        )
+        store._query(
+            db,
+            "UPDATE playlist_materializations SET expires_at = ? WHERE materialization_id = ?",
+            (store._db_datetime(NOW - timedelta(hours=3)), materialized.id),
+        )
+        store._query(
+            db,
+            "UPDATE media_ingest_runs SET expires_at = ? WHERE run_id = ?",
+            (store._db_datetime(NOW - timedelta(hours=2)), run.run_id),
+        )
+
+    first = store.cleanup_expired_resources("1", now=NOW, limit=1)
+
+    assert first == {"preflights": 0, "materializations": 1, "runs": 0}
+    with store._jobs._connect() as connection:
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM playlist_preflights WHERE preflight_id = ?",
+                (preflight.preflight_id,),
+            ).fetchone()[0]
+            == 1
+        )
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM media_ingest_runs WHERE run_id = ?",
+                (run.run_id,),
+            ).fetchone()[0]
+            == 1
+        )
+
+    second = store.cleanup_expired_resources("1", now=NOW, limit=1)
+
+    assert second == {"preflights": 0, "materializations": 0, "runs": 1}
+
+
+@pytest.mark.parametrize(
+    ("later_resource_type", "expected"),
+    [
+        ("preflight", {"preflights": 1, "materializations": 0, "runs": 0}),
+        ("materialization", {"preflights": 0, "materializations": 1, "runs": 0}),
+        ("run", {"preflights": 0, "materializations": 0, "runs": 1}),
+    ],
+)
+def test_cleanup_global_budget_backfills_after_blocked_oldest_run(
+    store,
+    later_resource_type,
+    expected,
+):
+    blocked, reserved, job = _seed_held_run_job(store, occurrence_id="occ-backfill-blocked")
+    store.bind_run_item_job(
+        "1",
+        blocked.run_id,
+        "occ-backfill-blocked",
+        attempt=1,
+        job_id=int(job["id"]),
+        batch_id="batch-held",
+        idempotency_identity="playlist-ingest-v1:held",
+        submission_lease_token=reserved.submission_lease_token,
+    )
+    if later_resource_type == "preflight":
+        later_id = store.create_preflight(
+            "1",
+            source_url="https://example.com/backfill-preflight",
+            source_kind="url",
+            expires_at=NOW + timedelta(hours=1),
+        ).preflight_id
+        table, id_column = "playlist_preflights", "preflight_id"
+    elif later_resource_type == "materialization":
+        later_id = _seed_materialization(store, item_count=1).id
+        table, id_column = "playlist_materializations", "materialization_id"
+    else:
+        later_id = store.create_validated_run(
+            "1",
+            items=[_validated_direct_record(occurrence_id="occ-backfill-later-run")],
+        ).run_id
+        table, id_column = "media_ingest_runs", "run_id"
+    with store._connection(write=True) as db:
+        store._query(
+            db,
+            "UPDATE media_ingest_runs SET expires_at = ? WHERE run_id = ?",
+            (store._db_datetime(NOW - timedelta(hours=3)), blocked.run_id),
+        )
+        store._query(
+            db,
+            f"UPDATE {table} SET expires_at = ? WHERE {id_column} = ?",  # nosec B608
+            (store._db_datetime(NOW - timedelta(hours=2)), later_id),
+        )
+
+    deleted = store.cleanup_expired_resources("1", now=NOW, limit=1)
+
+    assert deleted == expected
+    with store._jobs._connect() as connection:
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM media_ingest_runs WHERE run_id = ?",
+                (blocked.run_id,),
+            ).fetchone()[0]
+            == 1
+        )
+    assert store._jobs.get_job(int(job["id"]))["status"] == "queued"
+
+
+def test_cleanup_global_budget_backfills_after_retry_retained_staging(
+    store,
+    tmp_path,
+    monkeypatch,
+):
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video import playlist_ingest_store
+
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    blocked, _reserved, job, staging_dir = _seed_file_run_job(
+        store,
+        tmp_path,
+        occurrence_id="occ-backfill-staging-blocked",
+    )
+    later = store.create_preflight(
+        "1",
+        source_url="https://example.com/backfill-after-staging",
+        source_kind="url",
+        expires_at=NOW + timedelta(hours=1),
+    )
+    with store._connection(write=True) as db:
+        store._query(
+            db,
+            "UPDATE media_ingest_runs SET expires_at = ? WHERE run_id = ?",
+            (store._db_datetime(NOW - timedelta(hours=3)), blocked.run_id),
+        )
+        store._query(
+            db,
+            "UPDATE playlist_preflights SET expires_at = ? WHERE preflight_id = ?",
+            (store._db_datetime(NOW - timedelta(hours=2)), later.preflight_id),
+        )
+    monkeypatch.setattr(
+        playlist_ingest_store,
+        "cleanup_exact_run_file_staging",
+        lambda **_kwargs: "failed",
+    )
+
+    deleted = store.cleanup_expired_resources("1", now=NOW, limit=1)
+
+    assert deleted == {"preflights": 1, "materializations": 0, "runs": 0}
+    _assert_retained_run_staging_authority(store, blocked.run_id, staging_dir)
+    assert staging_dir.exists()
+    assert store._jobs.get_job(int(job["id"]))["status"] == "cancelled"
+
+
+def test_cleanup_global_budget_backfills_after_partial_staging_batch(
+    store,
+    tmp_path,
+    monkeypatch,
+):
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video import playlist_ingest_store
+
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(playlist_ingest_store, "_STAGING_CLEANUP_CANDIDATE_LIMIT", 1)
+    blocked, jobs, staging_dirs = _seed_file_run_jobs(
+        store,
+        tmp_path,
+        occurrence_ids=("occ-partial-a", "occ-partial-b"),
+    )
+    later = store.create_preflight(
+        "1",
+        source_url="https://example.com/backfill-after-partial-staging",
+        source_kind="url",
+        expires_at=NOW + timedelta(hours=1),
+    )
+    with store._connection(write=True) as db:
+        store._query(
+            db,
+            "UPDATE media_ingest_runs SET expires_at = ? WHERE run_id = ?",
+            (store._db_datetime(NOW - timedelta(hours=3)), blocked.run_id),
+        )
+        store._query(
+            db,
+            "UPDATE playlist_preflights SET expires_at = ? WHERE preflight_id = ?",
+            (store._db_datetime(NOW - timedelta(hours=2)), later.preflight_id),
+        )
+
+    deleted = store.cleanup_expired_resources("1", now=NOW, limit=1)
+
+    assert deleted == {"preflights": 1, "materializations": 0, "runs": 0}
+    assert sum(deleted.values()) == 1
+    with store._jobs._connect() as connection:
+        remaining_staging = connection.execute(
+            """
+            SELECT COUNT(*) FROM media_ingest_run_items
+            WHERE run_id = ? AND staging_temp_dir IS NOT NULL
+            """,
+            (blocked.run_id,),
+        ).fetchone()[0]
+        remaining_run = connection.execute(
+            "SELECT COUNT(*) FROM media_ingest_runs WHERE run_id = ?",
+            (blocked.run_id,),
+        ).fetchone()[0]
+    assert remaining_staging == 1
+    assert remaining_run == 1
+    assert sum(path.exists() for path in staging_dirs) == 1
+    assert [store._jobs.get_job(int(job["id"]))["status"] for job in jobs] == [
+        "cancelled",
+        "cancelled",
+    ]
+
+
+def test_postgres_expired_parent_scan_preserves_global_order_and_locks_exact_ids(store, monkeypatch):
+    queries: list[tuple[str, tuple]] = []
+
+    class _Rows:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def fetchall(self):
+            return self._rows
+
+    def fake_query(_db, sql, params=()):
+        queries.append((sql, tuple(params)))
+        if "UNION ALL" in sql:
+            return _Rows(
+                [
+                    {"resource_type": "run", "resource_id": "run-blocked"},
+                    {"resource_type": "preflight", "resource_id": "preflight-next"},
+                ]
+            )
+        if "FROM media_ingest_runs" in sql:
+            return _Rows([{"resource_id": "run-blocked"}])
+        if "FROM playlist_preflights" in sql:
+            return _Rows([{"resource_id": "preflight-next"}])
+        return _Rows([])
+
+    store._postgres = True
+    monkeypatch.setattr(store, "_query", fake_query)
+
+    selected = store._select_expired_parent_ids(
+        object(),
+        owner_user_id="owner-1",
+        cutoff=NOW,
+        limit=500,
+    )
+
+    assert selected == [("run", "run-blocked"), ("preflight", "preflight-next")]
+    candidate_query = next((sql, params) for sql, params in queries if "UNION ALL" in sql)
+    assert candidate_query[1][-1] == 500
+    lock_queries = [sql for sql, _params in queries if "FOR UPDATE" in sql]
+    assert len(lock_queries) == 2
+    assert all("owner_user_id = ?" in sql and "= ANY(?)" in sql for sql in lock_queries)
+
+
+def test_expired_parent_scan_cap_logs_only_aggregate_and_does_not_paginate(store, monkeypatch):
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video import playlist_ingest_store
+
+    queries: list[tuple[str, tuple]] = []
+
+    class _Rows:
+        def fetchall(self):
+            return [{"resource_type": "preflight", "resource_id": f"private-parent-{index}"} for index in range(500)]
+
+    class _LoggerStub:
+        def __init__(self):
+            self.bindings: list[dict] = []
+            self.messages: list[str] = []
+
+        def bind(self, **kwargs):
+            self.bindings.append(dict(kwargs))
+            return self
+
+        def warning(self, message, *_args, **_kwargs):
+            self.messages.append(str(message))
+
+    def fake_query(_db, sql, params=()):
+        queries.append((sql, tuple(params)))
+        return _Rows()
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(store, "_query", fake_query)
+    monkeypatch.setattr(playlist_ingest_store, "logger", logger_stub)
+
+    selected = store._select_expired_parent_ids(
+        object(),
+        owner_user_id="private-owner",
+        cutoff=NOW,
+        limit=500,
+    )
+
+    assert len(selected) == 500
+    assert len(queries) == 1
+    assert queries[0][1][-1] == 500
+    assert logger_stub.bindings == [
+        {
+            "error_code": "playlist_expired_parent_scan_cap_reached",
+            "candidate_count": 500,
+            "scan_limit": 500,
+        }
+    ]
+    assert "private" not in repr((logger_stub.bindings, logger_stub.messages))
+
+
+def test_postgres_cleanup_uses_one_bounded_oldest_first_parent_scan(store, monkeypatch):
+    queries: list[tuple[str, tuple]] = []
+
+    class _Rows:
+        rowcount = 0
+
+        def fetchall(self):
+            return []
+
+    @contextmanager
+    def fake_connection(*, write):
+        assert write is True
+        yield object()
+
+    def fake_query(_db, sql, params=()):
+        queries.append((sql, tuple(params)))
+        return _Rows()
+
+    store._postgres = True
+    monkeypatch.setattr(store, "_connection", fake_connection)
+    monkeypatch.setattr(store, "_query", fake_query)
+
+    assert store.cleanup_expired_resources("owner-1", now=NOW, limit=2) == {
+        "preflights": 0,
+        "materializations": 0,
+        "runs": 0,
+    }
+    candidate_queries = [sql for sql, _params in queries if "UNION ALL" in sql]
+    assert len(candidate_queries) == 1
+    assert "ORDER BY expires_at, resource_type, resource_id" in candidate_queries[0]
+    assert any(params[-1] == 500 for sql, params in queries if "UNION ALL" in sql)
+
+
 def test_cleanup_expired_resources_cancels_exact_held_job_and_releases_scheduled_counter(
     store,
     monkeypatch,
@@ -1662,6 +2107,103 @@ def test_cleanup_expired_resources_cancels_exact_held_job_and_releases_scheduled
     assert admitted["status"] == "queued"
 
 
+def test_cleanup_emits_cancelled_job_lifecycle_once_after_commit(store, monkeypatch):
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video import playlist_ingest_store
+
+    run, _reserved, job = _seed_held_run_job(store, occurrence_id="occ-cleanup-lifecycle")
+    gauge_calls: list[dict] = []
+    metric_calls: list[dict] = []
+    event_calls: list[tuple[str, dict, dict]] = []
+    cascade_calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(store._jobs, "_update_gauges", lambda **kwargs: gauge_calls.append(kwargs))
+    monkeypatch.setattr(
+        playlist_ingest_store,
+        "increment_cancelled",
+        lambda value: metric_calls.append(value),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        playlist_ingest_store,
+        "emit_job_event",
+        lambda event, *, job, attrs: event_calls.append((event, job, attrs)),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        store._jobs,
+        "_cancel_dependent_jobs",
+        lambda job_uuid, *, reason: cascade_calls.append((job_uuid, reason)),
+    )
+    store.test_clock.advance(timedelta(days=8))
+
+    deleted = store.cleanup_expired_resources("1", now=store.test_clock.current)
+
+    assert deleted["runs"] == 1
+    expected_job = {
+        "id": int(job["id"]),
+        "uuid": job["uuid"],
+        "owner_user_id": "1",
+        "domain": "media_ingest",
+        "queue": "default",
+        "job_type": "media_ingest_item",
+    }
+    assert gauge_calls == [{"domain": "media_ingest", "queue": "default", "job_type": "media_ingest_item"}]
+    assert metric_calls == [expected_job]
+    assert event_calls == [
+        (
+            "job.cancelled",
+            expected_job,
+            {"reason": "expired_playlist_ingest_run", "terminal": True},
+        )
+    ]
+    assert cascade_calls == [(job["uuid"], "expired_playlist_ingest_run")]
+    with store._jobs._connect() as connection:
+        assert (
+            connection.execute("SELECT COUNT(*) FROM media_ingest_runs WHERE run_id = ?", (run.run_id,)).fetchone()[0]
+            == 0
+        )
+
+
+def test_cleanup_lifecycle_failures_are_best_effort_and_sanitized(store, monkeypatch):
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video import playlist_ingest_store
+
+    run, _reserved, job = _seed_held_run_job(store, occurrence_id="occ-cleanup-lifecycle-failure")
+
+    class _LoggerStub:
+        def __init__(self):
+            self.bindings: list[dict] = []
+            self.messages: list[str] = []
+
+        def bind(self, **kwargs):
+            self.bindings.append(dict(kwargs))
+            return self
+
+        def warning(self, message, *_args, **_kwargs):
+            self.messages.append(str(message))
+
+    logger_stub = _LoggerStub()
+
+    def fail_lifecycle(*_args, **_kwargs):
+        raise RuntimeError("https://example.com/private?token=secret")
+
+    monkeypatch.setattr(store._jobs, "_update_gauges", fail_lifecycle)
+    monkeypatch.setattr(store._jobs, "_cancel_dependent_jobs", fail_lifecycle)
+    monkeypatch.setattr(playlist_ingest_store, "increment_cancelled", fail_lifecycle, raising=False)
+    monkeypatch.setattr(playlist_ingest_store, "emit_job_event", fail_lifecycle, raising=False)
+    monkeypatch.setattr(playlist_ingest_store, "logger", logger_stub)
+    store.test_clock.advance(timedelta(days=8))
+
+    deleted = store.cleanup_expired_resources("1", now=store.test_clock.current)
+
+    assert deleted["runs"] == 1
+    assert store._jobs.get_job(int(job["id"]))["status"] == "cancelled"
+    assert "secret" not in repr((logger_stub.bindings, logger_stub.messages))
+    with store._jobs._connect() as connection:
+        assert (
+            connection.execute("SELECT COUNT(*) FROM media_ingest_runs WHERE run_id = ?", (run.run_id,)).fetchone()[0]
+            == 0
+        )
+
+
 def test_cleanup_expired_resources_preserves_published_job(store):
     run, reserved, job = _seed_held_run_job(store, occurrence_id="occ-cleanup-published")
     store.bind_run_item_job(
@@ -1678,12 +2220,153 @@ def test_cleanup_expired_resources_preserves_published_job(store):
 
     deleted = store.cleanup_expired_resources("1", now=store.test_clock.current)
 
-    assert deleted["runs"] == 1
+    assert deleted["runs"] == 0
     assert store._jobs.get_job(int(job["id"]))["status"] == "queued"
+    with store._jobs._connect() as connection:
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM media_ingest_runs WHERE owner_user_id = ? AND run_id = ?",
+                ("1", run.run_id),
+            ).fetchone()[0]
+            == 1
+        )
 
 
-@pytest.mark.parametrize("job_status", ["processing", "completed", "failed", "cancelled", "quarantined"])
-def test_cleanup_expired_resources_preserves_processing_and_terminal_jobs(store, job_status):
+def test_cleanup_expired_resources_preserves_processing_job(store):
+    job_status = "processing"
+    occurrence_id = f"occ-cleanup-{job_status}"
+    run, reserved, job = _seed_held_run_job(store, occurrence_id=occurrence_id)
+    store.bind_run_item_job(
+        "1",
+        run.run_id,
+        occurrence_id,
+        attempt=1,
+        job_id=int(job["id"]),
+        batch_id="batch-held",
+        idempotency_identity="playlist-ingest-v1:held",
+        submission_lease_token=reserved.submission_lease_token,
+    )
+    with store._connection(write=True) as db:
+        store._query(
+            db,
+            "UPDATE jobs SET status = ? WHERE id = ?",
+            (job_status, int(job["id"])),
+        )
+    store.test_clock.advance(timedelta(days=8))
+
+    deleted = store.cleanup_expired_resources("1", now=store.test_clock.current)
+
+    assert deleted["runs"] == 0
+    assert store._jobs.get_job(int(job["id"]))["status"] == job_status
+    with store._jobs._connect() as connection:
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM media_ingest_runs WHERE owner_user_id = ? AND run_id = ?",
+                ("1", run.run_id),
+            ).fetchone()[0]
+            == 1
+        )
+
+
+def test_cleanup_expired_resources_preserves_currently_claimed_job(store):
+    occurrence_id = "occ-cleanup-claimed"
+    run, reserved, job = _seed_held_run_job(store, occurrence_id=occurrence_id)
+    store.bind_run_item_job(
+        "1",
+        run.run_id,
+        occurrence_id,
+        attempt=1,
+        job_id=int(job["id"]),
+        batch_id="batch-held",
+        idempotency_identity="playlist-ingest-v1:held",
+        submission_lease_token=reserved.submission_lease_token,
+    )
+    claimed = store._jobs.acquire_next_job(
+        domain="media_ingest",
+        queue="default",
+        worker_id="cleanup-active-worker",
+        lease_seconds=30,
+        owner_user_id="1",
+        job_type="media_ingest_item",
+    )
+    assert claimed is not None
+    assert int(claimed["id"]) == int(job["id"])
+    store.test_clock.advance(timedelta(days=8))
+
+    deleted = store.cleanup_expired_resources("1", now=store.test_clock.current)
+
+    assert deleted["runs"] == 0
+    assert store._jobs.get_job(int(job["id"]))["status"] == "processing"
+    with store._jobs._connect() as connection:
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM media_ingest_runs WHERE owner_user_id = ? AND run_id = ?",
+                ("1", run.run_id),
+            ).fetchone()[0]
+            == 1
+        )
+    assert (
+        store._jobs.acquire_next_job(
+            domain="media_ingest",
+            queue="default",
+            worker_id="cleanup-duplicate-worker",
+            lease_seconds=30,
+            owner_user_id="1",
+            job_type="media_ingest_item",
+        )
+        is None
+    )
+
+
+def test_cleanup_expired_resources_preserves_claimed_job_after_item_starts_running(store):
+    occurrence_id = "occ-cleanup-running-item"
+    run, reserved, job = _seed_held_run_job(store, occurrence_id=occurrence_id)
+    store.bind_run_item_job(
+        "1",
+        run.run_id,
+        occurrence_id,
+        attempt=1,
+        job_id=int(job["id"]),
+        batch_id="batch-held",
+        idempotency_identity="playlist-ingest-v1:held",
+        submission_lease_token=reserved.submission_lease_token,
+    )
+    claimed = store._jobs.acquire_next_job(
+        domain="media_ingest",
+        queue="default",
+        worker_id="cleanup-running-item-worker",
+        lease_seconds=30,
+        owner_user_id="1",
+        job_type="media_ingest_item",
+    )
+    assert claimed is not None
+    with store._connection(write=True) as db:
+        store._query(
+            db,
+            """
+            UPDATE media_ingest_run_items SET state = 'running'
+            WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
+            """,
+            ("1", run.run_id, occurrence_id),
+        )
+    store.test_clock.advance(timedelta(days=8))
+
+    deleted = store.cleanup_expired_resources("1", now=store.test_clock.current)
+
+    assert deleted["runs"] == 0
+    assert store._jobs.get_job(int(job["id"]))["status"] == "processing"
+    with store._jobs._connect() as connection:
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM media_ingest_runs WHERE owner_user_id = ? AND run_id = ?",
+                ("1", run.run_id),
+            ).fetchone()[0]
+            == 1
+        )
+
+
+@pytest.mark.parametrize("job_status", ["completed", "failed", "cancelled", "quarantined"])
+def test_cleanup_expired_resources_allows_terminal_jobs_to_survive_run_deletion(store, job_status):
     occurrence_id = f"occ-cleanup-{job_status}"
     run, reserved, job = _seed_held_run_job(store, occurrence_id=occurrence_id)
     store.bind_run_item_job(
@@ -1710,11 +2393,297 @@ def test_cleanup_expired_resources_preserves_processing_and_terminal_jobs(store,
     assert store._jobs.get_job(int(job["id"]))["status"] == job_status
 
 
-def test_cleanup_expired_resources_rolls_back_held_cancellation_on_delete_failure(
+def test_postgres_expired_run_job_proof_locks_rows_and_blocks_processing(
+    store,
+    monkeypatch,
+):
+    queries: list[tuple[str, tuple]] = []
+
+    class _Rows:
+        def fetchall(self):
+            return [
+                {
+                    "run_id": "run-active",
+                    "occurrence_id": "occ-active",
+                    "attempt": 1,
+                    "job_id": 11,
+                    "batch_id": "batch-active",
+                    "idempotency_identity": "playlist-ingest-v1:active",
+                    "submission_queue": "default",
+                    "id": 11,
+                    "uuid": "job-active",
+                    "owner_user_id": "1",
+                    "domain": "media_ingest",
+                    "queue": "default",
+                    "job_type": "media_ingest_item",
+                    "status": "processing",
+                    "available_at": NOW,
+                    "batch_group": "batch-active",
+                    "idempotency_key": "playlist-ingest-v1:active",
+                    "created_at": NOW,
+                    "payload": {
+                        "run_id": "run-active",
+                        "occurrence_id": "occ-active",
+                        "attempt": 1,
+                    },
+                }
+            ]
+
+    def fake_query(_db, sql, params=()):
+        queries.append((sql, params))
+        return _Rows()
+
+    store._postgres = True
+    monkeypatch.setattr(store, "_query", fake_query)
+
+    proof = store._cancel_expired_run_held_jobs(
+        object(),
+        owner_user_id="1",
+        cutoff=NOW,
+        run_ids=["run-active", "run-terminal"],
+    )
+
+    assert proof.deletable_run_ids == ("run-terminal",)
+    assert proof.cancelled_jobs == ()
+    assert len(queries) == 1
+    assert "run.run_id = ANY(?)" in queries[0][0]
+    assert queries[0][0].rstrip().endswith("FOR UPDATE OF item, job")
+
+
+def test_cleanup_job_eligibility_proves_every_row_before_cancelling_any_job(store):
+    run, _reservations, jobs = _seed_held_run_jobs(
+        store,
+        occurrence_ids=("occ-proof-first", "occ-proof-ambiguous"),
+    )
+    with store._jobs._connect() as connection, connection:
+        payload = json.loads(
+            connection.execute(
+                "SELECT payload FROM jobs WHERE id = ?",
+                (int(jobs[1]["id"]),),
+            ).fetchone()[0]
+        )
+        payload["occurrence_id"] = "occ-proof-mismatch"
+        connection.execute(
+            "UPDATE jobs SET payload = ? WHERE id = ?",
+            (json.dumps(payload), int(jobs[1]["id"])),
+        )
+
+    with store._connection(write=True) as db:
+        proof = store._cancel_expired_run_held_jobs(
+            db,
+            owner_user_id="1",
+            cutoff=NOW + timedelta(days=8),
+            run_ids=[run.run_id],
+        )
+
+    assert proof.deletable_run_ids == ()
+    assert proof.cancelled_jobs == ()
+    assert [store._jobs.get_job(int(job["id"]))["status"] for job in jobs] == ["queued", "queued"]
+
+
+def _assert_retained_run_staging_authority(store, run_id: str, staging_dir: Path) -> None:
+    with store._jobs._connect() as connection:
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM media_ingest_runs WHERE owner_user_id = ? AND run_id = ?",
+                ("1", run_id),
+            ).fetchone()[0]
+            == 1
+        )
+        item = connection.execute(
+            """
+            SELECT staging_temp_dir FROM media_ingest_run_items
+            WHERE owner_user_id = ? AND run_id = ?
+            """,
+            ("1", run_id),
+        ).fetchone()
+        assert item is not None
+        assert item[0] == str(staging_dir)
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM media_ingest_run_events WHERE owner_user_id = ? AND run_id = ?",
+                ("1", run_id),
+            ).fetchone()[0]
+            > 0
+        )
+
+
+def test_cleanup_decrypt_failure_retains_only_affected_run_and_held_quota(
+    store,
+    tmp_path,
+    monkeypatch,
+):
+    from tldw_Server_API.app.core.exceptions import JobSubmissionLimitError
+
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setenv("JOBS_COUNTERS_ENABLED", "true")
+    monkeypatch.setenv("JOBS_QUOTA_MAX_QUEUED_MEDIA_INGEST_USER_1", "1")
+    monkeypatch.setenv("JOBS_ENCRYPT_MEDIA_INGEST", "true")
+    monkeypatch.setenv(
+        "WORKFLOWS_ARTIFACT_ENC_KEY",
+        base64.b64encode(b"playlist-cleanup-encryption-key!"[:32]).decode(),
+    )
+    retained, _reserved, job, staging_dir = _seed_file_run_job(
+        store,
+        tmp_path,
+        occurrence_id="occ-cleanup-decrypt-failure",
+    )
+    store.append_run_event("1", retained.run_id, event_type="decrypt-failure-authority")
+    eligible = store.create_validated_run(
+        "1",
+        items=[_validated_direct_record(occurrence_id="occ-cleanup-decrypt-eligible")],
+    )
+    store.test_clock.advance(timedelta(days=8))
+    monkeypatch.setattr(store._jobs, "_maybe_decrypt_json", lambda payload: payload)
+
+    deleted = store.cleanup_expired_resources("1", now=store.test_clock.current)
+
+    assert deleted["runs"] == 1
+    _assert_retained_run_staging_authority(store, retained.run_id, staging_dir)
+    with store._jobs._connect() as connection:
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM media_ingest_runs WHERE run_id = ?",
+                (eligible.run_id,),
+            ).fetchone()[0]
+            == 0
+        )
+        assert (
+            connection.execute(
+                "SELECT status FROM jobs WHERE id = ?",
+                (int(job["id"]),),
+            ).fetchone()[0]
+            == "queued"
+        )
+        counter = connection.execute(
+            """
+            SELECT scheduled_count FROM job_counters
+            WHERE domain = 'media_ingest' AND queue = 'default'
+              AND job_type = 'media_ingest_item'
+            """
+        ).fetchone()
+    assert counter is not None
+    assert int(counter[0]) == 1
+    with pytest.raises(JobSubmissionLimitError, match="max queued"):
+        store._jobs.create_job(
+            domain="media_ingest",
+            queue="default",
+            job_type="media_ingest_item",
+            payload={"source": "https://example.com/decrypt-quota"},
+            owner_user_id="1",
+        )
+
+
+def test_cleanup_binding_mismatch_retains_only_affected_run_and_held_quota(
+    store,
+    tmp_path,
+    monkeypatch,
+):
+    from tldw_Server_API.app.core.exceptions import JobSubmissionLimitError
+
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setenv("JOBS_COUNTERS_ENABLED", "true")
+    monkeypatch.setenv("JOBS_QUOTA_MAX_QUEUED_MEDIA_INGEST_USER_1", "1")
+    retained, _reserved, job, staging_dir = _seed_file_run_job(
+        store,
+        tmp_path,
+        occurrence_id="occ-cleanup-binding-mismatch",
+    )
+    store.append_run_event("1", retained.run_id, event_type="binding-mismatch-authority")
+    eligible = store.create_validated_run(
+        "1",
+        items=[_validated_direct_record(occurrence_id="occ-cleanup-mismatch-eligible")],
+    )
+    with store._jobs._connect() as connection, connection:
+        payload = json.loads(
+            connection.execute(
+                "SELECT payload FROM jobs WHERE id = ?",
+                (int(job["id"]),),
+            ).fetchone()[0]
+        )
+        payload["occurrence_id"] = "occ-client-mismatch"
+        connection.execute(
+            "UPDATE jobs SET payload = ? WHERE id = ?",
+            (json.dumps(payload), int(job["id"])),
+        )
+    store.test_clock.advance(timedelta(days=8))
+
+    deleted = store.cleanup_expired_resources("1", now=store.test_clock.current)
+
+    assert deleted["runs"] == 1
+    _assert_retained_run_staging_authority(store, retained.run_id, staging_dir)
+    with store._jobs._connect() as connection:
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM media_ingest_runs WHERE run_id = ?",
+                (eligible.run_id,),
+            ).fetchone()[0]
+            == 0
+        )
+        assert (
+            connection.execute(
+                "SELECT status FROM jobs WHERE id = ?",
+                (int(job["id"]),),
+            ).fetchone()[0]
+            == "queued"
+        )
+    with pytest.raises(JobSubmissionLimitError, match="max queued"):
+        store._jobs.create_job(
+            domain="media_ingest",
+            queue="default",
+            job_type="media_ingest_item",
+            payload={"source": "https://example.com/mismatch-quota"},
+            owner_user_id="1",
+        )
+
+
+def test_cleanup_normalization_exception_retains_only_affected_run(
+    store,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    retained, _reserved, _job, staging_dir = _seed_file_run_job(
+        store,
+        tmp_path,
+        occurrence_id="occ-cleanup-normalization-error",
+    )
+    eligible = store.create_validated_run(
+        "1",
+        items=[_validated_direct_record(occurrence_id="occ-cleanup-normalization-eligible")],
+    )
+    store.test_clock.advance(timedelta(days=8))
+
+    def fail_normalization(_job, *, owner_user_id):  # noqa: ARG001
+        raise RuntimeError("synthetic decrypt adapter failure")
+
+    monkeypatch.setattr(store._jobs, "normalize_job_binding_view", fail_normalization)
+
+    deleted = store.cleanup_expired_resources("1", now=store.test_clock.current)
+
+    assert deleted["runs"] == 1
+    _assert_retained_run_staging_authority(store, retained.run_id, staging_dir)
+    with store._jobs._connect() as connection:
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM media_ingest_runs WHERE run_id = ?",
+                (eligible.run_id,),
+            ).fetchone()[0]
+            == 0
+        )
+
+
+def test_cleanup_expired_resources_rolls_back_no_staging_cancellation_on_delete_failure(
     store,
     monkeypatch,
 ):
     run, _reserved, job = _seed_held_run_job(store, occurrence_id="occ-cleanup-rollback")
+    lifecycle_calls: list[tuple[dict, ...]] = []
+    monkeypatch.setattr(
+        store,
+        "_emit_expired_job_cancellation_lifecycle",
+        lambda jobs: lifecycle_calls.append(tuple(jobs)),
+    )
     store.test_clock.advance(timedelta(days=8))
     original_query = store._query
 
@@ -1735,6 +2704,13 @@ def test_cleanup_expired_resources_rolls_back_held_cancellation_on_delete_failur
             (run.run_id,),
         ).fetchone()[0]
     assert remaining == 1
+    assert lifecycle_calls == []
+
+    monkeypatch.setattr(store, "_query", original_query)
+
+    assert store.cleanup_expired_resources("1", now=store.test_clock.current)["runs"] == 1
+    assert len(lifecycle_calls) == 1
+    assert [cancelled["id"] for cancelled in lifecycle_calls[0]] == [int(job["id"])]
 
 
 def test_cleanup_expired_resources_retires_unreferenced_staging_after_commit(
@@ -1763,7 +2739,91 @@ def test_cleanup_expired_resources_retires_unreferenced_staging_after_commit(
     assert remaining == 0
 
 
-def test_cleanup_expired_resources_rollback_does_not_delete_staging(
+@pytest.mark.parametrize("cleanup_outcome", ["invalid", "protected", "failed"])
+def test_cleanup_staging_retirement_outcome_retains_authority(
+    store,
+    tmp_path,
+    monkeypatch,
+    cleanup_outcome,
+):
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video import playlist_ingest_store
+
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    run, _reserved, job, staging_dir = _seed_file_run_job(
+        store,
+        tmp_path,
+        occurrence_id=f"occ-cleanup-file-{cleanup_outcome}",
+    )
+    store.test_clock.advance(timedelta(days=8))
+    monkeypatch.setattr(
+        playlist_ingest_store,
+        "cleanup_exact_run_file_staging",
+        lambda **_kwargs: cleanup_outcome,
+    )
+
+    deleted = store.cleanup_expired_resources("1", now=store.test_clock.current)
+
+    assert deleted["runs"] == 0
+    _assert_retained_run_staging_authority(store, run.run_id, staging_dir)
+    assert store._jobs.get_job(int(job["id"]))["status"] == "cancelled"
+    assert staging_dir.exists()
+
+
+def test_cleanup_failed_staging_retirement_retries_before_run_deletion(
+    store,
+    tmp_path,
+    monkeypatch,
+):
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video import playlist_ingest_store
+
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    run, _reserved, job, staging_dir = _seed_file_run_job(
+        store,
+        tmp_path,
+        occurrence_id="occ-cleanup-file-retry",
+    )
+    store.test_clock.advance(timedelta(days=8))
+    original_cleanup = playlist_ingest_store.cleanup_exact_run_file_staging
+    attempts = 0
+
+    def fail_once(**kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return "failed"
+        return original_cleanup(**kwargs)
+
+    monkeypatch.setattr(playlist_ingest_store, "cleanup_exact_run_file_staging", fail_once)
+
+    first = store.cleanup_expired_resources("1", now=store.test_clock.current)
+
+    assert first["runs"] == 0
+    _assert_retained_run_staging_authority(store, run.run_id, staging_dir)
+    assert store._jobs.get_job(int(job["id"]))["status"] == "cancelled"
+
+    second = store.cleanup_expired_resources("1", now=store.test_clock.current)
+
+    assert second["runs"] == 1
+    assert attempts == 2
+    assert not staging_dir.exists()
+    with store._jobs._connect() as connection:
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM media_ingest_runs WHERE run_id = ?",
+                (run.run_id,),
+            ).fetchone()[0]
+            == 0
+        )
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM media_ingest_run_items WHERE run_id = ?",
+                (run.run_id,),
+            ).fetchone()[0]
+            == 0
+        )
+
+
+def test_cleanup_staging_scan_cap_ambiguity_retries_before_run_deletion(
     store,
     tmp_path,
     monkeypatch,
@@ -1772,8 +2832,202 @@ def test_cleanup_expired_resources_rollback_does_not_delete_staging(
     run, _reserved, job, staging_dir = _seed_file_run_job(
         store,
         tmp_path,
+        occurrence_id="occ-cleanup-file-scan-cap",
+    )
+    store.test_clock.advance(timedelta(days=8))
+    monkeypatch.setattr(store, "_has_live_job_staging_reference", lambda *_args, **_kwargs: True)
+
+    first = store.cleanup_expired_resources("1", now=store.test_clock.current)
+
+    assert first["runs"] == 0
+    _assert_retained_run_staging_authority(store, run.run_id, staging_dir)
+    assert store._jobs.get_job(int(job["id"]))["status"] == "cancelled"
+
+    monkeypatch.setattr(store, "_has_live_job_staging_reference", lambda *_args, **_kwargs: False)
+    second = store.cleanup_expired_resources("1", now=store.test_clock.current)
+
+    assert second["runs"] == 1
+    assert not staging_dir.exists()
+
+
+@pytest.mark.parametrize("missing_payload_field", ["attempt", "batch_id", "temp_dir"])
+def test_staging_reference_check_fails_closed_when_held_payload_binding_is_incomplete(
+    store,
+    tmp_path,
+    monkeypatch,
+    missing_payload_field,
+):
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        _RunStagingCleanupCandidate,
+    )
+
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    occurrence_id = f"occ-cleanup-incomplete-{missing_payload_field}"
+    run, _reserved, job, staging_dir = _seed_file_run_job(
+        store,
+        tmp_path,
+        occurrence_id=occurrence_id,
+    )
+    with store._jobs._connect() as connection, connection:
+        payload = json.loads(connection.execute("SELECT payload FROM jobs WHERE id = ?", (job["id"],)).fetchone()[0])
+        payload.pop(missing_payload_field)
+        connection.execute(
+            "UPDATE jobs SET payload = ? WHERE id = ?",
+            (json.dumps(payload), int(job["id"])),
+        )
+    candidate = _RunStagingCleanupCandidate(
+        run_id=run.run_id,
+        occurrence_id=occurrence_id,
+        batch_id=f"batch-{occurrence_id}",
+        idempotency_identity=f"playlist-ingest-v1:{occurrence_id}",
+        temp_dir=str(staging_dir),
+    )
+
+    assert store._has_live_job_staging_reference("1", candidate) is True
+
+
+def test_cleanup_publish_wins_supported_bind_race_and_preserves_staging(
+    store,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    run, reserved, job, staging_dir = _seed_file_run_job(
+        store,
+        tmp_path,
+        occurrence_id="occ-cleanup-publish-wins",
+    )
+    publish_entered = Event()
+    allow_publish = Event()
+    cleanup_started = Event()
+    original_publish = store._publish_run_bound_job
+
+    def blocked_publish(*args, **kwargs):
+        publish_entered.set()
+        assert allow_publish.wait(timeout=5)
+        return original_publish(*args, **kwargs)
+
+    monkeypatch.setattr(store, "_publish_run_bound_job", blocked_publish)
+
+    def bind():
+        return store.bind_run_item_job(
+            "1",
+            run.run_id,
+            "occ-cleanup-publish-wins",
+            attempt=1,
+            job_id=int(job["id"]),
+            batch_id="batch-occ-cleanup-publish-wins",
+            idempotency_identity="playlist-ingest-v1:occ-cleanup-publish-wins",
+            submission_lease_token=reserved.submission_lease_token,
+        )
+
+    def cleanup():
+        cleanup_started.set()
+        return store.cleanup_expired_resources("1", now=NOW + timedelta(days=8))
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        bind_future = executor.submit(bind)
+        assert publish_entered.wait(timeout=5)
+        cleanup_future = executor.submit(cleanup)
+        assert cleanup_started.wait(timeout=5)
+        assert cleanup_future.done() is False
+        allow_publish.set()
+        assert bind_future.result(timeout=5).state == "queued"
+        deleted = cleanup_future.result(timeout=5)
+
+    assert deleted["runs"] == 0
+    assert staging_dir.exists()
+    assert store._jobs.get_job(int(job["id"]))["status"] == "queued"
+    _assert_retained_run_staging_authority(store, run.run_id, staging_dir)
+
+
+def test_cleanup_cancellation_wins_supported_bind_race_before_staging_retirement(
+    store,
+    tmp_path,
+    monkeypatch,
+):
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestConflictError,
+    )
+
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    run, reserved, job, staging_dir = _seed_file_run_job(
+        store,
+        tmp_path,
+        occurrence_id="occ-cleanup-cancel-wins",
+    )
+    lifecycle_entered = Event()
+    allow_retirement = Event()
+    lifecycle_calls: list[tuple[dict, ...]] = []
+
+    def pause_after_cancellation(jobs):
+        lifecycle_calls.append(tuple(jobs))
+        lifecycle_entered.set()
+        assert allow_retirement.wait(timeout=5)
+
+    monkeypatch.setattr(store, "_emit_expired_job_cancellation_lifecycle", pause_after_cancellation)
+
+    def bind():
+        return store.bind_run_item_job(
+            "1",
+            run.run_id,
+            "occ-cleanup-cancel-wins",
+            attempt=1,
+            job_id=int(job["id"]),
+            batch_id="batch-occ-cleanup-cancel-wins",
+            idempotency_identity="playlist-ingest-v1:occ-cleanup-cancel-wins",
+            submission_lease_token=reserved.submission_lease_token,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        cleanup_future = executor.submit(
+            store.cleanup_expired_resources,
+            "1",
+            now=NOW + timedelta(days=8),
+        )
+        assert lifecycle_entered.wait(timeout=5)
+        assert staging_dir.exists()
+        assert store._jobs.get_job(int(job["id"]))["status"] == "cancelled"
+        with store._jobs._connect() as connection:
+            assert (
+                connection.execute(
+                    "SELECT COUNT(*) FROM media_ingest_runs WHERE run_id = ?",
+                    (run.run_id,),
+                ).fetchone()[0]
+                == 1
+            )
+        bind_future = executor.submit(bind)
+        with pytest.raises(PlaylistIngestConflictError):
+            bind_future.result(timeout=5)
+        allow_retirement.set()
+        assert cleanup_future.result(timeout=5)["runs"] == 1
+
+    assert len(lifecycle_calls) == 1
+    assert not staging_dir.exists()
+
+
+def test_cleanup_final_transaction_rollback_preserves_authority_after_staging_retirement(
+    store,
+    tmp_path,
+    monkeypatch,
+):
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video import playlist_ingest_store
+
+    monkeypatch.setenv("JOBS_COUNTERS_ENABLED", "true")
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    run, _reserved, job, staging_dir = _seed_file_run_job(
+        store,
+        tmp_path,
         occurrence_id="occ-cleanup-file-rollback",
     )
+    with store._jobs._connect() as connection:
+        scheduled_before = connection.execute(
+            """
+            SELECT scheduled_count FROM job_counters
+            WHERE domain = 'media_ingest' AND queue = 'default'
+              AND job_type = 'media_ingest_item'
+            """
+        ).fetchone()[0]
     store.test_clock.advance(timedelta(days=8))
     original_query = store._query
 
@@ -1787,14 +3041,52 @@ def test_cleanup_expired_resources_rollback_does_not_delete_staging(
     with pytest.raises(RuntimeError, match="synthetic cleanup delete failure"):
         store.cleanup_expired_resources("1", now=store.test_clock.current)
 
-    assert staging_dir.exists()
-    assert store._jobs.get_job(int(job["id"]))["status"] == "queued"
+    assert not staging_dir.exists()
+    assert store._jobs.get_job(int(job["id"]))["status"] == "cancelled"
     with store._jobs._connect() as connection:
-        remaining = connection.execute(
-            "SELECT COUNT(*) FROM media_ingest_runs WHERE run_id = ?",
-            (run.run_id,),
-        ).fetchone()[0]
-    assert remaining == 1
+        assert (
+            connection.execute("SELECT COUNT(*) FROM media_ingest_runs WHERE run_id = ?", (run.run_id,)).fetchone()[0]
+            == 1
+        )
+        item = connection.execute(
+            """
+            SELECT staging_temp_dir FROM media_ingest_run_items
+            WHERE run_id = ? AND occurrence_id = ?
+            """,
+            (run.run_id, "occ-cleanup-file-rollback"),
+        ).fetchone()
+        assert item is not None
+        assert item[0] is None
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM media_ingest_run_events WHERE run_id = ?", (run.run_id,)
+            ).fetchone()[0]
+            >= 1
+        )
+        assert (
+            connection.execute(
+                """
+            SELECT scheduled_count FROM job_counters
+            WHERE domain = 'media_ingest' AND queue = 'default'
+              AND job_type = 'media_ingest_item'
+            """
+            ).fetchone()[0]
+            == max(scheduled_before - 1, 0)
+        )
+
+    monkeypatch.setattr(store, "_query", original_query)
+
+    def unexpected_second_retirement(**_kwargs):
+        raise AssertionError("confirmed staging retirement must not be retried")
+
+    monkeypatch.setattr(
+        playlist_ingest_store,
+        "cleanup_exact_run_file_staging",
+        unexpected_second_retirement,
+    )
+
+    assert store.cleanup_expired_resources("1", now=store.test_clock.current)["runs"] == 1
+    assert store._jobs.get_job(int(job["id"]))["status"] == "cancelled"
 
 
 def test_cleanup_expired_resources_preserves_published_staging_reference(
@@ -1803,7 +3095,7 @@ def test_cleanup_expired_resources_preserves_published_staging_reference(
     monkeypatch,
 ):
     monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
-    _run, _reserved, job, staging_dir = _seed_file_run_job(
+    run, _reserved, job, staging_dir = _seed_file_run_job(
         store,
         tmp_path,
         occurrence_id="occ-cleanup-file-published",
@@ -1813,9 +3105,175 @@ def test_cleanup_expired_resources_preserves_published_staging_reference(
 
     deleted = store.cleanup_expired_resources("1", now=store.test_clock.current)
 
-    assert deleted["runs"] == 1
+    assert deleted["runs"] == 0
     assert store._jobs.get_job(int(job["id"]))["status"] == "queued"
     assert staging_dir.exists()
+    _assert_retained_run_staging_authority(store, run.run_id, staging_dir)
+
+
+def test_staging_reference_scan_finds_encrypted_job_after_first_page(store, tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_staging import (
+        run_file_staging_prefix,
+    )
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        _RunStagingCleanupCandidate,
+    )
+
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setenv("JOBS_ENCRYPT_MEDIA_INGEST", "true")
+    monkeypatch.setenv(
+        "WORKFLOWS_ARTIFACT_ENC_KEY",
+        "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo0NTY3ODkwMTIzNDU2Nzg5MDEy"[:44],
+    )
+    batch_id = "batch-reference-page-two"
+    identity = "playlist-ingest-v1:reference-page-two"
+    staging_dir = tmp_path / f"{run_file_staging_prefix(batch_id=batch_id, idempotency_identity=identity)}candidate"
+    staging_dir.mkdir()
+    candidate = _RunStagingCleanupCandidate(
+        run_id="run-reference-page-two",
+        occurrence_id="occ-reference-page-two",
+        batch_id=batch_id,
+        idempotency_identity=identity,
+        temp_dir=str(staging_dir),
+    )
+    store._jobs.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="media_ingest_item",
+        owner_user_id="1",
+        batch_group=batch_id,
+        idempotency_key=identity,
+        payload={"temp_dir": str(staging_dir)},
+    )
+    for index in range(100):
+        store._jobs.create_job(
+            domain="media_ingest",
+            queue="default",
+            job_type="media_ingest_item",
+            owner_user_id="1",
+            batch_group=batch_id,
+            idempotency_key=f"playlist-ingest-v1:unrelated-{index}",
+            payload={"source": f"https://example.com/{index}"},
+        )
+    list_calls: list[dict] = []
+    original_list_jobs = store._jobs.list_jobs
+
+    def tracking_list_jobs(**kwargs):
+        list_calls.append(dict(kwargs))
+        return original_list_jobs(**kwargs)
+
+    monkeypatch.setattr(store._jobs, "list_jobs", tracking_list_jobs)
+
+    assert store._has_live_job_staging_reference("1", candidate) is True
+    assert len(list_calls) == 2
+
+
+def test_staging_reference_scan_fails_closed_at_total_bound(store, tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video import playlist_ingest_store
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_staging import (
+        run_file_staging_prefix,
+    )
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        _RunStagingCleanupCandidate,
+    )
+
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    batch_id = "batch-total-scan-bound"
+    identity = "playlist-ingest-v1:total-scan-bound"
+    staging_dir = tmp_path / f"{run_file_staging_prefix(batch_id=batch_id, idempotency_identity=identity)}candidate"
+    staging_dir.mkdir()
+    candidate = _RunStagingCleanupCandidate(
+        run_id="run-total-scan-bound",
+        occurrence_id="occ-total-scan-bound",
+        batch_id=batch_id,
+        idempotency_identity=identity,
+        temp_dir=str(staging_dir),
+    )
+    list_calls: list[dict] = []
+
+    def full_page(**kwargs):
+        list_calls.append(dict(kwargs))
+        if len(list_calls) > 5:
+            raise AssertionError("staging reference scan exceeded total bound")
+        page = len(list_calls)
+        return [
+            {
+                "id": 1000 - (page * 100) - index,
+                "created_at": NOW - timedelta(minutes=page),
+                "status": "queued",
+                "batch_group": batch_id,
+                "idempotency_key": f"playlist-ingest-v1:other-{page}-{index}",
+                "payload": {},
+            }
+            for index in range(100)
+        ]
+
+    monkeypatch.setattr(store._jobs, "list_jobs", full_page)
+    monkeypatch.setattr(
+        store._jobs,
+        "normalize_job_binding_view",
+        lambda job, **_kwargs: job,
+    )
+    monkeypatch.setattr(store, "has_live_run_item_staging_reference", lambda *_args, **_kwargs: False)
+    cleanup_calls: list[str] = []
+    monkeypatch.setattr(
+        playlist_ingest_store,
+        "cleanup_exact_run_file_staging",
+        lambda **kwargs: cleanup_calls.append(str(kwargs["temp_dir"])),
+    )
+
+    store._retire_expired_run_staging("1", [candidate])
+
+    assert cleanup_calls == []
+    assert len(list_calls) == 5
+    assert all(call["limit"] == 100 for call in list_calls)
+
+
+def test_staging_retirement_failure_log_excludes_client_identifiers(store, monkeypatch):
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video import playlist_ingest_store
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        _RunStagingCleanupCandidate,
+    )
+
+    sentinel = "client-sentinel-must-not-leak"
+    candidate = _RunStagingCleanupCandidate(
+        run_id=f"run-{sentinel}",
+        occurrence_id=f"occ-{sentinel}",
+        batch_id="batch-safe-log",
+        idempotency_identity="playlist-ingest-v1:safe-log",
+        temp_dir=sentinel,
+    )
+
+    class _LoggerStub:
+        def __init__(self) -> None:
+            self.bindings: list[dict] = []
+            self.messages: list[str] = []
+
+        def bind(self, **kwargs):
+            self.bindings.append(dict(kwargs))
+            return self
+
+        def warning(self, message, *args):
+            self.messages.append(str(message).format(*args))
+
+    logger_stub = _LoggerStub()
+
+    def fail_nested(*_args, **_kwargs):
+        raise RuntimeError(sentinel)
+
+    monkeypatch.setattr(store, "has_live_run_item_staging_reference", fail_nested)
+    monkeypatch.setattr(playlist_ingest_store, "logger", logger_stub)
+
+    store._retire_expired_run_staging("1", [candidate])
+
+    assert logger_stub.bindings == [
+        {
+            "error_code": "playlist_staging_retirement_failed",
+            "error_type": "RuntimeError",
+            "failure_count": 1,
+        }
+    ]
+    assert sentinel not in repr((logger_stub.bindings, logger_stub.messages))
 
 
 def test_cleanup_keeps_active_db_time_preflight_linked_to_acquirable_job(tmp_path, monkeypatch):
@@ -2771,6 +4229,51 @@ def test_bind_run_item_job_rejects_overwrite_option_opposite_reserved_action(sto
         )
 
 
+def _seed_held_run_jobs(store, *, occurrence_ids: tuple[str, ...]):
+    run = store.create_validated_run(
+        "1",
+        items=[_validated_direct_record(occurrence_id=occurrence_id) for occurrence_id in occurrence_ids],
+    )
+    reservations = []
+    jobs = []
+    for occurrence_id in occurrence_ids:
+        batch_id = f"batch-{occurrence_id}"
+        identity = f"playlist-ingest-v1:{occurrence_id}"
+        reserved = store.prepare_run_item_job_submission(
+            "1",
+            run.run_id,
+            occurrence_id,
+            attempt=1,
+            batch_id=batch_id,
+            idempotency_identity=identity,
+            submission_queue="default",
+            source_kind="url",
+            planned_item_id=None,
+        )
+        job = store._jobs.create_job(
+            domain="media_ingest",
+            queue="default",
+            job_type="media_ingest_item",
+            payload={
+                "run_id": run.run_id,
+                "occurrence_id": occurrence_id,
+                "attempt": 1,
+                "batch_id": batch_id,
+                "idempotency_key": identity,
+                "source": reserved.source_url,
+                "source_kind": "url",
+                "options": {"overwrite_existing": False},
+            },
+            owner_user_id="1",
+            batch_group=batch_id,
+            idempotency_key=identity,
+            available_at=datetime(9999, 12, 31, 23, 59, 59, tzinfo=timezone.utc),
+        )
+        reservations.append(reserved)
+        jobs.append(job)
+    return run, reservations, jobs
+
+
 def _seed_held_run_job(store, *, occurrence_id="occ-held"):
     run = store.create_validated_run(
         "1",
@@ -2807,6 +4310,85 @@ def _seed_held_run_job(store, *, occurrence_id="occ-held"):
         available_at=datetime(9999, 12, 31, 23, 59, 59, tzinfo=timezone.utc),
     )
     return run, reserved, job
+
+
+def _seed_file_run_jobs(store, tmp_path, *, occurrence_ids: tuple[str, ...]):
+    from tldw_Server_API.app.api.v1.endpoints.media.ingest_jobs import _run_file_staging_prefix
+
+    run = store.create_validated_run(
+        "1",
+        items=[
+            _validated_direct_record(
+                occurrence_id=occurrence_id,
+                input_kind="file_stub",
+                source_url=None,
+                normalized_source_id=None,
+                source_kind="file",
+                state="awaiting_upload",
+            )
+            for occurrence_id in occurrence_ids
+        ],
+    )
+    jobs = []
+    staging_dirs = []
+    for occurrence_id in occurrence_ids:
+        batch_id = f"batch-{occurrence_id}"
+        identity = f"playlist-ingest-v1:{occurrence_id}"
+        reserved = store.prepare_run_item_job_submission(
+            "1",
+            run.run_id,
+            occurrence_id,
+            attempt=1,
+            batch_id=batch_id,
+            idempotency_identity=identity,
+            submission_queue="default",
+            source_kind="file",
+            planned_item_id=None,
+        )
+        prefix = _run_file_staging_prefix(
+            batch_id=batch_id,
+            idempotency_identity=identity,
+            submission_lease_token=reserved.submission_lease_token,
+        )
+        staging_dir = tmp_path / f"{prefix}cleanup"
+        staging_dir.mkdir()
+        source = staging_dir / "clip.mp3"
+        source.write_bytes(b"test")
+        store.record_run_item_staging(
+            "1",
+            run.run_id,
+            occurrence_id,
+            attempt=1,
+            batch_id=batch_id,
+            idempotency_identity=identity,
+            submission_lease_token=reserved.submission_lease_token,
+            temp_dir=str(staging_dir),
+        )
+        jobs.append(
+            store._jobs.create_job(
+                domain="media_ingest",
+                queue="default",
+                job_type="media_ingest_item",
+                payload={
+                    "run_id": run.run_id,
+                    "occurrence_id": occurrence_id,
+                    "attempt": 1,
+                    "batch_id": batch_id,
+                    "idempotency_key": identity,
+                    "source": str(source),
+                    "source_kind": "file",
+                    "temp_dir": str(staging_dir),
+                    "cleanup_temp_dir": True,
+                    "options": {"overwrite_existing": False},
+                },
+                owner_user_id="1",
+                batch_group=batch_id,
+                idempotency_key=identity,
+                available_at=datetime(9999, 12, 31, 23, 59, 59, tzinfo=timezone.utc),
+            )
+        )
+        staging_dirs.append(Path(staging_dir))
+    return run, jobs, staging_dirs
 
 
 def _seed_file_run_job(store, tmp_path, *, occurrence_id: str, publish: bool = False):

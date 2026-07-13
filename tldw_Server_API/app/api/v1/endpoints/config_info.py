@@ -54,30 +54,27 @@ def load_safe_config() -> dict:
 
     if not config_path.exists():
         logger.warning("Config file not found")
-        return {
-            "configured": False,
-            "message": "Configuration file not found"
-        }
+        return {"configured": False, "message": "Configuration file not found"}
 
     config = configparser.ConfigParser()
     config.read(config_path)
 
     # Get authentication mode
-    auth_mode = config.get('Authentication', 'auth_mode', fallback='single_user')
+    auth_mode = config.get("Authentication", "auth_mode", fallback="single_user")
 
     # Determine what to expose based on auth mode
     safe_config = {
         "configured": True,
         "auth_mode": auth_mode,
         "server": {
-            "host": config.get('Server', 'host', fallback='127.0.0.1'),
-            "port": config.getint('Server', 'port', fallback=8000)
-        }
+            "host": config.get("Server", "host", fallback="127.0.0.1"),
+            "port": config.getint("Server", "port", fallback=8000),
+        },
     }
 
     # Never expose a real API key via docs-info.
-    if auth_mode == 'single_user':
-        api_key = config.get('Authentication', 'single_user_api_key', fallback='').strip()
+    if auth_mode == "single_user":
+        api_key = config.get("Authentication", "single_user_api_key", fallback="").strip()
         placeholders = {
             "",
             "your_api_key_here",
@@ -93,25 +90,25 @@ def load_safe_config() -> dict:
 
     # Check which LLM providers are configured (without exposing keys)
     configured_providers = []
-    if config.has_section('API'):
+    if config.has_section("API"):
         provider_keys = {
-            'openai_api_key': 'OpenAI',
-            'anthropic_api_key': 'Anthropic',
-            'groq_api_key': 'Groq',
-            'google_api_key': 'Google',
-            'cohere_api_key': 'Cohere',
-            'mistral_api_key': 'Mistral',
-            'deepseek_api_key': 'DeepSeek',
-            'huggingface_api_key': 'HuggingFace',
-            'openrouter_api_key': 'OpenRouter',
-            'novita_api_key': 'Novita',
-            'poe_api_key': 'Poe',
-            'together_api_key': 'Together',
+            "openai_api_key": "OpenAI",
+            "anthropic_api_key": "Anthropic",
+            "groq_api_key": "Groq",
+            "google_api_key": "Google",
+            "cohere_api_key": "Cohere",
+            "mistral_api_key": "Mistral",
+            "deepseek_api_key": "DeepSeek",
+            "huggingface_api_key": "HuggingFace",
+            "openrouter_api_key": "OpenRouter",
+            "novita_api_key": "Novita",
+            "poe_api_key": "Poe",
+            "together_api_key": "Together",
         }
 
         for key_name, provider_name in provider_keys.items():
-            value = config.get('API', key_name, fallback='')
-            if value and value not in ['', 'your_api_key_here', 'YOUR_API_KEY_HERE']:
+            value = config.get("API", key_name, fallback="")
+            if value and value not in ["", "your_api_key_here", "YOUR_API_KEY_HERE"]:
                 configured_providers.append(provider_name)
 
     safe_config["configured_llm_providers"] = configured_providers
@@ -122,6 +119,7 @@ def load_safe_config() -> dict:
     # Feature flags / capabilities (safe to expose)
     try:
         has_media_routes = bool(config_mod.route_enabled("media", default_stable=True))
+        has_media_ingest_job_routes = bool(config_mod.route_enabled("media-ingest-jobs", default_stable=True))
         has_audio_http = bool(config_mod.route_enabled("audio", default_stable=True))
         has_audio_websocket = bool(config_mod.route_enabled("audio-websocket", default_stable=True))
         caps = {
@@ -143,8 +141,11 @@ def load_safe_config() -> dict:
         caps["hasVoiceConversationTransport"] = bool(has_audio_websocket)
         caps["hasAudio"] = bool(caps["hasStt"] or caps["hasTts"] or caps["hasVoiceChat"])
         caps["hasMediaPlaylistPreflight"] = has_media_routes
-        caps["hasMediaIngestJobs"] = has_media_routes
-        caps["hasMediaIngestJobEvents"] = has_media_routes
+        caps["hasMediaPlaylistPreflightResources"] = has_media_routes
+        caps["hasMediaPlaylistIngestRuns"] = has_media_routes
+        caps["hasMediaIngestJobs"] = has_media_ingest_job_routes
+        caps["hasMediaIngestJobEvents"] = has_media_ingest_job_routes
+        caps["hasMediaPlaylistIngestEvents"] = has_media_routes
         caps["hasMediaIngestWorker"] = bool(
             has_media_routes
             and should_start_inprocess_worker(
@@ -155,6 +156,19 @@ def load_safe_config() -> dict:
                 test_mode=False,
             )
         )
+        playlist_ingest_v2_ready = all(
+            caps[name]
+            for name in (
+                "hasMediaPlaylistPreflight",
+                "hasMediaPlaylistPreflightResources",
+                "hasMediaPlaylistIngestRuns",
+                "hasMediaIngestJobs",
+                "hasMediaIngestJobEvents",
+                "hasMediaPlaylistIngestEvents",
+                "hasMediaIngestWorker",
+            )
+        )
+        caps["mediaPlaylistIngestContractVersion"] = 2 if playlist_ingest_v2_ready else 1
         caps["hasDurableMediaCollections"] = has_media_routes
         caps["hasKnowledgeQaMediaScope"] = has_media_routes
         # expose both for backward-compat and forward-looking UI
@@ -205,19 +219,10 @@ async def get_documentation_config():
         # Keep supported_features for older clients
         "supported_features": config.get("supported_features", {}),
         "examples": {
-            "python": generate_python_example(
-                _DOCS_API_KEY_PLACEHOLDER,
-                base_url
-            ),
-            "curl": generate_curl_example(
-                _DOCS_API_KEY_PLACEHOLDER,
-                base_url
-            ),
-            "javascript": generate_js_example(
-                _DOCS_API_KEY_PLACEHOLDER,
-                base_url
-            )
-        }
+            "python": generate_python_example(_DOCS_API_KEY_PLACEHOLDER, base_url),
+            "curl": generate_curl_example(_DOCS_API_KEY_PLACEHOLDER, base_url),
+            "javascript": generate_js_example(_DOCS_API_KEY_PLACEHOLDER, base_url),
+        },
     }
 
 
@@ -227,6 +232,7 @@ async def get_flashcards_import_limits():
     Expose current flashcards import limits derived from environment or defaults.
     These reflect server-enforced caps; per-request overrides can only lower these values.
     """
+
     def _int_env(name: str, default: int) -> int:
         try:
             return max(1, int(os.getenv(name, str(default))))
@@ -234,15 +240,13 @@ async def get_flashcards_import_limits():
             return default
 
     return {
-        "max_lines": _int_env('FLASHCARDS_IMPORT_MAX_LINES', 10000),
-        "max_line_length": _int_env('FLASHCARDS_IMPORT_MAX_LINE_LENGTH', 32768),
-        "max_field_length": _int_env('FLASHCARDS_IMPORT_MAX_FIELD_LENGTH', 8192),
+        "max_lines": _int_env("FLASHCARDS_IMPORT_MAX_LINES", 10000),
+        "max_line_length": _int_env("FLASHCARDS_IMPORT_MAX_LINE_LENGTH", 32768),
+        "max_field_length": _int_env("FLASHCARDS_IMPORT_MAX_FIELD_LENGTH", 8192),
         "overrides": {
-            "query_params": [
-                "max_lines", "max_line_length", "max_field_length"
-            ],
-            "note": "Query overrides can only reduce, not increase caps"
-        }
+            "query_params": ["max_lines", "max_line_length", "max_field_length"],
+            "note": "Query overrides can only reduce, not increase caps",
+        },
     }
 
 
@@ -325,6 +329,7 @@ console.log('Created evaluation:', data.id);"""
 # Tokenizer configuration readout and selection
 # ---------------------------------------------------------------------------
 
+
 class TokenizerConfig(BaseModel):
     mode: str = Field(..., description="Current tokenizer mode: whitespace|char_approx")
     divisor: int = Field(..., description="Char-based approx divisor (if applicable)")
@@ -358,16 +363,19 @@ async def get_jobs_config_info():
     Returns current backend selection (sqlite|postgres) and key lease/backoff parameters. Does not expose DSN.
     """
     backend = "postgres" if (os.getenv("JOBS_DB_URL", "").startswith("postgres")) else "sqlite"
+
     def _to_int(name: str, default: int) -> int:
         try:
             return int(os.getenv(name, str(default)))
         except Exception:
             return default
+
     def _to_float(name: str, default: float) -> float:
         try:
             return float(os.getenv(name, str(default)))
         except Exception:
             return default
+
     return {
         "backend": backend,
         "configured": bool(os.getenv("JOBS_DB_URL")) or backend == "sqlite",
@@ -379,7 +387,7 @@ async def get_jobs_config_info():
             "JOBS_LEASE_MAX_SECONDS": _to_int("JOBS_LEASE_MAX_SECONDS", 3600),
             "JOBS_ENFORCE_LEASE_ACK": is_truthy(os.getenv("JOBS_ENFORCE_LEASE_ACK")),
         },
-        "notes": "DSN is not exposed for security. Configure via the environment (PostgreSQL DSN) to use a Postgres backend."
+        "notes": "DSN is not exposed for security. Configure via the environment (PostgreSQL DSN) to use a Postgres backend.",
     }
 
 
@@ -427,10 +435,10 @@ async def get_quickstart_redirect():
         if not url:
             try:
                 cfg = config_mod.load_comprehensive_config()
-                if cfg.has_section('UI') and cfg.has_option('UI', 'quickstart_url'):
-                    url = cfg.get('UI', 'quickstart_url').strip()
-                elif cfg.has_section('Docs') and cfg.has_option('Docs', 'quickstart_url'):
-                    url = cfg.get('Docs', 'quickstart_url').strip()
+                if cfg.has_section("UI") and cfg.has_option("UI", "quickstart_url"):
+                    url = cfg.get("UI", "quickstart_url").strip()
+                elif cfg.has_section("Docs") and cfg.has_option("Docs", "quickstart_url"):
+                    url = cfg.get("Docs", "quickstart_url").strip()
             except Exception:
                 logger.warning("Quickstart redirect: could not read config, using default")
 
@@ -596,6 +604,7 @@ def _resolve_provider_key(provider: str) -> Optional[str]:
     # 2) Check get_api_keys() which reads both env and config.txt
     try:
         from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import get_api_keys
+
         keys = get_api_keys()
         val = (keys.get(provider) or "").strip()
         if val:
@@ -650,13 +659,33 @@ async def list_configured_providers() -> ProvidersStatusResponse:
 
     # Ordered list of cloud providers first, then local
     cloud_providers = [
-        "openai", "anthropic", "google", "cohere", "groq", "mistral",
-        "deepseek", "huggingface", "openrouter", "qwen", "moonshot", "zai",
-        "novita", "poe", "together", "bedrock",
+        "openai",
+        "anthropic",
+        "google",
+        "cohere",
+        "groq",
+        "mistral",
+        "deepseek",
+        "huggingface",
+        "openrouter",
+        "qwen",
+        "moonshot",
+        "zai",
+        "novita",
+        "poe",
+        "together",
+        "bedrock",
     ]
     local_providers = [
-        "llama.cpp", "kobold", "ooba", "tabbyapi", "vllm",
-        "local-llm", "ollama", "aphrodite", "mlx",
+        "llama.cpp",
+        "kobold",
+        "ooba",
+        "tabbyapi",
+        "vllm",
+        "local-llm",
+        "ollama",
+        "aphrodite",
+        "mlx",
     ]
     custom_providers = list(iter_custom_openai_provider_names())
 
@@ -675,12 +704,8 @@ async def list_configured_providers() -> ProvidersStatusResponse:
         if api_key:
             env_var = _PROVIDER_ENV_KEY_MAP.get(name)
             custom_number = custom_openai_provider_number(name)
-            has_custom_env_key = (
-                custom_number is not None
-                and any(
-                    os.environ.get(env_key, "").strip()
-                    for env_key in custom_openai_api_key_env_keys(custom_number)
-                )
+            has_custom_env_key = custom_number is not None and any(
+                os.environ.get(env_key, "").strip() for env_key in custom_openai_api_key_env_keys(custom_number)
             )
             if (env_var and os.environ.get(env_var, "").strip()) or has_custom_env_key:
                 key_source = "env"
@@ -690,13 +715,15 @@ async def list_configured_providers() -> ProvidersStatusResponse:
         if configured and name in cloud_providers:
             any_configured = True
 
-        items.append(ProviderStatusItem(
-            name=name,
-            configured=configured,
-            requires_api_key=requires_key,
-            key_hint=hint,
-            key_source=key_source,
-        ))
+        items.append(
+            ProviderStatusItem(
+                name=name,
+                configured=configured,
+                requires_api_key=requires_key,
+                key_hint=hint,
+                key_source=key_source,
+            )
+        )
 
     return ProvidersStatusResponse(providers=items, any_configured=any_configured)
 
@@ -818,6 +845,7 @@ async def _validate_provider_http(
 
     # Any other status -- report it
     from contextlib import suppress
+
     detail = ""
     with suppress(Exception):
         detail = resp.text[:200]

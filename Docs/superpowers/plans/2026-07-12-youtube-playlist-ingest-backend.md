@@ -493,25 +493,25 @@ Final evidence: Task 8 route/workflow `64 passed`; complete Task 1–8 affected 
 
 **Tests:** Config capability tests, cleanup tests, owner isolation, `/process-videos` compatibility, full focused suite.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 9: Finish rollout, cleanup, and verification
 
-- [ ] **Step 1: Add failing capability and cleanup tests**
+- [x] **Step 1: Add failing capability and cleanup tests**
 
 Assert `mediaPlaylistIngestContractVersion == 2` only when preflight/run routes and worker readiness are enabled. Test bounded cleanup of expired preflights/materializations/runs/events and lease release after worker crash. Keep `/process-videos` multi-result playlist behavior covered.
 
-- [ ] **Step 2: Implement capability and cleanup wiring**
+- [x] **Step 2: Implement capability and cleanup wiring**
 
 Update `config_info.py` with granular flags. Invoke bounded cleanup from preflight/run mutations and worker startup; do not add a new scheduler. Emit only counts/error codes in logs and metrics, never full playlist URLs.
 
-- [ ] **Step 3: Run the complete focused backend gate**
+- [x] **Step 3: Run the complete focused backend gate**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Jobs/test_jobs_migrations_sqlite.py tldw_Server_API/tests/Jobs/test_jobs_migrations_postgres.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_preflight.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_store.py tldw_Server_API/tests/MediaIngestion_NEW/integration/test_playlist_ingest_store_postgres.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_service.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_endpoint.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest_jobs_endpoint.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest_jobs_worker.py tldw_Server_API/tests/MediaIngestion_NEW/integration/test_playlist_ingest_run_workflow.py tldw_Server_API/tests/MediaIngestion_NEW/property/test_playlist_ingest_properties.py -q`
 
 Expected: PASS with only fixture-declared PostgreSQL skips.
 
-- [ ] **Step 4: Run security and diff gates**
+- [x] **Step 4: Run security and diff gates**
 
 Run: `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints/media/playlist_ingest.py tldw_Server_API/app/core/Ingestion_Media_Processing/Video/playlist_ingest_store.py tldw_Server_API/app/core/Ingestion_Media_Processing/Video/playlist_preflight_runner.py tldw_Server_API/app/core/Ingestion_Media_Processing/Video/playlist_ingest_service.py tldw_Server_API/app/api/v1/endpoints/media/ingest_jobs.py tldw_Server_API/app/services/media_ingest_jobs_worker.py -f json -o /tmp/bandit_task_12110.json`
 
@@ -519,11 +519,13 @@ Run: `git diff --check`
 
 Expected: Bandit exits 0 with no new findings; diff check exits 0.
 
-- [ ] **Step 5: Update docs/task and commit**
+- [x] **Step 5: Update docs/task and commit**
 
-Record exact test counts, PostgreSQL skips, Bandit result, touched files, and compatibility result in `TASK-12110`.
+Record exact test counts, PostgreSQL skips, Bandit result, touched files, and compatibility result in `TASK-12112`.
 
 ```bash
 git add tldw_Server_API Docs backlog/tasks
-git commit -m "test: verify playlist ingest backend contract (TASK-12110)"
+git commit -m "test: verify playlist ingest backend contract (TASK-12112)"
 ```
+
+Final evidence: the complete focused backend gate passed `570 passed, 18 skipped` with exit status 0; the exact Task 9 changed-module matrix passed `319 passed, 15 skipped` with exit status 0; and the complete store file passed `172 passed`. All skips were fixture-declared PostgreSQL tests because a live local PostgreSQL fixture was unavailable. The missing pytest footer was traced to the command wrapper discarding nested child-process metadata and obscuring captured output; redirected logs plus explicit child status files proved normal pytest completion, so no application-code change was required. Black and py_compile/import passed on the nine Task 9 Python files; `git diff --check` passed; Ruff introduced no findings beyond the five unchanged `config_info.py` baseline findings; Bandit reported zero findings on the four touched production files. Legacy `/process-videos` playlist behavior passed its six focused controls. Independent final reviews returned `✅ Spec compliant` and `✅ Quality approved` with no actionable findings.

@@ -659,6 +659,16 @@ def test_postgres_expired_cleanup_cancels_only_held_job_and_releases_quota(
         "pg-cleanup-terminal-occ",
         "playlist-ingest-v1:pg-cleanup-terminal",
     )
+    published_run, published_reserved, published_job = seed(
+        "pg-cleanup-published",
+        "pg-cleanup-published-occ",
+        "playlist-ingest-v1:pg-cleanup-published",
+    )
+    processing_run, processing_reserved, processing_job = seed(
+        "pg-cleanup-processing",
+        "pg-cleanup-processing-occ",
+        "playlist-ingest-v1:pg-cleanup-processing",
+    )
     store.bind_run_item_job(
         "pg-cleanup-terminal",
         terminal_run.run_id,
@@ -669,6 +679,36 @@ def test_postgres_expired_cleanup_cancels_only_held_job_and_releases_quota(
         idempotency_identity="playlist-ingest-v1:pg-cleanup-terminal",
         submission_lease_token=terminal_reserved.submission_lease_token,
     )
+    store.bind_run_item_job(
+        "pg-cleanup-published",
+        published_run.run_id,
+        "pg-cleanup-published-occ",
+        attempt=1,
+        job_id=int(published_job["id"]),
+        batch_id="batch-pg-cleanup-published-occ",
+        idempotency_identity="playlist-ingest-v1:pg-cleanup-published",
+        submission_lease_token=published_reserved.submission_lease_token,
+    )
+    store.bind_run_item_job(
+        "pg-cleanup-processing",
+        processing_run.run_id,
+        "pg-cleanup-processing-occ",
+        attempt=1,
+        job_id=int(processing_job["id"]),
+        batch_id="batch-pg-cleanup-processing-occ",
+        idempotency_identity="playlist-ingest-v1:pg-cleanup-processing",
+        submission_lease_token=processing_reserved.submission_lease_token,
+    )
+    claimed = manager.acquire_next_job(
+        domain="media_ingest",
+        queue="default",
+        worker_id="pg-cleanup-worker",
+        lease_seconds=30,
+        owner_user_id="pg-cleanup-processing",
+        job_type="media_ingest_item",
+    )
+    assert claimed is not None
+    assert int(claimed["id"]) == int(processing_job["id"])
     connection = manager._connect()
     try:
         with manager._pg_cursor(connection) as cursor:
@@ -688,9 +728,13 @@ def test_postgres_expired_cleanup_cancels_only_held_job_and_releases_quota(
     clock.advance(timedelta(days=8))
     assert store.cleanup_expired_resources("pg-cleanup-held", now=clock.now_utc())["runs"] == 1
     assert store.cleanup_expired_resources("pg-cleanup-terminal", now=clock.now_utc())["runs"] == 1
+    assert store.cleanup_expired_resources("pg-cleanup-published", now=clock.now_utc())["runs"] == 0
+    assert store.cleanup_expired_resources("pg-cleanup-processing", now=clock.now_utc())["runs"] == 0
 
     assert manager.get_job(int(held_job["id"]))["status"] == "cancelled"
     assert manager.get_job(int(terminal_job["id"]))["status"] == "completed"
+    assert manager.get_job(int(published_job["id"]))["status"] == "queued"
+    assert manager.get_job(int(processing_job["id"]))["status"] == "processing"
     admitted = manager.create_job(
         domain="media_ingest",
         queue="default",
@@ -704,12 +748,23 @@ def test_postgres_expired_cleanup_cancels_only_held_job_and_releases_quota(
         with manager._pg_cursor(connection) as cursor:
             cursor.execute(
                 """
+                SELECT owner_user_id, COUNT(*) AS count
+                FROM media_ingest_runs
+                WHERE run_id = ANY(%s)
+                GROUP BY owner_user_id
+                """,
+                ([published_run.run_id, processing_run.run_id],),
+            )
+            retained_runs = {str(row["owner_user_id"]): int(row["count"]) for row in cursor.fetchall()}
+            cursor.execute(
+                """
                 SELECT scheduled_count FROM job_counters
                 WHERE domain = 'media_ingest' AND queue = 'default'
                   AND job_type = 'media_ingest_item'
                 """
             )
             counter = cursor.fetchone()
+        assert retained_runs == {"pg-cleanup-processing": 1, "pg-cleanup-published": 1}
         assert counter is not None
         assert int(counter["scheduled_count"]) == 0
     finally:

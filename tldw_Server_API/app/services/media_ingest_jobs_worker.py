@@ -90,6 +90,26 @@ class MediaIngestJobError(RuntimeError):
             self.backoff_seconds = backoff_seconds
 
 
+def _cleanup_expired_playlist_resources(jm: JobManager, job: dict[str, Any]) -> None:
+    """Best-effort bounded cleanup after a claimed job establishes its owner."""
+    owner_user_id = str(job.get("owner_user_id") or "").strip()
+    if not owner_user_id:
+        return
+    try:
+        limit = int((os.getenv("PLAYLIST_INGEST_CLEANUP_LIMIT") or "").strip() or 20)
+    except ValueError:
+        limit = 20
+    limit = min(100, max(1, limit))
+    try:
+        deleted = PlaylistIngestStore(jm).cleanup_expired_resources(owner_user_id, limit=limit)
+    except Exception as exc:  # noqa: BLE001 - cleanup cannot block claimed work
+        logger.bind(error_type=type(exc).__name__).warning("Playlist ingest worker cleanup failed")
+        return
+    counts = {f"deleted_{name}": int(count) for name, count in deleted.items()}
+    if any(counts.values()):
+        logger.bind(**counts).info("Playlist ingest worker cleanup completed")
+
+
 async def _mark_embeddings_complete_with_retry(*, db: Any, media_id: int, context: str) -> bool:
     for attempt in range(1, _MARK_PROCESSED_CONFLICT_RETRIES + 1):
         try:
@@ -1121,6 +1141,7 @@ async def run_media_ingest_jobs_worker(
         return _should_cancel(jm, job_id)
 
     async def _handler(job: dict[str, Any]) -> dict[str, Any]:
+        await asyncio.to_thread(_cleanup_expired_playlist_resources, jm, job)
         return await _handle_job(job, jm, progress_state)
 
     def _progress_cb() -> dict[str, Any]:

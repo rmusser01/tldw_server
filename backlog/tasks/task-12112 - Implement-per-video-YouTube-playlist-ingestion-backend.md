@@ -1,71 +1,37 @@
 ---
 id: TASK-12112
 title: Implement per-video YouTube playlist ingestion backend
-status: In Progress
+status: Done
+assignee: []
+created_date: ''
+updated_date: '2026-07-13 20:44'
 labels:
-- media-ingestion
-- backend
-- implementation
-priority: high
+  - media-ingestion
+  - backend
+  - implementation
+dependencies: []
 references:
-- TASK-12109
-- TASK-12110
-- Docs/superpowers/specs/2026-07-12-youtube-playlist-per-item-ingest-design.md
+  - TASK-12109
+  - TASK-12110
+  - Docs/superpowers/specs/2026-07-12-youtube-playlist-per-item-ingest-design.md
 documentation:
-- Docs/superpowers/plans/2026-07-12-youtube-playlist-ingest-backend.md
-modified_files:
-- Docs/superpowers/plans/2026-07-12-youtube-playlist-ingest-backend.md
-- tldw_Server_API/app/api/v1/schemas/media_playlist_ingest.py
-- tldw_Server_API/app/core/Jobs/migrations.py
-- tldw_Server_API/app/core/Jobs/pg_migrations.py
-- tldw_Server_API/tests/Jobs/test_jobs_migrations_sqlite.py
-- tldw_Server_API/tests/Jobs/test_jobs_migrations_postgres.py
-- tldw_Server_API/app/core/Ingestion_Media_Processing/Video/playlist_ingest_store.py
-- tldw_Server_API/app/core/DB_Management/media_db/repositories/media_lookup_repository.py
-- tldw_Server_API/app/core/DB_Management/media_db/api.py
-- tldw_Server_API/app/core/DB_Management/media_db/runtime/query_ops.py
-- tldw_Server_API/app/core/DB_Management/media_db/media_database_impl.py
-- tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_store.py
-- tldw_Server_API/tests/MediaIngestion_NEW/integration/test_playlist_ingest_store_postgres.py
-- tldw_Server_API/tests/MediaIngestion_NEW/property/test_playlist_ingest_properties.py
-- tldw_Server_API/tests/MediaDB2/test_dedupe_url_normalization.py
-- tldw_Server_API/app/core/Ingestion_Media_Processing/Video/playlist_preflight.py
-- tldw_Server_API/app/core/Ingestion_Media_Processing/Video/playlist_preflight_runner.py
-- tldw_Server_API/app/services/media_ingest_jobs_worker.py
-- tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_preflight.py
-- tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest_jobs_worker.py
-- tldw_Server_API/app/api/v1/endpoints/media/playlist_ingest.py
-- tldw_Server_API/app/api/v1/endpoints/media/__init__.py
-- tldw_Server_API/app/core/Ingestion_Media_Processing/Video/playlist_ingest_service.py
-- tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_endpoint.py
-- tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_preflight_endpoint.py
-- tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_service.py
-- tldw_Server_API/app/core/DB_Management/Collections_DB.py
-- tldw_Server_API/app/core/DB_Management/media_db/runtime/media_item_update_ops.py
-- tldw_Server_API/tests/Collections/test_conference_media_collections.py
-- tldw_Server_API/tests/DB_Management/test_media_db_media_item_update_ops.py
-- tldw_Server_API/tests/Collections/test_collections_postgres_integration.py
-- tldw_Server_API/app/api/v1/endpoints/media/ingest_jobs.py
-- tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest_jobs_endpoint.py
-- tldw_Server_API/app/core/Jobs/manager.py
-- tldw_Server_API/app/core/exceptions.py
-- tldw_Server_API/tests/Jobs/test_jobs_quotas_sqlite.py
-- tldw_Server_API/tests/Jobs/test_jobs_quotas_postgres.py
+  - Docs/superpowers/plans/2026-07-12-youtube-playlist-ingest-backend.md
+priority: high
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Backend Tasks 1–8 are complete. Task 8 added owner-scoped run create/summary/paginated-item/cancel/retry/SSE routes; exact Jobs reconciliation with change-only transactional events/versioning; dynamic replay/resync and later-chunk discovery; durable unsent/accepted cancellation with completion-wins races; media-first retry reconciliation and one-attempt CAS; truthful running aggregate status; and PostgreSQL parity coverage for the new store transitions. Final Task 8 verification: 507 passed, 18 fixture-declared PostgreSQL skips, 53 warnings; exact route/workflow gate 38/38; Black, Ruff, py_compile, git diff --check, and Bandit passed. PostgreSQL parity collected 15 and skipped locally because the fixture was unavailable. Task 9 remains pending.
+Backend Tasks 1–9 and all five stages are complete. The backend now supports fail-closed asynchronous YouTube playlist inspection, complete materialized snapshots, owner-scoped run creation, duplicate actions, per-occurrence Jobs submission and reconciliation, SSE/status/cancellation/retry, truthful capability negotiation, and bounded lifecycle-safe cleanup. Task 9 adds granular readiness flags, owner-scoped cleanup from mutations and the worker, active/ambiguous binding retention, publication-fenced held-job cancellation, retryable staging retirement, bounded ordered backfill, and legacy /process-videos compatibility. The design reuses the existing Jobs, Media DB, Collections DB, auth, and worker infrastructure without a new scheduler or dependency.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Complete all nine tasks and five stages in the approved backend plan using test-first red/green/refactor cycles.
-- [ ] #2 Keep SQLite and PostgreSQL Jobs schemas and behavior aligned, with owner isolation, deterministic cursors, expiry, and portable constraints.
-- [ ] #3 Provide fail-closed asynchronous playlist preflight, complete paginated snapshots, materialization, run creation, duplicate policies, occurrence-bound jobs, reconciliation, events, cancellation, and retry.
-- [ ] #4 Pass focused backend tests, migration tests, type/format checks applicable to touched code, and Bandit on the touched backend scope.
-- [ ] #5 Complete per-task specification and code-quality reviews, then a final implementation review; record verification and final summary.
+- [x] #1 Complete all nine tasks and five stages in the approved backend plan using test-first red/green/refactor cycles.
+- [x] #2 Keep SQLite and PostgreSQL Jobs schemas and behavior aligned, with owner isolation, deterministic cursors, expiry, and portable constraints.
+- [x] #3 Provide fail-closed asynchronous playlist preflight, complete paginated snapshots, materialization, run creation, duplicate policies, occurrence-bound jobs, reconciliation, events, cancellation, and retry.
+- [x] #4 Pass focused backend tests, migration tests, type/format checks applicable to touched code, and Bandit on the touched backend scope.
+- [x] #5 Complete per-task specification and code-quality reviews, then a final implementation review; record verification and final summary.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -76,6 +42,7 @@ Follow Docs/superpowers/plans/2026-07-12-youtube-playlist-ingest-backend.md sequ
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Task 2: implemented the owner-scoped PlaylistIngestStore and signed ordinal cursor contract using the injected JobManager connection helpers. Added atomic snapshot/materialization/run/event/cleanup operations, compare-and-set item transitions, and one-query normalized Media DB URL batch lookup. Verification: focused suite 59 passed/1 existing jobs-suite-only PostgreSQL skip; property tests cover 42 generated cases; Ruff/compileall/diff-check clean on touched scope; Bandit reported zero findings.
 Task 2 review follow-up: replaced materialization metadata blacklisting with an explicit seven-field compact display allowlist; made expired preflights, materializations, runs, pages, events, cursors, snapshot replacement, event append, and CAS transitions fail closed; rejected nonfuture expiry at all resource creation seams; and added a PostgreSQL-only `FOR UPDATE` locked mutable snapshot read with a separate SQLite-safe query literal. RED: compact 1/1 failed, expiry 5/5 failed, PG lock 1/1 failed. GREEN: combined Task 1+2 verification 94 passed/3 existing jobs-suite-policy skips; Ruff/compileall/diff-check passed; Bandit zero findings.
@@ -105,18 +72,27 @@ Task 7 final submission-lifecycle safety follow-up complete. Added durable token
 Task 8 complete: added owner-scoped run creation/summary/items/cancel/retry/SSE routes; dynamic exact-binding Jobs reconciliation with change-only events; immutable pagination; Last-Event-ID and query replay with retained-range resync; stream-only progress and later-chunk discovery; exact cancellation authority and completion-wins races; media-first retry CAS; item-derived aggregate status; and bounded safe SSE polling configuration. Review follow-ups made the cancel body truly optional while rejecting falsy non-object JSON, revalidated normalized job binding immediately before cancellation, added query-only replay coverage, bounded cursors to signed BIGINT, resynchronized high/empty-history cursors, corrected running-to-staged aggregate transitions, and made poll configuration finite/positive. Fresh root verification: Task 8 route/workflow 64 passed; complete Task 1–8 affected matrix 534 passed, 18 fixture-declared PostgreSQL skips, 0 failures; Black/Ruff/py_compile/git diff --check passed; Bandit returned zero findings across 7,267 LOC. PostgreSQL parity assertions were collected but fixture-skipped because local PostgreSQL was unavailable. Independent reviews returned ✅ Spec compliant and Ready to proceed? Yes. Stage 4 and Task 8 are complete; TASK-12112 remains In Progress for Task 9.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
+Task 9 implementation and review are complete but verification remains blocked, so the task stays In Progress. Implemented truthful granular playlist capabilities; owner-scoped cleanup; proof-all transactional held-job cancellation; publication fencing before filesystem retirement; durable staging retry authority with CAS pointer clearing; ordered global cleanup with a 500-parent scan and backfill before the final limit slice; post-commit lifecycle parity; nonblocking worker cleanup; and legacy multi-result control. Final focused evidence: 42 cleanup quality regressions passed, including publish-wins/cancel-wins, active and ambiguous retention, staging failure and partial-cap backfill, global budget/cap, rollback, lifecycle, and PostgreSQL SQL/lock shape. Earlier unchanged-scope evidence: capabilities 16 passed, service 89 passed, worker 42 passed, and legacy controls 6 passed. PostgreSQL integration collected 15 tests and fixture-skipped all because PostgreSQL was unavailable. Black, py_compile/import, git diff --check, Ruff baseline comparison, and Bandit passed; Bandit reported zero findings. Independent final reviews returned spec compliant and quality approved with no actionable findings. Verification blocker: the final 172-test store session and a deterministic 86-node partition both exited without a pytest footer or traceback, matching the previously exhausted combined-session no-summary failure; neither is claimed passing and no further harness retries were made. No staging or commit performed.
+
+Task 9 verification blocker resolved without application-code changes. Root cause: the outer command wrapper emitted only captured output and discarded the nested pytest child exit metadata, while long captured logs obscured the footer. Fresh redirected-log/status verification proved: complete store file 172 passed, 4 warnings, exit 0; complete focused backend gate 570 passed, 18 fixture-declared PostgreSQL skips, 53 warnings, exit 0; exact changed-module matrix 319 passed, 15 fixture-declared PostgreSQL skips, 4 warnings, exit 0. Live PostgreSQL remains unavailable locally, so those fixture-declared integration cases are documented as skipped rather than claimed green. Independent final reviews remain spec compliant and quality approved with no actionable findings. Task 9 implementation, review, and test verification are complete; final static/security gates and commit follow.
+<!-- SECTION:NOTES:END -->
+
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Completed the approved per-video YouTube playlist ingestion backend contract through all nine tasks and five stages. The implementation keeps playlist occurrences distinct, persists owner-scoped preflight/materialization/run/event state, submits and reconciles exact Jobs bindings, supports duplicate policies, collections, cancellation, retry, replay/resync, and exposes truthful version-2 capability flags. Task 9 closes rollout safety with bounded cleanup, active-job and ambiguous-reference retention, proof-all transactional held-job cancellation, publish/cancel race fencing, retry-authoritative staging cleanup, ordered 500-parent backfill, exact lifecycle/counter parity, nonblocking worker integration, privacy-safe aggregate logging, and legacy multi-result coverage. Final verification: complete backend gate 570 passed/18 fixture-declared PostgreSQL skips; changed-module matrix 319 passed/15 fixture-declared PostgreSQL skips; store suite 172 passed. Black, py_compile, changed-scope Ruff, git diff --check, and Bandit passed; the five config_info.py Ruff findings are unchanged from HEAD. Bandit scanned 10,931 LOC with zero findings/errors. Live local PostgreSQL was unavailable, so fixture-declared PostgreSQL cases are documented as skipped rather than claimed green; earlier task gates and SQL/lock-shape coverage provide the recorded parity evidence. Independent final reviews returned spec compliant and quality approved with no actionable findings.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

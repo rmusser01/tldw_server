@@ -220,6 +220,96 @@ def _direct_input(occurrence_id: str, url: str) -> dict:
     }
 
 
+def test_preflight_materialization_and_run_mutations_invoke_bounded_cleanup(
+    service_context,
+    monkeypatch,
+):
+    service, store, _manager, _media_db = service_context
+    monkeypatch.setenv("PLAYLIST_INGEST_CLEANUP_LIMIT", "3")
+    cleanup_calls: list[tuple[str, int]] = []
+
+    def record_cleanup(owner_user_id, *, limit, now=None):  # noqa: ARG001
+        cleanup_calls.append((owner_user_id, limit))
+        return {"preflights": 0, "materializations": 0, "runs": 0}
+
+    monkeypatch.setattr(service._store, "cleanup_expired_resources", record_cleanup)
+    created = service.create_preflight(
+        "owner-1",
+        url="https://www.youtube.com/playlist?list=PLcleanupseams",
+        max_items=10,
+        timeout_seconds=30,
+    )
+    store.replace_preflight_snapshot(
+        "owner-1",
+        created.preflight_id,
+        status="ready",
+        items=[
+            {
+                "occurrence_id": "cleanup-seam-occ",
+                "ordinal": 1,
+                "source_url": "https://www.youtube.com/watch?v=cleanupseam",
+                "normalized_source_id": "youtube:video:cleanupseam",
+                "source_kind": "youtube_video",
+                "availability": "available",
+                "duplicate_status": "new",
+                "selected_by_default": True,
+                "display_metadata": {"title": "Cleanup seam"},
+            }
+        ],
+    )
+    service.create_materialization(
+        "owner-1",
+        created.preflight_id,
+        ["cleanup-seam-occ"],
+    )
+    service.create_run(
+        "owner-1",
+        inputs=[_direct_input("cleanup-direct", "https://example.com/cleanup-direct")],
+        review_overrides={},
+    )
+
+    assert cleanup_calls == [("owner-1", 3), ("owner-1", 3), ("owner-1", 3)]
+
+
+def test_cleanup_failure_is_sanitized_and_does_not_break_run_mutation(
+    service_context,
+    monkeypatch,
+):
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video import playlist_ingest_service
+
+    service, _store, _manager, _media_db = service_context
+
+    class _LoggerStub:
+        def __init__(self) -> None:
+            self.bindings: list[dict] = []
+            self.messages: list[str] = []
+
+        def bind(self, **kwargs):
+            self.bindings.append(dict(kwargs))
+            return self
+
+        def warning(self, message, *_args, **_kwargs):
+            self.messages.append(str(message))
+
+    logger_stub = _LoggerStub()
+
+    def fail_cleanup(*_args, **_kwargs):
+        raise RuntimeError("https://youtube.com/playlist?list=private&token=secret")
+
+    monkeypatch.setattr(service._store, "cleanup_expired_resources", fail_cleanup)
+    monkeypatch.setattr(playlist_ingest_service, "logger", logger_stub)
+
+    created = service.create_run(
+        "owner-1",
+        inputs=[_direct_input("cleanup-safe", "https://example.com/cleanup-safe")],
+        review_overrides={},
+    )
+
+    assert created.run_id
+    assert logger_stub.bindings == [{"error_type": "RuntimeError"}]
+    assert "secret" not in repr((logger_stub.bindings, logger_stub.messages))
+
+
 def _file_input(occurrence_id: str = "occ-file") -> dict:
     return {
         "input_kind": "file_stub",

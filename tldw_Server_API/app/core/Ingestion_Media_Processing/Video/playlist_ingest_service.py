@@ -247,6 +247,23 @@ class PlaylistIngestService:
         self._media_db_factory = media_db_factory or _owner_media_db
         self._collections_db_factory = collections_db_factory or _owner_collections_db
 
+    def _cleanup_expired_resources(self, owner_user_id: str) -> None:
+        """Best-effort bounded cleanup at owner-scoped mutation seams."""
+        limit = _bounded_env_int(
+            "PLAYLIST_INGEST_CLEANUP_LIMIT",
+            20,
+            minimum=1,
+            maximum=100,
+        )
+        try:
+            deleted = self._store.cleanup_expired_resources(owner_user_id, limit=limit)
+        except Exception as exc:  # noqa: BLE001 - cleanup cannot block an unrelated mutation
+            logger.bind(error_type=type(exc).__name__).warning("Playlist ingest cleanup failed")
+            return
+        counts = {f"deleted_{name}": int(count) for name, count in deleted.items()}
+        if any(counts.values()):
+            logger.bind(**counts).info("Playlist ingest cleanup completed")
+
     @staticmethod
     def public_error(error: dict | None) -> dict[str, str] | None:
         """Return only a stable public code from stored worker error state."""
@@ -266,6 +283,7 @@ class PlaylistIngestService:
         timeout_seconds: int,
     ) -> CreatedPlaylistPreflight:
         """Reserve capacity, enqueue non-acquirable work, then bind and publish it."""
+        self._cleanup_expired_resources(owner_user_id)
         canonical_url, classified = _trusted_youtube_playlist(url)
         global_capacity = _bounded_env_int(
             "PLAYLIST_PREFLIGHT_GLOBAL_CAPACITY",
@@ -402,6 +420,7 @@ class PlaylistIngestService:
         occurrence_ids: list[str],
     ) -> CreatedPlaylistMaterialization:
         """Copy only selected authoritative identities from a ready snapshot."""
+        self._cleanup_expired_resources(owner_user_id)
         preflight = self._store.get_preflight(owner_user_id, preflight_id)
         if preflight.status != "ready":
             raise PlaylistPreflightIncompleteError("preflight_incomplete")
@@ -648,6 +667,7 @@ class PlaylistIngestService:
         new_collection: Mapping[str, Any] | BaseModel | None = None,
     ) -> MediaIngestRunRecord:
         """Validate refreshed evidence, then atomically persist a mixed run manifest."""
+        self._cleanup_expired_resources(owner_user_id)
         if collection_id is not None:
             raise PlaylistRunValidationError("invalid_run_request")
         try:

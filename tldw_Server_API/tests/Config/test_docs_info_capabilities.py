@@ -47,9 +47,7 @@ def test_docs_info_persona_capability_enabled_by_default_even_when_stable_only_t
     assert safe_config["capabilities"] == safe_config["supported_features"]
 
 
-def test_docs_info_persona_capability_can_be_disabled_via_route_toggle(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_docs_info_persona_capability_can_be_disabled_via_route_toggle(monkeypatch, tmp_path: Path) -> None:
     config_path = tmp_path / "config.txt"
     _write_minimal_config(config_path)
 
@@ -85,9 +83,7 @@ def test_docs_info_persona_feature_flag_disables_capability_even_when_route_enab
     assert safe_config["supported_features"]["persona"] is False
 
 
-def test_docs_info_persona_capability_enabled_by_default_when_stable_only_false(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_docs_info_persona_capability_enabled_by_default_when_stable_only_false(monkeypatch, tmp_path: Path) -> None:
     config_path = tmp_path / "config.txt"
     _write_minimal_config(config_path, stable_only=False)
 
@@ -117,9 +113,7 @@ def test_docs_info_never_exposes_real_api_key(monkeypatch, tmp_path: Path) -> No
     assert safe_config["api_key_configured"] is True
 
 
-def test_docs_info_exposes_slides_and_presentation_studio_capabilities(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_docs_info_exposes_slides_and_presentation_studio_capabilities(monkeypatch, tmp_path: Path) -> None:
     config_path = tmp_path / "config.txt"
     _write_minimal_config(config_path)
 
@@ -138,9 +132,7 @@ def test_docs_info_exposes_slides_and_presentation_studio_capabilities(
     assert safe_config["supported_features"]["hasPresentationRender"] is True
 
 
-def test_docs_info_exposes_audio_capabilities_from_audio_and_websocket_routes(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_docs_info_exposes_audio_capabilities_from_audio_and_websocket_routes(monkeypatch, tmp_path: Path) -> None:
     config_path = tmp_path / "config.txt"
     _write_minimal_config(config_path)
 
@@ -159,9 +151,7 @@ def test_docs_info_exposes_audio_capabilities_from_audio_and_websocket_routes(
     assert safe_config["supported_features"] == safe_config["capabilities"]
 
 
-def test_docs_info_exposes_bulk_conference_ingest_capabilities(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_docs_info_exposes_bulk_conference_ingest_capabilities(monkeypatch, tmp_path: Path) -> None:
     config_path = tmp_path / "config.txt"
     _write_minimal_config(config_path)
 
@@ -177,17 +167,19 @@ def test_docs_info_exposes_bulk_conference_ingest_capabilities(
     caps = safe_config["capabilities"]
 
     assert caps["hasMediaPlaylistPreflight"] is True
+    assert caps["hasMediaPlaylistPreflightResources"] is True
+    assert caps["hasMediaPlaylistIngestRuns"] is True
     assert caps["hasMediaIngestJobs"] is True
     assert caps["hasMediaIngestJobEvents"] is True
+    assert caps["hasMediaPlaylistIngestEvents"] is True
     assert caps["hasMediaIngestWorker"] is True
+    assert caps["mediaPlaylistIngestContractVersion"] == 2
     assert caps["hasDurableMediaCollections"] is True
     assert caps["hasKnowledgeQaMediaScope"] is True
     assert safe_config["supported_features"] == caps
 
 
-def test_docs_info_media_ingest_worker_capability_respects_explicit_false(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_docs_info_media_ingest_worker_capability_respects_explicit_false(monkeypatch, tmp_path: Path) -> None:
     config_path = tmp_path / "config.txt"
     _write_minimal_config(config_path)
 
@@ -198,12 +190,13 @@ def test_docs_info_media_ingest_worker_capability_respects_explicit_false(
 
     safe_config = config_info.load_safe_config()
 
-    assert safe_config["capabilities"]["hasMediaIngestWorker"] is False
+    caps = safe_config["capabilities"]
+
+    assert caps["hasMediaIngestWorker"] is False
+    assert caps["mediaPlaylistIngestContractVersion"] != 2
 
 
-def test_docs_info_media_ingest_worker_capability_follows_disabled_media_route(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_docs_info_media_ingest_worker_capability_follows_disabled_media_route(monkeypatch, tmp_path: Path) -> None:
     config_path = tmp_path / "config.txt"
     _write_minimal_config(config_path)
 
@@ -216,7 +209,13 @@ def test_docs_info_media_ingest_worker_capability_follows_disabled_media_route(
 
     safe_config = config_info.load_safe_config()
 
-    assert safe_config["capabilities"]["hasMediaIngestWorker"] is False
+    caps = safe_config["capabilities"]
+
+    assert caps["hasMediaPlaylistPreflightResources"] is False
+    assert caps["hasMediaPlaylistIngestRuns"] is False
+    assert caps["hasMediaPlaylistIngestEvents"] is False
+    assert caps["hasMediaIngestWorker"] is False
+    assert caps["mediaPlaylistIngestContractVersion"] != 2
 
 
 def test_docs_info_media_ingest_worker_capability_stays_false_when_route_disabled_and_flag_true(
@@ -240,9 +239,31 @@ def test_docs_info_media_ingest_worker_capability_stays_false_when_route_disable
     assert caps["hasMediaIngestWorker"] is False
 
 
-def test_docs_info_media_ingest_worker_capability_is_false_in_sidecar_mode(
-    monkeypatch, tmp_path: Path
+def test_docs_info_media_ingest_job_capabilities_follow_independent_route(
+    monkeypatch,
+    tmp_path: Path,
 ) -> None:
+    config_path = tmp_path / "config.txt"
+    _write_minimal_config(config_path)
+
+    monkeypatch.setenv("TLDW_CONFIG_PATH", str(config_path))
+    monkeypatch.setenv("ROUTES_DISABLE", "media-ingest-jobs")
+    monkeypatch.delenv("ROUTES_ENABLE", raising=False)
+    monkeypatch.delenv("MEDIA_INGEST_JOBS_WORKER_ENABLED", raising=False)
+    monkeypatch.delenv("TLDW_WORKERS_SIDECAR_MODE", raising=False)
+    config_mod._route_toggle_policy.cache_clear()
+
+    caps = config_info.load_safe_config()["capabilities"]
+
+    assert caps["hasMediaPlaylistPreflightResources"] is True
+    assert caps["hasMediaPlaylistIngestRuns"] is True
+    assert caps["hasMediaPlaylistIngestEvents"] is True
+    assert caps["hasMediaIngestJobs"] is False
+    assert caps["hasMediaIngestJobEvents"] is False
+    assert caps["mediaPlaylistIngestContractVersion"] != 2
+
+
+def test_docs_info_media_ingest_worker_capability_is_false_in_sidecar_mode(monkeypatch, tmp_path: Path) -> None:
     config_path = tmp_path / "config.txt"
     _write_minimal_config(config_path)
 
@@ -253,12 +274,13 @@ def test_docs_info_media_ingest_worker_capability_is_false_in_sidecar_mode(
 
     safe_config = config_info.load_safe_config()
 
-    assert safe_config["capabilities"]["hasMediaIngestWorker"] is False
+    caps = safe_config["capabilities"]
+
+    assert caps["hasMediaIngestWorker"] is False
+    assert caps["mediaPlaylistIngestContractVersion"] != 2
 
 
-def test_docs_info_disables_voice_transport_when_audio_websocket_route_disabled(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_docs_info_disables_voice_transport_when_audio_websocket_route_disabled(monkeypatch, tmp_path: Path) -> None:
     config_path = tmp_path / "config.txt"
     _write_minimal_config(config_path)
 
@@ -305,9 +327,7 @@ def test_quickstart_redirect_reads_configured_ui_url(monkeypatch) -> None:
     assert response.headers["location"] == "/docs-static/Getting_Started/README.md"
 
 
-def test_docs_info_persona_capability_stable_across_config_module_reload(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_docs_info_persona_capability_stable_across_config_module_reload(monkeypatch, tmp_path: Path) -> None:
     config_path = tmp_path / "config.txt"
     _write_minimal_config(config_path)
 
