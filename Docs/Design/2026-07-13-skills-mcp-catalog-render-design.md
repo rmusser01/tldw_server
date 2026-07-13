@@ -33,7 +33,7 @@ Skills are available through the REST API and chat integration, but MCP clients 
 ## Goals
 
 1. Provide bounded, user-scoped Skills discovery through MCP Unified.
-2. Return metadata without reading or returning full Skill content for list/get operations.
+2. Return metadata without parsing or exposing full Skill content for list/get operations.
 3. Render one visible, integrity-approved, policy-approved Skill with forced dry-run behavior.
 4. Preserve existing MCP `deny`, `ask`, approval-lease, and `allow` semantics.
 5. Make declarations and effective authorization clearly distinct.
@@ -64,6 +64,8 @@ Skills are available through the REST API and chat integration, but MCP clients 
 ## Architecture
 
 `SkillsModule` is a thin MCP adapter. It validates inputs, opens a request-scoped user database, constructs `SkillsService`, delegates discovery or rendering, formats a bounded response, and closes the database connection. Existing `SkillsService` initialization and reads may create the user's Skills directory, ensure the registry table, or synchronize derived registry rows. These are internal index-maintenance effects, not caller-authored Skill mutations.
+
+Integrity verification may read the complete Skill file map, including supporting files, to calculate the canonical digest. Metadata operations must not parse those supporting files into the response or expose their content, names, paths, or hashes.
 
 The module must fail closed when any of these are absent or invalid:
 
@@ -142,6 +144,8 @@ Output:
 
 `total` is the integrity-filtered count for the same query. `next_offset` is `offset + count` only when that value is less than `total`; otherwise it is null. Sorting is fixed to name ascending in this first slice so pagination is deterministic.
 
+The page and total must come from one registry query and one integrity-filtering pass. The module must not compose the response by calling existing `list_skills()` and `get_total_count()` separately.
+
 ### `skills.get`
 
 Purpose: retrieve metadata for one exact model-visible Skill without returning its instructions.
@@ -184,12 +188,15 @@ Output:
   "declared_tools": ["rag.search"],
   "model_override": null,
   "execution_mode": "inline",
+  "supporting_files_omitted": false,
   "dry_run": true,
   "version": 3
 }
 ```
 
 `declared_tools` contains Skill declarations only. It does not assert tool availability or permission. Every later tool call remains subject to MCP catalog, profile, RBAC, hook, and argument-sensitive permission checks.
+
+`supporting_files_omitted` is true when the authorized Skill includes supporting files that this first-slice renderer does not return or resolve. It exposes only the existence of omitted material after render authorization, never file names, paths, hashes, or content. Clients must not assume a rendered prompt is self-contained when this field is true.
 
 ## Authorization
 
@@ -225,13 +232,21 @@ The module does not create grants, prompt for approval, or weaken a decision.
 3. Gateway evaluates profile rules and any existing approval lease.
 4. Module validates the exact argument shape and hard limits.
 5. Module resolves authenticated user context and opens the user-scoped registry database.
-6. Module loads metadata only and applies model-visible and integrity checks.
-7. Module loads the full Skill through the existing verified service path.
+6. Module loads metadata through an offloaded model-visible lookup and applies integrity checks.
+7. Module loads the full Skill through an offloaded verified service path.
 8. Module calls `SkillExecutor.execute` with `context=None` and `dry_run=True` forced by code.
 9. Module rejects rendered output above the configured character limit.
 10. Module returns the sanitized result and closes the request-scoped database.
 
 Using `context=None` is intentional: dry render reports declarations and cannot accidentally interpret the current MCP catalog as effective authorization. The executor must never enter inline execution or fork execution in this tool.
+
+## Service and I/O Contract
+
+Add one Skills service operation that returns an integrity-filtered page and total from the same row set. It must synchronize the registry once, fetch matching rows once, apply model-visible and integrity filtering once, and then slice the filtered rows. Add a metadata-only exact lookup that uses the same visibility predicate.
+
+Filesystem walks, integrity digest reads, synchronous registry queries, existence checks, and verified Skill parsing must not run on the MCP event loop. The new catalog operations must offload their synchronous work with `asyncio.to_thread`. The verified full-load path used by render should update the existing asynchronous `get_skill()` implementation to offload its filesystem checks and parsing rather than introducing a duplicate loader.
+
+These changes preserve existing REST behavior. They change scheduling only and require regression coverage for existing Skills service callers.
 
 ## Bounds and Configuration
 
@@ -258,15 +273,15 @@ Module-owned failures use the existing MCP JSON-RPC error classes and bounded re
 | Condition | JSON-RPC mapping and message | Disclosure rule |
 | --- | --- | --- |
 | Missing or invalid authenticated user context | Authorization error: `skills_user_context_required` | No fallback user or path |
-| Unknown, deleted, hidden, or model-disabled Skill | Invalid params: `skill_not_found` | Same response for every case |
+| Unknown, deleted, hidden, model-disabled, or discovery-time integrity-blocked Skill | Invalid params: `skill_not_found` | Same response for every case |
 | Invalid name, query, pagination, or arguments | Invalid params with field and bound | No submitted content |
-| Integrity resolver blocks the Skill | Authorization error: `context_integrity_blocked` | No path, digest, or content |
+| Integrity changes or becomes blocked during verified render after the visibility gate | Authorization error: `context_integrity_blocked` | No path, digest, or content |
 | Render exceeds output limit | Invalid params: `rendered_skill_too_large`; include limit | No partial rendered prompt |
 | Registry/storage unavailable | Existing sanitized internal error | Detailed exception type only in bounded logs |
 | Profile rule denies | Existing gateway denial | Existing sanitized provenance rules |
 | Profile rule asks without a lease | Existing `approval_required` | Existing grant availability metadata |
 
-Logs may include a bounded Skill name, user ID, operation, and exception type. Logs and tool responses must not include rendered content, raw Skill content, supporting-file content, API keys, approval tokens, database paths, or filesystem paths.
+MCP responses and logs newly emitted by `SkillsModule` may include a bounded Skill name, user ID, operation, and exception type. They must not include rendered content, raw Skill content, supporting-file content, API keys, approval tokens, database paths, or filesystem paths. Existing host-local `SkillsService` diagnostic logs are outside this slice and remain unchanged; they must never be copied into an MCP response.
 
 ## Metadata Semantics
 
@@ -305,9 +320,11 @@ Do not add Skills to gateway presets or persona archetypes in this slice unless 
 
 ### Skills service
 
-- After registry synchronization, metadata-only lookup does not call the verified full-directory parser, load supporting files, or return path/content fields.
+- Metadata-only lookup may read file bytes for integrity calculation but does not call the verified full-directory parser, parse supporting files into a response, or return path/content fields.
 - Exact lookup excludes hidden, model-disabled, deleted, and integrity-blocked Skills.
-- List count and pagination remain correct after integrity filtering.
+- One page operation returns correct count and pagination after a single integrity-filtering pass.
+- Catalog registry and filesystem work is offloaded from the event loop.
+- Existing `get_skill()` behavior remains unchanged after its filesystem checks and parsing are offloaded.
 
 ### Permission subject extraction
 
@@ -326,9 +343,10 @@ Do not add Skills to gateway presets or persona archetypes in this slice unless 
 - Render substitutes full and indexed arguments using existing executor behavior.
 - Fork-mode render remains dry and does not call a model or tool.
 - Response uses `declared_tools` and never claims effective authorization.
+- Render reports `supporting_files_omitted=true` without exposing supporting-file details.
 - Oversized output is rejected without a partial prompt.
 - Database connections close on success and failure.
-- Errors and logs do not expose content or paths.
+- MCP responses and logs newly emitted by the module do not expose content or paths.
 
 ### Registration and integration
 
@@ -376,3 +394,6 @@ Those tasks must build on this catalog/render contract rather than expanding `sk
 10. Defer all execution and workflow behavior to separately reviewable TASK-2294 child tasks.
 11. Treat existing registry synchronization as derived index maintenance rather than claiming every read is physically mutation-free.
 12. Canonicalize Skill permission subjects, patterns, and grants to lowercase before matching.
+13. Produce page items and total from one integrity-filtered row set to avoid duplicate full-tree walks.
+14. Offload synchronous database, filesystem, integrity, and verified parsing work from the MCP event loop.
+15. Report omitted supporting material with a boolean rather than silently implying the rendered body is self-contained.
