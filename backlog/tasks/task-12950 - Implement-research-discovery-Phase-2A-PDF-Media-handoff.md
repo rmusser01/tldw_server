@@ -1,7 +1,7 @@
 ---
 id: TASK-12950
 title: Implement research discovery Phase 2A PDF Media handoff
-status: Done
+status: In Progress
 assignee: []
 created_date: ''
 updated_date: 2026-07-12 20:45
