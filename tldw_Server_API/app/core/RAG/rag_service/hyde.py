@@ -14,14 +14,18 @@ from typing import Any, Callable, Optional
 from loguru import logger
 
 
-def _hyde_prompt(query: str) -> str:
-    """Build the shared retrieval-oriented HyDE prompt."""
+def _hyde_instruction_prompt() -> str:
+    """Build retrieval-oriented HyDE instructions without duplicating input."""
     return (
         "You are helping with retrieval. Write a concise, factual, neutral "
         "paragraph (2-5 sentences) that likely answers this question. Avoid hedging, "
-        "cite plausible entities, metrics, and terminology.\n\n"
-        f"Question: {query}\n"
+        "cite plausible entities, metrics, and terminology."
     )
+
+
+def _hyde_prompt(query: str) -> str:
+    """Build the legacy prompt that includes the query inline."""
+    return f"{_hyde_instruction_prompt()}\n\nQuestion: {query}\n"
 
 
 def _heuristic_hypothetical_answer(query: str) -> str:
@@ -36,7 +40,7 @@ def _hyde_response_text(response: Any) -> str:
     if isinstance(response, dict):
         value = response.get("text") or response.get("content")
         return value if isinstance(value, str) else ""
-    return "" if response is None else str(response)
+    return ""
 
 
 async def _mark_runtime_used_for_hyde(
@@ -117,7 +121,7 @@ async def generate_hypothetical_answer_async(
 ) -> str:
     """Generate HyDE text with request-scoped credentials and fail closed."""
     effective_provider = (provider or "openai").strip().lower()
-    effective_model = (model or "gpt-4o-mini").strip()
+    effective_model = model.strip() if isinstance(model, str) and model.strip() else None
     try:
         import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
 
@@ -126,8 +130,8 @@ async def generate_hypothetical_answer_async(
             partial(
                 sgl.analyze,
                 api_name=str(getattr(handle, "provider", effective_provider) or effective_provider),
-                input_data="",
-                custom_prompt_arg=_hyde_prompt(query),
+                input_data=query,
+                custom_prompt_arg=_hyde_instruction_prompt(),
                 api_key=handle.api_key,
                 system_message=None,
                 temp=None,
@@ -276,8 +280,12 @@ def _record_embedding_degraded(stage_metadata: dict[str, Any] | None, exc: BaseE
         EmbeddingCredentialError,
         EmbeddingEndpointError,
     )
-
     code = str(getattr(exc, "code", "") or getattr(exc, "error_code", "") or "")
+    code = {
+        "missing_credentials": "missing_provider_credentials",
+        "configuration": "provider_configuration_invalid",
+        "authentication": "invalid_provider_credentials",
+    }.get(code, code)
     status_code = getattr(exc, "status_code", None)
     if isinstance(exc, EmbeddingCredentialError):
         code = "missing_provider_credentials"

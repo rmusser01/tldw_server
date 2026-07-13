@@ -1,5 +1,9 @@
+import asyncio
+
 import pytest
 
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAuthenticationError
 from tldw_Server_API.app.core.RAG.rag_service import research_agent as ra
 from tldw_Server_API.app.core.RAG.rag_service.query_classifier import QueryClassification
 from tldw_Server_API.app.core.RAG.rag_service.research_agent import create_default_registry
@@ -403,37 +407,264 @@ async def test_default_registry_passes_runtime_to_local_database_action(monkeypa
 
     runtime = object()
     captured: dict[str, object] = {}
+    media_adapter = object()
+    chacha_adapter = object()
+    paths: dict[str, object] = {}
 
-    class FakeMultiDatabaseRetriever:
-        def __init__(self, *args, **kwargs):
-            captured.update(kwargs)
+    def recording_retriever(name):
+        class RecordingRetriever:
+            def __init__(self, db_path=None, *args, **kwargs):
+                paths[name] = db_path
+                captured[f"{name}_args"] = args
+                captured[f"{name}_kwargs"] = kwargs
+                self.config = None
 
-        async def retrieve(self, **_kwargs):
-            return []
+            async def retrieve(self, query, **_kwargs):
+                captured["query"] = query
+                captured["retrieval_config"] = self.config
+                return []
 
-    class FakeRetrievalConfig:
-        def __init__(self, **_kwargs):
-            pass
+            def close(self):
+                return None
 
-    monkeypatch.setattr(
-        database_retrievers,
-        "MultiDatabaseRetriever",
-        FakeMultiDatabaseRetriever,
-    )
-    monkeypatch.setattr(
-        database_retrievers,
-        "RetrievalConfig",
-        FakeRetrievalConfig,
-    )
+        return RecordingRetriever
+
+    for class_name, path_name in (
+        ("MediaDBRetriever", "media"),
+        ("NotesDBRetriever", "notes"),
+        ("CharacterCardsRetriever", "characters"),
+        ("ChatHistoryRetriever", "chats"),
+        ("WorldBooksRetriever", "world_books"),
+        ("ChatDictionariesRetriever", "dictionaries"),
+        ("KanbanDBRetriever", "kanban"),
+    ):
+        monkeypatch.setattr(
+            database_retrievers,
+            class_name,
+            recording_retriever(path_name),
+        )
     registry = create_default_registry(credential_runtime=runtime)
 
     output = await registry.execute(
         "local_db_search",
-        {"query": "runtime local search", "sources": ["media_db"]},
+        {
+            "query": "runtime local search",
+            "sources": ["media_db"],
+            "top_k": 7,
+            "user_id": "42",
+            "media_db_path": "media.sqlite",
+            "notes_db_path": "notes.sqlite",
+            "character_db_path": "characters.sqlite",
+            "kanban_db_path": "kanban.sqlite",
+            "media_db": media_adapter,
+            "chacha_db": chacha_adapter,
+        },
     )
 
     assert output.success is True
-    assert captured["credential_runtime"] is runtime
+    assert paths["media"] == "media.sqlite"
+    assert paths["notes"] == "notes.sqlite"
+    assert paths["characters"] == "characters.sqlite"
+    assert paths["kanban"] == "kanban.sqlite"
+    assert captured["media_kwargs"] == {
+        "user_id": "42",
+        "media_db": media_adapter,
+        "credential_runtime": runtime,
+    }
+    config = captured["retrieval_config"]
+    assert isinstance(config, database_retrievers.RetrievalConfig)
+    assert config.max_results == 7
+    assert config.use_fts is True
+    assert config.use_vector is True
+
+
+@pytest.mark.asyncio
+async def test_research_loop_overwrites_local_action_scope_with_trusted_context(monkeypatch):
+    import tldw_Server_API.app.core.Chat.chat_service as chat_service
+
+    captured: dict[str, object] = {}
+
+    async def fake_chat_call_async(**_kwargs):
+        return (
+            '{"reasoning":"search local","action":"local_db_search","params":'
+            '{"query":"scope test","sources":["media_db"],"top_k":3,'
+            '"user_id":"attacker","media_db_path":"attacker.db",'
+            '"notes_db_path":"attacker-notes.db","chacha_db":"attacker-adapter",'
+            '"credential_runtime":"attacker-runtime"}}'
+        )
+
+    async def capture_local_action(params):
+        captured.update(params)
+        return ra.ActionOutput(action_name="local_db_search", success=True)
+
+    monkeypatch.setattr(chat_service, "perform_chat_api_call_async", fake_chat_call_async)
+    registry = ra.ActionRegistry()
+    registry.register(
+        ra.ResearchAction(
+            name="local_db_search",
+            description="local",
+            schema={},
+            enabled=lambda _classification: True,
+            execute=capture_local_action,
+        )
+    )
+    classification = QueryClassification(
+        skip_search=False,
+        search_local_db=True,
+        standalone_query="scope test",
+    )
+
+    await ra.research_loop(
+        query="scope test",
+        classification=classification,
+        mode="speed",
+        max_iterations=1,
+        registry=registry,
+        db_context={
+            "user_id": "trusted-user",
+            "media_db_path": "trusted.db",
+        },
+    )
+
+    assert captured["user_id"] == "trusted-user"
+    assert captured["media_db_path"] == "trusted.db"
+    assert captured["sources"] == ["media_db"]
+    assert captured["top_k"] == 3
+    assert "notes_db_path" not in captured
+    assert "chacha_db" not in captured
+    assert "credential_runtime" not in captured
+
+
+@pytest.mark.asyncio
+async def test_local_database_action_sanitizes_typed_provider_failure(monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+    from tldw_Server_API.app.core.RAG.rag_service import database_retrievers
+
+    secret = "local-retrieval-secret"
+
+    class FailingMediaRetriever:
+        def __init__(self, *_args, **_kwargs):
+            self.config = None
+
+        async def retrieve(self, _query, **_kwargs):
+            raise ByokResolutionError("credential_store_unavailable", "openai")
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(database_retrievers, "MediaDBRetriever", FailingMediaRetriever)
+    registry = create_default_registry(credential_runtime=object())
+
+    output = await registry.execute(
+        "local_db_search",
+        {
+            "query": secret,
+            "sources": ["media_db"],
+            "media_db_path": "media.sqlite",
+        },
+    )
+
+    assert output.success is False
+    assert output.error == "credential_store_unavailable"
+    assert output.metadata == {"failure_code": "credential_store_unavailable"}
+    assert secret not in str(output)
+
+
+@pytest.mark.asyncio
+async def test_local_database_action_sanitizes_unexpected_failure():
+    secret = "local-action-secret"
+
+    class FailingUserId:
+        def __str__(self):
+            raise RuntimeError(secret)
+
+    registry = create_default_registry(credential_runtime=object())
+
+    output = await registry.execute(
+        "local_db_search",
+        {
+            "query": "unexpected failure",
+            "sources": [],
+            "user_id": FailingUserId(),
+        },
+    )
+
+    assert output.success is False
+    assert output.error == "action_failed"
+    assert output.metadata == {"failure_code": "action_failed"}
+    assert secret not in str(output)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("failure_factory", "expected_code"),
+    [
+        pytest.param(
+            lambda secret: ByokResolutionError("credential_store_unavailable", "openai"),
+            "credential_store_unavailable",
+            id="byok",
+        ),
+        pytest.param(
+            lambda secret: ChatAuthenticationError(secret, provider="openai"),
+            "invalid_provider_credentials",
+            id="chat-auth",
+        ),
+        pytest.param(lambda secret: RuntimeError(secret), "action_failed", id="unexpected"),
+    ],
+)
+async def test_action_registry_sanitizes_outer_failures(
+    monkeypatch,
+    failure_factory,
+    expected_code,
+):
+    secret = "outer-action-secret"
+    warnings: list[object] = []
+
+    async def fail_action(_params):
+        raise failure_factory(secret)
+
+    def capture_warning(*args, **kwargs):
+        warnings.append((args, kwargs))
+
+    monkeypatch.setattr(ra.logger, "warning", capture_warning)
+    registry = ra.ActionRegistry()
+    registry.register(
+        ra.ResearchAction(
+            name="failing_action",
+            description="failure",
+            schema={},
+            enabled=lambda _classification: True,
+            execute=fail_action,
+        )
+    )
+
+    output = await registry.execute("failing_action", {})
+
+    assert output.success is False
+    assert output.error == expected_code
+    assert output.metadata == {"failure_code": expected_code}
+    assert secret not in str(output)
+    assert secret not in str(warnings)
+
+
+@pytest.mark.asyncio
+async def test_action_registry_propagates_cancellation():
+    async def cancel_action(_params):
+        raise asyncio.CancelledError
+
+    registry = ra.ActionRegistry()
+    registry.register(
+        ra.ResearchAction(
+            name="cancel_action",
+            description="cancel",
+            schema={},
+            enabled=lambda _classification: True,
+            execute=cancel_action,
+        )
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await registry.execute("cancel_action", {})
 
 
 @pytest.mark.parametrize(

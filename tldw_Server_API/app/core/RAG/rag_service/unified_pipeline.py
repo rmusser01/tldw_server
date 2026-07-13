@@ -2889,6 +2889,7 @@ async def unified_rag_pipeline(
                 _research_start = time.time()
                 _research_mode = search_depth_mode or "balanced"
                 _db_ctx = {
+                    "user_id": user_id or "0",
                     "media_db_path": media_db_path,
                     "notes_db_path": notes_db_path,
                     "character_db_path": character_db_path,

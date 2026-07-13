@@ -22,6 +22,8 @@ from typing import Any, Callable, Literal
 
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
 from tldw_Server_API.app.core.LLM_Calls.structured_output import (
     StructuredOutputOptions,
     StructuredOutputParseError,
@@ -83,6 +85,45 @@ class ResearchAction:
     schema: dict[str, Any]  # JSON schema for parameters
     enabled: Callable[[QueryClassification], bool]  # Whether available
     execute: Callable[..., Any]  # Async callable: (params) -> ActionOutput
+
+
+_ACTION_FAILURE_CODES = frozenset(
+    {
+        "action_failed",
+        "credential_scope_revoked",
+        "credential_store_unavailable",
+        "invalid_provider_credentials",
+        "missing_provider_credentials",
+        "provider_configuration_invalid",
+        "provider_unavailable",
+    }
+)
+
+
+def _action_failure_code(exc: BaseException) -> str:
+    """Map action failures to a bounded, detail-free taxonomy."""
+    if isinstance(exc, ByokResolutionError):
+        code = exc.code
+    elif isinstance(exc, ChatAPIError):
+        code = str(getattr(exc, "error_code", "") or "")
+        if getattr(exc, "status_code", None) in {401, 403}:
+            code = "invalid_provider_credentials"
+        elif code not in _ACTION_FAILURE_CODES:
+            code = "provider_unavailable"
+    else:
+        code = "action_failed"
+    return code if code in _ACTION_FAILURE_CODES else "provider_unavailable"
+
+
+def _action_failure_output(action_name: str, exc: BaseException) -> ActionOutput:
+    """Build a sanitized action failure without serializing the exception."""
+    code = _action_failure_code(exc)
+    return ActionOutput(
+        action_name=action_name,
+        success=False,
+        error=code,
+        metadata={"failure_code": code},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -149,13 +190,15 @@ class ActionRegistry:
                     metadata=result,
                 )
             return ActionOutput(action_name=name, success=True, results=[], result_count=0)
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
-            logger.warning(f"Research action '{name}' failed: {exc!r}")
-            return ActionOutput(
-                action_name=name,
-                success=False,
-                error=str(exc),
+            logger.warning(
+                "Research action failed",
+                action=name,
+                error_type=type(exc).__name__,
             )
+            return _action_failure_output(name, exc)
 
     def get_actions_description(self, classification: QueryClassification) -> str:
         """Get a formatted description of available actions for the LLM prompt."""
@@ -212,29 +255,50 @@ def _create_local_db_search_action(credential_runtime: Any = None) -> ResearchAc
             from .database_retrievers import MultiDatabaseRetriever, RetrievalConfig
 
             query = params.get("query", "")
-            top_k = params.get("top_k", 10)
+            try:
+                top_k = max(1, int(params.get("top_k", 10)))
+            except (TypeError, ValueError):
+                top_k = 10
             sources = params.get("sources", ["media_db"])
 
             config = RetrievalConfig(
-                search_mode="hybrid",
-                top_k=top_k,
+                max_results=top_k,
+                use_fts=True,
+                use_vector=True,
             )
-            retriever_kwargs: dict[str, Any] = {"config": config}
-            if credential_runtime is not None:
-                retriever_kwargs["credential_runtime"] = credential_runtime
-            retriever = MultiDatabaseRetriever(**retriever_kwargs)
-
-            # Build kwargs from available DB paths
-            retrieve_kwargs: dict[str, Any] = {
-                "query": query,
-                "sources": sources,
+            path_aliases = {
+                "media_db_path": "media_db",
+                "notes_db_path": "notes_db",
+                "character_db_path": "character_cards_db",
+                "kanban_db_path": "kanban_db",
+                "prompts_db_path": "prompts_db",
+                "world_books_db_path": "world_books_db",
+                "chat_dictionaries_db_path": "chat_dictionaries_db",
             }
-            for key in ("media_db_path", "notes_db_path", "character_db_path",
-                         "kanban_db_path", "media_db", "chacha_db"):
-                if key in params and params[key] is not None:
-                    retrieve_kwargs[key] = params[key]
+            db_paths: dict[str, str] = {}
+            supplied_paths = params.get("db_paths")
+            if isinstance(supplied_paths, dict):
+                for canonical_key in set(path_aliases.values()) | {"claims_db"}:
+                    value = supplied_paths.get(canonical_key)
+                    if value is not None and str(value).strip():
+                        db_paths[canonical_key] = str(value).strip()
+            for source_key, canonical_key in path_aliases.items():
+                value = params.get(source_key)
+                if value is not None and str(value).strip():
+                    db_paths[canonical_key] = str(value).strip()
 
-            results = await retriever.retrieve(**retrieve_kwargs)
+            retriever = MultiDatabaseRetriever(
+                db_paths,
+                user_id=str(params.get("user_id") or "0"),
+                media_db=params.get("media_db"),
+                chacha_db=params.get("chacha_db"),
+                credential_runtime=credential_runtime,
+            )
+            results = await retriever.retrieve(
+                query=query,
+                sources=sources,
+                config=config,
+            )
 
             docs = []
             for doc in results:
@@ -261,12 +325,10 @@ def _create_local_db_search_action(credential_runtime: Any = None) -> ResearchAc
                 results=docs,
                 result_count=len(docs),
             )
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
-            return ActionOutput(
-                action_name="local_db_search",
-                success=False,
-                error=str(exc),
-            )
+            return _action_failure_output("local_db_search", exc)
 
     return ResearchAction(
         name="local_db_search",
@@ -1315,11 +1377,28 @@ async def research_loop(
             )
 
         # Inject DB context into local_db_search params
-        if action_name == "local_db_search" and db_context:
-            for key in ("media_db_path", "notes_db_path", "character_db_path",
-                         "kanban_db_path", "media_db", "chacha_db"):
-                if key in db_context and key not in action_params:
-                    action_params[key] = db_context[key]
+        if action_name == "local_db_search":
+            action_params = {
+                key: value
+                for key, value in action_params.items()
+                if key in {"query", "sources", "top_k"}
+            }
+            if db_context:
+                for key in (
+                    "db_paths",
+                    "media_db_path",
+                    "notes_db_path",
+                    "character_db_path",
+                    "kanban_db_path",
+                    "prompts_db_path",
+                    "world_books_db_path",
+                    "chat_dictionaries_db_path",
+                    "media_db",
+                    "chacha_db",
+                    "user_id",
+                ):
+                    if key in db_context:
+                        action_params[key] = db_context[key]
 
         action_signature = _action_signature(action_name, action_params)
         if (

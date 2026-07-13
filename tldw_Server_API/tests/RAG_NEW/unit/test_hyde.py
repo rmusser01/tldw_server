@@ -143,12 +143,32 @@ async def test_runtime_hyde_generation_uses_scoped_credentials_then_marks_used(m
     runtime.handle = handle
     captured: dict[str, Any] = {}
 
-    def fake_analyze(**kwargs):
+    def fake_dispatch(
+        text_to_summarize,
+        custom_prompt_arg,
+        api_name,
+        api_key,
+        temp,
+        system_message,
+        streaming,
+        model_override=None,
+        **kwargs,
+    ):
         assert runtime.marked == []
+        captured.update(
+            input_data=text_to_summarize,
+            custom_prompt_arg=custom_prompt_arg,
+            api_name=api_name,
+            api_key=api_key,
+            temp=temp,
+            system_message=system_message,
+            streaming=streaming,
+            model_override=model_override,
+        )
         captured.update(kwargs)
         return "A complete runtime hypothetical answer with facts."
 
-    monkeypatch.setattr(sgl, "analyze", fake_analyze)
+    monkeypatch.setattr(sgl, "_dispatch_to_api", fake_dispatch)
 
     result = await hyde.generate_hypothetical_answer_async(
         "runtime question",
@@ -167,6 +187,49 @@ async def test_runtime_hyde_generation_uses_scoped_credentials_then_marks_used(m
     assert captured["credentials_resolved"] is True
     assert captured["raise_on_error"] is True
     assert captured["model_override"] == "runtime-model"
+    assert captured["input_data"] == "runtime question"
+    assert "runtime question" not in captured["custom_prompt_arg"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_runtime_hyde_without_model_uses_scoped_provider_default(monkeypatch):
+    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
+
+    app_config = {"anthropic_api": {"model": "claude-configured"}}
+    handle = SimpleNamespace(
+        provider="anthropic",
+        api_key="runtime-anthropic-key",
+        app_config=app_config,
+    )
+    runtime = _CredentialRuntime("anthropic")
+    runtime.handle = handle
+    captured: dict[str, Any] = {}
+
+    def fake_dispatch(text_to_summarize, custom_prompt_arg, api_name, api_key, *args, **kwargs):
+        captured.update(
+            input_data=text_to_summarize,
+            custom_prompt_arg=custom_prompt_arg,
+            api_name=api_name,
+            api_key=api_key,
+            **kwargs,
+        )
+        return "A provider-compatible hypothetical answer with facts."
+
+    monkeypatch.setattr(sgl, "_dispatch_to_api", fake_dispatch)
+
+    result = await hyde.generate_hypothetical_answer_async(
+        "anthropic runtime question",
+        provider="anthropic",
+        credential_runtime=runtime,
+        stage_metadata={},
+    )
+
+    assert result == "A provider-compatible hypothetical answer with facts."
+    assert captured["input_data"] == "anthropic runtime question"
+    assert captured["model_override"] is None
+    assert captured["app_config"] is app_config
+    assert runtime.marked == [handle]
 
 
 @pytest.mark.unit
@@ -201,7 +264,27 @@ async def test_runtime_hyde_credential_failure_uses_bounded_heuristic(monkeypatc
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_runtime_hyde_rejects_unstructured_provider_error_without_leaking(monkeypatch):
+@pytest.mark.parametrize(
+    "response_factory",
+    [
+        pytest.param(
+            lambda secret: {"error": f"Provider rejected credentials: {secret}"},
+            id="error-dict",
+        ),
+        pytest.param(
+            lambda secret: ["Provider rejected credentials", secret],
+            id="list",
+        ),
+        pytest.param(
+            lambda secret: SimpleNamespace(error=f"Provider rejected credentials: {secret}"),
+            id="object",
+        ),
+    ],
+)
+async def test_runtime_hyde_rejects_unstructured_provider_error_without_leaking(
+    monkeypatch,
+    response_factory,
+):
     import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
 
     secret = "runtime-provider-secret-detail"
@@ -209,7 +292,7 @@ async def test_runtime_hyde_rejects_unstructured_provider_error_without_leaking(
     monkeypatch.setattr(
         sgl,
         "analyze",
-        lambda **_kwargs: {"error": f"Provider rejected credentials: {secret}"},
+        lambda **_kwargs: response_factory(secret),
     )
     metadata: dict[str, Any] = {}
 
@@ -226,6 +309,48 @@ async def test_runtime_hyde_rejects_unstructured_provider_error_without_leaking(
         "embedding_coverage": "degraded",
         "failure_code": "provider_unavailable",
     }
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("summary_code", "expected_code"),
+    [
+        ("missing_credentials", "missing_provider_credentials"),
+        ("configuration", "provider_configuration_invalid"),
+        ("authentication", "invalid_provider_credentials"),
+        ("provider_failure", "provider_unavailable"),
+    ],
+)
+def test_hyde_maps_summary_provider_failure_taxonomy(summary_code, expected_code):
+    from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import (
+        SummaryProviderError,
+    )
+
+    metadata: dict[str, Any] = {}
+
+    hyde._record_embedding_degraded(
+        metadata,
+        SummaryProviderError(code=summary_code, provider="openai"),
+    )
+
+    assert metadata == {
+        "embedding_coverage": "degraded",
+        "failure_code": expected_code,
+    }
+
+
+@pytest.mark.unit
+def test_hyde_preserves_runtime_scope_failure_taxonomy():
+    from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+
+    metadata: dict[str, Any] = {}
+
+    hyde._record_embedding_degraded(
+        metadata,
+        ByokResolutionError("credential_scope_revoked", "openai"),
+    )
+
+    assert metadata["failure_code"] == "credential_scope_revoked"
 
 
 @pytest.mark.unit
