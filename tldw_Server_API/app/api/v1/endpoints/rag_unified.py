@@ -65,6 +65,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.Prompts_DB import PromptsDatabase
+from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
 from tldw_Server_API.app.core.RAG.rag_service.agentic_chunker import (
     AgenticConfig,
     agentic_rag_pipeline,
@@ -2012,13 +2013,31 @@ async def resume_batch_endpoint(
         execution_media_db = media_db
         execution_chacha_db = chacha_db
         execution_prompts_db = prompts_db
-        if owner_user_id is not None and current_user.id_int != owner_user_id:
+        if owner_user_id is not None:
             execution_user = User(
                 id=owner_user_id,
                 username=f"checkpoint-owner-{owner_user_id}",
                 email=None,
             )
             try:
+                owner_resource_stack.enter_context(
+                    scoped_context(
+                        user_id=owner_user_id,
+                        org_ids=credential_scope[2],
+                        team_ids=credential_scope[1],
+                        active_org_id=(
+                            credential_scope[2][0]
+                            if len(credential_scope[2]) == 1
+                            else None
+                        ),
+                        active_team_id=(
+                            credential_scope[1][0]
+                            if len(credential_scope[1]) == 1
+                            else None
+                        ),
+                        is_admin=False,
+                    )
+                )
                 execution_media_db = owner_resource_stack.enter_context(
                     managed_media_db_for_owner(owner_user_id)
                 )

@@ -8,6 +8,10 @@ from fastapi.testclient import TestClient
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_auth_principal
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.core.DB_Management.scope_context import (
+    get_scope,
+    scoped_context,
+)
 from tldw_Server_API.app.main import app as fastapi_app
 
 pytestmark = pytest.mark.integration
@@ -19,10 +23,12 @@ class _RecordingRuntime:
     def __init__(self, **scope):
         self.scope = scope
         self.close_calls = 0
+        self.close_scope = None
         type(self).instances.append(self)
 
     async def close(self):
         self.close_calls += 1
+        self.close_scope = get_scope()
 
 
 @pytest.fixture(autouse=True)
@@ -531,16 +537,55 @@ def test_rag_batch_resume_rebuilds_owner_runtime_with_current_base_url_authority
     _patch_current_memberships(monkeypatch, team_ids=[7], org_ids=[11])
     _install_recording_runtime(monkeypatch)
 
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
     import tldw_Server_API.app.core.RAG.rag_service.unified_pipeline as up
 
-    async def fake_pipeline(query: str, **kwargs):  # noqa: ARG001
-        return up.UnifiedSearchResult(documents=[], query=query, errors=[])
+    owner_media = SimpleNamespace(db_path="owner-media.db")
+    owner_chacha = SimpleNamespace(db_path="owner-chacha.db")
+    owner_prompts = SimpleNamespace(db_path_str="owner-prompts.db")
+    owner_resource_calls = []
+    captured = {}
 
-    monkeypatch.setattr(up, "unified_rag_pipeline", fake_pipeline)
+    @contextmanager
+    def _owner_media(owner_user_id: int):
+        owner_resource_calls.append(("media_enter", owner_user_id))
+        captured["media_scope"] = get_scope()
+        try:
+            yield owner_media
+        finally:
+            captured["media_exit_scope"] = get_scope()
+            owner_resource_calls.append(("media_exit", owner_user_id))
 
-    response = client_with_overrides.post(
-        f"/api/v1/rag/batch/resume/{checkpoint.checkpoint_id}"
-    )
+    async def _owner_chacha(owner_user_id: int):
+        owner_resource_calls.append(("chacha", owner_user_id))
+        return owner_chacha
+
+    async def _owner_prompts(request: Request, owner_user: User):  # noqa: ARG001
+        owner_resource_calls.append(("prompts", owner_user.id))
+        return owner_prompts
+
+    async def fake_batch_pipeline(**kwargs):
+        captured["pipeline"] = kwargs
+        captured["pipeline_scope"] = get_scope()
+        return [up.UnifiedSearchResult(documents=[], query="resume me", errors=[])]
+
+    monkeypatch.setattr(rag_ep, "managed_media_db_for_owner", _owner_media)
+    monkeypatch.setattr(rag_ep, "get_chacha_db_for_owner", _owner_chacha)
+    monkeypatch.setattr(rag_ep, "get_prompts_db_for_user", _owner_prompts)
+    monkeypatch.setattr(rag_ep, "unified_batch_pipeline", fake_batch_pipeline)
+
+    with scoped_context(
+        user_id=42,
+        org_ids=[199],
+        team_ids=[299],
+        active_org_id=199,
+        active_team_id=299,
+        is_admin=True,
+    ) as request_scope:
+        response = client_with_overrides.post(
+            f"/api/v1/rag/batch/resume/{checkpoint.checkpoint_id}"
+        )
+        restored_scope = get_scope()
 
     assert response.status_code == 200, response.text
     runtime = _RecordingRuntime.instances[0]
@@ -549,6 +594,28 @@ def test_rag_batch_resume_rebuilds_owner_runtime_with_current_base_url_authority
     assert runtime.scope["org_ids"] == [11]
     assert runtime.scope["trusted_base_url_override"] is expected_trusted
     assert runtime.close_calls == 1
+    assert captured["pipeline"]["media_db"] is owner_media
+    assert captured["pipeline"]["chacha_db"] is owner_chacha
+    assert captured["pipeline"]["prompts_db"] is owner_prompts
+    for scope in (
+        captured["media_scope"],
+        captured["pipeline_scope"],
+        runtime.close_scope,
+        captured["media_exit_scope"],
+    ):
+        assert scope.user_id == 42
+        assert scope.org_ids == [11]
+        assert scope.team_ids == [7]
+        assert scope.active_org_id == 11
+        assert scope.active_team_id == 7
+        assert scope.is_admin is False
+    assert restored_scope == request_scope
+    assert owner_resource_calls == [
+        ("media_enter", 42),
+        ("chacha", 42),
+        ("prompts", 42),
+        ("media_exit", 42),
+    ]
 
 
 def test_rag_batch_admin_resume_uses_checkpoint_owner_scope(
@@ -593,9 +660,11 @@ def test_rag_batch_admin_resume_uses_checkpoint_owner_scope(
     @contextmanager
     def _owner_media(owner_user_id: int):
         owner_resource_calls.append(("media_enter", owner_user_id))
+        captured["media_scope"] = get_scope()
         try:
             yield owner_media
         finally:
+            captured["media_exit_scope"] = get_scope()
             owner_resource_calls.append(("media_exit", owner_user_id))
 
     async def _owner_chacha(owner_user_id: int):
@@ -617,6 +686,7 @@ def test_rag_batch_admin_resume_uses_checkpoint_owner_scope(
 
     async def fake_batch_pipeline(**kwargs):
         captured["pipeline"] = kwargs
+        captured["pipeline_scope"] = get_scope()
         return [up.UnifiedSearchResult(documents=[], query="resume me", errors=[])]
 
     monkeypatch.setattr(
@@ -635,9 +705,18 @@ def test_rag_batch_admin_resume_uses_checkpoint_owner_scope(
     monkeypatch.setattr(rag_ep, "_build_batch_request_bundle", _recording_build_bundle)
     monkeypatch.setattr(rag_ep, "unified_batch_pipeline", fake_batch_pipeline)
 
-    response = client_with_overrides.post(
-        f"/api/v1/rag/batch/resume/{checkpoint.checkpoint_id}"
-    )
+    with scoped_context(
+        user_id=99,
+        org_ids=[199],
+        team_ids=[299],
+        active_org_id=199,
+        active_team_id=299,
+        is_admin=True,
+    ) as admin_scope:
+        response = client_with_overrides.post(
+            f"/api/v1/rag/batch/resume/{checkpoint.checkpoint_id}"
+        )
+        restored_scope = get_scope()
 
     assert response.status_code == 200, response.text
     runtime = _RecordingRuntime.instances[0]
@@ -657,6 +736,19 @@ def test_rag_batch_admin_resume_uses_checkpoint_owner_scope(
     assert captured["db_paths"]["character_db_path"] == "owner-chacha.db"
     assert captured["db_paths"]["prompts_db_path"] == "owner-prompts.db"
     assert "42" in captured["db_paths"]["kanban_db_path"]
+    for scope in (
+        captured["media_scope"],
+        captured["pipeline_scope"],
+        runtime.close_scope,
+        captured["media_exit_scope"],
+    ):
+        assert scope.user_id == 42
+        assert scope.org_ids == [11]
+        assert scope.team_ids == [7]
+        assert scope.active_org_id == 11
+        assert scope.active_team_id == 7
+        assert scope.is_admin is False
+    assert restored_scope == admin_scope
     assert owner_resource_calls == [
         ("media_enter", 42),
         ("chacha", 42),
