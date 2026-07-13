@@ -380,7 +380,7 @@ git commit -m "docs: finalize Research Discovery PDF handoff"
 
 **Tests:** Add focused regression tests first, run the complete handoff suite, OpenAPI drift check, compile check, diff check, and Bandit on touched application files.
 
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 9: Address PR review findings
 
@@ -388,6 +388,6 @@ git commit -m "docs: finalize Research Discovery PDF handoff"
 - [x] Apply minimal production fixes within the existing chokepoint boundary.
 - [x] Replace the rebased task-ID collision with unique `TASK-12954`; the replacement has one valid final-summary marker.
 - [x] Run focused and full verification, including OpenAPI and Bandit gates.
-- [ ] Commit, force-push with lease, reply to every review comment, and resolve addressed threads.
+- [x] Commit, force-push with lease, reply to every review comment, and resolve addressed threads.
 
 Review remediation verification: 174 passed, 7 skipped, and 1 xpassed across 182 focused tests; Ruff, Black checks on the formatted touched files, compileall, OpenAPI drift, frontend OpenAPI type generation, and `git diff --check` passed. Bandit reported zero findings across 1,121 touched application LOC. The canonical OpenAPI fingerprint is updated to 1,982 paths and 2,874 schemas.

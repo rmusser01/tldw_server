@@ -1,10 +1,10 @@
 ---
 id: TASK-12954
 title: Implement research discovery Phase 2A PDF Media handoff
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
-updated_date: 2026-07-13 15:00
+updated_date: 2026-07-13 19:08
 labels:
 - research
 - media
@@ -69,7 +69,7 @@ Docs/superpowers/plans/2026-07-12-research-discovery-phase2a-pdf-media-handoff.m
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Implementation completed on branch codex/research-discovery-phase2a-pdf. Research remains snapshot-resolution only; the existing /api/v1/media/add and Media pipeline own duplicate lookup, egress, the 50 MiB/application-pdf limits, parsing, persistence, and ordered outcomes. PR review follow-up added legacy nullable/blank snapshot compatibility, identifier-only numeric coercion, async threadpool offloading for SQLite resolution, embargoed/private policy blocking, URL-redacted DownloadError failures, and an explicit public persistence-result allowlist. The rebase also exposed and corrected the TASK-12950 collision with dev by re-keying this record as TASK-12954 and refreshed the canonical OpenAPI fingerprint/frontend generated types. Verification: 173 passed, 7 skipped, 1 xpassed across 181 collected tests; Ruff, compileall, OpenAPI drift, frontend type generation, and git diff --check passed; Bandit found 0 issues across 1,116 touched application LOC. Phase 2B HTML, new queues/workers, idempotency storage, and plugin abstractions remain deferred.
+Implementation completed on branch codex/research-discovery-phase2a-pdf. Research remains snapshot-resolution only; the existing /api/v1/media/add and Media pipeline own duplicate lookup, egress, the 50 MiB/application-pdf limits, parsing, persistence, and ordered outcomes. PR review follow-up added legacy nullable/blank snapshot compatibility, identifier-only numeric coercion, async threadpool offloading for SQLite resolution, embargoed/private policy blocking, URL-redacted DownloadError failures, and an explicit public persistence-result allowlist. The rebase also exposed and corrected the TASK-12950 collision with dev by re-keying this record as TASK-12954 and refreshed the canonical OpenAPI fingerprint/frontend generated types. All nine inline review findings received replies in their original threads and every review thread is resolved on PR #2716. Verification: 174 passed, 7 skipped, 1 xpassed across 182 collected tests; Ruff, Black checks, compileall, OpenAPI drift, frontend type generation, and git diff --check passed; Bandit found 0 issues across 1,121 touched application LOC. Phase 2B HTML, new queues/workers, idempotency storage, and plugin abstractions remain deferred. The PR remains draft pending the required human-authored Change summary.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
