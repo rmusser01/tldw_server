@@ -56,10 +56,10 @@
 **Goal**: Verify, commit, force-update the rebased branch safely, and close addressed review threads.
 **Success Criteria**: Focused tests/builds pass; diff/security gates are recorded; a final fetch proves HEAD descends from current `origin/dev`; branch is pushed with `--force-with-lease`; all actionable threads are resolved or answered with technical rationale; current CI has no unaddressed branch-caused failures. TASK-12953 remains In Progress until the requester writes the Change summary; TASK-12952 may be completed once review remediation itself is verified.
 **Tests**: Auth matrix, WebUI Playwright, `cd apps/extension && bun run build:chrome:prod`, packaged extension Playwright, extension compile, frontend typecheck/lint where available, `git diff --check`, generated-artifact scan, Bandit applicability check, GitHub checks.
-**Status**: Not Started
+**Status**: In Progress
 
-- [ ] Run complete fresh verification.
-- [ ] Update TASK-12952 notes/checklists and append the fresh post-rebase verification to TASK-12953 while keeping TASK-12953 In Progress pending the human Change summary.
+- [x] Run complete fresh verification.
+- [x] Update TASK-12952 notes/checklists and append the fresh post-rebase verification to TASK-12953 while keeping TASK-12953 In Progress pending the human Change summary.
 - [ ] Run `git fetch origin dev`, verify `git merge-base --is-ancestor origin/dev HEAD`, and compare `origin/dev` to the previously verified base. If `dev` advanced, rebase again and repeat the complete verification matrix.
 - [ ] Commit and push with `--force-with-lease`.
 - [ ] Reply in and resolve review threads, then inspect the new CI run.
