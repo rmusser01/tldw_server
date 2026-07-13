@@ -308,7 +308,7 @@ def _strict_run_bound_array(value: Any, *, name: str) -> list[Any]:
             )
         try:
             decoded = json.loads(encoded)
-        except (TypeError, json.JSONDecodeError, RecursionError, MemoryError) as exc:
+        except (TypeError, ValueError, RecursionError, MemoryError) as exc:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"{name} must be an array.",

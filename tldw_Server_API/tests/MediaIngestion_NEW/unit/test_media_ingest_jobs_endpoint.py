@@ -1110,6 +1110,45 @@ def test_run_bound_submit_rejects_encoded_array_over_256_kib_before_json_decode(
     assert decoded_oversize is False
 
 
+def test_run_bound_submit_sanitizes_oversized_json_integer_before_lookup_or_staging(
+    media_ingest_jobs_client,
+    monkeypatch,
+):
+    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
+
+    lookup_calls = 0
+    stage_calls = 0
+
+    def fail_if_looked_up(*_args, **_kwargs):
+        nonlocal lookup_calls
+        lookup_calls += 1
+        raise AssertionError("invalid binding arrays must not reach run lookup")
+
+    async def fail_if_staged(*_args, **_kwargs):
+        nonlocal stage_calls
+        stage_calls += 1
+        raise AssertionError("invalid binding arrays must not reach staging")
+
+    monkeypatch.setattr(ingest_jobs.PlaylistIngestStore, "get_run", fail_if_looked_up, raising=True)
+    monkeypatch.setattr(ingest_jobs, "save_uploaded_files", fail_if_staged, raising=True)
+    response = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data={
+            "media_type": "audio",
+            "run_id": "does-not-exist",
+            "file_occurrence_ids": json.dumps(["occ-file-1"]),
+            "file_attempts": "[" + ("9" * 5000) + "]",
+        },
+        files=[("files", ("clip.mp3", b"test", "audio/mpeg"))],
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"] == "file_attempts must be an array."
+    assert lookup_calls == 0
+    assert stage_calls == 0
+
+
 @pytest.mark.parametrize("encoded", ["{}", '"occ-url-1"', "null", "["])
 def test_run_bound_submit_requires_encoded_top_level_list(media_ingest_jobs_client, encoded):
     response = media_ingest_jobs_client.post(
