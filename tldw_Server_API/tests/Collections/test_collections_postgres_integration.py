@@ -188,6 +188,85 @@ def test_playlist_collection_actions_are_cas_safe_on_postgres(
     )
 
 
+def test_playlist_collection_commit_then_error_recovery_attaches_run_on_postgres(
+    request: pytest.FixtureRequest,
+    monkeypatch,
+    tmp_path,
+):
+    _client, db_name = request.getfixturevalue("isolated_test_environment")  # type: ignore[assignment]
+    monkeypatch.setenv("USER_DB_BASE_DIR", str((tmp_path / "user_dbs").resolve()))
+    monkeypatch.setenv("TEST_MODE", "true")
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
+        PlaylistIngestService,
+    )
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestStore,
+    )
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    backend = _pg_backend(db_name)
+    db = CollectionsDatabase.from_backend(user_id="1", backend=backend)
+    malformed = db.create_media_collection(
+        name="Malformed legacy playlist",
+        kind="playlist_ingest",
+    )
+    backend.execute(
+        "UPDATE media_collections SET metadata_json = ? WHERE id = ? AND user_id = ?",
+        ("{malformed", malformed.id, "1"),
+    )
+
+    original_create = db.create_media_collection_with_items
+    committed = None
+
+    def create_then_raise(**kwargs):
+        nonlocal committed
+        committed = original_create(**kwargs)
+        raise RuntimeError("private post-commit detail")
+
+    monkeypatch.setattr(db, "create_media_collection_with_items", create_then_raise)
+    monkeypatch.setattr(db, "close", lambda: None)
+
+    class _NoDuplicateMediaDB:
+        @staticmethod
+        def get_media_by_urls(_urls, **_kwargs):
+            return []
+
+        @staticmethod
+        def close_connection():
+            return None
+
+    manager = JobManager(db_path=tmp_path / "playlist-recovery-jobs.db")
+    service = PlaylistIngestService(
+        manager,
+        media_db_factory=lambda _owner: _NoDuplicateMediaDB(),
+        collections_db_factory=lambda owner: db if owner == "1" else None,
+    )
+    created = service.create_run(
+        "1",
+        inputs=[
+            {
+                "input_kind": "direct_url",
+                "occurrence_id": "pg-recovery-occurrence",
+                "url": "https://example.com/postgres-recovery",
+                "source_kind": "video",
+                "display_metadata": {"title": "PostgreSQL recovery"},
+            }
+        ],
+        review_overrides={},
+        new_collection={"name": "Recovered playlist plan"},
+    )
+
+    assert committed is not None
+    recovered = db.get_playlist_ingest_collection_for_run(created.run_id)
+    item = PlaylistIngestStore(manager).list_run_items("1", created.run_id)[0]
+    assert created.collection_id == committed.id == recovered.id
+    assert item.planned_collection_item_id == committed.items[0].id
+    other_owner = CollectionsDatabase.from_backend(user_id="2", backend=backend)
+    with pytest.raises(KeyError, match="media_collection_not_found"):
+        other_owner.get_playlist_ingest_collection_for_run(created.run_id)
+
+
 def test_collections_postgres_backfills_notification_delivery_columns(
     request: pytest.FixtureRequest,
     monkeypatch,

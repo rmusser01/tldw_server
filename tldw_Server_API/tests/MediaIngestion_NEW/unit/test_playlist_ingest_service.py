@@ -1288,7 +1288,54 @@ def test_create_run_finalization_commit_then_error_never_restores_terminal_membe
     assert _table_count(manager, "jobs") == 0
 
 
-def test_create_run_finalization_failure_reports_safe_cleanup_failure(service_context, monkeypatch):
+def test_create_run_finalization_readback_failure_is_pending_and_reconciles_same_run(
+    service_context,
+    monkeypatch,
+):
+    service, store, manager, media_db = service_context
+    media_db.rows = [{"id": 17, "url": "https://example.com/existing"}]
+    monkeypatch.setattr(
+        service._store,
+        "resolve_nonprocessing_run_item",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("private finalization detail")),
+    )
+    monkeypatch.setattr(
+        service._store,
+        "get_run_item",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("private readback detail")),
+    )
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
+        PlaylistRunPendingError,
+    )
+
+    with pytest.raises(PlaylistRunPendingError) as pending:
+        service.create_run(
+            "owner-1",
+            inputs=[_direct_input("occ-existing", "https://example.com/existing")],
+            review_overrides={"occ-existing": {"duplicate_policy": "include_existing", "existing_media_id": 17}},
+            new_collection={"name": "Finalization readback failure"},
+        )
+
+    assert str(pending.value) == "duplicate_action_pending"
+    assert "private" not in str(pending.value)
+    assert store.get_run_item("owner-1", pending.value.run_id, "occ-existing").state == "preparing"
+    assert _table_count(manager, "jobs") == 0
+
+    monkeypatch.undo()
+    reconciled = service.reconcile_nonprocessing_actions("owner-1", pending.value.run_id)
+    item = store.get_run_item("owner-1", pending.value.run_id, "occ-existing")
+    assert reconciled.run_id == pending.value.run_id
+    assert reconciled.status == "completed"
+    assert item.state == "terminal"
+    assert item.outcome == "included_existing"
+    assert _table_count(manager, "jobs") == 0
+
+
+def test_create_run_finalization_cleanup_failure_is_pending_and_reconciles_same_run(
+    service_context,
+    monkeypatch,
+):
     service, store, manager, media_db = service_context
     collections_db = service.test_collections_db
     collections_db.restore_error = RuntimeError("private cleanup detail")
@@ -1300,10 +1347,10 @@ def test_create_run_finalization_failure_reports_safe_cleanup_failure(service_co
     )
 
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
-        PlaylistRunValidationError,
+        PlaylistRunPendingError,
     )
 
-    with pytest.raises(PlaylistRunValidationError) as exc_info:
+    with pytest.raises(PlaylistRunPendingError) as pending:
         service.create_run(
             "owner-1",
             inputs=[_direct_input("occ-existing", "https://example.com/existing")],
@@ -1311,22 +1358,23 @@ def test_create_run_finalization_failure_reports_safe_cleanup_failure(service_co
             new_collection={"name": "Cleanup failure"},
         )
 
-    assert str(exc_info.value) == "collection_action_cleanup_failed"
-    assert "private" not in str(exc_info.value)
-    connection = manager._connect()
-    try:
-        run_id = connection.execute("SELECT run_id FROM media_ingest_runs").fetchone()[0]
-    finally:
-        connection.close()
-    assert store.list_run_items("owner-1", run_id)[0].state == "preparing"
-    assert collections_db.restore_calls == [
-        {
-            "item_id": 701,
-            "expected_media_id": 17,
-            "expected_status": "skipped_existing",
-            "expected_updated_at": "2026-07-12T12:00:01+00:00",
-        }
-    ]
+    assert str(pending.value) == "duplicate_action_pending"
+    assert "private" not in str(pending.value)
+    assert store.list_run_items("owner-1", pending.value.run_id)[0].state == "preparing"
+    with pytest.raises(PlaylistRunPendingError) as repeated:
+        service.reconcile_nonprocessing_actions("owner-1", pending.value.run_id)
+    assert repeated.value.run_id == pending.value.run_id
+    assert len(collections_db.restore_calls) == 2
+    assert _table_count(manager, "jobs") == 0
+
+    collections_db.restore_error = None
+    monkeypatch.undo()
+    reconciled = service.reconcile_nonprocessing_actions("owner-1", pending.value.run_id)
+    item = store.list_run_items("owner-1", pending.value.run_id)[0]
+    assert reconciled.run_id == pending.value.run_id
+    assert reconciled.status == "completed"
+    assert item.state == "terminal"
+    assert item.outcome == "included_existing"
     assert _table_count(manager, "jobs") == 0
 
 

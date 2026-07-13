@@ -799,8 +799,6 @@ class PlaylistIngestService:
                     manifest,
                     collections_db=collections_db,
                 )
-            except PlaylistRunValidationError:
-                raise
             except Exception as exc:
                 raise PlaylistRunPendingError(created.run_id) from exc
         finally:
@@ -843,7 +841,7 @@ class PlaylistIngestService:
                 items,
                 collections_db=collections_db,
             )
-        except (PlaylistIngestNotFoundError, PlaylistRunValidationError):
+        except PlaylistIngestNotFoundError:
             raise
         except Exception as exc:
             raise PlaylistRunPendingError(run.run_id) from exc

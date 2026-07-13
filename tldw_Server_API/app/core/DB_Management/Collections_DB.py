@@ -3394,25 +3394,33 @@ class CollectionsDatabase:
         """Reconcile a playlist plan by its internal run marker."""
         if type(run_id) is not str or not run_id.strip() or len(run_id) > 100:
             raise ValueError("playlist_ingest_run_id_invalid")
+        marker = run_id.strip()
+        marker_pattern = json.dumps(marker, ensure_ascii=False)
         if self.backend_type == BackendType.POSTGRESQL:
-            marker_sql = "metadata_json ->> 'playlist_ingest_run_id' = ?"
+            marker_filter = "POSITION(? IN metadata_json) > 0"
         else:
-            marker_sql = "json_extract(metadata_json, '$.playlist_ingest_run_id') = ?"
+            marker_filter = "instr(metadata_json, ?) > 0"
+        # marker_filter is selected from fixed backend-specific SQL fragments.
         rows = self.backend.execute(
             f"""
             SELECT id, user_id, name, kind, description, source_url, metadata_json,
                    default_tags_json, deleted, created_at, updated_at
             FROM media_collections
             WHERE user_id = ? AND kind = 'playlist_ingest' AND deleted = ?
-              AND {marker_sql}
-            ORDER BY id ASC LIMIT 2
+              AND {marker_filter}
+            ORDER BY id ASC
             """,  # nosec B608
             (
                 self.user_id,
                 self._coerce_bool_flag(False, postgres=self.backend_type == BackendType.POSTGRESQL),
-                run_id.strip(),
+                marker_pattern,
             ),
         ).rows
+        rows = [
+            row
+            for row in rows
+            if self._json_loads_dict(row.get("metadata_json")).get("playlist_ingest_run_id") == marker
+        ]
         if len(rows) != 1:
             raise KeyError("media_collection_not_found")
         return self._row_to_media_collection(rows[0])
