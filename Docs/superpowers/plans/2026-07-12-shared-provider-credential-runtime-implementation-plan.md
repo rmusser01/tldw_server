@@ -343,33 +343,37 @@ git commit -m "feat(rag): propagate provider credential runtime"
 - Modify: `tldw_Server_API/app/core/RAG/rag_service/agentic_chunker.py`
 - Modify: `tldw_Server_API/app/core/RAG/rag_service/advanced_reranking.py`
 - Modify: `tldw_Server_API/app/core/RAG/rag_service/document_grader.py`
+- Modify: `tldw_Server_API/app/core/RAG/rag_service/faithfulness.py`
 - Modify: `tldw_Server_API/app/core/RAG/rag_service/quality_graders.py`
 - Modify: `tldw_Server_API/app/core/RAG/rag_service/post_generation_verifier.py`
+- Modify: `tldw_Server_API/app/core/Claims_Extraction/claims_engine.py`
+- Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_agentic_chunker_sanitizers.py`
 - Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_generation_executor.py`
 - Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_streaming_executor.py`
+- Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_unified_pipeline_structured_writer.py`
 
-- [ ] **Step 1: Add failing final/auxiliary tests**
+- [x] **Step 1: Add failing final/auxiliary tests**
 
 For each stage family, make the chosen provider differ where useful and assert its handle supplies `api_key`, `app_config`, and `credentials_resolved=True`. Final generation must propagate typed failures; graders/rerankers/verifiers may use their existing heuristic/skip fallback but must append only safe codes and lower verification/trust metadata. Include partial SGL stream then failure.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/RAG_NEW/unit/test_generation_executor.py tldw_Server_API/tests/RAG_NEW/unit/test_streaming_executor.py tldw_Server_API/tests/RAG_NEW/unit/test_rag_provider_credentials.py -q`
 
 Expected: FAIL because stages still call server config directly.
 
-- [ ] **Step 3: Bind resolved handles at async boundaries**
+- [x] **Step 3: Bind resolved handles at async boundaries**
 
 Resolve immediately after the effective provider is selected. Pass explicit call kwargs to `perform_chat_api_call_async`; for synchronous SGL callbacks, resolve first in the surrounding async function and bind a closure using `raise_on_error=True`. Reuse the original runtime for adaptive reruns and repairs. Do not create a RAG-specific credential wrapper or global/context variable.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run the Step 2 command. Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
-git add tldw_Server_API/app/core/RAG/rag_service tldw_Server_API/tests/RAG_NEW/unit
+git add tldw_Server_API/app/core/RAG/rag_service/generation.py tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py tldw_Server_API/app/core/RAG/rag_service/agentic_chunker.py tldw_Server_API/app/core/RAG/rag_service/advanced_reranking.py tldw_Server_API/app/core/RAG/rag_service/document_grader.py tldw_Server_API/app/core/RAG/rag_service/faithfulness.py tldw_Server_API/app/core/RAG/rag_service/quality_graders.py tldw_Server_API/app/core/RAG/rag_service/post_generation_verifier.py tldw_Server_API/app/core/Claims_Extraction/claims_engine.py tldw_Server_API/tests/RAG_NEW/unit/test_agentic_chunker_sanitizers.py tldw_Server_API/tests/RAG_NEW/unit/test_generation_executor.py tldw_Server_API/tests/RAG_NEW/unit/test_streaming_executor.py tldw_Server_API/tests/RAG_NEW/unit/test_unified_pipeline_structured_writer.py
 git commit -m "fix(rag): credentialize generation and verification stages"
 ```
 
