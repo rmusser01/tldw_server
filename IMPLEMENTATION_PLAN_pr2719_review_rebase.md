@@ -60,7 +60,7 @@
 
 - [x] Run complete fresh verification.
 - [x] Update TASK-12952 notes/checklists and append the fresh post-rebase verification to TASK-12953 while keeping TASK-12953 In Progress pending the human Change summary.
-- [ ] Run `git fetch origin dev`, verify `git merge-base --is-ancestor origin/dev HEAD`, and compare `origin/dev` to the previously verified base. If `dev` advanced, rebase again and repeat the complete verification matrix.
+- [x] Run `git fetch origin dev`, verify `git merge-base --is-ancestor origin/dev HEAD`, and compare `origin/dev` to the previously verified base. If `dev` advanced, rebase again and repeat the complete verification matrix.
 - [ ] Commit and push with `--force-with-lease`.
 - [ ] Reply in and resolve review threads, then inspect the new CI run.
 - [ ] After every stage is complete, remove this task-specific plan file and commit/push that finalization.
