@@ -166,19 +166,19 @@ git commit -m "fix(auth): distinguish absent and failed provider credentials"
 - Create: `tldw_Server_API/app/core/AuthNZ/provider_credential_runtime.py`
 - Create: `tldw_Server_API/tests/AuthNZ_Unit/test_provider_credential_runtime.py`
 
-- [ ] **Step 1: Write failing runtime tests**
+- [x] **Step 1: Write failing runtime tests**
 
 Cover alias normalization, one lookup for concurrent callers, shielded waiter cancellation, independent providers, forced-refresh generation ordering, one shared refresh, successful-use once, clean empty-response use, and cleanup. Use `asyncio.Event` barriers—never sleeps.
 
 Also assert `repr`, `pickle.dumps`, `copy.copy`, `copy.deepcopy`, Pydantic `TypeAdapter`, `CheckpointManager.create`, and JSON/cache serialization never expose or accept sentinel secrets.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/AuthNZ_Unit/test_provider_credential_runtime.py -q`
 
 Expected: FAIL because the module does not exist.
 
-- [ ] **Step 3: Implement the runtime**
+- [x] **Step 3: Implement the runtime**
 
 Implement only:
 
@@ -191,11 +191,11 @@ class ProviderCredentialRuntime:
 
 Constructor inputs are trusted `user_id`, revalidated team/org scope IDs, current `trusted_base_url_override` authority, an injected server fallback resolver, and an injectable resolver for tests. Interactive factories compute authority with existing `is_trusted_base_url_principal`; deferred/resume factories recompute it from the current principal after authorization. Never persist or inherit the boolean from a checkpoint/job. Cache `asyncio.Task` objects by normalized provider, wrap awaits with `asyncio.shield`, and guard forced refresh with per-provider generation counters and locks. Keep the original `ResolvedByokCredentials` only inside the runtime so callers receive no touch callback or source details.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run the Step 2 command. Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/AuthNZ/provider_credential_runtime.py tldw_Server_API/tests/AuthNZ_Unit/test_provider_credential_runtime.py

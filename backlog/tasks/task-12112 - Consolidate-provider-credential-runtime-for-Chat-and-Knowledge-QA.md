@@ -4,7 +4,7 @@ title: Consolidate provider credential runtime for Chat and Knowledge QA
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-12 23:39'
+updated_date: '2026-07-13 00:33'
 labels: []
 dependencies: []
 documentation:
@@ -53,6 +53,8 @@ Docs/superpowers/plans/2026-07-12-shared-provider-credential-runtime-implementat
 2026-07-12: Independent plan-document review approved the complete implementation plan with no remaining issues or recommendations after adding explicit revalidation of base-URL override authority on resume and exact auxiliary-stage test paths.
 
 2026-07-13: Task 1 complete. Commits 552a3f1c5e, 9af6a502ed, 66251817de, and c4350a520d implement typed fail-closed BYOK outcomes, scoped/redacted config, concrete operational-store classification, and the OAuth revocation-race fix. Final focused result: 73 passed, 1 capability-based skip, 3 pre-existing warnings; Black clean; Bandit 0 findings; git diff check clean. Independent specification and code-quality reviews approved with no open issues.
+
+2026-07-13: Task 2 complete. Commits 6187ba4ffd, 8cae33be3f, and 4a73349cfd add the execution-scoped runtime, close-cancellation cleanup, and explicit credential-handle persistence guards. Final focused results: runtime/cache 18 passed; BYOK regressions 73 passed, 1 capability skip; Black clean; Bandit 0 findings; diff clean. Independent specification and code-quality reviews approved with no open issues.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
