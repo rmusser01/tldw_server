@@ -350,6 +350,71 @@ def test_discard_media_collection_removes_just_created_plan_and_memberships(
     )
 
 
+def test_restore_media_collection_item_plan_requires_exact_resolved_write(
+    collections_db: CollectionsDatabase,
+) -> None:
+    created = collections_db.create_media_collection_with_items(
+        name="Compensated action",
+        kind="playlist_ingest",
+        items=[{"source_url": "https://example.com/one", "ordinal": 1}],
+    )
+    resolved = collections_db.resolve_media_collection_item(
+        created.items[0].id,
+        media_id=17,
+        status="completed",
+    )
+
+    with pytest.raises(ValueError, match="media_collection_restore_mismatch"):
+        collections_db.restore_media_collection_item_plan(
+            resolved.id,
+            expected_media_id=17,
+            expected_status="completed",
+            expected_updated_at="wrong-write-token",
+        )
+    unchanged = collections_db.get_media_collection_item(resolved.id)
+    assert unchanged.status == "completed"
+    assert unchanged.media_id == 17
+
+    restored = collections_db.restore_media_collection_item_plan(
+        resolved.id,
+        expected_media_id=17,
+        expected_status="completed",
+        expected_updated_at=resolved.updated_at,
+    )
+    assert restored.status == "planned"
+    assert restored.media_id is None
+
+
+def test_resolve_media_collection_item_rolls_back_when_result_cannot_be_read(
+    collections_db: CollectionsDatabase,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created = collections_db.create_media_collection_with_items(
+        name="Atomic action",
+        kind="playlist_ingest",
+        items=[{"source_url": "https://example.com/one", "ordinal": 1}],
+    )
+    original_execute = collections_db.backend.execute
+
+    def fail_result_read(query, params=None, connection=None):
+        if connection is not None and "SELECT id, user_id, collection_id, ordinal" in query:
+            raise RuntimeError("result read failed")
+        return original_execute(query, params, connection=connection)
+
+    monkeypatch.setattr(collections_db.backend, "execute", fail_result_read)
+    with pytest.raises(RuntimeError, match="result read failed"):
+        collections_db.resolve_media_collection_item(
+            created.items[0].id,
+            media_id=17,
+            status="completed",
+        )
+    monkeypatch.setattr(collections_db.backend, "execute", original_execute)
+
+    unchanged = collections_db.get_media_collection_item(created.items[0].id)
+    assert unchanged.status == "planned"
+    assert unchanged.media_id is None
+
+
 def test_media_collections_router_exposes_collection_crud(
     collections_db: CollectionsDatabase,
     monkeypatch: pytest.MonkeyPatch,

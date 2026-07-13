@@ -903,24 +903,41 @@ class PlaylistIngestService:
                         outcome = "metadata_update_failed"
                     else:
                         outcome = "metadata_updated"
-                self._store.resolve_nonprocessing_run_item(
-                    owner_user_id,
-                    run_id,
-                    str(item["occurrence_id"]),
-                    outcome=outcome,
-                    media_id=int(media_id) if media_id is not None else None,
-                )
                 planned_item_id = item.get("planned_collection_item_id")
+                resolved_membership = None
                 if (
                     collections_db is not None
                     and planned_item_id is not None
                     and outcome in {"included_existing", "metadata_updated"}
                 ):
-                    collections_db.resolve_media_collection_item(
-                        int(planned_item_id),
-                        media_id=int(media_id),
-                        status="skipped_existing" if outcome == "included_existing" else "completed",
+                    try:
+                        resolved_membership = collections_db.resolve_media_collection_item(
+                            int(planned_item_id),
+                            media_id=int(media_id),
+                            status="skipped_existing" if outcome == "included_existing" else "completed",
+                        )
+                    except Exception:  # noqa: BLE001 - the run records a safe terminal failure
+                        outcome = "metadata_update_failed"
+                try:
+                    self._store.resolve_nonprocessing_run_item(
+                        owner_user_id,
+                        run_id,
+                        str(item["occurrence_id"]),
+                        outcome=outcome,
+                        media_id=int(media_id) if media_id is not None else None,
                     )
+                except Exception as exc:
+                    if resolved_membership is not None:
+                        try:
+                            collections_db.restore_media_collection_item_plan(
+                                int(resolved_membership.id),
+                                expected_media_id=int(resolved_membership.media_id),
+                                expected_status=str(resolved_membership.status),
+                                expected_updated_at=str(resolved_membership.updated_at),
+                            )
+                        except Exception as cleanup_exc:
+                            raise PlaylistRunValidationError("collection_action_cleanup_failed") from cleanup_exc
+                    raise PlaylistRunValidationError("duplicate_action_finalization_failed") from exc
         finally:
             if metadata_db is not None:
                 with contextlib.suppress(Exception):

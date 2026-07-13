@@ -3792,16 +3792,141 @@ class CollectionsDatabase:
         latest_run_id: int | None = None,
     ) -> MediaCollectionItemRow:
         """Resolve a planned item to an existing or newly created media row."""
-        return self.update_media_collection_item(
-            item_id,
-            status=status,
-            media_id=media_id,
-            content_item_id=content_item_id,
-            latest_job_id=latest_job_id,
-            latest_run_id=latest_run_id,
-            error_summary="",
-            warnings=[],
-        )
+        status_value = self._normalize_collection_status(status)
+        media_id_value = int(media_id)
+        now = _utcnow_iso()
+        fields = [
+            "status = ?",
+            "media_id = ?",
+            "error_summary = ?",
+            "warnings_json = ?",
+            "updated_at = ?",
+        ]
+        params: list[Any] = [
+            status_value,
+            media_id_value,
+            None,
+            self._json_dumps_or_none([]),
+            now,
+        ]
+        if content_item_id is not None:
+            fields.append("content_item_id = ?")
+            params.append(int(content_item_id))
+        if latest_job_id is not None:
+            fields.append("latest_job_id = ?")
+            params.append(latest_job_id.strip() if latest_job_id.strip() else None)
+        if latest_run_id is not None:
+            fields.append("latest_run_id = ?")
+            params.append(int(latest_run_id))
+
+        with self.transaction() as conn:
+            existing = self.backend.execute(
+                "SELECT collection_id FROM media_collection_items WHERE id = ? AND user_id = ?",
+                (int(item_id), self.user_id),
+                connection=conn,
+            ).first
+            if not existing:
+                raise KeyError("media_collection_item_not_found")
+            updated = self.backend.execute(
+                f"UPDATE media_collection_items SET {', '.join(fields)} WHERE id = ? AND user_id = ?",  # nosec B608
+                tuple([*params, int(item_id), self.user_id]),
+                connection=conn,
+            )
+            if updated.rowcount != 1:
+                raise KeyError("media_collection_item_not_found")
+            self.backend.execute(
+                "UPDATE media_collections SET updated_at = ? WHERE id = ? AND user_id = ?",
+                (now, int(existing["collection_id"]), self.user_id),
+                connection=conn,
+            )
+            result = self.backend.execute(
+                """
+                SELECT id, user_id, collection_id, ordinal, source_url, normalized_source_id,
+                       source_kind, title, speaker, published_at, track, duplicate_status,
+                       status, media_id, content_item_id, latest_job_id, latest_run_id,
+                       idempotency_key, retry_count, error_summary, warnings_json,
+                       metadata_json, tags_json, created_at, updated_at
+                FROM media_collection_items
+                WHERE id = ? AND user_id = ?
+                """,
+                (int(item_id), self.user_id),
+                connection=conn,
+            ).first
+            if not result:
+                raise KeyError("media_collection_item_not_found")
+            resolved = self._row_to_media_collection_item(result)
+        return resolved
+
+    def restore_media_collection_item_plan(
+        self,
+        item_id: int,
+        *,
+        expected_media_id: int,
+        expected_status: str,
+        expected_updated_at: str,
+    ) -> MediaCollectionItemRow:
+        """Restore exactly one just-resolved playlist membership to its planned state."""
+        if type(item_id) is not int or item_id < 1:
+            raise ValueError("media_collection_restore_mismatch")
+        if type(expected_media_id) is not int or expected_media_id < 1:
+            raise ValueError("media_collection_restore_mismatch")
+        if expected_status not in {"completed", "skipped_existing"}:
+            raise ValueError("media_collection_restore_mismatch")
+        if not isinstance(expected_updated_at, str) or not expected_updated_at.strip():
+            raise ValueError("media_collection_restore_mismatch")
+
+        now = _utcnow_iso()
+        with self.transaction() as conn:
+            existing = self.backend.execute(
+                """
+                SELECT collection_id FROM media_collection_items
+                WHERE id = ? AND user_id = ?
+                  AND status = ? AND media_id = ? AND updated_at = ?
+                  AND content_item_id IS NULL
+                  AND latest_job_id IS NULL
+                  AND latest_run_id IS NULL
+                """,
+                (
+                    item_id,
+                    self.user_id,
+                    expected_status,
+                    expected_media_id,
+                    expected_updated_at,
+                ),
+                connection=conn,
+            ).first
+            if not existing:
+                raise ValueError("media_collection_restore_mismatch")
+            restored = self.backend.execute(
+                """
+                UPDATE media_collection_items
+                SET status = 'planned', media_id = NULL, error_summary = NULL,
+                    warnings_json = ?, updated_at = ?
+                WHERE id = ? AND user_id = ?
+                  AND status = ? AND media_id = ? AND updated_at = ?
+                  AND content_item_id IS NULL
+                  AND latest_job_id IS NULL
+                  AND latest_run_id IS NULL
+                """,
+                (
+                    self._json_dumps_or_none([]),
+                    now,
+                    item_id,
+                    self.user_id,
+                    expected_status,
+                    expected_media_id,
+                    expected_updated_at,
+                ),
+                connection=conn,
+            )
+            if restored.rowcount != 1:
+                raise ValueError("media_collection_restore_mismatch")
+            self.backend.execute(
+                "UPDATE media_collections SET updated_at = ? WHERE id = ? AND user_id = ?",
+                (now, int(existing["collection_id"]), self.user_id),
+                connection=conn,
+            )
+        return self.get_media_collection_item(item_id)
 
     def upsert_content_item(
         self,
