@@ -15,9 +15,12 @@ class _OwnerMediaDB:
     def __init__(self) -> None:
         self.rows: list[dict] = []
         self.lookup_calls: list[list[str]] = []
+        self.before_lookup = None
 
     def get_media_by_urls(self, urls, **_kwargs):
         self.lookup_calls.append(list(urls))
+        if self.before_lookup is not None:
+            self.before_lookup()
         return list(self.rows)
 
     def close_connection(self) -> None:
@@ -170,7 +173,13 @@ def test_create_run_mixed_inputs_preserve_identity_order_and_initial_state(servi
         "size_bytes": 1234,
         "title": "Local episode",
     }
-    assert media_db.lookup_calls == [["https://www.youtube.com/watch?v=abc", normalize_media_dedupe_url(direct["url"])]]
+    assert media_db.lookup_calls == [
+        [
+            "https://www.youtube.com/watch?v=abc",
+            direct["url"],
+            normalize_media_dedupe_url(direct["url"]),
+        ]
+    ]
     assert len(events) == 3
     assert [event.occurrence_id for event in events] == [item.occurrence_id for item in items]
     assert [event.attrs["action"] for event in events] == ["ingest", "ingest", "ingest"]
@@ -280,7 +289,12 @@ def test_create_run_normal_youtube_video_control_is_staged(service_context):
     assert item.source_url == "https://www.youtube.com/watch?v=abc_123-Z"
     assert item.normalized_source_id == "youtube:video:abc_123-Z"
     assert item.action == "ingest"
-    assert media_db.lookup_calls == [["https://www.youtube.com/watch?v=abc_123-Z"]]
+    assert media_db.lookup_calls == [
+        [
+            "https://youtu.be/abc_123-Z",
+            "https://www.youtube.com/watch?v=abc_123-Z",
+        ]
+    ]
 
 
 @pytest.mark.parametrize(
@@ -580,6 +594,219 @@ def test_create_run_in_run_repeat_uses_existing_generic_url_normalization(servic
     assert [item.occurrence_id for item in exc_info.value.items] == ["occ-repeat"]
     assert exc_info.value.items[0].evidence.duplicate_of_occurrence_id == "occ-first"
     assert _table_count(manager, "media_ingest_runs") == 0
+
+
+def test_create_run_direct_duplicate_lookup_preserves_raw_and_canonical_candidates(service_context):
+    service, store, _manager, media_db = service_context
+    raw_url = "https://example.com/video?utm_source=review&a=1"
+    canonical_url = "https://example.com/video?a=1"
+    direct = _direct_input("occ-direct", raw_url)
+    media_db.rows = [{"id": 23, "url": raw_url}]
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
+        ReviewRequiredError,
+    )
+
+    with pytest.raises(ReviewRequiredError) as exc_info:
+        service.create_run("owner-1", inputs=[direct], review_overrides={})
+
+    assert exc_info.value.items[0].evidence.existing_media_id == 23
+    assert media_db.lookup_calls == [[raw_url, canonical_url]]
+
+    created = service.create_run(
+        "owner-1",
+        inputs=[direct],
+        review_overrides={"occ-direct": {"duplicate_policy": "skip", "existing_media_id": 23}},
+    )
+    item = store.list_run_items("owner-1", created.run_id)[0]
+    events = list(store.list_run_events("owner-1", created.run_id))
+    assert item.source_url == canonical_url
+    assert raw_url not in repr(item)
+    assert raw_url not in repr(events)
+
+
+@pytest.mark.parametrize(
+    "query_key",
+    [
+        "token",
+        "SECRET",
+        "signature",
+        "Key",
+        "password",
+        "authorization",
+        "cookie_value",
+        "credential_id",
+    ],
+)
+def test_create_run_rejects_credential_query_keys_before_lookup(service_context, query_key):
+    service, _store, manager, media_db = service_context
+    secret_value = "do-not-leak-value"
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
+        PlaylistRunValidationError,
+    )
+
+    with pytest.raises(PlaylistRunValidationError) as exc_info:
+        service.create_run(
+            "owner-1",
+            inputs=[
+                _direct_input(
+                    "occ-secret",
+                    f"https://example.com/video?{query_key}={secret_value}",
+                )
+            ],
+            review_overrides={},
+        )
+
+    assert str(exc_info.value) == "invalid_direct_url"
+    assert secret_value not in str(exc_info.value)
+    assert media_db.lookup_calls == []
+    assert _table_count(manager, "media_ingest_runs") == 0
+
+
+@pytest.mark.parametrize(
+    ("inputs", "overrides", "kwargs"),
+    [
+        ([{**_file_input(), "size_bytes": "12"}], {}, {}),
+        ([{**_file_input(), "size_bytes": True}], {}, {}),
+        (
+            [
+                {
+                    **_direct_input("occ-direct", "https://example.com/video"),
+                    "display_metadata": {"duration_seconds": "12"},
+                }
+            ],
+            {},
+            {},
+        ),
+        (
+            [
+                {
+                    **_direct_input("occ-direct", "https://example.com/video"),
+                    "display_metadata": {"duration_seconds": True},
+                }
+            ],
+            {},
+            {},
+        ),
+        ([_file_input()], {}, {"collection_id": "12"}),
+        ([_file_input()], {}, {"collection_id": True}),
+        (
+            [_direct_input("occ-direct", "https://example.com/video")],
+            {"occ-direct": {"duplicate_policy": "skip", "existing_media_id": "17"}},
+            {},
+        ),
+        (
+            [_direct_input("occ-direct", "https://example.com/video")],
+            {"occ-direct": {"duplicate_policy": "skip", "existing_media_id": True}},
+            {},
+        ),
+    ],
+)
+def test_create_run_rejects_coerced_run_integers_before_lookup(
+    service_context,
+    inputs,
+    overrides,
+    kwargs,
+):
+    service, _store, manager, media_db = service_context
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
+        PlaylistRunValidationError,
+    )
+
+    with pytest.raises(PlaylistRunValidationError, match="invalid_run_request"):
+        service.create_run(
+            "owner-1",
+            inputs=inputs,
+            review_overrides=overrides,
+            **kwargs,
+        )
+
+    assert media_db.lookup_calls == []
+    assert _table_count(manager, "media_ingest_runs") == 0
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"processing_options": {"temperature": float("nan")}},
+        {"processing_options": {"temperature": float("inf")}},
+        {"processing_options": {"temperature": float("-inf")}},
+        {"processing_options": {"nested": {"not_json": object()}}},
+        {"playlist_summaries": [{"score": float("nan")}]},
+    ],
+)
+def test_create_run_rejects_nonfinite_or_nonjson_options_before_lookup(service_context, kwargs):
+    service, _store, manager, media_db = service_context
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
+        PlaylistRunValidationError,
+    )
+
+    with pytest.raises(PlaylistRunValidationError, match="invalid_run_request"):
+        service.create_run(
+            "owner-1",
+            inputs=[_file_input()],
+            review_overrides={},
+            **kwargs,
+        )
+
+    assert media_db.lookup_calls == []
+    assert _table_count(manager, "media_ingest_runs") == 0
+
+
+def test_create_run_rejects_nonfinite_raw_patch_before_lookup(service_context):
+    service, _store, manager, media_db = service_context
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
+        PlaylistRunValidationError,
+    )
+
+    with pytest.raises(PlaylistRunValidationError, match="invalid_run_request"):
+        service.create_run(
+            "owner-1",
+            inputs=[_direct_input("occ-direct", "https://example.com/video")],
+            review_overrides={
+                "occ-direct": {
+                    "duplicate_policy": "overwrite",
+                    "existing_media_id": 17,
+                    "metadata_patch": {"title": float("nan")},
+                }
+            },
+        )
+
+    assert media_db.lookup_calls == []
+    assert _table_count(manager, "media_ingest_runs") == 0
+
+
+def test_create_run_revalidates_materialized_authority_after_duplicate_lookup(service_context):
+    service, store, manager, media_db = service_context
+    materialized = _seed_materialized_video(store)
+
+    def expire_materialization():
+        connection = manager._connect()
+        try:
+            connection.execute(
+                "UPDATE playlist_materializations SET status = 'expired' WHERE materialization_id = ?",
+                (materialized["materialization_id"],),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+    media_db.before_lookup = expire_materialization
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestNotFoundError,
+    )
+
+    with pytest.raises(PlaylistIngestNotFoundError, match="playlist resource not found"):
+        service.create_run("owner-1", inputs=[materialized], review_overrides={})
+
+    assert _table_count(manager, "media_ingest_runs") == 0
+    assert _table_count(manager, "media_ingest_run_items") == 0
+    assert _table_count(manager, "media_ingest_run_events") == 0
 
 
 def test_create_run_manifest_failure_rolls_back_all_rows(service_context, monkeypatch):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from datetime import datetime
 from enum import Enum
 from typing import Annotated, Any, Literal
@@ -18,6 +19,62 @@ MAX_RUN_IDENTITY_LENGTH = 255
 MAX_RUN_URL_LENGTH = 8192
 MAX_RUN_DISPLAY_TEXT_LENGTH = 2000
 MAX_RUN_JSON_LENGTH = 65536
+MAX_RUN_JSON_DEPTH = 8
+MAX_RUN_JSON_ITEMS = 2000
+
+
+def _validate_bounded_json(
+    value: object,
+    *,
+    max_length: int = MAX_RUN_JSON_LENGTH,
+    max_depth: int = MAX_RUN_JSON_DEPTH,
+    max_items: int = MAX_RUN_JSON_ITEMS,
+) -> object:
+    """Reject non-JSON, non-finite, excessively nested, or oversized values."""
+    item_count = 0
+
+    def visit(candidate: object, depth: int) -> None:
+        nonlocal item_count
+        if depth > max_depth:
+            raise ValueError("JSON value is too deeply nested")
+        if candidate is None or type(candidate) in {bool, str, int}:
+            return
+        if type(candidate) is float:
+            if not math.isfinite(candidate):
+                raise ValueError("JSON numbers must be finite")
+            return
+        if type(candidate) is list:
+            item_count += len(candidate)
+            if item_count > max_items:
+                raise ValueError("JSON value contains too many items")
+            for entry in candidate:
+                visit(entry, depth + 1)
+            return
+        if type(candidate) is dict:
+            item_count += len(candidate)
+            if item_count > max_items:
+                raise ValueError("JSON value contains too many items")
+            for key, entry in candidate.items():
+                if type(key) is not str:
+                    raise ValueError("JSON object keys must be strings")
+                visit(entry, depth + 1)
+            return
+        raise ValueError("value must contain only JSON types")
+
+    visit(value, 0)
+    try:
+        encoded = json.dumps(
+            value,
+            allow_nan=False,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise ValueError("value must be JSON serializable") from exc
+    if len(encoded) > max_length:
+        raise ValueError("JSON value is too large")
+    return value
 
 
 class DuplicatePolicy(str, Enum):
@@ -109,7 +166,7 @@ class ReviewOverride(BaseModel):
 
     duplicate_policy: DuplicatePolicy
     metadata_patch: MetadataPatch | None = None
-    existing_media_id: int | None = Field(default=None, ge=1)
+    existing_media_id: int | None = Field(default=None, ge=1, strict=True)
     duplicate_of_occurrence_id: str | None = Field(
         default=None,
         min_length=1,
@@ -144,7 +201,7 @@ class ReviewOverrideEnvelope(BaseModel):
 
     duplicate_policy: str = Field(..., min_length=1, max_length=64)
     metadata_patch: dict[str, Any] | None = Field(default=None, max_length=10)
-    existing_media_id: int | None = Field(default=None, ge=1)
+    existing_media_id: int | None = Field(default=None, ge=1, strict=True)
     duplicate_of_occurrence_id: str | None = Field(
         default=None,
         min_length=1,
@@ -167,12 +224,7 @@ class ReviewOverrideEnvelope(BaseModel):
             return None
         if type(value) is not dict:
             raise ValueError("metadata_patch must be an object")
-        try:
-            encoded = json.dumps(value, sort_keys=True, separators=(",", ":"))
-        except (TypeError, ValueError) as exc:
-            raise ValueError("metadata_patch must be JSON serializable") from exc
-        if len(encoded) > 8192:
-            raise ValueError("metadata_patch is too large")
+        _validate_bounded_json(value, max_length=8192, max_depth=2, max_items=MAX_METADATA_PATCH_KEYWORDS + 10)
         for patch_value in value.values():
             if isinstance(patch_value, dict):
                 raise ValueError("metadata_patch must be shallow")
@@ -191,7 +243,7 @@ class CompactRunDisplayMetadata(BaseModel):
 
     title: str | None = Field(default=None, min_length=1, max_length=MAX_RUN_DISPLAY_TEXT_LENGTH)
     channel_or_uploader: str | None = Field(default=None, min_length=1, max_length=MAX_RUN_DISPLAY_TEXT_LENGTH)
-    duration_seconds: int | None = Field(default=None, ge=0, le=315_576_000)
+    duration_seconds: int | None = Field(default=None, ge=0, le=315_576_000, strict=True)
     published_at: str | None = Field(default=None, min_length=1, max_length=128)
     thumbnail_url: str | None = Field(default=None, min_length=1, max_length=MAX_RUN_URL_LENGTH)
     playlist_id: str | None = Field(default=None, min_length=1, max_length=MAX_RUN_IDENTITY_LENGTH)
@@ -266,7 +318,7 @@ class FileStubInput(_RunOccurrenceInput):
     input_kind: Literal["file_stub"]
     name: str = Field(..., min_length=1, max_length=255)
     content_type: str | None = Field(default=None, min_length=1, max_length=255)
-    size_bytes: int = Field(..., ge=0, le=10 * 1024**4)
+    size_bytes: int = Field(..., ge=0, le=10 * 1024**4, strict=True)
     display_metadata: CompactRunDisplayMetadata = Field(default_factory=CompactRunDisplayMetadata)
 
     @field_validator("name", "content_type", mode="before")
@@ -299,7 +351,7 @@ class PlaylistIngestRunCreateRequest(BaseModel):
         default=None,
         max_length=MAX_PLAYLIST_PREFLIGHT_SELECTIONS,
     )
-    collection_id: int | None = Field(default=None, ge=1)
+    collection_id: int | None = Field(default=None, ge=1, strict=True)
 
     @field_validator("review_overrides", mode="before")
     @classmethod
@@ -316,19 +368,29 @@ class PlaylistIngestRunCreateRequest(BaseModel):
             normalized[trimmed] = override
         return normalized
 
+    @field_validator("processing_options", mode="before")
+    @classmethod
+    def _validate_processing_options(cls, value: object) -> object:
+        if value is None:
+            return None
+        if type(value) is not dict:
+            raise ValueError("processing_options must be an object")
+        return _validate_bounded_json(value)
+
+    @field_validator("playlist_summaries", mode="before")
+    @classmethod
+    def _validate_playlist_summaries(cls, value: object) -> object:
+        if value is None:
+            return None
+        if type(value) is not list or any(type(summary) is not dict for summary in value):
+            raise ValueError("playlist_summaries must be a list of objects")
+        return _validate_bounded_json(value)
+
     @model_validator(mode="after")
     def _validate_manifest(self) -> PlaylistIngestRunCreateRequest:
         occurrence_ids = [item.occurrence_id for item in self.inputs]
         if len(set(occurrence_ids)) != len(occurrence_ids):
             raise ValueError("occurrence_id values must be unique")
-        for value in (self.processing_options, self.playlist_summaries):
-            if value is not None:
-                try:
-                    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"))
-                except (TypeError, ValueError) as exc:
-                    raise ValueError("run options and summaries must be JSON serializable") from exc
-                if len(encoded) > MAX_RUN_JSON_LENGTH:
-                    raise ValueError("run options and summaries are too large")
         return self
 
 
@@ -338,7 +400,7 @@ class DuplicateEvidence(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: Literal["library", "in_run", "none"]
-    existing_media_id: int | None = Field(default=None, ge=1)
+    existing_media_id: int | None = Field(default=None, ge=1, strict=True)
     duplicate_of_occurrence_id: str | None = Field(default=None, max_length=MAX_RUN_IDENTITY_LENGTH)
 
 

@@ -6,6 +6,7 @@ import base64
 import hashlib
 import hmac
 import json
+import math
 import os
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
@@ -21,6 +22,11 @@ _CURSOR_ORDER = "ordinal_asc"
 _MAX_CURSOR_LENGTH = 4096
 _MAX_CURSOR_PAYLOAD = 2048
 _MAX_PAGE_SIZE = 500
+_MAX_RUN_JSON_BYTES = 65536
+_MAX_RUN_JSON_DEPTH = 8
+_MAX_RUN_JSON_ITEMS = 2000
+_MAX_RUN_IDENTITY_LENGTH = 255
+_MAX_RUN_URL_LENGTH = 8192
 _PREFLIGHT_JOB_DOMAIN = "media_ingest"
 _PREFLIGHT_JOB_TYPE = "playlist_preflight"
 _PREFLIGHT_JOB_SENTINEL = datetime(9999, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
@@ -103,6 +109,18 @@ class PlaylistMaterializationRecord:
     def id(self) -> str:
         """Return the caller-facing resource identifier."""
         return self.materialization_id
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedMaterializationOccurrence:
+    """One owner-authorized immutable occurrence resolved in request order."""
+
+    materialization_id: str
+    occurrence_id: str
+    source_url: str | None
+    normalized_source_id: str | None
+    source_kind: str
+    display_metadata: dict[str, Any]
 
 
 @dataclass(frozen=True, slots=True)
@@ -239,6 +257,162 @@ class PlaylistIngestStore:
         if normalized <= now:
             raise ValueError("expires_at must be in the future")
         return normalized
+
+    @staticmethod
+    def _bounded_json(
+        value: Any,
+        *,
+        max_bytes: int = _MAX_RUN_JSON_BYTES,
+        max_depth: int = _MAX_RUN_JSON_DEPTH,
+        max_items: int = _MAX_RUN_JSON_ITEMS,
+    ) -> Any:
+        """Return a detached JSON value after recursive safety and size checks."""
+        item_count = 0
+
+        def visit(candidate: Any, depth: int) -> None:
+            nonlocal item_count
+            if depth > max_depth:
+                raise ValueError("JSON value is too deeply nested")
+            if candidate is None or type(candidate) in {bool, str, int}:
+                return
+            if type(candidate) is float:
+                if not math.isfinite(candidate):
+                    raise ValueError("JSON numbers must be finite")
+                return
+            if type(candidate) is list:
+                item_count += len(candidate)
+                if item_count > max_items:
+                    raise ValueError("JSON value contains too many items")
+                for entry in candidate:
+                    visit(entry, depth + 1)
+                return
+            if type(candidate) is dict:
+                item_count += len(candidate)
+                if item_count > max_items:
+                    raise ValueError("JSON value contains too many items")
+                for key, entry in candidate.items():
+                    if type(key) is not str:
+                        raise ValueError("JSON object keys must be strings")
+                    visit(entry, depth + 1)
+                return
+            raise ValueError("value must contain only JSON types")
+
+        visit(value, 0)
+        try:
+            encoded = json.dumps(
+                value,
+                allow_nan=False,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError("value must be JSON serializable") from exc
+        if len(encoded.encode("utf-8")) > max_bytes:
+            raise ValueError("JSON value is too large")
+        return json.loads(encoded)
+
+    @staticmethod
+    def _run_text(value: Any, name: str, *, max_length: int) -> str:
+        if type(value) is not str or not value or value.strip() != value or len(value) > max_length:
+            raise ValueError(f"{name} must be a canonical non-empty string")
+        return value
+
+    @classmethod
+    def _normalize_validated_run_item(cls, item: Mapping[str, Any]) -> dict[str, Any]:
+        """Validate and detach one trusted-boundary run item before any write lock."""
+        if type(item) is not dict:
+            raise ValueError("run items must be plain objects")
+        allowed = {
+            "occurrence_id",
+            "input_kind",
+            "materialization_id",
+            "source_url",
+            "normalized_source_id",
+            "source_kind",
+            "display_metadata",
+            "state",
+            "action",
+            "metadata_patch",
+            "attempt",
+        }
+        if set(item) - allowed:
+            raise ValueError("run item contains unsupported fields")
+        occurrence_id = cls._run_text(
+            item.get("occurrence_id"),
+            "occurrence_id",
+            max_length=_MAX_RUN_IDENTITY_LENGTH,
+        )
+        input_kind = item.get("input_kind")
+        expected_state = {
+            "materialized_playlist_item": "staged",
+            "direct_url": "staged",
+            "file_stub": "awaiting_upload",
+        }.get(input_kind)
+        if expected_state is None:
+            raise ValueError("invalid run item input_kind")
+        if item.get("state") != expected_state:
+            raise ValueError("invalid initial run item state")
+        action = item.get("action")
+        if action not in {"ingest", "overwrite", "skip", "include_existing", "update_metadata_only"}:
+            raise ValueError("invalid initial run item action")
+        attempt = item.get("attempt", 1)
+        if type(attempt) is not int or attempt != 1:
+            raise ValueError("initial run item attempt must be the integer 1")
+
+        materialization_id = item.get("materialization_id")
+        source_url = item.get("source_url")
+        normalized_source_id = item.get("normalized_source_id")
+        source_kind = item.get("source_kind")
+        if input_kind == "file_stub":
+            if materialization_id is not None or source_url is not None or normalized_source_id is not None:
+                raise ValueError("file stubs cannot contain materialized source identity")
+            if source_kind != "file":
+                raise ValueError("file stubs require file source_kind")
+        else:
+            source_url = cls._run_text(source_url, "source_url", max_length=_MAX_RUN_URL_LENGTH)
+            normalized_source_id = cls._run_text(
+                normalized_source_id,
+                "normalized_source_id",
+                max_length=_MAX_RUN_URL_LENGTH,
+            )
+            source_kind = cls._run_text(source_kind, "source_kind", max_length=64)
+            if input_kind == "materialized_playlist_item":
+                materialization_id = cls._run_text(
+                    materialization_id,
+                    "materialization_id",
+                    max_length=_MAX_RUN_IDENTITY_LENGTH,
+                )
+            elif materialization_id is not None:
+                raise ValueError("direct URLs cannot contain materialization_id")
+
+        display = item.get("display_metadata", {})
+        if type(display) is not dict:
+            raise ValueError("display_metadata must be an object")
+        display = cls._bounded_json(display)
+        metadata_patch = item.get("metadata_patch")
+        if metadata_patch is not None:
+            if type(metadata_patch) is not dict:
+                raise ValueError("metadata_patch must be an object")
+            metadata_patch = cls._bounded_json(metadata_patch, max_bytes=8192, max_depth=2, max_items=110)
+        if action in {"ingest", "skip", "include_existing"} and metadata_patch is not None:
+            raise ValueError("initial run item action does not allow metadata_patch")
+        if action == "update_metadata_only" and metadata_patch is None:
+            raise ValueError("update_metadata_only requires metadata_patch")
+
+        return {
+            "occurrence_id": occurrence_id,
+            "input_kind": input_kind,
+            "materialization_id": materialization_id,
+            "source_url": source_url,
+            "normalized_source_id": normalized_source_id,
+            "source_kind": source_kind,
+            "display_metadata": display,
+            "state": expected_state,
+            "action": action,
+            "metadata_patch": metadata_patch,
+            "attempt": 1,
+        }
 
     def _json_value(self, value: Any) -> Any:
         if value is None:
@@ -1365,6 +1539,132 @@ class PlaylistIngestStore:
             converter=self._playlist_item_record,
         )
 
+    @classmethod
+    def _normalize_materialization_pairs(
+        cls,
+        pairs: Sequence[tuple[str, str]],
+    ) -> list[tuple[str, str]]:
+        if not 1 <= len(pairs) <= _MAX_PAGE_SIZE:
+            raise ValueError("materialization occurrence pairs must contain between 1 and 500 entries")
+        normalized: list[tuple[str, str]] = []
+        for pair in pairs:
+            if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+                raise ValueError("materialization occurrence pairs must contain two strings")
+            materialization_id = cls._run_text(
+                pair[0],
+                "materialization_id",
+                max_length=_MAX_RUN_IDENTITY_LENGTH,
+            )
+            occurrence_id = cls._run_text(
+                pair[1],
+                "occurrence_id",
+                max_length=_MAX_RUN_IDENTITY_LENGTH,
+            )
+            normalized.append((materialization_id, occurrence_id))
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("materialization occurrence pairs must be unique")
+        return normalized
+
+    def _resolve_materialization_occurrences_in_connection(
+        self,
+        db: Any,
+        owner: str,
+        pairs: Sequence[tuple[str, str]],
+        *,
+        now: datetime,
+        lock: bool,
+    ) -> list[ResolvedMaterializationOccurrence]:
+        """Resolve an ordered authority set with one fixed-shape collection bind."""
+        request_json = json.dumps(
+            [
+                {"materialization_id": materialization_id, "occurrence_id": occurrence_id}
+                for materialization_id, occurrence_id in pairs
+            ],
+            separators=(",", ":"),
+        )
+        if self._postgres:
+            requested_sql = """
+                SELECT materialization_id, occurrence_id, request_ordinal
+                FROM jsonb_to_recordset(?::jsonb) WITH ORDINALITY AS r(
+                    materialization_id text,
+                    occurrence_id text,
+                    request_ordinal bigint
+                )
+            """
+            lock_sql = "FOR SHARE OF m, mi" if lock else ""
+        else:
+            requested_sql = """
+                SELECT
+                    json_extract(value, '$.materialization_id') AS materialization_id,
+                    json_extract(value, '$.occurrence_id') AS occurrence_id,
+                    CAST(key AS INTEGER) + 1 AS request_ordinal
+                FROM json_each(?)
+            """
+            lock_sql = ""
+        rows = self._query(
+            db,
+            f"""
+            WITH requested AS ({requested_sql})
+            SELECT
+                r.request_ordinal,
+                r.materialization_id,
+                r.occurrence_id,
+                mi.source_url,
+                mi.normalized_source_id,
+                mi.source_kind,
+                mi.display_metadata_json
+            FROM requested AS r
+            JOIN playlist_materializations AS m
+              ON m.materialization_id = r.materialization_id
+             AND m.owner_user_id = ?
+             AND m.status = 'ready'
+            JOIN playlist_materialization_items AS mi
+              ON mi.materialization_id = m.materialization_id
+             AND mi.owner_user_id = m.owner_user_id
+             AND mi.occurrence_id = r.occurrence_id
+            WHERE {('m.expires_at > ?' if self._postgres else 'julianday(m.expires_at) > julianday(?)')}
+            ORDER BY r.request_ordinal
+            {lock_sql}
+            """,  # nosec B608 - backend-specific fixed SQL fragments only
+            (request_json, owner, self._db_datetime(now)),
+        ).fetchall()
+        if len(rows) != len(pairs):
+            raise self._not_found()
+        resolved: list[ResolvedMaterializationOccurrence] = []
+        for request_ordinal, (row, expected_pair) in enumerate(zip(rows, pairs, strict=True), start=1):
+            data = self._row_dict(row)
+            actual_pair = (str(data["materialization_id"]), str(data["occurrence_id"]))
+            if int(data["request_ordinal"]) != request_ordinal or actual_pair != expected_pair:
+                raise self._not_found()
+            resolved.append(
+                ResolvedMaterializationOccurrence(
+                    materialization_id=actual_pair[0],
+                    occurrence_id=actual_pair[1],
+                    source_url=data.get("source_url"),
+                    normalized_source_id=data.get("normalized_source_id"),
+                    source_kind=str(data["source_kind"]),
+                    display_metadata=self._json_dict(data.get("display_metadata_json")) or {},
+                )
+            )
+        return resolved
+
+    def resolve_materialization_occurrences(
+        self,
+        owner_user_id: str,
+        pairs: Sequence[tuple[str, str]],
+    ) -> list[ResolvedMaterializationOccurrence]:
+        """Resolve up to 500 owner-authorized occurrences with one bulk query."""
+        owner = self._owner(owner_user_id)
+        normalized = self._normalize_materialization_pairs(pairs)
+        with self._connection(write=False) as db:
+            return self._resolve_materialization_occurrences_in_connection(
+                db,
+                owner,
+                normalized,
+                now=self._now(),
+                lock=False,
+            )
+
     def create_run(
         self,
         owner_user_id: str,
@@ -1478,25 +1778,51 @@ class PlaylistIngestStore:
     ) -> MediaIngestRunRecord:
         """Persist one fully validated mixed manifest and its initial events atomically."""
         owner = self._owner(owner_user_id)
-        records = [dict(item) for item in items]
-        if not 1 <= len(records) <= _MAX_PAGE_SIZE:
+        if not 1 <= len(items) <= _MAX_PAGE_SIZE:
             raise ValueError("items must contain between 1 and 500 occurrences")
-        occurrence_ids = [item.get("occurrence_id") for item in records]
-        if any(type(value) is not str or not value for value in occurrence_ids):
-            raise ValueError("occurrence_id values must be non-empty strings")
+        records = [self._normalize_validated_run_item(item) for item in items]
+        occurrence_ids = [item["occurrence_id"] for item in records]
         if len(set(occurrence_ids)) != len(occurrence_ids):
             raise ValueError("occurrence_id values must be unique")
-        allowed_actions = {"ingest", "overwrite", "skip", "include_existing", "update_metadata_only"}
-        for item in records:
-            if item.get("state") not in {"staged", "awaiting_upload"}:
-                raise ValueError("invalid initial run item state")
-            if item.get("action") not in allowed_actions:
-                raise ValueError("invalid initial run item action")
+        if collection_id is not None and (type(collection_id) is not int or collection_id < 1):
+            raise ValueError("collection_id must be a positive integer")
+        if processing_options is None:
+            normalized_options = None
+        elif type(processing_options) is dict:
+            normalized_options = self._bounded_json(processing_options)
+        else:
+            raise ValueError("processing_options must be an object")
+        if playlist_summaries is None:
+            normalized_summaries = None
+        elif type(playlist_summaries) is list and all(type(summary) is dict for summary in playlist_summaries):
+            normalized_summaries = self._bounded_json(playlist_summaries)
+        else:
+            raise ValueError("playlist_summaries must be a list of objects")
 
         run_id = str(uuid4())
         now = self._now()
         expires = self._future_expiry(expires_at, now=now) if expires_at is not None else now + timedelta(days=7)
+        materialized_records = [item for item in records if item["input_kind"] == "materialized_playlist_item"]
+        materialized_pairs = [
+            (str(item["materialization_id"]), str(item["occurrence_id"])) for item in materialized_records
+        ]
         with self._connection(write=True) as db:
+            if materialized_pairs:
+                authoritative = self._resolve_materialization_occurrences_in_connection(
+                    db,
+                    owner,
+                    materialized_pairs,
+                    now=now,
+                    lock=True,
+                )
+                for item, current in zip(materialized_records, authoritative, strict=True):
+                    if (
+                        item["source_url"] != current.source_url
+                        or item["normalized_source_id"] != current.normalized_source_id
+                        or item["source_kind"] != current.source_kind
+                        or item["display_metadata"] != current.display_metadata
+                    ):
+                        raise self._not_found()
             self._query(
                 db,
                 """
@@ -1510,12 +1836,8 @@ class PlaylistIngestStore:
                     run_id,
                     owner,
                     collection_id,
-                    self._json_value(dict(processing_options)) if processing_options is not None else None,
-                    (
-                        self._json_value([dict(summary) for summary in playlist_summaries])
-                        if playlist_summaries is not None
-                        else None
-                    ),
+                    self._json_value(normalized_options) if normalized_options is not None else None,
+                    (self._json_value(normalized_summaries) if normalized_summaries is not None else None),
                     self._json_value([]),
                     self._db_datetime(now),
                     self._db_datetime(now),
@@ -1976,4 +2298,5 @@ __all__ = [
     "PlaylistPreflightLeaseLostError",
     "PlaylistPreflightCapacityError",
     "PlaylistPreflightRecord",
+    "ResolvedMaterializationOccurrence",
 ]

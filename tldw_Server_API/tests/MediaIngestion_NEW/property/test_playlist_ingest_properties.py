@@ -163,7 +163,7 @@ def test_validated_run_preserves_arbitrary_unique_order_and_actions(
                 "display_metadata": {},
                 "state": "staged",
                 "action": action,
-                "metadata_patch": None,
+                "metadata_patch": {"title": "Reviewed"} if action == "update_metadata_only" else None,
             }
             for index, (occurrence_id, action) in enumerate(occurrences, start=1)
         ],

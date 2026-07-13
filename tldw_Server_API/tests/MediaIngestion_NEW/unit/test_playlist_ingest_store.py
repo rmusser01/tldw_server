@@ -84,6 +84,148 @@ def _seed_materialization(store, *, owner_id: str = "1", item_count: int = 2):
     )
 
 
+def _validated_direct_record(**overrides) -> dict:
+    record = {
+        "occurrence_id": "occ-direct",
+        "input_kind": "direct_url",
+        "materialization_id": None,
+        "source_url": "https://example.com/video",
+        "normalized_source_id": "url:https://example.com/video",
+        "source_kind": "generic_url",
+        "display_metadata": {"title": "Video"},
+        "state": "staged",
+        "action": "ingest",
+        "metadata_patch": None,
+    }
+    record.update(overrides)
+    return record
+
+
+@pytest.mark.parametrize(
+    ("postgres", "shredder"),
+    [(False, "json_each(?)"), (True, "jsonb_to_recordset(?::jsonb)")],
+)
+def test_bulk_materialization_resolution_uses_one_fixed_shape_collection_bind(
+    store,
+    monkeypatch,
+    postgres,
+    shredder,
+):
+    pairs = [(f"mat-{index}", f"occ-{index}") for index in range(500)]
+    calls = []
+
+    class _Rows:
+        def fetchall(self):
+            return [
+                {
+                    "request_ordinal": index + 1,
+                    "materialization_id": materialization_id,
+                    "occurrence_id": occurrence_id,
+                    "source_url": f"https://example.com/{index}",
+                    "normalized_source_id": f"url:https://example.com/{index}",
+                    "source_kind": "generic_url",
+                    "display_metadata_json": {"title": str(index)} if postgres else json.dumps({"title": str(index)}),
+                }
+                for index, (materialization_id, occurrence_id) in enumerate(pairs)
+            ]
+
+    @contextmanager
+    def fake_connection(*, write):
+        assert write is False
+        yield object()
+
+    def fake_query(_db, sql, params=()):
+        calls.append((sql, params))
+        return _Rows()
+
+    store._postgres = postgres
+    monkeypatch.setattr(store, "_connection", fake_connection)
+    monkeypatch.setattr(store, "_query", fake_query)
+
+    resolved = store.resolve_materialization_occurrences("1", pairs)
+
+    assert len(resolved) == 500
+    assert len(calls) == 1
+    sql, params = calls[0]
+    assert shredder in sql
+    assert len(params) == 3
+    assert len(json.loads(params[0])) == 500
+    assert sql.count("?") == 3
+
+
+def test_postgres_authority_revalidation_locks_parent_and_item_rows(store, monkeypatch):
+    calls = []
+
+    class _Rows:
+        def fetchall(self):
+            return [
+                {
+                    "request_ordinal": 1,
+                    "materialization_id": "mat-1",
+                    "occurrence_id": "occ-1",
+                    "source_url": "https://example.com/1",
+                    "normalized_source_id": "url:https://example.com/1",
+                    "source_kind": "generic_url",
+                    "display_metadata_json": {"title": "One"},
+                }
+            ]
+
+    def fake_query(_db, sql, params=()):
+        calls.append((sql, params))
+        return _Rows()
+
+    store._postgres = True
+    monkeypatch.setattr(store, "_query", fake_query)
+
+    resolved = store._resolve_materialization_occurrences_in_connection(
+        object(),
+        "1",
+        [("mat-1", "occ-1")],
+        now=NOW,
+        lock=True,
+    )
+
+    assert len(resolved) == 1
+    assert len(calls) == 1
+    assert "FOR SHARE OF m, mi" in calls[0][0]
+    assert len(calls[0][1]) == 3
+
+
+@pytest.mark.parametrize(
+    ("items", "processing_options"),
+    [
+        ([_validated_direct_record(display_metadata={"score": float("nan")})], None),
+        ([_validated_direct_record(display_metadata={"opaque": object()})], None),
+        ([_validated_direct_record()], {"nested": {"opaque": object()}}),
+    ],
+)
+def test_validated_manifest_rejects_internal_json_before_write_lock(
+    store,
+    monkeypatch,
+    items,
+    processing_options,
+):
+    entered = False
+
+    @contextmanager
+    def fail_if_entered(*, write):
+        nonlocal entered
+        entered = True
+        raise AssertionError(f"connection entered with write={write}")
+        yield
+
+    monkeypatch.setattr(store, "_connection", fail_if_entered)
+
+    with pytest.raises(ValueError):
+        store.create_validated_run(
+            "1",
+            items=items,
+            processing_options=processing_options,
+        )
+
+    assert entered is False
+
+
 def test_ready_snapshot_guard_rejects_cancelled_linked_job_atomically(store):
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
         PlaylistPreflightLeaseLostError,

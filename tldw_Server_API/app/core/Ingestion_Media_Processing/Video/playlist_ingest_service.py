@@ -424,6 +424,9 @@ class PlaylistIngestService:
             or bool(parsed.fragment)
         ):
             raise PlaylistRunValidationError("invalid_direct_url")
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        if any(_SENSITIVE_QUERY_KEY.search(key) for key in query):
+            raise PlaylistRunValidationError("invalid_direct_url")
         try:
             classified = classify_playlist_url(item.url)
         except ValueError as exc:
@@ -457,6 +460,7 @@ class PlaylistIngestService:
             "input_kind": item.input_kind,
             "materialization_id": None,
             "source_url": canonical_url,
+            "lookup_urls": list(dict.fromkeys((item.url, canonical_url))),
             "normalized_source_id": (
                 classified.normalized_source_id if classified.source_kind == "youtube_video" else f"url:{canonical_url}"
             ),
@@ -470,22 +474,21 @@ class PlaylistIngestService:
         owner_user_id: str,
         inputs: Sequence[MaterializedPlaylistItemInput | DirectUrlInput | FileStubInput],
     ) -> list[dict[str, Any]]:
-        materializations: dict[str, dict[str, PlaylistItemRecord]] = {}
+        materialized_pairs = [
+            (item.materialization_id, item.occurrence_id)
+            for item in inputs
+            if isinstance(item, MaterializedPlaylistItemInput)
+        ]
+        authoritative_items = iter(
+            self._store.resolve_materialization_occurrences(owner_user_id, materialized_pairs)
+            if materialized_pairs
+            else ()
+        )
         resolved: list[dict[str, Any]] = []
         for item in inputs:
             if isinstance(item, MaterializedPlaylistItemInput):
-                selected = materializations.get(item.materialization_id)
-                if selected is None:
-                    self._store.get_materialization(owner_user_id, item.materialization_id)
-                    page = self._store.list_materialization_items(
-                        owner_user_id,
-                        item.materialization_id,
-                        limit=500,
-                    )
-                    selected = {record.occurrence_id: record for record in page}
-                    materializations[item.materialization_id] = selected
-                authoritative = selected.get(item.occurrence_id)
-                if authoritative is None or authoritative.source_url is None:
+                authoritative = next(authoritative_items)
+                if authoritative.source_url is None:
                     raise PlaylistIngestNotFoundError("playlist resource not found")
                 resolved.append(
                     {
@@ -493,6 +496,7 @@ class PlaylistIngestService:
                         "input_kind": item.input_kind,
                         "materialization_id": item.materialization_id,
                         "source_url": authoritative.source_url,
+                        "lookup_urls": [authoritative.source_url],
                         "normalized_source_id": authoritative.normalized_source_id or f"url:{authoritative.source_url}",
                         "source_kind": authoritative.source_kind,
                         "display_metadata": authoritative.display_metadata,
@@ -529,7 +533,9 @@ class PlaylistIngestService:
         owner_user_id: str,
         items: Sequence[dict[str, Any]],
     ) -> list[DuplicateEvidence]:
-        urls = list(dict.fromkeys(str(item["source_url"]) for item in items if item.get("source_url")))
+        urls = list(
+            dict.fromkeys(str(candidate) for item in items for candidate in item.get("lookup_urls", ()) if candidate)
+        )
         library_by_url: dict[str, int] = {}
         if urls:
             media_db = None
@@ -566,12 +572,13 @@ class PlaylistIngestService:
                     )
                 )
             else:
+                evidence_candidates = dict.fromkeys(
+                    candidate
+                    for lookup_url in item.get("lookup_urls", (source_url,))
+                    for candidate in media_dedupe_url_candidates(str(lookup_url))
+                )
                 media_id = next(
-                    (
-                        library_by_url[candidate]
-                        for candidate in media_dedupe_url_candidates(str(source_url))
-                        if candidate in library_by_url
-                    ),
+                    (library_by_url[candidate] for candidate in evidence_candidates if candidate in library_by_url),
                     None,
                 )
                 evidence.append(
@@ -702,9 +709,10 @@ class PlaylistIngestService:
         if review_items:
             raise ReviewRequiredError(review_items)
 
+        manifest = [{key: value for key, value in item.items() if key != "lookup_urls"} for item in resolved]
         return self._store.create_validated_run(
             owner,
-            items=resolved,
+            items=manifest,
             processing_options=request.processing_options,
             playlist_summaries=request.playlist_summaries,
             collection_id=request.collection_id,

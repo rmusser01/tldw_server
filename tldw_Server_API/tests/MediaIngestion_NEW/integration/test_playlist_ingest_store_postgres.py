@@ -148,6 +148,89 @@ def test_postgres_validated_mixed_manifest_matches_sqlite_contract(pg_temp_db, m
     assert manager.list_jobs(domain="media_ingest", owner_user_id="pg-manifest-owner", limit=10) == []
 
 
+def test_postgres_validated_manifest_rejects_stale_materialization_authority(pg_temp_db, monkeypatch):
+    monkeypatch.setenv("TEST_MODE", "true")
+    dsn = str(pg_temp_db["dsn"])
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestNotFoundError,
+        PlaylistIngestStore,
+    )
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    from tldw_Server_API.app.core.Jobs.pg_migrations import ensure_jobs_tables_pg
+
+    ensure_jobs_tables_pg(dsn)
+    manager = JobManager(backend="postgres", db_url=dsn, clock=_FixedClock())
+    store = PlaylistIngestStore(manager)
+    preflight = store.create_preflight(
+        "pg-race-owner",
+        source_url="https://example.com/playlist",
+        source_kind="playlist",
+        expires_at=NOW + timedelta(hours=1),
+    )
+    store.replace_preflight_snapshot(
+        "pg-race-owner",
+        preflight.preflight_id,
+        status="ready",
+        items=[
+            {
+                "occurrence_id": "pg-race-occ",
+                "ordinal": 1,
+                "occurrence_index_for_source": 1,
+                "source_url": "https://example.com/video",
+                "normalized_source_id": "url:https://example.com/video",
+                "source_kind": "generic_url",
+                "availability": "available",
+                "duplicate_status": "not_found",
+                "selected_by_default": True,
+                "display_metadata": {"title": "Authoritative"},
+            }
+        ],
+    )
+    materialized = store.create_materialization(
+        "pg-race-owner",
+        preflight_id=preflight.preflight_id,
+        occurrence_ids=["pg-race-occ"],
+    )
+    authoritative = store.resolve_materialization_occurrences(
+        "pg-race-owner",
+        [(materialized.materialization_id, "pg-race-occ")],
+    )[0]
+    with store._connection(write=True) as db:
+        store._query(
+            db,
+            "UPDATE playlist_materializations SET status = 'expired' WHERE materialization_id = ?",
+            (materialized.materialization_id,),
+        )
+
+    with pytest.raises(PlaylistIngestNotFoundError, match="playlist resource not found"):
+        store.create_validated_run(
+            "pg-race-owner",
+            items=[
+                {
+                    "occurrence_id": authoritative.occurrence_id,
+                    "input_kind": "materialized_playlist_item",
+                    "materialization_id": authoritative.materialization_id,
+                    "source_url": authoritative.source_url,
+                    "normalized_source_id": authoritative.normalized_source_id,
+                    "source_kind": authoritative.source_kind,
+                    "display_metadata": authoritative.display_metadata,
+                    "state": "staged",
+                    "action": "ingest",
+                    "metadata_patch": None,
+                }
+            ],
+        )
+
+    with store._connection(write=False) as db:
+        count = store._query(
+            db,
+            "SELECT COUNT(*) AS count FROM media_ingest_runs WHERE owner_user_id = ?",
+            ("pg-race-owner",),
+        ).fetchone()
+    assert int(dict(count)["count"]) == 0
+
+
 def test_postgres_preflight_admission_serializes_empty_capacity_predicate(pg_temp_db, monkeypatch):
     monkeypatch.setenv("TEST_MODE", "true")
     monkeypatch.setenv("PLAYLIST_PREFLIGHT_GLOBAL_CAPACITY", "1")
