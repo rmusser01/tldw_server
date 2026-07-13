@@ -70,6 +70,11 @@ def _create_preflight(client: TestClient, playlist_id: str = "PLresource") -> di
     return response.json()
 
 
+def _closure_values(callable_obj) -> list[object]:
+    closure = getattr(callable_obj, "__closure__", None) or ()
+    return [cell.cell_contents for cell in closure]
+
+
 def _ready_snapshot(manager, owner: str, preflight_id: str) -> None:
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
         PlaylistIngestStore,
@@ -220,6 +225,46 @@ def test_preflight_summary_and_signed_item_pages_are_owner_scoped(preflight_api)
     ):
         assert response.status_code == 404
         assert response.json()["detail"] == "preflight_not_found"
+
+
+def test_preflight_get_routes_require_media_read_and_keep_owner_identity_dependency():
+    from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user
+    from tldw_Server_API.app.api.v1.endpoints.media import playlist_ingest
+    from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_READ
+
+    routes = [
+        route
+        for route in playlist_ingest.router.routes
+        if "GET" in (route.methods or set())
+        and route.path
+        in {
+            "/playlist-preflights/{preflight_id}",
+            "/playlist-preflights/{preflight_id}/items",
+        }
+    ]
+
+    assert len(routes) == 2
+    for route in routes:
+        calls = [dependency.call for dependency in route.dependant.dependencies]
+        assert get_request_user in calls
+        assert any(MEDIA_READ in value for call in calls for value in _closure_values(call) if isinstance(value, list))
+        assert any(getattr(call, "_tldw_rate_limit_resource", None) == "media.read" for call in calls)
+
+
+@pytest.mark.parametrize("cursor", ["", "x" * 4097, "malformed-cursor"])
+def test_preflight_invalid_cursors_are_generic_not_found_without_echo(preflight_api, cursor):
+    client, manager, _clock, _owner = preflight_api
+    accepted = _create_preflight(client, "PLinvalidcursor")
+    _ready_snapshot(manager, "1", accepted["preflight_id"])
+
+    response = client.get(accepted["items_url"], params={"cursor": cursor})
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "preflight_not_found"}
+    if cursor:
+        assert cursor[:100] not in response.text
+    else:
+        assert "input" not in response.text
 
 
 def test_preflight_materialization_is_ready_only_and_returns_compact_authority(preflight_api):

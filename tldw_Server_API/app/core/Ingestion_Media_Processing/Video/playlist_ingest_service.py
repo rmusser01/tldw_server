@@ -268,6 +268,8 @@ class PlaylistIngestService:
         cursor: str | None,
     ) -> PlaylistPage[PlaylistItemRecord]:
         """Return a bounded owner-scoped immutable occurrence page."""
+        if cursor is not None and (not cursor.strip() or len(cursor) > 4096):
+            raise PlaylistIngestNotFoundError("playlist resource not found")
         return self._store.list_preflight_items(
             owner_user_id,
             preflight_id,

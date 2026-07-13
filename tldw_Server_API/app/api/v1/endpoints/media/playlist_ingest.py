@@ -26,7 +26,7 @@ from tldw_Server_API.app.api.v1.schemas.media_playlist_ingest import (
     PlaylistPreflightLimits,
     PlaylistPreflightSummaryResponse,
 )
-from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_CREATE
+from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_CREATE, MEDIA_READ
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
     InvalidPlaylistUrlError,
     PlaylistIngestService,
@@ -46,6 +46,10 @@ _RESOURCE_BASE = "/api/v1/media/playlist-preflights"
 _PREFLIGHT_DEPENDENCIES = [
     Depends(RequirePermission(MEDIA_CREATE)),
     Depends(rbac_rate_limit("media.create")),
+]
+_PREFLIGHT_READ_DEPENDENCIES = [
+    Depends(RequirePermission(MEDIA_READ)),
+    Depends(rbac_rate_limit("media.read")),
 ]
 
 
@@ -134,6 +138,7 @@ def create_playlist_preflight(
     response_model=PlaylistPreflightSummaryResponse,
     summary="Get an asynchronous playlist preflight summary",
     tags=["Media Playlist Ingest v2"],
+    dependencies=_PREFLIGHT_READ_DEPENDENCIES,
 )
 def get_playlist_preflight(
     preflight_id: str,
@@ -164,11 +169,12 @@ def get_playlist_preflight(
     response_model=PlaylistPreflightItemsPageResponse,
     summary="List an immutable playlist preflight item page",
     tags=["Media Playlist Ingest v2"],
+    dependencies=_PREFLIGHT_READ_DEPENDENCIES,
 )
 def list_playlist_preflight_items(
     preflight_id: str,
     limit: int = Query(default=100, ge=1, le=500),
-    cursor: str | None = Query(default=None, min_length=1, max_length=4096),
+    cursor: str | None = Query(default=None),
     current_user: User = Depends(get_request_user),
     job_manager: JobManager = Depends(get_job_manager),
 ) -> PlaylistPreflightItemsPageResponse:

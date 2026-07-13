@@ -189,25 +189,25 @@ git commit -m "feat: run playlist inspection as bounded jobs (TASK-12110)"
 
 ### Task 4: Expose preflight, pages, cancellation, and materialization
 
-- [ ] **Step 1: Write failing route tests**
+- [x] **Step 1: Write failing route tests**
 
 Cover POST 202, summary polling, paginated pages, delete/cancel, ready-only materialization, cross-owner 404-equivalent behavior, `preflight_busy`, expiry, and sanitized errors.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_endpoint.py -k preflight -q`
 
 Expected: FAIL because `/playlist-preflights` routes are missing.
 
-- [ ] **Step 3: Implement the routes and service methods**
+- [x] **Step 3: Implement the routes and service methods**
 
 `POST /playlist-preflights` validates the trusted YouTube boundary, reserves capacity transactionally, creates the resource, and enqueues the internal job. Item routes return bounded pages. Materialization accepts only selected occurrence IDs and returns compact identity records; it never accepts policies or patches. `DELETE` requests job cancellation and expires the resource.
 
-- [ ] **Step 4: Register the router and keep compatibility explicit**
+- [x] **Step 4: Register the router and keep compatibility explicit**
 
 Add `playlist_ingest` to `_MEDIA_ENDPOINT_MODULES`. Leave `/playlists/preflight` working for older clients, but add compatibility tests proving version-2 clients are advertised separately.
 
-- [ ] **Step 5: Run tests and commit**
+- [x] **Step 5: Run tests and commit**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_endpoint.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_preflight_endpoint.py -q`
 
