@@ -178,6 +178,7 @@ Input:
 - `skill_name` is required and uses existing Skill name validation.
 - `arguments` is optional, defaults to an empty string, and is limited to 10,000 characters.
 - The caller cannot provide `dry_run`, model, provider, tools, user identity, paths, or execution settings.
+- `arguments` is preserved verbatim. The module uses exact shape, type, and length validation rather than `BaseModule.sanitize_input()`, whose SQL-oriented token checks would reject valid prompt text such as `--help` or `/* example */`.
 
 Output:
 
@@ -245,6 +246,8 @@ Using `context=None` is intentional: dry render reports declarations and cannot 
 Add one Skills service operation that returns an integrity-filtered page and total from the same row set. It must synchronize the registry once, fetch matching rows once, apply model-visible and integrity filtering once, and then slice the filtered rows. Add a metadata-only exact lookup that uses the same visibility predicate.
 
 Filesystem walks, integrity digest reads, synchronous registry queries, existence checks, and verified Skill parsing must not run on the MCP event loop. The new catalog operations must offload their synchronous work with `asyncio.to_thread`. The verified full-load path used by render should update the existing asynchronous `get_skill()` implementation to offload its filesystem checks and parsing rather than introducing a duplicate loader.
+
+Request cancellation must not close a request-scoped database while an offloaded constructor, registry operation, integrity check, or verified load is still using it. The module must retain and await the in-flight worker task before closing the database and propagating cancellation. If database construction succeeds but service construction fails, the same worker must close the partially initialized database before raising.
 
 These changes preserve existing REST behavior. They change scheduling only and require regression coverage for existing Skills service callers.
 
@@ -320,7 +323,7 @@ Do not add Skills to gateway presets or persona archetypes in this slice unless 
 
 ### Skills service
 
-- Metadata-only lookup may read file bytes for integrity calculation but does not call the verified full-directory parser, parse supporting files into a response, or return path/content fields.
+- Metadata-only lookup may read file bytes for integrity calculation but does not call the verified full-directory parser or return content/supporting-file payloads. Internal `SkillMetadata` may retain registry path and hash fields needed by existing service callers; the MCP formatter must never expose them.
 - Exact lookup excludes hidden, model-disabled, deleted, and integrity-blocked Skills.
 - One page operation returns correct count and pagination after a single integrity-filtering pass.
 - Catalog registry and filesystem work is offloaded from the event loop.
@@ -337,6 +340,7 @@ Do not add Skills to gateway presets or persona archetypes in this slice unless 
 ### MCP module
 
 - Tool definitions, annotations, defaults, bounds, and unknown-property rejection.
+- Search and render text containing punctuation such as `--` and `/* */` is preserved and accepted within the documented bounds.
 - Missing user context and missing ChaChaNotes path fail closed.
 - List/get response shapes expose metadata only.
 - Hidden and model-disabled Skills cannot be listed, fetched, or rendered.
@@ -397,3 +401,5 @@ Those tasks must build on this catalog/render contract rather than expanding `sk
 13. Produce page items and total from one integrity-filtered row set to avoid duplicate full-tree walks.
 14. Offload synchronous database, filesystem, integrity, and verified parsing work from the MCP event loop.
 15. Report omitted supporting material with a boolean rather than silently implying the rendered body is self-contained.
+16. Preserve bounded prompt arguments verbatim instead of applying the generic module SQL-token sanitizer to non-executing text.
+17. Await in-flight offloaded work before request-scoped database cleanup so cancellation cannot race active registry or filesystem access.
