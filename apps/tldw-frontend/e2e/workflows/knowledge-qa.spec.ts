@@ -1757,6 +1757,85 @@ test.describe("KnowledgeQA Workflow", () => {
 
       await assertNoCriticalErrors(diagnostics)
     })
+
+    test("credential terminal stream prevents standard stream fallback and secret persistence", async ({
+      authedPage,
+      diagnostics
+    }) => {
+      const sentinel = "sk-browser-credential-must-not-leak"
+      const browserEvents: string[] = []
+      let standardRequests = 0
+
+      authedPage.on("request", (request) => {
+        if (request.url().includes("/api/v1/rag/")) {
+          browserEvents.push(
+            `request:${request.method()}:${request.url()}:${request.postData() || ""}`
+          )
+        }
+      })
+      authedPage.on("response", (response) => {
+        if (response.url().includes("/api/v1/rag/")) {
+          browserEvents.push(`response:${response.status()}:${response.url()}`)
+        }
+      })
+      authedPage.on("console", (message) => {
+        browserEvents.push(`console:${message.type()}:${message.text()}`)
+      })
+      authedPage.on("pageerror", (error) => {
+        browserEvents.push(`pageerror:${error.message}`)
+      })
+
+      await authedPage.route("**/api/v1/rag/search/stream", async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/x-ndjson",
+          body: `${JSON.stringify({
+            schema_version: 1,
+            type: "error",
+            code: "credential_store_unavailable",
+            status_code: 503,
+            upstream_dispatched: true,
+            output_emitted: false,
+            allow_non_stream_fallback: false,
+            message: "Provider credential storage is temporarily unavailable."
+          })}\n`
+        })
+      })
+      await authedPage.route("**/api/v1/rag/search", async (route) => {
+        standardRequests += 1
+        browserEvents.push(`unsafe-standard-response:${sentinel}`)
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ answer: sentinel, results: [] })
+        })
+      })
+
+      qaPage = new KnowledgeQAPage(authedPage)
+      await qaPage.goto()
+      await qaPage.waitForReady()
+      await qaPage.search("use the current provider credential")
+      await qaPage.waitForResults()
+
+      await expect
+        .poll(async () => await qaPage.getErrorMessage(), { timeout: 10_000 })
+        .not.toBeNull()
+      expect(standardRequests).toBe(0)
+
+      const browserState = await authedPage.evaluate(() => ({
+        localStorage: Object.entries(window.localStorage),
+        sessionStorage: Object.entries(window.sessionStorage),
+        bodyText: document.body.innerText
+      }))
+      const capturedState = JSON.stringify({
+        browserEvents,
+        diagnostics,
+        browserState
+      })
+      expect(capturedState).not.toContain(sentinel)
+
+      await assertNoCriticalErrors(diagnostics)
+    })
   })
 
   // ═════════════════════════════════════════════════════════════════════

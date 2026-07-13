@@ -12,10 +12,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import status
+from loguru import logger
 from starlette.responses import StreamingResponse
 
 from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+    ByokResolutionError,
+    ByokResolutionStatus,
+    ResolvedByokCredentials,
+)
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    ProviderCredentialRuntime,
+)
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAPIError,
@@ -30,6 +38,37 @@ from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
     ChatCompletionUserMessageParam,
 )
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import DEFAULT_CHARACTER_NAME
+
+_CHAT_USER_SECRET = "sk-chat-user-secret-must-not-leak"
+
+
+def _real_credential_runtime_type(resolver):
+    class Runtime(ProviderCredentialRuntime):
+        instances: list["Runtime"] = []
+
+        def __init__(self, **kwargs):
+            super().__init__(resolver=resolver, **kwargs)
+            self.__class__.instances.append(self)
+
+    return Runtime
+
+
+def _resolved_user_credential(
+    provider: str,
+    api_key: str,
+    *,
+    auth_source: str = "api_key",
+) -> ResolvedByokCredentials:
+    return ResolvedByokCredentials(
+        provider=provider,
+        api_key=api_key,
+        app_config={f"{provider}_api": {"model": "runtime-model"}},
+        credential_fields={},
+        source="user",
+        allowlisted=True,
+        status=ByokResolutionStatus.RESOLVED,
+        auth_source=auth_source,
+    )
 
 
 def _credential_runtime_double(
@@ -81,6 +120,263 @@ def _credential_runtime_double(
             self.close_calls += 1
 
     return RuntimeDouble
+
+
+@pytest.mark.parametrize("streaming", [False, True])
+def test_chat_user_credential_never_uses_server_fallback_or_leaks(
+    authenticated_client,
+    mock_chacha_db,
+    setup_dependencies,
+    streaming,
+):
+    captured: dict[str, object] = {}
+    resolution_calls: list[tuple[str, bool]] = []
+
+    async def resolver(provider: str, **kwargs):
+        resolution_calls.append((provider, kwargs["force_oauth_refresh"]))
+        return _resolved_user_credential(provider, _CHAT_USER_SECRET)
+
+    runtime_type = _real_credential_runtime_type(resolver)
+    provider_manager = MagicMock()
+    provider_manager.circuit_breakers = {
+        "openai": SimpleNamespace(can_attempt_call=lambda: True)
+    }
+    request_data = ChatCompletionRequest(
+        model="gpt-4o-mini",
+        api_provider="openai",
+        messages=[ChatCompletionUserMessageParam(role="user", content="Hello")],
+        stream=streaming,
+    )
+
+    async def execute_non_stream(**kwargs):
+        captured.update(kwargs["cleaned_args"])
+        await kwargs["on_success"](kwargs["selected_provider"])
+        return {
+            "id": "chatcmpl-runtime",
+            "choices": [{"message": {"role": "assistant", "content": "safe"}}],
+        }
+
+    async def execute_stream(**kwargs):
+        captured.update(kwargs["cleaned_args"])
+
+        async def body():
+            await kwargs["on_success"](kwargs["selected_provider"])
+            yield 'data: {"choices":[{"delta":{"content":"safe"}}]}\n\n'
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(body(), media_type="text/event-stream")
+
+    logs: list[str] = []
+    sink_id = logger.add(logs.append, format="{message}")
+    try:
+        with (
+            patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
+            patch.object(
+                chat_endpoint,
+                "get_provider_manager",
+                return_value=provider_manager,
+            ),
+            patch.object(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", True),
+            patch.object(
+                chat_endpoint,
+                "resolve_provider_api_key",
+                side_effect=AssertionError("server fallback used"),
+            ) as server_fallback,
+            patch.object(
+                chat_endpoint,
+                "execute_non_stream_call",
+                side_effect=execute_non_stream,
+            ),
+            patch.object(
+                chat_endpoint,
+                "execute_streaming_call",
+                side_effect=execute_stream,
+            ),
+        ):
+            response = authenticated_client.post(
+                "/api/v1/chat/completions",
+                json=request_data.model_dump(),
+            )
+    finally:
+        logger.remove(sink_id)
+
+    assert response.status_code == status.HTTP_200_OK
+    assert captured["api_key"] == _CHAT_USER_SECRET
+    assert captured["credentials_resolved"] is True
+    assert resolution_calls == [("openai", False)]
+    assert _CHAT_USER_SECRET not in response.text
+    assert _CHAT_USER_SECRET not in "".join(logs)
+    server_fallback.assert_not_called()
+    provider_manager.get_available_provider.assert_not_called()
+    assert runtime_type.instances[0]._closed is True
+
+
+@pytest.mark.parametrize("streaming", [False, True])
+def test_chat_oauth_refresh_keeps_user_credential_isolated_and_secret_free(
+    authenticated_client,
+    mock_chacha_db,
+    setup_dependencies,
+    streaming,
+):
+    refreshed_secret = f"{_CHAT_USER_SECRET}-refreshed"
+    resolution_calls: list[tuple[str, bool]] = []
+
+    async def resolver(provider: str, **kwargs):
+        force_refresh = kwargs["force_oauth_refresh"]
+        resolution_calls.append((provider, force_refresh))
+        return _resolved_user_credential(
+            provider,
+            refreshed_secret if force_refresh else _CHAT_USER_SECRET,
+            auth_source="oauth",
+        )
+
+    runtime_type = _real_credential_runtime_type(resolver)
+    provider_manager = MagicMock()
+    provider_manager.circuit_breakers = {
+        "openai": SimpleNamespace(can_attempt_call=lambda: True)
+    }
+    request_data = ChatCompletionRequest(
+        model="gpt-4o-mini",
+        api_provider="openai",
+        messages=[ChatCompletionUserMessageParam(role="user", content="Hello")],
+        stream=streaming,
+    )
+
+    if streaming:
+
+        def expired_stream():
+            if False:
+                yield ""
+            raise ChatAuthenticationError(
+                "expired OAuth credential",
+                provider="openai",
+            )
+
+        def refreshed_stream():
+            yield 'data: {"choices":[{"delta":{"content":"recovered"}}]}\n\n'
+            yield "data: [DONE]\n\n"
+
+        provider_results = [expired_stream(), refreshed_stream()]
+    else:
+        provider_results = [
+            ChatAuthenticationError(
+                "expired OAuth credential",
+                provider="openai",
+            ),
+            {
+                "id": "chatcmpl-refreshed",
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "recovered",
+                        }
+                    }
+                ],
+            },
+        ]
+
+    logs: list[str] = []
+    sink_id = logger.add(logs.append, format="{message}")
+    try:
+        with (
+            patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
+            patch.object(
+                chat_endpoint,
+                "get_provider_manager",
+                return_value=provider_manager,
+            ),
+            patch.object(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", True),
+            patch.object(chat_endpoint, "get_request_queue", return_value=None),
+            patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
+            patch.object(
+                chat_endpoint,
+                "resolve_provider_api_key",
+                side_effect=AssertionError("server fallback used"),
+            ) as server_fallback,
+            patch.object(
+                chat_endpoint,
+                "perform_chat_api_call",
+                side_effect=provider_results,
+            ) as provider_call,
+        ):
+            response = authenticated_client.post(
+                "/api/v1/chat/completions",
+                json=request_data.model_dump(),
+            )
+    finally:
+        logger.remove(sink_id)
+
+    assert response.status_code == status.HTTP_200_OK
+    assert "recovered" in response.text
+    assert resolution_calls == [("openai", False), ("openai", True)]
+    assert provider_call.call_count == 2
+    assert provider_call.call_args_list[0].kwargs["api_key"] == _CHAT_USER_SECRET
+    assert provider_call.call_args_list[1].kwargs["api_key"] == refreshed_secret
+    assert _CHAT_USER_SECRET not in response.text
+    assert _CHAT_USER_SECRET not in "".join(logs)
+    server_fallback.assert_not_called()
+    provider_manager.get_available_provider.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "error_code",
+    ["invalid_provider_credentials", "credential_store_unavailable"],
+)
+def test_chat_terminal_credential_resolution_never_falls_back_or_leaks(
+    authenticated_client,
+    mock_chacha_db,
+    setup_dependencies,
+    error_code,
+):
+    async def resolver(provider: str, **_kwargs):
+        secret_present_only_in_resolver = _CHAT_USER_SECRET
+        assert secret_present_only_in_resolver
+        raise ByokResolutionError(error_code, provider)
+
+    runtime_type = _real_credential_runtime_type(resolver)
+    provider_manager = MagicMock()
+    provider_manager.circuit_breakers = {
+        "openai": SimpleNamespace(can_attempt_call=lambda: True)
+    }
+    request_data = ChatCompletionRequest(
+        model="gpt-4o-mini",
+        api_provider="openai",
+        messages=[ChatCompletionUserMessageParam(role="user", content="Hello")],
+    )
+
+    logs: list[str] = []
+    sink_id = logger.add(logs.append, format="{message}")
+    try:
+        with (
+            patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
+            patch.object(
+                chat_endpoint,
+                "get_provider_manager",
+                return_value=provider_manager,
+            ),
+            patch.object(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", True),
+            patch.object(
+                chat_endpoint,
+                "resolve_provider_api_key",
+                side_effect=AssertionError("server fallback used"),
+            ) as server_fallback,
+            patch.object(chat_endpoint, "perform_chat_api_call") as provider_call,
+        ):
+            response = authenticated_client.post(
+                "/api/v1/chat/completions",
+                json=request_data.model_dump(),
+            )
+    finally:
+        logger.remove(sink_id)
+
+    assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+    assert response.json()["detail"]["error_code"] == error_code
+    assert _CHAT_USER_SECRET not in response.text
+    assert _CHAT_USER_SECRET not in "".join(logs)
+    server_fallback.assert_not_called()
+    provider_call.assert_not_called()
+    provider_manager.get_available_provider.assert_not_called()
 
 
 def test_chat_completion_basic(authenticated_client, mock_chacha_db, setup_dependencies):
