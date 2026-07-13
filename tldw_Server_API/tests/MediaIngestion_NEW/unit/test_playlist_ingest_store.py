@@ -1456,6 +1456,56 @@ def test_postgres_event_append_locks_run_before_versioning(store, monkeypatch):
     assert locked_read.rstrip().endswith("FOR UPDATE")
 
 
+def test_postgres_attach_collection_plan_locks_run_and_items_before_updates(store, monkeypatch):
+    queries: list[str] = []
+
+    class _Result:
+        rowcount = 1
+
+        def __init__(self, rows=()):
+            self.rows = list(rows)
+
+        def fetchone(self):
+            return self.rows[0] if self.rows else None
+
+        def fetchall(self):
+            return self.rows
+
+    @contextmanager
+    def fake_connection(*, write):
+        assert write is True
+        yield object()
+
+    def fake_query(_db, sql, _params=()):
+        queries.append(sql)
+        if "SELECT version" in sql:
+            return _Result([{"version": 1}])
+        if "SELECT occurrence_id, duplicate_policy" in sql:
+            return _Result([{"occurrence_id": "occ-one", "duplicate_policy": "overwrite"}])
+        return _Result()
+
+    sentinel = object()
+    store._postgres = True
+    monkeypatch.setattr(store, "_connection", fake_connection)
+    monkeypatch.setattr(store, "_query", fake_query)
+    monkeypatch.setattr(store, "get_run", lambda *_args, **_kwargs: sentinel)
+
+    attached = store.attach_collection_plan(
+        "owner-1",
+        "run-1",
+        collection_id=55,
+        planned_item_ids={"occ-one": 101},
+    )
+
+    run_lock = next(index for index, query in enumerate(queries) if "SELECT version" in query)
+    items_lock = next(index for index, query in enumerate(queries) if "SELECT occurrence_id" in query)
+    first_update = next(index for index, query in enumerate(queries) if "UPDATE media_ingest" in query)
+    assert attached is sentinel
+    assert run_lock < items_lock < first_update
+    assert queries[run_lock].rstrip().endswith("FOR UPDATE")
+    assert queries[items_lock].rstrip().endswith("FOR UPDATE")
+
+
 def test_no_cas_event_appends_both_persist_with_monotonic_versions(store):
     materialized = _seed_materialization(store, item_count=1)
     run = store.create_run("1", materialization_ids=[materialized.id])
@@ -1586,3 +1636,79 @@ def test_cleanup_deletes_historical_expiry_formats(tmp_path, monkeypatch, storag
     deleted = store.cleanup_expired("cleanup-owner", now=now)
 
     assert deleted["preflights"] == 1
+
+
+def test_attach_collection_plan_persists_run_and_per_occurrence_mapping(store):
+    run = store.create_validated_run(
+        "1",
+        items=[
+            _validated_direct_record(occurrence_id="occ-one"),
+            _validated_direct_record(
+                occurrence_id="occ-skip",
+                source_url="https://example.com/skip",
+                normalized_source_id="url:https://example.com/skip",
+                action="skip",
+                media_id=9,
+            ),
+            _validated_direct_record(
+                occurrence_id="occ-two",
+                source_url="https://example.com/two",
+                normalized_source_id="url:https://example.com/two",
+            ),
+        ],
+    )
+
+    attached = store.attach_collection_plan(
+        "1",
+        run.run_id,
+        collection_id=55,
+        planned_item_ids={"occ-one": 101, "occ-two": 102},
+    )
+
+    items = list(store.list_run_items("1", run.run_id, limit=10))
+    events = list(store.list_run_events("1", run.run_id))
+    assert attached.collection_id == 55
+    assert [item.planned_collection_item_id for item in items] == [101, None, 102]
+    assert events[-1].event_type == "collection_plan_attached"
+    assert events[-1].attrs == {"collection_id": 55, "planned_item_count": 2}
+
+
+def test_attach_collection_plan_rolls_back_every_mapping_on_failure(store, monkeypatch):
+    run = store.create_validated_run(
+        "1",
+        items=[
+            _validated_direct_record(occurrence_id="occ-one"),
+            _validated_direct_record(
+                occurrence_id="occ-two",
+                source_url="https://example.com/two",
+                normalized_source_id="url:https://example.com/two",
+            ),
+        ],
+    )
+    original_query = store._query
+    mapping_updates = 0
+
+    def fail_second_mapping(db, sql, params=()):
+        nonlocal mapping_updates
+        if "SET planned_collection_item_id = ?" in " ".join(sql.split()):
+            mapping_updates += 1
+            if mapping_updates == 2:
+                raise RuntimeError("synthetic mapping failure")
+        return original_query(db, sql, params)
+
+    monkeypatch.setattr(store, "_query", fail_second_mapping)
+
+    with pytest.raises(RuntimeError, match="synthetic mapping failure"):
+        store.attach_collection_plan(
+            "1",
+            run.run_id,
+            collection_id=55,
+            planned_item_ids={"occ-one": 101, "occ-two": 102},
+        )
+
+    loaded = store.get_run("1", run.run_id)
+    items = list(store.list_run_items("1", run.run_id, limit=10))
+    assert loaded.collection_id is None
+    assert loaded.status == "staged"
+    assert loaded.version == run.version
+    assert [item.planned_collection_item_id for item in items] == [None, None]

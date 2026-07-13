@@ -7,6 +7,7 @@ import math
 from datetime import datetime
 from enum import Enum
 from typing import Annotated, Any, Literal
+from urllib.parse import parse_qsl, urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -337,6 +338,65 @@ PlaylistIngestRunInput = Annotated[
 ]
 
 
+class PlaylistIngestNewCollection(BaseModel):
+    """Bounded metadata for one optional server-created playlist collection."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., min_length=1, max_length=255)
+    description: str | None = Field(default=None, min_length=1, max_length=2000)
+    source_url: str | None = Field(default=None, min_length=1, max_length=2048)
+    default_tags: list[str] = Field(default_factory=list, max_length=50)
+
+    @field_validator("name", "description", "source_url", mode="before")
+    @classmethod
+    def _strip_text(cls, value: object) -> object:
+        if value is None:
+            return None
+        if type(value) is not str:
+            raise ValueError("collection text fields must be strings")
+        return value.strip()
+
+    @field_validator("source_url")
+    @classmethod
+    def _validate_source_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        try:
+            parsed = urlparse(value)
+            _ = parsed.port
+        except ValueError as exc:
+            raise ValueError("collection source_url must be a credential-free HTTP URL") from exc
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+            raise ValueError("collection source_url must be a credential-free HTTP URL")
+        sensitive_parts = ("auth", "cookie", "credential", "key", "password", "secret", "signature", "token")
+        if any(
+            any(part in key.casefold() for part in sensitive_parts)
+            for key, _value in parse_qsl(parsed.query, keep_blank_values=True)
+        ):
+            raise ValueError("collection source_url must not contain credential-like query keys")
+        return value
+
+    @field_validator("default_tags", mode="before")
+    @classmethod
+    def _normalize_tags(cls, value: object) -> object:
+        if type(value) is not list:
+            raise ValueError("default_tags must be a list")
+        if len(value) > 50:
+            raise ValueError("default_tags cannot contain more than 50 entries")
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for tag in value:
+            if type(tag) is not str or not tag.strip() or len(tag.strip()) > 100:
+                raise ValueError("default_tags must contain strings between 1 and 100 characters")
+            clean = tag.strip()
+            folded = clean.casefold()
+            if folded not in seen:
+                normalized.append(clean)
+                seen.add(folded)
+        return normalized
+
+
 class PlaylistIngestRunCreateRequest(BaseModel):
     """Strict, bounded mixed-input manifest validated before run creation."""
 
@@ -352,6 +412,7 @@ class PlaylistIngestRunCreateRequest(BaseModel):
         max_length=MAX_PLAYLIST_PREFLIGHT_SELECTIONS,
     )
     collection_id: int | None = Field(default=None, ge=1, strict=True)
+    new_collection: PlaylistIngestNewCollection | None = None
 
     @field_validator("review_overrides", mode="before")
     @classmethod
@@ -391,6 +452,8 @@ class PlaylistIngestRunCreateRequest(BaseModel):
         occurrence_ids = [item.occurrence_id for item in self.inputs]
         if len(set(occurrence_ids)) != len(occurrence_ids):
             raise ValueError("occurrence_id values must be unique")
+        if self.collection_id is not None and self.new_collection is not None:
+            raise ValueError("collection_id and new_collection are mutually exclusive")
         return self
 
 
@@ -416,6 +479,7 @@ class ReviewRequiredItem(BaseModel):
         "duplicate_target_changed",
         "invalid_duplicate_override",
         "unknown_review_override",
+        "in_run_duplicate_requires_processing_or_skip",
     ]
     evidence: DuplicateEvidence
     allowed_actions: list[DuplicatePolicy] = Field(default_factory=list, max_length=4)
@@ -434,6 +498,7 @@ class RunItemSnapshot(BaseModel):
     progress_message: str | None = Field(default=None, max_length=1000)
     job_id: int | None = Field(default=None, ge=1)
     media_id: int | None = Field(default=None, ge=1)
+    planned_collection_item_id: int | None = Field(default=None, ge=1)
     attempt: int = Field(default=1, ge=1)
     retryable: bool = False
 

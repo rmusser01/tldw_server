@@ -303,6 +303,53 @@ def test_create_media_collection_with_items_rolls_back_collection_and_membership
     assert collections == []
 
 
+def test_discard_media_collection_removes_just_created_plan_and_memberships(
+    collections_db: CollectionsDatabase,
+) -> None:
+    created = collections_db.create_media_collection_with_items(
+        name="Compensated plan",
+        kind="playlist_ingest",
+        items=[
+            {"source_url": "https://example.com/one", "ordinal": 1},
+            {"source_url": "https://example.com/two", "ordinal": 2},
+        ],
+    )
+    expected_item_ids = [item.id for item in created.items]
+
+    with pytest.raises(ValueError, match="media_collection_discard_mismatch"):
+        collections_db.discard_media_collection(True, expected_item_ids=expected_item_ids)
+
+    with pytest.raises(ValueError, match="media_collection_discard_mismatch"):
+        collections_db.discard_media_collection(created.id, expected_item_ids=[created.items[0].id])
+    assert collections_db.get_media_collection(created.id).id == created.id
+
+    assert (
+        collections_db.discard_media_collection(
+            created.id,
+            expected_item_ids=expected_item_ids,
+        )
+        is True
+    )
+
+    collections, total = collections_db.list_media_collections(kind="playlist_ingest")
+    assert total == 0
+    assert collections == []
+    assert (
+        collections_db.backend.execute(
+            "SELECT COUNT(*) AS total FROM media_collection_items WHERE collection_id = ?",
+            (created.id,),
+        ).first["total"]
+        == 0
+    )
+    assert (
+        collections_db.backend.execute(
+            "SELECT COUNT(*) AS total FROM media_collections WHERE id = ?",
+            (created.id,),
+        ).first["total"]
+        == 0
+    )
+
+
 def test_media_collections_router_exposes_collection_crud(
     collections_db: CollectionsDatabase,
     monkeypatch: pytest.MonkeyPatch,

@@ -159,6 +159,7 @@ class MediaIngestRunItemRecord:
     progress_message: str | None
     retryable: bool
     media_id: int | None
+    planned_collection_item_id: int | None
 
     @property
     def action(self) -> str:
@@ -579,6 +580,9 @@ class PlaylistIngestStore:
             progress_message=data.get("progress_message"),
             retryable=bool(data["retryable"]),
             media_id=int(data["media_id"]) if data.get("media_id") is not None else None,
+            planned_collection_item_id=(
+                int(data["planned_collection_item_id"]) if data.get("planned_collection_item_id") is not None else None
+            ),
         )
 
     @classmethod
@@ -2212,6 +2216,122 @@ class PlaylistIngestStore:
                     self._db_datetime(now),
                 ),
             )
+
+    def attach_collection_plan(
+        self,
+        owner_user_id: str,
+        run_id: str,
+        *,
+        collection_id: int,
+        planned_item_ids: Mapping[str, int],
+    ) -> MediaIngestRunRecord:
+        """Attach one complete non-skip collection plan to a staged run atomically."""
+        if type(collection_id) is not int or collection_id < 1:
+            raise ValueError("collection_id must be a positive integer")
+        if type(planned_item_ids) is not dict or len(planned_item_ids) > _MAX_PAGE_SIZE:
+            raise ValueError("planned_item_ids must be a bounded object")
+        normalized: dict[str, int] = {}
+        for occurrence_id, item_id in planned_item_ids.items():
+            if type(occurrence_id) is not str or not occurrence_id or len(occurrence_id) > 255:
+                raise ValueError("planned item occurrence IDs must be canonical strings")
+            if type(item_id) is not int or item_id < 1:
+                raise ValueError("planned collection item IDs must be positive integers")
+            normalized[occurrence_id] = item_id
+        if len(set(normalized.values())) != len(normalized):
+            raise ValueError("planned collection item IDs must be unique")
+
+        owner = self._owner(owner_user_id)
+        now = self._now()
+        with self._connection(write=True) as db:
+            if self._postgres:
+                run_sql = """
+                    SELECT version FROM media_ingest_runs
+                    WHERE owner_user_id = ? AND run_id = ? AND status = 'staged'
+                      AND collection_id IS NULL AND expires_at > ?
+                    FOR UPDATE
+                """
+                items_sql = """
+                    SELECT occurrence_id, duplicate_policy
+                    FROM media_ingest_run_items
+                    WHERE owner_user_id = ? AND run_id = ?
+                    ORDER BY ordinal
+                    FOR UPDATE
+                """
+            else:
+                run_sql = """
+                    SELECT version FROM media_ingest_runs
+                    WHERE owner_user_id = ? AND run_id = ? AND status = 'staged'
+                      AND collection_id IS NULL
+                      AND julianday(expires_at) > julianday(?)
+                """
+                items_sql = """
+                    SELECT occurrence_id, duplicate_policy
+                    FROM media_ingest_run_items
+                    WHERE owner_user_id = ? AND run_id = ?
+                    ORDER BY ordinal
+                """
+            run_row = self._query(
+                db,
+                run_sql,
+                (owner, str(run_id), self._db_datetime(now)),
+            ).fetchone()
+            if run_row is None:
+                raise PlaylistIngestConflictError("run is not available for collection planning")
+            version = int(self._row_dict(run_row)["version"])
+            item_rows = self._query(db, items_sql, (owner, str(run_id))).fetchall()
+            expected = {
+                str(self._row_dict(row)["occurrence_id"])
+                for row in item_rows
+                if self._row_dict(row).get("duplicate_policy") != "skip"
+            }
+            if set(normalized) != expected:
+                raise ValueError("planned collection mapping must cover every non-skip occurrence")
+            for occurrence_id, planned_item_id in normalized.items():
+                updated = self._query(
+                    db,
+                    """
+                    UPDATE media_ingest_run_items
+                    SET planned_collection_item_id = ?, updated_at = ?
+                    WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
+                      AND planned_collection_item_id IS NULL
+                    """,
+                    (
+                        planned_item_id,
+                        self._db_datetime(now),
+                        owner,
+                        str(run_id),
+                        occurrence_id,
+                    ),
+                )
+                if updated.rowcount != 1:
+                    raise PlaylistIngestConflictError("run item collection mapping changed")
+            attached = self._query(
+                db,
+                """
+                UPDATE media_ingest_runs
+                SET collection_id = ?, version = version + 1, updated_at = ?
+                WHERE owner_user_id = ? AND run_id = ? AND status = 'staged'
+                  AND collection_id IS NULL AND version = ?
+                """,
+                (collection_id, self._db_datetime(now), owner, str(run_id), version),
+            )
+            if attached.rowcount != 1:
+                raise PlaylistIngestConflictError("run collection plan changed")
+            self._query(
+                db,
+                """
+                INSERT INTO media_ingest_run_events (
+                    run_id, owner_user_id, event_type, state, attrs_json, occurred_at
+                ) VALUES (?, ?, 'collection_plan_attached', 'staged', ?, ?)
+                """,
+                (
+                    str(run_id),
+                    owner,
+                    self._json_value({"collection_id": collection_id, "planned_item_count": len(normalized)}),
+                    self._db_datetime(now),
+                ),
+            )
+        return self.get_run(owner, run_id)
 
     def cleanup_expired(
         self,

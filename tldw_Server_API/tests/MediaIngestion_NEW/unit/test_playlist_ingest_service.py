@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
@@ -35,6 +36,34 @@ class _OwnerMediaDB:
         return None
 
 
+class _OwnerCollectionsDB:
+    def __init__(self) -> None:
+        self.create_calls: list[dict] = []
+        self.resolve_calls: list[dict] = []
+        self.discard_calls: list[int] = []
+        self.create_error: Exception | None = None
+        self.discard_error: Exception | None = None
+
+    def create_media_collection_with_items(self, **kwargs):
+        self.create_calls.append(kwargs)
+        if self.create_error is not None:
+            raise self.create_error
+        items = [SimpleNamespace(id=701 + index, ordinal=item["ordinal"]) for index, item in enumerate(kwargs["items"])]
+        return SimpleNamespace(id=700, items=items)
+
+    def resolve_media_collection_item(self, item_id, **kwargs):
+        self.resolve_calls.append({"item_id": item_id, **kwargs})
+
+    def discard_media_collection(self, collection_id, *, expected_item_ids):
+        self.discard_calls.append(collection_id)
+        if self.discard_error is not None:
+            raise self.discard_error
+        return True
+
+    def close(self) -> None:
+        return None
+
+
 @pytest.fixture()
 def service_context(tmp_path, monkeypatch):
     monkeypatch.setenv("TEST_MODE", "true")
@@ -48,8 +77,11 @@ def service_context(tmp_path, monkeypatch):
 
     manager = JobManager(db_path=tmp_path / "playlist-service-jobs.db", clock=_FixedClock())
     media_db = _OwnerMediaDB()
+    collections_db = _OwnerCollectionsDB()
     service = PlaylistIngestService(manager)
     service._media_db_factory = lambda _owner: media_db
+    service._collections_db_factory = lambda _owner: collections_db
+    service.test_collections_db = collections_db
     return service, PlaylistIngestStore(manager), manager, media_db
 
 
@@ -388,6 +420,57 @@ def test_run_request_union_is_strict_bounded_and_occurrence_unique():
             PlaylistIngestRunCreateRequest.model_validate(payload)
 
 
+def test_run_request_new_collection_is_bounded_and_exclusive_with_collection_id():
+    from tldw_Server_API.app.api.v1.schemas.media_playlist_ingest import (
+        PlaylistIngestRunCreateRequest,
+    )
+
+    valid = PlaylistIngestRunCreateRequest.model_validate(
+        {
+            "inputs": [_direct_input("occ-1", "https://example.com/1")],
+            "review_overrides": {},
+            "new_collection": {
+                "name": "  Playlist research  ",
+                "description": "Selected videos",
+                "source_url": "https://www.youtube.com/playlist?list=PL123",
+                "default_tags": [" research ", "video"],
+            },
+        }
+    )
+    assert valid.new_collection.name == "Playlist research"
+    assert valid.new_collection.default_tags == ["research", "video"]
+
+    invalid_collections = [
+        {"name": "x" * 256},
+        {"name": "Playlist", "description": "x" * 2001},
+        {"name": "Playlist", "source_url": "x" * 2049},
+        {"name": "Playlist", "default_tags": ["tag"] * 51},
+        {"name": "Playlist", "default_tags": ["x" * 101]},
+        {"name": "Playlist", "source_url": "https://user:secret@example.com/list"},
+        {"name": "Playlist", "source_url": "https://example.com/list?token=secret"},
+        {"name": "Playlist", "metadata": {"secret": "not accepted"}},
+    ]
+    for collection in invalid_collections:
+        with pytest.raises(ValidationError):
+            PlaylistIngestRunCreateRequest.model_validate(
+                {
+                    "inputs": [_direct_input("occ-1", "https://example.com/1")],
+                    "review_overrides": {},
+                    "new_collection": collection,
+                }
+            )
+
+    with pytest.raises(ValidationError):
+        PlaylistIngestRunCreateRequest.model_validate(
+            {
+                "inputs": [_direct_input("occ-1", "https://example.com/1")],
+                "review_overrides": {},
+                "collection_id": 7,
+                "new_collection": {"name": "Playlist"},
+            }
+        )
+
+
 def test_create_run_validates_missing_extra_and_stale_review_overrides(service_context):
     service, _store, manager, media_db = service_context
     direct = _direct_input("occ-direct", "https://example.com/existing")
@@ -684,6 +767,237 @@ def test_create_run_in_run_skip_is_terminal_without_media_id_or_job(service_cont
     assert repeated.state == "terminal"
     assert repeated.outcome == "skipped_existing"
     assert repeated.media_id is None
+    assert _table_count(manager, "jobs") == 0
+
+
+@pytest.mark.parametrize(
+    ("policy", "patch"),
+    [
+        ("include_existing", None),
+        ("update_metadata_only", {"title": "Cannot target an in-run duplicate"}),
+    ],
+)
+def test_create_run_rejects_in_run_reuse_without_media_id_before_side_effects(
+    service_context,
+    policy,
+    patch,
+):
+    service, _store, manager, media_db = service_context
+    collections_db = service.test_collections_db
+    override = {
+        "duplicate_policy": policy,
+        "duplicate_of_occurrence_id": "occ-first",
+    }
+    if patch is not None:
+        override["metadata_patch"] = patch
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
+        ReviewRequiredError,
+    )
+
+    with pytest.raises(ReviewRequiredError) as exc_info:
+        service.create_run(
+            "owner-1",
+            inputs=[
+                _direct_input("occ-first", "https://youtu.be/abc"),
+                _direct_input("occ-repeat", "https://www.youtube.com/watch?v=abc"),
+            ],
+            review_overrides={"occ-repeat": override},
+            new_collection={"name": "Must not be created"},
+        )
+
+    item = exc_info.value.items[0]
+    assert item.occurrence_id == "occ-repeat"
+    assert item.reason == "in_run_duplicate_requires_processing_or_skip"
+    assert [action.value for action in item.allowed_actions] == ["skip", "overwrite"]
+    assert media_db.metadata_calls == []
+    assert collections_db.create_calls == []
+    assert _table_count(manager, "media_ingest_runs") == 0
+    assert _table_count(manager, "jobs") == 0
+
+
+def test_create_run_plans_non_skip_collection_items_and_resolves_existing_membership(service_context):
+    service, store, manager, media_db = service_context
+    collections_db = service.test_collections_db
+    media_db.rows = [
+        {"id": 11, "url": "https://example.com/skip"},
+        {"id": 12, "url": "https://example.com/include"},
+    ]
+
+    created = service.create_run(
+        "owner-1",
+        inputs=[
+            _direct_input("occ-skip", "https://example.com/skip"),
+            _direct_input("occ-include", "https://example.com/include"),
+            _direct_input("occ-new", "https://example.com/new"),
+        ],
+        review_overrides={
+            "occ-skip": {"duplicate_policy": "skip", "existing_media_id": 11},
+            "occ-include": {"duplicate_policy": "include_existing", "existing_media_id": 12},
+        },
+        new_collection={
+            "name": "Playlist research",
+            "description": "Selected videos",
+            "default_tags": ["research"],
+        },
+    )
+
+    items = list(store.list_run_items("owner-1", created.run_id, limit=10))
+    assert created.collection_id == 700
+    assert [item.planned_collection_item_id for item in items] == [None, 701, 702]
+    assert [item["source_url"] for item in collections_db.create_calls[0]["items"]] == [
+        "https://example.com/include",
+        "https://example.com/new",
+    ]
+    assert collections_db.resolve_calls == [{"item_id": 701, "media_id": 12, "status": "skipped_existing"}]
+    assert _table_count(manager, "jobs") == 0
+
+
+def test_create_run_resolves_successful_metadata_update_collection_membership(service_context):
+    service, store, _manager, media_db = service_context
+    collections_db = service.test_collections_db
+    media_db.rows = [{"id": 17, "url": "https://example.com/update"}]
+
+    created = service.create_run(
+        "owner-1",
+        inputs=[_direct_input("occ-update", "https://example.com/update")],
+        review_overrides={
+            "occ-update": {
+                "duplicate_policy": "update_metadata_only",
+                "existing_media_id": 17,
+                "metadata_patch": {"title": "Reviewed"},
+            }
+        },
+        new_collection={"name": "Metadata updates"},
+    )
+
+    item = store.list_run_items("owner-1", created.run_id)[0]
+    assert item.planned_collection_item_id == 701
+    assert collections_db.resolve_calls == [{"item_id": 701, "media_id": 17, "status": "completed"}]
+
+
+def test_create_run_collection_attachment_failure_discards_plan_and_keeps_run_unsubmitted(
+    service_context,
+    monkeypatch,
+):
+    service, store, manager, _media_db = service_context
+    collections_db = service.test_collections_db
+    monkeypatch.setattr(
+        service._store,
+        "attach_collection_plan",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("attach exploded")),
+        raising=False,
+    )
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
+        PlaylistRunValidationError,
+    )
+
+    with pytest.raises(PlaylistRunValidationError, match="collection_planning_failed"):
+        service.create_run(
+            "owner-1",
+            inputs=[_direct_input("occ-new", "https://example.com/new")],
+            review_overrides={},
+            new_collection={"name": "Discard me"},
+        )
+
+    connection = manager._connect()
+    try:
+        run_id = connection.execute("SELECT run_id FROM media_ingest_runs").fetchone()[0]
+    finally:
+        connection.close()
+    run = store.get_run("owner-1", run_id)
+    item = store.list_run_items("owner-1", run_id)[0]
+    assert run.status == "staged"
+    assert run.collection_id is None
+    assert item.planned_collection_item_id is None
+    assert collections_db.discard_calls == [700]
+    assert _table_count(manager, "jobs") == 0
+
+
+def test_create_run_collection_creation_failure_keeps_staged_run_without_side_effects(service_context):
+    service, store, manager, _media_db = service_context
+    collections_db = service.test_collections_db
+    collections_db.create_error = RuntimeError("private create detail")
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
+        PlaylistRunValidationError,
+    )
+
+    with pytest.raises(PlaylistRunValidationError, match="collection_planning_failed"):
+        service.create_run(
+            "owner-1",
+            inputs=[_direct_input("occ-new", "https://example.com/new")],
+            review_overrides={},
+            new_collection={"name": "Create fails"},
+        )
+
+    connection = manager._connect()
+    try:
+        run_id = connection.execute("SELECT run_id FROM media_ingest_runs").fetchone()[0]
+    finally:
+        connection.close()
+    run = store.get_run("owner-1", run_id)
+    assert run.status == "staged"
+    assert run.collection_id is None
+    assert collections_db.discard_calls == []
+    assert _table_count(manager, "jobs") == 0
+
+
+def test_create_run_collection_factory_failure_is_safe_and_keeps_staged_run(service_context):
+    service, store, manager, _media_db = service_context
+    service._collections_db_factory = lambda _owner: (_ for _ in ()).throw(RuntimeError("private factory detail"))
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
+        PlaylistRunValidationError,
+    )
+
+    with pytest.raises(PlaylistRunValidationError) as exc_info:
+        service.create_run(
+            "owner-1",
+            inputs=[_direct_input("occ-new", "https://example.com/new")],
+            review_overrides={},
+            new_collection={"name": "Factory fails"},
+        )
+
+    assert str(exc_info.value) == "collection_planning_failed"
+    assert "private" not in str(exc_info.value)
+    connection = manager._connect()
+    try:
+        run_id = connection.execute("SELECT run_id FROM media_ingest_runs").fetchone()[0]
+    finally:
+        connection.close()
+    run = store.get_run("owner-1", run_id)
+    assert run.status == "staged"
+    assert run.collection_id is None
+    assert _table_count(manager, "jobs") == 0
+
+
+def test_create_run_collection_cleanup_failure_is_safe_and_explicit(service_context, monkeypatch):
+    service, _store, manager, _media_db = service_context
+    collections_db = service.test_collections_db
+    collections_db.discard_error = RuntimeError("private cleanup detail")
+    monkeypatch.setattr(
+        service._store,
+        "attach_collection_plan",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("private attach detail")),
+        raising=False,
+    )
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
+        PlaylistRunValidationError,
+    )
+
+    with pytest.raises(PlaylistRunValidationError) as exc_info:
+        service.create_run(
+            "owner-1",
+            inputs=[_direct_input("occ-new", "https://example.com/new")],
+            review_overrides={},
+            new_collection={"name": "Cleanup fails"},
+        )
+
+    assert str(exc_info.value) == "collection_planning_cleanup_failed"
+    assert "private" not in str(exc_info.value)
     assert _table_count(manager, "jobs") == 0
 
 

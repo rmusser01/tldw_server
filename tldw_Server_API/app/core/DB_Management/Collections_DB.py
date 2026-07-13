@@ -3358,6 +3358,67 @@ class CollectionsDatabase:
             raise KeyError("media_collection_not_found")
         return self._row_to_media_collection(row)
 
+    def discard_media_collection(
+        self,
+        collection_id: int,
+        *,
+        expected_item_ids: Iterable[int],
+    ) -> bool:
+        """Hard-delete one just-created unattached plan and all of its memberships."""
+        if type(collection_id) is not int or collection_id < 1:
+            raise ValueError("media_collection_discard_mismatch")
+        collection_id_value = collection_id
+        item_ids = list(expected_item_ids)
+        if (
+            len(item_ids) > 500
+            or len(set(item_ids)) != len(item_ids)
+            or any(type(item_id) is not int or item_id < 1 for item_id in item_ids)
+        ):
+            raise ValueError("media_collection_discard_mismatch")
+        with self.transaction() as conn:
+            existing = self.backend.execute(
+                """
+                SELECT id FROM media_collections
+                WHERE id = ? AND user_id = ? AND kind = 'playlist_ingest' AND deleted = ?
+                """,
+                (
+                    collection_id_value,
+                    self.user_id,
+                    self._coerce_bool_flag(False, postgres=self.backend_type == BackendType.POSTGRESQL),
+                ),
+                connection=conn,
+            ).first
+            if not existing:
+                raise KeyError("media_collection_not_found")
+            membership_rows = self.backend.execute(
+                """
+                SELECT id, status, media_id, content_item_id, latest_job_id
+                FROM media_collection_items
+                WHERE collection_id = ? AND user_id = ?
+                """,
+                (collection_id_value, self.user_id),
+                connection=conn,
+            ).rows
+            if {int(row["id"]) for row in membership_rows} != set(item_ids) or any(
+                row.get("status") != "planned"
+                or row.get("media_id") is not None
+                or row.get("content_item_id") is not None
+                or row.get("latest_job_id") is not None
+                for row in membership_rows
+            ):
+                raise ValueError("media_collection_discard_mismatch")
+            self.backend.execute(
+                "DELETE FROM media_collection_items WHERE collection_id = ? AND user_id = ?",
+                (collection_id_value, self.user_id),
+                connection=conn,
+            )
+            self.backend.execute(
+                "DELETE FROM media_collections WHERE id = ? AND user_id = ?",
+                (collection_id_value, self.user_id),
+                connection=conn,
+            )
+        return True
+
     def list_media_collections(
         self,
         *,

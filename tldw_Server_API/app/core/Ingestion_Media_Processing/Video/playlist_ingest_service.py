@@ -154,6 +154,13 @@ def _owner_media_db(owner_user_id: str) -> Any:
     return create_media_database(client_id=f"playlist_ingest:{owner_user_id}", db_path=str(db_path))
 
 
+def _owner_collections_db(owner_user_id: str) -> Any:
+    """Open the existing owner Collections DB adapter."""
+    from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
+
+    return CollectionsDatabase.for_user(owner_user_id)
+
+
 def _trusted_youtube_playlist(url: str) -> tuple[str, PlaylistUrlClassification]:
     """Validate and canonicalize only a credential-free YouTube playlist URL."""
     try:
@@ -213,10 +220,17 @@ def _trusted_youtube_playlist(url: str) -> tuple[str, PlaylistUrlClassification]
 class PlaylistIngestService:
     """Coordinate the reviewed store and existing Jobs manager."""
 
-    def __init__(self, job_manager, *, media_db_factory: Callable[[str], Any] | None = None) -> None:
+    def __init__(
+        self,
+        job_manager,
+        *,
+        media_db_factory: Callable[[str], Any] | None = None,
+        collections_db_factory: Callable[[str], Any] | None = None,
+    ) -> None:
         self._jobs = job_manager
         self._store = PlaylistIngestStore(job_manager)
         self._media_db_factory = media_db_factory or _owner_media_db
+        self._collections_db_factory = collections_db_factory or _owner_collections_db
 
     @staticmethod
     def public_error(error: dict | None) -> dict[str, str] | None:
@@ -594,12 +608,17 @@ class PlaylistIngestService:
         occurrence_id: str,
         reason: str,
         evidence: DuplicateEvidence,
+        allowed_actions: Sequence[DuplicatePolicy] | None = None,
     ) -> ReviewRequiredItem:
         return ReviewRequiredItem(
             occurrence_id=occurrence_id,
             reason=reason,
             evidence=evidence,
-            allowed_actions=list(DuplicatePolicy) if evidence.kind != "none" else [],
+            allowed_actions=(
+                list(allowed_actions)
+                if allowed_actions is not None
+                else (list(DuplicatePolicy) if evidence.kind != "none" else [])
+            ),
         )
 
     def create_run(
@@ -611,6 +630,7 @@ class PlaylistIngestService:
         processing_options: Mapping[str, Any] | None = None,
         playlist_summaries: Sequence[Mapping[str, Any]] | None = None,
         collection_id: int | None = None,
+        new_collection: Mapping[str, Any] | BaseModel | None = None,
     ) -> MediaIngestRunRecord:
         """Validate refreshed evidence, then atomically persist a mixed run manifest."""
         try:
@@ -628,6 +648,11 @@ class PlaylistIngestService:
                         [dict(summary) for summary in playlist_summaries] if playlist_summaries is not None else None
                     ),
                     "collection_id": collection_id,
+                    "new_collection": (
+                        new_collection.model_dump()
+                        if isinstance(new_collection, BaseModel)
+                        else (dict(new_collection) if new_collection is not None else None)
+                    ),
                 }
             )
         except (AttributeError, TypeError, ValueError, ValidationError) as exc:
@@ -692,6 +717,19 @@ class PlaylistIngestService:
                     )
                 )
                 continue
+            if current_evidence.kind == "in_run" and validated_override.duplicate_policy in {
+                DuplicatePolicy.INCLUDE_EXISTING,
+                DuplicatePolicy.UPDATE_METADATA_ONLY,
+            }:
+                review_items.append(
+                    self._review_required_item(
+                        occurrence_id,
+                        "in_run_duplicate_requires_processing_or_skip",
+                        current_evidence,
+                        [DuplicatePolicy.SKIP, DuplicatePolicy.OVERWRITE],
+                    )
+                )
+                continue
             item["action"] = validated_override.duplicate_policy.value
             item["existing_media_id"] = current_evidence.existing_media_id
             item["metadata_patch"] = (
@@ -729,14 +767,115 @@ class PlaylistIngestService:
             playlist_summaries=request.playlist_summaries,
             collection_id=request.collection_id,
         )
-        self._resolve_nonprocessing_actions(owner, created.run_id, manifest)
+        collections_db = None
+        try:
+            if request.new_collection is not None:
+                try:
+                    collections_db = self._collections_db_factory(owner)
+                except Exception as exc:
+                    raise PlaylistRunValidationError("collection_planning_failed") from exc
+                created = self._create_and_attach_collection_plan(
+                    owner,
+                    created.run_id,
+                    manifest,
+                    request.new_collection,
+                    collections_db,
+                )
+            self._resolve_nonprocessing_actions(
+                owner,
+                created.run_id,
+                manifest,
+                collections_db=collections_db,
+            )
+        finally:
+            if collections_db is not None:
+                with contextlib.suppress(Exception):
+                    collections_db.close()
         return self._store.get_run(owner, created.run_id)
+
+    def _create_and_attach_collection_plan(
+        self,
+        owner_user_id: str,
+        run_id: str,
+        items: list[dict[str, Any]],
+        collection_request: BaseModel,
+        collections_db: Any,
+    ) -> MediaIngestRunRecord:
+        """Create one non-skip plan, then compensate if run attachment fails."""
+        planned_items: list[dict[str, Any]] = []
+        planned_occurrences: list[str] = []
+        for ordinal, item in enumerate(items, start=1):
+            if item.get("action") == "skip":
+                continue
+            display = dict(item.get("display_metadata") or {})
+            occurrence_id = str(item["occurrence_id"])
+            planned_occurrences.append(occurrence_id)
+            planned_items.append(
+                {
+                    "source_url": item.get("source_url") or f"urn:tldw:file-stub:{occurrence_id}",
+                    "normalized_source_id": item.get("normalized_source_id"),
+                    "source_kind": item.get("source_kind"),
+                    "ordinal": ordinal,
+                    "title": display.get("title"),
+                    "speaker": display.get("channel_or_uploader"),
+                    "published_at": display.get("published_at"),
+                    "duplicate_status": "existing" if item.get("action") != "ingest" else "unknown",
+                }
+            )
+        try:
+            collection = collections_db.create_media_collection_with_items(
+                name=collection_request.name,
+                kind="playlist_ingest",
+                description=collection_request.description,
+                source_url=collection_request.source_url,
+                default_tags=collection_request.default_tags,
+                items=planned_items,
+            )
+        except Exception as exc:
+            raise PlaylistRunValidationError("collection_planning_failed") from exc
+
+        collection_items = list(collection.items)
+        collection_item_ids = [int(item.id) for item in collection_items]
+        if len(collection_items) != len(planned_occurrences):
+            try:
+                collections_db.discard_media_collection(
+                    int(collection.id),
+                    expected_item_ids=collection_item_ids,
+                )
+            except Exception as cleanup_exc:
+                raise PlaylistRunValidationError("collection_planning_cleanup_failed") from cleanup_exc
+            raise PlaylistRunValidationError("collection_planning_failed")
+        mapping = {
+            occurrence_id: int(planned_item.id)
+            for occurrence_id, planned_item in zip(planned_occurrences, collection_items, strict=True)
+        }
+        try:
+            attached = self._store.attach_collection_plan(
+                owner_user_id,
+                run_id,
+                collection_id=int(collection.id),
+                planned_item_ids=mapping,
+            )
+        except Exception as exc:
+            try:
+                collections_db.discard_media_collection(
+                    int(collection.id),
+                    expected_item_ids=collection_item_ids,
+                )
+            except Exception as cleanup_exc:
+                raise PlaylistRunValidationError("collection_planning_cleanup_failed") from cleanup_exc
+            raise PlaylistRunValidationError("collection_planning_failed") from exc
+        for item in items:
+            item["planned_collection_item_id"] = mapping.get(str(item["occurrence_id"]))
+        return attached
 
     def _resolve_nonprocessing_actions(
         self,
         owner_user_id: str,
         run_id: str,
         items: Sequence[Mapping[str, Any]],
+        *,
+        collections_db: Any | None = None,
     ) -> None:
         """Finish reviewed library-duplicate actions without creating media jobs."""
         metadata_db = None
@@ -771,6 +910,17 @@ class PlaylistIngestService:
                     outcome=outcome,
                     media_id=int(media_id) if media_id is not None else None,
                 )
+                planned_item_id = item.get("planned_collection_item_id")
+                if (
+                    collections_db is not None
+                    and planned_item_id is not None
+                    and outcome in {"included_existing", "metadata_updated"}
+                ):
+                    collections_db.resolve_media_collection_item(
+                        int(planned_item_id),
+                        media_id=int(media_id),
+                        status="skipped_existing" if outcome == "included_existing" else "completed",
+                    )
         finally:
             if metadata_db is not None:
                 with contextlib.suppress(Exception):
