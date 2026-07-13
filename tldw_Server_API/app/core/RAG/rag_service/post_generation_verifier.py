@@ -445,6 +445,10 @@ class PostGenerationVerifier:
         fixed = False
         new_answer: str | None = None
         while retries < self._max_retries:
+            if retrieval_provider_failed:
+                outcome.reason = "retrieval_provider_unavailable"
+                break
+
             retries += 1
             increment_counter("rag_adaptive_retries_total", 1)
 
@@ -538,10 +542,13 @@ class PostGenerationVerifier:
                                     _record_embedding_degradation(outcome, exc)
                                     logger.debug("Adaptive per-query retrieval failed; continuing")
 
-                            merged_docs = sorted(docs_union.values(), key=lambda x: getattr(x, "score", 0.0), reverse=True)
-                            merged_docs = merged_docs[: max(5, min(30, top_k * 2))]
-                            # Apply simple diversity filter to reduce near-duplicates
-                            new_docs = _select_diverse(merged_docs, k=max(5, min(15, top_k)))
+                            if retrieval_provider_failed:
+                                new_docs = base_documents[:]
+                            else:
+                                merged_docs = sorted(docs_union.values(), key=lambda x: getattr(x, "score", 0.0), reverse=True)
+                                merged_docs = merged_docs[: max(5, min(30, top_k * 2))]
+                                # Apply simple diversity filter to reduce near-duplicates
+                                new_docs = _select_diverse(merged_docs, k=max(5, min(15, top_k)))
             except (ByokResolutionError, ChatAPIError) as e:
                 retrieval_provider_failed = True
                 _record_embedding_degradation(outcome, e)
@@ -551,6 +558,10 @@ class PostGenerationVerifier:
                 _record_embedding_degradation(outcome, e)
                 logger.debug(f"Adaptive retrieval failed; using base docs. Reason: {_safe_exception_label(e)}")
                 new_docs = base_documents[:]
+
+            if retrieval_provider_failed:
+                outcome.reason = "retrieval_provider_unavailable"
+                break
 
             # Regenerate if possible
             try:

@@ -608,7 +608,8 @@ async def test_claim_retrieval_latches_first_provider_failure(monkeypatch):
 @pytest.mark.asyncio
 async def test_claim_provider_failure_latches_adaptive_retrieval(monkeypatch):
     dispatches = 0
-    generated_contexts: list[str] = []
+    generator_calls = 0
+    recheck_calls = 0
 
     class _MediaRetriever:
         async def retrieve_hybrid(self, **_kwargs):
@@ -626,6 +627,13 @@ async def test_claim_provider_failure_latches_adaptive_retrieval(monkeypatch):
 
     class _ClaimsEngine:
         async def run(self, **kwargs):
+            nonlocal recheck_calls
+            if kwargs["retrieve_fn"] is None:
+                recheck_calls += 1
+                return {
+                    "claims": [{"id": "repaired"}],
+                    "summary": {"supported": 1, "refuted": 0, "nei": 0},
+                }
             assert await kwargs["retrieve_fn"]("unsupported claim") == []
             return {
                 "claims": [{"id": "c1"}],
@@ -637,8 +645,9 @@ async def test_claim_provider_failure_latches_adaptive_retrieval(monkeypatch):
             pass
 
         async def generate(self, **kwargs):
-            generated_contexts.append(kwargs["context"])
-            return {"answer": ""}
+            nonlocal generator_calls
+            generator_calls += 1
+            return {"answer": "Replacement answer."}
 
     verifier = PostGenerationVerifier(
         max_retries=1,
@@ -664,12 +673,95 @@ async def test_claim_provider_failure_latches_adaptive_retrieval(monkeypatch):
     )
 
     assert dispatches == 1
-    assert generated_contexts == ["A\n\nB"]
+    assert generator_calls == 0
+    assert recheck_calls == 0
     assert base_documents == _base_docs()
     assert outcome.new_answer is None
     assert outcome.fixed is False
     assert outcome.total_claims == 1
     assert outcome.unsupported_ratio == 1.0
+    assert outcome.embedding_coverage == "degraded"
+    assert outcome.embedding_failure_code == "provider_configuration_invalid"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_adaptive_provider_failure_aborts_repair_before_empty_union(monkeypatch):
+    dispatches = 0
+    generator_calls = 0
+    runner_calls = 0
+    diversity_calls = 0
+
+    class _MediaRetriever:
+        async def retrieve_hybrid(self, **_kwargs):
+            nonlocal dispatches
+            dispatches += 1
+            raise ChatConfigurationError(
+                "secret endpoint configuration detail",
+                provider="local_api",
+                error_code="provider_configuration_invalid",
+            )
+
+    class _MultiDatabaseRetriever:
+        def __init__(self, *args, **kwargs):
+            self.retrievers = {verifier_module.DataSource.MEDIA_DB: _MediaRetriever()}
+
+    class _AnswerGenerator:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def generate(self, **_kwargs):
+            nonlocal generator_calls
+            generator_calls += 1
+            return {"answer": "Replacement answer."}
+
+    async def claims_runner(**_kwargs):
+        nonlocal runner_calls
+        runner_calls += 1
+        if runner_calls == 1:
+            return {
+                "claims": [{"id": "c1"}],
+                "summary": {"supported": 0, "refuted": 1, "nei": 0},
+            }
+        return {
+            "claims": [{"id": "repaired"}],
+            "summary": {"supported": 1, "refuted": 0, "nei": 0},
+        }
+
+    def select_diverse(docs, **_kwargs):
+        nonlocal diversity_calls
+        diversity_calls += 1
+        return docs
+
+    monkeypatch.setattr(verifier_module, "MultiDatabaseRetriever", _MultiDatabaseRetriever)
+    monkeypatch.setattr(verifier_module, "generate_hypothetical_answer", None)
+    monkeypatch.setattr(verifier_module, "hyde_embed_text", None)
+    monkeypatch.setattr(verifier_module, "multi_strategy_expansion", None)
+    monkeypatch.setattr(verifier_module, "AnswerGenerator", _AnswerGenerator)
+    monkeypatch.setattr(verifier_module, "_select_diverse", select_diverse)
+
+    verifier = PostGenerationVerifier(
+        claims_runner=claims_runner,
+        max_retries=1,
+        unsupported_threshold=0.1,
+        use_advanced_rewrites=True,
+        credential_runtime=object(),
+    )
+    base_documents = _base_docs()
+    outcome = await verifier.verify_and_maybe_fix(
+        query="What is RAG?",
+        answer="Original answer.",
+        base_documents=base_documents,
+        media_db_path="media.db",
+    )
+
+    assert dispatches == 1
+    assert diversity_calls == 0
+    assert generator_calls == 0
+    assert runner_calls == 1
+    assert base_documents == _base_docs()
+    assert outcome.new_answer is None
+    assert outcome.fixed is False
     assert outcome.embedding_coverage == "degraded"
     assert outcome.embedding_failure_code == "provider_configuration_invalid"
 
