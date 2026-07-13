@@ -315,6 +315,107 @@ async def test_unified_bound_sgl_error_result_is_unavailable_and_unmarked(
     assert sensitive not in str(result.errors)  # nosec B101
 
 
+@pytest.mark.parametrize("stage", ["gap", "reranker", "critique", "faithfulness"])
+@pytest.mark.parametrize(
+    ("first_chunk", "expected_marked"),
+    [
+        ("valid provider content", True),
+        (": keepalive\n\n", False),
+        ("Error: streamed provider failure", False),
+    ],
+)
+@pytest.mark.asyncio
+async def test_unified_bound_sgl_stream_failure_marks_only_after_content(
+    monkeypatch: pytest.MonkeyPatch,
+    stage: str,
+    first_chunk: str,
+    expected_marked: bool,
+) -> None:
+    runtime = _RecordingCredentialRuntime()
+    sensitive = "private streamed provider detail"
+
+    def partial_response() -> Any:
+        yield first_chunk
+        raise SummaryProviderError(code="authentication", provider="anthropic")
+
+    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
+
+    monkeypatch.setattr(sgl, "analyze", lambda *args, **kwargs: partial_response())
+
+    result = await _run_unified_bound_sgl_stage(monkeypatch, stage, runtime)
+
+    assert runtime.marked == ([runtime.handle] if expected_marked else [])  # nosec B101
+    metadata_key = {
+        "gap": "gap_analysis",
+        "reranker": "reranking",
+        "critique": "synthesis",
+        "faithfulness": "faithfulness",
+    }[stage]
+    assert result.metadata[metadata_key]["failure_code"] == "provider_unavailable"  # nosec B101
+    assert result.metadata[metadata_key]["verification_available"] is False  # nosec B101
+    assert sensitive not in str(result.metadata)  # nosec B101
+    assert sensitive not in str(result.errors)  # nosec B101
+
+
+@pytest.mark.parametrize("stage", ["gap", "reranker", "critique", "faithfulness"])
+@pytest.mark.asyncio
+async def test_unified_bound_sgl_clean_empty_stream_marks_once(
+    monkeypatch: pytest.MonkeyPatch,
+    stage: str,
+) -> None:
+    runtime = _RecordingCredentialRuntime()
+
+    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
+
+    monkeypatch.setattr(sgl, "analyze", lambda *args, **kwargs: iter(()))
+
+    await _run_unified_bound_sgl_stage(monkeypatch, stage, runtime)
+
+    assert runtime.marked == [runtime.handle]  # nosec B101
+
+
+def test_bound_sgl_rejects_streamed_error_after_valid_content() -> None:
+    used: list[bool] = []
+
+    with pytest.raises(SummaryProviderError):
+        unified_pipeline_module._consume_bound_sgl_response(
+            iter(("valid provider content", "Error: private provider detail")),
+            "anthropic",
+            on_content=lambda: used.append(True),
+        )
+
+    assert used == [True]  # nosec B101
+
+
+@pytest.mark.parametrize(
+    ("stage", "metadata_key"),
+    [("gap", "gap_analysis"), ("critique", "synthesis")],
+)
+@pytest.mark.asyncio
+async def test_unified_runtime_bound_auxiliary_generic_failure_is_bounded(
+    monkeypatch: pytest.MonkeyPatch,
+    stage: str,
+    metadata_key: str,
+) -> None:
+    runtime = _RecordingCredentialRuntime()
+    sensitive = "private generic auxiliary failure"
+
+    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
+
+    def failing_analyze(*args: Any, **kwargs: Any) -> str:
+        raise RuntimeError(sensitive)
+
+    monkeypatch.setattr(sgl, "analyze", failing_analyze)
+
+    result = await _run_unified_bound_sgl_stage(monkeypatch, stage, runtime)
+
+    assert runtime.marked == []  # nosec B101
+    assert result.metadata[metadata_key]["failure_code"] == "provider_unavailable"  # nosec B101
+    assert result.metadata[metadata_key]["verification_available"] is False  # nosec B101
+    assert sensitive not in str(result.metadata)  # nosec B101
+    assert sensitive not in str(result.errors)  # nosec B101
+
+
 @pytest.mark.asyncio
 async def test_execute_generation_phase_builds_rag_result_from_derived_evidence():
     resolved = ResolvedRAGRequest(
@@ -648,7 +749,7 @@ async def test_unified_llm_reranker_runtime_failure_does_not_fail_over_provider(
 
 
 @pytest.mark.asyncio
-async def test_unified_llm_reranker_partial_stream_failure_is_bounded_and_unmarked(
+async def test_unified_llm_reranker_partial_stream_failure_is_bounded_and_marked(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runtime = _RecordingCredentialRuntime()
@@ -725,7 +826,7 @@ async def test_unified_llm_reranker_partial_stream_failure_is_bounded_and_unmark
     )
 
     assert runtime.resolved == ["anthropic"]  # nosec B101
-    assert runtime.marked == []  # nosec B101
+    assert runtime.marked == [runtime.handle]  # nosec B101
     assert captured["rerank_scores"] == [document.score]  # nosec B101
     assert captured["analyze_kwargs"]["api_key"] == "runtime-only-key"  # nosec B101
     assert captured["analyze_kwargs"]["credentials_resolved"] is True  # nosec B101
@@ -735,6 +836,83 @@ async def test_unified_llm_reranker_partial_stream_failure_is_bounded_and_unmark
     }
     assert sensitive_partial not in str(result.metadata)  # nosec B101
     assert sensitive_partial not in str(result.errors)  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_unified_llm_reranker_marks_prior_success_before_cancellation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _RecordingCredentialRuntime()
+    analyze_calls = 0
+    documents = [
+        Document(
+            id=f"doc-rerank-cancel-{index}",
+            content=f"Evidence {index}.",
+            metadata={},
+            source=DataSource.MEDIA_DB,
+            score=0.8 - index * 0.1,
+        )
+        for index in range(2)
+    ]
+
+    class FakeRetriever:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        async def retrieve(self, *args: Any, **kwargs: Any) -> list[Document]:
+            return documents
+
+    class CancellingReranker:
+        def __init__(self, llm_client: Any) -> None:
+            self.llm_client = llm_client
+
+        async def rerank(self, query: str, documents: list[Document]) -> list[Document]:
+            self.llm_client.analyze("first rerank prompt")
+            self.llm_client.analyze("second rerank prompt")
+            raise AssertionError("second provider call should cancel")
+
+    def fake_create_reranker(
+        strategy: Any,
+        config: Any,
+        llm_client: Any = None,
+    ) -> CancellingReranker:
+        return CancellingReranker(llm_client)
+
+    def fake_analyze(*args: Any, **kwargs: Any) -> str:
+        nonlocal analyze_calls
+        analyze_calls += 1
+        if analyze_calls == 1:
+            return "0.8"
+        raise asyncio.CancelledError
+
+    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
+    import tldw_Server_API.app.core.config as core_config
+
+    monkeypatch.setattr(unified_pipeline_module, "MultiDatabaseRetriever", FakeRetriever)
+    monkeypatch.setattr(unified_pipeline_module, "create_reranker", fake_create_reranker)
+    monkeypatch.setattr(sgl, "analyze", fake_analyze)
+    monkeypatch.setattr(
+        core_config,
+        "load_and_log_configs",
+        lambda: {
+            "RAG_LLM_RERANKER_PROVIDER": "anthropic",
+            "RAG_LLM_RERANKER_MODEL": "rerank-model",
+        },
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await unified_pipeline_module.unified_rag_pipeline(
+            query="cancel reranking",
+            sources=["media_db"],
+            enable_cache=False,
+            enable_reranking=True,
+            reranking_strategy="llm_scoring",
+            enable_generation=False,
+            credential_runtime=runtime,
+        )
+
+    assert analyze_calls == 2  # nosec B101
+    assert runtime.marked == [runtime.handle]  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -828,7 +1006,7 @@ async def test_post_verifier_repair_consumes_task_runtime(
 
 
 @pytest.mark.asyncio
-async def test_post_verifier_partial_provider_stream_is_unavailable_and_not_marked(
+async def test_post_verifier_partial_provider_stream_is_unavailable_and_marked(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runtime = _RecordingCredentialRuntime()
@@ -877,7 +1055,7 @@ async def test_post_verifier_partial_provider_stream_is_unavailable_and_not_mark
     )
 
     assert runtime.resolved == ["anthropic"]  # nosec B101
-    assert runtime.marked == []  # nosec B101
+    assert runtime.marked == [runtime.handle]  # nosec B101
     assert captured["args"][3] == "runtime-only-key"  # nosec B101
     assert captured["kwargs"]["app_config"] == {  # nosec B101
         "Anthropic": {"api_timeout": 12}
@@ -982,6 +1160,328 @@ async def test_claims_multicall_failure_marks_prior_completed_call(
     }
 
 
+@pytest.mark.parametrize("failure_kind", ["provider", "cancel", "partial"])
+@pytest.mark.asyncio
+async def test_preextracted_claims_mark_prior_completed_provider_call(
+    monkeypatch: pytest.MonkeyPatch,
+    failure_kind: str,
+) -> None:
+    runtime = _RecordingCredentialRuntime()
+    analyze_calls = 0
+    document = Document(
+        id="doc-preextracted-claims",
+        content="Stored claims evidence.",
+        metadata={"media_id": 7},
+        source=DataSource.MEDIA_DB,
+        score=0.8,
+    )
+
+    class FakeRetriever:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        async def retrieve(self, *args: Any, **kwargs: Any) -> list[Document]:
+            return [document]
+
+    class FakeAnswerGenerator:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        async def generate(self, **kwargs: Any) -> dict[str, str]:
+            return {"answer": "A claim-bearing answer."}
+
+    class FakeManagedDatabase:
+        def __enter__(self) -> "FakeManagedDatabase":
+            return self
+
+        def __exit__(self, *args: Any) -> bool:
+            return False
+
+        def execute_query(self, *args: Any, **kwargs: Any) -> Any:
+            return SimpleNamespace(
+                fetchall=lambda: [("first stored claim",), ("second stored claim",)]
+            )
+
+    class DirectVerifierClaimsEngine:
+        def __init__(self, analyze_fn: Any) -> None:
+            self.analyze_fn = analyze_fn
+            self.verifier = SimpleNamespace(verify=self._verify)
+
+        async def _verify(self, **kwargs: Any) -> Any:
+            self.analyze_fn("anthropic", kwargs["claim"].text, None)
+            return SimpleNamespace(label="supported")
+
+        async def run(self, **kwargs: Any) -> dict[str, Any]:
+            raise AssertionError("pre-extracted claims must bypass engine.run")
+
+    def fake_analyze(*args: Any, **kwargs: Any) -> Any:
+        nonlocal analyze_calls
+        analyze_calls += 1
+        if failure_kind == "partial":
+            def partial_response() -> Any:
+                yield "partial private provider output"
+                raise SummaryProviderError(code="authentication", provider="anthropic")
+
+            return partial_response()
+        if analyze_calls == 1:
+            return "completed provider response"
+        if failure_kind == "cancel":
+            raise asyncio.CancelledError
+        raise SummaryProviderError(code="authentication", provider="anthropic")
+
+    import tldw_Server_API.app.core.Claims_Extraction.claims_engine as claims_engine_module
+    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
+
+    monkeypatch.setattr(
+        claims_engine_module,
+        "_resolve_claims_llm_config",
+        lambda: ("anthropic", None, 0.1),
+    )
+    monkeypatch.setattr(sgl, "analyze", fake_analyze)
+    monkeypatch.setattr(unified_pipeline_module, "MultiDatabaseRetriever", FakeRetriever)
+    monkeypatch.setattr(unified_pipeline_module, "AnswerGenerator", FakeAnswerGenerator)
+    monkeypatch.setattr(unified_pipeline_module, "ClaimsEngine", DirectVerifierClaimsEngine)
+    monkeypatch.setattr(
+        unified_pipeline_module,
+        "managed_media_database",
+        lambda **kwargs: FakeManagedDatabase(),
+    )
+
+    pipeline_call = unified_pipeline_module.unified_rag_pipeline(
+        query="verify stored claims",
+        sources=["media_db"],
+        enable_cache=False,
+        enable_reranking=False,
+        enable_generation=True,
+        enable_claims=True,
+        enable_pre_retrieval_clarification=False,
+        media_db_path="/tmp/media.db",
+        credential_runtime=runtime,
+    )
+    if failure_kind == "cancel":
+        with pytest.raises(asyncio.CancelledError):
+            await pipeline_call
+    else:
+        result = await pipeline_call
+        assert result.metadata["claims"] == {  # nosec B101
+            "failure_code": "provider_unavailable",
+            "verification_available": False,
+        }
+
+    expected_calls = 1 if failure_kind == "partial" else 2
+    expected_marks = [runtime.handle]
+    assert analyze_calls == expected_calls  # nosec B101
+    assert runtime.marked == expected_marks  # nosec B101
+
+
+@pytest.mark.parametrize("pipeline_kind", ["unified", "agentic", "post"])
+@pytest.mark.parametrize(
+    "response_kind",
+    [
+        "error_string",
+        "streamed_error_string",
+        "content_then_error_string",
+        "partial_stream",
+    ],
+)
+@pytest.mark.asyncio
+async def test_claims_provider_failure_is_unavailable_with_accurate_use(
+    monkeypatch: pytest.MonkeyPatch,
+    pipeline_kind: str,
+    response_kind: str,
+) -> None:
+    runtime = _RecordingCredentialRuntime()
+    sensitive = "private legacy provider detail"
+    document = Document(
+        id=f"doc-legacy-error-{pipeline_kind}",
+        content="Claims evidence.",
+        metadata={},
+        source=DataSource.MEDIA_DB,
+        score=0.8,
+    )
+
+    class FakeRetriever:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        async def retrieve(self, *args: Any, **kwargs: Any) -> list[Document]:
+            return [document]
+
+    class FakeAnswerGenerator:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        async def generate(self, **kwargs: Any) -> dict[str, str]:
+            return {"answer": "A claim-bearing answer."}
+
+    class LegacyErrorClaimsEngine:
+        def __init__(self, analyze_fn: Any) -> None:
+            self.analyze_fn = analyze_fn
+
+        async def run(self, **kwargs: Any) -> dict[str, Any]:
+            response = self.analyze_fn("anthropic", "claims prompt", None)
+            return {
+                "claims": [{"text": response}],
+                "summary": {"supported": 1, "refuted": 0, "nei": 0},
+            }
+
+    def fake_analyze(*args: Any, **kwargs: Any) -> Any:
+        if response_kind == "error_string":
+            return f"Error: provider failed {sensitive}"
+
+        if response_kind == "streamed_error_string":
+            return iter((f"Error: provider failed {sensitive}",))
+
+        if response_kind == "content_then_error_string":
+            return iter(
+                (
+                    "valid provider content",
+                    f"Error: provider failed {sensitive}",
+                )
+            )
+
+        def partial_response() -> Any:
+            yield "valid provider content"
+            raise SummaryProviderError(code="authentication", provider="anthropic")
+
+        return partial_response()
+
+    import tldw_Server_API.app.core.Claims_Extraction.claims_engine as claims_engine_module
+    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
+    import tldw_Server_API.app.core.RAG.rag_service.claims as rag_claims_module
+
+    monkeypatch.setattr(
+        claims_engine_module,
+        "_resolve_claims_llm_config",
+        lambda: ("anthropic", None, 0.1),
+    )
+    monkeypatch.setattr(sgl, "analyze", fake_analyze)
+    monkeypatch.setattr(rag_claims_module, "ClaimsEngine", LegacyErrorClaimsEngine, raising=False)
+
+    if pipeline_kind == "unified":
+        monkeypatch.setattr(unified_pipeline_module, "MultiDatabaseRetriever", FakeRetriever)
+        monkeypatch.setattr(unified_pipeline_module, "AnswerGenerator", FakeAnswerGenerator)
+        monkeypatch.setattr(unified_pipeline_module, "ClaimsEngine", LegacyErrorClaimsEngine)
+        result = await unified_pipeline_module.unified_rag_pipeline(
+            query="verify claims",
+            sources=["media_db"],
+            enable_cache=False,
+            enable_reranking=False,
+            enable_generation=True,
+            enable_claims=True,
+            enable_pre_retrieval_clarification=False,
+            credential_runtime=runtime,
+        )
+        failure = result.metadata["claims"]
+        exposed = f"{result.metadata} {result.errors}"
+    elif pipeline_kind == "agentic":
+        monkeypatch.setattr(agentic_chunker, "MultiDatabaseRetriever", FakeRetriever)
+        monkeypatch.setattr(generation_module, "AnswerGenerator", FakeAnswerGenerator)
+        result = await agentic_chunker.agentic_rag_pipeline(
+            query="verify claims",
+            sources=["media_db"],
+            search_mode="fts",
+            agentic=AgenticConfig(top_k_docs=1, enable_tools=False),
+            enable_generation=True,
+            enable_claims=True,
+            credential_runtime=runtime,
+        )
+        failure = result.metadata["claims"]
+        exposed = f"{result.metadata} {result.errors}"
+    else:
+        monkeypatch.setattr(verifier_module, "ClaimsEngine", LegacyErrorClaimsEngine)
+        outcome = await PostGenerationVerifier(
+            max_retries=0,
+            credential_runtime=runtime,
+        ).verify_and_maybe_fix(
+            query="verify claims",
+            answer="A claim-bearing answer.",
+            base_documents=[document],
+        )
+        failure = {
+            "failure_code": outcome.failure_code,
+            "verification_available": outcome.verification_available,
+        }
+        exposed = str(outcome)
+
+    assert failure == {  # nosec B101
+        "failure_code": "provider_unavailable",
+        "verification_available": False,
+    }
+    expected_marks = (
+        [runtime.handle]
+        if response_kind in {"content_then_error_string", "partial_stream"}
+        else []
+    )
+    assert runtime.marked == expected_marks  # nosec B101
+    assert sensitive not in exposed  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_unified_runtime_bound_claims_generic_failure_is_bounded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _RecordingCredentialRuntime()
+    sensitive = "private generic claims failure"
+    document = Document(
+        id="doc-generic-claims",
+        content="Claims evidence.",
+        metadata={},
+        source=DataSource.MEDIA_DB,
+        score=0.8,
+    )
+
+    class FakeRetriever:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        async def retrieve(self, *args: Any, **kwargs: Any) -> list[Document]:
+            return [document]
+
+    class FakeAnswerGenerator:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        async def generate(self, **kwargs: Any) -> dict[str, str]:
+            return {"answer": "A claim-bearing answer."}
+
+    class FailingClaimsEngine:
+        def __init__(self, analyze_fn: Any) -> None:
+            pass
+
+        async def run(self, **kwargs: Any) -> dict[str, Any]:
+            raise RuntimeError(sensitive)
+
+    import tldw_Server_API.app.core.Claims_Extraction.claims_engine as claims_engine_module
+
+    monkeypatch.setattr(
+        claims_engine_module,
+        "_resolve_claims_llm_config",
+        lambda: ("anthropic", None, 0.1),
+    )
+    monkeypatch.setattr(unified_pipeline_module, "MultiDatabaseRetriever", FakeRetriever)
+    monkeypatch.setattr(unified_pipeline_module, "AnswerGenerator", FakeAnswerGenerator)
+    monkeypatch.setattr(unified_pipeline_module, "ClaimsEngine", FailingClaimsEngine)
+
+    result = await unified_pipeline_module.unified_rag_pipeline(
+        query="verify claims",
+        sources=["media_db"],
+        enable_cache=False,
+        enable_reranking=False,
+        enable_generation=True,
+        enable_claims=True,
+        enable_pre_retrieval_clarification=False,
+        credential_runtime=runtime,
+    )
+
+    assert result.metadata["claims"] == {  # nosec B101
+        "failure_code": "provider_unavailable",
+        "verification_available": False,
+    }
+    assert sensitive not in str(result.metadata)  # nosec B101
+    assert sensitive not in str(result.errors)  # nosec B101
+
+
 @pytest.mark.asyncio
 async def test_post_verifier_initial_multicall_failure_marks_prior_completed_call(
     monkeypatch: pytest.MonkeyPatch,
@@ -1026,6 +1526,40 @@ async def test_post_verifier_initial_multicall_failure_marks_prior_completed_cal
     assert outcome.reason == "verification_unavailable"  # nosec B101
     assert outcome.failure_code == "provider_unavailable"  # nosec B101
     assert outcome.verification_available is False  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_post_verifier_initial_generic_failure_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _RecordingCredentialRuntime()
+    sensitive = "private initial verification failure"
+
+    class FailingClaimsEngine:
+        def __init__(self, analyze_fn: Any) -> None:
+            pass
+
+        async def run(self, **kwargs: Any) -> dict[str, Any]:
+            raise RuntimeError(sensitive)
+
+    import tldw_Server_API.app.core.Claims_Extraction.claims_engine as claims_engine_module
+
+    monkeypatch.setattr(
+        claims_engine_module,
+        "_resolve_claims_llm_config",
+        lambda: ("anthropic", None, 0.1),
+    )
+    monkeypatch.setattr(verifier_module, "ClaimsEngine", FailingClaimsEngine)
+
+    outcome = await PostGenerationVerifier(
+        max_retries=0,
+        credential_runtime=runtime,
+    ).verify_and_maybe_fix(query="question", answer="answer", base_documents=[])
+
+    assert outcome.reason == "verification_unavailable"  # nosec B101
+    assert outcome.failure_code == "provider_unavailable"  # nosec B101
+    assert outcome.verification_available is False  # nosec B101
+    assert sensitive not in str(outcome)  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -1089,6 +1623,58 @@ async def test_post_verifier_recheck_multicall_failure_marks_prior_completed_cal
     assert outcome.reason == "verification_unavailable"  # nosec B101
     assert outcome.failure_code == "provider_unavailable"  # nosec B101
     assert outcome.verification_available is False  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_post_verifier_recheck_generic_failure_is_not_successful_repair(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _RecordingCredentialRuntime()
+    sensitive = "private recheck failure"
+    engine_instances = 0
+
+    class FailingRecheckClaimsEngine:
+        def __init__(self, analyze_fn: Any) -> None:
+            nonlocal engine_instances
+            engine_instances += 1
+            self.instance = engine_instances
+
+        async def run(self, **kwargs: Any) -> dict[str, Any]:
+            if self.instance == 1:
+                return {
+                    "claims": [],
+                    "summary": {"supported": 0, "refuted": 1, "nei": 0},
+                }
+            raise RuntimeError(sensitive)
+
+    class FakeAnswerGenerator:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        async def generate(self, **kwargs: Any) -> dict[str, str]:
+            return {"answer": "repaired answer"}
+
+    import tldw_Server_API.app.core.Claims_Extraction.claims_engine as claims_engine_module
+
+    monkeypatch.setattr(
+        claims_engine_module,
+        "_resolve_claims_llm_config",
+        lambda: ("anthropic", None, 0.1),
+    )
+    monkeypatch.setattr(verifier_module, "ClaimsEngine", FailingRecheckClaimsEngine)
+    monkeypatch.setattr(verifier_module, "AnswerGenerator", FakeAnswerGenerator)
+
+    outcome = await PostGenerationVerifier(
+        max_retries=1,
+        unsupported_threshold=0.1,
+        credential_runtime=runtime,
+    ).verify_and_maybe_fix(query="question", answer="answer", base_documents=[])
+
+    assert outcome.fixed is False  # nosec B101
+    assert outcome.reason == "verification_unavailable"  # nosec B101
+    assert outcome.failure_code == "provider_unavailable"  # nosec B101
+    assert outcome.verification_available is False  # nosec B101
+    assert sensitive not in str(outcome)  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -1161,6 +1747,117 @@ async def test_runtime_bound_grader_timeout_uses_unavailable_native_fallback(
         "error": "provider_unavailable",
         "verification_available": False,
     }
+
+
+@pytest.mark.parametrize("runtime_bound", [False, True])
+@pytest.mark.asyncio
+async def test_filter_relevant_batch_timeout_preserves_runtime_trust_state(
+    monkeypatch: pytest.MonkeyPatch,
+    runtime_bound: bool,
+) -> None:
+    runtime = _RecordingCredentialRuntime() if runtime_bound else None
+    document = Document(
+        id="doc-batch-timeout",
+        content="Batch timeout evidence.",
+        metadata={},
+        source=DataSource.MEDIA_DB,
+        score=0.8,
+    )
+    grader = DocumentGrader(
+        analyze_fn=lambda *args, **kwargs: "{}",
+        config=GradingConfig(timeout_seconds=0.01),
+        credential_runtime=runtime,
+    )
+
+    async def slow_grade_document(*args: Any, **kwargs: Any) -> Any:
+        await asyncio.sleep(0.05)
+        raise AssertionError("outer batch timeout should cancel this call")
+
+    monkeypatch.setattr(grader, "grade_document", slow_grade_document)
+
+    filtered, metadata = await grader.filter_relevant("query", [document])
+
+    assert filtered == [document]  # nosec B101
+    assert metadata["grading_results"][0]["method"] == "score_fallback"  # nosec B101
+    if runtime_bound:
+        assert metadata["failure_code"] == "provider_unavailable"  # nosec B101
+        assert metadata["verification_available"] is False  # nosec B101
+    else:
+        assert "failure_code" not in metadata  # nosec B101
+        assert "verification_available" not in metadata  # nosec B101
+
+
+@pytest.mark.parametrize("runtime_bound", [False, True])
+@pytest.mark.asyncio
+async def test_document_grader_generic_failure_preserves_runtime_trust_state(
+    runtime_bound: bool,
+) -> None:
+    runtime = _RecordingCredentialRuntime() if runtime_bound else None
+    document = Document(
+        id="doc-generic-grader",
+        content="Generic failure evidence.",
+        metadata={},
+        source=DataSource.MEDIA_DB,
+        score=0.8,
+    )
+
+    def failing_analyze(*args: Any, **kwargs: Any) -> str:
+        raise RuntimeError("private document grader failure")
+
+    result = await DocumentGrader(
+        analyze_fn=failing_analyze,
+        config=GradingConfig(provider="anthropic"),
+        credential_runtime=runtime,
+    ).grade_document("query", document)
+
+    if runtime_bound:
+        assert result.metadata == {  # nosec B101
+            "error": "provider_unavailable",
+            "verification_available": False,
+        }
+    else:
+        assert result.metadata == {"error": "grading_error"}  # nosec B101
+
+
+@pytest.mark.parametrize("stage", ["groundedness", "utility"])
+@pytest.mark.parametrize("runtime_bound", [False, True])
+@pytest.mark.asyncio
+async def test_quality_grader_generic_failure_preserves_runtime_trust_state(
+    stage: str,
+    runtime_bound: bool,
+) -> None:
+    runtime = _RecordingCredentialRuntime() if runtime_bound else None
+    document = Document(
+        id=f"doc-generic-{stage}",
+        content="Generic quality evidence.",
+        metadata={},
+        source=DataSource.MEDIA_DB,
+        score=0.8,
+    )
+
+    def failing_analyze(*args: Any, **kwargs: Any) -> str:
+        raise RuntimeError(f"private {stage} failure")
+
+    if stage == "groundedness":
+        result = await FastGroundednessGrader(
+            analyze_fn=failing_analyze,
+            provider="anthropic",
+            credential_runtime=runtime,
+        ).grade("query", "answer", [document])
+    else:
+        result = await UtilityGrader(
+            analyze_fn=failing_analyze,
+            provider="anthropic",
+            credential_runtime=runtime,
+        ).grade("query", "answer")
+
+    if runtime_bound:
+        assert result.metadata == {  # nosec B101
+            "error": "provider_unavailable",
+            "verification_available": False,
+        }
+    else:
+        assert result.metadata == {}  # nosec B101
 
 
 @pytest.mark.asyncio

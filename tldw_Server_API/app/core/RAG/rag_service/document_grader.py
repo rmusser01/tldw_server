@@ -307,7 +307,12 @@ class DocumentGrader:
 
         except Exception as e:
             logger.warning(f"Document grading failed for doc {doc_id}; using fallback")
-            return self._fallback_to_score(doc_id, doc_score, start_time, error="grading_error")
+            error = (
+                "provider_unavailable"
+                if self.credential_runtime is not None
+                else "grading_error"
+            )
+            return self._fallback_to_score(doc_id, doc_score, start_time, error=error)
 
     def _parse_grading_response(
         self,
@@ -493,12 +498,17 @@ class DocumentGrader:
 
             except asyncio.TimeoutError:
                 logger.warning(f"Batch grading timed out at index {i}")
+                error = (
+                    "provider_unavailable"
+                    if self.credential_runtime is not None
+                    else "batch_timeout"
+                )
                 # Fall back for remaining documents in batch
                 for doc in batch[len(results) - i:]:
                     doc_id = getattr(doc, "id", str(id(doc)))
                     doc_score = getattr(doc, "score", 0.0)
                     results.append(self._fallback_to_score(
-                        doc_id, doc_score, start_time, error="batch_timeout"
+                        doc_id, doc_score, start_time, error=error
                     ))
 
         total_latency_ms = int((time.time() - start_time) * 1000)

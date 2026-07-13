@@ -206,11 +206,25 @@ class PostGenerationVerifier:
                 **kwargs,
             )
             if isinstance(response, Iterator):
+                from .generation import _extract_stream_text
+
                 chunks = []
                 for chunk in response:
                     chunks.append(str(chunk))
-                state["used"] = True
-                return "".join(chunks)
+                    content = _extract_stream_text(chunk)
+                    if content is not None and content.startswith("Error:"):
+                        raise SummaryProviderError(
+                            code="provider_failure",
+                            provider=claims_provider or credential_handle.provider,
+                        )
+                    if content is not None:
+                        state["used"] = True
+                response = "".join(chunks)
+            if isinstance(response, str) and response.startswith("Error:"):
+                raise SummaryProviderError(
+                    code="provider_failure",
+                    provider=claims_provider or credential_handle.provider,
+                )
             state["used"] = True
             return response
 
@@ -338,6 +352,12 @@ class PostGenerationVerifier:
             outcome.reason = "verification_unavailable"
             return outcome
         except Exception as e:  # noqa: BLE001 - claims verification best-effort
+            if self._credential_runtime is not None:
+                logger.warning("Post-check claims provider unavailable")
+                outcome.verification_available = False
+                outcome.failure_code = "provider_unavailable"
+                outcome.reason = "verification_unavailable"
+                return outcome
             logger.warning(f"Post-check claims verification failed: {_safe_exception_label(e)}")
 
         # Compute unsupported ratio
@@ -515,6 +535,12 @@ class PostGenerationVerifier:
                 outcome.reason = "verification_unavailable"
                 break
             except Exception as e:  # noqa: BLE001 - recheck best-effort
+                if self._credential_runtime is not None:
+                    logger.warning("Adaptive recheck provider unavailable")
+                    outcome.verification_available = False
+                    outcome.failure_code = "provider_unavailable"
+                    outcome.reason = "verification_unavailable"
+                    break
                 logger.debug(f"Adaptive recheck failed: {_safe_exception_label(e)}")
                 sum2 = {}
 

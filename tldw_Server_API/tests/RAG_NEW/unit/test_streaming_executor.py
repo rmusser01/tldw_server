@@ -90,6 +90,7 @@ async def _consume_tracked_stream(
     [
         [": keepalive\n\n", "event: message\n", "id: 7\n", "retry: 1000\n"],
         ["keepalive", "event: ping"],
+        ["data: ping\n\n", "data: pong\n\n", "data: heartbeat\n\n", "data: keepalive\n\n"],
     ],
 )
 @pytest.mark.asyncio
@@ -175,6 +176,22 @@ async def test_mixed_sse_controls_then_data_marks_once_before_later_failure(
     async def upstream() -> Any:
         yield "event: message\n"
         yield 'data: {"choices":[{"delta":{"content":"answer"}}]}'
+        raise ChatAuthenticationError("private upstream", provider="test-provider")
+
+    with pytest.raises(ChatAuthenticationError):
+        await _consume_tracked_stream(monkeypatch, upstream(), runtime)
+
+    assert runtime.marked == [runtime.handle]  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_plain_data_sse_content_marks_once_before_later_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _StreamingRuntime()
+
+    async def upstream() -> Any:
+        yield "data: legitimate provider text\n\n"
         raise ChatAuthenticationError("private upstream", provider="test-provider")
 
     with pytest.raises(ChatAuthenticationError):

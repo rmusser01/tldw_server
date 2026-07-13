@@ -697,9 +697,25 @@ async def agentic_rag_pipeline(
                         **kwargs,
                     )
                     if isinstance(response, Iterator):
-                        chunks = [str(chunk) for chunk in response]
-                        claims_state["used"] = True
-                        return "".join(chunks)
+                        from .generation import _extract_stream_text
+
+                        chunks = []
+                        for chunk in response:
+                            chunks.append(str(chunk))
+                            content = _extract_stream_text(chunk)
+                            if content is not None and content.startswith("Error:"):
+                                raise SummaryProviderError(
+                                    code="provider_failure",
+                                    provider=claims_provider or claims_handle.provider,
+                                )
+                            if content is not None:
+                                claims_state["used"] = True
+                        response = "".join(chunks)
+                    if isinstance(response, str) and response.startswith("Error:"):
+                        raise SummaryProviderError(
+                            code="provider_failure",
+                            provider=claims_provider or claims_handle.provider,
+                        )
                     claims_state["used"] = True
                     return response
                 engine = ClaimsEngine(_analyze)

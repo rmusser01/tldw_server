@@ -384,10 +384,24 @@ from .retrieval_plan import build_retrieval_plan
 from .types import DataSource, Document
 
 
-def _consume_bound_sgl_response(response: Any, provider: str) -> Any:
+def _consume_bound_sgl_response(
+    response: Any,
+    provider: str,
+    on_content: Callable[[], None] | None = None,
+) -> Any:
     """Consume a bound SGL response and reject its legacy error-string form."""
     if isinstance(response, Iterator):
-        response = "".join(str(chunk) for chunk in response)
+        from .generation import _extract_stream_text
+
+        chunks: list[str] = []
+        for chunk in response:
+            chunks.append(str(chunk))
+            content = _extract_stream_text(chunk)
+            if content is not None and content.startswith("Error:"):
+                raise SummaryProviderError(code="provider_failure", provider=provider)
+            if on_content is not None and content is not None:
+                on_content()
+        response = "".join(chunks)
     if isinstance(response, str) and response.startswith("Error:"):
         raise SummaryProviderError(code="provider_failure", provider=provider)
     return response
@@ -4180,6 +4194,7 @@ async def unified_rag_pipeline(
                     gap_handle = None
                     if credential_runtime is not None:
                         gap_handle = await credential_runtime.resolve(_prov)
+                    gap_stream_state = {"content": False}
 
                     def _call_gap_analyzer() -> Any:
                         response = llm_analyze(
@@ -4192,11 +4207,24 @@ async def unified_rag_pipeline(
                             credentials_resolved=gap_handle is not None,
                             raise_on_error=gap_handle is not None,
                         )
-                        return _consume_bound_sgl_response(response, _prov)
+                        return _consume_bound_sgl_response(
+                            response,
+                            _prov,
+                            on_content=lambda: gap_stream_state.__setitem__(
+                                "content",
+                                True,
+                            ),
+                        )
 
-                    llm_out = await asyncio.to_thread(_call_gap_analyzer)
-                    if gap_handle is not None:
-                        await credential_runtime.mark_used(gap_handle)
+                    gap_completed = False
+                    try:
+                        llm_out = await asyncio.to_thread(_call_gap_analyzer)
+                        gap_completed = True
+                    finally:
+                        if gap_handle is not None and (
+                            gap_completed or gap_stream_state["content"]
+                        ):
+                            await credential_runtime.mark_used(gap_handle)
                     if isinstance(llm_out, str):
                         try:
                             parsed = parse_structured_output(
@@ -4230,7 +4258,11 @@ async def unified_rag_pipeline(
                     ValueError,
                     asyncio.TimeoutError,
                 ):
-                    # Fallback
+                    if credential_runtime is not None:
+                        result.metadata["gap_analysis"] = {
+                            "failure_code": "provider_unavailable",
+                            "verification_available": False,
+                        }
                     followups = [f"detailed {query}", f"examples {query}"]
                 followups = [q for q in followups if isinstance(q, str) and q.strip()][:max_followup_searches]
                 if followups:
@@ -5150,6 +5182,7 @@ async def unified_rag_pipeline(
                                         response = _consume_bound_sgl_response(
                                             response,
                                             self.provider,
+                                            on_content=lambda: setattr(self, "used", True),
                                         )
                                         self.used = True
                                         return response
@@ -5206,14 +5239,23 @@ async def unified_rag_pipeline(
                                 limit=rerank_debug_limit,
                             )
                         reranker = create_reranker(selected_strategy, rerank_config, llm_client=llm_client)
-                        reranked = await _resilient_call("reranking", reranker.rerank, query, result.documents)
-                        if (
-                            credential_runtime is not None
-                            and reranker_credential_handle is not None
-                            and llm_client is not None
-                            and llm_client.used
-                        ):
-                            await credential_runtime.mark_used(reranker_credential_handle)
+                        try:
+                            reranked = await _resilient_call(
+                                "reranking",
+                                reranker.rerank,
+                                query,
+                                result.documents,
+                            )
+                        finally:
+                            if (
+                                credential_runtime is not None
+                                and reranker_credential_handle is not None
+                                and llm_client is not None
+                                and llm_client.used
+                            ):
+                                await credential_runtime.mark_used(
+                                    reranker_credential_handle
+                                )
                     except Exception as rerank_exc:
                         if reranking_strategy != "two_tier":
                             raise
@@ -5948,6 +5990,7 @@ async def unified_rag_pipeline(
                             critique_handle = None
                             if credential_runtime is not None:
                                 critique_handle = await credential_runtime.resolve("openai")
+                            critique_stream_state = {"content": False}
 
                             def _call_critique() -> Any:
                                 response = sgl.analyze(
@@ -5968,11 +6011,25 @@ async def unified_rag_pipeline(
                                     credentials_resolved=critique_handle is not None,
                                     raise_on_error=critique_handle is not None,
                                 )
-                                return _consume_bound_sgl_response(response, "openai")
+                                return _consume_bound_sgl_response(
+                                    response,
+                                    "openai",
+                                    on_content=lambda: critique_stream_state.__setitem__(
+                                        "content",
+                                        True,
+                                    ),
+                                )
 
-                            c_text = await asyncio.to_thread(_call_critique)
-                            if critique_handle is not None:
-                                await credential_runtime.mark_used(critique_handle)
+                            critique_completed = False
+                            try:
+                                c_text = await asyncio.to_thread(_call_critique)
+                                critique_completed = True
+                            finally:
+                                if critique_handle is not None and (
+                                    critique_completed
+                                    or critique_stream_state["content"]
+                                ):
+                                    await credential_runtime.mark_used(critique_handle)
                             c_dt = time.time() - c_start
                         except (ByokResolutionError, SummaryProviderError) as exc:
                             result.metadata.setdefault("synthesis", {})
@@ -5988,6 +6045,14 @@ async def unified_rag_pipeline(
                             )
                             c_text = "- Ensure claims are supported by provided snippets."
                         except (ImportError, ConnectionError, OSError, RuntimeError, TypeError, ValueError, asyncio.TimeoutError):
+                            if credential_runtime is not None:
+                                result.metadata.setdefault("synthesis", {})
+                                result.metadata["synthesis"].update(
+                                    {
+                                        "failure_code": "provider_unavailable",
+                                        "verification_available": False,
+                                    }
+                                )
                             c_text = "- Ensure claims are supported by provided snippets.\n- Add missing specifics.\n- Clarify ambiguous statements."
                         if isinstance(c_text, str):
                             c_text_val = c_text
@@ -6351,26 +6416,45 @@ async def unified_rag_pipeline(
                         **kwargs,
                     )
                     if isinstance(response, Iterator):
-                        chunks = [str(chunk) for chunk in response]
-                        claims_state["used"] = True
-                        return "".join(chunks)
+                        from .generation import _extract_stream_text
+
+                        chunks = []
+                        for chunk in response:
+                            chunks.append(str(chunk))
+                            content = _extract_stream_text(chunk)
+                            if content is not None and content.startswith("Error:"):
+                                raise SummaryProviderError(
+                                    code="provider_failure",
+                                    provider=claims_provider or claims_handle.provider,
+                                )
+                            if content is not None:
+                                claims_state["used"] = True
+                        response = "".join(chunks)
+                    if isinstance(response, str) and response.startswith("Error:"):
+                        raise SummaryProviderError(
+                            code="provider_failure",
+                            provider=claims_provider or claims_handle.provider,
+                        )
                     claims_state["used"] = True
                     return response
 
                 if ClaimsEngine:
                     engine = ClaimsEngine(_analyze)
 
+                    async def _mark_claims_used() -> None:
+                        if (
+                            claims_handle is not None
+                            and claims_state["used"]
+                            and not claims_state["marked"]
+                        ):
+                            await credential_runtime.mark_used(claims_handle)
+                            claims_state["marked"] = True
+
                     async def _run_claims_engine(**run_kwargs: Any) -> dict[str, Any]:
                         try:
                             return await engine.run(**run_kwargs)
                         finally:
-                            if (
-                                claims_handle is not None
-                                and claims_state["used"]
-                                and not claims_state["marked"]
-                            ):
-                                await credential_runtime.mark_used(claims_handle)
-                                claims_state["marked"] = True
+                            await _mark_claims_used()
 
                     # Default NLI model from environment if not provided
                     if not nli_model:
@@ -6515,21 +6599,24 @@ async def unified_rag_pipeline(
                             # Verify these claims directly, skipping extraction
                             from tldw_Server_API.app.core.Claims_Extraction.claims_engine import Claim as _Claim
                             verifications = []
-                            for i, ctext in enumerate(pre_claims[:claims_max]):
-                                cv = await engine.verifier.verify(
-                                    claim=_Claim(id=f"pc{i+1}", text=ctext),
-                                    query=query,
-                                    base_documents=result.documents or [],
-                                    retrieve_fn=_retrieve_for_claim,
-                                    top_k=claims_top_k,
-                                    conf_threshold=claims_conf_threshold,
-                                    mode=(claim_verifier or "hybrid").strip().lower(),
-                                    budget=job_budget,
-                                    job_context=job_context,
-                                    doc_only_mode=doc_only_verification,
-                                    numeric_precision_mode=numeric_precision_mode,
-                                )
-                                verifications.append(cv)
+                            try:
+                                for i, ctext in enumerate(pre_claims[:claims_max]):
+                                    cv = await engine.verifier.verify(
+                                        claim=_Claim(id=f"pc{i+1}", text=ctext),
+                                        query=query,
+                                        base_documents=result.documents or [],
+                                        retrieve_fn=_retrieve_for_claim,
+                                        top_k=claims_top_k,
+                                        conf_threshold=claims_conf_threshold,
+                                        mode=(claim_verifier or "hybrid").strip().lower(),
+                                        budget=job_budget,
+                                        job_context=job_context,
+                                        doc_only_mode=doc_only_verification,
+                                        numeric_precision_mode=numeric_precision_mode,
+                                    )
+                                    verifications.append(cv)
+                            finally:
+                                await _mark_claims_used()
                             supported = sum(1 for v in verifications if v.label == "supported")
                             refuted = sum(1 for v in verifications if v.label == "refuted")
                             nei = sum(1 for v in verifications if v.label == "nei")
@@ -6619,13 +6706,7 @@ async def unified_rag_pipeline(
                         factuality_payload = claims_run.get("summary")
                         verifications = claims_run.get("verifications", [])
                     # Also store in metadata for debugging/analytics
-                    if (
-                        claims_handle is not None
-                        and claims_state["used"]
-                        and not claims_state["marked"]
-                    ):
-                        await credential_runtime.mark_used(claims_handle)
-                        claims_state["marked"] = True
+                    await _mark_claims_used()
                     result.metadata["claims"] = claims_payload
                     result.metadata["factuality"] = factuality_payload
 
@@ -6664,8 +6745,15 @@ async def unified_rag_pipeline(
                 ValueError,
                 asyncio.TimeoutError,
             ) as e:
-                result.errors.append(f"Claims analysis failed: {str(e)}")
-                logger.error(f"Claims analysis error: {e}")
+                if credential_runtime is not None:
+                    result.metadata["claims"] = {
+                        "failure_code": "provider_unavailable",
+                        "verification_available": False,
+                    }
+                    logger.warning("Claims analysis provider unavailable")
+                else:
+                    result.errors.append(f"Claims analysis failed: {str(e)}")
+                    logger.error(f"Claims analysis error: {e}")
 
         # ========== NUMERIC FIDELITY (verify numeric tokens) ==========
         try:
@@ -7412,7 +7500,7 @@ async def unified_rag_pipeline(
                             _f_handle = None
                             if credential_runtime is not None:
                                 _f_handle = await credential_runtime.resolve(_f_prov)
-                            _f_state = {"marked": False}
+                            _f_state = {"marked": False, "content": False}
 
                             class _FaithfulnessLLMAdapter:
                                 """Wraps analyze() to satisfy the LLMCallable protocol."""
@@ -7442,15 +7530,30 @@ async def unified_rag_pipeline(
                                         return _consume_bound_sgl_response(
                                             response,
                                             _f_prov,
+                                            on_content=lambda: _f_state.__setitem__(
+                                                "content",
+                                                True,
+                                            ),
                                         )
 
-                                    result_text = await _aio.get_running_loop().run_in_executor(
-                                        None,
-                                        _call_faithfulness,
-                                    )
-                                    if _f_handle is not None and not _f_state["marked"]:
-                                        await credential_runtime.mark_used(_f_handle)
-                                        _f_state["marked"] = True
+                                    faithfulness_completed = False
+                                    try:
+                                        result_text = await _aio.get_running_loop().run_in_executor(
+                                            None,
+                                            _call_faithfulness,
+                                        )
+                                        faithfulness_completed = True
+                                    finally:
+                                        if (
+                                            _f_handle is not None
+                                            and not _f_state["marked"]
+                                            and (
+                                                faithfulness_completed
+                                                or _f_state["content"]
+                                            )
+                                        ):
+                                            await credential_runtime.mark_used(_f_handle)
+                                            _f_state["marked"] = True
                                     return str(result_text) if result_text else ""
 
                             _llm_obj = _FaithfulnessLLMAdapter()

@@ -309,7 +309,13 @@ class FastGroundednessGrader:
 
         except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
             logger.warning("Fast groundedness check failed; using heuristic fallback")
-            return self._heuristic_groundedness(query, answer, documents, start_time)
+            fallback = self._heuristic_groundedness(query, answer, documents, start_time)
+            if self.credential_runtime is not None:
+                fallback.metadata = {
+                    "error": "provider_unavailable",
+                    "verification_available": False,
+                }
+            return fallback
 
     def _build_sources_text(self, documents: list[Any], max_chars: int = 3000) -> str:
         """Build a text representation of source documents."""
@@ -591,7 +597,13 @@ class UtilityGrader:
 
         except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
             logger.warning("Utility grading failed; using heuristic fallback")
-            return self._heuristic_utility(query, answer, start_time)
+            fallback = self._heuristic_utility(query, answer, start_time)
+            if self.credential_runtime is not None:
+                fallback.metadata = {
+                    "error": "provider_unavailable",
+                    "verification_available": False,
+                }
+            return fallback
 
     def _parse_utility_response(self, raw_response: Any, latency_ms: int) -> UtilityResult:
         """Parse LLM response into UtilityResult."""

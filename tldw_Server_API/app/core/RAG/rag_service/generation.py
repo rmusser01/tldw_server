@@ -22,6 +22,8 @@ from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
 
 from .types import Document
 
+_STREAM_CONTROL_TOKENS = frozenset({"keepalive", "ping", "pong", "heartbeat"})
+
 if TYPE_CHECKING:
     from .claims import ClaimsEngine as ClaimsEngineType
 else:
@@ -250,7 +252,7 @@ def _extract_stream_text(chunk: Any) -> Optional[str]:
             if (
                 line.startswith(":")
                 or lowered.startswith(("event:", "id:", "retry:"))
-                or lowered in {"keepalive", "ping", "pong", "heartbeat"}
+                or lowered in _STREAM_CONTROL_TOKENS
             ):
                 continue
             if lowered.startswith("data:"):
@@ -260,13 +262,18 @@ def _extract_stream_text(chunk: Any) -> Optional[str]:
                 try:
                     payload = json.loads(data)
                 except json.JSONDecodeError:
-                    text_parts.append(data)
+                    if data.lower() not in _STREAM_CONTROL_TOKENS:
+                        text_parts.append(data)
                     continue
                 if isinstance(payload, dict):
                     text = _extract_openai_text_content(payload)
                     if text:
                         text_parts.append(text)
-                elif isinstance(payload, str) and payload:
+                elif (
+                    isinstance(payload, str)
+                    and payload
+                    and payload.strip().lower() not in _STREAM_CONTROL_TOKENS
+                ):
                     text_parts.append(payload)
                 continue
             text_parts.append(line)
