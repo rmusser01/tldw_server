@@ -354,7 +354,7 @@ def _getaddrinfo_with_timeout(
         return []
 
     result: list[list[tuple]] = []
-    error: list[BaseException] = []
+    error_types: list[str] = []
 
     def _worker() -> None:
         """Run the blocking OS resolver and always release the resolver slot."""
@@ -367,8 +367,8 @@ def _getaddrinfo_with_timeout(
                     type=socket.SOCK_STREAM,
                 )
             )
-        except (OSError, ValueError) as exc:
-            error.append(exc)
+        except Exception as exc:  # noqa: BLE001 - contain resolver worker failures
+            error_types.append(type(exc).__name__)
         finally:
             _release_dns_resolver_slot(
                 host,
@@ -414,11 +414,10 @@ def _getaddrinfo_with_timeout(
             event="dns_resolver_timeout",
         ).warning("DNS resolver timed out; failing closed")
         return []
-    if error:
-        exc = error[0]
+    if error_types:
         logger.bind(
             host=log_host,
-            exception_type=type(exc).__name__,
+            exception_type=error_types[0],
             event="dns_resolver_error",
         ).debug("DNS resolver failed; failing closed")
         return []

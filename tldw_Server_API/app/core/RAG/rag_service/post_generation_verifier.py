@@ -317,7 +317,7 @@ class PostGenerationVerifier:
         # Run or reuse claims verification
         claims_payload: list[dict[str, Any]] | None = existing_claims
         summary_payload: dict[str, Any] | None = existing_summary
-        claim_retrieval_provider_failed = False
+        retrieval_provider_failed = False
         try:
             if (claims_payload is None or summary_payload is None):
                 if self._claims_runner is not None:
@@ -335,8 +335,8 @@ class PostGenerationVerifier:
 
                     # Build a claim-level retrieval function
                     async def _retrieve_for_claim(c_text: str, top: int = 5):
-                        nonlocal claim_retrieval_provider_failed
-                        if claim_retrieval_provider_failed:
+                        nonlocal retrieval_provider_failed
+                        if retrieval_provider_failed:
                             return []
                         try:
                             if MultiDatabaseRetriever is None:
@@ -365,7 +365,7 @@ class PostGenerationVerifier:
                             docs = sorted(docs, key=lambda d: getattr(d, 'score', 0.0), reverse=True)
                             return docs[:top]
                         except (ByokResolutionError, ChatAPIError) as exc:
-                            claim_retrieval_provider_failed = True
+                            retrieval_provider_failed = True
                             _record_embedding_degradation(outcome, exc)
                             return []
                         except Exception as exc:  # noqa: BLE001 - retrieval fallback should be safe
@@ -455,7 +455,7 @@ class PostGenerationVerifier:
             # Second-chance retrieval: use query rewrites (HyDE + multi-strategy) and apply diversity
             new_docs: list[Document] = base_documents[:]
             try:
-                if MultiDatabaseRetriever is not None and media_db_path:
+                if not retrieval_provider_failed and MultiDatabaseRetriever is not None and media_db_path:
                     mdr = MultiDatabaseRetriever(
                         {"media_db": media_db_path},
                         user_id=user_id or "0",
@@ -515,6 +515,8 @@ class PostGenerationVerifier:
                             # Aggregate retrieval across queries
                             docs_union: dict[str, Document] = {}
                             for cq in list(dict.fromkeys(candidate_queries))[:4]:  # bound rewrites
+                                if retrieval_provider_failed:
+                                    break
                                 try:
                                     cur_docs: list[Document]
                                     if search_mode == "hybrid" and rh_fn is not None:
@@ -528,6 +530,10 @@ class PostGenerationVerifier:
                                         prev = docs_union.get(getattr(d, "id", ""))
                                         if prev is None or float(getattr(d, "score", 0.0)) > float(getattr(prev, "score", 0.0)):
                                             docs_union[getattr(d, "id", "")] = d
+                                except (ByokResolutionError, ChatAPIError) as exc:
+                                    retrieval_provider_failed = True
+                                    _record_embedding_degradation(outcome, exc)
+                                    break
                                 except Exception as exc:  # noqa: BLE001 - per-query retrieval best-effort
                                     _record_embedding_degradation(outcome, exc)
                                     logger.debug("Adaptive per-query retrieval failed; continuing")
@@ -536,6 +542,11 @@ class PostGenerationVerifier:
                             merged_docs = merged_docs[: max(5, min(30, top_k * 2))]
                             # Apply simple diversity filter to reduce near-duplicates
                             new_docs = _select_diverse(merged_docs, k=max(5, min(15, top_k)))
+            except (ByokResolutionError, ChatAPIError) as e:
+                retrieval_provider_failed = True
+                _record_embedding_degradation(outcome, e)
+                logger.debug("Adaptive retrieval provider unavailable; using base docs")
+                new_docs = base_documents[:]
             except Exception as e:  # noqa: BLE001 - fallback to base docs
                 _record_embedding_degradation(outcome, e)
                 logger.debug(f"Adaptive retrieval failed; using base docs. Reason: {_safe_exception_label(e)}")

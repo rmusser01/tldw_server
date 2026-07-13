@@ -606,6 +606,76 @@ async def test_claim_retrieval_latches_first_provider_failure(monkeypatch):
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_claim_provider_failure_latches_adaptive_retrieval(monkeypatch):
+    dispatches = 0
+    generated_contexts: list[str] = []
+
+    class _MediaRetriever:
+        async def retrieve_hybrid(self, **_kwargs):
+            nonlocal dispatches
+            dispatches += 1
+            raise ChatConfigurationError(
+                "secret endpoint configuration detail",
+                provider="local_api",
+                error_code="provider_configuration_invalid",
+            )
+
+    class _MultiDatabaseRetriever:
+        def __init__(self, *args, **kwargs):
+            self.retrievers = {verifier_module.DataSource.MEDIA_DB: _MediaRetriever()}
+
+    class _ClaimsEngine:
+        async def run(self, **kwargs):
+            assert await kwargs["retrieve_fn"]("unsupported claim") == []
+            return {
+                "claims": [{"id": "c1"}],
+                "summary": {"supported": 0, "refuted": 1, "nei": 0},
+            }
+
+    class _AnswerGenerator:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def generate(self, **kwargs):
+            generated_contexts.append(kwargs["context"])
+            return {"answer": ""}
+
+    verifier = PostGenerationVerifier(
+        max_retries=1,
+        unsupported_threshold=0.1,
+        use_advanced_rewrites=False,
+        credential_runtime=object(),
+    )
+
+    async def build_claims_engine():
+        return _ClaimsEngine(), None, {"used": False}
+
+    monkeypatch.setattr(verifier_module, "ClaimsEngine", object)
+    monkeypatch.setattr(verifier_module, "MultiDatabaseRetriever", _MultiDatabaseRetriever)
+    monkeypatch.setattr(verifier_module, "AnswerGenerator", _AnswerGenerator)
+    monkeypatch.setattr(verifier, "_build_claims_engine", build_claims_engine)
+
+    base_documents = _base_docs()
+    outcome = await verifier.verify_and_maybe_fix(
+        query="What is RAG?",
+        answer="Original answer.",
+        base_documents=base_documents,
+        media_db_path="media.db",
+    )
+
+    assert dispatches == 1
+    assert generated_contexts == ["A\n\nB"]
+    assert base_documents == _base_docs()
+    assert outcome.new_answer is None
+    assert outcome.fixed is False
+    assert outcome.total_claims == 1
+    assert outcome.unsupported_ratio == 1.0
+    assert outcome.embedding_coverage == "degraded"
+    assert outcome.embedding_failure_code == "provider_configuration_invalid"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_adaptive_retrieval_reports_bounded_embedding_auth_degradation(monkeypatch):
     class _MediaRetriever:
         async def retrieve_hybrid(self, **kwargs):
