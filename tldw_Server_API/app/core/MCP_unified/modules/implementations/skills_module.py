@@ -347,6 +347,7 @@ class SkillsModule(BaseModule):
         operation: ServiceOperation[T],
     ) -> T:
         user_id, chacha_path = self._trusted_user_context(context)
+        cancellation_requested = asyncio.Event()
         try:
             return await self._await_retained(
                 self._service_lifecycle(
@@ -354,7 +355,9 @@ class SkillsModule(BaseModule):
                     chacha_path,
                     operation_name,
                     operation,
-                )
+                    cancellation_requested,
+                ),
+                cancellation_requested,
             )
         except asyncio.CancelledError:
             raise
@@ -380,6 +383,7 @@ class SkillsModule(BaseModule):
         chacha_path: Path,
         operation_name: str,
         operation: ServiceOperation[T],
+        cancellation_requested: asyncio.Event,
     ) -> T:
         """Own construction, operation, and cleanup inside one retained task."""
         db: CharactersRAGDB | None = None
@@ -390,6 +394,8 @@ class SkillsModule(BaseModule):
                 user_id,
                 chacha_path,
             )
+            if cancellation_requested.is_set():
+                raise asyncio.CancelledError
             result = await operation(service)
             operation_succeeded = True
             return result
@@ -445,7 +451,9 @@ class SkillsModule(BaseModule):
             raise
 
     @staticmethod
-    async def _await_retained(awaitable: Awaitable[T]) -> T:
+    async def _await_retained(
+        awaitable: Awaitable[T], cancellation_requested: asyncio.Event
+    ) -> T:
         """Wait through every cancellation delivery before propagating cancellation."""
         task = asyncio.create_task(awaitable)
         cancellation: asyncio.CancelledError | None = None
@@ -455,6 +463,7 @@ class SkillsModule(BaseModule):
             except asyncio.CancelledError as exc:
                 if cancellation is None:
                     cancellation = exc
+                    cancellation_requested.set()
             except Exception:
                 if cancellation is None:
                     raise

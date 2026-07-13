@@ -911,6 +911,7 @@ async def test_repeated_cancellation_waits_for_lifecycle_and_database_close(
     phase_started = threading.Event()
     release_phase = threading.Event()
     phase_finished = threading.Event()
+    operation_calls = 0
 
     def block_phase() -> None:
         phase_started.set()
@@ -936,7 +937,9 @@ async def test_repeated_cancellation_waits_for_lifecycle_and_database_close(
             limit: int = 50,
             offset: int = 0,
         ) -> tuple[list[SkillMetadata], int]:
+            nonlocal operation_calls
             del q, limit, offset
+            operation_calls += 1
             if blocked_phase == "service":
                 await asyncio.to_thread(block_phase)
             return [], 0
@@ -967,6 +970,8 @@ async def test_repeated_cancellation_waits_for_lifecycle_and_database_close(
     assert closed_before_release is False
     assert phase_finished.is_set()
     assert TrackingDB.instances[0].closed is True
+    if blocked_phase == "construction":
+        assert operation_calls == 0
 
 
 @pytest.mark.asyncio
