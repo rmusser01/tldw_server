@@ -80,7 +80,7 @@ def extract_permission_rule_subjects(
                 if len(argv) > MAX_COMMAND_ARGV_TOKENS:
                     raise PermissionSubjectLimitError("max_command_argv_tokens")
                 _append_permission_subject(subjects, "command", " ".join(argv), argv)
-        elif normalized_key in SKILL_ARGUMENT_KEYS:
+        elif key in SKILL_ARGUMENT_KEYS:
             for item in _string_values(value):
                 _append_permission_subject(subjects, "skill", item.lower(), None)
     return subjects

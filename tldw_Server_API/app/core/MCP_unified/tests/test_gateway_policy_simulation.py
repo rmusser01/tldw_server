@@ -75,6 +75,23 @@ def test_skill_permission_subject_extraction_ignores_invalid_values() -> None:
         )
 
 
+def test_skill_permission_subject_extraction_requires_exact_argument_key() -> None:
+    from mcp_unified.profiles.subjects import extract_permission_rule_subjects
+
+    for key in ("SKILL_NAME", " skill_name "):
+        assert all(
+            subject_type != "skill"
+            for subject_type, _, _ in extract_permission_rule_subjects(
+                "skills.render", {key: "Review-Paper"}
+            )
+        )
+
+    subjects = extract_permission_rule_subjects(
+        "skills.render", {"skill_name": "Review-Paper"}
+    )
+    assert ("skill", "review-paper", None) in subjects
+
+
 def test_subjects_module_enforces_extraction_limits() -> None:
     from mcp_unified.profiles.subjects import (
         MAX_PERMISSION_SUBJECTS,
