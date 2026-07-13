@@ -1482,13 +1482,15 @@ def test_postgres_attach_collection_plan_locks_run_and_items_before_updates(stor
             return _Result([{"version": 1}])
         if "SELECT occurrence_id, duplicate_policy" in sql:
             return _Result([{"occurrence_id": "occ-one", "duplicate_policy": "overwrite"}])
+        if "SELECT * FROM media_ingest_runs" in sql:
+            return _Result([{"run_id": "run-1"}])
         return _Result()
 
     sentinel = object()
     store._postgres = True
     monkeypatch.setattr(store, "_connection", fake_connection)
     monkeypatch.setattr(store, "_query", fake_query)
-    monkeypatch.setattr(store, "get_run", lambda *_args, **_kwargs: sentinel)
+    monkeypatch.setattr(store, "_run_record", lambda _row: sentinel)
 
     attached = store.attach_collection_plan(
         "owner-1",
@@ -1671,6 +1673,165 @@ def test_attach_collection_plan_persists_run_and_per_occurrence_mapping(store):
     assert [item.planned_collection_item_id for item in items] == [101, None, 102]
     assert events[-1].event_type == "collection_plan_attached"
     assert events[-1].attrs == {"collection_id": 55, "planned_item_count": 2}
+
+
+def test_attach_collection_plan_reads_attached_run_before_commit(store, monkeypatch):
+    run = store.create_validated_run(
+        "1",
+        items=[_validated_direct_record(occurrence_id="occ-one")],
+    )
+    monkeypatch.setattr(
+        store,
+        "get_run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("post-commit readback")),
+    )
+
+    attached = store.attach_collection_plan(
+        "1",
+        run.run_id,
+        collection_id=55,
+        planned_item_ids={"occ-one": 101},
+    )
+
+    assert attached.collection_id == 55
+    assert attached.version == run.version + 1
+
+
+def test_nonprocessing_action_preparation_is_durable_and_idempotent(store):
+    run = store.create_validated_run(
+        "1",
+        items=[_validated_direct_record(action="skip")],
+    )
+
+    prepared = store.prepare_nonprocessing_run_item("1", run.run_id, "occ-direct")
+    repeated = store.prepare_nonprocessing_run_item("1", run.run_id, "occ-direct")
+
+    loaded = store.get_run("1", run.run_id)
+    events = list(store.list_run_events("1", run.run_id))
+    assert prepared.state == "preparing"
+    assert repeated.state == "preparing"
+    assert loaded.version == run.version + 1
+    assert [event.event_type for event in events].count("duplicate_action_preparing") == 1
+
+
+@pytest.mark.parametrize(
+    ("action", "outcome", "media_id"),
+    [
+        ("ingest", "included_existing", 17),
+        ("overwrite", "included_existing", 17),
+        ("skip", "included_existing", 17),
+        ("include_existing", "skipped_existing", 17),
+        ("include_existing", "included_existing", None),
+        ("update_metadata_only", "included_existing", 17),
+        ("update_metadata_only", "metadata_updated", None),
+    ],
+)
+def test_nonprocessing_action_outcome_mapping_is_enforced(
+    store,
+    action,
+    outcome,
+    media_id,
+):
+    run = store.create_validated_run(
+        "1",
+        items=[
+            _validated_direct_record(
+                action=action,
+                metadata_patch=({"title": "Reviewed"} if action in {"overwrite", "update_metadata_only"} else None),
+            )
+        ],
+    )
+    if action in {"skip", "include_existing", "update_metadata_only"}:
+        store.prepare_nonprocessing_run_item("1", run.run_id, "occ-direct")
+
+    with pytest.raises(ValueError, match="invalid non-processing action outcome"):
+        store.resolve_nonprocessing_run_item(
+            "1",
+            run.run_id,
+            "occ-direct",
+            outcome=outcome,
+            media_id=media_id,
+        )
+
+    assert store.get_run_item("1", run.run_id, "occ-direct").state != "terminal"
+
+
+def test_nonprocessing_action_requires_preparing_and_exact_terminal_retry_is_idempotent(store):
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestConflictError,
+    )
+
+    run = store.create_validated_run(
+        "1",
+        items=[_validated_direct_record(action="include_existing")],
+    )
+    with pytest.raises(PlaylistIngestConflictError, match="no longer preparing"):
+        store.resolve_nonprocessing_run_item(
+            "1",
+            run.run_id,
+            "occ-direct",
+            outcome="included_existing",
+            media_id=17,
+        )
+
+    store.prepare_nonprocessing_run_item("1", run.run_id, "occ-direct")
+    resolved = store.resolve_nonprocessing_run_item(
+        "1",
+        run.run_id,
+        "occ-direct",
+        outcome="included_existing",
+        media_id=17,
+    )
+    version = store.get_run("1", run.run_id).version
+    repeated = store.resolve_nonprocessing_run_item(
+        "1",
+        run.run_id,
+        "occ-direct",
+        outcome="included_existing",
+        media_id=17,
+    )
+
+    assert resolved.state == repeated.state == "terminal"
+    assert store.get_run("1", run.run_id).version == version
+    assert [event.event_type for event in store.list_run_events("1", run.run_id)].count(
+        "duplicate_action_resolved"
+    ) == 1
+
+
+def test_run_completes_only_after_every_item_is_terminal(store):
+    mixed = store.create_validated_run(
+        "1",
+        items=[
+            _validated_direct_record(occurrence_id="occ-skip", action="skip"),
+            _validated_direct_record(
+                occurrence_id="occ-ingest",
+                source_url="https://example.com/new",
+                normalized_source_id="url:https://example.com/new",
+            ),
+        ],
+    )
+    store.prepare_nonprocessing_run_item("1", mixed.run_id, "occ-skip")
+    store.resolve_nonprocessing_run_item("1", mixed.run_id, "occ-skip", outcome="skipped_existing", media_id=None)
+    assert store.get_run("1", mixed.run_id).status == "staged"
+
+    complete = store.create_validated_run(
+        "1",
+        items=[
+            _validated_direct_record(occurrence_id="occ-one", action="skip"),
+            _validated_direct_record(
+                occurrence_id="occ-two",
+                source_url="https://example.com/two",
+                normalized_source_id="url:https://example.com/two",
+                action="include_existing",
+            ),
+        ],
+    )
+    store.prepare_nonprocessing_run_item("1", complete.run_id, "occ-one")
+    store.resolve_nonprocessing_run_item("1", complete.run_id, "occ-one", outcome="skipped_existing", media_id=None)
+    assert store.get_run("1", complete.run_id).status == "staged"
+    store.prepare_nonprocessing_run_item("1", complete.run_id, "occ-two")
+    store.resolve_nonprocessing_run_item("1", complete.run_id, "occ-two", outcome="included_existing", media_id=17)
+    assert store.get_run("1", complete.run_id).status == "completed"
 
 
 def test_attach_collection_plan_rolls_back_every_mapping_on_failure(store, monkeypatch):

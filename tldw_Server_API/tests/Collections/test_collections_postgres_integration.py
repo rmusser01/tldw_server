@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import os
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 
 pytest_plugins = ["tldw_Server_API.tests._plugins.authnz_full_fixtures"]
 
@@ -127,6 +128,64 @@ def test_collections_postgres_round_trip(request: pytest.FixtureRequest, monkeyp
 
     purged = db.purge_expired_outputs()
     assert purged >= 1
+
+
+def test_playlist_collection_actions_are_cas_safe_on_postgres(
+    request: pytest.FixtureRequest,
+    monkeypatch,
+    tmp_path,
+):
+    _client, db_name = request.getfixturevalue("isolated_test_environment")  # type: ignore[assignment]
+    monkeypatch.setenv("USER_DB_BASE_DIR", str((tmp_path / "user_dbs").resolve()))
+
+    backend = _pg_backend(db_name)
+    db = CollectionsDatabase.from_backend(user_id="1", backend=backend)
+    created = db.create_media_collection_with_items(
+        name="Playlist CAS",
+        kind="playlist_ingest",
+        items=[
+            {"source_url": "https://example.com/one", "ordinal": 1},
+            {"source_url": "https://example.com/two", "ordinal": 2},
+        ],
+    )
+
+    def resolve(media_id: int):
+        try:
+            return db.resolve_media_collection_item(created.items[0].id, media_id=media_id)
+        except ValueError as exc:
+            return exc
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(resolve, (17, 18)))
+
+    resolved = db.get_media_collection_item(created.items[0].id)
+    assert len([result for result in results if not isinstance(result, Exception)]) == 1
+    assert len([result for result in results if isinstance(result, ValueError)]) == 1
+    assert resolved.media_id in {17, 18}
+    repeated = db.resolve_media_collection_item(
+        resolved.id,
+        media_id=resolved.media_id,
+        status="completed",
+    )
+    assert repeated.updated_at == resolved.updated_at
+
+    restored = db.restore_media_collection_item_plan(
+        resolved.id,
+        expected_media_id=resolved.media_id,
+        expected_status="completed",
+        expected_updated_at=resolved.updated_at,
+    )
+    repeated_restore = db.restore_media_collection_item_plan(
+        resolved.id,
+        expected_media_id=resolved.media_id,
+        expected_status="completed",
+        expected_updated_at=resolved.updated_at,
+    )
+    assert repeated_restore.updated_at == restored.updated_at
+    assert db.discard_media_collection(
+        created.id,
+        expected_item_ids=[item.id for item in created.items],
+    )
 
 
 def test_collections_postgres_backfills_notification_delivery_columns(

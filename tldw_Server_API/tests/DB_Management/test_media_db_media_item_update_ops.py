@@ -14,14 +14,11 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     InputError,
 )
 
-
 pytestmark = pytest.mark.unit
 
 
 def _load_media_item_update_ops_module():
-    module_name = (
-        "tldw_Server_API.app.core.DB_Management.media_db.runtime.media_item_update_ops"
-    )
+    module_name = "tldw_Server_API.app.core.DB_Management.media_db.runtime.media_item_update_ops"
     assert importlib.util.find_spec(module_name) is not None
     return importlib.import_module(module_name)
 
@@ -56,10 +53,7 @@ def test_apply_media_item_update_rebinds_on_media_database() -> None:
 
     media_item_update_ops_module = _load_media_item_update_ops_module()
 
-    assert (
-        MediaDatabase.apply_media_item_update
-        is media_item_update_ops_module.apply_media_item_update
-    )
+    assert MediaDatabase.apply_media_item_update is media_item_update_ops_module.apply_media_item_update
 
 
 def test_apply_media_item_update_rejects_empty_fields() -> None:
@@ -143,6 +137,29 @@ def test_apply_media_metadata_patch_has_no_forbidden_field_surface() -> None:
             SimpleNamespace(),
             media_id=9,
             content="must not be mutable",
+        )
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"title": "x" * 501},
+        {"author": "x" * 501},
+        {"keywords_add": ["tag"] * 101},
+        {"keywords_add": ("x" * 129,)},
+        {"keywords_add": {"tag"}},
+        {"keywords_add": (keyword for keyword in ["tag"])},
+        {"keywords_add": (True,)},
+    ],
+)
+def test_apply_media_metadata_patch_rejects_unbounded_or_coerced_values(kwargs) -> None:
+    media_item_update_ops_module = _load_media_item_update_ops_module()
+
+    with pytest.raises(InputError):
+        media_item_update_ops_module.apply_media_metadata_patch(
+            SimpleNamespace(),
+            media_id=9,
+            **kwargs,
         )
 
 
@@ -232,6 +249,39 @@ def test_apply_media_metadata_patch_updates_allowlist_and_unions_keywords() -> N
             ),
         )
     ]
+
+
+def test_apply_media_metadata_patch_exact_retry_has_no_side_effects() -> None:
+    media_item_update_ops_module = _load_media_item_update_ops_module()
+    execute_calls: list[object] = []
+    keyword_calls: list[object] = []
+    fts_calls: list[object] = []
+    sync_calls: list[object] = []
+    db = SimpleNamespace(
+        client_id="api-client",
+        transaction=lambda: _Txn(),
+        _get_current_utc_timestamp_str=lambda: "2026-03-22T20:00:00Z",
+        _fetchone_with_connection=lambda _conn, _query, _params: {
+            **_media_row(title="Reviewed", version=7),
+            "author": "Speaker",
+        },
+        _fetchall_with_connection=lambda _conn, _query, _params: [{"keyword": "Existing"}],
+        _execute_with_connection=lambda *_args, **_kwargs: execute_calls.append(True),
+        update_keywords_for_media=lambda *_args, **_kwargs: keyword_calls.append(True),
+        _update_fts_media=lambda *_args, **_kwargs: fts_calls.append(True),
+        _log_sync_event=lambda *_args, **_kwargs: sync_calls.append(True),
+    )
+
+    result = media_item_update_ops_module.apply_media_metadata_patch(
+        db,
+        media_id=9,
+        title="Reviewed",
+        author="Speaker",
+        keywords_add=("existing",),
+    )
+
+    assert result == {"media_id": 9, "new_media_version": 7}
+    assert execute_calls == keyword_calls == fts_calls == sync_calls == []
 
 
 def test_apply_media_metadata_patch_conflict_rolls_back_all_side_effects() -> None:
@@ -383,9 +433,7 @@ def test_apply_media_item_update_updates_metadata_logs_sync_and_refreshes_title_
             "client_id": "api-client",
         }
     ]
-    assert fts_calls == [
-        ("conn", 9, "Updated Title", "existing body", "Current Title", "existing body")
-    ]
+    assert fts_calls == [("conn", 9, "Updated Title", "existing body", "Current Title", "existing body")]
     assert doc_versions == []
 
 
@@ -524,9 +572,7 @@ def test_apply_media_item_update_changes_content_creates_version_logs_sync_and_m
             "created_doc_ver_num": 4,
         }
     ]
-    assert fts_calls == [
-        ("conn", 9, "Updated Title", "updated body", "Current Title", "existing body")
-    ]
+    assert fts_calls == [("conn", 9, "Updated Title", "updated body", "Current Title", "existing body")]
     assert collection_calls == [(9, expected_hash)]
 
 

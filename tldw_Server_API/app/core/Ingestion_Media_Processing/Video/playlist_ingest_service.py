@@ -29,6 +29,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.dedupe_urls import (
     media_dedupe_url_candidates,
     normalize_media_dedupe_url,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.errors import ConflictError, InputError
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
     _PREFLIGHT_JOB_SENTINEL,
     MediaIngestRunRecord,
@@ -633,6 +634,8 @@ class PlaylistIngestService:
         new_collection: Mapping[str, Any] | BaseModel | None = None,
     ) -> MediaIngestRunRecord:
         """Validate refreshed evidence, then atomically persist a mixed run manifest."""
+        if collection_id is not None:
+            raise PlaylistRunValidationError("invalid_run_request")
         try:
             raw_inputs = [item.model_dump() if isinstance(item, BaseModel) else dict(item) for item in inputs]
             raw_overrides = {
@@ -647,7 +650,6 @@ class PlaylistIngestService:
                     "playlist_summaries": (
                         [dict(summary) for summary in playlist_summaries] if playlist_summaries is not None else None
                     ),
-                    "collection_id": collection_id,
                     "new_collection": (
                         new_collection.model_dump()
                         if isinstance(new_collection, BaseModel)
@@ -765,7 +767,7 @@ class PlaylistIngestService:
             items=manifest,
             processing_options=request.processing_options,
             playlist_summaries=request.playlist_summaries,
-            collection_id=request.collection_id,
+            collection_id=None,
         )
         collections_db = None
         try:
@@ -828,11 +830,17 @@ class PlaylistIngestService:
                 kind="playlist_ingest",
                 description=collection_request.description,
                 source_url=collection_request.source_url,
+                metadata={"playlist_ingest_run_id": run_id},
                 default_tags=collection_request.default_tags,
                 items=planned_items,
             )
-        except Exception as exc:
-            raise PlaylistRunValidationError("collection_planning_failed") from exc
+        except Exception as exc:  # noqa: BLE001 - reconcile a possible commit before deciding
+            try:
+                collection = collections_db.get_playlist_ingest_collection_for_run(run_id)
+            except KeyError:
+                raise PlaylistRunValidationError("collection_planning_failed") from exc
+            except Exception as reconciliation_exc:
+                raise PlaylistRunValidationError("collection_planning_reconciliation_failed") from reconciliation_exc
 
         collection_items = list(collection.items)
         collection_item_ids = [int(item.id) for item in collection_items]
@@ -858,13 +866,34 @@ class PlaylistIngestService:
             )
         except Exception as exc:
             try:
-                collections_db.discard_media_collection(
-                    int(collection.id),
-                    expected_item_ids=collection_item_ids,
+                reconciled_run = self._store.get_run(owner_user_id, run_id)
+                reconciled_items = self._store.list_run_items(
+                    owner_user_id,
+                    run_id,
+                    limit=max(1, len(items)),
                 )
-            except Exception as cleanup_exc:
-                raise PlaylistRunValidationError("collection_planning_cleanup_failed") from cleanup_exc
-            raise PlaylistRunValidationError("collection_planning_failed") from exc
+                reconciled_mapping = {
+                    item.occurrence_id: item.planned_collection_item_id
+                    for item in reconciled_items
+                    if item.action != "skip"
+                }
+            except Exception as reconciliation_exc:
+                raise PlaylistRunValidationError("collection_planning_reconciliation_failed") from reconciliation_exc
+            if reconciled_run.collection_id == int(collection.id) and reconciled_mapping == mapping:
+                attached = reconciled_run
+            elif reconciled_run.collection_id is not None or any(
+                item_id is not None for item_id in reconciled_mapping.values()
+            ):
+                raise PlaylistRunValidationError("collection_planning_reconciliation_failed") from exc
+            else:
+                try:
+                    collections_db.discard_media_collection(
+                        int(collection.id),
+                        expected_item_ids=collection_item_ids,
+                    )
+                except Exception as cleanup_exc:
+                    raise PlaylistRunValidationError("collection_planning_cleanup_failed") from cleanup_exc
+                raise PlaylistRunValidationError("collection_planning_failed") from exc
         for item in items:
             item["planned_collection_item_id"] = mapping.get(str(item["occurrence_id"]))
         return attached
@@ -887,6 +916,13 @@ class PlaylistIngestService:
                     continue
                 if action != "skip" and media_id is None:
                     continue
+                prepared = self._store.prepare_nonprocessing_run_item(
+                    owner_user_id,
+                    run_id,
+                    str(item["occurrence_id"]),
+                )
+                if prepared.state == "terminal":
+                    continue
                 if action == "skip":
                     outcome = "skipped_existing"
                 elif action == "include_existing":
@@ -899,8 +935,24 @@ class PlaylistIngestService:
                             int(media_id),
                             **dict(item.get("metadata_patch") or {}),
                         )
-                    except Exception:  # noqa: BLE001 - the run records a safe terminal failure
+                    except (ConflictError, InputError):
                         outcome = "metadata_update_failed"
+                    except Exception:  # noqa: BLE001 - an exact retry reconciles ambiguous commit state
+                        try:
+                            metadata_db.apply_media_metadata_patch(
+                                int(media_id),
+                                **dict(item.get("metadata_patch") or {}),
+                            )
+                        except Exception as reconciliation_exc:  # noqa: BLE001 - unknown state remains recoverable
+                            logger.warning(
+                                "Playlist metadata reconciliation remains ambiguous for run {} item {} ({})",
+                                run_id,
+                                item.get("occurrence_id"),
+                                type(reconciliation_exc).__name__,
+                            )
+                            continue
+                        else:
+                            outcome = "metadata_updated"
                     else:
                         outcome = "metadata_updated"
                 planned_item_id = item.get("planned_collection_item_id")
@@ -916,8 +968,27 @@ class PlaylistIngestService:
                             media_id=int(media_id),
                             status="skipped_existing" if outcome == "included_existing" else "completed",
                         )
-                    except Exception:  # noqa: BLE001 - the run records a safe terminal failure
-                        outcome = "metadata_update_failed"
+                    except Exception:  # noqa: BLE001 - reconcile a possible commit before deciding
+                        try:
+                            current_membership = collections_db.get_media_collection_item(int(planned_item_id))
+                        except Exception as reconciliation_exc:  # noqa: BLE001 - unknown state remains recoverable
+                            logger.warning(
+                                "Playlist membership reconciliation remains ambiguous for run {} item {} ({})",
+                                run_id,
+                                item.get("occurrence_id"),
+                                type(reconciliation_exc).__name__,
+                            )
+                            continue
+                        expected_status = "skipped_existing" if outcome == "included_existing" else "completed"
+                        if (
+                            current_membership.status != expected_status
+                            or current_membership.media_id != int(media_id)
+                            or current_membership.content_item_id is not None
+                            or current_membership.latest_job_id is not None
+                            or current_membership.latest_run_id is not None
+                        ):
+                            continue
+                        resolved_membership = current_membership
                 try:
                     self._store.resolve_nonprocessing_run_item(
                         owner_user_id,
@@ -927,6 +998,24 @@ class PlaylistIngestService:
                         media_id=int(media_id) if media_id is not None else None,
                     )
                 except Exception as exc:
+                    try:
+                        current_item = self._store.get_run_item(
+                            owner_user_id,
+                            run_id,
+                            str(item["occurrence_id"]),
+                        )
+                    except Exception as reconciliation_exc:
+                        raise PlaylistRunValidationError(
+                            "duplicate_action_reconciliation_failed"
+                        ) from reconciliation_exc
+                    if (
+                        current_item.state == "terminal"
+                        and current_item.outcome == outcome
+                        and current_item.media_id == (int(media_id) if media_id is not None else None)
+                    ):
+                        continue
+                    if current_item.state != "preparing":
+                        raise PlaylistRunValidationError("duplicate_action_reconciliation_failed") from exc
                     if resolved_membership is not None:
                         try:
                             collections_db.restore_media_collection_item_plan(
@@ -937,7 +1026,7 @@ class PlaylistIngestService:
                             )
                         except Exception as cleanup_exc:
                             raise PlaylistRunValidationError("collection_action_cleanup_failed") from cleanup_exc
-                    raise PlaylistRunValidationError("duplicate_action_finalization_failed") from exc
+                    continue
         finally:
             if metadata_db is not None:
                 with contextlib.suppress(Exception):

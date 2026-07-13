@@ -30,7 +30,7 @@ def apply_media_metadata_patch(
     media_id: int,
     title: str | None = None,
     author: str | None = None,
-    keywords_add: tuple[str, ...] = (),
+    keywords_add: list[str] | tuple[str, ...] = (),
 ) -> dict[str, int]:
     """Apply the reviewed metadata-only allowlist in one Media DB transaction."""
     if type(media_id) is not int or media_id < 1:
@@ -39,19 +39,19 @@ def apply_media_metadata_patch(
     def _text(value: str | None, field: str) -> str | None:
         if value is None:
             return None
-        if type(value) is not str or not value.strip():
-            raise InputError(f"{field} must be a non-empty string")  # noqa: TRY003
+        if type(value) is not str or not value.strip() or len(value.strip()) > 500:
+            raise InputError(f"{field} must be a string between 1 and 500 characters")  # noqa: TRY003
         return value.strip()
 
     title_value = _text(title, "title")
     author_value = _text(author, "author")
-    if isinstance(keywords_add, (str, bytes)):
-        raise InputError("keywords_add must contain non-empty strings")  # noqa: TRY003
+    if type(keywords_add) not in {list, tuple} or len(keywords_add) > 100:
+        raise InputError("keywords_add must be a list or tuple of at most 100 strings")  # noqa: TRY003
     additions: list[str] = []
     seen_additions: set[str] = set()
     for keyword in keywords_add:
-        if type(keyword) is not str or not keyword.strip():
-            raise InputError("keywords_add must contain non-empty strings")  # noqa: TRY003
+        if type(keyword) is not str or not keyword.strip() or len(keyword.strip()) > 128:
+            raise InputError("keywords_add must contain strings between 1 and 128 characters")  # noqa: TRY003
         normalized = keyword.strip()
         folded = normalized.casefold()
         if folded not in seen_additions:
@@ -86,20 +86,26 @@ def apply_media_metadata_patch(
             )
             keywords = [str(row["keyword"]) for row in keyword_rows]
             seen = {keyword.casefold() for keyword in keywords}
+            keywords_changed = False
             for keyword in additions:
                 if keyword.casefold() not in seen:
                     keywords.append(keyword)
                     seen.add(keyword.casefold())
+                    keywords_changed = True
 
             current_version = int(current["version"])
+            title_changed = title_value is not None and title_value != current.get("title")
+            author_changed = author_value is not None and author_value != current.get("author")
+            if not title_changed and not author_changed and not keywords_changed:
+                return {"media_id": media_id, "new_media_version": current_version}
             next_version = current_version + 1
             now = self._get_current_utc_timestamp_str()
             assignments = ["last_modified = ?", "version = ?", "client_id = ?"]
             params: list[Any] = [now, next_version, self.client_id]
-            if title_value is not None:
+            if title_changed:
                 assignments.append("title = ?")
                 params.append(title_value)
-            if author_value is not None:
+            if author_changed:
                 assignments.append("author = ?")
                 params.append(author_value)
             result = self._execute_with_connection(
@@ -110,9 +116,9 @@ def apply_media_metadata_patch(
             if getattr(result, "rowcount", 0) != 1:
                 raise ConflictError("Media", media_id)  # noqa: TRY301
 
-            if additions:
+            if keywords_changed:
                 self.update_keywords_for_media(media_id, keywords, conn=conn)
-            if title_value is not None:
+            if title_changed:
                 self._update_fts_media(
                     conn,
                     media_id,
@@ -144,7 +150,6 @@ def apply_media_metadata_patch(
         raise DatabaseError(f"Media metadata patch failed: {exc}") from exc  # noqa: TRY003
     except _MEDIA_NONCRITICAL_EXCEPTIONS as exc:
         raise DatabaseError(f"Unexpected media metadata patch error: {exc}") from exc  # noqa: TRY003
-
 
 
 def apply_media_item_update(
@@ -183,9 +188,7 @@ def apply_media_item_update(
                 (media_id,),
             )
             if not media_info:
-                raise InputError(  # noqa: TRY003, TRY301
-                    f"Media {media_id} not found or inactive/trashed."
-                )
+                raise InputError(f"Media {media_id} not found or inactive/trashed.")  # noqa: TRY003, TRY301
 
             media_uuid = media_info["uuid"]
             current_title = media_info["title"]
@@ -237,8 +240,7 @@ def apply_media_item_update(
                     params.extend([new_content, new_content_hash, "pending", 0])
                 else:
                     logger.info(
-                        "Content provided for media {} but hash is identical. "
-                        "Content field not updated.",
+                        "Content provided for media {} but hash is identical. " "Content field not updated.",
                         media_id,
                     )
 
@@ -274,19 +276,18 @@ def apply_media_item_update(
                     analysis_content=analysis_content,
                 )
 
-            updated_row = self._fetchone_with_connection(
-                conn,
-                "SELECT * FROM Media WHERE id = ?",
-                (media_id,),
-            ) or {}
+            updated_row = (
+                self._fetchone_with_connection(
+                    conn,
+                    "SELECT * FROM Media WHERE id = ?",
+                    (media_id,),
+                )
+                or {}
+            )
             updated_media_data = dict(updated_row)
             if new_doc_version_info:
-                updated_media_data["created_doc_ver_uuid"] = new_doc_version_info.get(
-                    "uuid"
-                )
-                updated_media_data["created_doc_ver_num"] = new_doc_version_info.get(
-                    "version_number"
-                )
+                updated_media_data["created_doc_ver_uuid"] = new_doc_version_info.get("uuid")
+                updated_media_data["created_doc_ver_num"] = new_doc_version_info.get("version_number")
 
             self._log_sync_event(
                 conn,
@@ -298,11 +299,7 @@ def apply_media_item_update(
             )
 
         try:
-            if (
-                content_actually_changed
-                and _COLLECTIONS_DB is not None
-                and client_id is not None
-            ):
+            if content_actually_changed and _COLLECTIONS_DB is not None and client_id is not None:
                 _COLLECTIONS_DB.from_backend(
                     user_id=str(client_id),
                     backend=self.backend,
@@ -332,14 +329,8 @@ def apply_media_item_update(
             "content_hash": resulting_content_hash,
             "new_media_version": new_media_version,
             "content_changed": content_actually_changed,
-            "document_version_number": (
-                new_doc_version_info.get("version_number")
-                if new_doc_version_info
-                else None
-            ),
-            "document_version_uuid": (
-                new_doc_version_info.get("uuid") if new_doc_version_info else None
-            ),
+            "document_version_number": (new_doc_version_info.get("version_number") if new_doc_version_info else None),
+            "document_version_uuid": (new_doc_version_info.get("uuid") if new_doc_version_info else None),
             "invalidate_rag": True,
         }
 

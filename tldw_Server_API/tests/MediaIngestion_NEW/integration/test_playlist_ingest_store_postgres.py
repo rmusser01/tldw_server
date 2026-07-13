@@ -21,6 +21,56 @@ class _FixedClock:
         self.current += delta
 
 
+def test_postgres_duplicate_action_state_matches_sqlite_contract(pg_temp_db, monkeypatch):
+    monkeypatch.setenv("TEST_MODE", "true")
+    dsn = str(pg_temp_db["dsn"])
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestStore,
+    )
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    from tldw_Server_API.app.core.Jobs.pg_migrations import ensure_jobs_tables_pg
+
+    ensure_jobs_tables_pg(dsn)
+    store = PlaylistIngestStore(JobManager(backend="postgres", db_url=dsn, clock=_FixedClock()))
+    run = store.create_validated_run(
+        "pg-action-owner",
+        items=[
+            {
+                "occurrence_id": "pg-action-occ",
+                "input_kind": "direct_url",
+                "source_url": "https://example.com/existing",
+                "normalized_source_id": "url:https://example.com/existing",
+                "source_kind": "generic_url",
+                "display_metadata": {"title": "Existing"},
+                "state": "staged",
+                "action": "include_existing",
+                "metadata_patch": None,
+            }
+        ],
+    )
+
+    prepared = store.prepare_nonprocessing_run_item("pg-action-owner", run.run_id, "pg-action-occ")
+    resolved = store.resolve_nonprocessing_run_item(
+        "pg-action-owner",
+        run.run_id,
+        "pg-action-occ",
+        outcome="included_existing",
+        media_id=17,
+    )
+    repeated = store.resolve_nonprocessing_run_item(
+        "pg-action-owner",
+        run.run_id,
+        "pg-action-occ",
+        outcome="included_existing",
+        media_id=17,
+    )
+
+    assert prepared.state == "preparing"
+    assert resolved == repeated
+    assert store.get_run("pg-action-owner", run.run_id).status == "completed"
+
+
 def test_playlist_store_postgres_matches_sqlite_contract(pg_temp_db, monkeypatch):
     monkeypatch.setenv("TEST_MODE", "true")
     dsn = str(pg_temp_db["dsn"])

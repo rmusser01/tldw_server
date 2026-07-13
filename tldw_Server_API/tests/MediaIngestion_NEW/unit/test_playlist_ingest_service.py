@@ -19,6 +19,9 @@ class _OwnerMediaDB:
         self.before_lookup = None
         self.metadata_calls: list[dict] = []
         self.metadata_error: Exception | None = None
+        self.metadata_commit_then_error_once: Exception | None = None
+        self.metadata_mutations = 0
+        self._applied_metadata_patches: set[str] = set()
 
     def get_media_by_urls(self, urls, **_kwargs):
         self.lookup_calls.append(list(urls))
@@ -30,6 +33,14 @@ class _OwnerMediaDB:
         self.metadata_calls.append({"media_id": media_id, **patch})
         if self.metadata_error is not None:
             raise self.metadata_error
+        fingerprint = repr((media_id, sorted(patch.items())))
+        if fingerprint not in self._applied_metadata_patches:
+            self._applied_metadata_patches.add(fingerprint)
+            self.metadata_mutations += 1
+        if self.metadata_commit_then_error_once is not None:
+            error = self.metadata_commit_then_error_once
+            self.metadata_commit_then_error_once = None
+            raise error
         return {"media_id": media_id, "new_media_version": 2}
 
     def close_connection(self) -> None:
@@ -42,34 +53,82 @@ class _OwnerCollectionsDB:
         self.resolve_calls: list[dict] = []
         self.discard_calls: list[int] = []
         self.create_error: Exception | None = None
+        self.create_commit_then_error_once: Exception | None = None
         self.resolve_error: Exception | None = None
         self.restore_error: Exception | None = None
         self.discard_error: Exception | None = None
         self.restore_calls: list[dict] = []
+        self.resolve_commit_then_error_once: Exception | None = None
+        self.items: dict[int, SimpleNamespace] = {}
+        self.last_collection = None
 
     def create_media_collection_with_items(self, **kwargs):
         self.create_calls.append(kwargs)
         if self.create_error is not None:
             raise self.create_error
         items = [SimpleNamespace(id=701 + index, ordinal=item["ordinal"]) for index, item in enumerate(kwargs["items"])]
-        return SimpleNamespace(id=700, items=items)
+        self.items = {
+            item.id: SimpleNamespace(
+                id=item.id,
+                status="planned",
+                media_id=None,
+                content_item_id=None,
+                latest_job_id=None,
+                latest_run_id=None,
+                updated_at="2026-07-12T12:00:00+00:00",
+            )
+            for item in items
+        }
+        self.last_collection = SimpleNamespace(id=700, items=items)
+        if self.create_commit_then_error_once is not None:
+            error = self.create_commit_then_error_once
+            self.create_commit_then_error_once = None
+            raise error
+        return self.last_collection
+
+    def get_playlist_ingest_collection_for_run(self, _run_id):
+        if self.last_collection is None:
+            raise KeyError("media_collection_not_found")
+        return self.last_collection
 
     def resolve_media_collection_item(self, item_id, **kwargs):
         self.resolve_calls.append({"item_id": item_id, **kwargs})
         if self.resolve_error is not None:
             raise self.resolve_error
-        return SimpleNamespace(
+        resolved = SimpleNamespace(
             id=item_id,
             status=kwargs["status"],
             media_id=kwargs["media_id"],
+            content_item_id=None,
+            latest_job_id=None,
+            latest_run_id=None,
             updated_at="2026-07-12T12:00:01+00:00",
         )
+        self.items[item_id] = resolved
+        if self.resolve_commit_then_error_once is not None:
+            error = self.resolve_commit_then_error_once
+            self.resolve_commit_then_error_once = None
+            raise error
+        return resolved
+
+    def get_media_collection_item(self, item_id):
+        return self.items[item_id]
 
     def restore_media_collection_item_plan(self, item_id, **kwargs):
         self.restore_calls.append({"item_id": item_id, **kwargs})
         if self.restore_error is not None:
             raise self.restore_error
-        return SimpleNamespace(id=item_id, status="planned", media_id=None)
+        restored = SimpleNamespace(
+            id=item_id,
+            status="planned",
+            media_id=None,
+            content_item_id=None,
+            latest_job_id=None,
+            latest_run_id=None,
+            updated_at="2026-07-12T12:00:02+00:00",
+        )
+        self.items[item_id] = restored
+        return restored
 
     def discard_media_collection(self, collection_id, *, expected_item_ids):
         self.discard_calls.append(collection_id)
@@ -437,7 +496,7 @@ def test_run_request_union_is_strict_bounded_and_occurrence_unique():
             PlaylistIngestRunCreateRequest.model_validate(payload)
 
 
-def test_run_request_new_collection_is_bounded_and_exclusive_with_collection_id():
+def test_run_request_new_collection_is_bounded_and_rejects_existing_collection_id():
     from tldw_Server_API.app.api.v1.schemas.media_playlist_ingest import (
         PlaylistIngestRunCreateRequest,
     )
@@ -465,6 +524,8 @@ def test_run_request_new_collection_is_bounded_and_exclusive_with_collection_id(
         {"name": "Playlist", "default_tags": ["x" * 101]},
         {"name": "Playlist", "source_url": "https://user:secret@example.com/list"},
         {"name": "Playlist", "source_url": "https://example.com/list?token=secret"},
+        {"name": "Playlist", "source_url": "https://example.com/list#section"},
+        {"name": "Playlist", "source_url": "https://example.com/list#access_token=secret"},
         {"name": "Playlist", "metadata": {"secret": "not accepted"}},
     ]
     for collection in invalid_collections:
@@ -477,15 +538,50 @@ def test_run_request_new_collection_is_bounded_and_exclusive_with_collection_id(
                 }
             )
 
-    with pytest.raises(ValidationError):
-        PlaylistIngestRunCreateRequest.model_validate(
-            {
-                "inputs": [_direct_input("occ-1", "https://example.com/1")],
-                "review_overrides": {},
-                "collection_id": 7,
-                "new_collection": {"name": "Playlist"},
-            }
+    for payload in (
+        {"collection_id": 7},
+        {"collection_id": 7, "new_collection": {"name": "Playlist"}},
+    ):
+        with pytest.raises(ValidationError):
+            PlaylistIngestRunCreateRequest.model_validate(
+                {
+                    "inputs": [_direct_input("occ-1", "https://example.com/1")],
+                    "review_overrides": {},
+                    **payload,
+                }
+            )
+
+
+@pytest.mark.parametrize(
+    "collection_id",
+    [
+        pytest.param(41, id="foreign"),
+        pytest.param(42, id="missing"),
+        pytest.param(43, id="deleted"),
+        pytest.param(44, id="non-null"),
+    ],
+)
+def test_create_run_rejects_existing_collection_association_without_side_effects(
+    service_context,
+    collection_id,
+):
+    service, _store, manager, media_db = service_context
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
+        PlaylistRunValidationError,
+    )
+
+    with pytest.raises(PlaylistRunValidationError, match="invalid_run_request"):
+        service.create_run(
+            "owner-1",
+            inputs=[_direct_input("occ-direct", "https://example.com/video")],
+            review_overrides={},
+            collection_id=collection_id,
         )
+
+    assert media_db.lookup_calls == []
+    assert _table_count(manager, "media_ingest_runs") == 0
+    assert _table_count(manager, "jobs") == 0
 
 
 def test_create_run_validates_missing_extra_and_stale_review_overrides(service_context):
@@ -730,6 +826,55 @@ def test_create_run_metadata_conflict_becomes_terminal_failure_without_job(servi
     assert _table_count(manager, "jobs") == 0
 
 
+def test_create_run_metadata_commit_then_error_retries_idempotently(service_context):
+    service, store, manager, media_db = service_context
+    media_db.rows = [{"id": 17, "url": "https://example.com/existing"}]
+    media_db.metadata_commit_then_error_once = RuntimeError("private post-commit detail")
+
+    created = service.create_run(
+        "owner-1",
+        inputs=[_direct_input("occ-direct", "https://example.com/existing")],
+        review_overrides={
+            "occ-direct": {
+                "duplicate_policy": "update_metadata_only",
+                "existing_media_id": 17,
+                "metadata_patch": {"title": "Reviewed"},
+            }
+        },
+    )
+
+    item = store.get_run_item("owner-1", created.run_id, "occ-direct")
+    assert item.state == "terminal"
+    assert item.outcome == "metadata_updated"
+    assert len(media_db.metadata_calls) == 2
+    assert media_db.metadata_mutations == 1
+    assert _table_count(manager, "jobs") == 0
+
+
+def test_create_run_repeated_ambiguous_metadata_failure_stays_recoverable(service_context):
+    service, store, manager, media_db = service_context
+    media_db.rows = [{"id": 17, "url": "https://example.com/existing"}]
+    media_db.metadata_error = RuntimeError("private unknown write state")
+
+    created = service.create_run(
+        "owner-1",
+        inputs=[_direct_input("occ-direct", "https://example.com/existing")],
+        review_overrides={
+            "occ-direct": {
+                "duplicate_policy": "update_metadata_only",
+                "existing_media_id": 17,
+                "metadata_patch": {"title": "Reviewed"},
+            }
+        },
+    )
+
+    item = store.get_run_item("owner-1", created.run_id, "occ-direct")
+    assert item.state == "preparing"
+    assert item.outcome is None
+    assert len(media_db.metadata_calls) == 2
+    assert _table_count(manager, "jobs") == 0
+
+
 def test_create_run_in_run_repeat_requires_occurrence_bound_override(service_context):
     service, store, manager, _media_db = service_context
     inputs = [
@@ -923,9 +1068,9 @@ def test_create_run_collection_membership_failure_terminalizes_complete_action_w
 
     item = store.list_run_items("owner-1", created.run_id)[0]
     events = list(store.list_run_events("owner-1", created.run_id))
-    assert item.state == "terminal"
-    assert item.outcome == "metadata_update_failed"
-    assert events[-1].outcome == "metadata_update_failed"
+    assert item.state == "preparing"
+    assert item.outcome is None
+    assert events[-1].event_type == "duplicate_action_preparing"
     assert media_db.metadata_calls == expected_metadata_calls
     assert collections_db.resolve_calls == [
         {
@@ -934,6 +1079,31 @@ def test_create_run_collection_membership_failure_terminalizes_complete_action_w
             "status": "skipped_existing" if policy == "include_existing" else "completed",
         }
     ]
+    assert collections_db.restore_calls == []
+    assert _table_count(manager, "jobs") == 0
+
+
+def test_create_run_membership_commit_then_error_reconciles_without_restore(service_context):
+    service, store, manager, media_db = service_context
+    collections_db = service.test_collections_db
+    collections_db.resolve_commit_then_error_once = RuntimeError("private post-commit detail")
+    media_db.rows = [{"id": 17, "url": "https://example.com/existing"}]
+
+    created = service.create_run(
+        "owner-1",
+        inputs=[_direct_input("occ-existing", "https://example.com/existing")],
+        review_overrides={
+            "occ-existing": {
+                "duplicate_policy": "include_existing",
+                "existing_media_id": 17,
+            }
+        },
+        new_collection={"name": "Ambiguous membership"},
+    )
+
+    item = store.get_run_item("owner-1", created.run_id, "occ-existing")
+    assert item.state == "terminal"
+    assert item.outcome == "included_existing"
     assert collections_db.restore_calls == []
     assert _table_count(manager, "jobs") == 0
 
@@ -948,27 +1118,15 @@ def test_create_run_finalization_failure_restores_exact_resolved_membership(serv
         lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("private finalization detail")),
     )
 
-    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
-        PlaylistRunValidationError,
+    created = service.create_run(
+        "owner-1",
+        inputs=[_direct_input("occ-existing", "https://example.com/existing")],
+        review_overrides={"occ-existing": {"duplicate_policy": "include_existing", "existing_media_id": 17}},
+        new_collection={"name": "Finalization failure"},
     )
 
-    with pytest.raises(PlaylistRunValidationError) as exc_info:
-        service.create_run(
-            "owner-1",
-            inputs=[_direct_input("occ-existing", "https://example.com/existing")],
-            review_overrides={"occ-existing": {"duplicate_policy": "include_existing", "existing_media_id": 17}},
-            new_collection={"name": "Finalization failure"},
-        )
-
-    assert str(exc_info.value) == "duplicate_action_finalization_failed"
-    assert "private" not in str(exc_info.value)
-    connection = manager._connect()
-    try:
-        run_id = connection.execute("SELECT run_id FROM media_ingest_runs").fetchone()[0]
-    finally:
-        connection.close()
-    item = store.list_run_items("owner-1", run_id)[0]
-    assert item.state == "staged"
+    item = store.list_run_items("owner-1", created.run_id)[0]
+    assert item.state == "preparing"
     assert collections_db.resolve_calls == [{"item_id": 701, "media_id": 17, "status": "skipped_existing"}]
     assert collections_db.restore_calls == [
         {
@@ -978,6 +1136,35 @@ def test_create_run_finalization_failure_restores_exact_resolved_membership(serv
             "expected_updated_at": "2026-07-12T12:00:01+00:00",
         }
     ]
+    assert _table_count(manager, "jobs") == 0
+
+
+def test_create_run_finalization_commit_then_error_never_restores_terminal_membership(
+    service_context,
+    monkeypatch,
+):
+    service, store, manager, media_db = service_context
+    collections_db = service.test_collections_db
+    media_db.rows = [{"id": 17, "url": "https://example.com/existing"}]
+    original_resolve = service._store.resolve_nonprocessing_run_item
+
+    def resolve_then_raise(*args, **kwargs):
+        original_resolve(*args, **kwargs)
+        raise RuntimeError("private post-commit detail")
+
+    monkeypatch.setattr(service._store, "resolve_nonprocessing_run_item", resolve_then_raise)
+
+    created = service.create_run(
+        "owner-1",
+        inputs=[_direct_input("occ-existing", "https://example.com/existing")],
+        review_overrides={"occ-existing": {"duplicate_policy": "include_existing", "existing_media_id": 17}},
+        new_collection={"name": "Ambiguous finalization"},
+    )
+
+    item = store.get_run_item("owner-1", created.run_id, "occ-existing")
+    assert item.state == "terminal"
+    assert item.outcome == "included_existing"
+    assert collections_db.restore_calls == []
     assert _table_count(manager, "jobs") == 0
 
 
@@ -1011,7 +1198,7 @@ def test_create_run_finalization_failure_reports_safe_cleanup_failure(service_co
         run_id = connection.execute("SELECT run_id FROM media_ingest_runs").fetchone()[0]
     finally:
         connection.close()
-    assert store.list_run_items("owner-1", run_id)[0].state == "staged"
+    assert store.list_run_items("owner-1", run_id)[0].state == "preparing"
     assert collections_db.restore_calls == [
         {
             "item_id": 701,
@@ -1059,6 +1246,56 @@ def test_create_run_collection_attachment_failure_discards_plan_and_keeps_run_un
     assert run.collection_id is None
     assert item.planned_collection_item_id is None
     assert collections_db.discard_calls == [700]
+    assert _table_count(manager, "jobs") == 0
+
+
+def test_create_run_attachment_commit_then_exception_reconciles_without_discard(
+    service_context,
+    monkeypatch,
+):
+    service, store, manager, _media_db = service_context
+    collections_db = service.test_collections_db
+    original_attach = service._store.attach_collection_plan
+
+    def attach_then_raise(*args, **kwargs):
+        original_attach(*args, **kwargs)
+        raise RuntimeError("private post-commit detail")
+
+    monkeypatch.setattr(service._store, "attach_collection_plan", attach_then_raise)
+
+    created = service.create_run(
+        "owner-1",
+        inputs=[_direct_input("occ-new", "https://example.com/new")],
+        review_overrides={},
+        new_collection={"name": "Keep attached"},
+    )
+
+    item = store.list_run_items("owner-1", created.run_id)[0]
+    assert created.collection_id == 700
+    assert item.planned_collection_item_id == 701
+    assert collections_db.discard_calls == []
+    assert _table_count(manager, "jobs") == 0
+
+
+def test_create_run_collection_creation_commit_then_exception_reconciles(
+    service_context,
+):
+    service, store, manager, _media_db = service_context
+    collections_db = service.test_collections_db
+    collections_db.create_commit_then_error_once = RuntimeError("private post-commit detail")
+
+    created = service.create_run(
+        "owner-1",
+        inputs=[_direct_input("occ-new", "https://example.com/new")],
+        review_overrides={},
+        new_collection={"name": "Keep committed plan"},
+    )
+
+    item = store.get_run_item("owner-1", created.run_id, "occ-new")
+    assert created.collection_id == 700
+    assert item.planned_collection_item_id == 701
+    assert collections_db.discard_calls == []
+    assert collections_db.create_calls[0]["metadata"] == {"playlist_ingest_run_id": created.run_id}
     assert _table_count(manager, "jobs") == 0
 
 

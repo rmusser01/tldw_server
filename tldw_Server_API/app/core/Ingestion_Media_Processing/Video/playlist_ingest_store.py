@@ -1963,6 +1963,37 @@ class PlaylistIngestStore:
             converter=self._run_item_record,
         )
 
+    def get_run_item(
+        self,
+        owner_user_id: str,
+        run_id: str,
+        occurrence_id: str,
+    ) -> MediaIngestRunItemRecord:
+        """Return one owner-scoped run occurrence by its stable identity."""
+        owner = self._owner(owner_user_id)
+        expiry_sql = "run.expires_at > ?" if self._postgres else "julianday(run.expires_at) > julianday(?)"
+        with self._connection(write=False) as db:
+            row = self._query(
+                db,
+                f"""
+                SELECT item.*
+                FROM media_ingest_run_items AS item
+                JOIN media_ingest_runs AS run
+                  ON run.run_id = item.run_id AND run.owner_user_id = item.owner_user_id
+                WHERE item.owner_user_id = ? AND item.run_id = ? AND item.occurrence_id = ?
+                  AND {expiry_sql}
+                """,  # nosec B608
+                (
+                    owner,
+                    str(run_id),
+                    str(occurrence_id),
+                    self._db_datetime(self._now()),
+                ),
+            ).fetchone()
+        if row is None:
+            raise self._not_found()
+        return self._run_item_record(row)
+
     def append_run_event(
         self,
         owner_user_id: str,
@@ -2127,60 +2158,60 @@ class PlaylistIngestStore:
             )
             return updated.rowcount == 1
 
-    def resolve_nonprocessing_run_item(
+    def prepare_nonprocessing_run_item(
         self,
         owner_user_id: str,
         run_id: str,
         occurrence_id: str,
-        *,
-        outcome: str,
-        media_id: int | None,
-    ) -> None:
-        """Set one reviewed duplicate action terminal and append its event atomically."""
-        if outcome not in {
-            "skipped_existing",
-            "included_existing",
-            "metadata_updated",
-            "metadata_update_failed",
-        }:
-            raise ValueError("invalid non-processing outcome")
-        if media_id is not None and (type(media_id) is not int or media_id < 1):
-            raise ValueError("media_id must be a positive integer")
+    ) -> MediaIngestRunItemRecord:
+        """Durably record intent before a reviewed duplicate action has side effects."""
         owner = self._owner(owner_user_id)
         now = self._now()
         with self._connection(write=True) as db:
-            if self._postgres:
-                run_sql = """
-                    SELECT version FROM media_ingest_runs
-                    WHERE owner_user_id = ? AND run_id = ? AND expires_at > ?
-                    FOR UPDATE
-                """
-            else:
-                run_sql = """
-                    SELECT version FROM media_ingest_runs
-                    WHERE owner_user_id = ? AND run_id = ?
-                      AND julianday(expires_at) > julianday(?)
-                """
+            lock = " FOR UPDATE" if self._postgres else ""
             run_row = self._query(
                 db,
-                run_sql,
+                f"""
+                SELECT version FROM media_ingest_runs
+                WHERE owner_user_id = ? AND run_id = ? AND {self._unexpired_sql()}
+                {lock}
+                """,  # nosec B608
                 (owner, str(run_id), self._db_datetime(now)),
             ).fetchone()
             if run_row is None:
                 raise self._not_found()
             version = int(self._row_dict(run_row)["version"])
+            item_row = self._query(
+                db,
+                f"""
+                SELECT * FROM media_ingest_run_items
+                WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
+                {lock}
+                """,  # nosec B608
+                (owner, str(run_id), str(occurrence_id)),
+            ).fetchone()
+            if item_row is None:
+                raise self._not_found()
+            item = self._row_dict(item_row)
+            if item.get("duplicate_policy") not in {
+                "skip",
+                "include_existing",
+                "update_metadata_only",
+            }:
+                raise ValueError("invalid non-processing action outcome")
+            if item.get("state") in {"preparing", "terminal"}:
+                return self._run_item_record(item_row)
+            if item.get("state") != "staged" or int(item.get("attempt") or 0) != 1:
+                raise PlaylistIngestConflictError("run item is no longer staged")
             updated = self._query(
                 db,
                 """
                 UPDATE media_ingest_run_items
-                SET state = 'terminal', outcome = ?, media_id = ?, retryable = ?, updated_at = ?
+                SET state = 'preparing', updated_at = ?
                 WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
                   AND state = 'staged' AND attempt = 1
                 """,
                 (
-                    outcome,
-                    media_id,
-                    False,
                     self._db_datetime(now),
                     owner,
                     str(run_id),
@@ -2204,6 +2235,139 @@ class PlaylistIngestStore:
                 """
                 INSERT INTO media_ingest_run_events (
                     run_id, owner_user_id, occurrence_id, event_type, state,
+                    attrs_json, occurred_at
+                ) VALUES (?, ?, ?, 'duplicate_action_preparing', 'preparing', ?, ?)
+                """,
+                (
+                    str(run_id),
+                    owner,
+                    str(occurrence_id),
+                    self._json_value({"action": item["duplicate_policy"]}),
+                    self._db_datetime(now),
+                ),
+            )
+            prepared_row = self._query(
+                db,
+                """
+                SELECT * FROM media_ingest_run_items
+                WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
+                """,
+                (owner, str(run_id), str(occurrence_id)),
+            ).fetchone()
+            if prepared_row is None:
+                raise PlaylistIngestConflictError("run item preparation changed")
+            prepared = self._run_item_record(prepared_row)
+        return prepared
+
+    def resolve_nonprocessing_run_item(
+        self,
+        owner_user_id: str,
+        run_id: str,
+        occurrence_id: str,
+        *,
+        outcome: str,
+        media_id: int | None,
+    ) -> MediaIngestRunItemRecord:
+        """Set one reviewed duplicate action terminal and append its event atomically."""
+        if outcome not in {
+            "skipped_existing",
+            "included_existing",
+            "metadata_updated",
+            "metadata_update_failed",
+        }:
+            raise ValueError("invalid non-processing outcome")
+        if media_id is not None and (type(media_id) is not int or media_id < 1):
+            raise ValueError("media_id must be a positive integer")
+        owner = self._owner(owner_user_id)
+        now = self._now()
+        with self._connection(write=True) as db:
+            lock = " FOR UPDATE" if self._postgres else ""
+            run_sql = f"""
+                SELECT version, status FROM media_ingest_runs
+                WHERE owner_user_id = ? AND run_id = ? AND {self._unexpired_sql()}
+                {lock}
+            """  # nosec B608
+            run_row = self._query(
+                db,
+                run_sql,
+                (owner, str(run_id), self._db_datetime(now)),
+            ).fetchone()
+            if run_row is None:
+                raise self._not_found()
+            run = self._row_dict(run_row)
+            version = int(run["version"])
+            item_row = self._query(
+                db,
+                f"""
+                SELECT * FROM media_ingest_run_items
+                WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
+                {lock}
+                """,  # nosec B608
+                (owner, str(run_id), str(occurrence_id)),
+            ).fetchone()
+            if item_row is None:
+                raise self._not_found()
+            item = self._row_dict(item_row)
+            action = item.get("duplicate_policy")
+            allowed = {
+                "skip": {"skipped_existing"},
+                "include_existing": {"included_existing"},
+                "update_metadata_only": {"metadata_updated", "metadata_update_failed"},
+            }
+            if action not in allowed or outcome not in allowed[action] or (action != "skip" and media_id is None):
+                raise ValueError("invalid non-processing action outcome")
+            if item.get("state") == "terminal":
+                if item.get("outcome") == outcome and item.get("media_id") == media_id:
+                    return self._run_item_record(item_row)
+                raise PlaylistIngestConflictError("run item terminal result does not match")
+            if item.get("state") != "preparing" or int(item.get("attempt") or 0) != 1:
+                raise PlaylistIngestConflictError("run item is no longer preparing")
+            updated = self._query(
+                db,
+                """
+                UPDATE media_ingest_run_items
+                SET state = 'terminal', outcome = ?, media_id = ?, retryable = ?, updated_at = ?
+                WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
+                  AND state = 'preparing' AND attempt = 1
+                """,
+                (
+                    outcome,
+                    media_id,
+                    False,
+                    self._db_datetime(now),
+                    owner,
+                    str(run_id),
+                    str(occurrence_id),
+                ),
+            )
+            if updated.rowcount != 1:
+                raise PlaylistIngestConflictError("run item is no longer preparing")
+            incomplete = self._query(
+                db,
+                """
+                SELECT 1 FROM media_ingest_run_items
+                WHERE owner_user_id = ? AND run_id = ? AND state <> 'terminal'
+                LIMIT 1
+                """,
+                (owner, str(run_id)),
+            ).fetchone()
+            run_status = "completed" if incomplete is None else str(run["status"])
+            bumped = self._query(
+                db,
+                """
+                UPDATE media_ingest_runs
+                SET status = ?, version = version + 1, updated_at = ?
+                WHERE owner_user_id = ? AND run_id = ? AND version = ?
+                """,
+                (run_status, self._db_datetime(now), owner, str(run_id), version),
+            )
+            if bumped.rowcount != 1:
+                raise PlaylistIngestConflictError("run version no longer matches expected version")
+            self._query(
+                db,
+                """
+                INSERT INTO media_ingest_run_events (
+                    run_id, owner_user_id, occurrence_id, event_type, state,
                     outcome, attrs_json, occurred_at
                 ) VALUES (?, ?, ?, 'duplicate_action_resolved', 'terminal', ?, ?, ?)
                 """,
@@ -2212,10 +2376,22 @@ class PlaylistIngestStore:
                     owner,
                     str(occurrence_id),
                     outcome,
-                    self._json_value({"media_id": media_id}),
+                    self._json_value({"media_id": media_id, "run_status": run_status}),
                     self._db_datetime(now),
                 ),
             )
+            resolved_row = self._query(
+                db,
+                """
+                SELECT * FROM media_ingest_run_items
+                WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
+                """,
+                (owner, str(run_id), str(occurrence_id)),
+            ).fetchone()
+            if resolved_row is None:
+                raise PlaylistIngestConflictError("run item finalization changed")
+            resolved = self._run_item_record(resolved_row)
+        return resolved
 
     def attach_collection_plan(
         self,
@@ -2331,7 +2507,18 @@ class PlaylistIngestStore:
                     self._db_datetime(now),
                 ),
             )
-        return self.get_run(owner, run_id)
+            attached_row = self._query(
+                db,
+                """
+                SELECT * FROM media_ingest_runs
+                WHERE owner_user_id = ? AND run_id = ? AND collection_id = ?
+                """,
+                (owner, str(run_id), collection_id),
+            ).fetchone()
+            if attached_row is None:
+                raise PlaylistIngestConflictError("run collection plan changed")
+            attached_run = self._run_record(attached_row)
+        return attached_run
 
     def cleanup_expired(
         self,

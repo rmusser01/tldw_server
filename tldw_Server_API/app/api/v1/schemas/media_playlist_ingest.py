@@ -369,6 +369,8 @@ class PlaylistIngestNewCollection(BaseModel):
             raise ValueError("collection source_url must be a credential-free HTTP URL") from exc
         if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
             raise ValueError("collection source_url must be a credential-free HTTP URL")
+        if parsed.fragment:
+            raise ValueError("collection source_url must not contain a fragment")
         sensitive_parts = ("auth", "cookie", "credential", "key", "password", "secret", "signature", "token")
         if any(
             any(part in key.casefold() for part in sensitive_parts)
@@ -411,7 +413,6 @@ class PlaylistIngestRunCreateRequest(BaseModel):
         default=None,
         max_length=MAX_PLAYLIST_PREFLIGHT_SELECTIONS,
     )
-    collection_id: int | None = Field(default=None, ge=1, strict=True)
     new_collection: PlaylistIngestNewCollection | None = None
 
     @field_validator("review_overrides", mode="before")
@@ -452,8 +453,6 @@ class PlaylistIngestRunCreateRequest(BaseModel):
         occurrence_ids = [item.occurrence_id for item in self.inputs]
         if len(set(occurrence_ids)) != len(occurrence_ids):
             raise ValueError("occurrence_id values must be unique")
-        if self.collection_id is not None and self.new_collection is not None:
-            raise ValueError("collection_id and new_collection are mutually exclusive")
         return self
 
 

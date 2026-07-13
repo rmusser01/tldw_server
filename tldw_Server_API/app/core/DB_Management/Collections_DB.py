@@ -3336,7 +3336,39 @@ class CollectionsDatabase:
                 )
                 if not self._extract_lastrowid(result):
                     raise DatabaseError("Failed to insert media collection item")
-        return self.get_media_collection(collection_id)
+            collection_row = self.backend.execute(
+                """
+                SELECT id, user_id, name, kind, description, source_url, metadata_json,
+                       default_tags_json, deleted, created_at, updated_at
+                FROM media_collections
+                WHERE id = ? AND user_id = ? AND deleted = ?
+                """,
+                (
+                    collection_id,
+                    self.user_id,
+                    self._coerce_bool_flag(False, postgres=self.backend_type == BackendType.POSTGRESQL),
+                ),
+                connection=conn,
+            ).first
+            item_rows = self.backend.execute(
+                """
+                SELECT id, user_id, collection_id, ordinal, source_url, normalized_source_id,
+                       source_kind, title, speaker, published_at, track, duplicate_status,
+                       status, media_id, content_item_id, latest_job_id, latest_run_id,
+                       idempotency_key, retry_count, error_summary, warnings_json,
+                       metadata_json, tags_json, created_at, updated_at
+                FROM media_collection_items
+                WHERE collection_id = ? AND user_id = ?
+                ORDER BY ordinal ASC, id ASC
+                """,
+                (collection_id, self.user_id),
+                connection=conn,
+            ).rows
+            if collection_row is None or len(item_rows) != len(item_values):
+                raise DatabaseError("Failed to read inserted media collection")
+            created = self._row_to_media_collection(collection_row, include_items=False)
+            created.items = [self._row_to_media_collection_item(row) for row in item_rows]
+        return created
 
 
     def get_media_collection(self, collection_id: int) -> MediaCollectionRow:
@@ -3358,6 +3390,33 @@ class CollectionsDatabase:
             raise KeyError("media_collection_not_found")
         return self._row_to_media_collection(row)
 
+    def get_playlist_ingest_collection_for_run(self, run_id: str) -> MediaCollectionRow:
+        """Reconcile a playlist plan by its internal run marker."""
+        if type(run_id) is not str or not run_id.strip() or len(run_id) > 100:
+            raise ValueError("playlist_ingest_run_id_invalid")
+        if self.backend_type == BackendType.POSTGRESQL:
+            marker_sql = "metadata_json ->> 'playlist_ingest_run_id' = ?"
+        else:
+            marker_sql = "json_extract(metadata_json, '$.playlist_ingest_run_id') = ?"
+        rows = self.backend.execute(
+            f"""
+            SELECT id, user_id, name, kind, description, source_url, metadata_json,
+                   default_tags_json, deleted, created_at, updated_at
+            FROM media_collections
+            WHERE user_id = ? AND kind = 'playlist_ingest' AND deleted = ?
+              AND {marker_sql}
+            ORDER BY id ASC LIMIT 2
+            """,  # nosec B608
+            (
+                self.user_id,
+                self._coerce_bool_flag(False, postgres=self.backend_type == BackendType.POSTGRESQL),
+                run_id.strip(),
+            ),
+        ).rows
+        if len(rows) != 1:
+            raise KeyError("media_collection_not_found")
+        return self._row_to_media_collection(rows[0])
+
     def discard_media_collection(
         self,
         collection_id: int,
@@ -3376,11 +3435,12 @@ class CollectionsDatabase:
         ):
             raise ValueError("media_collection_discard_mismatch")
         with self.transaction() as conn:
+            lock = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
             existing = self.backend.execute(
                 """
                 SELECT id FROM media_collections
                 WHERE id = ? AND user_id = ? AND kind = 'playlist_ingest' AND deleted = ?
-                """,
+                """ + lock,  # nosec B608
                 (
                     collection_id_value,
                     self.user_id,
@@ -3392,10 +3452,11 @@ class CollectionsDatabase:
                 raise KeyError("media_collection_not_found")
             membership_rows = self.backend.execute(
                 """
-                SELECT id, status, media_id, content_item_id, latest_job_id
+                SELECT id, status, media_id, content_item_id, latest_job_id,
+                       latest_run_id, idempotency_key
                 FROM media_collection_items
                 WHERE collection_id = ? AND user_id = ?
-                """,
+                """ + lock,  # nosec B608
                 (collection_id_value, self.user_id),
                 connection=conn,
             ).rows
@@ -3404,19 +3465,38 @@ class CollectionsDatabase:
                 or row.get("media_id") is not None
                 or row.get("content_item_id") is not None
                 or row.get("latest_job_id") is not None
+                or row.get("latest_run_id") is not None
+                or row.get("idempotency_key") is not None
                 for row in membership_rows
             ):
                 raise ValueError("media_collection_discard_mismatch")
-            self.backend.execute(
-                "DELETE FROM media_collection_items WHERE collection_id = ? AND user_id = ?",
+            deleted_items = self.backend.execute(
+                """
+                DELETE FROM media_collection_items
+                WHERE collection_id = ? AND user_id = ? AND status = 'planned'
+                  AND media_id IS NULL AND content_item_id IS NULL
+                  AND latest_job_id IS NULL AND latest_run_id IS NULL
+                  AND idempotency_key IS NULL
+                """,
                 (collection_id_value, self.user_id),
                 connection=conn,
             )
-            self.backend.execute(
-                "DELETE FROM media_collections WHERE id = ? AND user_id = ?",
-                (collection_id_value, self.user_id),
+            if deleted_items.rowcount != len(item_ids):
+                raise ValueError("media_collection_discard_mismatch")
+            deleted_collection = self.backend.execute(
+                """
+                DELETE FROM media_collections
+                WHERE id = ? AND user_id = ? AND kind = 'playlist_ingest' AND deleted = ?
+                """,
+                (
+                    collection_id_value,
+                    self.user_id,
+                    self._coerce_bool_flag(False, postgres=self.backend_type == BackendType.POSTGRESQL),
+                ),
                 connection=conn,
             )
+            if deleted_collection.rowcount != 1:
+                raise ValueError("media_collection_discard_mismatch")
         return True
 
     def list_media_collections(
@@ -3792,51 +3872,145 @@ class CollectionsDatabase:
         latest_run_id: int | None = None,
     ) -> MediaCollectionItemRow:
         """Resolve a planned item to an existing or newly created media row."""
+        if type(item_id) is not int or item_id < 1:
+            raise ValueError("media_collection_resolve_mismatch")
+        if type(media_id) is not int or media_id < 1:
+            raise ValueError("media_collection_resolve_mismatch")
+        if content_item_id is not None and (type(content_item_id) is not int or content_item_id < 1):
+            raise ValueError("media_collection_resolve_mismatch")
+        if latest_run_id is not None and (type(latest_run_id) is not int or latest_run_id < 1):
+            raise ValueError("media_collection_resolve_mismatch")
+        if latest_job_id is not None and (
+            type(latest_job_id) is not str or not latest_job_id.strip()
+        ):
+            raise ValueError("media_collection_resolve_mismatch")
+        latest_job_id_value = latest_job_id.strip() if latest_job_id is not None else None
         status_value = self._normalize_collection_status(status)
-        media_id_value = int(media_id)
-        now = _utcnow_iso()
-        fields = [
-            "status = ?",
-            "media_id = ?",
-            "error_summary = ?",
-            "warnings_json = ?",
-            "updated_at = ?",
-        ]
-        params: list[Any] = [
-            status_value,
-            media_id_value,
-            None,
-            self._json_dumps_or_none([]),
-            now,
-        ]
-        if content_item_id is not None:
-            fields.append("content_item_id = ?")
-            params.append(int(content_item_id))
-        if latest_job_id is not None:
-            fields.append("latest_job_id = ?")
-            params.append(latest_job_id.strip() if latest_job_id.strip() else None)
-        if latest_run_id is not None:
-            fields.append("latest_run_id = ?")
-            params.append(int(latest_run_id))
+        media_id_value = media_id
 
         with self.transaction() as conn:
-            existing = self.backend.execute(
+            lookup = self.backend.execute(
                 "SELECT collection_id FROM media_collection_items WHERE id = ? AND user_id = ?",
-                (int(item_id), self.user_id),
+                (item_id, self.user_id),
+                connection=conn,
+            ).first
+            if not lookup:
+                raise KeyError("media_collection_item_not_found")
+            collection_id = int(lookup["collection_id"])
+            parent_lock = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
+            parent = self.backend.execute(
+                """
+                SELECT id, kind FROM media_collections
+                WHERE id = ? AND user_id = ? AND deleted = ?
+                """ + parent_lock,  # nosec B608
+                (
+                    collection_id,
+                    self.user_id,
+                    self._coerce_bool_flag(False, postgres=self.backend_type == BackendType.POSTGRESQL),
+                ),
+                connection=conn,
+            ).first
+            if not parent:
+                raise KeyError("media_collection_not_found")
+            strict_playlist_plan = parent.get("kind") == "playlist_ingest"
+            item_lock = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
+            existing = self.backend.execute(
+                """
+                SELECT id, user_id, collection_id, ordinal, source_url, normalized_source_id,
+                       source_kind, title, speaker, published_at, track, duplicate_status,
+                       status, media_id, content_item_id, latest_job_id, latest_run_id,
+                       idempotency_key, retry_count, error_summary, warnings_json,
+                       metadata_json, tags_json, created_at, updated_at
+                FROM media_collection_items
+                WHERE id = ? AND user_id = ?
+                """ + item_lock,  # nosec B608
+                (item_id, self.user_id),
                 connection=conn,
             ).first
             if not existing:
                 raise KeyError("media_collection_item_not_found")
+            exact_result = (
+                existing.get("status") == status_value
+                and existing.get("media_id") == media_id_value
+                and existing.get("content_item_id") == content_item_id
+                and existing.get("latest_job_id") == latest_job_id_value
+                and existing.get("latest_run_id") == latest_run_id
+            )
+            if exact_result:
+                return self._row_to_media_collection_item(existing)
+            permitted_status = (
+                {"planned", "processing"} if latest_job_id is not None else {"planned"}
+            )
+            may_resolve = (
+                (not strict_playlist_plan or existing.get("status") in permitted_status)
+                and existing.get("media_id") is None
+                and existing.get("content_item_id") is None
+                and existing.get("latest_run_id") is None
+                and (not strict_playlist_plan or existing.get("idempotency_key") is None)
+                and (
+                    not strict_playlist_plan
+                    or existing.get("latest_job_id")
+                    in ({None, latest_job_id_value} if latest_job_id_value is not None else {None})
+                )
+            )
+            if not may_resolve:
+                raise ValueError("media_collection_resolve_mismatch")
+            now = _utcnow_iso()
+            fields = [
+                "status = ?",
+                "media_id = ?",
+                "error_summary = ?",
+                "warnings_json = ?",
+                "updated_at = ?",
+            ]
+            params: list[Any] = [
+                status_value,
+                media_id_value,
+                None,
+                self._json_dumps_or_none([]),
+                now,
+            ]
+            if content_item_id is not None:
+                fields.append("content_item_id = ?")
+                params.append(content_item_id)
+            if latest_job_id is not None:
+                fields.append("latest_job_id = ?")
+                params.append(latest_job_id_value)
+            if latest_run_id is not None:
+                fields.append("latest_run_id = ?")
+                params.append(latest_run_id)
+            existing_job_id = existing.get("latest_job_id")
+            if existing_job_id is None:
+                latest_job_cas = "latest_job_id IS NULL"
+                latest_job_params: list[Any] = []
+            else:
+                latest_job_cas = "latest_job_id = ?"
+                latest_job_params = [existing_job_id]
+            idempotency_cas = (
+                "AND idempotency_key IS NULL" if strict_playlist_plan else ""
+            )
             updated = self.backend.execute(
-                f"UPDATE media_collection_items SET {', '.join(fields)} WHERE id = ? AND user_id = ?",  # nosec B608
-                tuple([*params, int(item_id), self.user_id]),
+                f"""UPDATE media_collection_items SET {', '.join(fields)}
+                    WHERE id = ? AND user_id = ? AND status = ?
+                      AND media_id IS NULL AND content_item_id IS NULL
+                      AND latest_run_id IS NULL
+                      AND {latest_job_cas}
+                      {idempotency_cas}
+                """,  # nosec B608
+                (
+                    *params,
+                    item_id,
+                    self.user_id,
+                    existing.get("status"),
+                    *latest_job_params,
+                ),
                 connection=conn,
             )
             if updated.rowcount != 1:
-                raise KeyError("media_collection_item_not_found")
+                raise ValueError("media_collection_resolve_mismatch")
             self.backend.execute(
                 "UPDATE media_collections SET updated_at = ? WHERE id = ? AND user_id = ?",
-                (now, int(existing["collection_id"]), self.user_id),
+                (now, collection_id, self.user_id),
                 connection=conn,
             )
             result = self.backend.execute(
@@ -3849,7 +4023,7 @@ class CollectionsDatabase:
                 FROM media_collection_items
                 WHERE id = ? AND user_id = ?
                 """,
-                (int(item_id), self.user_id),
+                (item_id, self.user_id),
                 connection=conn,
             ).first
             if not result:
@@ -3875,28 +4049,68 @@ class CollectionsDatabase:
         if not isinstance(expected_updated_at, str) or not expected_updated_at.strip():
             raise ValueError("media_collection_restore_mismatch")
 
-        now = _utcnow_iso()
         with self.transaction() as conn:
-            existing = self.backend.execute(
+            lookup = self.backend.execute(
                 """
                 SELECT collection_id FROM media_collection_items
                 WHERE id = ? AND user_id = ?
-                  AND status = ? AND media_id = ? AND updated_at = ?
-                  AND content_item_id IS NULL
-                  AND latest_job_id IS NULL
-                  AND latest_run_id IS NULL
                 """,
+                (item_id, self.user_id),
+                connection=conn,
+            ).first
+            if not lookup:
+                raise ValueError("media_collection_restore_mismatch")
+            collection_id = int(lookup["collection_id"])
+            lock = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
+            parent = self.backend.execute(
+                """
+                SELECT id FROM media_collections
+                WHERE id = ? AND user_id = ? AND deleted = ?
+                """ + lock,  # nosec B608
                 (
-                    item_id,
+                    collection_id,
                     self.user_id,
-                    expected_status,
-                    expected_media_id,
-                    expected_updated_at,
+                    self._coerce_bool_flag(False, postgres=self.backend_type == BackendType.POSTGRESQL),
                 ),
+                connection=conn,
+            ).first
+            if not parent:
+                raise ValueError("media_collection_restore_mismatch")
+            existing = self.backend.execute(
+                """
+                SELECT id, user_id, collection_id, ordinal, source_url, normalized_source_id,
+                       source_kind, title, speaker, published_at, track, duplicate_status,
+                       status, media_id, content_item_id, latest_job_id, latest_run_id,
+                       idempotency_key, retry_count, error_summary, warnings_json,
+                       metadata_json, tags_json, created_at, updated_at
+                FROM media_collection_items
+                WHERE id = ? AND user_id = ?
+                """ + lock,  # nosec B608
+                (item_id, self.user_id),
                 connection=conn,
             ).first
             if not existing:
                 raise ValueError("media_collection_restore_mismatch")
+            if (
+                existing.get("status") == "planned"
+                and existing.get("media_id") is None
+                and existing.get("content_item_id") is None
+                and existing.get("latest_job_id") is None
+                and existing.get("latest_run_id") is None
+                and existing.get("idempotency_key") is None
+            ):
+                return self._row_to_media_collection_item(existing)
+            if (
+                existing.get("status") != expected_status
+                or existing.get("media_id") != expected_media_id
+                or existing.get("updated_at") != expected_updated_at
+                or existing.get("content_item_id") is not None
+                or existing.get("latest_job_id") is not None
+                or existing.get("latest_run_id") is not None
+                or existing.get("idempotency_key") is not None
+            ):
+                raise ValueError("media_collection_restore_mismatch")
+            now = _utcnow_iso()
             restored = self.backend.execute(
                 """
                 UPDATE media_collection_items
@@ -3907,6 +4121,7 @@ class CollectionsDatabase:
                   AND content_item_id IS NULL
                   AND latest_job_id IS NULL
                   AND latest_run_id IS NULL
+                  AND idempotency_key IS NULL
                 """,
                 (
                     self._json_dumps_or_none([]),
@@ -3923,10 +4138,26 @@ class CollectionsDatabase:
                 raise ValueError("media_collection_restore_mismatch")
             self.backend.execute(
                 "UPDATE media_collections SET updated_at = ? WHERE id = ? AND user_id = ?",
-                (now, int(existing["collection_id"]), self.user_id),
+                (now, collection_id, self.user_id),
                 connection=conn,
             )
-        return self.get_media_collection_item(item_id)
+            result = self.backend.execute(
+                """
+                SELECT id, user_id, collection_id, ordinal, source_url, normalized_source_id,
+                       source_kind, title, speaker, published_at, track, duplicate_status,
+                       status, media_id, content_item_id, latest_job_id, latest_run_id,
+                       idempotency_key, retry_count, error_summary, warnings_json,
+                       metadata_json, tags_json, created_at, updated_at
+                FROM media_collection_items
+                WHERE id = ? AND user_id = ?
+                """,
+                (item_id, self.user_id),
+                connection=conn,
+            ).first
+            if not result:
+                raise ValueError("media_collection_restore_mismatch")
+            restored_item = self._row_to_media_collection_item(result)
+        return restored_item
 
     def upsert_content_item(
         self,
