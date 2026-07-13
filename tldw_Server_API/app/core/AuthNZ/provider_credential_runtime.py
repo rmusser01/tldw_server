@@ -269,12 +269,9 @@ class ProviderCredentialRuntime:
             self._closed = True
             task = asyncio.create_task(self._close_owned())
             self._close_task = task
+            task.add_done_callback(self._close_task_done)
 
-        try:
-            await asyncio.shield(task)
-        finally:
-            if task.done() and self._close_task is task:
-                self._close_task = None
+        await asyncio.shield(task)
 
     async def _refresh(self, provider: str) -> ProviderCallCredentials:
         lock = self._refresh_locks.setdefault(provider, asyncio.Lock())
@@ -414,6 +411,17 @@ class ProviderCredentialRuntime:
         self._fallback_resolver = _no_fallback
         self._resolver = resolve_byok_credentials
         self._identity = object()
+
+    def _close_task_done(self, task: asyncio.Task[None]) -> None:
+        """Release and safely observe the owned cleanup task."""
+        try:
+            if not task.cancelled():
+                task.exception()
+        except (asyncio.CancelledError, Exception):
+            return
+        finally:
+            if self._close_task is task:
+                self._close_task = None
 
     def _ensure_open(self) -> None:
         if self._closed:

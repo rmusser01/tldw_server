@@ -484,6 +484,54 @@ async def test_close_cancels_owned_work_is_idempotent_and_closes_public_methods(
 
 
 @pytest.mark.asyncio
+async def test_cancelled_close_waiter_does_not_retain_completed_cleanup_task() -> None:
+    resolution_started = asyncio.Event()
+    cleanup_active = asyncio.Event()
+    release_resolution = asyncio.Event()
+
+    async def resolver(provider: str, **_kwargs) -> ResolvedByokCredentials:
+        if provider == "openai":
+            return _resolution(provider)
+        resolution_started.set()
+        try:
+            await release_resolution.wait()
+        except asyncio.CancelledError:
+            cleanup_active.set()
+            await release_resolution.wait()
+        return _resolution(provider)
+
+    runtime = _runtime(resolver)
+    handle = await runtime.resolve("openai")
+    pending_resolution = asyncio.create_task(runtime.resolve("anthropic"))
+    await resolution_started.wait()
+
+    close_waiter = asyncio.create_task(runtime.close())
+    await cleanup_active.wait()
+    owned_cleanup = runtime._close_task
+    assert owned_cleanup is not None
+    cleanup_finished = asyncio.Event()
+    owned_cleanup.add_done_callback(lambda _task: cleanup_finished.set())
+
+    close_waiter.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await close_waiter
+    assert owned_cleanup.cancelled() is False
+
+    release_resolution.set()
+    await cleanup_finished.wait()
+
+    assert runtime._close_task is None
+    with pytest.raises(RuntimeError, match="runtime is closed"):
+        await pending_resolution
+    await runtime.close()
+    await runtime.close()
+    with pytest.raises(RuntimeError, match="runtime is closed"):
+        await runtime.resolve("openai")
+    with pytest.raises(RuntimeError, match="runtime is closed"):
+        await runtime.mark_used(handle)
+
+
+@pytest.mark.asyncio
 async def test_resolver_failure_is_sanitized_and_not_cached() -> None:
     calls = 0
 
