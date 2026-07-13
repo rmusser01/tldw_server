@@ -121,6 +121,7 @@ def test_describe_module_surface_groups_enabled_modules_by_risk():
     modules = {
         "cooking": {"enabled": True, "status": "healthy"},
         "media": {"enabled": True, "status": "healthy"},
+        "skills": {"enabled": True, "status": "healthy"},
         "filesystem": {"enabled": True, "status": "healthy"},
         "git": {"enabled": True, "status": "healthy"},
         "web_fetch": {"enabled": True, "status": "healthy"},
@@ -141,7 +142,13 @@ def test_describe_module_surface_groups_enabled_modules_by_risk():
     assert [module["id"] for module in surface["tiers"]["read_only"]["modules"]] == [
         "cooking",
         "media",
+        "skills",
     ]
+    skills_entry = next(
+        module for module in surface["tiers"]["read_only"]["modules"] if module["id"] == "skills"
+    )
+    assert skills_entry["description"] == "Discover and safely render user-owned Skills without execution."
+    assert "requires_explicit_opt_in" not in skills_entry
     assert [module["id"] for module in surface["tiers"]["local_files"]["modules"]] == ["filesystem"]
     assert [module["id"] for module in surface["tiers"]["local_process"]["modules"]] == [
         "browser_cdp",
@@ -153,7 +160,7 @@ def test_describe_module_surface_groups_enabled_modules_by_risk():
         "web_research",
         "web_search",
     ]
-    assert surface["enabled_count"] == 9
+    assert surface["enabled_count"] == 10
 
 
 def test_describe_module_surface_reports_disabled_available_high_risk_modules():
