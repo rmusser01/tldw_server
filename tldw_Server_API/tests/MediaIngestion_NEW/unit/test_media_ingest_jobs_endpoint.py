@@ -1088,7 +1088,7 @@ def test_run_bound_file_length_mismatch_does_not_stage_or_leak(
     assert store.get_run_item("1", run.run_id, "occ-file-1").state == "awaiting_upload"
 
 
-def test_run_bound_file_job_failure_cleans_staging_and_releases_reservation(
+def test_run_bound_file_job_failure_cleans_own_staging_and_preserves_reservation_for_retry(
     media_ingest_jobs_client,
     monkeypatch,
 ):
@@ -1096,38 +1096,116 @@ def test_run_bound_file_job_failure_cleans_staging_and_releases_reservation(
     from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
 
     cleaned: list[str] = []
+    create_calls: list[dict] = []
     original_cleanup = ingest_jobs._cleanup_dir
+    original_create = ingest_jobs._create_media_ingest_job
 
     def record_cleanup(path):
         cleaned.append(path)
         original_cleanup(path)
 
-    monkeypatch.setattr(ingest_jobs, "_cleanup_dir", record_cleanup, raising=True)
-    monkeypatch.setattr(
-        ingest_jobs,
-        "_create_media_ingest_job",
-        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("private token=do-not-leak")),
-        raising=True,
-    )
+    def fail_once(**kwargs):
+        create_calls.append(kwargs)
+        if len(create_calls) == 1:
+            raise RuntimeError("private token=do-not-leak")
+        return original_create(**kwargs)
 
-    response = media_ingest_jobs_client.post(
+    monkeypatch.setattr(ingest_jobs, "_cleanup_dir", record_cleanup, raising=True)
+    monkeypatch.setattr(ingest_jobs, "_create_media_ingest_job", fail_once, raising=True)
+
+    data = {
+        "media_type": "audio",
+        "run_id": run.run_id,
+        "file_occurrence_ids": json.dumps(["occ-file-1"]),
+        "file_attempts": json.dumps([1]),
+    }
+
+    first = media_ingest_jobs_client.post(
         "/api/v1/media/ingest/jobs",
-        data={
-            "media_type": "audio",
-            "run_id": run.run_id,
-            "file_occurrence_ids": json.dumps(["occ-file-1"]),
-            "file_attempts": json.dumps([1]),
-        },
+        data=data,
         files=[("files", ("clip.mp3", b"test", "audio/mpeg"))],
         headers={"X-API-KEY": "test-api-key-12345"},
     )
+    pending = store.get_run_item("1", run.run_id, "occ-file-1")
+    second = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=data,
+        files=[("files", ("clip.mp3", b"next", "audio/mpeg"))],
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
 
-    assert response.status_code == 207, response.text
-    assert response.json()["submissions"][0]["error_code"] == "job_submission_failed"
-    assert "do-not-leak" not in response.text
-    assert cleaned and all(not Path(path).exists() for path in cleaned)
-    assert manager.list_jobs(domain="media_ingest", owner_user_id="1", limit=10) == []
-    assert store.get_run_item("1", run.run_id, "occ-file-1").state == "awaiting_upload"
+    assert first.status_code == 207, first.text
+    assert first.json()["submissions"][0]["error_code"] == "job_submission_failed"
+    assert "do-not-leak" not in first.text
+    assert pending.state == "submit_pending"
+    assert pending.batch_id == first.json()["submissions"][0]["batch_id"]
+    assert second.status_code == 200, second.text
+    assert len(create_calls) == 2
+    assert {call["batch_id"] for call in create_calls} == {pending.batch_id}
+    assert cleaned and not Path(cleaned[0]).exists()
+    jobs = manager.list_jobs(domain="media_ingest", owner_user_id="1", limit=10)
+    assert len(jobs) == 1
+    payload = json.loads(jobs[0]["payload"]) if isinstance(jobs[0]["payload"], str) else jobs[0]["payload"]
+    assert Path(payload["source"]).read_bytes() == b"next"
+    assert store.get_run_item("1", run.run_id, "occ-file-1").job_id == jobs[0]["id"]
+    shutil.rmtree(payload["temp_dir"], ignore_errors=True)
+
+
+def test_run_bound_upload_staging_failure_preserves_reservation_for_retry(
+    media_ingest_jobs_client,
+    monkeypatch,
+):
+    manager, store, run = _seed_occurrence_run(include_file=True)
+    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
+
+    original_save = ingest_jobs.save_uploaded_files
+    staged_dirs: list[Path] = []
+    save_calls = 0
+
+    async def fail_once(*args, temp_dir, **kwargs):
+        nonlocal save_calls
+        save_calls += 1
+        staged_dirs.append(Path(temp_dir))
+        if save_calls == 1:
+            raise RuntimeError("private staging failure")
+        return await original_save(*args, temp_dir=temp_dir, **kwargs)
+
+    monkeypatch.setattr(ingest_jobs, "save_uploaded_files", fail_once, raising=True)
+    data = {
+        "media_type": "audio",
+        "run_id": run.run_id,
+        "file_occurrence_ids": json.dumps(["occ-file-1"]),
+        "file_attempts": json.dumps([1]),
+    }
+
+    first = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=data,
+        files=[("files", ("clip.mp3", b"old!", "audio/mpeg"))],
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+    pending = store.get_run_item("1", run.run_id, "occ-file-1")
+    second = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=data,
+        files=[("files", ("clip.mp3", b"new!", "audio/mpeg"))],
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert first.status_code == 207, first.text
+    assert first.json()["submissions"][0]["error_code"] == "upload_staging_failed"
+    assert "private" not in first.text
+    assert pending.state == "submit_pending"
+    assert pending.batch_id == first.json()["submissions"][0]["batch_id"]
+    assert len(staged_dirs) == 2
+    assert not staged_dirs[0].exists()
+    assert second.status_code == 200, second.text
+    assert second.json()["submissions"][0]["batch_id"] == pending.batch_id
+    job = manager.get_job(second.json()["submissions"][0]["job_id"])
+    payload = json.loads(job["payload"]) if isinstance(job["payload"], str) else job["payload"]
+    assert Path(payload["source"]).read_bytes() == b"new!"
+    assert Path(payload["temp_dir"]) == staged_dirs[1]
+    shutil.rmtree(payload["temp_dir"], ignore_errors=True)
 
 
 @pytest.mark.parametrize(
@@ -1373,6 +1451,50 @@ def test_run_bound_url_commit_then_http_503_reconciles_original_job(
     jobs = manager.list_jobs(domain="media_ingest", owner_user_id="1", limit=10)
     assert len(jobs) == 1
     assert response.json()["submissions"][0]["job_id"] == jobs[0]["id"]
+    assert store.get_run_item("1", run.run_id, "occ-url-1").job_id == jobs[0]["id"]
+
+
+def test_confirmed_url_create_failure_preserves_reservation_for_retry(
+    media_ingest_jobs_client,
+    monkeypatch,
+):
+    manager, store, run = _seed_occurrence_run()
+    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
+
+    original_create = ingest_jobs._create_media_ingest_job
+    create_calls: list[dict] = []
+
+    def fail_once(**kwargs):
+        create_calls.append(kwargs)
+        if len(create_calls) == 1:
+            raise RuntimeError("job was not created")
+        return original_create(**kwargs)
+
+    monkeypatch.setattr(ingest_jobs, "_create_media_ingest_job", fail_once, raising=True)
+    data = _run_submit_data(run.run_id)
+
+    first = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=data,
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+    pending = store.get_run_item("1", run.run_id, "occ-url-1")
+    second = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=data,
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert first.status_code == 207, first.text
+    assert first.json()["submissions"][0]["error_code"] == "job_submission_failed"
+    assert pending.state == "submit_pending"
+    assert pending.batch_id == first.json()["submissions"][0]["batch_id"]
+    assert second.status_code == 200, second.text
+    assert len(create_calls) == 2
+    assert {call["batch_id"] for call in create_calls} == {pending.batch_id}
+    assert len({call["payload"]["idempotency_key"] for call in create_calls}) == 1
+    jobs = manager.list_jobs(domain="media_ingest", owner_user_id="1", limit=10)
+    assert len(jobs) == 1
     assert store.get_run_item("1", run.run_id, "occ-url-1").job_id == jobs[0]["id"]
 
 
@@ -1769,6 +1891,85 @@ def test_concurrent_retry_cooperatively_creates_without_replacing_reservation(
     assert store.get_run_item("1", run.run_id, "occ-url-1").job_id == jobs[0]["id"]
 
 
+def test_original_failure_cannot_release_reservation_after_retry_creates_job(
+    media_ingest_jobs_client,
+    monkeypatch,
+):
+    manager, store, run = _seed_occurrence_run()
+    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
+
+    original_create = ingest_jobs._create_media_ingest_job
+    first_entered = Event()
+    retry_created = Event()
+    release_retry_bind = Event()
+    calls_lock = Lock()
+    create_calls = 0
+    lookup_calls = 0
+    create_inputs: list[tuple[str, str]] = []
+
+    def controlled_create(**kwargs):
+        nonlocal create_calls
+        with calls_lock:
+            create_calls += 1
+            call_number = create_calls
+            create_inputs.append((kwargs["batch_id"], kwargs["payload"]["idempotency_key"]))
+        if call_number == 1:
+            first_entered.set()
+            assert retry_created.wait(10)
+            raise RuntimeError("original submission did not create a job")
+        row = original_create(**kwargs)
+        retry_created.set()
+        assert release_retry_bind.wait(10)
+        return row
+
+    def controlled_lookup(*_args, **_kwargs):
+        nonlocal lookup_calls
+        with calls_lock:
+            lookup_calls += 1
+            call_number = lookup_calls
+        assert call_number <= 2
+        return None
+
+    monkeypatch.setattr(ingest_jobs, "_create_media_ingest_job", controlled_create, raising=True)
+    monkeypatch.setattr(ingest_jobs, "_find_exact_occurrence_job", controlled_lookup, raising=True)
+    data = _run_submit_data(run.run_id)
+
+    def post_retry():
+        with TestClient(media_ingest_jobs_client.app) as client:
+            return client.post(
+                "/api/v1/media/ingest/jobs",
+                data=data,
+                headers={"X-API-KEY": "test-api-key-12345"},
+            )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        original_future = pool.submit(
+            media_ingest_jobs_client.post,
+            "/api/v1/media/ingest/jobs",
+            data=data,
+            headers={"X-API-KEY": "test-api-key-12345"},
+        )
+        assert first_entered.wait(10)
+        retry_future = pool.submit(post_retry)
+        assert retry_created.wait(10)
+        original_response = original_future.result(timeout=10)
+        release_retry_bind.set()
+        retry_response = retry_future.result(timeout=10)
+
+    assert original_response.status_code == 207, original_response.text
+    assert original_response.json()["submissions"][0]["error_code"] == "job_submission_failed"
+    assert retry_response.status_code == 200, retry_response.text
+    assert create_calls == 2
+    assert lookup_calls == 2
+    assert len(set(create_inputs)) == 1
+    jobs = manager.list_jobs(domain="media_ingest", owner_user_id="1", limit=10)
+    assert len(jobs) == 1
+    assert retry_response.json()["submissions"][0]["job_id"] == jobs[0]["id"]
+    bound = store.get_run_item("1", run.run_id, "occ-url-1")
+    assert bound.state == "queued"
+    assert bound.job_id == jobs[0]["id"]
+
+
 def test_pending_retry_rate_limit_stops_globally_without_resetting_stored_reservation(
     media_ingest_jobs_client,
     monkeypatch,
@@ -1843,26 +2044,28 @@ def test_pending_retry_rate_limit_stops_globally_without_resetting_stored_reserv
     assert manager.list_jobs(domain="media_ingest", owner_user_id="1", limit=10) == []
 
 
-def test_run_bound_rate_limit_stops_later_entries_and_returns_retry_after(
+def test_run_bound_rate_limit_preserves_reservation_for_retry_and_stops_later_entries(
     media_ingest_jobs_client,
     monkeypatch,
 ):
     manager, store, run = _seed_occurrence_run()
     from tldw_Server_API.app.core.Jobs import manager as jobs_manager
 
-    create_calls = 0
+    original_create = jobs_manager.JobManager.create_job
+    create_calls: list[dict] = []
 
-    def rate_limited_create(self, **_kwargs):
-        nonlocal create_calls
-        create_calls += 1
-        raise JobSubmissionLimitError(
-            "Quota exceeded: submits per minute",
-            code="jobs_submit_rate_limited",
-            retry_after=17,
-        )
+    def rate_limited_once(self, **kwargs):
+        create_calls.append(kwargs)
+        if len(create_calls) == 1:
+            raise JobSubmissionLimitError(
+                "Quota exceeded: submits per minute",
+                code="jobs_submit_rate_limited",
+                retry_after=17,
+            )
+        return original_create(self, **kwargs)
 
-    monkeypatch.setattr(jobs_manager.JobManager, "create_job", rate_limited_create, raising=True)
-    response = media_ingest_jobs_client.post(
+    monkeypatch.setattr(jobs_manager.JobManager, "create_job", rate_limited_once, raising=True)
+    first = media_ingest_jobs_client.post(
         "/api/v1/media/ingest/jobs",
         data=_run_submit_data(
             run.run_id,
@@ -1875,11 +2078,22 @@ def test_run_bound_rate_limit_stops_later_entries_and_returns_retry_after(
         ),
         headers={"X-API-KEY": "test-api-key-12345"},
     )
+    pending = store.get_run_item("1", run.run_id, "occ-url-1")
+    second = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=_run_submit_data(run.run_id),
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
 
-    assert response.status_code == 429, response.text
-    assert response.headers["Retry-After"] == "17"
-    assert response.json()["detail"] == "Quota exceeded: submits per minute"
-    assert create_calls == 1
-    assert manager.list_jobs(domain="media_ingest", owner_user_id="1", limit=10) == []
-    assert store.get_run_item("1", run.run_id, "occ-url-1").state == "staged"
+    assert first.status_code == 429, first.text
+    assert first.headers["Retry-After"] == "17"
+    assert first.json()["detail"] == "Quota exceeded: submits per minute"
+    assert pending.state == "submit_pending"
+    assert pending.batch_id is not None
     assert store.get_run_item("1", run.run_id, "occ-url-2").state == "staged"
+    assert second.status_code == 200, second.text
+    assert second.json()["submissions"][0]["batch_id"] == pending.batch_id
+    assert len(create_calls) == 2
+    jobs = manager.list_jobs(domain="media_ingest", owner_user_id="1", limit=10)
+    assert len(jobs) == 1
+    assert store.get_run_item("1", run.run_id, "occ-url-1").job_id == jobs[0]["id"]

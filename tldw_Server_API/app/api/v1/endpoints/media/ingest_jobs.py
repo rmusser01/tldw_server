@@ -1164,15 +1164,6 @@ async def _submit_run_bound_media_ingest_jobs(
             except Exception:
                 if temp_dir_path:
                     _cleanup_dir(temp_dir_path)
-                with contextlib.suppress(Exception):
-                    store.reset_run_item_job_submission(
-                        owner,
-                        run_identity,
-                        occurrence,
-                        attempt=attempt,
-                        batch_id=batch_id,
-                        idempotency_identity=identity,
-                    )
                 submissions.append(
                     _submission_rejected(
                         occurrence_id=occurrence,
@@ -1215,16 +1206,6 @@ async def _submit_run_bound_media_ingest_jobs(
             if isinstance(exc, HTTPException) and isinstance(exc.__cause__, JobSubmissionLimitError):
                 if temp_dir_path:
                     _cleanup_dir(temp_dir_path)
-                if owns_reservation:
-                    with contextlib.suppress(Exception):
-                        store.reset_run_item_job_submission(
-                            owner,
-                            run_identity,
-                            occurrence,
-                            attempt=attempt,
-                            batch_id=batch_id,
-                            idempotency_identity=identity,
-                        )
                 raise
             try:
                 existing = _find_exact_occurrence_job(
@@ -1292,23 +1273,9 @@ async def _submit_run_bound_media_ingest_jobs(
 
             if temp_dir_path:
                 _cleanup_dir(temp_dir_path)
-            reset = False
-            if owns_reservation:
-                try:
-                    store.reset_run_item_job_submission(
-                        owner,
-                        run_identity,
-                        occurrence,
-                        attempt=attempt,
-                        batch_id=batch_id,
-                        idempotency_identity=identity,
-                    )
-                    reset = True
-                except Exception:
-                    logger.warning("Could not release media ingest reservation after job submission failure")
-            if reset and isinstance(exc, HTTPException) and exc.status_code in {429, 503}:
+            if owns_reservation and isinstance(exc, HTTPException) and exc.status_code in {429, 503}:
                 raise
-            if not reset:
+            if not owns_reservation:
                 submissions.append(
                     _submission_rejected(
                         occurrence_id=occurrence,

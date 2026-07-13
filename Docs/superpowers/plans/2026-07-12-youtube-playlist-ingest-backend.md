@@ -356,6 +356,13 @@ git commit -m "feat: bind media jobs to ingest occurrences (TASK-12110)"
 - [x] Prove file recovery leaves only the authoritative committed staging path.
 - [x] Re-run focused, PostgreSQL, property, static, and Bandit verification, then commit.
 
+**Shared-reservation race follow-up:** Complete
+
+- [x] Add deterministic RED coverage for recovery after upload staging failure, typed quota rejection, and confirmed no-job creation failure.
+- [x] Reproduce a cooperative retry creating the exact job before the original submitter reaches its former reset-before-bind path.
+- [x] Preserve run-bound submit-pending reservations on every retryable submission failure while leaving legacy non-run behavior unchanged.
+- [x] Re-run focused, PostgreSQL, property, static, and Bandit verification, update TASK-12112, and commit.
+
 ### Task 8: Add run routes, reconciliation, event replay, cancellation, and retry
 
 - [ ] **Step 1: Write failing run-route tests**
