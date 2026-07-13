@@ -18,15 +18,24 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request,
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from loguru import logger
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_auth_principal, get_request_user, rbac_rate_limit, RequirePermission, TokenScopeGuard, User
 
+import tldw_Server_API.app.core.AuthNZ.orgs_teams as orgs_teams
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequirePermission,
+    TokenScopeGuard,
+    User,
+    check_rate_limit,
+    get_auth_principal,
+    get_request_user,
+    rbac_rate_limit,
+)
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import require_within_limit
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
-from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
 
 # Dependencies
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
 
 # Schemas
 from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import (
@@ -37,17 +46,18 @@ from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import (
     UnifiedRAGRequest,
     UnifiedRAGResponse,
 )
-from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_READ
 from tldw_Server_API.app.core.AuthNZ.byok_helpers import is_trusted_base_url_principal
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_READ
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import ProviderCredentialRuntime
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
 from tldw_Server_API.app.core.Chat.chat_service import resolve_provider_api_key
+from tldw_Server_API.app.core.config import get_config_value, settings
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
-from tldw_Server_API.app.core.DB_Management.Prompts_DB import PromptsDatabase
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.DB_Management.Prompts_DB import PromptsDatabase
 from tldw_Server_API.app.core.RAG.rag_service.agentic_chunker import (
     AgenticConfig,
     agentic_rag_pipeline,
@@ -77,13 +87,16 @@ from tldw_Server_API.app.core.RAG.rag_service.response_mapping import (
     rag_result_from_unified_search_result,
     rag_result_to_response,
 )
+from tldw_Server_API.app.core.RAG.rag_service.retrieval_plan import (
+    RetrievalPlan,
+    build_retrieval_plan,
+)
 from tldw_Server_API.app.core.RAG.rag_service.source_health import build_source_health_entries
 from tldw_Server_API.app.core.RAG.rag_service.streaming_executor import (
     classify_rag_provider_error,
     rag_provider_error_event,
     stream_rag_events,
 )
-from tldw_Server_API.app.core.config import get_config_value, settings
 
 # Unified Pipeline
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import (
@@ -155,6 +168,23 @@ def _build_credential_runtime(
 ) -> ProviderCredentialRuntime:
     """Create one request-owned provider credential runtime."""
     user_id, team_ids, org_ids, trusted_base_url_override = _trusted_credential_runtime_scope(request, current_user)
+
+    return _build_credential_runtime_for_scope(
+        user_id=user_id,
+        team_ids=team_ids,
+        org_ids=org_ids,
+        trusted_base_url_override=trusted_base_url_override,
+    )
+
+
+def _build_credential_runtime_for_scope(
+    *,
+    user_id: int | None,
+    team_ids: list[int],
+    org_ids: list[int],
+    trusted_base_url_override: bool,
+) -> ProviderCredentialRuntime:
+    """Create a provider runtime from an already trusted execution scope."""
 
     def fallback_resolver(provider: str) -> str | None:
         api_key, _ = resolve_provider_api_key(
@@ -443,6 +473,138 @@ def _sanitize_checkpoint_config_for_persistence(config: dict[str, Any]) -> dict[
         if safe_value is not _CHECKPOINT_UNSUPPORTED:
             sanitized[str(key)] = safe_value
     return sanitized
+
+
+_CHECKPOINT_CREDENTIAL_SCOPE_KEY = "credential_scope"
+_CHECKPOINT_SCOPE_FIELDS = frozenset({"owner_user_id", "team_ids", "org_ids"})
+_CHECKPOINT_QUERY_FAILURE = "batch_query_failed"
+
+
+def _checkpoint_admin_authorized(principal: AuthPrincipal) -> bool:
+    """Return whether current principal has an explicit checkpoint admin claim."""
+    roles = {str(role).strip().lower() for role in principal.roles}
+    permissions = {
+        str(permission).strip().lower() for permission in principal.permissions
+    }
+    return bool(
+        principal.is_admin
+        or "admin" in roles
+        or permissions & {"*", "system.configure"}
+    )
+
+
+def _checkpoint_scope_ids(value: Any) -> list[int]:
+    """Validate one persisted checkpoint scope ID list without coercion."""
+    if not isinstance(value, list):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="credential_scope_invalid",
+        )
+    if any(type(item) is not int or item <= 0 for item in value):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="credential_scope_invalid",
+        )
+    return sorted(set(value))
+
+
+async def _checkpoint_resume_credential_scope(
+    checkpoint: Any,
+    principal: AuthPrincipal,
+) -> tuple[int | None, list[int], list[int], bool]:
+    """Authorize and revalidate a checkpoint's persisted credential identity."""
+    metadata = getattr(checkpoint, "metadata", None) or {}
+    if _CHECKPOINT_CREDENTIAL_SCOPE_KEY not in metadata:
+        return None, [], [], False
+
+    scope = metadata[_CHECKPOINT_CREDENTIAL_SCOPE_KEY]
+    if not isinstance(scope, dict) or set(scope) != _CHECKPOINT_SCOPE_FIELDS:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="credential_scope_invalid",
+        )
+
+    owner_user_id = scope.get("owner_user_id")
+    if type(owner_user_id) is not int or owner_user_id <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="credential_scope_invalid",
+        )
+    team_ids = _checkpoint_scope_ids(scope.get("team_ids"))
+    org_ids = _checkpoint_scope_ids(scope.get("org_ids"))
+
+    if principal.user_id != owner_user_id and not _checkpoint_admin_authorized(principal):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="checkpoint_owner_forbidden",
+        )
+
+    try:
+        active_team_ids: set[int] = set()
+        if team_ids:
+            team_memberships = await orgs_teams.list_active_team_memberships_for_user(
+                owner_user_id
+            )
+            active_team_ids = {
+                int(membership["team_id"]) for membership in team_memberships
+            }
+
+        active_org_ids: set[int] = set()
+        if org_ids:
+            org_memberships = await orgs_teams.list_org_memberships_for_user(
+                owner_user_id
+            )
+            active_org_ids = {
+                int(membership["org_id"])
+                for membership in org_memberships
+                if str(membership.get("status") or "").strip().lower() == "active"
+            }
+    except Exception:  # noqa: BLE001 - fail closed when membership state is unavailable
+        logger.warning("Checkpoint credential scope membership lookup unavailable")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="credential_scope_unavailable",
+        ) from None
+
+    if not set(team_ids).issubset(active_team_ids) or not set(org_ids).issubset(
+        active_org_ids
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="credential_scope_revoked",
+        )
+
+    return (
+        owner_user_id,
+        team_ids,
+        org_ids,
+        is_trusted_base_url_principal(principal),
+    )
+
+
+def _checkpoint_error_codes(
+    *,
+    error: BaseException | None = None,
+    result: Any = None,
+) -> list[str]:
+    """Return bounded error codes for persisted checkpoint results."""
+    raw_errors: list[Any]
+    if error is not None:
+        raw_errors = [error]
+    else:
+        raw_errors = list(getattr(result, "errors", None) or [])
+
+    codes: list[str] = []
+    for raw_error in raw_errors:
+        classified = (
+            classify_rag_provider_error(raw_error)
+            if isinstance(raw_error, BaseException)
+            else None
+        )
+        code = classified[0] if classified is not None else _CHECKPOINT_QUERY_FAILURE
+        if code not in codes:
+            codes.append(code)
+    return codes
 
 
 def _sync_retriever_overrides_to_pipeline() -> None:
@@ -1449,7 +1611,13 @@ async def unified_batch_endpoint(
     Processes multiple queries concurrently with the same parameters.
     """
     try:
-        credential_runtime = _build_credential_runtime(request_raw, current_user)
+        credential_scope = _trusted_credential_runtime_scope(request_raw, current_user)
+        credential_runtime = _build_credential_runtime_for_scope(
+            user_id=credential_scope[0],
+            team_ids=credential_scope[1],
+            org_ids=credential_scope[2],
+            trusted_base_url_override=credential_scope[3],
+        )
     except _RAG_PROVIDER_FAILURES as exc:
         raise _rag_provider_http_exception(exc) from exc
 
@@ -1511,6 +1679,13 @@ async def unified_batch_endpoint(
                 "rag_batch",
                 total_items=len(request.queries or []),
                 config=checkpoint_config,
+                metadata={
+                    _CHECKPOINT_CREDENTIAL_SCOPE_KEY: {
+                        "owner_user_id": credential_scope[0],
+                        "team_ids": credential_scope[1],
+                        "org_ids": credential_scope[2],
+                    }
+                },
             )
             checkpoint_id = checkpoint_state.checkpoint_id
         # Process batch
@@ -1526,21 +1701,12 @@ async def unified_batch_endpoint(
                 result: Optional[Any],
                 error: Optional[BaseException],
             ) -> None:
-                status = "ok"
-                errors: list[str] = []
-                if error is not None:
-                    status = "error"
-                    errors = [str(error)]
-                else:
-                    result_errors = getattr(result, "errors", None)
-                    if result_errors:
-                        status = "error"
-                        errors = [str(e) for e in result_errors]
+                errors = _checkpoint_error_codes(error=error, result=result)
 
                 payload: dict[str, Any] = {
                     "query_index": int(query_index),
                     "query": query_text,
-                    "status": status,
+                    "status": "error" if errors else "ok",
                 }
                 if errors:
                     payload["errors"] = errors
@@ -1584,13 +1750,10 @@ async def unified_batch_endpoint(
             for idx, res in enumerate(results):
                 if idx in saved_indices:
                     continue
-                errors: list[str] = []
-                if isinstance(res, BaseException):
-                    errors = [str(res)]
-                else:
-                    result_errors = getattr(res, "errors", None)
-                    if result_errors:
-                        errors = [str(e) for e in result_errors]
+                errors = _checkpoint_error_codes(
+                    error=res if isinstance(res, BaseException) else None,
+                    result=res,
+                )
                 payload: dict[str, Any] = {
                     "query_index": int(idx),
                     "query": request.queries[idx] if idx < len(request.queries) else "",
@@ -1751,16 +1914,17 @@ async def resume_batch_endpoint(
     prompts_db: PromptsDatabase = Depends(get_prompts_db_for_user),
 ):
     """Resume a batch RAG operation from a previously saved checkpoint."""
-    try:
-        credential_runtime = _build_credential_runtime(request_raw, current_user)
-    except _RAG_PROVIDER_FAILURES as exc:
-        raise _rag_provider_http_exception(exc) from exc
+    credential_runtime: ProviderCredentialRuntime | None = None
 
     try:
         from tldw_Server_API.app.core.RAG.rag_service.checkpoint import CheckpointManager
 
         manager = CheckpointManager()
         checkpoint = manager.load_by_id(checkpoint_id)
+        credential_scope = await _checkpoint_resume_credential_scope(
+            checkpoint,
+            principal,
+        )
 
         if checkpoint.is_complete:
             return UnifiedBatchResponse(
@@ -1809,6 +1973,13 @@ async def resume_batch_endpoint(
                 total_time=0.0,
             )
 
+        credential_runtime = _build_credential_runtime_for_scope(
+            user_id=credential_scope[0],
+            team_ids=credential_scope[1],
+            org_ids=credential_scope[2],
+            trusted_base_url_override=credential_scope[3],
+        )
+
         max_concurrent = checkpoint.config.get("max_concurrent", 5)
 
         db_paths = {
@@ -1845,21 +2016,12 @@ async def resume_batch_endpoint(
             error: Optional[BaseException],
         ) -> None:
             """Save checkpoint progress incrementally per completed query."""
-            status = "ok"
-            errors: list[str] = []
-            if error is not None:
-                status = "error"
-                errors = [str(error)]
-            else:
-                result_errors = getattr(result, "errors", None)
-                if result_errors:
-                    status = "error"
-                    errors = [str(e) for e in result_errors]
+            errors = _checkpoint_error_codes(error=error, result=result)
 
             payload: dict[str, Any] = {
                 "query_index": int(query_index),
                 "query": query_text,
-                "status": status,
+                "status": "error" if errors else "ok",
             }
             if errors:
                 payload["errors"] = errors
@@ -1893,13 +2055,10 @@ async def resume_batch_endpoint(
             if global_idx in _saved_indices:
                 continue
             res = results[local_idx] if local_idx < len(results) else None
-            errors: list[str] = []
-            if isinstance(res, BaseException):
-                errors = [str(res)]
-            else:
-                result_errors = getattr(res, "errors", None)
-                if result_errors:
-                    errors = [str(e) for e in result_errors]
+            errors = _checkpoint_error_codes(
+                error=res if isinstance(res, BaseException) else None,
+                result=res,
+            )
             payload: dict[str, Any] = {
                 "query_index": int(global_idx),
                 "query": remaining_queries[local_idx] if local_idx < len(remaining_queries) else "",
@@ -1920,6 +2079,8 @@ async def resume_batch_endpoint(
         )
     except _RAG_PROVIDER_FAILURES as exc:
         raise _rag_provider_http_exception(exc) from exc
+    except HTTPException:
+        raise
     except FileNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1937,7 +2098,8 @@ async def resume_batch_endpoint(
             detail="Batch resume failed due to an internal error.",
         ) from e
     finally:
-        await credential_runtime.close()
+        if credential_runtime is not None:
+            await credential_runtime.close()
 
 
 @router.post(

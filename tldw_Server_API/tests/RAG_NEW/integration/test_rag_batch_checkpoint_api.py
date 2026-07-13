@@ -2,11 +2,10 @@ import pytest
 from fastapi import Request
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.app.main import app as fastapi_app
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_auth_principal
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.main import app as fastapi_app
 
 pytestmark = pytest.mark.integration
 
@@ -50,8 +49,8 @@ def client_with_overrides(monkeypatch, auth_headers):
     fastapi_app.dependency_overrides[check_rate_limit] = _noop
     # Avoid DB initialization by overriding DB deps to return None
     try:
-        from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user as _get_media_db
         from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user as _get_chacha_db
+        from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user as _get_media_db
         async def _none_media_db():
             return None
         async def _none_chacha_db():
@@ -88,7 +87,14 @@ def test_rag_batch_creates_checkpoint(client_with_overrides, monkeypatch, tmp_pa
     cp_mod = _set_checkpoint_dir(monkeypatch, tmp_path)
     manager = cp_mod.CheckpointManager()
 
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
     import tldw_Server_API.app.core.RAG.rag_service.unified_pipeline as up
+
+    monkeypatch.setattr(
+        rag_ep,
+        "_trusted_credential_runtime_scope",
+        lambda *args, **kwargs: (1, [7], [11], True),  # noqa: ARG005
+    )
 
     async def fake_pipeline(query: str, **kwargs):  # noqa: ARG001
         return up.UnifiedSearchResult(documents=[], query=query, errors=[])
@@ -106,6 +112,17 @@ def test_rag_batch_creates_checkpoint(client_with_overrides, monkeypatch, tmp_pa
     loaded = manager.load_by_id(checkpoint_id)
     assert loaded.total_items == 2
     assert loaded.completed_items == 2
+    assert loaded.metadata == {
+        "credential_scope": {
+            "owner_user_id": 1,
+            "team_ids": [7],
+            "org_ids": [11],
+        }
+    }
+    assert "credential_runtime" not in loaded.config
+    assert "trusted_base_url_override" not in loaded.metadata["credential_scope"]
+    assert "base_url" not in loaded.metadata["credential_scope"]
+    assert "api_key" not in loaded.metadata["credential_scope"]
 
     indices = [entry.get("query_index") for entry in loaded.results]
     assert sorted(indices) == [0, 1]
@@ -148,4 +165,4 @@ def test_rag_batch_checkpoint_records_errors(client_with_overrides, monkeypatch,
     bad_entry = status_map.get(1)
     assert bad_entry is not None
     assert bad_entry.get("status") == "error"
-    assert any("boom" in str(err) for err in bad_entry.get("errors", []))
+    assert bad_entry.get("errors") == ["batch_query_failed"]
