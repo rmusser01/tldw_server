@@ -1,4 +1,4 @@
-import { bgRequest, bgUpload } from "@/services/background-proxy"
+import { bgRequest, bgStream, bgUpload } from "@/services/background-proxy"
 import { inferUploadMediaTypeFromUrl } from "@/services/tldw/media-routing"
 import {
   buildContentPayload,
@@ -22,6 +22,47 @@ import {
   type PlaylistPreflightResult
 } from "@/services/tldw/playlist-preflight"
 import type { DocumentUploadPreflightResponse } from "@/services/chat-document-processing"
+import {
+  buildPlaylistIngestPageQuery,
+  normalizePlaylistIngestRunCreateResult,
+  normalizePlaylistIngestRunItemsPage,
+  normalizePlaylistIngestRunRetryResult,
+  normalizePlaylistIngestRunSummary,
+  normalizePlaylistMaterialization,
+  normalizePlaylistPreflightAccepted,
+  normalizePlaylistPreflightItemsPage,
+  normalizePlaylistPreflightSummary,
+  parsePlaylistIngestRunStreamLine,
+  toApiPlaylistIngestRunCreateRequest,
+  toPlaylistIngestPublicError,
+  type ApiPlaylistIngestRunCancelRequest,
+  type ApiPlaylistIngestRunCreateResponse,
+  type ApiPlaylistIngestRunItemsPageResponse,
+  type ApiPlaylistIngestRunRetryRequest,
+  type ApiPlaylistIngestRunRetryResponse,
+  type ApiPlaylistIngestRunSummaryResponse,
+  type ApiPlaylistMaterializationCreateRequest,
+  type ApiPlaylistMaterializationResponse,
+  type ApiPlaylistPreflightAcceptedResponse,
+  type ApiPlaylistPreflightCreateRequest,
+  type ApiPlaylistPreflightItemsPageResponse,
+  type ApiPlaylistPreflightSummaryResponse,
+  type PlaylistIngestPageParams,
+  type PlaylistIngestRequestOptions,
+  type PlaylistIngestRunCancelRequest,
+  type PlaylistIngestRunCreateRequest,
+  type PlaylistIngestRunCreateResult,
+  type PlaylistIngestRunItemsPage,
+  type PlaylistIngestRunRetryResult,
+  type PlaylistIngestRunStreamEvent,
+  type PlaylistIngestRunSummary,
+  type PlaylistIngestStreamOptions,
+  type PlaylistMaterialization,
+  type PlaylistPreflightAccepted,
+  type PlaylistPreflightCreateRequest,
+  type PlaylistPreflightItemsPage,
+  type PlaylistPreflightSummary
+} from "@/services/tldw/playlist-ingest"
 import {
   normalizeMediaCollectionItem,
   normalizeMediaCollectionListResponse,
@@ -66,6 +107,25 @@ function buildQuery(params?: Record<string, any>): string {
   const query = search.toString()
   return query ? `?${query}` : ''
 }
+
+const isPlaylistIngestAbortError = (error: unknown): boolean =>
+  (error as { name?: unknown } | null)?.name === "AbortError"
+
+const withPlaylistIngestError = async <T>(request: () => Promise<T>): Promise<T> => {
+  try {
+    return await request()
+  } catch (error) {
+    if (isPlaylistIngestAbortError(error)) throw error
+    throw toPlaylistIngestPublicError(error)
+  }
+}
+
+const playlistRequestOptions = (
+  options?: PlaylistIngestRequestOptions
+): { timeoutMs?: number; abortSignal?: AbortSignal } => ({
+  ...(options?.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+  ...(options?.signal !== undefined ? { abortSignal: options.signal } : {})
+})
 
 const normalizeReferenceImageCandidate = (
   item: any
@@ -182,6 +242,226 @@ export const mediaMethods = {
       timeoutMs
     })
     return normalizePlaylistPreflightResponse(response)
+  },
+
+  async createPlaylistPreflight(
+    payload: PlaylistPreflightCreateRequest,
+    options?: PlaylistIngestRequestOptions
+  ): Promise<PlaylistPreflightAccepted> {
+    const body: ApiPlaylistPreflightCreateRequest = { url: payload.url }
+    if (payload.maxItems !== undefined) body.max_items = payload.maxItems
+    if (payload.timeoutSeconds !== undefined) {
+      body.timeout_seconds = payload.timeoutSeconds
+    }
+    return withPlaylistIngestError(async () => {
+      const response = await bgRequest<ApiPlaylistPreflightAcceptedResponse>({
+        path: "/api/v1/media/playlist-preflights",
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+        ...playlistRequestOptions(options)
+      })
+      return normalizePlaylistPreflightAccepted(response)
+    })
+  },
+
+  async getPlaylistPreflight(
+    preflightId: string,
+    options?: PlaylistIngestRequestOptions
+  ): Promise<PlaylistPreflightSummary> {
+    const id = encodeURIComponent(preflightId)
+    return withPlaylistIngestError(async () => {
+      const response = await bgRequest<ApiPlaylistPreflightSummaryResponse>({
+        path: `/api/v1/media/playlist-preflights/${id}`,
+        method: "GET",
+        ...playlistRequestOptions(options)
+      })
+      return normalizePlaylistPreflightSummary(response)
+    })
+  },
+
+  async listPlaylistPreflightItems(
+    preflightId: string,
+    params?: PlaylistIngestPageParams,
+    options?: PlaylistIngestRequestOptions
+  ): Promise<PlaylistPreflightItemsPage> {
+    const id = encodeURIComponent(preflightId)
+    const query = buildPlaylistIngestPageQuery(params)
+    return withPlaylistIngestError(async () => {
+      const response = await bgRequest<ApiPlaylistPreflightItemsPageResponse>({
+        path: `/api/v1/media/playlist-preflights/${id}/items${query}`,
+        method: "GET",
+        ...playlistRequestOptions(options)
+      })
+      return normalizePlaylistPreflightItemsPage(response)
+    })
+  },
+
+  async materializePlaylistPreflight(
+    preflightId: string,
+    occurrenceIds: string[],
+    options?: PlaylistIngestRequestOptions
+  ): Promise<PlaylistMaterialization> {
+    const id = encodeURIComponent(preflightId)
+    const body: ApiPlaylistMaterializationCreateRequest = {
+      occurrence_ids: occurrenceIds
+    }
+    return withPlaylistIngestError(async () => {
+      const response = await bgRequest<ApiPlaylistMaterializationResponse>({
+        path: `/api/v1/media/playlist-preflights/${id}/materializations`,
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+        ...playlistRequestOptions(options)
+      })
+      return normalizePlaylistMaterialization(response)
+    })
+  },
+
+  async cancelPlaylistPreflight(
+    preflightId: string,
+    options?: PlaylistIngestRequestOptions
+  ): Promise<void> {
+    const id = encodeURIComponent(preflightId)
+    return withPlaylistIngestError(async () => {
+      await bgRequest<void>({
+        path: `/api/v1/media/playlist-preflights/${id}`,
+        method: "DELETE",
+        ...playlistRequestOptions(options)
+      })
+    })
+  },
+
+  async createPlaylistIngestRun(
+    payload: PlaylistIngestRunCreateRequest,
+    options?: PlaylistIngestRequestOptions
+  ): Promise<PlaylistIngestRunCreateResult> {
+    return withPlaylistIngestError(async () => {
+      const response = await bgRequest<ApiPlaylistIngestRunCreateResponse>({
+        path: "/api/v1/media/ingest/runs",
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: toApiPlaylistIngestRunCreateRequest(payload),
+        ...playlistRequestOptions(options)
+      })
+      return normalizePlaylistIngestRunCreateResult(response)
+    })
+  },
+
+  async getPlaylistIngestRun(
+    runId: string,
+    options?: PlaylistIngestRequestOptions
+  ): Promise<PlaylistIngestRunSummary> {
+    const id = encodeURIComponent(runId)
+    return withPlaylistIngestError(async () => {
+      const response = await bgRequest<ApiPlaylistIngestRunSummaryResponse>({
+        path: `/api/v1/media/ingest/runs/${id}`,
+        method: "GET",
+        ...playlistRequestOptions(options)
+      })
+      return normalizePlaylistIngestRunSummary(response)
+    })
+  },
+
+  async listPlaylistIngestRunItems(
+    runId: string,
+    params?: PlaylistIngestPageParams,
+    options?: PlaylistIngestRequestOptions
+  ): Promise<PlaylistIngestRunItemsPage> {
+    const id = encodeURIComponent(runId)
+    const query = buildPlaylistIngestPageQuery(params)
+    return withPlaylistIngestError(async () => {
+      const response = await bgRequest<ApiPlaylistIngestRunItemsPageResponse>({
+        path: `/api/v1/media/ingest/runs/${id}/items${query}`,
+        method: "GET",
+        ...playlistRequestOptions(options)
+      })
+      return normalizePlaylistIngestRunItemsPage(response)
+    })
+  },
+
+  async cancelPlaylistIngestRun(
+    runId: string,
+    payload?: PlaylistIngestRunCancelRequest,
+    options?: PlaylistIngestRequestOptions
+  ): Promise<PlaylistIngestRunSummary> {
+    const id = encodeURIComponent(runId)
+    return withPlaylistIngestError(async () => {
+      if (payload === undefined) {
+        const response = await bgRequest<ApiPlaylistIngestRunSummaryResponse>({
+          path: `/api/v1/media/ingest/runs/${id}/cancel`,
+          method: "POST",
+          ...playlistRequestOptions(options)
+        })
+        return normalizePlaylistIngestRunSummary(response)
+      }
+      const body: ApiPlaylistIngestRunCancelRequest = {}
+      if (payload.occurrenceIds !== undefined) {
+        body.occurrence_ids = payload.occurrenceIds
+      }
+      if (payload.reason !== undefined) body.reason = payload.reason
+      const response = await bgRequest<ApiPlaylistIngestRunSummaryResponse>({
+        path: `/api/v1/media/ingest/runs/${id}/cancel`,
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+        ...playlistRequestOptions(options)
+      })
+      return normalizePlaylistIngestRunSummary(response)
+    })
+  },
+
+  async retryPlaylistIngestRunItems(
+    runId: string,
+    occurrenceIds: string[],
+    options?: PlaylistIngestRequestOptions
+  ): Promise<PlaylistIngestRunRetryResult> {
+    const id = encodeURIComponent(runId)
+    const body: ApiPlaylistIngestRunRetryRequest = {
+      occurrence_ids: occurrenceIds
+    }
+    return withPlaylistIngestError(async () => {
+      const response = await bgRequest<ApiPlaylistIngestRunRetryResponse>({
+        path: `/api/v1/media/ingest/runs/${id}/retry`,
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+        ...playlistRequestOptions(options)
+      })
+      return normalizePlaylistIngestRunRetryResult(response)
+    })
+  },
+
+  async *streamPlaylistIngestRunEvents(
+    runId: string,
+    options?: PlaylistIngestStreamOptions
+  ): AsyncGenerator<PlaylistIngestRunStreamEvent> {
+    const id = encodeURIComponent(runId)
+    const query =
+      options?.afterId === undefined
+        ? ""
+        : `?after_id=${encodeURIComponent(String(options.afterId))}`
+    const headers: Record<string, string> = { Accept: "text/event-stream" }
+    if (options?.afterId !== undefined) {
+      headers["Last-Event-ID"] = String(options.afterId)
+    }
+    try {
+      for await (const line of bgStream({
+        path: `/api/v1/media/ingest/runs/${id}/events/stream${query}`,
+        method: "GET",
+        headers,
+        ...(options?.signal !== undefined ? { abortSignal: options.signal } : {}),
+        ...(options?.streamIdleTimeoutMs !== undefined
+          ? { streamIdleTimeoutMs: options.streamIdleTimeoutMs }
+          : {})
+      })) {
+        const event = parsePlaylistIngestRunStreamLine(line)
+        if (event) yield event
+      }
+    } catch (error) {
+      if (isPlaylistIngestAbortError(error)) throw error
+      throw toPlaylistIngestPublicError(error, "run_status_unavailable")
+    }
   },
 
   async createMediaCollection(

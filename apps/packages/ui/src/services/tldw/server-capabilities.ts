@@ -8,6 +8,7 @@ export type ServerCapabilities = {
   hasRag: boolean
   hasMedia: boolean
   hasMediaPlaylistPreflight?: boolean
+  hasMediaPlaylistIngestV2?: boolean
   hasMediaIngestJobs?: boolean
   hasMediaIngestJobEvents?: boolean
   hasMediaIngestWorker?: boolean
@@ -60,6 +61,7 @@ const defaultCapabilities: ServerCapabilities = {
   hasRag: false,
   hasMedia: false,
   hasMediaPlaylistPreflight: false,
+  hasMediaPlaylistIngestV2: false,
   hasMediaIngestJobs: false,
   hasMediaIngestJobEvents: false,
   hasMediaIngestWorker: false,
@@ -213,7 +215,20 @@ type IngestionSourceCapabilitiesResponse = {
 }
 
 const CAPABILITIES_CACHE_TTL_MS = 5 * 60 * 1000
-const CAPABILITIES_STORAGE_KEY = "__tldwServerCapabilitiesCacheV5"
+const CAPABILITIES_STORAGE_KEY = "__tldwServerCapabilitiesCacheV6"
+
+const MEDIA_PLAYLIST_INGEST_V2_PATHS = [
+  "/api/v1/media/playlist-preflights",
+  "/api/v1/media/playlist-preflights/{preflight_id}",
+  "/api/v1/media/playlist-preflights/{preflight_id}/items",
+  "/api/v1/media/playlist-preflights/{preflight_id}/materializations",
+  "/api/v1/media/ingest/runs",
+  "/api/v1/media/ingest/runs/{run_id}",
+  "/api/v1/media/ingest/runs/{run_id}/items",
+  "/api/v1/media/ingest/runs/{run_id}/events/stream",
+  "/api/v1/media/ingest/runs/{run_id}/cancel",
+  "/api/v1/media/ingest/runs/{run_id}/retry"
+] as const
 
 type CapabilitiesCachePayload = {
   key: string
@@ -362,6 +377,21 @@ const extractFeatureFlag = (
   return null
 }
 
+const extractNumericCapability = (
+  docsInfo: DocsInfoResponse | null | undefined,
+  key: string
+): number | null => {
+  const maps: Array<Record<string, unknown> | null | undefined> = [
+    docsInfo?.capabilities,
+    docsInfo?.supported_features
+  ]
+  for (const map of maps) {
+    const value = map?.[key]
+    if (typeof value === "number" && Number.isFinite(value)) return value
+  }
+  return null
+}
+
 const applyDocsInfoFeatureGates = (
   capabilities: ServerCapabilities,
   docsInfo: DocsInfoResponse | null | undefined
@@ -386,6 +416,10 @@ const applyDocsInfoFeatureGates = (
   const mediaPlaylistPreflightEnabled = extractFeatureFlag(
     docsInfo,
     "hasMediaPlaylistPreflight"
+  )
+  const mediaPlaylistIngestContractVersion = extractNumericCapability(
+    docsInfo,
+    "mediaPlaylistIngestContractVersion"
   )
   const mediaIngestJobsEnabled = extractFeatureFlag(docsInfo, "hasMediaIngestJobs")
   const mediaIngestJobEventsEnabled = extractFeatureFlag(
@@ -458,6 +492,10 @@ const applyDocsInfoFeatureGates = (
       capabilities.hasMediaPlaylistPreflight,
       mediaPlaylistPreflightEnabled
     ),
+    hasMediaPlaylistIngestV2:
+      Boolean(capabilities.hasMediaPlaylistIngestV2) &&
+      mediaPlaylistIngestContractVersion !== null &&
+      mediaPlaylistIngestContractVersion >= 2,
     hasMediaIngestJobs: mergeFeatureFlag(
       capabilities.hasMediaIngestJobs,
       mediaIngestJobsEnabled
@@ -549,6 +587,7 @@ const computeCapabilities = (
   const hasVoiceConversationTransport =
     specSource === "fallback" ? false : has("/api/v1/audio/chat/stream")
   const hasMediaPlaylistPreflight = has("/api/v1/media/playlists/preflight")
+  const hasMediaPlaylistIngestV2 = MEDIA_PLAYLIST_INGEST_V2_PATHS.every(has)
   const hasMediaIngestJobs = has("/api/v1/media/ingest/jobs")
   const hasMediaIngestJobEvents = has("/api/v1/media/ingest/jobs/events/stream")
   const hasDurableMediaCollections = has("/api/v1/media/collections")
@@ -563,6 +602,7 @@ const computeCapabilities = (
     hasRag: has("/api/v1/rag/search") || has("/api/v1/rag/health") || has("/api/v1/rag/"),
     hasMedia:
       hasMediaPlaylistPreflight ||
+      hasMediaPlaylistIngestV2 ||
       hasMediaIngestJobs ||
       hasDurableMediaCollections ||
       has("/api/v1/media/add") ||
@@ -570,6 +610,7 @@ const computeCapabilities = (
       has("/api/v1/media/process-videos") ||
       has("/api/v1/media/process-documents"),
     hasMediaPlaylistPreflight,
+    hasMediaPlaylistIngestV2,
     hasMediaIngestJobs,
     hasMediaIngestJobEvents,
     hasMediaIngestWorker: false,

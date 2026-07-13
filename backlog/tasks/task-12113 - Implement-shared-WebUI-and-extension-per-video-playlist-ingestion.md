@@ -1,20 +1,24 @@
 ---
 id: TASK-12113
 title: Implement shared WebUI and extension per-video playlist ingestion
-status: To Do
+status: In Progress
+assignee: []
+created_date: ''
+updated_date: '2026-07-13 22:29'
 labels:
-- webui
-- browser-extension
-- media-ingestion
-- implementation
-priority: high
+  - webui
+  - browser-extension
+  - media-ingestion
+  - implementation
+dependencies: []
 references:
-- TASK-12109
-- TASK-12111
-- TASK-12112
-- Docs/superpowers/specs/2026-07-12-youtube-playlist-per-item-ingest-design.md
+  - TASK-12109
+  - TASK-12111
+  - TASK-12112
+  - Docs/superpowers/specs/2026-07-12-youtube-playlist-per-item-ingest-design.md
 documentation:
-- Docs/superpowers/plans/2026-07-12-youtube-playlist-ingest-shared-frontend.md
+  - Docs/superpowers/plans/2026-07-12-youtube-playlist-ingest-shared-frontend.md
+priority: high
 ---
 
 ## Description
@@ -40,13 +44,23 @@ Begin only after TASK-12112 stabilizes the backend contract. Follow Docs/superpo
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
+Backend dependency TASK-12112 is complete at commit bc20c306d2. Frontend execution began with Impeccable product-context preflight passed; the shared Quick Ingest design remains restrained, state-literate, accessible, and visually consistent across WebUI and extension. Task 1 will add the version-2 client models and truthful capability gate test-first.
+
+Task 1 contract client and capability gate completed test-first. Initial RED: 11 failed / 49 passed; quality-remediation RED: 8 failed / 68 passed. Final focused Vitest: 76/76 passed. ESLint: exit 0 with zero errors; Prettier and git diff --check passed. Full TypeScript remains blocked by unrelated repository baseline after the three-attempt audit. Final specification re-review: compliant. Final code-quality re-review: approved. Touched scope: playlist-ingest client, media-domain methods, strict OpenAPI/capability gate, and focused tests. Bandit is not applicable to this TypeScript-only task.
+<!-- SECTION:NOTES:END -->
+
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
 

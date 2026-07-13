@@ -70,6 +70,22 @@ if (!openApiGuardSourcePath) {
   throw new Error("Unable to locate openapi-guard.ts for route contract test")
 }
 
+const playlistIngestV2Paths = [
+  "/api/v1/media/playlist-preflights",
+  "/api/v1/media/playlist-preflights/{preflight_id}",
+  "/api/v1/media/playlist-preflights/{preflight_id}/items",
+  "/api/v1/media/playlist-preflights/{preflight_id}/materializations",
+  "/api/v1/media/ingest/runs",
+  "/api/v1/media/ingest/runs/{run_id}",
+  "/api/v1/media/ingest/runs/{run_id}/items",
+  "/api/v1/media/ingest/runs/{run_id}/events/stream",
+  "/api/v1/media/ingest/runs/{run_id}/cancel",
+  "/api/v1/media/ingest/runs/{run_id}/retry"
+] as const
+
+const openApiPaths = (paths: readonly string[]) =>
+  Object.fromEntries(paths.map((path) => [path, {}]))
+
 describe("server capabilities docs-info merge", () => {
   beforeEach(() => {
     vi.resetModules()
@@ -243,6 +259,77 @@ describe("server capabilities docs-info merge", () => {
     expect(capabilities.hasMediaIngestWorker).toBe(false)
     expect(capabilities.hasDurableMediaCollections).toBe(true)
     expect(capabilities.hasKnowledgeQaMediaScope).toBe(false)
+  })
+
+  it("requires the complete playlist ingest contract for version 2", async () => {
+    mocks.getOpenAPISpec.mockResolvedValue({
+      info: { version: "playlist-ingest-v2" },
+      paths: openApiPaths(playlistIngestV2Paths)
+    })
+    mocks.bgRequest.mockResolvedValue({
+      capabilities: { mediaPlaylistIngestContractVersion: 3 }
+    })
+
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    const capabilities = await getServerCapabilities()
+
+    expect(capabilities.hasMediaPlaylistIngestV2).toBe(true)
+  })
+
+  it("fails closed when a version-2 playlist ingest route is missing", async () => {
+    mocks.getOpenAPISpec.mockResolvedValue({
+      info: { version: "playlist-ingest-v2-incomplete" },
+      paths: openApiPaths(playlistIngestV2Paths.slice(0, -1))
+    })
+    mocks.bgRequest.mockResolvedValue({
+      capabilities: { mediaPlaylistIngestContractVersion: 2 }
+    })
+
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    const capabilities = await getServerCapabilities()
+
+    expect(capabilities.hasMediaPlaylistIngestV2).toBe(false)
+  })
+
+  it("fails closed when complete routes advertise a pre-version-2 contract", async () => {
+    mocks.getOpenAPISpec.mockResolvedValue({
+      info: { version: "playlist-ingest-v1" },
+      paths: openApiPaths(playlistIngestV2Paths)
+    })
+    mocks.bgRequest.mockResolvedValue({
+      capabilities: { mediaPlaylistIngestContractVersion: 1 }
+    })
+
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    const capabilities = await getServerCapabilities()
+
+    expect(capabilities.hasMediaPlaylistIngestV2).toBe(false)
+  })
+
+  it("fails closed when complete routes omit the advertised contract version", async () => {
+    mocks.getOpenAPISpec.mockResolvedValue({
+      info: { version: "playlist-ingest-version-unadvertised" },
+      paths: openApiPaths(playlistIngestV2Paths)
+    })
+    mocks.bgRequest.mockResolvedValue({ capabilities: {} })
+
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    const capabilities = await getServerCapabilities()
+
+    expect(capabilities.hasMediaPlaylistIngestV2).toBe(false)
+  })
+
+  it("does not enable playlist ingest v2 from fallback discovery", async () => {
+    mocks.getOpenAPISpec.mockRejectedValue(new Error("openapi unavailable"))
+    mocks.bgRequest.mockResolvedValue({
+      capabilities: { mediaPlaylistIngestContractVersion: 3 }
+    })
+
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    const capabilities = await getServerCapabilities()
+
+    expect(capabilities.specSource).toBe("fallback")
+    expect(capabilities.hasMediaPlaylistIngestV2).toBe(false)
   })
 
   it("detects ingestion source capability from advertised source routes", async () => {
@@ -911,5 +998,13 @@ describe("server capabilities docs-info merge", () => {
 
     expect(source).toContain('| "/api/v1/audio/voice-conversion"')
     expect(source).toContain('| "/api/v1/audio/tts/providers/{provider}/unload"')
+  })
+
+  it("keeps strict client path metadata aligned with playlist ingest version 2", () => {
+    const source = readFileSync(resolve(process.cwd(), openApiGuardSourcePath), "utf8")
+
+    for (const path of playlistIngestV2Paths) {
+      expect(source).toContain(`| "${path}"`)
+    }
   })
 })

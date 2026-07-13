@@ -8,7 +8,7 @@
 
 **Tech Stack:** React 18, TypeScript, Ant Design/design-system primitives, Zustand, Dexie, `@tanstack/react-virtual`, Vitest/Testing Library, Playwright, WXT extension runtime.
 
-**Backlog:** `TASK-12111` (depends on backend contract task `TASK-12110`)
+**Backlog:** `TASK-12113` (depends on backend contract task `TASK-12112`)
 
 **Spec:** `Docs/superpowers/specs/2026-07-12-youtube-playlist-per-item-ingest-design.md`
 
@@ -53,11 +53,11 @@
 
 **Tests:** Media-domain tests, capability tests, controller tests, AddContent integration tests.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 1: Add version-2 client models and capability gating
 
-- [ ] **Step 1: Write failing client/capability tests**
+- [x] **Step 1: Write failing client/capability tests**
 
 Extend `tldw-api-client.media-ingest.test.ts` and `server-capabilities.test.ts` to cover create/get/page/materialize/run/items/cancel/retry routes and `mediaPlaylistIngestContractVersion >= 2`.
 
@@ -80,17 +80,17 @@ it("requires the complete playlist ingest contract for version 2", async () => {
 })
 ```
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 Run: `cd apps/tldw-frontend && bunx vitest run ../packages/ui/src/services/__tests__/tldw-api-client.media-ingest.test.ts ../packages/ui/src/services/__tests__/server-capabilities.test.ts --maxWorkers=1 --no-file-parallelism`
 
 Expected: FAIL because the version-2 client and capability are missing.
 
-- [ ] **Step 3: Implement the contract client**
+- [x] **Step 3: Implement the contract client**
 
 Add exact server wire types and normalized camelCase types in `playlist-ingest.ts`. Use `bgRequest`/`bgUpload` through `domains/media.ts`; extend `openapi-guard.ts` for only the required paths. Keep cursor strings opaque. Map typed server codes to stable UI errors without exposing raw extractor output.
 
-- [ ] **Step 4: Run tests and commit**
+- [x] **Step 4: Run tests and commit**
 
 Run the command from Step 2.
 
@@ -98,8 +98,10 @@ Expected: PASS.
 
 ```bash
 git add apps/packages/ui/src/services/tldw apps/packages/ui/src/services/__tests__
-git commit -m "feat: add playlist ingest v2 client (TASK-12111)"
+git commit -m "feat: add playlist ingest v2 client (TASK-12113)"
 ```
+
+Verification before commit: initial RED was 11 failed / 49 passed; review-remediation RED was 8 failed / 68 passed. Final focused Vitest passed 76/76, ESLint exited 0 with no errors, Prettier and `git diff --check` passed. Full TypeScript checking remains blocked by the unrelated repository baseline after the required three-attempt audit. Specification and code-quality re-reviews both approved the final Task 1 diff.
 
 ### Task 2: Route every playlist candidate through one inspection controller
 
@@ -136,7 +138,7 @@ Expected: PASS.
 
 ```bash
 git add apps/packages/ui/src/components/Common/QuickIngest/AddContentStep.tsx apps/packages/ui/src/components/Common/QuickIngest/usePlaylistInspection.ts apps/packages/ui/src/components/Common/QuickIngest/__tests__
-git commit -m "fix: require playlist inspection before queueing (TASK-12111)"
+git commit -m "fix: require playlist inspection before queueing (TASK-12113)"
 ```
 
 ## Stage 2: Complete virtual preview and stable queue identity
@@ -173,7 +175,7 @@ Expected: PASS with a bounded mounted-row assertion.
 
 ```bash
 git add apps/packages/ui/src/services/tldw/playlist-ingest.ts apps/packages/ui/src/components/Common/QuickIngest/PlaylistPreflightPanel.tsx apps/packages/ui/src/components/Common/QuickIngest/__tests__ apps/packages/ui/src/services/tldw/__tests__
-git commit -m "feat: show complete virtualized playlist previews (TASK-12111)"
+git commit -m "feat: show complete virtualized playlist previews (TASK-12113)"
 ```
 
 ### Task 4: Materialize occurrences and carry Review-time overrides
@@ -213,7 +215,7 @@ Expected: PASS.
 
 ```bash
 git add apps/packages/ui/src/components/Common/QuickIngest/types.ts apps/packages/ui/src/components/Common/QuickIngest/IngestWizardContext.tsx apps/packages/ui/src/components/Common/QuickIngest/ReviewStep.tsx apps/packages/ui/src/components/Common/QuickIngest/ItemMetadataTable.tsx apps/packages/ui/src/components/Common/QuickIngest/AddContentStep.tsx apps/packages/ui/src/components/Common/QuickIngest/__tests__
-git commit -m "feat: preserve playlist occurrence identity in review (TASK-12111)"
+git commit -m "feat: preserve playlist occurrence identity in review (TASK-12113)"
 ```
 
 ## Stage 3: Shared run submission and status transport
@@ -263,7 +265,7 @@ Expected: PASS.
 
 ```bash
 git add apps/packages/ui/src/services/tldw/playlist-ingest.ts apps/packages/ui/src/services/tldw/quick-ingest-batch.ts apps/packages/ui/src/services/tldw/quick-ingest-session-reattach.ts apps/packages/ui/src/services/__tests__ apps/packages/ui/src/services/tldw/__tests__
-git commit -m "feat: submit quick ingest through shared runs (TASK-12111)"
+git commit -m "feat: submit quick ingest through shared runs (TASK-12113)"
 ```
 
 ### Task 6: Make the extension runtime a thin transport adapter
@@ -290,7 +292,7 @@ Expected: PASS.
 
 ```bash
 git add apps/packages/ui/src/entries apps/packages/ui/src/components/Sidepanel/Chat/ControlRow.tsx apps/packages/ui/src/components/Sidepanel/Chat/__tests__
-git commit -m "feat: align extension playlist run transport (TASK-12111)"
+git commit -m "feat: align extension playlist run transport (TASK-12113)"
 ```
 
 ## Stage 4: Truthful lifecycle UI and durable local recovery
@@ -331,7 +333,7 @@ Expected: PASS.
 
 ```bash
 git add apps/packages/ui/src/components/Common/QuickIngest apps/packages/ui/src/components/Common/QuickIngestWizardModal.tsx
-git commit -m "feat: show per-occurrence ingest lifecycle (TASK-12111)"
+git commit -m "feat: show per-occurrence ingest lifecycle (TASK-12113)"
 ```
 
 ### Task 8: Move compact sessions to IndexedDB with visible recovery failures
@@ -362,7 +364,7 @@ Expected: PASS.
 
 ```bash
 git add apps/packages/ui/src/db/dexie apps/packages/ui/src/store/quick-ingest-session.ts apps/packages/ui/src/store/__tests__
-git commit -m "feat: persist quick ingest runs in indexeddb (TASK-12111)"
+git commit -m "feat: persist quick ingest runs in indexeddb (TASK-12113)"
 ```
 
 ## Stage 5: Cross-client, accessibility, and release gates
@@ -407,9 +409,9 @@ Expected: all commands exit 0.
 
 Run: `git diff --check`
 
-Record test counts, browser result, accessibility assertions, and any explicit skips in `TASK-12111`. Bandit is not applicable to this TypeScript-only plan; record the skip.
+Record test counts, browser result, accessibility assertions, and any explicit skips in `TASK-12113`. Bandit is not applicable to this TypeScript-only plan; record the skip.
 
 ```bash
 git add apps/packages/ui apps/tldw-frontend/e2e backlog/tasks
-git commit -m "test: verify shared playlist ingest experience (TASK-12111)"
+git commit -m "test: verify shared playlist ingest experience (TASK-12113)"
 ```
