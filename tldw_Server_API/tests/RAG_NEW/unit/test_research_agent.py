@@ -623,6 +623,133 @@ async def test_research_loop_normalizes_malformed_local_action_params(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("action_name", "limit_name", "limit_json", "expected_limit", "sentinel"),
+    [
+        pytest.param(
+            "local_db_search",
+            "top_k",
+            "1e309",
+            10,
+            "provider-local-infinity-secret",
+            id="local-overflow-default",
+        ),
+        pytest.param(
+            "local_db_search",
+            "top_k",
+            "999999999999999999999999",
+            25,
+            "provider-local-extreme-secret",
+            id="local-extreme-clamp",
+        ),
+        pytest.param(
+            "web_search",
+            "result_count",
+            '"provider-web-limit-secret"',
+            5,
+            "provider-web-limit-secret",
+            id="web-value-error-default",
+        ),
+        pytest.param(
+            "web_search",
+            "result_count",
+            "-999999999999999999",
+            1,
+            "provider-web-negative-secret",
+            id="web-negative-clamp",
+        ),
+        pytest.param(
+            "academic_search",
+            "result_count",
+            "null",
+            5,
+            "provider-academic-type-secret",
+            id="academic-type-error-default",
+        ),
+        pytest.param(
+            "discussion_search",
+            "max_results",
+            "1e309",
+            10,
+            "provider-discussion-overflow-secret",
+            id="discussion-overflow-default",
+        ),
+        pytest.param(
+            "image_search",
+            "max_results",
+            "999999999999999999999999",
+            25,
+            "provider-image-extreme-secret",
+            id="image-extreme-clamp",
+        ),
+        pytest.param(
+            "video_search",
+            "max_results",
+            "-999999999999999999",
+            1,
+            "provider-video-negative-secret",
+            id="video-negative-clamp",
+        ),
+    ],
+)
+async def test_research_loop_normalizes_all_action_numeric_limits(
+    monkeypatch,
+    action_name,
+    limit_name,
+    limit_json,
+    expected_limit,
+    sentinel,
+):
+    import tldw_Server_API.app.core.Chat.chat_service as chat_service
+
+    captured: list[dict[str, object]] = []
+
+    async def fake_chat_call_async(**_kwargs):
+        return (
+            '{"reasoning":"bounded numeric input","action":'
+            f'"{action_name}","params":{{"query":"numeric normalization",'
+            f'"{limit_name}":{limit_json},"undeclared":"{sentinel}",'
+            '"llm_provider":"attacker-provider","llm_model":"attacker-model",'
+            '"search_engine":"attacker-engine"}}}'
+        )
+
+    async def capture_action(params):
+        captured.append(dict(params))
+        return ra.ActionOutput(action_name=action_name, success=True)
+
+    monkeypatch.setattr(chat_service, "perform_chat_api_call_async", fake_chat_call_async)
+    registry = ra.ActionRegistry()
+    registry.register(
+        ra.ResearchAction(
+            name=action_name,
+            description="numeric action",
+            schema={},
+            enabled=lambda _classification: True,
+            execute=capture_action,
+        )
+    )
+    classification = QueryClassification(
+        skip_search=False,
+        standalone_query="numeric normalization",
+    )
+
+    output = await ra.research_loop(
+        query="numeric normalization",
+        classification=classification,
+        mode="speed",
+        max_iterations=1,
+        registry=registry,
+    )
+
+    assert captured[0][limit_name] == expected_limit
+    assert "undeclared" not in captured[0]
+    assert "llm_provider" not in captured[0]
+    assert "llm_model" not in captured[0]
+    assert "search_engine" not in captured[0]
+    assert sentinel not in str(output)
+
+
+@pytest.mark.asyncio
 async def test_research_loop_normalizes_known_action_name_case(monkeypatch):
     import tldw_Server_API.app.core.Chat.chat_service as chat_service
 

@@ -1231,6 +1231,13 @@ async def research_loop(
                 sources.append(source)
         return sources
 
+    def _bounded_int(value: Any, default: int) -> int:
+        try:
+            normalized = int(value)
+        except (TypeError, ValueError, OverflowError):
+            normalized = default
+        return max(1, min(normalized, 25))
+
     def _action_signature(action_name: str, params: dict[str, Any]) -> tuple[Any, ...]:
         q = _normalize_query(params.get("query", ""))
         if action_name == "web_search":
@@ -1238,27 +1245,27 @@ async def research_loop(
                 action_name,
                 q,
                 _normalize_query(params.get("engine", "duckduckgo")),
-                int(params.get("result_count", 5)),
+                params.get("result_count", 5),
             )
         if action_name == "academic_search":
             return (
                 action_name,
                 q,
-                int(params.get("result_count", 5)),
+                params.get("result_count", 5),
             )
         if action_name == "discussion_search":
             return (
                 action_name,
                 q,
                 _normalized_tuple(params.get("platforms") or []),
-                int(params.get("max_results", 10)),
+                params.get("max_results", 10),
             )
         if action_name == "local_db_search":
             return (
                 action_name,
                 q,
                 _normalized_tuple(params.get("sources") or []),
-                int(params.get("top_k", 10)),
+                params.get("top_k", 10),
             )
         return (action_name,)
 
@@ -1362,23 +1369,62 @@ async def research_loop(
         raw_reasoning = action_dict.get("reasoning")
         reasoning = raw_reasoning[:4000] if isinstance(raw_reasoning, str) else ""
 
-        if action_name == "local_db_search":
-            raw_local_query = action_params.get("query")
-            local_query = (
-                raw_local_query.strip()
-                if isinstance(raw_local_query, str) and raw_local_query.strip()
+        if action_name in {
+            "local_db_search",
+            "web_search",
+            "academic_search",
+            "discussion_search",
+            "image_search",
+            "video_search",
+        }:
+            raw_action_query = action_params.get("query")
+            action_query = (
+                raw_action_query.strip()
+                if isinstance(raw_action_query, str) and raw_action_query.strip()
                 else standalone_query
             )[:4000]
-            try:
-                local_top_k = int(action_params.get("top_k", 10))
-            except (TypeError, ValueError):
-                local_top_k = 10
+
+        if action_name == "local_db_search":
             action_params = {
-                "query": local_query,
+                "query": action_query,
                 "sources": _normalize_local_sources(
                     action_params.get("sources", ["media_db"])
                 ),
-                "top_k": max(1, min(local_top_k, 25)),
+                "top_k": _bounded_int(action_params.get("top_k", 10), 10),
+            }
+        elif action_name == "web_search":
+            normalized_params: dict[str, Any] = {
+                "query": action_query,
+                "result_count": _bounded_int(action_params.get("result_count", 5), 5),
+            }
+            engine = action_params.get("engine")
+            if isinstance(engine, str) and engine.strip():
+                normalized_params["engine"] = engine.strip()
+            action_params = normalized_params
+        elif action_name == "academic_search":
+            action_params = {
+                "query": action_query,
+                "result_count": _bounded_int(action_params.get("result_count", 5), 5),
+            }
+        elif action_name == "discussion_search":
+            normalized_params = {
+                "query": action_query,
+                "max_results": _bounded_int(action_params.get("max_results", 10), 10),
+            }
+            platforms = action_params.get("platforms")
+            if isinstance(platforms, list):
+                normalized_platforms = [
+                    platform.strip()
+                    for platform in platforms
+                    if isinstance(platform, str) and platform.strip()
+                ]
+                if normalized_platforms:
+                    normalized_params["platforms"] = normalized_platforms
+            action_params = normalized_params
+        elif action_name in {"image_search", "video_search"}:
+            action_params = {
+                "query": action_query,
+                "max_results": _bounded_int(action_params.get("max_results", 10), 10),
             }
 
         # Emit reasoning event
