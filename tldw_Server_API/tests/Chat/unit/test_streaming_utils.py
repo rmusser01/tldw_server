@@ -742,6 +742,42 @@ class TestStreamingResponseHandlerIntegration:
 class TestSSENormalization:
     """Tests that upstream provider SSE frames are normalized to plain text chunks."""
 
+    @pytest.mark.parametrize("control_line", ["id: stream-7", "retry: 1500"])
+    async def test_sse_control_only_line_is_not_assistant_content(self, control_line):
+        handler = StreamingResponseHandler("conv_sse_control", "gpt-4")
+
+        async def provider_stream():
+            yield f"{control_line}\n\n"
+            yield "data: [DONE]\n\n"
+
+        messages = [message async for message in handler.safe_stream_generator(provider_stream())]
+        content_messages = [
+            message
+            for message in messages
+            if message.startswith("data: ") and '"choices"' in message and '"content"' in message
+        ]
+
+        assert content_messages == []
+        assert handler.full_response == []
+
+    async def test_sse_event_id_retry_fields_preserve_data_processing(self):
+        handler = StreamingResponseHandler("conv_sse_controls_and_data", "gpt-4")
+        payload = {"choices": [{"delta": {"content": "Hello"}}]}
+
+        async def provider_stream():
+            yield ("event: chunk\n" "id: stream-8\n" "retry: 2000\n" f"data: {json.dumps(payload)}\n\n")
+            yield "data: [DONE]\n\n"
+
+        messages = [message async for message in handler.safe_stream_generator(provider_stream())]
+        content_messages = [
+            json.loads(message[6 : message.index("\n")])
+            for message in messages
+            if message.startswith("data: ") and '"choices"' in message and '"content"' in message
+        ]
+
+        assert [message["choices"][0]["delta"]["content"] for message in content_messages] == ["Hello"]
+        assert handler.full_response == ["Hello"]
+
     async def test_openai_like_sse_is_normalized(self):
         handler = StreamingResponseHandler("conv_sse", "gpt-4")
 

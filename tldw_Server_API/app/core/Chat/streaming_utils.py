@@ -38,6 +38,8 @@ _STREAMING_NONCRITICAL_EXCEPTIONS = (
     json.JSONDecodeError,
 )
 
+_SSE_CONTROL_PREFIXES = (":", "event:", "id:", "retry:")
+
 _config = load_comprehensive_config()
 # ConfigParser uses sections, check if Chat-Module section exists
 _chat_config = {}
@@ -161,8 +163,8 @@ def _extract_text_from_upstream_sse(chunk_str: str) -> tuple[Optional[str], Opti
     # Normalize common invisible prefixes (BOM, zero-width spaces) and trim whitespace
     s = chunk_str.lstrip("\ufeff\u200b\u200c\u200d\u2060").strip()
 
-    # Ignore comment/heartbeat/event-only lines from upstream
-    if s.startswith(":") or s.startswith("event:"):
+    # Ignore SSE control-only lines from upstream
+    if s.startswith(_SSE_CONTROL_PREFIXES) and "data:" not in s:
         return None, None, False
 
     # If any 'data:' line exists, try to parse; some providers send 'event:' + 'data:' pairs or multiple frames
@@ -174,8 +176,8 @@ def _extract_text_from_upstream_sse(chunk_str: str) -> tuple[Optional[str], Opti
             ls = line.lstrip("\ufeff\u200b\u200c\u200d\u2060").strip()
             if not ls:
                 continue
-            if ls.startswith(":") or ls.startswith("event:"):
-                # Skip comment or event name lines
+            if ls.startswith(_SSE_CONTROL_PREFIXES):
+                # Skip SSE control fields
                 continue
             if not ls.startswith("data:"):
                 continue
@@ -625,7 +627,7 @@ class StreamingResponseHandler:
                 candidate = stripped_leading.strip()
                 if not candidate and not stripped_leading:
                     return outputs, False
-                if candidate.startswith(":") or candidate.startswith("event:"):
+                if candidate.startswith(_SSE_CONTROL_PREFIXES):
                     return outputs, False
                 if candidate.startswith("data:"):
                     payload_str = candidate[len("data:"):].strip()

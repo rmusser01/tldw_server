@@ -4,6 +4,7 @@ Simplified chat endpoint tests using real database and authentication.
 
 import asyncio
 import json
+import os
 from contextlib import ExitStack
 from typing import Optional
 from types import SimpleNamespace
@@ -1509,6 +1510,67 @@ def test_streaming_sse_control_field_before_auth_error_is_not_provider_output(
         assert response.json()["detail"]["error_code"] == "provider_authentication_failed"
         assert provider_call.call_count == 1
     assert "sentinel" not in response.text.lower()
+
+
+@pytest.mark.parametrize("oauth_enabled", [True, False])
+def test_streaming_delayed_sse_controls_do_not_cross_credential_handoff(
+    authenticated_client,
+    mock_chacha_db,
+    setup_dependencies,
+    oauth_enabled,
+):
+    runtime_type = _credential_runtime_double(auth_source="oauth" if oauth_enabled else None)
+    provider_manager = MagicMock()
+    provider_manager.circuit_breakers = {"openai": SimpleNamespace(can_attempt_call=lambda: True)}
+    request_data = ChatCompletionRequest(
+        model="gpt-4o-mini",
+        api_provider="openai",
+        messages=[ChatCompletionUserMessageParam(role="user", content="Hello")],
+        stream=True,
+    )
+
+    async def delayed_control_then_error():
+        yield "id: delayed-stream\n\n"
+        await asyncio.sleep(0)
+        yield "retry: 2500\n\n"
+        await asyncio.sleep(0)
+        yield ": keepalive\n\n"
+        await asyncio.sleep(0.01)
+        raise ChatAuthenticationError("sentinel delayed control auth", provider="openai")
+
+    async def refreshed_stream():
+        yield 'data: {"choices":[{"delta":{"content":"recovered"}}]}\n\n'
+        yield "data: [DONE]\n\n"
+
+    side_effect = (
+        [delayed_control_then_error(), refreshed_stream()] if oauth_enabled else [delayed_control_then_error()]
+    )
+    with (
+        patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
+        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
+        patch.dict(os.environ, {"MODERATION_STREAM_BUFFER_CHARS": "0"}),
+        patch.object(chat_endpoint, "perform_chat_api_call", side_effect=side_effect) as provider_call,
+    ):
+        response = authenticated_client.post(
+            "/api/v1/chat/completions",
+            json=request_data.model_dump(),
+        )
+
+    assert "id: delayed-stream" not in response.text
+    assert "retry: 2500" not in response.text
+    assert "sentinel" not in response.text.lower()
+    if oauth_enabled:
+        assert response.status_code == status.HTTP_200_OK
+        assert "recovered" in response.text
+        assert provider_call.call_count == 2
+        assert runtime_type.instances[0].resolve_calls.count(("openai", True)) == 1
+    else:
+        assert response.status_code == status.HTTP_502_BAD_GATEWAY
+        assert response.json()["detail"]["error_code"] == "provider_authentication_failed"
+        assert provider_call.call_count == 1
+        assert ("openai", True) not in runtime_type.instances[0].resolve_calls
 
 
 def test_execution_fallback_to_openai_oauth_refreshes_nonstream_and_marks_active_handle(
