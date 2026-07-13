@@ -6,28 +6,24 @@ No mocking - uses actual implementations.
 """
 
 import inspect
+import json
 import warnings
 
 import pytest
+
 pytestmark = pytest.mark.integration
 import asyncio
 import time
-from pathlib import Path
-from typing import List, Dict, Any
-import numpy as np
-from uuid import uuid4
 from datetime import datetime
+from pathlib import Path
 
+from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import UnifiedRAGResponse
 from tldw_Server_API.app.core.DB_Management.backends.factory import reset_managed_sqlite_backends
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
-from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
-from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import UnifiedRAGResponse
-from tldw_Server_API.app.core.RAG.rag_service.types import Document, SearchResult, DataSource
-from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import (
-    MultiDatabaseRetriever,
-    RetrievalConfig
-)
+from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import MultiDatabaseRetriever, RetrievalConfig
 from tldw_Server_API.app.core.RAG.rag_service.semantic_cache import SemanticCache
+from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
+from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
 
 
 def test_internal_rag_caller_keeps_legacy_optional_runtime_contract():
@@ -372,22 +368,42 @@ class TestCacheIntegration:
             persist_path=str(cache_dir / "cache.pkl")
         )
 
-        # Store documents
-        await cache.set("test query", sample_documents, ttl=3600)
+        # Store the real Document payload produced by the retrieval pipeline.
+        await cache.set(
+            "test query",
+            {
+                "documents": sample_documents,
+                "answer": "STALE_SENTINEL",
+                "metadata": {"generation_model": "stale-model"},
+            },
+            ttl=3600,
+        )
 
         # Exact match retrieval
         cached = await cache.get("test query")
         assert cached is not None
-        assert len(cached) == len(sample_documents)
+        assert len(cached["documents"]) == len(sample_documents)
+        assert set(cached) == {"documents", "metadata"}
+        assert cached["metadata"] == {
+            "kind": "retrieval_documents",
+            "schema_version": 1,
+        }
+
+        cache.save()
+        json.loads(Path(cache.persist_path).read_text())
+        reloaded = SemanticCache(persist_path=cache.persist_path)
+        persisted = await reloaded.get("test query")
+        assert persisted == cached
+        assert "STALE_SENTINEL" not in Path(cache.persist_path).read_text()
 
         # Similar query retrieval
-        similar_cached = await cache.get("test question")
+        await cache.get("test question")
         # Depends on similarity threshold and implementation
 
         # Cache expiry
         await cache.set("expiring query", sample_documents, ttl=1)
         await asyncio.sleep(1.1)
-        expired = await cache.get("expiring query")
+        await cache.get("expiring query")
         # Should be None or empty after TTL
 
         # No explicit close in this implementation
@@ -454,6 +470,7 @@ class TestErrorRecoveryIntegration:
     async def test_partial_retrieval_failure(self, populated_media_db):
         """If one source fails, results from other sources are still returned."""
         from unittest.mock import patch
+
         from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import MultiDatabaseRetriever, RetrievalConfig
         from tldw_Server_API.app.core.RAG.rag_service.types import DataSource
 
@@ -487,7 +504,8 @@ class TestErrorRecoveryIntegration:
     async def test_retry_mechanism(self, populated_media_db):
         """Simulate transient failures and ensure subsequent call succeeds."""
         from unittest.mock import patch
-        from tldw_Server_API.app.core.RAG.rag_service.types import Document, DataSource
+
+        from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
 
         class FlakyRetriever:
             attempts = 0
@@ -608,8 +626,9 @@ class TestPerformanceIntegration:
     @pytest.mark.asyncio
     async def test_memory_usage(self, populated_media_db):
         """Test memory usage doesn't grow unbounded."""
-        import psutil
         import gc
+
+        import psutil
 
         process = psutil.Process()
 

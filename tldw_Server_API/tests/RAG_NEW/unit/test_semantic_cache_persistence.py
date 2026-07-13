@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import time
 from pathlib import Path
 
 import numpy as np
@@ -11,8 +13,13 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
 )
 from tldw_Server_API.app.core.RAG.rag_service.semantic_cache import SemanticCache
 
-
 pytestmark = pytest.mark.unit
+
+
+RETRIEVAL_CACHE_METADATA = {
+    "kind": "retrieval_documents",
+    "schema_version": 1,
+}
 
 
 class DummyEmbedder:
@@ -40,14 +47,43 @@ async def test_semantic_cache_save_load_and_find_similar(tmp_path):
         namespace="tenant-1",
     )
 
-    await cache.set("alpha", {"answer": "A"}, ttl=10)
-    _ = await cache.get("alpha")
+    await cache.set(
+        "alpha",
+        {
+            "documents": [{"id": "alpha-doc", "content": "retrieved evidence"}],
+            "answer": "STALE_SENTINEL",
+            "generated_answer": "STALE_SENTINEL",
+            "metadata": {
+                **RETRIEVAL_CACHE_METADATA,
+                "generation_model": "stale-model",
+            },
+        },
+        ttl=10,
+    )
+    cached = await cache.get("alpha")
+
+    assert cached == {
+        "documents": [
+            {
+                "id": "alpha-doc",
+                "content": "retrieved evidence",
+                "metadata": {},
+                "score": 0.0,
+            }
+        ],
+        "metadata": RETRIEVAL_CACHE_METADATA,
+    }
 
     entry = list(cache._cache.values())[0]
     created_at = entry.created_at
     last_accessed = entry.last_accessed
 
     cache.save()
+
+    persisted = json.loads(cache_path.read_text())
+    persisted_value = next(iter(persisted["cache"].values()))["value"]
+    assert persisted_value == cached
+    assert "STALE_SENTINEL" not in cache_path.read_text()
 
     cache_loaded = SemanticCache(
         similarity_threshold=0.8,
@@ -67,6 +103,59 @@ async def test_semantic_cache_save_load_and_find_similar(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_semantic_cache_loads_legacy_persisted_documents_without_answer(
+    tmp_path: Path,
+) -> None:
+    query = "legacy persisted query"
+    cache_path = tmp_path / "semantic_cache.json"
+    key = SemanticCache()._generate_key(query)
+    now = time.time()
+    cache_path.write_text(
+        json.dumps(
+            {
+                "cache": {
+                    key: {
+                        "value": {
+                            "documents": [
+                                {"id": "legacy-doc", "content": "legacy evidence"}
+                            ],
+                            "answer": "STALE_SENTINEL",
+                            "generated_answer": "STALE_SENTINEL",
+                            "metadata": {
+                                "generation_provider": "stale-provider",
+                                "verification_report": {"answer": "STALE_SENTINEL"},
+                            },
+                        },
+                        "query": query,
+                        "timestamp": now,
+                        "ttl": 3600,
+                        "access_count": 0,
+                        "last_access": now,
+                    }
+                },
+                "stats": {},
+                "config": {},
+            }
+        )
+    )
+
+    cache = SemanticCache(persist_path=str(cache_path))
+
+    assert await cache.get(query) == {
+        "documents": [
+            {
+                "id": "legacy-doc",
+                "content": "legacy evidence",
+                "metadata": {},
+                "score": 0.0,
+            }
+        ],
+        "metadata": RETRIEVAL_CACHE_METADATA,
+    }
+    assert "STALE_SENTINEL" not in repr(cache._cache)
+
+
+@pytest.mark.asyncio
 async def test_semantic_cache_rejects_credential_handles_before_mutation(
     tmp_path: Path,
 ) -> None:
@@ -77,7 +166,11 @@ async def test_semantic_cache_rejects_credential_handles_before_mutation(
         persist_path=str(cache_path),
         embedding_model=embedder,
     )
-    await cache.set("existing", {"answer": "safe"})
+    existing_payload = {
+        "documents": [{"id": "existing", "content": "safe"}],
+        "metadata": RETRIEVAL_CACHE_METADATA,
+    }
+    await cache.set("existing", existing_payload)
     cache.save()
     original_file = cache_path.read_bytes()
     original_keys = set(cache._cache)
@@ -117,7 +210,21 @@ async def test_semantic_cache_rejects_credential_handles_before_mutation(
     assert secret not in "".join(messages)
     assert secret not in cache_path.read_text()
 
-    await cache.set("later", {"answer": "still works"})
+    later_payload = {
+        "documents": [{"id": "later", "content": "still works"}],
+        "metadata": RETRIEVAL_CACHE_METADATA,
+    }
+    await cache.set("later", later_payload)
     cache.save()
     reloaded = SemanticCache(persist_path=str(cache_path))
-    assert await reloaded.get("later") == {"answer": "still works"}
+    assert await reloaded.get("later") == {
+        "documents": [
+            {
+                "id": "later",
+                "content": "still works",
+                "metadata": {},
+                "score": 0.0,
+            }
+        ],
+        "metadata": RETRIEVAL_CACHE_METADATA,
+    }

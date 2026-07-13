@@ -3,7 +3,6 @@ import pytest
 from tldw_Server_API.app.core import config as config_module
 from tldw_Server_API.app.core.RAG.rag_service import semantic_cache
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -52,6 +51,27 @@ def test_shared_cache_anchors_relative_persist_path(tmp_path, monkeypatch):
 
     expected_path = (base_dir / "relative_cache.json").resolve()
     assert cache.persist_path == str(expected_path)
+
+
+def test_long_namespace_persist_paths_include_collision_resistant_suffix(
+    tmp_path,
+    monkeypatch,
+):
+    base_dir = tmp_path / "cache_root"
+    base_dir.mkdir()
+    monkeypatch.setenv("RAG_SEMANTIC_CACHE_DIR", str(base_dir))
+    monkeypatch.delenv("RAG_CACHE_DIR", raising=False)
+    monkeypatch.setattr(semantic_cache, "_DEFAULT_CACHE_DIR", None)
+
+    common_prefix = "tenant-" + ("a" * 80)
+    first = semantic_cache._default_persist_path(common_prefix + "-first")
+    second = semantic_cache._default_persist_path(common_prefix + "-second")
+
+    assert first is not None
+    assert second is not None
+    assert first != second
+    assert len(semantic_cache.Path(first).name) <= 100
+    assert len(semantic_cache.Path(second).name) <= 100
 
 
 def test_shared_cache_rejects_absolute_persist_path_outside_base(tmp_path, monkeypatch):

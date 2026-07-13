@@ -18,6 +18,7 @@ import calendar
 import copy
 import hashlib
 import inspect
+import json
 import os
 import re
 import sqlite3
@@ -168,6 +169,71 @@ def _clone_cached_document(doc: Any) -> Any:
 def _clone_cached_documents(documents: list[Any]) -> list[Any]:
     """Return independent document instances for cache store/load boundaries."""
     return [_clone_cached_document(doc) for doc in documents]
+
+
+def _restore_cached_document(document: Any) -> Optional["Document"]:
+    """Restore one supported cache wire document to the pipeline document type."""
+    if isinstance(document, Document):
+        return _clone_cached_document(document)
+    if not isinstance(document, dict):
+        return None
+    content = document.get("content")
+    document_id = document.get("id")
+    if not isinstance(content, str) or not isinstance(document_id, (str, int)):
+        return None
+    metadata = copy.deepcopy(document.get("metadata") or {})
+    if not isinstance(metadata, dict):
+        metadata = {}
+    source_value = document.get("source", metadata.get("source"))
+    if isinstance(source_value, DataSource):
+        source = source_value
+    else:
+        try:
+            source = DataSource(str(source_value))
+        except (TypeError, ValueError):
+            source = DataSource.MEDIA_DB
+    try:
+        score = float(document.get("score", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        score = 0.0
+    return Document(
+        id=str(document_id),
+        content=content,
+        metadata=metadata,
+        source=source,
+        score=score,
+    )
+
+
+def _extract_cached_documents(value: Any) -> list["Document"]:
+    """Extract only non-empty retrieval documents from a cache payload."""
+    if isinstance(value, dict):
+        raw_documents = value.get("documents")
+    elif isinstance(value, list):
+        raw_documents = value
+    else:
+        return []
+    if not isinstance(raw_documents, list) or not raw_documents:
+        return []
+    return [
+        restored
+        for document in raw_documents
+        if (restored := _restore_cached_document(document)) is not None
+    ]
+
+
+async def _invoke_cache_callable(callable_obj: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    """Invoke a cache callable once and await wrapped awaitable results."""
+    value = callable_obj(*args, **kwargs)
+    if inspect.isawaitable(value):
+        return await value
+    return value
+
+
+def _cache_identity_digest(value: dict[str, Any]) -> str:
+    """Return a deterministic short digest for cache identity components."""
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()[:20]
 
 
 def _resolve_security_user_id(user_id: Any, feedback_user_id: Any) -> str:
@@ -2231,6 +2297,8 @@ async def unified_rag_pipeline(
             result.metadata.update(inbound_meta)
     except TypeError:
         pass
+    result.metadata["retrieval_cache_hit"] = False
+    result.metadata["generation_executed"] = False
 
     def _ensure_profile_resolution_metadata() -> dict[str, Any]:
         profile_resolution = result.metadata.get("profile_resolution")
@@ -2268,6 +2336,7 @@ async def unified_rag_pipeline(
     _ensure_profile_resolution_metadata()
 
     cache_instance = None
+    cache_setup_attempted = False
     cache_max_size = 1000
     try:
         from tldw_Server_API.app.core.config import RAG_SERVICE_CONFIG
@@ -2275,25 +2344,67 @@ async def unified_rag_pipeline(
         cache_max_size = int((cfg.get("cache") or {}).get("max_cache_size", cache_max_size))
     except (ImportError, TypeError, ValueError):
         pass
-    cache_namespace = retrieval_index_namespace or (user_id or None)
-    if cache_namespace is None:
-        try:
-            parts = [media_db_path, notes_db_path, character_db_path, kanban_db_path, prompts_db_path]
-            if any(parts):
-                joined = "|".join([str(p or "") for p in parts])
-                cache_namespace = f"db:{hashlib.sha256(joined.encode('utf-8')).hexdigest()[:12]}"
-        except (TypeError, ValueError):
-            cache_namespace = None
-    workspace_cache_component = workspace_id or "global"
-    if cache_namespace is not None:
-        cache_namespace = f"{cache_namespace}|workspace:{workspace_cache_component}"
-    elif workspace_id is not None:
-        cache_namespace = f"workspace:{workspace_cache_component}"
+    def _build_cache_namespace() -> str:
+        def _cache_path_value(value: Any) -> Optional[str]:
+            if isinstance(value, (str, os.PathLike)):
+                return os.fspath(value)
+            return None
+
+        runtime_user_id = (
+            getattr(credential_runtime, "_user_id", None)
+            if credential_runtime is not None
+            else user_id
+        )
+        if runtime_user_id is not None:
+            owner_scope = {"kind": "user", "id": str(runtime_user_id)}
+        else:
+            owner_paths = {
+                "media": _cache_path_value(media_db_path)
+                or _cache_path_value(getattr(media_db, "db_path", None)),
+                "notes": _cache_path_value(notes_db_path),
+                "characters": _cache_path_value(character_db_path),
+                "kanban": _cache_path_value(kanban_db_path),
+                "prompts": _cache_path_value(prompts_db_path),
+                "world_books": _cache_path_value(world_books_db_path),
+                "dictionaries": _cache_path_value(chat_dictionaries_db_path),
+            }
+            owner_scope = {
+                "kind": "database" if any(owner_paths.values()) else "server",
+                "paths": owner_paths,
+            }
+
+        collection_scope = (
+            {
+                str(key): str(value)
+                for key, value in sorted(retrieval_plan.collection_names.items())
+            }
+            if retrieval_plan is not None
+            else {}
+        )
+        retrieval_scope = {
+            "sources": sorted(
+                str(getattr(source, "value", source)).strip().lower()
+                for source in (retrieval_sources or [])
+            ),
+            "search_mode": str(retrieval_search_mode or "").strip().lower(),
+            "top_k": int(retrieval_top_k),
+            "min_score": float(retrieval_min_score),
+            "index_namespace": str(retrieval_index_namespace or ""),
+            "collection_names": collection_scope,
+        }
+        return "|".join(
+            (
+                f"owner:{_cache_identity_digest(owner_scope)}",
+                f"workspace:{_cache_identity_digest({'id': str(workspace_id or 'global')})}",
+                f"retrieval:{_cache_identity_digest(retrieval_scope)}",
+            )
+        )
 
     def _get_cache_instance():
-        nonlocal cache_instance
-        if cache_instance is not None:
+        nonlocal cache_instance, cache_setup_attempted
+        if cache_setup_attempted:
             return cache_instance
+        cache_setup_attempted = True
         cache_cls = None
         if adaptive_cache and AdaptiveCache:
             cache_cls = AdaptiveCache
@@ -2302,6 +2413,7 @@ async def unified_rag_pipeline(
 
         if cache_cls:
             try:
+                cache_namespace = _build_cache_namespace()
                 if get_shared_cache:
                     cache_instance = get_shared_cache(
                         cache_cls=cache_cls,
@@ -2316,8 +2428,13 @@ async def unified_rag_pipeline(
                         ttl=cache_ttl,
                         namespace=cache_namespace,
                     )
-            except TypeError:
-                cache_instance = cache_cls(similarity_threshold=cache_threshold)
+            except (OSError, RuntimeError, TypeError, ValueError) as exc:
+                cache_instance = None
+                logger.warning(
+                    "Semantic cache disabled after scoped setup failure "
+                    "(error_type={})",
+                    type(exc).__name__,
+                )
         # Register with the RAGCache facade so health endpoints see real stats
         if cache_instance is not None:
             try:
@@ -3359,50 +3476,48 @@ async def unified_rag_pipeline(
         )
 
         # ========== CACHE CHECK ==========
-        cached_documents = None
         if enable_cache and not _skip_retrieval_stack and not _skip_local_retrieval:
             cache_start = time.time()
             cache = _get_cache_instance()
 
             if cache:
-                # First try direct get on the main query (support sync or async)
+                get_fn = getattr(cache, "get", None)
                 try:
-                    get_fn = cache.get
-                    if asyncio.iscoroutinefunction(get_fn):
-                        direct = await get_fn(query)
-                    else:
-                        direct = get_fn(query)
+                    direct = (
+                        await _invoke_cache_callable(get_fn, query)
+                        if callable(get_fn)
+                        else None
+                    )
                 except (AttributeError, OSError, RuntimeError, TypeError):
                     direct = None
-                if direct:
-                    cached_documents = direct
+                cached_documents = _extract_cached_documents(direct)
+                if cached_documents:
                     result.cache_hit = True
                 else:
                     # Check cache for all query variations
                     for q in expanded_queries:
                         try:
                             find_fn = getattr(cache, 'find_similar', None)
-                            if find_fn is None:
+                            if not callable(find_fn):
                                 break
-                            if asyncio.iscoroutinefunction(find_fn):
-                                cached_result = await find_fn(q)
-                            else:
-                                cached_result = find_fn(q)
+                            cached_result = await _invoke_cache_callable(find_fn, q)
                         except (AttributeError, OSError, RuntimeError, TypeError):
                             cached_result = None
-                        if cached_result:
+                        if isinstance(cached_result, (list, tuple)) and len(cached_result) in {2, 3}:
                             # find_similar returns (key, query, sim) or (query, sim)
                             if len(cached_result) == 3:
                                 _, cached_query, similarity = cached_result
                             else:
                                 cached_query, similarity = cached_result
                             try:
-                                if asyncio.iscoroutinefunction(get_fn):
-                                    cached_documents = await get_fn(cached_query)
-                                else:
-                                    cached_documents = get_fn(cached_query)
+                                similar_payload = (
+                                    await _invoke_cache_callable(get_fn, cached_query)
+                                    if callable(get_fn)
+                                    else None
+                                )
                             except (AttributeError, OSError, RuntimeError, TypeError):
-                                cached_documents = None
+                                similar_payload = None
+                            cached_documents = _extract_cached_documents(similar_payload)
                             if cached_documents:
                                 result.cache_hit = True
                                 result.metadata["cache_similarity"] = similarity
@@ -3410,32 +3525,10 @@ async def unified_rag_pipeline(
                                 break
 
                 if result.cache_hit:
-                    empty_cached_docs = False
-                    if isinstance(cached_documents, dict):
-                        docs = cached_documents.get("documents")
-                        if isinstance(docs, list) and not docs:
-                            empty_cached_docs = True
-                    elif isinstance(cached_documents, list) and not cached_documents:
-                        empty_cached_docs = True
-                    if empty_cached_docs:
-                        # Treat empty cached results as a miss to avoid stale false negatives.
-                        result.cache_hit = False
-                        cached_documents = None
-
-                if result.cache_hit:
-                    if isinstance(cached_documents, dict):
-                        ans = cached_documents.get("answer")
-                        if ans is not None:
-                            result.generated_answer = ans
-                        docs = cached_documents.get("documents")
-                        if isinstance(docs, list):
-                            result.documents = _clone_cached_documents(docs)
-                        if cached_documents.get("cached") is True:
-                            result.metadata["cached_flag"] = True
-                    elif isinstance(cached_documents, list):
-                        # Backward compatibility: older cache entries stored document lists directly
-                        result.documents = _clone_cached_documents(cached_documents)
-                    result.metadata.setdefault("cached_flag", True)
+                    result.documents = cached_documents
+                    result.generated_answer = None
+                    result.metadata["retrieval_cache_hit"] = True
+                    result.metadata["cached_flag"] = True
 
             result.timings["cache_check"] = time.time() - cache_start
             if metrics:
@@ -6167,7 +6260,8 @@ async def unified_rag_pipeline(
             result.documents = list(retrieval_only_result.documents)
             result.metadata.update(dict(retrieval_only_result.metadata or {}))
 
-        if effective_enable_generation and not gated_generation and not result.cache_hit:
+        if effective_enable_generation and not gated_generation:
+            result.metadata["generation_executed"] = True
             generation_start = time.time()
             try:
                 # --- OTEL: generation span ---
@@ -6808,8 +6902,8 @@ async def unified_rag_pipeline(
 
                     # Default NLI model from environment if not provided
                     if not nli_model:
-                        import os
-                        nli_model = os.environ.get("RAG_NLI_MODEL") or os.environ.get("RAG_NLI_MODEL_PATH")
+                        import os as _os
+                        nli_model = _os.environ.get("RAG_NLI_MODEL") or _os.environ.get("RAG_NLI_MODEL_PATH")
                     job_context = None
                     if ClaimsJobContext is not None:
                         user_id_val = None
@@ -7242,8 +7336,8 @@ async def unified_rag_pipeline(
             # Allow env defaults if parameters not explicitly set
             if adaptive_time_budget_sec is None:
                 try:
-                    import os
-                    adaptive_time_budget_sec = float(os.getenv("RAG_ADAPTIVE_TIME_BUDGET_SEC", "0")) or None
+                    import os as _os
+                    adaptive_time_budget_sec = float(_os.getenv("RAG_ADAPTIVE_TIME_BUDGET_SEC", "0")) or None
                 except (TypeError, ValueError):
                     adaptive_time_budget_sec = None
             if enable_post_verification and result.generated_answer and PostGenerationVerifier:
@@ -7753,11 +7847,10 @@ async def unified_rag_pipeline(
                     # Support both async/sync and set/add method names
                     set_fn = getattr(cache, 'set', None) or getattr(cache, 'add', None)
                     if set_fn:
-                        cache_payload = {
-                            "documents": _clone_cached_documents(list(result.documents)),
-                            "answer": result.generated_answer,
-                            "cached": True,
-                        }
+                        wire_documents = [
+                            _serialize_result_document(document)
+                            for document in result.documents
+                        ]
                         cache_queries = [query]
                         cache_queries.extend(
                             [q for q in (result.expanded_queries or []) if isinstance(q, str)]
@@ -7770,12 +7863,24 @@ async def unified_rag_pipeline(
                             if not cq or cq in seen:
                                 continue
                             seen.add(cq)
-                            if asyncio.iscoroutinefunction(set_fn):
-                                await set_fn(cq, cache_payload, ttl=cache_ttl)
-                            else:
-                                set_fn(cq, cache_payload, ttl=cache_ttl)
-            except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
-                logger.error(f"Cache storage error: {e}")
+                            cache_payload = {
+                                "documents": _clone_cached_documents(wire_documents),
+                                "metadata": {
+                                    "kind": "retrieval_documents",
+                                    "schema_version": 1,
+                                },
+                            }
+                            await _invoke_cache_callable(
+                                set_fn,
+                                cq,
+                                cache_payload,
+                                ttl=cache_ttl,
+                            )
+            except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as exc:
+                logger.error(
+                    "Cache storage failed (error_type={})",
+                    type(exc).__name__,
+                )
 
         # ========== OBSERVABILITY ==========
         if enable_observability:
