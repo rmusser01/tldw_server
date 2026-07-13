@@ -8,7 +8,11 @@ from fastapi import HTTPException
 from starlette.responses import StreamingResponse
 
 from tldw_Server_API.app.core.Chat import chat_service
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatProviderError
+from tldw_Server_API.app.core.Chat.Chat_Deps import (
+    ChatAuthenticationError,
+    ChatConfigurationError,
+    ChatProviderError,
+)
 from tldw_Server_API.app.core.Chat.chat_metrics import ChatMetricsCollector
 from tldw_Server_API.app.core.Chat.chat_service import (
     execute_non_stream_call,
@@ -236,6 +240,75 @@ async def test_execute_non_stream_call_refreshes_credentials(monkeypatch):
         entry.get("selected_provider") == "openai" and entry.get("streaming") is False
         for entry in metrics.fallback_successes
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "terminal_error",
+    [
+        ChatAuthenticationError("provider rejected credentials", provider="anthropic"),
+        ChatConfigurationError("provider configuration invalid", provider="anthropic"),
+    ],
+)
+async def test_execute_non_stream_call_never_falls_back_for_terminal_provider_errors(
+    monkeypatch,
+    terminal_error,
+):
+    async def fake_log_llm_usage(**_kwargs):
+        return None
+
+    monkeypatch.setattr(chat_service, "log_llm_usage", fake_log_llm_usage)
+    metrics = _DummyMetrics()
+    provider_manager = _DummyProviderManager()
+
+    def failing_llm_call():
+        raise terminal_error
+
+    async def save_message_fn(*_args, **_kwargs):
+        return None
+
+    request = SimpleNamespace(
+        method="POST",
+        url=SimpleNamespace(path="/api/v1/chat/completions"),
+        headers={},
+        state=SimpleNamespace(user_id=None, api_key_id=None),
+    )
+
+    with pytest.raises(type(terminal_error)):
+        await execute_non_stream_call(
+            current_loop=asyncio.get_running_loop(),
+            cleaned_args={
+                "api_endpoint": "anthropic",
+                "api_key": "runtime-key",
+                "credentials_resolved": True,
+                "messages_payload": [],
+                "model": "claude-3",
+                "streaming": False,
+            },
+            selected_provider="anthropic",
+            provider="anthropic",
+            model="claude-3",
+            request_json="{}",
+            request=request,
+            metrics=metrics,
+            provider_manager=provider_manager,
+            templated_llm_payload=[],
+            should_persist=False,
+            final_conversation_id="conv-terminal",
+            character_card_for_context={},
+            chat_db=None,
+            save_message_fn=save_message_fn,
+            audit_service=None,
+            audit_context=None,
+            client_id="user-terminal",
+            queue_execution_enabled=False,
+            enable_provider_fallback=True,
+            llm_call_func=failing_llm_call,
+            refresh_provider_params=lambda *_args, **_kwargs: None,
+            moderation_getter=_DummyModeration,
+        )
+
+    assert provider_manager.fallback_requests == []
 
 
 @pytest.mark.asyncio

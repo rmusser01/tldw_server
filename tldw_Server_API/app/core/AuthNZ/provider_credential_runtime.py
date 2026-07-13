@@ -61,6 +61,7 @@ class ProviderCallCredentials:
         "api_key",
         "app_config",
         "auth_source",
+        "endpoint_provenance",
         "credentials_resolved",
         "_runtime_generation",
         "_runtime_identity",
@@ -77,11 +78,13 @@ class ProviderCallCredentials:
         runtime_generation: int,
         runtime_identity: object,
         credential_identity: object,
+        endpoint_provenance: str = "server_config",
     ) -> None:
         self.provider = provider
         self.api_key = api_key
         self.app_config = app_config
         self.auth_source = auth_source
+        self.endpoint_provenance = endpoint_provenance
         self.credentials_resolved = True
         self._runtime_generation = runtime_generation
         self._runtime_identity = runtime_identity
@@ -412,6 +415,12 @@ class ProviderCredentialRuntime:
             runtime_generation=entry.generation,
             runtime_identity=self._identity,
             credential_identity=entry.identity,
+            endpoint_provenance=(
+                "byok"
+                if isinstance(resolution.credential_fields.get("base_url"), str)
+                and bool(resolution.credential_fields["base_url"].strip())
+                else "server_config"
+            ),
         )
 
     def _forget_task(

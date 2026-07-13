@@ -2,22 +2,71 @@
 Simplified chat endpoint tests using real database and authentication.
 """
 
+import asyncio
 from typing import Optional
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import status
+from starlette.responses import StreamingResponse
 
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import ResolvedByokCredentials
+from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAuthenticationError
+from tldw_Server_API.app.core.Chat.Chat_Deps import (
+    ChatAuthenticationError,
+    ChatConfigurationError,
+)
 from tldw_Server_API.app.main import app
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
     ChatCompletionRequest,
     ChatCompletionUserMessageParam,
 )
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import DEFAULT_CHARACTER_NAME
+
+
+def _credential_runtime_double(
+    *,
+    api_keys: dict[str, str | None] | None = None,
+    auth_source: str | None = None,
+    errors: dict[str, Exception] | None = None,
+):
+    class RuntimeDouble:
+        instances: list["RuntimeDouble"] = []
+
+        def __init__(self, **kwargs):
+            self.init_kwargs = kwargs
+            self.resolve_calls: list[tuple[str, bool]] = []
+            self.marked_used: list[str] = []
+            self.close_calls = 0
+            self.__class__.instances.append(self)
+
+        async def resolve(self, provider: str, *, force_refresh: bool = False):
+            provider = provider.strip().lower()
+            self.resolve_calls.append((provider, force_refresh))
+            error = (errors or {}).get(provider)
+            if error is not None:
+                raise error
+            key = (api_keys or {}).get(provider, f"{provider}-runtime-key")
+            if force_refresh:
+                key = f"{provider}-refreshed-runtime-key"
+            return SimpleNamespace(
+                provider=provider,
+                api_key=key,
+                app_config={f"{provider}_api": {"model": "runtime-model"}},
+                auth_source=auth_source,
+                credentials_resolved=True,
+            )
+
+        async def mark_used(self, handle) -> None:
+            if handle.provider not in self.marked_used:
+                self.marked_used.append(handle.provider)
+
+        async def close(self) -> None:
+            self.close_calls += 1
+
+    return RuntimeDouble
 
 
 def test_chat_completion_basic(authenticated_client, mock_chacha_db, setup_dependencies):
@@ -361,6 +410,394 @@ def test_chat_completion_downgrades_structured_response_format_before_provider_c
         assert mock_llm.call_args.kwargs["response_format"] == {"type": "json_object"}
 
 
+@pytest.mark.parametrize("streaming", [False, True])
+def test_chat_completion_uses_one_runtime_and_marks_success_once(
+    authenticated_client,
+    mock_chacha_db,
+    setup_dependencies,
+    streaming,
+):
+    runtime_type = _credential_runtime_double()
+    captured: dict[str, object] = {}
+    request_data = ChatCompletionRequest(
+        model="gpt-4o-mini",
+        api_provider="openai",
+        messages=[ChatCompletionUserMessageParam(role="user", content="Hello")],
+        stream=streaming,
+    )
+
+    async def fake_execute_non_stream_call(**kwargs):
+        captured.update(kwargs["cleaned_args"])
+        await kwargs["on_success"](kwargs["selected_provider"])
+        return {
+            "id": "chatcmpl-runtime",
+            "choices": [{"message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}],
+        }
+
+    async def fake_execute_streaming_call(**kwargs):
+        captured.update(kwargs["cleaned_args"])
+
+        async def body():
+            await kwargs["on_success"](kwargs["selected_provider"])
+            yield 'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n'
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(body(), media_type="text/event-stream")
+
+    provider_manager = MagicMock()
+    provider_manager.circuit_breakers = {"openai": SimpleNamespace(can_attempt_call=lambda: True)}
+
+    with (
+        patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type, create=True),
+        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch.object(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", True),
+        patch.object(
+            chat_endpoint,
+            "execute_non_stream_call",
+            side_effect=fake_execute_non_stream_call,
+        ),
+        patch.object(
+            chat_endpoint,
+            "execute_streaming_call",
+            side_effect=fake_execute_streaming_call,
+        ),
+        patch.object(chat_endpoint, "API_KEYS", {"openai": "legacy-key"}),
+    ):
+        response = authenticated_client.post(
+            "/api/v1/chat/completions",
+            json=request_data.model_dump(),
+        )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert len(runtime_type.instances) == 1
+    runtime = runtime_type.instances[0]
+    assert runtime.marked_used == ["openai"]
+    assert runtime.close_calls == 1
+    assert captured["api_key"] == "openai-runtime-key"
+    assert captured["credentials_resolved"] is True
+
+
+def test_chat_completion_resolves_health_fallback_with_same_runtime(
+    authenticated_client,
+    mock_chacha_db,
+    setup_dependencies,
+):
+    runtime_type = _credential_runtime_double()
+    captured: dict[str, object] = {}
+    request_data = ChatCompletionRequest(
+        model="gpt-4o-mini",
+        api_provider="openai",
+        messages=[ChatCompletionUserMessageParam(role="user", content="Hello")],
+    )
+
+    async def fake_execute_non_stream_call(**kwargs):
+        captured.update(kwargs["cleaned_args"])
+        await kwargs["on_success"](kwargs["selected_provider"])
+        return {
+            "id": "chatcmpl-runtime-fallback",
+            "choices": [{"message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}],
+        }
+
+    provider_manager = MagicMock()
+    provider_manager.circuit_breakers = {}
+    provider_manager.get_available_provider.return_value = "anthropic"
+
+    with (
+        patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type, create=True),
+        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch.object(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", True),
+        patch.object(
+            chat_endpoint,
+            "execute_non_stream_call",
+            side_effect=fake_execute_non_stream_call,
+        ),
+        patch.object(
+            chat_endpoint,
+            "API_KEYS",
+            {"openai": "legacy-openai", "anthropic": "legacy-anthropic"},
+        ),
+    ):
+        response = authenticated_client.post(
+            "/api/v1/chat/completions",
+            json=request_data.model_dump(),
+        )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert len(runtime_type.instances) == 1
+    runtime = runtime_type.instances[0]
+    assert ("openai", False) in runtime.resolve_calls
+    assert ("anthropic", False) in runtime.resolve_calls
+    assert runtime.marked_used == ["anthropic"]
+    assert captured["api_key"] == "anthropic-runtime-key"
+    assert captured["credentials_resolved"] is True
+
+
+@pytest.mark.asyncio
+async def test_auto_router_uses_request_credential_runtime(monkeypatch):
+    runtime_type = _credential_runtime_double()
+    runtime = runtime_type(
+        user_id=1,
+        team_ids=[],
+        org_ids=[],
+        trusted_base_url_override=False,
+        fallback_resolver=lambda _provider: None,
+    )
+    captured: dict[str, object] = {}
+
+    async def fake_call(**kwargs):
+        captured.update(kwargs)
+        return {"choices": [{"message": {"content": "openai/gpt-4o-mini"}}]}
+
+    async def fake_select(**kwargs):
+        router_model = SimpleNamespace(provider="openai", model="gpt-4o-mini")
+        await kwargs["execute_router_call"](router_model, [{"role": "user", "content": "route"}])
+        return {"provider": "openai", "model": "gpt-4o-mini"}, {}
+
+    monkeypatch.setattr(chat_endpoint, "perform_chat_api_call_async", fake_call)
+    monkeypatch.setattr(chat_endpoint, "select_llm_router_choice", fake_select)
+
+    await chat_endpoint._select_auto_chat_llm_router_choice(
+        router_request=SimpleNamespace(scope=None),
+        policy=SimpleNamespace(),
+        candidates=[],
+        provider_listing={},
+        request=SimpleNamespace(state=SimpleNamespace(user_id=1, api_key_id=None)),
+        current_user=SimpleNamespace(id=1),
+        request_id="request-1",
+        credential_runtime=runtime,
+    )
+
+    assert runtime.resolve_calls == [("openai", False)]
+    assert runtime.marked_used == ["openai"]
+    assert captured["api_key"] == "openai-runtime-key"
+    assert captured["credentials_resolved"] is True
+
+
+@pytest.mark.asyncio
+async def test_auto_router_does_not_swallow_terminal_credential_error(monkeypatch):
+    runtime_type = _credential_runtime_double(
+        errors={
+            "openai": ByokResolutionError(
+                "credential_store_unavailable",
+                "openai",
+            )
+        }
+    )
+    runtime = runtime_type(
+        user_id=1,
+        team_ids=[],
+        org_ids=[],
+        trusted_base_url_override=False,
+        fallback_resolver=lambda _provider: None,
+    )
+
+    async def swallowing_select(**kwargs):
+        router_model = SimpleNamespace(provider="openai", model="gpt-4o-mini")
+        try:
+            await kwargs["execute_router_call"](
+                router_model,
+                [{"role": "user", "content": "route"}],
+            )
+        except Exception as exc:
+            return None, {"error": type(exc).__name__}
+        raise AssertionError("credential resolution should fail")
+
+    monkeypatch.setattr(chat_endpoint, "select_llm_router_choice", swallowing_select)
+
+    with pytest.raises(ByokResolutionError) as exc_info:
+        await chat_endpoint._select_auto_chat_llm_router_choice(
+            router_request=SimpleNamespace(scope=None),
+            policy=SimpleNamespace(),
+            candidates=[],
+            provider_listing={},
+            request=SimpleNamespace(state=SimpleNamespace(user_id=1, api_key_id=None)),
+            current_user=SimpleNamespace(id=1),
+            request_id="request-credential-error",
+            credential_runtime=runtime,
+        )
+
+    assert exc_info.value.code == "credential_store_unavailable"
+
+
+@pytest.mark.parametrize(
+    ("runtime_error", "expected_code"),
+    [
+        (
+            ByokResolutionError("invalid_provider_credentials", "openai"),
+            "invalid_provider_credentials",
+        ),
+        (
+            ByokResolutionError("credential_store_unavailable", "openai"),
+            "credential_store_unavailable",
+        ),
+        (
+            ByokResolutionError("credential_scope_revoked", "openai"),
+            "credential_scope_revoked",
+        ),
+    ],
+)
+def test_chat_credential_resolution_errors_are_terminal_503(
+    authenticated_client,
+    mock_chacha_db,
+    setup_dependencies,
+    runtime_error,
+    expected_code,
+):
+    runtime_type = _credential_runtime_double(errors={"openai": runtime_error})
+    provider_manager = MagicMock()
+    provider_manager.circuit_breakers = {"openai": SimpleNamespace(can_attempt_call=lambda: True)}
+    request_data = ChatCompletionRequest(
+        model="gpt-4o-mini",
+        api_provider="openai",
+        messages=[ChatCompletionUserMessageParam(role="user", content="Hello")],
+    )
+
+    with (
+        patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type, create=True),
+        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch.object(chat_endpoint, "API_KEYS", {"openai": "legacy-key"}),
+        patch.object(chat_endpoint, "perform_chat_api_call") as provider_call,
+    ):
+        response = authenticated_client.post(
+            "/api/v1/chat/completions",
+            json=request_data.model_dump(),
+        )
+
+    assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+    assert response.json()["detail"]["error_code"] == expected_code
+    provider_manager.get_available_provider.assert_not_called()
+    provider_call.assert_not_called()
+
+
+def test_chat_missing_runtime_credentials_are_terminal_503(
+    authenticated_client,
+    mock_chacha_db,
+    setup_dependencies,
+):
+    runtime_type = _credential_runtime_double(api_keys={"openai": None})
+    provider_manager = MagicMock()
+    provider_manager.circuit_breakers = {"openai": SimpleNamespace(can_attempt_call=lambda: True)}
+    request_data = ChatCompletionRequest(
+        model="gpt-4o-mini",
+        api_provider="openai",
+        messages=[ChatCompletionUserMessageParam(role="user", content="Hello")],
+    )
+
+    with (
+        patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type, create=True),
+        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch.object(chat_endpoint, "API_KEYS", {"openai": "legacy-key"}),
+        patch.object(chat_endpoint, "perform_chat_api_call") as provider_call,
+    ):
+        response = authenticated_client.post(
+            "/api/v1/chat/completions",
+            json=request_data.model_dump(),
+        )
+
+    assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+    assert response.json()["detail"]["error_code"] == "missing_provider_credentials"
+    provider_manager.get_available_provider.assert_not_called()
+    provider_call.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("provider_error", "expected_status", "expected_code"),
+    [
+        (
+            ChatAuthenticationError("sentinel upstream body", provider="openai"),
+            status.HTTP_502_BAD_GATEWAY,
+            "provider_authentication_failed",
+        ),
+        (
+            ChatConfigurationError("sentinel config path", provider="openai"),
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "provider_configuration_invalid",
+        ),
+    ],
+)
+def test_chat_provider_auth_and_config_errors_are_sanitized_and_terminal(
+    authenticated_client,
+    mock_chacha_db,
+    setup_dependencies,
+    provider_error,
+    expected_status,
+    expected_code,
+):
+    runtime_type = _credential_runtime_double()
+    provider_manager = MagicMock()
+    provider_manager.circuit_breakers = {"openai": SimpleNamespace(can_attempt_call=lambda: True)}
+    request_data = ChatCompletionRequest(
+        model="gpt-4o-mini",
+        api_provider="openai",
+        messages=[ChatCompletionUserMessageParam(role="user", content="Hello")],
+    )
+
+    with (
+        patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type, create=True),
+        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch.object(chat_endpoint, "API_KEYS", {"openai": "legacy-key"}),
+        patch.object(
+            chat_endpoint,
+            "execute_non_stream_call",
+            side_effect=provider_error,
+        ),
+    ):
+        response = authenticated_client.post(
+            "/api/v1/chat/completions",
+            json=request_data.model_dump(),
+        )
+
+    assert response.status_code == expected_status
+    detail = response.json()["detail"]
+    assert detail["error_code"] == expected_code
+    assert "sentinel" not in str(detail).lower()
+    provider_manager.get_available_provider.assert_not_called()
+    assert runtime_type.instances[0].close_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_stream_runtime_cleanup_runs_on_completion_error_and_cancel():
+    runtime_type = _credential_runtime_double()
+
+    async def consume(mode: str) -> int:
+        runtime = runtime_type(
+            user_id=1,
+            team_ids=[],
+            org_ids=[],
+            trusted_base_url_override=False,
+            fallback_resolver=lambda _provider: None,
+        )
+
+        async def body():
+            yield b"first"
+            if mode == "error":
+                raise RuntimeError("stream failed")
+            if mode == "cancel":
+                await asyncio.Event().wait()
+
+        response = StreamingResponse(body())
+        chat_endpoint._attach_credential_runtime_cleanup(response, runtime)
+        iterator = response.body_iterator
+        await iterator.__anext__()
+        if mode == "complete":
+            with pytest.raises(StopAsyncIteration):
+                await iterator.__anext__()
+        elif mode == "error":
+            with pytest.raises(RuntimeError, match="stream failed"):
+                await iterator.__anext__()
+        else:
+            pending = asyncio.create_task(iterator.__anext__())
+            await asyncio.sleep(0)
+            pending.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await pending
+        return runtime.close_calls
+
+    assert await consume("complete") == 1
+    assert await consume("error") == 1
+    assert await consume("cancel") == 1
+
+
 def test_chat_completion_openai_oauth_auth_failure_retries_once(
     authenticated_client,
     mock_chacha_db,
@@ -371,25 +808,11 @@ def test_chat_completion_openai_oauth_auth_failure_retries_once(
         api_provider="openai",
         messages=[ChatCompletionUserMessageParam(role="user", content="Hello")],
     )
-    forced_refresh_flags: list[bool] = []
-
-    async def _resolve_byok(provider: str, *_args, **kwargs):
-        forced = bool(kwargs.get("force_oauth_refresh", False))
-        forced_refresh_flags.append(forced)
-        api_key = "oauth-refreshed-key" if forced else "oauth-initial-key"
-        return ResolvedByokCredentials(
-            provider=provider,
-            api_key=api_key,
-            app_config=None,
-            credential_fields={},
-            source="user",
-            allowlisted=True,
-            auth_source="oauth",
-        )
+    runtime_type = _credential_runtime_double(auth_source="oauth")
 
     with (
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.resolve_byok_credentials", side_effect=_resolve_byok),
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_llm,
+        patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type, create=True),
+        patch.object(chat_endpoint, "perform_chat_api_call") as mock_llm,
     ):
         mock_llm.side_effect = [
             ChatAuthenticationError("expired oauth access token", provider="openai"),
@@ -408,7 +831,11 @@ def test_chat_completion_openai_oauth_auth_failure_retries_once(
 
     assert response.status_code == status.HTTP_200_OK
     assert mock_llm.call_count == 2
-    assert forced_refresh_flags[:2] == [False, True]
+    assert runtime_type.instances[0].resolve_calls[:2] == [
+        ("openai", False),
+        ("openai", True),
+    ]
+    assert mock_llm.call_args_list[1].kwargs["credentials_resolved"] is True
 
 
 def test_chat_completion_openai_oauth_propagates_original_auth_error_after_second_failure(
@@ -422,22 +849,11 @@ def test_chat_completion_openai_oauth_propagates_original_auth_error_after_secon
         messages=[ChatCompletionUserMessageParam(role="user", content="Hello")],
     )
 
-    async def _resolve_byok(provider: str, *_args, **kwargs):
-        forced = bool(kwargs.get("force_oauth_refresh", False))
-        api_key = "oauth-refreshed-key" if forced else "oauth-initial-key"
-        return ResolvedByokCredentials(
-            provider=provider,
-            api_key=api_key,
-            app_config=None,
-            credential_fields={},
-            source="user",
-            allowlisted=True,
-            auth_source="oauth",
-        )
+    runtime_type = _credential_runtime_double(auth_source="oauth")
 
     with (
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.resolve_byok_credentials", side_effect=_resolve_byok),
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_llm,
+        patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type, create=True),
+        patch.object(chat_endpoint, "perform_chat_api_call") as mock_llm,
     ):
         mock_llm.side_effect = [
             ChatAuthenticationError("expired oauth access token", provider="openai"),
@@ -446,8 +862,12 @@ def test_chat_completion_openai_oauth_propagates_original_auth_error_after_secon
 
         response = authenticated_client.post("/api/v1/chat/completions", json=request_data.model_dump())
 
-    assert response.status_code == status.HTTP_401_UNAUTHORIZED
-    assert response.json().get("detail") == "Unauthorized."
+    assert response.status_code == status.HTTP_502_BAD_GATEWAY
+    assert response.json()["detail"]["error_code"] == "provider_authentication_failed"
+    assert runtime_type.instances[0].resolve_calls[:2] == [
+        ("openai", False),
+        ("openai", True),
+    ]
 
 
 def test_chat_completion_with_conversation_history(authenticated_client, mock_chacha_db, setup_dependencies):

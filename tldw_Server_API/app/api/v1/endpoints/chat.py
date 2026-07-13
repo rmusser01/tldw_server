@@ -37,12 +37,10 @@ from fastapi import (
     status,
 )
 
-from tldw_Server_API.app.core.AuthNZ.byok_config import merge_app_config_overrides
 from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
     apply_llm_provider_overrides_to_listing,
     get_llm_provider_override,
     get_llm_provider_overrides_snapshot,
-    get_override_credentials,
     get_override_default_model,
     get_override_model_priority,
     validate_provider_override,
@@ -129,7 +127,12 @@ from tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_selector i
 from tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_telemetry import (
     compute_persona_exemplar_telemetry,
 )
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError, ChatBadRequestError
+from tldw_Server_API.app.core.Chat.Chat_Deps import (
+    ChatAPIError,
+    ChatAuthenticationError,
+    ChatBadRequestError,
+    ChatConfigurationError,
+)
 from tldw_Server_API.app.core.Chat.chat_exceptions import (
     ChatDatabaseError,
     ChatErrorCode,
@@ -226,9 +229,15 @@ from tldw_Server_API.app.api.v1.schemas.chat_dictionary_schemas import (
 )
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
-    ResolvedByokCredentials,
+    ByokResolutionError,
     record_byok_missing_credentials,
-    resolve_byok_credentials,
+)
+from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
+    is_trusted_base_url_principal,
+)
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    ProviderCallCredentials,
+    ProviderCredentialRuntime,
 )
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import (
     LimitEnforcer,
@@ -300,17 +309,14 @@ _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS = (
 
 
 def _derive_endpoint_provenance(
-    credentials: ResolvedByokCredentials,
+    credentials: ProviderCallCredentials,
     *,
     request_override: bool,
 ) -> str:
     """Return the URL-free ownership class for a resolved provider endpoint."""
     if request_override:
         return "request_override"
-    byok_base_url = credentials.credential_fields.get("base_url")
-    if isinstance(byok_base_url, str) and byok_base_url.strip():
-        return "byok"
-    return "server_config"
+    return credentials.endpoint_provenance
 
 
 def _request_has_endpoint_override(request_data: Any) -> bool:
@@ -874,6 +880,102 @@ def _extract_routing_requested_capabilities(
     }
 
 
+def _provider_credential_http_exception(exc: BaseException) -> HTTPException:
+    """Map internal credential failures to bounded downstream-provider errors."""
+    if isinstance(exc, ChatAuthenticationError):
+        return HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "error_code": "provider_authentication_failed",
+                "message": "The selected provider credentials could not be authenticated.",
+            },
+        )
+    if isinstance(exc, ByokResolutionError):
+        messages = {
+            "invalid_provider_credentials": "The selected provider credentials are invalid.",
+            "credential_store_unavailable": "Provider credential storage is temporarily unavailable.",
+            "credential_scope_revoked": "The selected provider credential scope is no longer available.",
+        }
+        code = (
+            exc.code
+            if exc.code in messages
+            else "provider_configuration_invalid"
+        )
+        return HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "error_code": code,
+                "message": messages.get(code, "The selected provider configuration is invalid."),
+            },
+        )
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail={
+            "error_code": "provider_configuration_invalid",
+            "message": "The selected provider configuration is invalid.",
+        },
+    )
+
+
+def _trusted_credential_runtime_scope(
+    request: Request,
+    current_user: User | None,
+) -> tuple[int | None, list[int], list[int], bool]:
+    """Derive the execution credential scope only from authenticated server state."""
+    request_state = getattr(request, "state", None)
+    auth_context = getattr(request_state, "auth", None)
+    principal = getattr(auth_context, "principal", None)
+
+    user_id = getattr(principal, "user_id", None)
+    if user_id is None:
+        user_id = getattr(current_user, "id_int", None)
+    if user_id is None:
+        try:
+            user_id = int(getattr(current_user, "id", None))
+        except (TypeError, ValueError):
+            user_id = None
+
+    def scoped_ids(kind: str) -> list[int]:
+        values = getattr(principal, f"{kind}_ids", None)
+        if values is None:
+            values = getattr(request_state, f"{kind}_ids", None)
+        members = sorted({int(value) for value in (values or ()) if value is not None})
+        active = getattr(principal, f"active_{kind}_id", None)
+        if active is None:
+            active = getattr(request_state, f"active_{kind}_id", None)
+        if active is None:
+            return members
+        active_id = int(active)
+        if active_id not in members:
+            raise ByokResolutionError("credential_scope_revoked", "credential_scope")
+        return [active_id]
+
+    return (
+        user_id,
+        scoped_ids("team"),
+        scoped_ids("org"),
+        is_trusted_base_url_principal(principal),
+    )
+
+
+def _attach_credential_runtime_cleanup(
+    response: Any,
+    runtime: ProviderCredentialRuntime,
+) -> Any:
+    """Keep credentials alive through streaming and release them on termination."""
+    body_iterator = response.body_iterator
+
+    async def iterator():
+        try:
+            async for chunk in body_iterator:
+                yield chunk
+        finally:
+            await runtime.close()
+
+    response.body_iterator = iterator()
+    return response
+
+
 async def _select_auto_chat_llm_router_choice(
     *,
     router_request: RouterRequest,
@@ -883,21 +985,8 @@ async def _select_auto_chat_llm_router_choice(
     request: Request,
     current_user: User | None,
     request_id: str | None,
+    credential_runtime: ProviderCredentialRuntime,
 ) -> tuple[dict[str, str] | None, dict[str, Any]]:
-    def _fallback_resolver(name: str) -> str | None:
-        key_val, _ = resolve_provider_api_key(
-            name,
-            prefer_module_keys_in_tests=True,
-        )
-        return key_val
-
-    user_id_int = getattr(current_user, "id_int", None)
-    if user_id_int is None:
-        try:
-            user_id_int = int(getattr(current_user, "id", None))
-        except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
-            user_id_int = None
-
     try:
         request_state = getattr(request, "state", None)
         user_id = getattr(request_state, "user_id", None)
@@ -906,30 +995,32 @@ async def _select_auto_chat_llm_router_choice(
         user_id = None
         api_key_id = None
 
+    terminal_credential_error: BaseException | None = None
+
     async def _execute_router_call(router_model, router_messages):
-        byok_resolution = await resolve_byok_credentials(
-            router_model.provider,
-            user_id=user_id_int,
-            request=request,
-            fallback_resolver=_fallback_resolver,
-        )
+        nonlocal terminal_credential_error
         try:
-            return await perform_chat_api_call_async(
+            handle = await credential_runtime.resolve(router_model.provider)
+            response = await perform_chat_api_call_async(
                 api_endpoint=router_model.provider,
                 messages_payload=router_messages,
-                api_key=byok_resolution.api_key,
+                api_key=handle.api_key,
                 model=router_model.model,
                 max_tokens=64,
                 streaming=False,
                 user_identifier=str(getattr(current_user, "id", "auto-router")),
-                app_config=byok_resolution.app_config,
+                app_config=handle.app_config,
+                credentials_resolved=handle.credentials_resolved,
                 _endpoint_provenance=_derive_endpoint_provenance(
-                    byok_resolution,
+                    handle,
                     request_override=False,
                 ),
             )
-        finally:
-            await byok_resolution.touch_last_used()
+        except (ByokResolutionError, ChatAuthenticationError, ChatConfigurationError) as exc:
+            terminal_credential_error = exc
+            raise
+        await credential_runtime.mark_used(handle)
+        return response
 
     async def _log_router_usage(router_model, usage, latency_ms):
         try:
@@ -954,7 +1045,7 @@ async def _select_auto_chat_llm_router_choice(
             logger.debug("Auto chat router usage logging skipped: {}", exc)
 
     try:
-        return await select_llm_router_choice(
+        result = await select_llm_router_choice(
             router_request=router_request,
             policy=policy,
             candidates=candidates,
@@ -962,6 +1053,11 @@ async def _select_auto_chat_llm_router_choice(
             execute_router_call=_execute_router_call,
             log_router_usage=_log_router_usage,
         )
+        if terminal_credential_error is not None:
+            raise terminal_credential_error
+        return result
+    except (ByokResolutionError, ChatAuthenticationError, ChatConfigurationError):
+        raise
     except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
         logger.debug("Auto chat LLM router call failed: {}", exc)
         return None, {"error": type(exc).__name__}
@@ -974,6 +1070,7 @@ async def _resolve_auto_chat_routing_decision(
     sticky_store: InMemoryRoutingDecisionStore,
     current_user: User | None,
     request_id: str | None,
+    credential_runtime: ProviderCredentialRuntime,
 ) -> tuple[Any | None, dict[str, Any]]:
     """Resolve `model='auto'` into a canonical provider/model pair."""
     provider_listing = apply_llm_provider_overrides_to_listing(get_configured_providers())
@@ -1013,6 +1110,7 @@ async def _resolve_auto_chat_routing_decision(
         request=request,
         current_user=current_user,
         request_id=request_id,
+        credential_runtime=credential_runtime,
     )
     decision = route_model(
         request=router_request,
@@ -2477,15 +2575,43 @@ async def create_chat_completion(
         logger.warning(f"Input validation error: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid request.") from e
 
-    if auto_model_requested:
-        routing_decision, routing_debug = await _resolve_auto_chat_routing_decision(
-            request_data,
-            request=request,
-            sticky_store=routing_decision_store,
-            current_user=current_user,
-            request_id=request_id,
+    def _fallback_resolver(name: str) -> str | None:
+        key_val, _ = resolve_provider_api_key(
+            name,
+            prefer_module_keys_in_tests=True,
         )
+        return key_val
+
+    try:
+        runtime_user_id, runtime_team_ids, runtime_org_ids, trusted_base_url_override = (
+            _trusted_credential_runtime_scope(request, current_user)
+        )
+    except ByokResolutionError as exc:
+        raise _provider_credential_http_exception(exc) from exc
+    credential_runtime = ProviderCredentialRuntime(
+        user_id=runtime_user_id,
+        team_ids=runtime_team_ids,
+        org_ids=runtime_org_ids,
+        trusted_base_url_override=trusted_base_url_override,
+        fallback_resolver=_fallback_resolver,
+    )
+    credential_runtime_owned_by_stream = False
+
+    if auto_model_requested:
+        try:
+            routing_decision, routing_debug = await _resolve_auto_chat_routing_decision(
+                request_data,
+                request=request,
+                sticky_store=routing_decision_store,
+                current_user=current_user,
+                request_id=request_id,
+                credential_runtime=credential_runtime,
+            )
+        except (ByokResolutionError, ChatAuthenticationError, ChatConfigurationError) as exc:
+            await credential_runtime.close()
+            raise _provider_credential_http_exception(exc) from exc
         if routing_decision is None:
+            await credential_runtime.close()
             candidate_count = int((routing_debug or {}).get("candidate_count") or 0)
             if candidate_count > 0:
                 raise HTTPException(
@@ -3290,57 +3416,13 @@ async def create_chat_completion(
                     provider = "openai"
 
             target_api_provider = provider  # Already determined (possibly adjusted above)
-            byok_cache: dict[str, ResolvedByokCredentials] = {}
+            credential_handle = await credential_runtime.resolve(target_api_provider)
+            provider_api_key = credential_handle.api_key
+            app_config_override = credential_handle.app_config
 
-            def _fallback_resolver(name: str) -> str | None:
-                key_val, _ = resolve_provider_api_key(
-                    name,
-                    prefer_module_keys_in_tests=True,
-                )
-                return key_val
-
-            async def _resolve_byok(
-                name: str,
-                *,
-                force_oauth_refresh: bool = False,
-            ) -> ResolvedByokCredentials:
-                provider_key = (name or "").strip().lower()
-                cached = byok_cache.get(provider_key)
-                if cached and not force_oauth_refresh:
-                    return cached
-                user_id_int = getattr(current_user, "id_int", None)
-                if user_id_int is None:
-                    try:
-                        user_id_int = int(getattr(current_user, "id", None))
-                    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
-                        user_id_int = None
-                resolved = await resolve_byok_credentials(
-                    provider_key,
-                    user_id=user_id_int,
-                    request=request,
-                    fallback_resolver=_fallback_resolver,
-                    force_oauth_refresh=force_oauth_refresh,
-                )
-                byok_cache[provider_key] = resolved
-                return resolved
-
-            async def _touch_byok(name: str) -> None:
-                provider_key = (name or "").strip().lower()
-                resolved = byok_cache.get(provider_key)
-                if resolved:
-                    await resolved.touch_last_used()
-
-            byok_resolution = await _resolve_byok(target_api_provider)
-            provider_api_key = byok_resolution.api_key
-            app_config_override = byok_resolution.app_config
-            override_creds = get_override_credentials(target_api_provider)
-            if override_creds and override_creds.get("credential_fields") and not byok_resolution.uses_byok:
-                base_config = app_config_override or loaded_config_data
-                app_config_override = merge_app_config_overrides(
-                    base_config,
-                    target_api_provider,
-                    override_creds.get("credential_fields"),
-                )
+            async def _mark_provider_used(name: str) -> None:
+                handle = await credential_runtime.resolve(name)
+                await credential_runtime.mark_used(handle)
 
             # Centralized provider capabilities
             try:
@@ -3350,8 +3432,7 @@ async def create_chat_completion(
                     return True
             # Allow explicit mock forcing in tests even if provider key is absent
             _force_mock = _shared_is_truthy(os.getenv("CHAT_FORCE_MOCK", ""))
-            _auto_mock_family = target_api_provider in {"openai", "groq", "mistral"}
-            if provider_requires_api_key(target_api_provider) and not provider_api_key and not (_force_mock or (_test_mode_flag and _auto_mock_family)):
+            if provider_requires_api_key(target_api_provider) and not provider_api_key and not _force_mock:
                 record_byok_missing_credentials(target_api_provider, operation="chat")
 
                 # Distinguish "no LLM providers configured at all" (fresh install) from
@@ -3703,8 +3784,9 @@ async def create_chat_completion(
             )
             cleaned_args["request"] = request
             cleaned_args["model"] = cleaned_args.get("model") or model
+            cleaned_args["credentials_resolved"] = credential_handle.credentials_resolved
             cleaned_args["_endpoint_provenance"] = _derive_endpoint_provenance(
-                byok_resolution,
+                credential_handle,
                 request_override=_request_has_endpoint_override(request_data),
             )
 
@@ -3713,11 +3795,11 @@ async def create_chat_completion(
                 *,
                 force_oauth_refresh: bool = False,
             ) -> tuple[dict[str, Any], str | None]:
-                refreshed_resolution = await _resolve_byok(
+                refreshed_handle = await credential_runtime.resolve(
                     target_provider,
-                    force_oauth_refresh=force_oauth_refresh,
+                    force_refresh=force_oauth_refresh,
                 )
-                provider_api_key_new = refreshed_resolution.api_key
+                provider_api_key_new = refreshed_handle.api_key
                 if provider_requires_api_key(target_provider) and not provider_api_key_new:
                     logger.error(
                         f"API key for provider '{target_provider}' is missing or not configured (fallback)."
@@ -3737,12 +3819,13 @@ async def create_chat_completion(
                     provider_api_key=provider_api_key_new,
                     templated_llm_payload=llm_templated_payload,
                     final_system_message=llm_final_system_message,
-                    app_config=refreshed_resolution.app_config,
+                    app_config=refreshed_handle.app_config,
                     grammar_record=_resolve_llamacpp_grammar_record(target_provider),
                 )
                 refreshed_args["request"] = request
+                refreshed_args["credentials_resolved"] = refreshed_handle.credentials_resolved
                 refreshed_args["_endpoint_provenance"] = _derive_endpoint_provenance(
-                    refreshed_resolution,
+                    refreshed_handle,
                     request_override=_request_has_endpoint_override(request_data),
                 )
                 refreshed_model = refreshed_args.get("model")
@@ -4028,7 +4111,7 @@ async def create_chat_completion(
 
             if (
                 target_api_provider == "openai"
-                and getattr(byok_resolution, "auth_source", None) == "oauth"
+                and credential_handle.auth_source == "oauth"
             ):
                 oauth_retry_state = {"attempted": False}
                 base_llm_call_func = llm_call_func
@@ -4163,7 +4246,7 @@ async def create_chat_completion(
                     llm_call_func=llm_call_func,
                     refresh_provider_params=rebuild_call_params_for_provider,
                     moderation_getter=_get_moderation_with_guardian,
-                    on_success=_touch_byok,
+                    on_success=_mark_provider_used,
                     on_stream_full_reply=_on_stream_full_reply_for_persona_telemetry,
                     rg_commit_cb=_build_streaming_commit_cb(
                         _rg_handle_id, request, _billing_enforcer, billing_org_id,
@@ -4184,6 +4267,8 @@ async def create_chat_completion(
                 alias_headers = _build_persona_alias_deprecation_headers(persona_alias_used)
                 for header_key, header_value in alias_headers.items():
                     stream_response.headers[header_key] = header_value
+                _attach_credential_runtime_cleanup(stream_response, credential_runtime)
+                credential_runtime_owned_by_stream = True
                 return stream_response
 
             else: # Non-streaming
@@ -4212,7 +4297,7 @@ async def create_chat_completion(
                     llm_call_func=llm_call_func,
                     refresh_provider_params=rebuild_call_params_for_provider,
                     moderation_getter=_get_moderation_with_guardian,
-                    on_success=_touch_byok,
+                    on_success=_mark_provider_used,
                     self_monitoring_service=_self_mon_service,
                     assistant_parent_message_id=assistant_parent_message_id,
                     continuation_metadata=continuation_meta,
@@ -4321,6 +4406,12 @@ async def create_chat_completion(
 
         # Important: preserve HTTPException status codes raised from deeper layers
         # before a broad Exception handler can catch and normalize them.
+        except ByokResolutionError as credential_error:
+            raise _provider_credential_http_exception(credential_error) from credential_error
+
+        except (ChatAuthenticationError, ChatConfigurationError) as provider_error:
+            raise _provider_credential_http_exception(provider_error) from provider_error
+
         except HTTPException as e_http:
             # Log with request context
             if e_http.status_code >= 500:
@@ -4574,6 +4665,8 @@ async def create_chat_completion(
 
     finally:
         exc_type, exc_value, exc_tb = sys.exc_info()
+        if not credential_runtime_owned_by_stream:
+            await credential_runtime.close()
         if exc_type is not None and _rg_handle_id and not rg_finalized:
             try:
                 gov = getattr(request.app.state, "rg_governor", None) if request is not None else None
