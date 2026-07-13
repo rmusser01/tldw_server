@@ -42,6 +42,7 @@ Implementation completed using TDD and subagent-driven review. Final post-rebase
 Draft PR created: https://github.com/rmusser01/tldw_server/pull/2718. The PR remains draft pending the repository-required human-authored Change summary.
 PR #2718 review remediation started: rebasing/auditing against latest origin/dev, adding test-first regressions for normalized wrapped-body persistence and safe URL logging, and addressing all actionable inline feedback.
 PR review remediation implemented test-first. Added non-string envelope handling, normalized-body persistence for enhanced and legacy paths, redacted warning-log URLs while preserving raw per-URL response errors, unit markers, helper docstring, and explicit B108 suppression rationale. Kept the existing nullable `errors` response key to preserve compatibility with the enhanced service and approved response contract. Verification: 40 focused/adjacent tests passed; Black passed on changed tests; Ruff passed on touched files with only the two documented pre-existing Article_Extractor_Lib I001/F841 findings excluded; compileall and git diff checks passed; Bandit production scan reported 0 findings and 0 errors.
+Follow-up Qodo re-review required per-test classification decorators rather than a module-level marker. Replaced the module marker with explicit `@pytest.mark.unit` on all 10 tests; the file's 10 tests, Black, Ruff, and diff checks passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

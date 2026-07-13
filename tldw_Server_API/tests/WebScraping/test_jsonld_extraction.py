@@ -6,8 +6,6 @@ from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import (
     extract_jsonld_entities,
 )
 
-pytestmark = pytest.mark.unit
-
 DESCRIPTION_ONLY_JSONLD = """
 <html>
   <head>
@@ -25,6 +23,7 @@ DESCRIPTION_ONLY_JSONLD = """
 """
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_legacy_scrape_preserves_structured_summary_when_summarization_disabled(monkeypatch):
     async def fake_scrape_article(
@@ -58,6 +57,7 @@ async def test_legacy_scrape_preserves_structured_summary_when_summarization_dis
     assert result[0]["summary"] == "Structured summary"
 
 
+@pytest.mark.unit
 def test_jsonld_description_only_is_not_successful():
     result = extract_jsonld_entities(DESCRIPTION_ONLY_JSONLD, "https://example.com")
 
@@ -66,6 +66,7 @@ def test_jsonld_description_only_is_not_successful():
     assert result["summary"] == "Structured summary"
 
 
+@pytest.mark.unit
 def test_pipeline_retains_jsonld_summary_after_fallback():
     def fallback_extractor(_html: str, url: str) -> dict[str, str | bool]:
         return {
@@ -90,6 +91,7 @@ def test_pipeline_retains_jsonld_summary_after_fallback():
     assert result["summary"] == "Structured summary"
 
 
+@pytest.mark.unit
 def test_pipeline_keeps_fallback_summary_over_jsonld_summary():
     def fallback_extractor(_html: str, url: str) -> dict[str, str | bool]:
         return {
@@ -114,6 +116,7 @@ def test_pipeline_keeps_fallback_summary_over_jsonld_summary():
     assert result["summary"] == "Fallback summary"
 
 
+@pytest.mark.unit
 def test_pipeline_does_not_carry_jsonld_summary_when_fallback_fails():
     def fallback_extractor(_html: str, url: str) -> dict[str, str | bool]:
         return {
@@ -136,6 +139,7 @@ def test_pipeline_does_not_carry_jsonld_summary_when_fallback_fails():
     assert result.get("summary") is None
 
 
+@pytest.mark.unit
 def test_jsonld_extraction_basic():
     html = """
     <html>
@@ -163,6 +167,7 @@ def test_jsonld_extraction_basic():
     assert "JSON-LD body text." in result["content"]
 
 
+@pytest.mark.unit
 def test_jsonld_extraction_multiple_blocks_prefers_article():
     html = """
     <html>
@@ -184,6 +189,7 @@ def test_jsonld_extraction_multiple_blocks_prefers_article():
     assert result["content"] == "Article body"
 
 
+@pytest.mark.unit
 def test_jsonld_extraction_invalid_json():
     html = """
     <html>
@@ -201,6 +207,7 @@ def test_jsonld_extraction_invalid_json():
     assert result.get("jsonld_error")
 
 
+@pytest.mark.unit
 def test_jsonld_pipeline_short_circuits():
     html = """
     <html>
@@ -219,6 +226,7 @@ def test_jsonld_pipeline_short_circuits():
     assert result["content"] == "Pipe body"
 
 
+@pytest.mark.unit
 def test_microdata_extraction_basic():
     html = """
     <html>
