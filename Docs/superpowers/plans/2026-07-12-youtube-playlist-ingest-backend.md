@@ -230,7 +230,7 @@ git commit -m "feat: expose playlist preflight resources (TASK-12110)"
 
 ### Task 5: Validate and create ingest runs atomically
 
-- [ ] **Step 1: Write failing service tests**
+- [x] **Step 1: Write failing service tests**
 
 Test mixed input unions, playlist rejection in `direct_url`, expired materialization, unique occurrence IDs, file `awaiting_upload`, missing/extra review overrides, and a fresh duplicate appearing after Review.
 
@@ -245,21 +245,21 @@ def test_fresh_duplicate_requires_review_without_side_effects(service, media_db)
     assert service.count_media_jobs() == 0
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_service.py -k create_run -q`
 
 Expected: FAIL because run creation is absent.
 
-- [ ] **Step 3: Implement validation and fresh duplicate lookup**
+- [x] **Step 3: Implement validation and fresh duplicate lookup**
 
 Resolve materialized identity server-side, canonicalize non-playlist direct URLs, and create file stubs without bytes. Reuse the Stage 1 `get_media_by_urls(urls)` owner-database bulk lookup to refresh library evidence. Resolve in-run repeats by normalized source ID plus occurrence order. Validate Review overrides only after this fresh evidence. Return structured `review_required` before opening the run transaction when choices are stale.
 
-- [ ] **Step 4: Persist the run and initial events in one transaction**
+- [x] **Step 4: Persist the run and initial events in one transaction**
 
 Store immutable ordinal/identity plus mutable state/outcome/attempt. Initial action is `ingest`, `overwrite`, `skip`, `include_existing`, or `update_metadata_only`; do not create jobs yet. Append one initial event per occurrence and one summary version bump.
 
-- [ ] **Step 5: Run tests and commit**
+- [x] **Step 5: Run tests and commit**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_service.py tldw_Server_API/tests/MediaIngestion_NEW/property/test_playlist_ingest_properties.py -q`
 
@@ -267,7 +267,7 @@ Expected: PASS.
 
 ```bash
 git add tldw_Server_API/app/api/v1/schemas/media_playlist_ingest.py tldw_Server_API/app/core/Ingestion_Media_Processing/Video/playlist_ingest_service.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_service.py tldw_Server_API/tests/MediaIngestion_NEW/property/test_playlist_ingest_properties.py
-git commit -m "feat: validate playlist ingest runs (TASK-12110)"
+git commit -m "feat: validate playlist ingest runs (TASK-12112)"
 ```
 
 ### Task 6: Execute non-processing duplicate policies and optional collection planning

@@ -2,16 +2,35 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
+from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 from loguru import logger
+from pydantic import BaseModel, ValidationError
 
+from tldw_Server_API.app.api.v1.schemas.media_playlist_ingest import (
+    DirectUrlInput,
+    DuplicateEvidence,
+    DuplicatePolicy,
+    FileStubInput,
+    MaterializedPlaylistItemInput,
+    PlaylistIngestRunCreateRequest,
+    ReviewRequiredItem,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.api import get_media_by_urls
+from tldw_Server_API.app.core.DB_Management.media_db.dedupe_urls import (
+    media_dedupe_url_candidates,
+    normalize_media_dedupe_url,
+)
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
     _PREFLIGHT_JOB_SENTINEL,
+    MediaIngestRunRecord,
     PlaylistIngestNotFoundError,
     PlaylistIngestStore,
     PlaylistItemRecord,
@@ -22,6 +41,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_s
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_preflight import (
     PlaylistUrlClassification,
+    canonical_youtube_video_url,
     classify_playlist_url,
 )
 
@@ -70,6 +90,22 @@ class PlaylistSelectionError(ValueError):
     """Raised for an invalid server occurrence selection."""
 
 
+class PlaylistRunValidationError(ValueError):
+    """Raised with a stable code when a run request is invalid."""
+
+
+class PlaylistPreflightRequiredError(PlaylistRunValidationError):
+    """Raised when a direct URL must first use playlist preflight."""
+
+
+class ReviewRequiredError(RuntimeError):
+    """Raised before persistence when refreshed duplicate evidence changed Review."""
+
+    def __init__(self, items: Sequence[ReviewRequiredItem]) -> None:
+        self.items = tuple(items)
+        super().__init__("review_required")
+
+
 @dataclass(frozen=True, slots=True)
 class CreatedPlaylistPreflight:
     """Accepted preflight plus the safe admission limits used for it."""
@@ -106,6 +142,15 @@ def _playlist_preflight_queue() -> str:
         or (os.getenv("MEDIA_INGEST_JOBS_DEFAULT_QUEUE") or "").strip()
         or "default"
     )
+
+
+def _owner_media_db(owner_user_id: str) -> Any:
+    """Open the existing owner Media DB without touching AuthNZ storage."""
+    from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+    from tldw_Server_API.app.core.DB_Management.media_db.api import create_media_database
+
+    db_path = DatabasePaths.get_media_db_path(owner_user_id)
+    return create_media_database(client_id=f"playlist_ingest:{owner_user_id}", db_path=str(db_path))
 
 
 def _trusted_youtube_playlist(url: str) -> tuple[str, PlaylistUrlClassification]:
@@ -167,9 +212,10 @@ def _trusted_youtube_playlist(url: str) -> tuple[str, PlaylistUrlClassification]
 class PlaylistIngestService:
     """Coordinate the reviewed store and existing Jobs manager."""
 
-    def __init__(self, job_manager) -> None:
+    def __init__(self, job_manager, *, media_db_factory: Callable[[str], Any] | None = None) -> None:
         self._jobs = job_manager
         self._store = PlaylistIngestStore(job_manager)
+        self._media_db_factory = media_db_factory or _owner_media_db
 
     @staticmethod
     def public_error(error: dict | None) -> dict[str, str] | None:
@@ -361,14 +407,286 @@ class PlaylistIngestService:
         except Exception:  # noqa: BLE001 - resource fencing remains authoritative if Jobs is unavailable
             logger.warning("Playlist preflight job cancellation request failed")
 
+    @staticmethod
+    def _direct_identity(item: DirectUrlInput) -> dict[str, Any]:
+        try:
+            parsed = urlparse(item.url)
+            _ = parsed.port
+        except ValueError as exc:
+            raise PlaylistRunValidationError("invalid_direct_url") from exc
+        if (
+            parsed.scheme.lower() not in {"http", "https"}
+            or not parsed.netloc
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or bool(parsed.fragment)
+        ):
+            raise PlaylistRunValidationError("invalid_direct_url")
+        try:
+            classified = classify_playlist_url(item.url)
+        except ValueError as exc:
+            raise PlaylistRunValidationError("invalid_direct_url") from exc
+        if classified.is_playlist:
+            raise PlaylistPreflightRequiredError("playlist_preflight_required")
+        source_url = (
+            canonical_youtube_video_url(classified.video_id)
+            if classified.video_id is not None and classified.source_kind == "youtube_video"
+            else item.url
+        )
+        canonical_url = normalize_media_dedupe_url(source_url)
+        if canonical_url is None or len(canonical_url) > 8192:
+            raise PlaylistRunValidationError("invalid_direct_url")
+        return {
+            "occurrence_id": item.occurrence_id,
+            "input_kind": item.input_kind,
+            "materialization_id": None,
+            "source_url": canonical_url,
+            "normalized_source_id": (
+                classified.normalized_source_id if classified.source_kind == "youtube_video" else f"url:{canonical_url}"
+            ),
+            "source_kind": classified.source_kind,
+            "display_metadata": item.display_metadata.model_dump(exclude_none=True),
+            "state": "staged",
+        }
+
+    def _resolve_run_inputs(
+        self,
+        owner_user_id: str,
+        inputs: Sequence[MaterializedPlaylistItemInput | DirectUrlInput | FileStubInput],
+    ) -> list[dict[str, Any]]:
+        materializations: dict[str, dict[str, PlaylistItemRecord]] = {}
+        resolved: list[dict[str, Any]] = []
+        for item in inputs:
+            if isinstance(item, MaterializedPlaylistItemInput):
+                selected = materializations.get(item.materialization_id)
+                if selected is None:
+                    self._store.get_materialization(owner_user_id, item.materialization_id)
+                    page = self._store.list_materialization_items(
+                        owner_user_id,
+                        item.materialization_id,
+                        limit=500,
+                    )
+                    selected = {record.occurrence_id: record for record in page}
+                    materializations[item.materialization_id] = selected
+                authoritative = selected.get(item.occurrence_id)
+                if authoritative is None or authoritative.source_url is None:
+                    raise PlaylistIngestNotFoundError("playlist resource not found")
+                resolved.append(
+                    {
+                        "occurrence_id": item.occurrence_id,
+                        "input_kind": item.input_kind,
+                        "materialization_id": item.materialization_id,
+                        "source_url": authoritative.source_url,
+                        "normalized_source_id": authoritative.normalized_source_id or f"url:{authoritative.source_url}",
+                        "source_kind": authoritative.source_kind,
+                        "display_metadata": authoritative.display_metadata,
+                        "state": "staged",
+                    }
+                )
+            elif isinstance(item, DirectUrlInput):
+                resolved.append(self._direct_identity(item))
+            else:
+                display = item.display_metadata.model_dump(exclude_none=True)
+                display.update(
+                    {
+                        "name": item.name,
+                        "content_type": item.content_type,
+                        "size_bytes": item.size_bytes,
+                    }
+                )
+                resolved.append(
+                    {
+                        "occurrence_id": item.occurrence_id,
+                        "input_kind": item.input_kind,
+                        "materialization_id": None,
+                        "source_url": None,
+                        "normalized_source_id": None,
+                        "source_kind": "file",
+                        "display_metadata": {key: value for key, value in display.items() if value is not None},
+                        "state": "awaiting_upload",
+                    }
+                )
+        return resolved
+
+    def _fresh_duplicate_evidence(
+        self,
+        owner_user_id: str,
+        items: Sequence[dict[str, Any]],
+    ) -> list[DuplicateEvidence]:
+        urls = list(dict.fromkeys(str(item["source_url"]) for item in items if item.get("source_url")))
+        library_by_url: dict[str, int] = {}
+        if urls:
+            media_db = None
+            try:
+                media_db = self._media_db_factory(owner_user_id)
+                rows = get_media_by_urls(media_db, urls)
+            except Exception as exc:
+                raise PlaylistRunValidationError("library_lookup_failed") from exc
+            finally:
+                if media_db is not None:
+                    with contextlib.suppress(Exception):
+                        media_db.close_connection()
+            for row in rows:
+                media_id = row.get("id")
+                if type(media_id) is not int or media_id < 1:
+                    continue
+                for candidate in media_dedupe_url_candidates(row.get("url")):
+                    library_by_url.setdefault(candidate, media_id)
+
+        seen: dict[str, str] = {}
+        evidence: list[DuplicateEvidence] = []
+        for item in items:
+            source_url = item.get("source_url")
+            if source_url is None:
+                evidence.append(DuplicateEvidence(kind="none"))
+                continue
+            source_key = str(item.get("normalized_source_id") or f"url:{source_url}")
+            first_occurrence = seen.get(source_key)
+            if first_occurrence is not None:
+                evidence.append(
+                    DuplicateEvidence(
+                        kind="in_run",
+                        duplicate_of_occurrence_id=first_occurrence,
+                    )
+                )
+            else:
+                media_id = next(
+                    (
+                        library_by_url[candidate]
+                        for candidate in media_dedupe_url_candidates(str(source_url))
+                        if candidate in library_by_url
+                    ),
+                    None,
+                )
+                evidence.append(
+                    DuplicateEvidence(kind="library", existing_media_id=media_id)
+                    if media_id is not None
+                    else DuplicateEvidence(kind="none")
+                )
+            seen.setdefault(source_key, str(item["occurrence_id"]))
+        return evidence
+
+    @staticmethod
+    def _review_required_item(
+        occurrence_id: str,
+        reason: str,
+        evidence: DuplicateEvidence,
+    ) -> ReviewRequiredItem:
+        return ReviewRequiredItem(
+            occurrence_id=occurrence_id,
+            reason=reason,
+            evidence=evidence,
+            allowed_actions=list(DuplicatePolicy) if evidence.kind != "none" else [],
+        )
+
+    def create_run(
+        self,
+        owner_user_id: str,
+        *,
+        inputs: Sequence[Mapping[str, Any] | BaseModel],
+        review_overrides: Mapping[str, Mapping[str, Any] | BaseModel],
+        processing_options: Mapping[str, Any] | None = None,
+        playlist_summaries: Sequence[Mapping[str, Any]] | None = None,
+        collection_id: int | None = None,
+    ) -> MediaIngestRunRecord:
+        """Validate refreshed evidence, then atomically persist a mixed run manifest."""
+        try:
+            raw_inputs = [item.model_dump() if isinstance(item, BaseModel) else dict(item) for item in inputs]
+            raw_overrides = {
+                key: value.model_dump() if isinstance(value, BaseModel) else dict(value)
+                for key, value in review_overrides.items()
+            }
+            request = PlaylistIngestRunCreateRequest.model_validate(
+                {
+                    "inputs": raw_inputs,
+                    "review_overrides": raw_overrides,
+                    "processing_options": dict(processing_options) if processing_options is not None else None,
+                    "playlist_summaries": (
+                        [dict(summary) for summary in playlist_summaries] if playlist_summaries is not None else None
+                    ),
+                    "collection_id": collection_id,
+                }
+            )
+        except (AttributeError, TypeError, ValueError, ValidationError) as exc:
+            raise PlaylistRunValidationError("invalid_run_request") from exc
+
+        owner = self._store._owner(owner_user_id)
+        resolved = self._resolve_run_inputs(owner, request.inputs)
+        evidence = self._fresh_duplicate_evidence(owner, resolved)
+        occurrence_ids = {item["occurrence_id"] for item in resolved}
+        if set(request.review_overrides) - occurrence_ids:
+            raise PlaylistRunValidationError("unknown_review_override")
+
+        review_items: list[ReviewRequiredItem] = []
+        for item, current_evidence in zip(resolved, evidence, strict=True):
+            occurrence_id = str(item["occurrence_id"])
+            override = request.review_overrides.get(occurrence_id)
+            if current_evidence.kind == "none":
+                if override is not None:
+                    review_items.append(
+                        self._review_required_item(
+                            occurrence_id,
+                            "duplicate_no_longer_present",
+                            current_evidence,
+                        )
+                    )
+                item["action"] = "ingest"
+                item["metadata_patch"] = None
+                continue
+            if override is None:
+                review_items.append(
+                    self._review_required_item(
+                        occurrence_id,
+                        "duplicate_action_required",
+                        current_evidence,
+                    )
+                )
+                continue
+            target_matches = (
+                current_evidence.kind == "library"
+                and override.existing_media_id == current_evidence.existing_media_id
+                and override.duplicate_of_occurrence_id is None
+            ) or (
+                current_evidence.kind == "in_run"
+                and override.duplicate_of_occurrence_id == current_evidence.duplicate_of_occurrence_id
+                and override.existing_media_id is None
+            )
+            if not target_matches:
+                review_items.append(
+                    self._review_required_item(
+                        occurrence_id,
+                        "duplicate_target_changed",
+                        current_evidence,
+                    )
+                )
+                continue
+            item["action"] = override.duplicate_policy.value
+            item["metadata_patch"] = (
+                override.metadata_patch.model_dump(exclude_none=True) if override.metadata_patch is not None else None
+            )
+        if review_items:
+            raise ReviewRequiredError(review_items)
+
+        return self._store.create_validated_run(
+            owner,
+            items=resolved,
+            processing_options=request.processing_options,
+            playlist_summaries=request.playlist_summaries,
+            collection_id=request.collection_id,
+        )
+
 
 __all__ = [
     "CreatedPlaylistMaterialization",
     "CreatedPlaylistPreflight",
     "InvalidPlaylistUrlError",
     "PlaylistIngestService",
+    "PlaylistPreflightRequiredError",
     "PlaylistPreflightBusyError",
     "PlaylistPreflightIncompleteError",
     "PlaylistPreflightUnavailableError",
+    "PlaylistRunValidationError",
     "PlaylistSelectionError",
+    "ReviewRequiredError",
 ]

@@ -142,6 +142,11 @@ class MediaIngestRunItemRecord:
     retryable: bool
     media_id: int | None
 
+    @property
+    def action(self) -> str:
+        """Return the reviewed initial action without requiring a schema column."""
+        return self.duplicate_policy or "ingest"
+
 
 @dataclass(frozen=True, slots=True)
 class MediaIngestRunEventRecord:
@@ -1459,6 +1464,124 @@ class PlaylistIngestStore:
                         self._db_datetime(now),
                     ),
                 )
+        return self.get_run(owner, run_id)
+
+    def create_validated_run(
+        self,
+        owner_user_id: str,
+        *,
+        items: Sequence[Mapping[str, Any]],
+        processing_options: Mapping[str, Any] | None = None,
+        playlist_summaries: Sequence[Mapping[str, Any]] | None = None,
+        collection_id: int | None = None,
+        expires_at: datetime | None = None,
+    ) -> MediaIngestRunRecord:
+        """Persist one fully validated mixed manifest and its initial events atomically."""
+        owner = self._owner(owner_user_id)
+        records = [dict(item) for item in items]
+        if not 1 <= len(records) <= _MAX_PAGE_SIZE:
+            raise ValueError("items must contain between 1 and 500 occurrences")
+        occurrence_ids = [item.get("occurrence_id") for item in records]
+        if any(type(value) is not str or not value for value in occurrence_ids):
+            raise ValueError("occurrence_id values must be non-empty strings")
+        if len(set(occurrence_ids)) != len(occurrence_ids):
+            raise ValueError("occurrence_id values must be unique")
+        allowed_actions = {"ingest", "overwrite", "skip", "include_existing", "update_metadata_only"}
+        for item in records:
+            if item.get("state") not in {"staged", "awaiting_upload"}:
+                raise ValueError("invalid initial run item state")
+            if item.get("action") not in allowed_actions:
+                raise ValueError("invalid initial run item action")
+
+        run_id = str(uuid4())
+        now = self._now()
+        expires = self._future_expiry(expires_at, now=now) if expires_at is not None else now + timedelta(days=7)
+        with self._connection(write=True) as db:
+            self._query(
+                db,
+                """
+                INSERT INTO media_ingest_runs (
+                    run_id, owner_user_id, status, collection_id,
+                    processing_options_json, playlist_summaries_json, batch_ids_json,
+                    version, created_at, updated_at, expires_at
+                ) VALUES (?, ?, 'staged', ?, ?, ?, ?, 1, ?, ?, ?)
+                """,
+                (
+                    run_id,
+                    owner,
+                    collection_id,
+                    self._json_value(dict(processing_options)) if processing_options is not None else None,
+                    (
+                        self._json_value([dict(summary) for summary in playlist_summaries])
+                        if playlist_summaries is not None
+                        else None
+                    ),
+                    self._json_value([]),
+                    self._db_datetime(now),
+                    self._db_datetime(now),
+                    self._db_datetime(expires),
+                ),
+            )
+            for ordinal, item in enumerate(records, start=1):
+                action = str(item["action"])
+                duplicate_policy = None if action == "ingest" else action
+                self._query(
+                    db,
+                    """
+                    INSERT INTO media_ingest_run_items (
+                        run_id, owner_user_id, occurrence_id, ordinal, input_kind,
+                        materialization_id, source_url, normalized_source_id, source_kind,
+                        display_metadata_json, duplicate_policy, metadata_patch_json,
+                        state, attempt, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                    """,
+                    (
+                        run_id,
+                        owner,
+                        item["occurrence_id"],
+                        ordinal,
+                        item["input_kind"],
+                        item.get("materialization_id"),
+                        item.get("source_url"),
+                        item.get("normalized_source_id"),
+                        item.get("source_kind"),
+                        self._json_value(dict(item.get("display_metadata") or {})),
+                        duplicate_policy,
+                        (
+                            self._json_value(dict(item["metadata_patch"]))
+                            if item.get("metadata_patch") is not None
+                            else None
+                        ),
+                        item["state"],
+                        self._db_datetime(now),
+                        self._db_datetime(now),
+                    ),
+                )
+                self._query(
+                    db,
+                    """
+                    INSERT INTO media_ingest_run_events (
+                        run_id, owner_user_id, occurrence_id, event_type, state,
+                        attrs_json, occurred_at
+                    ) VALUES (?, ?, ?, 'manifest_item_staged', ?, ?, ?)
+                    """,
+                    (
+                        run_id,
+                        owner,
+                        item["occurrence_id"],
+                        item["state"],
+                        self._json_value({"action": action, "input_kind": item["input_kind"]}),
+                        self._db_datetime(now),
+                    ),
+                )
+            self._query(
+                db,
+                """
+                UPDATE media_ingest_runs SET version = version + 1, updated_at = ?
+                WHERE owner_user_id = ? AND run_id = ? AND version = 1
+                """,
+                (self._db_datetime(now), owner, run_id),
+            )
         return self.get_run(owner, run_id)
 
     def get_run(self, owner_user_id: str, run_id: str) -> MediaIngestRunRecord:

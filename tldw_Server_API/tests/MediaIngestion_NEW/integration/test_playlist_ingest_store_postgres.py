@@ -96,6 +96,58 @@ def test_playlist_store_postgres_matches_sqlite_contract(pg_temp_db, monkeypatch
     assert store.get_run("pg-owner", run.run_id).version == 2
 
 
+def test_postgres_validated_mixed_manifest_matches_sqlite_contract(pg_temp_db, monkeypatch):
+    monkeypatch.setenv("TEST_MODE", "true")
+    dsn = str(pg_temp_db["dsn"])
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestStore,
+    )
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    from tldw_Server_API.app.core.Jobs.pg_migrations import ensure_jobs_tables_pg
+
+    ensure_jobs_tables_pg(dsn)
+    manager = JobManager(backend="postgres", db_url=dsn, clock=_FixedClock())
+    store = PlaylistIngestStore(manager)
+    run = store.create_validated_run(
+        "pg-manifest-owner",
+        items=[
+            {
+                "occurrence_id": "pg-url",
+                "input_kind": "direct_url",
+                "source_url": "https://example.com/video",
+                "normalized_source_id": "url:https://example.com/video",
+                "source_kind": "generic_url",
+                "display_metadata": {"title": "URL"},
+                "state": "staged",
+                "action": "overwrite",
+                "metadata_patch": {"title": "Reviewed"},
+            },
+            {
+                "occurrence_id": "pg-file",
+                "input_kind": "file_stub",
+                "source_url": None,
+                "normalized_source_id": None,
+                "source_kind": "file",
+                "display_metadata": {"name": "local.mp3", "size_bytes": 12},
+                "state": "awaiting_upload",
+                "action": "ingest",
+                "metadata_patch": None,
+            },
+        ],
+    )
+
+    items = list(store.list_run_items("pg-manifest-owner", run.run_id, limit=10))
+    events = list(store.list_run_events("pg-manifest-owner", run.run_id, limit=10))
+    assert [(item.occurrence_id, item.state, item.action) for item in items] == [
+        ("pg-url", "staged", "overwrite"),
+        ("pg-file", "awaiting_upload", "ingest"),
+    ]
+    assert len(events) == 2
+    assert store.get_run("pg-manifest-owner", run.run_id).version == 2
+    assert manager.list_jobs(domain="media_ingest", owner_user_id="pg-manifest-owner", limit=10) == []
+
+
 def test_postgres_preflight_admission_serializes_empty_capacity_predicate(pg_temp_db, monkeypatch):
     monkeypatch.setenv("TEST_MODE", "true")
     monkeypatch.setenv("PLAYLIST_PREFLIGHT_GLOBAL_CAPACITY", "1")

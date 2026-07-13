@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from enum import Enum
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -13,6 +14,10 @@ MAX_METADATA_PATCH_TEXT_LENGTH = 500
 MAX_METADATA_PATCH_KEYWORDS = 100
 MAX_METADATA_PATCH_KEYWORD_LENGTH = 128
 MAX_PLAYLIST_PREFLIGHT_SELECTIONS = 500
+MAX_RUN_IDENTITY_LENGTH = 255
+MAX_RUN_URL_LENGTH = 8192
+MAX_RUN_DISPLAY_TEXT_LENGTH = 2000
+MAX_RUN_JSON_LENGTH = 65536
 
 
 class DuplicatePolicy(str, Enum):
@@ -104,6 +109,21 @@ class ReviewOverride(BaseModel):
 
     duplicate_policy: DuplicatePolicy
     metadata_patch: MetadataPatch | None = None
+    existing_media_id: int | None = Field(default=None, ge=1)
+    duplicate_of_occurrence_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_RUN_IDENTITY_LENGTH,
+    )
+
+    @field_validator("duplicate_of_occurrence_id", mode="before")
+    @classmethod
+    def _strip_duplicate_occurrence_id(cls, value: object) -> object:
+        if value is None:
+            return None
+        if type(value) is not str:
+            raise ValueError("duplicate_of_occurrence_id must be a string")
+        return value.strip()
 
     @model_validator(mode="after")
     def _validate_policy_patch(self) -> ReviewOverride:
@@ -115,6 +135,179 @@ class ReviewOverride(BaseModel):
         ):
             raise ValueError(f"{self.duplicate_policy.value} does not allow metadata_patch")
         return self
+
+
+class CompactRunDisplayMetadata(BaseModel):
+    """Bounded display-only metadata accepted in a run manifest."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = Field(default=None, min_length=1, max_length=MAX_RUN_DISPLAY_TEXT_LENGTH)
+    channel_or_uploader: str | None = Field(default=None, min_length=1, max_length=MAX_RUN_DISPLAY_TEXT_LENGTH)
+    duration_seconds: int | None = Field(default=None, ge=0, le=315_576_000)
+    published_at: str | None = Field(default=None, min_length=1, max_length=128)
+    thumbnail_url: str | None = Field(default=None, min_length=1, max_length=MAX_RUN_URL_LENGTH)
+    playlist_id: str | None = Field(default=None, min_length=1, max_length=MAX_RUN_IDENTITY_LENGTH)
+    playlist_title: str | None = Field(default=None, min_length=1, max_length=MAX_RUN_DISPLAY_TEXT_LENGTH)
+
+    @field_validator(
+        "title",
+        "channel_or_uploader",
+        "published_at",
+        "thumbnail_url",
+        "playlist_id",
+        "playlist_title",
+        mode="before",
+    )
+    @classmethod
+    def _strip_display_text(cls, value: object) -> object:
+        if value is None:
+            return None
+        if type(value) is not str:
+            raise ValueError("display metadata text must be a string")
+        return value.strip()
+
+
+class _RunOccurrenceInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    occurrence_id: str = Field(..., min_length=1, max_length=MAX_RUN_IDENTITY_LENGTH)
+
+    @field_validator("occurrence_id", mode="before")
+    @classmethod
+    def _strip_input_occurrence_id(cls, value: object) -> object:
+        if type(value) is not str:
+            raise ValueError("occurrence_id must be a string")
+        return value.strip()
+
+
+class MaterializedPlaylistItemInput(_RunOccurrenceInput):
+    """Reference one server-authoritative materialized playlist occurrence."""
+
+    input_kind: Literal["materialized_playlist_item"]
+    materialization_id: str = Field(..., min_length=1, max_length=MAX_RUN_IDENTITY_LENGTH)
+
+    @field_validator("materialization_id", mode="before")
+    @classmethod
+    def _strip_materialization_id(cls, value: object) -> object:
+        if type(value) is not str:
+            raise ValueError("materialization_id must be a string")
+        return value.strip()
+
+
+class DirectUrlInput(_RunOccurrenceInput):
+    """One concrete non-playlist URL with display-only client hints."""
+
+    input_kind: Literal["direct_url"]
+    url: str = Field(..., min_length=1, max_length=MAX_RUN_URL_LENGTH)
+    source_kind: str | None = Field(default=None, min_length=1, max_length=64)
+    display_metadata: CompactRunDisplayMetadata = Field(default_factory=CompactRunDisplayMetadata)
+
+    @field_validator("url", "source_kind", mode="before")
+    @classmethod
+    def _strip_direct_text(cls, value: object) -> object:
+        if value is None:
+            return None
+        if type(value) is not str:
+            raise ValueError("direct URL fields must be strings")
+        return value.strip()
+
+
+class FileStubInput(_RunOccurrenceInput):
+    """Metadata-only placeholder for bytes supplied after run creation."""
+
+    input_kind: Literal["file_stub"]
+    name: str = Field(..., min_length=1, max_length=255)
+    content_type: str | None = Field(default=None, min_length=1, max_length=255)
+    size_bytes: int = Field(..., ge=0, le=10 * 1024**4)
+    display_metadata: CompactRunDisplayMetadata = Field(default_factory=CompactRunDisplayMetadata)
+
+    @field_validator("name", "content_type", mode="before")
+    @classmethod
+    def _strip_file_text(cls, value: object) -> object:
+        if value is None:
+            return None
+        if type(value) is not str:
+            raise ValueError("file metadata fields must be strings")
+        return value.strip()
+
+
+PlaylistIngestRunInput = Annotated[
+    MaterializedPlaylistItemInput | DirectUrlInput | FileStubInput,
+    Field(discriminator="input_kind"),
+]
+
+
+class PlaylistIngestRunCreateRequest(BaseModel):
+    """Strict, bounded mixed-input manifest validated before run creation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    inputs: list[PlaylistIngestRunInput] = Field(..., min_length=1, max_length=MAX_PLAYLIST_PREFLIGHT_SELECTIONS)
+    review_overrides: dict[str, ReviewOverride] = Field(
+        default_factory=dict, max_length=MAX_PLAYLIST_PREFLIGHT_SELECTIONS
+    )
+    processing_options: dict[str, Any] | None = Field(default=None, max_length=100)
+    playlist_summaries: list[dict[str, Any]] | None = Field(
+        default=None,
+        max_length=MAX_PLAYLIST_PREFLIGHT_SELECTIONS,
+    )
+    collection_id: int | None = Field(default=None, ge=1)
+
+    @field_validator("review_overrides", mode="before")
+    @classmethod
+    def _validate_override_keys(cls, value: object) -> object:
+        if type(value) is not dict:
+            raise ValueError("review_overrides must be an object")
+        normalized: dict[str, object] = {}
+        for occurrence_id, override in value.items():
+            if type(occurrence_id) is not str:
+                raise ValueError("review override keys must be strings")
+            trimmed = occurrence_id.strip()
+            if not trimmed or len(trimmed) > MAX_RUN_IDENTITY_LENGTH or trimmed != occurrence_id:
+                raise ValueError("review override keys must be canonical occurrence IDs")
+            normalized[trimmed] = override
+        return normalized
+
+    @model_validator(mode="after")
+    def _validate_manifest(self) -> PlaylistIngestRunCreateRequest:
+        occurrence_ids = [item.occurrence_id for item in self.inputs]
+        if len(set(occurrence_ids)) != len(occurrence_ids):
+            raise ValueError("occurrence_id values must be unique")
+        for value in (self.processing_options, self.playlist_summaries):
+            if value is not None:
+                try:
+                    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"))
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("run options and summaries must be JSON serializable") from exc
+                if len(encoded) > MAX_RUN_JSON_LENGTH:
+                    raise ValueError("run options and summaries are too large")
+        return self
+
+
+class DuplicateEvidence(BaseModel):
+    """Safe owner-scoped evidence returned when Review must be repeated."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["library", "in_run", "none"]
+    existing_media_id: int | None = Field(default=None, ge=1)
+    duplicate_of_occurrence_id: str | None = Field(default=None, max_length=MAX_RUN_IDENTITY_LENGTH)
+
+
+class ReviewRequiredItem(BaseModel):
+    """One deterministic occurrence-level Review correction."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    occurrence_id: str = Field(..., min_length=1, max_length=MAX_RUN_IDENTITY_LENGTH)
+    reason: Literal[
+        "duplicate_action_required",
+        "duplicate_no_longer_present",
+        "duplicate_target_changed",
+    ]
+    evidence: DuplicateEvidence
+    allowed_actions: list[DuplicatePolicy] = Field(default_factory=list, max_length=4)
 
 
 class RunItemSnapshot(BaseModel):

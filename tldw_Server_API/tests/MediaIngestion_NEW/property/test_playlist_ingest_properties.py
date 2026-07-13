@@ -126,3 +126,49 @@ def test_invalid_owner_cursor_pairs_use_the_same_not_found_contract(tmp_path, mo
             store.list_preflight_items(other_owner, resource_id, limit=1, cursor=cursor)
         messages.append(str(exc_info.value))
     assert messages == ["playlist resource not found", "playlist resource not found"]
+
+
+@pytest.mark.property
+@settings(max_examples=12, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@given(
+    occurrences=st.lists(
+        st.tuples(
+            st.integers(min_value=0, max_value=1_000_000).map(lambda value: f"run-occ-{value}"),
+            st.sampled_from(["ingest", "overwrite", "skip", "include_existing", "update_metadata_only"]),
+        ),
+        min_size=1,
+        max_size=20,
+        unique_by=lambda value: value[0],
+    )
+)
+def test_validated_run_preserves_arbitrary_unique_order_and_actions(
+    tmp_path,
+    monkeypatch,
+    occurrences,
+):
+    store = _new_store(tmp_path, monkeypatch)
+
+    run = store.create_validated_run(
+        "owner-1",
+        items=[
+            {
+                "occurrence_id": occurrence_id,
+                "input_kind": "direct_url",
+                "source_url": f"https://example.com/{index}",
+                "normalized_source_id": f"url:{index}",
+                "source_kind": "generic_url",
+                "display_metadata": {},
+                "state": "staged",
+                "action": action,
+                "metadata_patch": None,
+            }
+            for index, (occurrence_id, action) in enumerate(occurrences, start=1)
+        ],
+    )
+
+    items = list(store.list_run_items("owner-1", run.run_id, limit=500))
+    events = list(store.list_run_events("owner-1", run.run_id, limit=500))
+    assert [(item.occurrence_id, item.action) for item in items] == occurrences
+    assert [event.occurrence_id for event in events] == [value[0] for value in occurrences]
+    assert [event.attrs["action"] for event in events] == [value[1] for value in occurrences]
+    assert store.get_run("owner-1", run.run_id).version == 2
