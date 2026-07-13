@@ -158,25 +158,25 @@ git commit -m "feat: persist playlist ingest resources (TASK-12110)"
 
 ### Task 3: Add the bounded preflight child-process runner
 
-- [ ] **Step 1: Write failing runner tests**
+- [x] **Step 1: Write failing runner tests**
 
 Test successful normalized extraction, child timeout termination, cancellation termination, malformed child payload, `configured_limit + 1` producing `playlist_too_large` without a partial-ready snapshot, owner-library duplicates being marked `duplicate_existing`/counted/deselected before ready, and a failed library lookup producing `unknown` evidence plus a warning rather than falsely reporting `new`.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_preflight.py -k "process or configured_limit" -q`
 
 Expected: FAIL because the process runner and hard-ceiling behavior are absent.
 
-- [ ] **Step 3: Implement the runner and tighten extraction**
+- [x] **Step 3: Implement the runner and tighten extraction**
 
 Use `multiprocessing.get_context("spawn")`, one result pipe, and a small polling loop. On timeout/cancel, call `terminate()`, then `kill()` only if the child remains alive after a bounded join. The child calls the existing yt-dlp normalizer. Request at most `limit + 1`, return unavailable entries visibly, generate opaque occurrence IDs server-side, and never return truncation as success.
 
-- [ ] **Step 4: Extend the media worker**
+- [x] **Step 4: Extend the media worker**
 
 Handle `job_type == "playlist_preflight"` before `media_ingest_item`; call the runner, open the owner's Media DB, bulk-resolve extracted URLs with `get_media_by_urls`, and merge `duplicate_existing` evidence with in-snapshot duplicates before atomically storing the complete snapshot. Recompute duplicate/selected counts from the enriched items. A library lookup failure marks otherwise-new evidence `unknown` and adds a typed warning; extraction, capacity, or snapshot-write failure blocks the resource with a safe error code. Keep Jobs leases as the only cross-process extraction claim.
 
-- [ ] **Step 5: Run tests and commit**
+- [x] **Step 5: Run tests and commit**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_preflight.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest_jobs_worker.py -q`
 
