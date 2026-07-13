@@ -154,7 +154,7 @@ git commit -m "feat: persist playlist ingest resources (TASK-12110)"
 
 **Tests:** Runner process tests, worker tests, endpoint tests, configured-limit-plus-one tests.
 
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 3: Add the bounded preflight child-process runner
 
@@ -226,7 +226,7 @@ git commit -m "feat: expose playlist preflight resources (TASK-12110)"
 
 **Tests:** Service tests, Media DB patch tests, Collections DB transaction tests, action-resolution properties.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 5: Validate and create ingest runs atomically
 
