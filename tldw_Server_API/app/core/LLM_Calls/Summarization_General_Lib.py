@@ -119,6 +119,13 @@ class SummaryProviderError(Exception):
         super().__init__(f"Summary provider error: {self.code} ({self.provider})")
 
 
+class _ResolvedAppConfig(dict[str, Any]):
+    """Empty resolved config that downstream adapters cannot treat as absent."""
+
+    def __bool__(self) -> bool:
+        return True
+
+
 def _summary_failure(
     *,
     code: str,
@@ -189,7 +196,7 @@ def _summarize_via_adapter(
         )
     explicit_credentials = credentials_resolved is True
     if explicit_credentials:
-        effective_app_config = copy.deepcopy(app_config) if app_config is not None else {}
+        effective_app_config = _ResolvedAppConfig(copy.deepcopy(app_config or {}))
     else:
         effective_app_config = ensure_app_config(app_config if app_config is not None else loaded_config_data)
     adapter = get_registry().get_adapter(provider)
@@ -251,12 +258,12 @@ def _summarize_via_adapter(
                         return
                     if text_chunk:
                         yield text_chunk
-            except _SUMMARY_ADAPTER_EXCEPTIONS as exc:
+            except _SUMMARY_ADAPTER_EXCEPTIONS:
                 if raise_on_error:
                     logging.error(f"Adapter streaming failed for {provider}")
                     raise SummaryProviderError(code="provider_failure", provider=provider) from None
-                logging.error(f"Error during adapter streaming for {provider}: {exc}", exc_info=True)
-                yield f"Error during streaming: {exc}"
+                logging.error(f"Adapter streaming failed for {provider}")
+                yield f"Error: Provider streaming failed for '{provider}'."
             finally:
                 try:
                     if gen is not None and hasattr(gen, "close"):
@@ -268,12 +275,12 @@ def _summarize_via_adapter(
     try:
         response = adapter.chat(request, timeout=timeout)
         return extract_response_content(response) or str(response)
-    except _SUMMARY_ADAPTER_EXCEPTIONS as exc:
+    except _SUMMARY_ADAPTER_EXCEPTIONS:
         if raise_on_error:
             logging.error(f"Adapter summarization failed for {provider}")
             raise SummaryProviderError(code="provider_failure", provider=provider) from None
-        logging.error(f"Error during adapter summarization for {provider}: {exc}", exc_info=True)
-        return f"Error calling API {api_name}: {exc}"
+        logging.error(f"Adapter summarization failed for {provider}")
+        return f"Error: Provider request failed for '{provider}'."
 
 #######################################################################################################################
 # Helper Function Definitions
@@ -488,15 +495,16 @@ def _dispatch_to_api(
             return error_msg
         return adapter_result
 
-    except _SUMMARIZATION_NONCRITICAL_EXCEPTIONS as e:
+    except _SUMMARIZATION_NONCRITICAL_EXCEPTIONS:
         if raise_on_error:
             logging.error(f"Summary provider dispatch failed for {_adapter_provider_name(api_name)}")
             raise SummaryProviderError(
                 code="provider_failure",
                 provider=_adapter_provider_name(api_name),
             ) from None
-        logging.error(f"Error during dispatch to API '{api_name}': {str(e)}", exc_info=True)
-        return f"Error calling API {api_name}: {str(e)}"
+        provider = _adapter_provider_name(api_name)
+        logging.error(f"Summary provider dispatch failed for {provider}")
+        return f"Error: Provider request failed for '{provider}'."
 
 
 # --- Main Summarization Function ---

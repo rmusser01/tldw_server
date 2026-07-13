@@ -163,6 +163,14 @@ _CHAT_RUN_FIRST_METRIC_EXCEPTIONS: tuple[type[Exception], ...] = (
     ValueError,
 )
 
+
+class _ResolvedAppConfig(dict[str, Any]):
+    """Empty resolved config that downstream adapters cannot treat as absent."""
+
+    def __bool__(self) -> bool:
+        return True
+
+
 _config = load_comprehensive_config()
 _chat_config: dict[str, str] = {}
 if _config and _config.has_section("Chat-Module"):
@@ -1840,7 +1848,7 @@ def _build_adapter_request_from_chat_args(chat_args: dict[str, Any]) -> tuple[st
     credentials_resolved = chat_args.get("credentials_resolved") is True
     explicit_app_config = chat_args.get("app_config")
     if credentials_resolved:
-        app_config = copy.deepcopy(explicit_app_config) if explicit_app_config is not None else None
+        app_config = _ResolvedAppConfig(copy.deepcopy(explicit_app_config or {}))
     else:
         app_config = (
             explicit_app_config

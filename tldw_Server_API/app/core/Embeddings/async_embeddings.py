@@ -58,6 +58,17 @@ class EmbeddingCredentialError(ValueError):
         super().__init__(f"Embedding credential is required for provider '{self.provider}'")
 
 
+class EmbeddingEndpointError(ValueError):
+    """Sanitized error for a missing execution-scoped embedding endpoint."""
+
+    def __init__(self, provider: str) -> None:
+        normalized = "".join(
+            char for char in str(provider or "").strip().lower() if char.isalnum() or char in ".-_"
+        )[:64]
+        self.provider = normalized or "unknown"
+        super().__init__(f"Embedding endpoint is required for provider '{self.provider}'")
+
+
 def _is_auth_failure(exc: Exception) -> bool:
     status = getattr(exc, "status_code", None)
     response = getattr(exc, "response", None)
@@ -329,6 +340,11 @@ class AsyncLocalAPIProvider(AsyncEmbeddingProvider):
         import time as _time
         t0 = _time.perf_counter()
         status = "success"
+
+        if credentials_resolved is True and not (
+            isinstance(base_url_override, str) and base_url_override.strip()
+        ):
+            raise EmbeddingEndpointError(self.provider_name)
 
         if user_id:
             try:
@@ -639,6 +655,10 @@ class AsyncEmbeddingService:
                 isinstance(api_key_override, str) and api_key_override.strip()
             ):
                 raise EmbeddingCredentialError(provider)
+            if provider == "local_api" and not (
+                isinstance(effective_base_url, str) and effective_base_url.strip()
+            ):
+                raise EmbeddingEndpointError(provider)
 
         # Create deterministic cache key across processes
         text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()

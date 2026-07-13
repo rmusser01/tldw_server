@@ -35,6 +35,7 @@ if TYPE_CHECKING:
 # Import them lazily inside functions/methods when needed to keep app import light.
 
 _EMBEDDINGS_IMPORT_EXCEPTIONS = (ImportError, OSError, RuntimeError)
+_EXPLICIT_OPENAI_API_BASE = "https://api.openai.com/v1"
 
 
 def _import_torch():
@@ -2021,8 +2022,7 @@ def create_embeddings_batch(
                 openai_app_config = copy.deepcopy(user_app_config)
                 openai_section = dict(openai_app_config.get("openai_api", {}) or {})
                 openai_section["api_key"] = api_key_override
-                if base_url_override is not None:
-                    openai_section["api_base_url"] = base_url_override
+                openai_section["api_base_url"] = base_url_override or _EXPLICIT_OPENAI_API_BASE
                 openai_app_config["openai_api"] = openai_section
             else:
                 openai_app_config = user_app_config

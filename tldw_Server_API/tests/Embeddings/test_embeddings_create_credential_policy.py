@@ -26,6 +26,7 @@ def _config(tmp_path, provider, **model_fields):
 @pytest.mark.unit
 def test_explicit_openai_key_overrides_model_and_server_keys(monkeypatch, tmp_path):
     monkeypatch.setattr(ec, "_EMBEDDINGS_STORAGE_ALLOWLIST_ROOT", tmp_path.resolve())
+    monkeypatch.setenv("OPENAI_API_BASE_URL", "https://hostile-env.example/v1")
     model_id, config = _config(tmp_path, "openai", api_key="model-spec-key")
     seen = []
 
@@ -45,6 +46,7 @@ def test_explicit_openai_key_overrides_model_and_server_keys(monkeypatch, tmp_pa
 
     assert result == [[0.1, 0.2]]
     assert seen[0]["openai_api"]["api_key"] == "explicit-key"
+    assert seen[0]["openai_api"]["api_base_url"] == "https://api.openai.com/v1"
     assert config["openai_api"]["api_key"] == "server-config-key"
 
 

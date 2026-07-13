@@ -4,7 +4,8 @@ import pytest
 
 from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
-from tldw_Server_API.app.core.LLM_Calls import adapter_utils
+from tldw_Server_API.app.core.LLM_Calls import adapter_utils, chat_calls
+from tldw_Server_API.app.core.LLM_Calls.providers import moonshot_adapter
 
 
 def _args(**overrides):
@@ -85,3 +86,69 @@ def test_legacy_request_without_marker_still_resolves_key(monkeypatch):
 
     assert request["api_key"] == "server-key"
     assert calls == [("openai", {})]
+
+
+class _Response:
+    status_code = 200
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return {"choices": [{"message": {"content": "ok"}}]}
+
+    def close(self):
+        return None
+
+
+class _Session:
+    def __init__(self):
+        self.urls = []
+
+    def post(self, url, **_kwargs):
+        self.urls.append(url)
+        return _Response()
+
+    def close(self):
+        return None
+
+
+def test_explicit_absent_config_cannot_trigger_adapter_config_reload(monkeypatch):
+    session = _Session()
+    monkeypatch.setattr(chat_calls, "create_session_with_retries", lambda **_kwargs: session)
+    monkeypatch.setattr(
+        moonshot_adapter,
+        "load_and_log_configs",
+        lambda: (_ for _ in ()).throw(AssertionError("adapter must not reload server config")),
+    )
+    _provider, request, _internal = chat_service._build_adapter_request_from_chat_args(
+        _args(
+            api_provider="moonshot",
+            api_key="explicit-key",
+            app_config=None,
+            credentials_resolved=True,
+        )
+    )
+
+    result = moonshot_adapter.MoonshotAdapter().chat(request)
+
+    assert result["choices"][0]["message"]["content"] == "ok"
+    assert session.urls == ["https://api.moonshot.cn/v1/chat/completions"]
+
+
+def test_legacy_empty_config_still_allows_adapter_config_reload(monkeypatch):
+    session = _Session()
+    monkeypatch.setattr(chat_calls, "create_session_with_retries", lambda **_kwargs: session)
+    monkeypatch.setattr(adapter_utils, "ensure_app_config", lambda _config: {})
+    monkeypatch.setattr(
+        moonshot_adapter,
+        "load_and_log_configs",
+        lambda: {"moonshot_api": {"api_base_url": "https://legacy.example/v1"}},
+    )
+    _provider, request, _internal = chat_service._build_adapter_request_from_chat_args(
+        _args(api_provider="moonshot", api_key="legacy-key")
+    )
+
+    moonshot_adapter.MoonshotAdapter().chat(request)
+
+    assert session.urls == ["https://legacy.example/v1/chat/completions"]

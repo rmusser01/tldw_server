@@ -4,7 +4,9 @@ import pytest
 
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatProviderError
 from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib as sgl
+from tldw_Server_API.app.core.LLM_Calls import chat_calls
 import tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter as openai_mod
+import tldw_Server_API.app.core.LLM_Calls.providers.moonshot_adapter as moonshot_mod
 
 
 @pytest.mark.unit
@@ -83,6 +85,9 @@ class _FakeResp:
         for line in self._lines:
             yield line
 
+    def close(self):
+        return None
+
 
 class _FakeStreamCtx:
     def __init__(self, resp):
@@ -105,6 +110,9 @@ class _FakeClient:
 
     def __exit__(self, exc_type, exc, tb):
         return False
+
+    def close(self):
+        return None
 
     def post(self, *args, **kwargs):
         return _FakeResp(json_data=self._json_data)
@@ -341,5 +349,54 @@ def test_legacy_errors_remain_error_strings_and_chunks(monkeypatch):
         streaming=True,
     )
 
+    stream_error = list(stream)[0]
     assert nonstream.startswith("Error")
-    assert list(stream)[0].startswith("Error")
+    assert stream_error.startswith("Error")
+    assert SECRET not in nonstream
+    assert SECRET not in stream_error
+
+
+@pytest.mark.unit
+def test_explicit_absent_config_cannot_trigger_summary_adapter_reload(monkeypatch):
+    client = _FakeClient(json_data={"choices": [{"message": {"content": "summary"}}]})
+    monkeypatch.setattr(chat_calls, "create_session_with_retries", lambda **_kwargs: client)
+    monkeypatch.setattr(
+        moonshot_mod,
+        "load_and_log_configs",
+        lambda: (_ for _ in ()).throw(AssertionError("adapter must not reload server config")),
+    )
+
+    result = sgl.analyze(
+        "moonshot",
+        "hello",
+        None,
+        api_key="explicit-key",
+        model_override="moonshot-test",
+        app_config=None,
+        credentials_resolved=True,
+        raise_on_error=True,
+    )
+
+    assert result == "summary"
+
+
+@pytest.mark.unit
+def test_legacy_empty_config_still_allows_summary_adapter_reload(monkeypatch):
+    client = _FakeClient(json_data={"choices": [{"message": {"content": "legacy"}}]})
+    monkeypatch.setattr(chat_calls, "create_session_with_retries", lambda **_kwargs: client)
+    monkeypatch.setattr(sgl, "loaded_config_data", {})
+    monkeypatch.setattr(
+        moonshot_mod,
+        "load_and_log_configs",
+        lambda: {"moonshot_api": {"model": "legacy-model"}},
+    )
+
+    result = sgl.analyze(
+        "moonshot",
+        "hello",
+        None,
+        api_key="legacy-key",
+        model_override="legacy-model",
+    )
+
+    assert result == "legacy"

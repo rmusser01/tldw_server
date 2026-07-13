@@ -302,3 +302,42 @@ async def test_legacy_network_failure_can_use_fallback(monkeypatch):
     result = await service.create_embedding("hello", provider="openai", use_cache=False, use_batching=False)
 
     assert result == [0.4, 0.5]
+
+
+@pytest.mark.asyncio
+async def test_explicit_local_api_requires_per_call_url(monkeypatch):
+    singleton_url = "https://singleton-secret.example/embeddings"
+    config = EmbeddingsConfig(
+        providers=[
+            ProviderConfig(
+                name="local_api",
+                api_key="server-key",
+                api_url=singleton_url,
+            )
+        ],
+        batching=BatchingConfig(enabled=False),
+        security=SecurityConfig(enable_rate_limiting=False),
+        default_provider="local_api",
+        default_model="local-model",
+    )
+    service = AsyncEmbeddingService(config=config)
+    service.cache = DummyCache()
+    pool = get_pool_manager().get_pool("local_api")
+
+    async def fail_request(*_args, **_kwargs):
+        raise AssertionError("singleton endpoint must not be contacted")
+
+    monkeypatch.setattr(pool, "request", fail_request)
+
+    with pytest.raises(async_embeddings.EmbeddingEndpointError) as exc_info:
+        await service.create_embedding(
+            "hello",
+            provider="local_api",
+            use_cache=False,
+            api_key_override=None,
+            base_url_override=None,
+            credentials_resolved=True,
+        )
+
+    assert singleton_url not in str(exc_info.value)
+    assert singleton_url not in repr(exc_info.value)
