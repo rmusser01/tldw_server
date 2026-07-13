@@ -694,6 +694,55 @@ class TestUnifiedPipelineFeatures:
         )
 
     @pytest.mark.asyncio
+    async def test_error_fallback_docs_are_not_cached_as_base_retrieval(self):
+        from tldw_Server_API.app.core.RAG.rag_service import database_retrievers
+
+        cache = MagicMock()
+        cache.get.return_value = None
+        cache.find_similar.return_value = None
+        fallback_retriever = MagicMock()
+        fallback_retriever.retrieve = AsyncMock(return_value=[
+            Document(
+                id="fallback-doc",
+                content="fallback evidence",
+                metadata={},
+                source=DataSource.MEDIA_DB,
+            )
+        ])
+
+        with patch(
+            'tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.get_shared_cache',
+            return_value=cache,
+        ), patch(
+            'tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.MultiDatabaseRetriever'
+        ), patch(
+            'tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.execute_retrieval_phase',
+            AsyncMock(side_effect=RuntimeError("base retrieval failed")),
+        ) as mock_execute, patch.object(
+            database_retrievers,
+            "MediaDBRetriever",
+            return_value=fallback_retriever,
+        ):
+            result = await unified_rag_pipeline(
+                query="fallback cache query",
+                sources=["media_db"],
+                media_db_path="media.db",
+                search_mode="hybrid",
+                adaptive_hybrid_weights=False,
+                enable_cache=True,
+                enable_generation=False,
+                enable_reranking=False,
+                adaptive_cache=False,
+            )
+
+        mock_execute.assert_awaited_once()
+        fallback_retriever.retrieve.assert_awaited_once()
+        cache.set.assert_not_called()
+        assert result.documents[0]["id"] == "fallback-doc"
+        assert result.metadata["fallbacks"]["media_db_fts_on_error"] is True
+        assert any("base retrieval failed" in error for error in result.errors)
+
+    @pytest.mark.asyncio
     async def test_cache_namespace_uses_post_routing_retrieval_values(self):
         captured = []
 

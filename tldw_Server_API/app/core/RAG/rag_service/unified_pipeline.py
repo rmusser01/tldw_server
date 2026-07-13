@@ -3796,8 +3796,6 @@ async def unified_rag_pipeline(
                         _otel_cm = None
                         _otel_span = None
                 if MultiDatabaseRetriever and RetrievalConfig:
-                    base_retrieval_executed = True
-
                     # Set up database paths
                     db_paths = _build_pipeline_db_paths()
 
@@ -3925,6 +3923,7 @@ async def unified_rag_pipeline(
                         allowed_note_ids=include_note_ids,
                         bypass_provider_failures=credential_runtime is not None,
                     )
+                    base_retrieval_executed = True
                     documents = list(retrieved_evidence.documents)
 
                     # Fallback: if no documents were retrieved via MultiDatabaseRetriever,
