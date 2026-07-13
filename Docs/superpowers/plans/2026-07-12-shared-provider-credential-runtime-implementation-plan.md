@@ -251,39 +251,42 @@ git commit -m "fix(llm): forbid config fallback after credential resolution"
 
 **Tests:** Chat endpoint simplified integration and service fallback suites.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 4: Migrate Chat to the runtime
 
 **Files:**
 - Modify: `tldw_Server_API/app/api/v1/endpoints/chat.py:3260-4190`
+- Modify: `tldw_Server_API/app/core/Chat/chat_service.py:4805`
+- Modify: `tldw_Server_API/app/core/Chat/streaming_utils.py:622-761`
 - Modify: `tldw_Server_API/tests/Chat/integration/test_chat_endpoint_simplified.py`
 - Modify: `tldw_Server_API/tests/Chat/unit/test_chat_service_fallback.py`
+- Modify: `tldw_Server_API/tests/Chat/unit/test_streaming_utils.py`
 
-- [ ] **Step 1: Write failing Chat parity tests**
+- [x] **Step 1: Write failing Chat parity tests**
 
 Assert one runtime instance resolves auto-router, selected, and permitted fallback providers; missing/invalid/store-unavailable errors do not ask `provider_manager` for another provider; OpenAI auth failure refreshes once before output; provider auth maps to `502 provider_authentication_failed`; credential/config failures map to the spec's 503 codes; stream and non-stream success mark use once.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat/integration/test_chat_endpoint_simplified.py tldw_Server_API/tests/Chat/unit/test_chat_service_fallback.py -q`
 
 Expected: FAIL while `_resolve_byok`/`_touch_byok` closures remain.
 
-- [ ] **Step 3: Replace endpoint-local orchestration**
+- [x] **Step 3: Replace endpoint-local orchestration**
 
 Create the runtime after trusted principal/scope resolution and before automatic routing. Replace `byok_cache`, `_resolve_byok`, and `_touch_byok` with `runtime.resolve`, `runtime.mark_used`, and `runtime.close`. Build call params from the returned handle and set `credentials_resolved=True`. Rebuild fallback-provider params through the same runtime. Preserve existing health-fallback policy, but classify credential/auth/config exceptions as client-like terminal errors.
 
 Hold the runtime until the streaming iterator finishes or cancels; non-stream paths close it in `finally`. Forced OAuth refresh calls `runtime.resolve("openai", force_refresh=True)` and may retry only before output.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run the Step 2 command. Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
-git add tldw_Server_API/app/api/v1/endpoints/chat.py tldw_Server_API/tests/Chat/integration/test_chat_endpoint_simplified.py tldw_Server_API/tests/Chat/unit/test_chat_service_fallback.py
+git add tldw_Server_API/app/api/v1/endpoints/chat.py tldw_Server_API/app/core/Chat/chat_service.py tldw_Server_API/app/core/Chat/streaming_utils.py tldw_Server_API/tests/Chat/integration/test_chat_endpoint_simplified.py tldw_Server_API/tests/Chat/unit/test_chat_service_fallback.py tldw_Server_API/tests/Chat/unit/test_streaming_utils.py
 git commit -m "refactor(chat): use shared provider credential runtime"
 ```
 
