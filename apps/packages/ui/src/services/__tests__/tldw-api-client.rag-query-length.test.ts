@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   bgRequest: vi.fn(),
   bgUpload: vi.fn(),
   bgStream: vi.fn(),
+  tldwRequest: vi.fn(),
 }))
 
 vi.mock("@/services/background-proxy", () => ({
@@ -12,9 +13,21 @@ vi.mock("@/services/background-proxy", () => ({
   bgStream: (...args: unknown[]) => mocks.bgStream(...args),
 }))
 
+vi.mock("@/services/tldw/request-core", () => ({
+  tldwRequest: (...args: unknown[]) => mocks.tldwRequest(...args),
+}))
+
 vi.mock("@/utils/safe-storage", () => ({
   createSafeStorage: () => ({
-    get: vi.fn(async () => null),
+    get: vi.fn(async (key: string) =>
+      key === "tldwConfig"
+        ? {
+            serverUrl: "http://127.0.0.1:8000",
+            authMode: "single-user",
+            apiKey: "test-key-not-placeholder",
+          }
+        : null
+    ),
     set: vi.fn(async () => undefined),
     remove: vi.fn(async () => undefined),
   }),
@@ -35,22 +48,27 @@ describe("TldwApiClient RAG query length guard", () => {
   })
 
   it("truncates ragSearch query payloads to backend-safe length", async () => {
-    mocks.bgRequest.mockResolvedValue({ results: [], answer: null })
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { results: [], answer: null },
+    })
 
     const client = new TldwApiClient()
     await client.ragSearch(OVER_LIMIT_QUERY, { top_k: 5 })
 
-    expect(mocks.bgRequest).toHaveBeenCalledTimes(1)
-    expect(mocks.bgRequest).toHaveBeenCalledWith(
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
+    expect(mocks.tldwRequest).toHaveBeenCalledWith(
       expect.objectContaining({
         path: "/api/v1/rag/search",
         body: expect.objectContaining({
           query: expect.any(String),
           top_k: 5,
         }),
-      })
+      }),
+      expect.any(Object)
     )
-    const body = mocks.bgRequest.mock.calls[0][0]?.body as Record<string, unknown>
+    const body = mocks.tldwRequest.mock.calls[0][0]?.body as Record<string, unknown>
     expect((body.query as string).length).toBeLessThanOrEqual(20000)
   })
 
@@ -92,14 +110,12 @@ describe("TldwApiClient RAG query length guard", () => {
   })
 
   it("sanitizes non-retryable ragSearch failures before surfacing them", async () => {
-    mocks.bgRequest.mockRejectedValue(
-      Object.assign(
-        new Error(
-          "Request failed: 403 (POST /api/v1/rag/search) trace=/Users/private/dev.log"
-        ),
-        { status: 403 }
-      )
-    )
+    mocks.tldwRequest.mockResolvedValue({
+      ok: false,
+      status: 403,
+      error: "Request failed: 403 (POST /api/v1/rag/search) trace=/Users/private/dev.log",
+      data: null,
+    })
 
     const client = new TldwApiClient()
 
@@ -109,17 +125,13 @@ describe("TldwApiClient RAG query length guard", () => {
     })
   })
 
-  it("sanitizes retry failures after reranking fallback", async () => {
-    mocks.bgRequest
-      .mockRejectedValueOnce(
-        Object.assign(new Error("Request failed: 500"), { status: 500 })
-      )
-      .mockRejectedValueOnce(
-        Object.assign(
-          new Error("Request failed: 503 (POST /api/v1/rag/search) stacktrace"),
-          { status: 503 }
-        )
-      )
+  it("does not replay ragSearch POST requests after HTTP 500", async () => {
+    mocks.tldwRequest.mockResolvedValue({
+      ok: false,
+      status: 500,
+      error: "Request failed: 500 (POST /api/v1/rag/search) stacktrace",
+      data: null,
+    })
 
     const client = new TldwApiClient()
 
@@ -127,16 +139,15 @@ describe("TldwApiClient RAG query length guard", () => {
       client.ragSearch("retry me", { top_k: 5, enable_reranking: true })
     ).rejects.toMatchObject({
       message: "RAG search failed due to a server error.",
-      status: 503,
+      status: 500,
     })
 
-    expect(mocks.bgRequest).toHaveBeenCalledTimes(2)
-    expect(mocks.bgRequest.mock.calls[1][0]).toMatchObject({
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
+    expect(mocks.tldwRequest.mock.calls[0][0]).toMatchObject({
       path: "/api/v1/rag/search",
       body: expect.objectContaining({
         query: "retry me",
-        enable_reranking: false,
-        reranking_strategy: "none",
+        enable_reranking: true,
       }),
     })
   })

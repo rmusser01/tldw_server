@@ -582,9 +582,13 @@ async def test_streaming_credential_failure_is_terminal_and_sanitized() -> None:
 
     assert events == [  # nosec B101
         {
+            "schema_version": 1,
             "type": "error",
             "code": "credential_store_unavailable",
             "status_code": 503,
+            "upstream_dispatched": True,
+            "output_emitted": False,
+            "allow_non_stream_fallback": False,
             "message": "Provider credential storage is temporarily unavailable.",
         }
     ]
@@ -623,7 +627,12 @@ async def test_streaming_generation_context_retains_runtime_identity() -> None:
     ]
 
     assert captured["credential_runtime"] is runtime  # nosec B101
-    assert [event["type"] for event in events] == ["contexts", "reasoning"]  # nosec B101
+    assert [event["type"] for event in events] == [  # nosec B101
+        "contexts",
+        "reasoning",
+        "complete",
+    ]
+    assert events[-1]["output_emitted"] is False  # nosec B101
 
 
 @pytest.mark.asyncio

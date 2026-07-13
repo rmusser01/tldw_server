@@ -7,6 +7,7 @@ import type { TldwApiClientCore } from '../TldwApiClient'
 import type { ChatScope } from '@/types/chat-scope'
 import { toChatScopeParams } from '@/types/chat-scope'
 import { normalizeChatRole } from '@/utils/normalize-chat-role'
+import { parseRagStreamLine } from '@/services/rag/stream-contract'
 import type {
   ChatCompletionRequestOptions,
   ChatCompletionStreamOptions,
@@ -298,7 +299,6 @@ export const chatRagMethods = {
         abortSignal: signal
       })
     } catch (error) {
-      const status = (error as { status?: number } | null)?.status
       const message = error instanceof Error ? error.message : String(error ?? '')
       const aborted =
         (error as { name?: string } | null)?.name === 'AbortError' ||
@@ -306,38 +306,7 @@ export const chatRagMethods = {
       if (aborted) {
         throw error
       }
-      const shouldRetryWithoutRerank =
-        status === 500 &&
-        rest?.enable_reranking !== false &&
-        rest?.reranking_strategy !== 'none'
-
-      if (!shouldRetryWithoutRerank) {
-        throw buildSanitizedRagSearchError(error)
-      }
-
-      // Some local/dev servers fail hard when FlashRank assets are missing.
-      // Retry once with reranking disabled so retrieval still works.
-      console.warn(
-        '[tldw:rag] /api/v1/rag/search failed; retrying once without reranking',
-        { status }
-      )
-      try {
-        return await this.requestWithCurrentConfig<any>({
-          path: '/api/v1/rag/search',
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: {
-            query: normalizedQuery,
-            ...rest,
-            enable_reranking: false,
-            reranking_strategy: 'none'
-          },
-          timeoutMs,
-          abortSignal: signal
-        })
-      } catch (retryError) {
-        throw buildSanitizedRagSearchError(retryError)
-      }
+      throw buildSanitizedRagSearchError(error)
     }
   },
 
@@ -356,11 +325,7 @@ export const chatRagMethods = {
       abortSignal: signal,
       streamIdleTimeoutMs: timeoutMs
     })) {
-      try {
-        yield JSON.parse(line)
-      } catch {
-        // Ignore malformed stream chunks
-      }
+      yield parseRagStreamLine(line)
     }
   },
 

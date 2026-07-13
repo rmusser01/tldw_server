@@ -102,6 +102,7 @@ from tldw_Server_API.app.core.RAG.rag_service.retrieval_plan import (
 from tldw_Server_API.app.core.RAG.rag_service.source_health import build_source_health_entries
 from tldw_Server_API.app.core.RAG.rag_service.streaming_executor import (
     classify_rag_provider_error,
+    rag_internal_error_event,
     rag_provider_error_event,
     stream_rag_events,
 )
@@ -2280,6 +2281,7 @@ async def unified_search_stream_endpoint(
 
     async def event_generator():
         credential_runtime: ProviderCredentialRuntime | None = None
+        output_emitted = False
         try:
             credential_runtime = _build_credential_runtime(request_raw, current_user)
             async for event in stream_rag_events(
@@ -2292,13 +2294,29 @@ async def unified_search_stream_endpoint(
                     "credential_runtime": credential_runtime,
                 },
             ):
+                if event.get("type") == "delta" and bool(event.get("text")):
+                    output_emitted = True
                 yield json.dumps(_sanitize_rag_stream_event(event)) + "\n"
         except asyncio.CancelledError:
             raise
         except _RAG_PROVIDER_FAILURES as exc:
-            provider_event = rag_provider_error_event(exc)
+            provider_event = rag_provider_error_event(
+                exc,
+                upstream_dispatched=credential_runtime is not None,
+                output_emitted=output_emitted,
+            )
             if provider_event is not None:
                 yield json.dumps(_sanitize_rag_stream_event(provider_event)) + "\n"
+        except Exception:  # noqa: BLE001 - stream initialization must return bounded details
+            logger.error("RAG stream initialization failed")
+            yield json.dumps(
+                _sanitize_rag_stream_event(
+                    rag_internal_error_event(
+                        upstream_dispatched=credential_runtime is not None,
+                        output_emitted=output_emitted,
+                    )
+                )
+            ) + "\n"
         finally:
             if credential_runtime is not None:
                 await credential_runtime.close()

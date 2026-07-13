@@ -1,6 +1,6 @@
 import asyncio
-from typing import Any
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -313,7 +313,12 @@ async def test_stream_rag_events_wraps_standard_stream_result_in_order():
         )
     ]
 
-    assert [event["type"] for event in events] == ["contexts", "reasoning", "delta"]  # nosec B101
+    assert [event["type"] for event in events] == [  # nosec B101
+        "contexts",
+        "reasoning",
+        "delta",
+        "complete",
+    ]
     assert events[0]["contexts"][0]["id"] == "doc-1"  # nosec B101
     assert events[1]["plan"] == [  # nosec B101
         "Gather top-k contexts",
@@ -326,24 +331,40 @@ async def test_stream_rag_events_wraps_standard_stream_result_in_order():
 
 @pytest.mark.asyncio
 async def test_stream_rag_events_emits_structured_error():
+    sentinel = "sk-secret-must-not-appear-in-stream-logs"
+
     async def empty_standard_pipeline(**kwargs: Any) -> UnifiedSearchResult:
         return UnifiedSearchResult(documents=[], query=str(kwargs.get("query", "")))
 
     async def failing_generate_streaming_response(context: Any, **kwargs: Any) -> Any:  # noqa: ARG001
-        raise RuntimeError("stream failed")
+        raise RuntimeError(sentinel)
 
-    events = [
-        event
-        async for event in stream_rag_events(
-            resolved_request=_resolved_request("standard"),
-            retrieval_plan=_retrieval_plan(),
-            standard_pipeline=empty_standard_pipeline,
-            extra_context={"generate_streaming_response": failing_generate_streaming_response},
-        )
-    ]
+    logs: list[str] = []
+    sink_id = streaming_executor.logger.add(logs.append, format="{message}")
+    try:
+        events = [
+            event
+            async for event in stream_rag_events(
+                resolved_request=_resolved_request("standard"),
+                retrieval_plan=_retrieval_plan(),
+                standard_pipeline=empty_standard_pipeline,
+                extra_context={"generate_streaming_response": failing_generate_streaming_response},
+            )
+        ]
+    finally:
+        streaming_executor.logger.remove(sink_id)
 
     assert [event["type"] for event in events] == ["contexts", "reasoning", "error"]  # nosec B101
-    assert events[2] == {"type": "error", "message": _PUBLIC_STREAM_ERROR_MESSAGE}  # nosec B101
+    assert events[2] == {  # nosec B101
+        "schema_version": 1,
+        "type": "error",
+        "code": "stream_internal_error",
+        "upstream_dispatched": True,
+        "output_emitted": False,
+        "allow_non_stream_fallback": False,
+        "message": _PUBLIC_STREAM_ERROR_MESSAGE,
+    }
+    assert sentinel not in "".join(logs)  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -410,6 +431,11 @@ async def test_streaming_generation_marks_partial_output_and_propagates_failure(
     ]
     assert events[2]["text"] == "partial answer"  # nosec B101
     assert events[3]["code"] == "provider_authentication_failed"  # nosec B101
+    assert events[3]["status_code"] == 502  # nosec B101
+    assert events[3]["schema_version"] == 1  # nosec B101
+    assert events[3]["upstream_dispatched"] is True  # nosec B101
+    assert events[3]["output_emitted"] is True  # nosec B101
+    assert events[3]["allow_non_stream_fallback"] is False  # nosec B101
     assert "raw provider secret" not in str(events)  # nosec B101
     assert runtime.resolved == ["test-provider"]  # nosec B101
     assert runtime.marked == [runtime.handle]  # nosec B101
@@ -432,9 +458,14 @@ async def test_stream_rag_events_continues_when_standard_prefetch_fails():
         )
     ]
 
-    assert [event["type"] for event in events] == ["contexts", "reasoning", "delta"]  # nosec B101
+    assert [event["type"] for event in events] == [  # nosec B101
+        "contexts",
+        "reasoning",
+        "delta",
+        "complete",
+    ]
     assert events[0]["contexts"] == []  # nosec B101
-    assert events[-1]["text"] == "answer text"  # nosec B101
+    assert events[-2]["text"] == "answer text"  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -467,9 +498,14 @@ async def test_stream_rag_events_continues_with_empty_contexts_when_agentic_pref
         )
     ]
 
-    assert [event["type"] for event in events] == ["contexts", "reasoning", "delta"]  # nosec B101
+    assert [event["type"] for event in events] == [  # nosec B101
+        "contexts",
+        "reasoning",
+        "delta",
+        "complete",
+    ]
     assert events[0]["contexts"] == []  # nosec B101
-    assert events[-1]["text"] == "answer text"  # nosec B101
+    assert events[-2]["text"] == "answer text"  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -508,7 +544,13 @@ async def test_stream_rag_events_skips_standard_prefetch_for_agentic_strategy():
     ]
 
     assert calls == ["agentic"]  # nosec B101
-    assert [event["type"] for event in events] == ["plan", "contexts", "reasoning", "delta"]  # nosec B101
+    assert [event["type"] for event in events] == [  # nosec B101
+        "plan",
+        "contexts",
+        "reasoning",
+        "delta",
+        "complete",
+    ]
     assert events[1]["contexts"][0]["id"] == "agentic-doc"  # nosec B101
 
 

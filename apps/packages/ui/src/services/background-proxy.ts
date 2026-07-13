@@ -1071,7 +1071,7 @@ const yieldToBrowser = async (): Promise<void> => {
 }
 
 /**
- * Direct fetch streaming implementation - used as fallback when extension messaging is unavailable or times out
+ * Direct streaming fallback used before handoff, or for safe/idempotent replay.
  */
 async function* bgStreamDirect<
   P extends AllowedPath = AllowedPath,
@@ -1401,6 +1401,9 @@ export async function* bgStream<
     yield* bgStreamDirect({ path, method, headers, body, streamIdleTimeoutMs, abortSignal, onOpen: notifyOpen })
     return
   }
+  const mayReplayAfterHandoff =
+    isSafeFallbackMethod(method) ||
+    isIdempotentWriteFallbackAllowed(method, path, body)
 
   // Derive the response-acquisition timeout from config instead of a hard-coded
   // 5s. Time-to-response over 5s is normal for large prompts, RAG,
@@ -1416,11 +1419,7 @@ export async function* bgStream<
     String(path),
     Number(streamIdleTimeoutMs)
   )
-  // Only idempotent (GET/HEAD/OPTIONS) streams may be replayed via direct fetch
-  // after a transport loss. Non-idempotent generation POSTs must not be re-sent.
-  const methodAllowsStreamReplay = isSafeFallbackMethod(method)
-
-  // Extension port-based streaming with connection-time and connection-establish fallback.
+  // Extension streaming permits direct fallback before postMessage handoff.
   let port: ReturnType<typeof browser.runtime.connect>
   try {
     port = browser.runtime.connect({ name: 'tldw:stream' })
@@ -1437,9 +1436,10 @@ export async function* bgStream<
   let firstDataReceived = false
   let streamOpened = false
   let connectionTimedOut = false
+  let handoffAttempted = false
 
   // Connection timeout - if no response body is acquired within the derived window,
-  // give up on the port. Whether we may then replay depends on idempotency.
+  // give up on the port. After handoff, replay requires explicit idempotency.
   const connectionTimer = setTimeout(() => {
     if (!streamOpened && !done) {
       connectionTimedOut = true
@@ -1509,6 +1509,9 @@ export async function* bgStream<
   }
   if (!done) {
     try {
+      // postMessage may throw after delivery. Once attempted, dispatch is
+      // unknown and therefore conservatively treated as having occurred.
+      handoffAttempted = true
       port.postMessage({ path, method, headers, body, streamIdleTimeoutMs })
     } catch (e) {
       clearTimeout(connectionTimer)
@@ -1539,12 +1542,9 @@ export async function* bgStream<
         sliceStartedAt = Date.now()
       }
     }
-    // If connection timed out before acquiring a response body, only idempotent
-    // requests may be replayed via direct fetch. The worker may already be
-    // generating server-side for a non-idempotent POST, so replaying it would
-    // double-generate and persist a duplicate message — surface a timeout error.
+    // Resolve a response-acquisition timeout without replaying ambiguous dispatch.
     if (connectionTimedOut) {
-      if (methodAllowsStreamReplay) {
+      if (!handoffAttempted || mayReplayAfterHandoff) {
         yield* bgStreamDirect({ path, method, headers, body, streamIdleTimeoutMs, abortSignal, onOpen: notifyOpen })
         return
       }
@@ -1558,9 +1558,7 @@ export async function* bgStream<
       Boolean(error) &&
       (isExtensionTransportFailure(error) || !hasHttpStatus(error))
     if (shouldFallbackAfterEarlyError) {
-      // Same rule for an early transport failure: replay idempotent requests
-      // only; never re-send a non-idempotent generation POST.
-      if (methodAllowsStreamReplay) {
+      if (!handoffAttempted || mayReplayAfterHandoff) {
         yield* bgStreamDirect({ path, method, headers, body, streamIdleTimeoutMs, abortSignal, onOpen: notifyOpen })
         return
       }

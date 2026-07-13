@@ -44,6 +44,26 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 
 let latestContext: ReturnType<typeof useKnowledgeQA> | null = null
 
+const completeEvent = (outputEmitted: boolean) => ({
+  schema_version: 1,
+  type: "complete",
+  code: "complete",
+  upstream_dispatched: true,
+  output_emitted: outputEmitted,
+  allow_non_stream_fallback: false,
+  message: "Search completed.",
+})
+
+const preDispatchTransportError = {
+  schema_version: 1,
+  type: "error",
+  code: "stream_transport_unavailable",
+  upstream_dispatched: false,
+  output_emitted: false,
+  allow_non_stream_fallback: true,
+  message: "Streaming is unavailable before provider dispatch.",
+}
+
 function ContextProbe() {
   latestContext = useKnowledgeQA()
   return null
@@ -91,6 +111,7 @@ describe("KnowledgeQAProvider streaming search", () => {
         releaseFinalDelta = resolve
       })
       yield { type: "delta", text: " world" }
+      yield completeEvent(true)
     })
 
     render(
@@ -175,6 +196,7 @@ describe("KnowledgeQAProvider streaming search", () => {
         ],
       }
       yield { type: "delta", text: normalized }
+      yield completeEvent(true)
     })
 
     render(
@@ -201,9 +223,9 @@ describe("KnowledgeQAProvider streaming search", () => {
     expect(latestContext!.answer).toBe("BOUND STREAM")
   })
 
-  it("falls back to non-stream rag search when stream path fails", async () => {
+  it("falls back only for a certified pre-dispatch stream transport error", async () => {
     ragSearchStreamMock.mockImplementation(async function* () {
-      throw new Error("stream endpoint unavailable")
+      yield preDispatchTransportError
     })
     ragSearchMock.mockResolvedValue({
       results: [{ id: "fallback-doc", metadata: { title: "Fallback" } }],
@@ -308,7 +330,41 @@ describe("KnowledgeQAProvider streaming search", () => {
     )
   })
 
-  it("falls back to non-stream rag search when stream completes without usable evidence", async () => {
+  it.each([
+    ["a trailing delta", { type: "delta", text: "late output" }],
+    ["a second terminal", completeEvent(false)],
+  ])(
+    "fails closed when a certified replay terminal is followed by %s",
+    async (_name, trailingEvent) => {
+      ragSearchStreamMock.mockImplementation(async function* () {
+        yield preDispatchTransportError
+        yield trailingEvent
+      })
+
+      render(
+        <KnowledgeQAProvider>
+          <ContextProbe />
+        </KnowledgeQAProvider>
+      )
+
+      await waitFor(() => expect(latestContext).not.toBeNull())
+      await act(async () => {
+        await latestContext!.selectThread("local-trailing-terminal-event")
+      })
+      act(() => {
+        latestContext!.setQuery("do not replay this stream")
+      })
+
+      await act(async () => {
+        await latestContext!.search()
+      })
+
+      expect(ragSearchMock).not.toHaveBeenCalled()
+      expect(latestContext!.error).toBe("Invalid RAG terminal stream event.")
+    }
+  )
+
+  it("does not replay a clean empty stream completion", async () => {
     ragSearchStreamMock.mockImplementation(async function* () {
       yield {
         type: "contexts",
@@ -317,6 +373,7 @@ describe("KnowledgeQAProvider streaming search", () => {
           notes: { status: "empty", count: 0, reason: "no_matching_entries" },
         },
       }
+      yield completeEvent(false)
     })
     ragSearchMock.mockResolvedValue({
       results: [
@@ -362,25 +419,145 @@ describe("KnowledgeQAProvider streaming search", () => {
     })
 
     expect(ragSearchStreamMock).toHaveBeenCalledTimes(1)
-    expect(ragSearchMock).toHaveBeenCalledTimes(1)
-    expect(latestContext!.results).toHaveLength(1)
-    expect(latestContext!.results[0].id).toBe("note-scoped")
-    expect(latestContext!.answer).toBe(
-      "Scoped note answers must stay inside the selected source [1]."
-    )
+    expect(ragSearchMock).not.toHaveBeenCalled()
+    expect(latestContext!.results).toHaveLength(0)
+    expect(latestContext!.answer).toBeNull()
     expect(latestContext!.isSearching).toBe(false)
     expect(trackMetricMock).toHaveBeenCalledWith(
       expect.objectContaining({
         type: "search_complete",
-        used_streaming: false,
-        has_answer: true,
+        used_streaming: true,
+        has_answer: false,
       })
     )
   })
 
+  it("does not replay a terminal provider credential error", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+    ragSearchStreamMock.mockImplementation(async function* () {
+      yield {
+        schema_version: 1,
+        type: "error",
+        code: "provider_authentication_failed",
+        upstream_dispatched: true,
+        output_emitted: false,
+        allow_non_stream_fallback: false,
+        message: "The selected provider credentials could not be authenticated.",
+      }
+    })
+
+    render(
+      <KnowledgeQAProvider>
+        <ContextProbe />
+      </KnowledgeQAProvider>
+    )
+
+    await waitFor(() => expect(latestContext).not.toBeNull())
+    await act(async () => {
+      await latestContext!.selectThread("local-terminal-credential-error")
+    })
+
+    act(() => {
+      latestContext!.setQuery("use my provider")
+    })
+
+    await act(async () => {
+      await latestContext!.search()
+    })
+
+    expect(ragSearchMock).not.toHaveBeenCalled()
+    expect(latestContext!.error).toBe(
+      "The selected provider credentials could not be authenticated."
+    )
+    expect(latestContext!.answerTrustState).toBe("failed_search")
+    expect(trackMetricMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "search_complete" })
+    )
+    expect(consoleError).toHaveBeenCalledWith(
+      "Search failed:",
+      "provider_authentication_failed"
+    )
+    consoleError.mockRestore()
+  })
+
+  it("does not replay after partial provider output", async () => {
+    ragSearchStreamMock.mockImplementation(async function* () {
+      yield { type: "delta", text: "Partial answer" }
+      yield {
+        schema_version: 1,
+        type: "error",
+        code: "provider_unavailable",
+        upstream_dispatched: true,
+        output_emitted: true,
+        allow_non_stream_fallback: false,
+        message: "The selected provider is currently unavailable.",
+      }
+    })
+
+    render(
+      <KnowledgeQAProvider>
+        <ContextProbe />
+      </KnowledgeQAProvider>
+    )
+
+    await waitFor(() => expect(latestContext).not.toBeNull())
+    await act(async () => {
+      await latestContext!.selectThread("local-partial-terminal-error")
+    })
+
+    act(() => {
+      latestContext!.setQuery("partial failure")
+    })
+
+    await act(async () => {
+      await latestContext!.search()
+    })
+
+    expect(ragSearchMock).not.toHaveBeenCalled()
+    expect(latestContext!.error).toBe(
+      "The selected provider is currently unavailable."
+    )
+    expect(latestContext!.answerTrustState).toBe("failed_search")
+  })
+
+  it("fails closed for malformed terminal events", async () => {
+    ragSearchStreamMock.mockImplementation(async function* () {
+      yield {
+        schema_version: 2,
+        type: "error",
+        code: "stream_transport_unavailable",
+        upstream_dispatched: false,
+        output_emitted: false,
+        allow_non_stream_fallback: true,
+        message: "Unknown contract version.",
+      }
+    })
+
+    render(
+      <KnowledgeQAProvider>
+        <ContextProbe />
+      </KnowledgeQAProvider>
+    )
+
+    await waitFor(() => expect(latestContext).not.toBeNull())
+    await act(async () => {
+      await latestContext!.selectThread("local-malformed-terminal-error")
+    })
+    act(() => {
+      latestContext!.setQuery("malformed terminal")
+    })
+
+    await act(async () => {
+      await latestContext!.search()
+    })
+
+    expect(ragSearchMock).not.toHaveBeenCalled()
+    expect(latestContext!.error).toBe("Invalid RAG terminal stream event.")
+  })
+
   it("normalizes whitespace-only non-stream answers to null", async () => {
     ragSearchStreamMock.mockImplementation(async function* () {
-      throw new Error("stream endpoint unavailable")
+      yield preDispatchTransportError
     })
     ragSearchMock.mockResolvedValue({
       results: [{ id: "blank-answer-doc", metadata: { title: "Blank Answer Doc" } }],
@@ -415,7 +592,7 @@ describe("KnowledgeQAProvider streaming search", () => {
 
   it("removes out-of-scope local results without remapping surviving citation indexes", async () => {
     ragSearchStreamMock.mockImplementation(async function* () {
-      throw new Error("stream endpoint unavailable")
+      yield preDispatchTransportError
     })
     ragSearchMock.mockResolvedValue({
       results: [
@@ -471,7 +648,7 @@ describe("KnowledgeQAProvider streaming search", () => {
 
   it("surfaces query-length warning when a submitted query exceeds backend limits", async () => {
     ragSearchStreamMock.mockImplementation(async function* () {
-      throw new Error("stream endpoint unavailable")
+      yield preDispatchTransportError
     })
     ragSearchMock.mockResolvedValue({
       results: [{ id: "fallback-doc", metadata: { title: "Fallback" } }],
@@ -510,7 +687,7 @@ describe("KnowledgeQAProvider streaming search", () => {
 
   it("merges pinned source filters into rag search options", async () => {
     ragSearchStreamMock.mockImplementation(async function* () {
-      throw new Error("stream endpoint unavailable")
+      yield preDispatchTransportError
     })
     ragSearchMock.mockResolvedValue({
       results: [],

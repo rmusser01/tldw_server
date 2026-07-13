@@ -62,6 +62,12 @@ import {
 } from "./trustState"
 import { validateKnowledgeResultScope } from "./scopeValidation"
 import {
+  RagTerminalStreamError,
+  mayReplayNonStream,
+  parseRagTerminalEvent,
+  type RagTerminalEvent,
+} from "@/services/rag/stream-contract"
+import {
   getEvidenceOrigin,
   getResultChunkId,
   getResultEvidenceText,
@@ -2302,7 +2308,8 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
         ) {
           let streamResults: RagResult[] = []
           let streamAnswer = ""
-          let receivedStreamEvent = false
+          let observedStreamOutput = false
+          let terminalEvent: RagTerminalEvent | null = null
           let streamWhyPayload: unknown = null
           let streamSourceStatusPayload: unknown = null
 
@@ -2318,6 +2325,23 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
             })) {
               if (isStaleSearchRequest()) {
                 return
+              }
+              if (terminalEvent) {
+                throw new RagTerminalStreamError(
+                  "Invalid RAG terminal stream event."
+                )
+              }
+              const parsedTerminalEvent = parseRagTerminalEvent(event)
+              if (parsedTerminalEvent) {
+                if (
+                  parsedTerminalEvent.output_emitted !== observedStreamOutput
+                ) {
+                  throw new RagTerminalStreamError(
+                    "Invalid RAG terminal stream event."
+                  )
+                }
+                terminalEvent = parsedTerminalEvent
+                continue
               }
               const eventType = typeof event?.type === "string" ? event.type : ""
 
@@ -2366,7 +2390,6 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
                         : partialTrust.evidenceOrigin,
                   },
                 })
-                receivedStreamEvent = true
                 continue
               }
 
@@ -2375,6 +2398,7 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
                 const deltaText =
                   typeof event?.text === "string" ? event.text : ""
                 if (!deltaText) continue
+                observedStreamOutput = true
                 streamAnswer += deltaText
                 const partialAnswer = normalizeAnswerText(streamAnswer)
                 const partialCitations = partialAnswer
@@ -2405,40 +2429,31 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
                         : partialTrust.evidenceOrigin,
                   },
                 })
-                receivedStreamEvent = true
                 continue
               }
-
-              if (eventType === "error") {
-                throw new Error(
-                  typeof event?.message === "string" && event.message
-                    ? event.message
-                    : "Search failed"
-                )
-              }
             }
 
+            if (!terminalEvent) {
+              throw new RagTerminalStreamError(
+                "Search stream ended before terminal completion."
+              )
+            }
+            if (terminalEvent.type === "error") {
+              throw new RagTerminalStreamError(
+                terminalEvent.message,
+                terminalEvent
+              )
+            }
             const normalizedStreamAnswer = normalizeAnswerText(streamAnswer)
-            const streamCompletedWithUsableResult =
-              streamResults.length > 0 &&
-              (!effectiveSettings.enable_generation ||
-                Boolean(normalizedStreamAnswer))
-
-            if (receivedStreamEvent && streamCompletedWithUsableResult) {
-              results = streamResults
-              answer = normalizedStreamAnswer
-              usedStreaming = true
-              resolvedSearchDetails = buildSearchDetailsFromStreaming(
-                streamResults,
-                streamWhyPayload,
-                streamSourceStatusPayload,
-                effectiveSettings
-              )
-            } else if (receivedStreamEvent) {
-              console.warn(
-                "Streaming search completed without usable evidence, falling back to standard search."
-              )
-            }
+            results = streamResults
+            answer = normalizedStreamAnswer
+            usedStreaming = true
+            resolvedSearchDetails = buildSearchDetailsFromStreaming(
+              streamResults,
+              streamWhyPayload,
+              streamSourceStatusPayload,
+              effectiveSettings
+            )
           } catch (streamError) {
             const streamMessage =
               streamError instanceof Error
@@ -2451,11 +2466,17 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
             if (isStreamAbort) {
               throw streamError
             }
-
-            console.warn(
-              "Streaming search failed, falling back to standard search:",
-              streamError
-            )
+            if (
+              streamError instanceof RagTerminalStreamError &&
+              streamError.event &&
+              mayReplayNonStream(streamError.event)
+            ) {
+              console.warn(
+                "Streaming is unavailable before provider dispatch; using standard search."
+              )
+            } else {
+              throw streamError
+            }
           }
         }
 
@@ -2657,7 +2678,12 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
           dispatch({ type: "SET_QUERY_STAGE", payload: "idle" })
           return
         }
-        console.error("Search failed:", error)
+        console.error(
+          "Search failed:",
+          error instanceof RagTerminalStreamError
+            ? error.event?.code ?? error.name
+            : error
+        )
         const errorMessage = mapKnowledgeQaSearchErrorMessage(error, "Search failed")
         dispatch({
           type: "SET_ERROR",

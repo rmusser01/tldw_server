@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import types
 from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import Any
+from typing import Any, Literal, TypedDict
 
 from loguru import logger
 
@@ -30,9 +31,31 @@ from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import (
 )
 
 RAGStreamEvent = dict[str, Any]
+
+
+class _RAGTerminalEventRequired(TypedDict):
+    schema_version: Literal[1]
+    type: Literal["complete", "error"]
+    code: str
+    upstream_dispatched: bool
+    output_emitted: bool
+    allow_non_stream_fallback: bool
+    message: str
+
+
+class RAGTerminalEvent(_RAGTerminalEventRequired, total=False):
+    """Versioned terminal event shared with Knowledge QA clients."""
+
+    status_code: int
+
+
 PipelineCallable = Callable[..., Awaitable[Any]]
 GenerationCallable = Callable[..., Awaitable[Any]]
 _PUBLIC_STREAM_ERROR_MESSAGE = "Search failed due to an internal error."
+_PUBLIC_STREAM_COMPLETE_MESSAGE = "Search completed."
+_RAG_STREAM_SCHEMA_VERSION = 1
+_RAG_TERMINAL_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+_MAX_TERMINAL_MESSAGE_LENGTH = 240
 _RAG_PROVIDER_ERROR_MESSAGES = {
     "provider_request_invalid": "The selected provider or model is invalid.",
     "provider_authentication_failed": "The selected provider credentials could not be authenticated.",
@@ -91,18 +114,138 @@ def classify_rag_provider_error(exc: BaseException) -> tuple[str, int, str] | No
     return None
 
 
-def rag_provider_error_event(exc: BaseException) -> RAGStreamEvent | None:
+def is_valid_rag_terminal_event(event: object) -> bool:
+    """Return whether an object satisfies the strict version-one terminal schema."""
+    if not isinstance(event, dict):
+        return False
+    schema_version = event.get("schema_version")
+    if type(schema_version) is not int or schema_version != _RAG_STREAM_SCHEMA_VERSION:
+        return False
+    event_type = event.get("type")
+    if event_type not in {"complete", "error"}:
+        return False
+    code = event.get("code")
+    message = event.get("message")
+    if not isinstance(code, str) or _RAG_TERMINAL_CODE_RE.fullmatch(code) is None:
+        return False
+    if (
+        not isinstance(message, str)
+        or not message
+        or len(message) > _MAX_TERMINAL_MESSAGE_LENGTH
+    ):
+        return False
+
+    upstream_dispatched = event.get("upstream_dispatched")
+    output_emitted = event.get("output_emitted")
+    allow_fallback = event.get("allow_non_stream_fallback")
+    if not all(
+        type(value) is bool
+        for value in (upstream_dispatched, output_emitted, allow_fallback)
+    ):
+        return False
+    if "status_code" in event:
+        status_code = event["status_code"]
+        if type(status_code) is not int or not 100 <= status_code <= 599:
+            return False
+    if output_emitted and not upstream_dispatched:
+        return False
+    if event_type == "complete":
+        return (
+            code == "complete"
+            and upstream_dispatched is True
+            and allow_fallback is False
+        )
+    if code == "complete":
+        return False
+    if allow_fallback:
+        return upstream_dispatched is False and output_emitted is False
+    return True
+
+
+def may_replay_non_stream(event: object) -> bool:
+    """Allow replay only for certified pre-dispatch version-one errors."""
+    return bool(
+        is_valid_rag_terminal_event(event)
+        and isinstance(event, dict)
+        and event["schema_version"] == _RAG_STREAM_SCHEMA_VERSION
+        and event["type"] == "error"
+        and event["upstream_dispatched"] is False
+        and event["output_emitted"] is False
+        and event["allow_non_stream_fallback"] is True
+    )
+
+
+def _rag_terminal_event(
+    *,
+    event_type: Literal["complete", "error"],
+    code: str,
+    message: str,
+    upstream_dispatched: bool,
+    output_emitted: bool,
+    allow_non_stream_fallback: bool = False,
+    status_code: int | None = None,
+) -> RAGTerminalEvent:
+    event: RAGTerminalEvent = {
+        "schema_version": _RAG_STREAM_SCHEMA_VERSION,
+        "type": event_type,
+        "code": code,
+        "upstream_dispatched": upstream_dispatched,
+        "output_emitted": output_emitted,
+        "allow_non_stream_fallback": allow_non_stream_fallback,
+        "message": message,
+    }
+    if status_code is not None:
+        event["status_code"] = status_code
+    if not is_valid_rag_terminal_event(event):
+        raise ValueError("Invalid RAG terminal event")
+    return event
+
+
+def rag_complete_event(*, output_emitted: bool) -> RAGTerminalEvent:
+    """Build the explicit terminal event for a clean upstream completion."""
+    return _rag_terminal_event(
+        event_type="complete",
+        code="complete",
+        message=_PUBLIC_STREAM_COMPLETE_MESSAGE,
+        upstream_dispatched=True,
+        output_emitted=output_emitted,
+    )
+
+
+def rag_internal_error_event(
+    *,
+    upstream_dispatched: bool,
+    output_emitted: bool,
+) -> RAGTerminalEvent:
+    """Build a bounded terminal event for an unexpected internal failure."""
+    return _rag_terminal_event(
+        event_type="error",
+        code="stream_internal_error",
+        message=_PUBLIC_STREAM_ERROR_MESSAGE,
+        upstream_dispatched=upstream_dispatched,
+        output_emitted=output_emitted,
+    )
+
+
+def rag_provider_error_event(
+    exc: BaseException,
+    *,
+    upstream_dispatched: bool = True,
+    output_emitted: bool = False,
+) -> RAGTerminalEvent | None:
     """Build a detail-free stream event for a typed provider failure."""
     classified = classify_rag_provider_error(exc)
     if classified is None:
         return None
     code, status_code, message = classified
-    return {
-        "type": "error",
-        "code": code,
-        "status_code": status_code,
-        "message": message,
-    }
+    return _rag_terminal_event(
+        event_type="error",
+        code=code,
+        message=message,
+        upstream_dispatched=upstream_dispatched,
+        output_emitted=output_emitted,
+        status_code=status_code,
+    )
 
 
 def _value(
@@ -499,6 +642,7 @@ async def stream_rag_events(
         build_agentic_execution_context,
     )
     sync_retriever_overrides = context.get("sync_retriever_overrides")
+    output_emitted = False
 
     try:
         if callable(sync_retriever_overrides):
@@ -567,17 +711,26 @@ async def stream_rag_events(
             generation_streamer=generation_streamer,
             credential_runtime=context.get("credential_runtime"),
         ):
+            if event.get("type") == "delta" and bool(event.get("text")):
+                output_emitted = True
             yield event
+        yield rag_complete_event(output_emitted=output_emitted)
     except asyncio.CancelledError:
         raise
     except Exception as exc:  # noqa: BLE001 - streaming should surface error payload instead of crashing
-        provider_event = rag_provider_error_event(exc)
+        # This layer cannot certify that dispatch did not occur. Unknown
+        # provider dispatch is conservatively represented as true.
+        provider_event = rag_provider_error_event(
+            exc,
+            upstream_dispatched=True,
+            output_emitted=output_emitted,
+        )
         if provider_event is not None:
             logger.warning("RAG streaming provider failure: {}", provider_event["code"])
             yield provider_event
         else:
-            logger.exception("RAG streaming failed")
-            yield {
-                "type": "error",
-                "message": _PUBLIC_STREAM_ERROR_MESSAGE,
-            }
+            logger.error("RAG streaming failed")
+            yield rag_internal_error_event(
+                upstream_dispatched=True,
+                output_emitted=output_emitted,
+            )

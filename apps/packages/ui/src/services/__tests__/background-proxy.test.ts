@@ -1186,6 +1186,57 @@ describe("background proxy fallback safety", () => {
     expect(chunks.some((chunk) => chunk.includes('"event":"run_started"'))).toBe(true)
   })
 
+  it("does not replay POST streams after an ambiguous postMessage failure", async () => {
+    mocks.sendMessage.mockResolvedValue({ ok: true })
+    const onMessageListeners = new Set<(msg: any) => void>()
+    const port = {
+      onMessage: {
+        addListener: (listener: (msg: any) => void) => onMessageListeners.add(listener),
+        removeListener: (listener: (msg: any) => void) => onMessageListeners.delete(listener)
+      },
+      onDisconnect: {
+        addListener: vi.fn(),
+        removeListener: vi.fn()
+      },
+      postMessage: vi.fn(() => {
+        throw new Error("Message port closed during postMessage")
+      }),
+      disconnect: vi.fn()
+    }
+    mocks.connect.mockReturnValue(port as any)
+    mocks.storageGet.mockResolvedValue({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: "test-key-not-placeholder"
+    })
+    const fetchSpy = vi.fn(async () =>
+      new Response("data: [DONE]\n\n", {
+        status: 200,
+        headers: { "content-type": "text/event-stream" }
+      })
+    )
+    vi.stubGlobal("fetch", fetchSpy as any)
+
+    const { bgStream } = await importProxy()
+    const consume = async () => {
+      for await (const _chunk of bgStream({
+        path: "/api/v1/chat/completions",
+        method: "POST",
+        body: { stream: true, messages: [] }
+      })) {
+        // no-op
+      }
+    }
+
+    try {
+      await expect(consume()).rejects.toThrow("Message port closed")
+      expect(port.postMessage).toHaveBeenCalledTimes(1)
+      expect(fetchSpy).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it("does not replay a non-idempotent POST after a response-acquisition timeout", async () => {
     vi.useFakeTimers()
     mocks.sendMessage.mockResolvedValue({ ok: true })
@@ -1531,7 +1582,10 @@ describe("background proxy fallback safety", () => {
         return {
           serverUrl: "http://127.0.0.1:8000",
           authMode: "single-user",
-          apiKey: "not-a-real-key"
+          apiKey: "not-a-real-key",
+          credentialSource: "manual",
+          apiKeyPersistence: "device",
+          apiKeyServerOrigin: "http://127.0.0.1:8000"
         }
       }
       return null
