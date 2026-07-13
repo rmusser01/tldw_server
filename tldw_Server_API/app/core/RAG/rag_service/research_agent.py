@@ -99,6 +99,21 @@ _ACTION_FAILURE_CODES = frozenset(
     }
 )
 
+_LOCAL_SOURCE_ALIASES = {
+    "media": "media_db",
+    "media_db": "media_db",
+    "notes": "notes",
+    "notes_db": "notes",
+    "character": "character_cards",
+    "characters": "character_cards",
+    "character_cards": "character_cards",
+    "chat": "chat_history",
+    "chats": "chat_history",
+    "chat_history": "chat_history",
+    "kanban": "kanban",
+    "kanban_db": "kanban",
+}
+
 
 def _action_failure_code(exc: BaseException) -> str:
     """Map action failures to a bounded, detail-free taxonomy."""
@@ -1204,6 +1219,18 @@ async def research_loop(
         normalized = sorted(_normalize_query(v) for v in values if str(v or "").strip())
         return tuple(v for v in normalized if v)
 
+    def _normalize_local_sources(values: Any) -> list[str]:
+        if not isinstance(values, (list, tuple, set)):
+            return []
+        sources: list[str] = []
+        for value in values:
+            if not isinstance(value, str):
+                continue
+            source = _LOCAL_SOURCE_ALIASES.get(value.strip().lower())
+            if source and source not in sources:
+                sources.append(source)
+        return sources
+
     def _action_signature(action_name: str, params: dict[str, Any]) -> tuple[Any, ...]:
         q = _normalize_query(params.get("query", ""))
         if action_name == "web_search":
@@ -1325,9 +1352,34 @@ async def research_loop(
                 logger.warning(f"Research loop LLM call failed at iteration {iteration}: {exc!r}")
             break
 
-        action_name = action_dict.get("action", "done")
-        action_params = action_dict.get("params", {})
-        reasoning = action_dict.get("reasoning", "")
+        raw_action_name = action_dict.get("action")
+        action_name = raw_action_name.strip().lower() if isinstance(raw_action_name, str) else ""
+        raw_action_params = action_dict.get("params")
+        if not action_name or (action_name != "done" and registry.get(action_name) is None):
+            action_name = "done"
+            raw_action_params = {}
+        action_params = dict(raw_action_params) if isinstance(raw_action_params, dict) else {}
+        raw_reasoning = action_dict.get("reasoning")
+        reasoning = raw_reasoning[:4000] if isinstance(raw_reasoning, str) else ""
+
+        if action_name == "local_db_search":
+            raw_local_query = action_params.get("query")
+            local_query = (
+                raw_local_query.strip()
+                if isinstance(raw_local_query, str) and raw_local_query.strip()
+                else standalone_query
+            )[:4000]
+            try:
+                local_top_k = int(action_params.get("top_k", 10))
+            except (TypeError, ValueError):
+                local_top_k = 10
+            action_params = {
+                "query": local_query,
+                "sources": _normalize_local_sources(
+                    action_params.get("sources", ["media_db"])
+                ),
+                "top_k": max(1, min(local_top_k, 25)),
+            }
 
         # Emit reasoning event
         await _emit("research_reasoning", {
@@ -1378,11 +1430,6 @@ async def research_loop(
 
         # Inject DB context into local_db_search params
         if action_name == "local_db_search":
-            action_params = {
-                key: value
-                for key, value in action_params.items()
-                if key in {"query", "sources", "top_k"}
-            }
             if db_context:
                 for key in (
                     "db_paths",

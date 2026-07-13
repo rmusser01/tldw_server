@@ -506,8 +506,8 @@ class PostGenerationVerifier:
                                     elif generate_hypothetical_answer_async is not None:
                                         hypo = await generate_hypothetical_answer_async(
                                             query,
-                                            None,
-                                            None,
+                                            generation_provider,
+                                            generation_model,
                                             credential_runtime=self._credential_runtime,
                                             stage_metadata=hyde_metadata,
                                         )

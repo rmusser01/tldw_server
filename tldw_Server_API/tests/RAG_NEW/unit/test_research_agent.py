@@ -536,6 +536,259 @@ async def test_research_loop_overwrites_local_action_scope_with_trusted_context(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("response", "secrets", "expected_sources"),
+    [
+        pytest.param(
+            '{"reasoning":"local","action":"local_db_search",'
+            '"params":"provider-params-secret"}',
+            ("provider-params-secret",),
+            ["media_db"],
+            id="non-mapping-params",
+        ),
+        pytest.param(
+            '{"reasoning":"local","action":"local_db_search","params":'
+            '{"query":{"secret":"provider-query-secret"},'
+            '"sources":{"secret":"provider-sources-secret"},'
+            '"top_k":"provider-top-k-secret"}}',
+            (
+                "provider-query-secret",
+                "provider-sources-secret",
+                "provider-top-k-secret",
+            ),
+            [],
+            id="malformed-local-fields",
+        ),
+        pytest.param(
+            '{"reasoning":"local","action":"local_db_search","params":'
+            '{"query":"trusted fallback query",'
+            '"sources":["provider-unknown-source"],"top_k":10}}',
+            ("provider-unknown-source",),
+            [],
+            id="unknown-source",
+        ),
+    ],
+)
+async def test_research_loop_normalizes_malformed_local_action_params(
+    monkeypatch,
+    response,
+    secrets,
+    expected_sources,
+):
+    import tldw_Server_API.app.core.Chat.chat_service as chat_service
+
+    captured: list[dict[str, object]] = []
+
+    async def fake_chat_call_async(**_kwargs):
+        return response
+
+    async def capture_local_action(params):
+        captured.append(dict(params))
+        return ra.ActionOutput(action_name="local_db_search", success=True)
+
+    monkeypatch.setattr(chat_service, "perform_chat_api_call_async", fake_chat_call_async)
+    registry = ra.ActionRegistry()
+    registry.register(
+        ra.ResearchAction(
+            name="local_db_search",
+            description="local",
+            schema={},
+            enabled=lambda _classification: True,
+            execute=capture_local_action,
+        )
+    )
+    classification = QueryClassification(
+        skip_search=False,
+        search_local_db=True,
+        standalone_query="trusted fallback query",
+    )
+
+    output = await ra.research_loop(
+        query="trusted fallback query",
+        classification=classification,
+        mode="speed",
+        max_iterations=1,
+        registry=registry,
+    )
+
+    assert captured == [
+        {
+            "query": "trusted fallback query",
+            "sources": expected_sources,
+            "top_k": 10,
+        }
+    ]
+    for secret in secrets:
+        assert secret not in str(output)
+
+
+@pytest.mark.asyncio
+async def test_research_loop_normalizes_known_action_name_case(monkeypatch):
+    import tldw_Server_API.app.core.Chat.chat_service as chat_service
+
+    captured: list[dict[str, object]] = []
+
+    async def fake_chat_call_async(**_kwargs):
+        return (
+            '{"reasoning":"local","action":" LOCAL_DB_SEARCH ","params":'
+            '{"query":"case normalized","sources":["media_db"],"top_k":2}}'
+        )
+
+    async def capture_local_action(params):
+        captured.append(dict(params))
+        return ra.ActionOutput(action_name="local_db_search", success=True)
+
+    monkeypatch.setattr(chat_service, "perform_chat_api_call_async", fake_chat_call_async)
+    registry = ra.ActionRegistry()
+    registry.register(
+        ra.ResearchAction(
+            name="local_db_search",
+            description="local",
+            schema={},
+            enabled=lambda _classification: True,
+            execute=capture_local_action,
+        )
+    )
+    classification = QueryClassification(
+        skip_search=False,
+        search_local_db=True,
+        standalone_query="case normalized",
+    )
+
+    output = await ra.research_loop(
+        query="case normalized",
+        classification=classification,
+        mode="speed",
+        max_iterations=1,
+        registry=registry,
+    )
+
+    assert output.steps[0].action_name == "local_db_search"
+    assert captured[0]["top_k"] == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "action_json",
+    ['["provider-action-secret"]', '"provider-action-secret"'],
+)
+async def test_research_loop_maps_untrusted_action_names_to_safe_completion(
+    monkeypatch,
+    action_json,
+):
+    import tldw_Server_API.app.core.Chat.chat_service as chat_service
+
+    async def fake_chat_call_async(**_kwargs):
+        return (
+            '{"reasoning":"stop safely","action":'
+            f"{action_json}"
+            ',"params":{}}'
+        )
+
+    monkeypatch.setattr(chat_service, "perform_chat_api_call_async", fake_chat_call_async)
+    classification = QueryClassification(
+        skip_search=False,
+        standalone_query="safe action normalization",
+    )
+
+    output = await ra.research_loop(
+        query="safe action normalization",
+        classification=classification,
+        mode="speed",
+        max_iterations=1,
+        registry=ra.ActionRegistry(),
+    )
+
+    assert output.steps[0].action_name == "done"
+    assert "provider-action-secret" not in str(output)
+
+
+@pytest.mark.asyncio
+async def test_research_loop_canonicalizes_local_source_aliases_before_dedup(monkeypatch):
+    import tldw_Server_API.app.core.Chat.chat_service as chat_service
+    from tldw_Server_API.app.core.RAG.rag_service import database_retrievers
+    from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
+
+    calls = {"character_cards": 0, "chat_history": 0}
+
+    def recording_retriever(name, source):
+        class RecordingRetriever:
+            def __init__(self, *_args, **_kwargs):
+                self.config = None
+
+            async def retrieve(self, _query, **_kwargs):
+                calls[name] += 1
+                return [
+                    Document(
+                        id=f"{name}-1",
+                        content=name,
+                        metadata={},
+                        source=source,
+                        score=0.9,
+                    )
+                ]
+
+            def close(self):
+                return None
+
+        return RecordingRetriever
+
+    class InertRetriever:
+        def __init__(self, *_args, **_kwargs):
+            self.config = None
+
+        async def retrieve(self, _query, **_kwargs):
+            return []
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(
+        database_retrievers,
+        "CharacterCardsRetriever",
+        recording_retriever("character_cards", DataSource.CHARACTER_CARDS),
+    )
+    monkeypatch.setattr(
+        database_retrievers,
+        "ChatHistoryRetriever",
+        recording_retriever("chat_history", DataSource.CHAT_HISTORY),
+    )
+    monkeypatch.setattr(database_retrievers, "WorldBooksRetriever", InertRetriever)
+    monkeypatch.setattr(database_retrievers, "ChatDictionariesRetriever", InertRetriever)
+
+    responses = iter(
+        [
+            '{"reasoning":"aliases","action":"local_db_search","params":'
+            '{"query":"local aliases","sources":["characters","chats"],"top_k":4}}',
+            '{"reasoning":"canonical duplicate","action":"local_db_search","params":'
+            '{"query":"local aliases","sources":["character_cards","chat_history"],"top_k":4}}',
+        ]
+    )
+
+    async def fake_chat_call_async(**_kwargs):
+        return next(responses)
+
+    monkeypatch.setattr(chat_service, "perform_chat_api_call_async", fake_chat_call_async)
+    classification = QueryClassification(
+        skip_search=False,
+        search_local_db=True,
+        standalone_query="local aliases",
+    )
+
+    output = await ra.research_loop(
+        query="local aliases",
+        classification=classification,
+        mode="speed",
+        max_iterations=2,
+        registry=create_default_registry(),
+        db_context={"character_db_path": "characters.sqlite"},
+    )
+
+    assert calls == {"character_cards": 1, "chat_history": 1}
+    assert output.metadata["action_dedup"]["duplicates_skipped"] == 1
+
+
+@pytest.mark.asyncio
 async def test_local_database_action_sanitizes_typed_provider_failure(monkeypatch):
     from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
     from tldw_Server_API.app.core.RAG.rag_service import database_retrievers

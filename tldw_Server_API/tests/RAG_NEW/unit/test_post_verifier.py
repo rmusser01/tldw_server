@@ -471,6 +471,8 @@ async def test_adaptive_retrieval_threads_runtime_to_retriever_and_hyde_embeddin
             self.retrievers = {verifier_module.DataSource.MEDIA_DB: _MediaRetriever()}
 
     async def fake_hyde_generation(query: str, provider=None, model=None, **kwargs):
+        captured["hyde_generation_provider"] = provider
+        captured["hyde_generation_model"] = model
         captured["hyde_generation_runtime"] = kwargs.get("credential_runtime")
         captured["hyde_generation_metadata"] = kwargs.get("stage_metadata")
         return "hypothesis"
@@ -518,9 +520,13 @@ async def test_adaptive_retrieval_threads_runtime_to_retriever_and_hyde_embeddin
         answer="RAG is X.",
         base_documents=_base_docs(),
         media_db_path="media.db",
+        generation_provider="anthropic",
+        generation_model="claude-3-7-sonnet",
     )
 
     assert captured["retrieval_runtime"] is runtime
+    assert captured["hyde_generation_provider"] == "anthropic"
+    assert captured["hyde_generation_model"] == "claude-3-7-sonnet"
     assert captured["hyde_generation_runtime"] is runtime
     assert isinstance(captured["hyde_generation_metadata"], dict)
     assert captured["hyde_runtime"] is runtime
