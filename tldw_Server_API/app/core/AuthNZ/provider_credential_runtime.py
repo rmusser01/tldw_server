@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any, NoReturn
 
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
@@ -28,6 +28,10 @@ def _serialization_error() -> TypeError:
 
 def _copy_error() -> TypeError:
     return TypeError("ProviderCallCredentials cannot be copied")
+
+
+def _reject_pydantic_serialization(_value: object) -> NoReturn:
+    raise _serialization_error()
 
 
 def _no_fallback(_provider: str) -> None:
@@ -104,9 +108,16 @@ class ProviderCallCredentials:
         raise _copy_error()
 
     @classmethod
-    def __get_pydantic_core_schema__(cls, source_type, handler) -> NoReturn:
+    def __get_pydantic_core_schema__(cls, source_type, handler) -> Any:
         del source_type, handler
-        raise _serialization_error()
+        from pydantic_core import core_schema
+
+        return core_schema.is_instance_schema(
+            cls,
+            serialization=core_schema.plain_serializer_function_ser_schema(
+                _reject_pydantic_serialization,
+            ),
+        )
 
     def model_dump(self, *args, **kwargs) -> NoReturn:
         del args, kwargs
@@ -127,6 +138,32 @@ class ProviderCallCredentials:
     def __json__(self, *args, **kwargs) -> NoReturn:
         del args, kwargs
         raise _serialization_error()
+
+
+def reject_provider_call_credentials(value: object) -> None:
+    """Reject provider credentials nested in supported persistence containers."""
+    seen: set[int] = set()
+
+    def visit(item: object) -> None:
+        if isinstance(item, ProviderCallCredentials):
+            raise _serialization_error()
+        if not isinstance(item, (Mapping, list, tuple, set, frozenset)):
+            return
+
+        identity = id(item)
+        if identity in seen:
+            return
+        seen.add(identity)
+
+        if isinstance(item, Mapping):
+            for key, nested in item.items():
+                visit(key)
+                visit(nested)
+            return
+        for nested in item:
+            visit(nested)
+
+    visit(value)
 
 
 class _ResolvedEntry:

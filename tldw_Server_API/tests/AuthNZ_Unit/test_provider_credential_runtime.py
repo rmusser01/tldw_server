@@ -19,10 +19,13 @@ from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
 from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     ProviderCallCredentials,
     ProviderCredentialRuntime,
+    reject_provider_call_credentials,
 )
 from tldw_Server_API.app.core.Jobs.manager import JobManager
-from tldw_Server_API.app.core.RAG.rag_service.checkpoint import CheckpointManager
-from tldw_Server_API.app.core.RAG.rag_service.semantic_cache import SemanticCache
+from tldw_Server_API.app.core.RAG.rag_service.checkpoint import (
+    CheckpointData,
+    CheckpointManager,
+)
 
 
 SECRET = "sk-runtime-sentinel-secret-value"
@@ -400,7 +403,6 @@ async def test_handle_rejects_serialization_and_persistence_without_leaking(
         lambda: copy.copy(handle),
         lambda: copy.deepcopy(handle),
         lambda: json.dumps(handle),
-        lambda: TypeAdapter(ProviderCallCredentials),
         lambda: handle.model_dump(),
         lambda: handle.model_dump_json(),
     )
@@ -410,18 +412,53 @@ async def test_handle_rejects_serialization_and_persistence_without_leaking(
         assert SECRET not in str(exc_info.value)
         assert SECRET not in repr(exc_info.value)
 
-    class Envelope(BaseModel):
+    class AnyEnvelope(BaseModel):
         credential: Any
 
-    envelope = Envelope(credential=handle)
-    with pytest.raises(Exception) as exc_info:
-        envelope.model_dump_json()
-    assert SECRET not in str(exc_info.value)
+    any_envelope = AnyEnvelope(credential=handle)
+    python_payload = any_envelope.model_dump(mode="python")
+    assert python_payload["credential"] is handle
+    with pytest.raises(TypeError) as exc_info:
+        reject_provider_call_credentials(python_payload)
+    assert str(exc_info.value) == "ProviderCallCredentials cannot be serialized"
+
+    class TypedEnvelope(BaseModel):
+        credential: ProviderCallCredentials
+
+    typed_envelope = TypedEnvelope(credential=handle)
+    adapter = TypeAdapter(ProviderCallCredentials)
+    assert adapter.validate_python(handle) is handle
+    pydantic_operations = (
+        lambda: any_envelope.model_dump(mode="json"),
+        lambda: any_envelope.model_dump_json(),
+        lambda: typed_envelope.model_dump(mode="json"),
+        lambda: typed_envelope.model_dump_json(),
+        lambda: adapter.dump_python(handle, mode="json"),
+        lambda: adapter.dump_json(handle),
+    )
+    for operation in pydantic_operations:
+        with pytest.raises(Exception) as exc_info:
+            operation()
+        assert SECRET not in str(exc_info.value)
+        assert SECRET not in repr(exc_info.value)
 
     checkpoint_dir = tmp_path / "checkpoints"
+    checkpoint = CheckpointData(
+        checkpoint_id="credential-test",
+        task_type="credential-test",
+        created_at="2026-07-12T00:00:00+00:00",
+        updated_at="2026-07-12T00:00:00+00:00",
+        total_items=1,
+        config={"credential": handle},
+    )
+    checkpoint_manager = CheckpointManager(checkpoint_dir)
+    checkpoint_path = checkpoint_manager.get_checkpoint_path("credential-test")
+    original_checkpoint = b'{"existing":true}\n'
+    checkpoint_path.write_bytes(original_checkpoint)
     with pytest.raises(Exception) as exc_info:
-        CheckpointManager(checkpoint_dir).create("credential-test", 1, config={"credential": handle})
+        checkpoint_manager._save_atomic(checkpoint)
     assert SECRET not in str(exc_info.value)
+    assert checkpoint_path.read_bytes() == original_checkpoint
 
     manager = JobManager(db_path=tmp_path / "jobs.db")
     with pytest.raises(Exception) as exc_info:
@@ -433,14 +470,6 @@ async def test_handle_rejects_serialization_and_persistence_without_leaking(
             owner_user_id=None,
         )
     assert SECRET not in str(exc_info.value)
-
-    cache_path = tmp_path / "cache.json"
-    cache = SemanticCache(persist_path=str(cache_path))
-    await cache.set("safe-query", {"credential": handle})
-    cache.save()
-    with pytest.raises(json.JSONDecodeError):
-        json.loads(cache_path.read_text())
-    cache.clear()
 
     for path in tmp_path.rglob("*"):
         if path.is_file():

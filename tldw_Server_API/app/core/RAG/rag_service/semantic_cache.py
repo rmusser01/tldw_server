@@ -20,6 +20,10 @@ from typing import Any, Optional, cast
 import numpy as np
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    reject_provider_call_credentials,
+)
+
 from .advanced_cache import CacheEntry
 
 
@@ -299,6 +303,7 @@ class SemanticCache:
             ttl: Time-to-live in seconds
             metadata: Optional metadata to store
         """
+        reject_provider_call_credentials(value)
         key = self._generate_key(query)
 
         # Generate embedding for semantic matching
