@@ -260,7 +260,11 @@ class FastGroundednessGrader:
                 timeout=self.timeout_sec,
             )
 
-            if isinstance(raw_response, str) and raw_response.startswith("Error:"):
+            if (
+                credential_handle is not None
+                and isinstance(raw_response, str)
+                and raw_response.startswith("Error:")
+            ):
                 raise SummaryProviderError(
                     code="provider_failure",
                     provider=use_provider,
@@ -549,7 +553,11 @@ class UtilityGrader:
                 timeout=self.timeout_sec,
             )
 
-            if isinstance(raw_response, str) and raw_response.startswith("Error:"):
+            if (
+                credential_handle is not None
+                and isinstance(raw_response, str)
+                and raw_response.startswith("Error:")
+            ):
                 raise SummaryProviderError(
                     code="provider_failure",
                     provider=use_provider,

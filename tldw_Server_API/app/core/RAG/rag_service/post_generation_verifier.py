@@ -206,19 +206,24 @@ class PostGenerationVerifier:
                 **kwargs,
             )
             if isinstance(response, Iterator):
-                from .generation import _extract_stream_text
+                from .generation import (
+                    _classify_stream_content,
+                    _extract_stream_text,
+                )
 
                 chunks = []
                 for chunk in response:
                     chunks.append(str(chunk))
-                    content = _extract_stream_text(chunk)
-                    if content is not None and content.startswith("Error:"):
+                    has_content, has_error = _classify_stream_content(
+                        _extract_stream_text(chunk)
+                    )
+                    if has_content:
+                        state["used"] = True
+                    if has_error:
                         raise SummaryProviderError(
                             code="provider_failure",
                             provider=claims_provider or credential_handle.provider,
                         )
-                    if content is not None:
-                        state["used"] = True
                 response = "".join(chunks)
             if isinstance(response, str) and response.startswith("Error:"):
                 raise SummaryProviderError(

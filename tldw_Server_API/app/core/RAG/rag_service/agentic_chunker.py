@@ -697,19 +697,24 @@ async def agentic_rag_pipeline(
                         **kwargs,
                     )
                     if isinstance(response, Iterator):
-                        from .generation import _extract_stream_text
+                        from .generation import (
+                            _classify_stream_content,
+                            _extract_stream_text,
+                        )
 
                         chunks = []
                         for chunk in response:
                             chunks.append(str(chunk))
-                            content = _extract_stream_text(chunk)
-                            if content is not None and content.startswith("Error:"):
+                            has_content, has_error = _classify_stream_content(
+                                _extract_stream_text(chunk)
+                            )
+                            if has_content:
+                                claims_state["used"] = True
+                            if has_error:
                                 raise SummaryProviderError(
                                     code="provider_failure",
                                     provider=claims_provider or claims_handle.provider,
                                 )
-                            if content is not None:
-                                claims_state["used"] = True
                         response = "".join(chunks)
                     if isinstance(response, str) and response.startswith("Error:"):
                         raise SummaryProviderError(
@@ -752,7 +757,14 @@ async def agentic_rag_pipeline(
                 }
                 logger.warning("Agentic claims provider unavailable")
             except (ImportError, AttributeError, ConnectionError, RuntimeError, TypeError, ValueError, TimeoutError):
-                logger.debug("Agentic claims verification skipped")
+                if credential_runtime is not None:
+                    result.metadata["claims"] = {
+                        "failure_code": "provider_unavailable",
+                        "verification_available": False,
+                    }
+                    logger.warning("Agentic claims provider unavailable")
+                else:
+                    logger.debug("Agentic claims verification skipped")
 
         # Hard citations using assembled spans
         try:
@@ -901,7 +913,14 @@ async def agentic_rag_pipeline(
                     elif low_confidence_behavior == "decline":
                         result.generated_answer = "Insufficient evidence found to answer confidently."
         except (ImportError, AttributeError, ConnectionError, RuntimeError, TypeError, ValueError, TimeoutError) as _enlv:
-            result.errors.append(f"NLI verification failed: {str(_enlv)}")
+            if credential_runtime is not None:
+                result.metadata["post_verification"] = {
+                    "failure_code": "provider_unavailable",
+                    "verification_available": False,
+                }
+                logger.warning("Agentic NLI verification provider unavailable")
+            else:
+                result.errors.append(f"NLI verification failed: {str(_enlv)}")
 
     # Include tool trace on debug
     if (debug_mode or cfg.debug_trace) and (not cached_hit) and cfg.enable_tools:

@@ -388,21 +388,24 @@ def _consume_bound_sgl_response(
     response: Any,
     provider: str,
     on_content: Callable[[], None] | None = None,
+    fail_closed: bool = False,
 ) -> Any:
     """Consume a bound SGL response and reject its legacy error-string form."""
     if isinstance(response, Iterator):
-        from .generation import _extract_stream_text
+        from .generation import _classify_stream_content, _extract_stream_text
 
         chunks: list[str] = []
         for chunk in response:
             chunks.append(str(chunk))
-            content = _extract_stream_text(chunk)
-            if content is not None and content.startswith("Error:"):
-                raise SummaryProviderError(code="provider_failure", provider=provider)
-            if on_content is not None and content is not None:
+            has_content, has_error = _classify_stream_content(
+                _extract_stream_text(chunk)
+            )
+            if on_content is not None and has_content:
                 on_content()
+            if fail_closed and has_error:
+                raise SummaryProviderError(code="provider_failure", provider=provider)
         response = "".join(chunks)
-    if isinstance(response, str) and response.startswith("Error:"):
+    if fail_closed and isinstance(response, str) and response.startswith("Error:"):
         raise SummaryProviderError(code="provider_failure", provider=provider)
     return response
 
@@ -4214,6 +4217,7 @@ async def unified_rag_pipeline(
                                 "content",
                                 True,
                             ),
+                            fail_closed=gap_handle is not None,
                         )
 
                     gap_completed = False
@@ -5183,6 +5187,7 @@ async def unified_rag_pipeline(
                                             response,
                                             self.provider,
                                             on_content=lambda: setattr(self, "used", True),
+                                            fail_closed=self.handle is not None,
                                         )
                                         self.used = True
                                         return response
@@ -6018,6 +6023,7 @@ async def unified_rag_pipeline(
                                         "content",
                                         True,
                                     ),
+                                    fail_closed=critique_handle is not None,
                                 )
 
                             critique_completed = False
@@ -6416,19 +6422,24 @@ async def unified_rag_pipeline(
                         **kwargs,
                     )
                     if isinstance(response, Iterator):
-                        from .generation import _extract_stream_text
+                        from .generation import (
+                            _classify_stream_content,
+                            _extract_stream_text,
+                        )
 
                         chunks = []
                         for chunk in response:
                             chunks.append(str(chunk))
-                            content = _extract_stream_text(chunk)
-                            if content is not None and content.startswith("Error:"):
+                            has_content, has_error = _classify_stream_content(
+                                _extract_stream_text(chunk)
+                            )
+                            if has_content:
+                                claims_state["used"] = True
+                            if has_error:
                                 raise SummaryProviderError(
                                     code="provider_failure",
                                     provider=claims_provider or claims_handle.provider,
                                 )
-                            if content is not None:
-                                claims_state["used"] = True
                         response = "".join(chunks)
                     if isinstance(response, str) and response.startswith("Error:"):
                         raise SummaryProviderError(
@@ -6686,7 +6697,12 @@ async def unified_rag_pipeline(
                         ValueError,
                         asyncio.TimeoutError,
                     ) as _eclaims:
-                        logger.debug(f"Pre-extracted claims path failed: {_eclaims}")
+                        if credential_runtime is not None:
+                            logger.debug(
+                                "Pre-extracted claims path failed; using on-the-fly fallback"
+                            )
+                        else:
+                            logger.debug(f"Pre-extracted claims path failed: {_eclaims}")
                         claims_run = await _run_claims_engine(
                             answer=result.generated_answer,
                             query=query,
@@ -7534,6 +7550,7 @@ async def unified_rag_pipeline(
                                                 "content",
                                                 True,
                                             ),
+                                            fail_closed=_f_handle is not None,
                                         )
 
                                     faithfulness_completed = False

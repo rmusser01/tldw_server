@@ -284,6 +284,24 @@ def _extract_stream_text(chunk: Any) -> Optional[str]:
         return None
 
 
+def _classify_stream_content(content: Optional[str]) -> tuple[bool, bool]:
+    """Return whether valid content precedes a legacy Error sentinel."""
+    if not content:
+        return False, False
+
+    has_valid_content = False
+    for line in content.splitlines():
+        normalized = line.strip()
+        if not normalized:
+            continue
+        if normalized.startswith("Error:"):
+            return has_valid_content, True
+        if normalized.lower() in _STREAM_CONTROL_TOKENS:
+            continue
+        has_valid_content = True
+    return has_valid_content, False
+
+
 class BaseGenerator(ABC):
     """Base class for response generators."""
 

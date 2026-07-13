@@ -267,7 +267,11 @@ class DocumentGrader:
                 timeout=self.config.timeout_seconds,
             )
 
-            if isinstance(raw_response, str) and raw_response.startswith("Error:"):
+            if (
+                credential_handle is not None
+                and isinstance(raw_response, str)
+                and raw_response.startswith("Error:")
+            ):
                 raise SummaryProviderError(
                     code="provider_failure",
                     provider=use_provider,
