@@ -93,20 +93,31 @@ async def _consume_tracked_stream(
         ["data: ping\n\n", "data: pong\n\n", "data: heartbeat\n\n", "data: keepalive\n\n"],
     ],
 )
+@pytest.mark.parametrize("stream_kind", ["sync", "async"])
 @pytest.mark.asyncio
 async def test_stream_controls_then_failure_remain_unmarked(
     monkeypatch: pytest.MonkeyPatch,
     control_chunks: list[str],
+    stream_kind: str,
 ) -> None:
     runtime = _StreamingRuntime()
 
-    async def upstream() -> Any:
-        for chunk in control_chunks:
-            yield chunk
-        raise ChatAuthenticationError("private upstream", provider="test-provider")
+    if stream_kind == "async":
+        async def async_upstream() -> Any:
+            for chunk in control_chunks:
+                yield chunk
+            raise ChatAuthenticationError("private upstream", provider="test-provider")
+
+        upstream: Any = async_upstream()
+    else:
+        def sync_upstream() -> Any:
+            yield from control_chunks
+            raise ChatAuthenticationError("private upstream", provider="test-provider")
+
+        upstream = sync_upstream()
 
     with pytest.raises(ChatAuthenticationError):
-        await _consume_tracked_stream(monkeypatch, upstream(), runtime)
+        await _consume_tracked_stream(monkeypatch, upstream, runtime)
 
     assert runtime.marked == []  # nosec B101
 
@@ -128,18 +139,34 @@ async def test_stream_preoutput_failure_remains_unmarked(
     assert runtime.marked == []  # nosec B101
 
 
+@pytest.mark.parametrize("stream_kind", ["sync", "async"])
+@pytest.mark.parametrize(
+    "control_chunk",
+    ["keepalive", ": keepalive\n\n", "data: ping\n\n"],
+)
 @pytest.mark.asyncio
 async def test_stream_controls_then_cancellation_remain_unmarked(
     monkeypatch: pytest.MonkeyPatch,
+    stream_kind: str,
+    control_chunk: str,
 ) -> None:
     runtime = _StreamingRuntime()
 
-    async def upstream() -> Any:
-        yield ": keepalive\n\n"
-        raise asyncio.CancelledError
+    if stream_kind == "async":
+        async def async_upstream() -> Any:
+            yield control_chunk
+            raise asyncio.CancelledError
+
+        upstream: Any = async_upstream()
+    else:
+        def sync_upstream() -> Any:
+            yield control_chunk
+            raise asyncio.CancelledError
+
+        upstream = sync_upstream()
 
     with pytest.raises(asyncio.CancelledError):
-        await _consume_tracked_stream(monkeypatch, upstream(), runtime)
+        await _consume_tracked_stream(monkeypatch, upstream, runtime)
 
     assert runtime.marked == []  # nosec B101
 
@@ -149,10 +176,10 @@ async def test_stream_controls_then_cancellation_remain_unmarked(
 @pytest.mark.parametrize(
     ("content", "expected_mark_count"),
     [
-        ("ping", 0),
-        ("pong", 0),
-        ("heartbeat", 0),
-        ("keepalive", 0),
+        ("ping", 1),
+        ("pong", 1),
+        ("heartbeat", 1),
+        ("keepalive", 1),
         ("", 0),
         ("answer", 1),
     ],

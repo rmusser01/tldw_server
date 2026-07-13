@@ -296,8 +296,6 @@ def _classify_stream_content(content: Optional[str]) -> tuple[bool, bool]:
             continue
         if normalized.startswith("Error:"):
             return has_valid_content, True
-        if normalized.lower() in _STREAM_CONTROL_TOKENS:
-            continue
         has_valid_content = True
     return has_valid_content, False
 
