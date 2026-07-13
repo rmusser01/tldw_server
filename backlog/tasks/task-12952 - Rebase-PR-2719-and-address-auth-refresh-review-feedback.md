@@ -1,7 +1,7 @@
 ---
 id: TASK-12952
 title: Rebase PR 2719 and address auth-refresh review feedback
-status: In Progress
+status: Done
 labels:
 - auth
 - webui
@@ -29,9 +29,9 @@ Rebase PR #2719 onto latest dev, evaluate and address every actionable review co
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 PR #2719 is rebased onto the latest origin/dev without unresolved conflicts.
-- [ ] #2 Every actionable inline and out-of-diff review comment is either fixed or answered with verified technical reasoning.
+- [x] #2 Every actionable inline and out-of-diff review comment is either fixed or answered with verified technical reasoning.
 - [x] #3 Focused unit, browser, build, compile, diff, and applicable security checks pass.
-- [ ] #4 The rebased branch is pushed and all addressed review threads are resolved.
+- [x] #4 The rebased branch is pushed and all addressed review threads are resolved.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -56,21 +56,21 @@ Post-rebase verification on 2026-07-12 at HEAD `4b741152bf9caab302856c52a2861347
 
 Final pre-push fetch on 2026-07-12 confirmed `origin/dev` remained `5634ea4a04ebcb6322a218469d6ff972b2435450`; HEAD `4b5d19c1281e5c3778616eb7a4c33b787a70c070` had merge-base `5634ea4a04` and `git merge-base --is-ancestor origin/dev HEAD` exited 0. The branch was 21 commits ahead and 0 behind, so no second rebase or verification repeat was required.
 
-Task remains In Progress because push and review-thread resolution are pending.
+Force-pushed the rebased branch with --force-with-lease. Posted direct replies to all eight inline comments, resolved all eight review threads, and posted a top-level technical response explaining why the two out-of-diff RAG wait suggestions conflict with the valid no-key initialization path. Updated the PR body with current task IDs and fresh verification, and restored draft status because the human-written Change summary remains pending. The newly triggered GitHub Actions jobs were inspected and remained queued with no branch-caused failure reported at finalization; CodeRabbit passed/skipped review for the dev target.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Rebased PR #2719 onto current dev, resolved the Backlog task-ID collision without altering the unrelated dev task, addressed every valid review finding, documented technical pushback for the invalid RAG waits, and verified the auth migration across unit tests, WebUI, and the packaged extension. The rebased branch is pushed, all review threads are resolved, and the PR remains draft pending the required human-written Change summary.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
