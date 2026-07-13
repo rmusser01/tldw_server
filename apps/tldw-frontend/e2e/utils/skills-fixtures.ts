@@ -131,7 +131,10 @@ export async function mockSkillsBeginnerApi(
         await fulfillJson(route, {}, 405)
         return
       }
-      const body = route.request().postDataJSON() as { args?: string; dry_run?: boolean }
+      const body = (route.request().postDataJSON() ?? {}) as {
+        args?: string
+        dry_run?: boolean
+      }
       const args = body.args ?? "A long article about Skills UX"
       await fulfillJson(route, {
         skill_name: "summarize",
@@ -259,14 +262,15 @@ export async function mockPowerUserSkillsLibrary(page: Page) {
   })
 
   await page.route(/\/api\/v1\/skills\/([^/?]+)(?:\/)?(?:\?.*)?$/, async (route) => {
-    const name = decodeURIComponent(new URL(route.request().url()).pathname.split("/").pop() ?? "")
+    const segments = new URL(route.request().url()).pathname.split("/").filter(Boolean)
+    const name = decodeURIComponent(segments.pop() ?? "")
     const skill = largeLibrarySkills.find((candidate) => candidate.name === name)
     if (!skill) {
       await fulfillJson(route, { detail: "Skill not found" }, 404)
       return
     }
     if (route.request().method() === "DELETE") {
-      deleteRequests.push({ name, body: route.request().postDataJSON() })
+      deleteRequests.push({ name })
       await fulfillJson(route, { deleted: true, count: 1 })
       return
     }

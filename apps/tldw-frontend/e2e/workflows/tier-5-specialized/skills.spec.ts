@@ -26,6 +26,35 @@ import {
 } from "../../utils/skills-fixtures"
 
 test.describe("Skills beginner journey (mocked)", () => {
+  test("fixture defaults a missing execute payload", async ({ page }) => {
+    await mockSkillsBeginnerApi(page, { seeded: true })
+    await seedAuth(page, {
+      serverUrl: TEST_CONFIG.serverUrl,
+      allowOffline: true,
+    })
+
+    await page.goto("/skills", { waitUntil: "domcontentloaded" })
+    await forceSkillsConnectionState(page)
+
+    const result = await page.evaluate(async () => {
+      const response = await fetch("/api/v1/skills/summarize/execute", {
+        method: "POST",
+      })
+      return {
+        status: response.status,
+        body: await response.json(),
+      }
+    })
+
+    expect(result).toEqual({
+      status: 200,
+      body: expect.objectContaining({
+        rendered_prompt: "Summarize this source: A long article about Skills UX",
+        dry_run: false,
+      }),
+    })
+  })
+
   test("seeds built-ins, opens test run, and persists after refresh", async ({
     page,
     diagnostics,
@@ -153,6 +182,36 @@ test.describe("Skills beginner journey (mocked)", () => {
 })
 
 test.describe("Skills power-user journey (mocked)", () => {
+  test("fixture accepts body-less skill deletes with trailing slashes", async ({ page }) => {
+    const api = await mockPowerUserSkillsLibrary(page)
+    await seedAuth(page, {
+      serverUrl: TEST_CONFIG.serverUrl,
+      allowOffline: true,
+    })
+
+    await page.goto("/skills", { waitUntil: "domcontentloaded" })
+    await forceSkillsConnectionState(page)
+
+    const statuses = await page.evaluate(async () => {
+      const paths = [
+        "/api/v1/skills/target-research-formatter",
+        "/api/v1/skills/target-research-formatter/",
+      ]
+      const results: number[] = []
+      for (const path of paths) {
+        const response = await fetch(path, { method: "DELETE" })
+        results.push(response.status)
+      }
+      return results
+    })
+
+    expect(statuses).toEqual([200, 200])
+    expect(api.deleteRequests).toEqual([
+      { name: "target-research-formatter" },
+      { name: "target-research-formatter" },
+    ])
+  })
+
   test("finds a skill outside page one and opens bulk delete confirmation", async ({
     page,
     diagnostics,
@@ -167,8 +226,7 @@ test.describe("Skills power-user journey (mocked)", () => {
     await forceSkillsConnectionState(page)
 
     const searchInput = page.getByPlaceholder("Search skills...")
-    await searchInput.focus()
-    await page.keyboard.type("target-research-formatter")
+    await searchInput.pressSequentially("target-research-formatter")
     await expect
       .poll(() => api.lastListUrl()?.searchParams.get("q"))
       .toBe("target-research-formatter")
