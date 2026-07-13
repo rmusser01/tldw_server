@@ -116,6 +116,174 @@ def test_generate_with_llm_sanitizes_utility_unavailable(monkeypatch):
 
 
 @pytest.mark.unit
+def test_generate_hypothetical_answer_keeps_legacy_sync_helper(monkeypatch):
+    monkeypatch.setattr(
+        hyde,
+        "_generate_with_llm",
+        lambda prompt, provider, model: "A complete legacy hypothetical answer with facts.",
+    )
+
+    assert hyde.generate_hypothetical_answer("legacy question") == (
+        "A complete legacy hypothetical answer with facts."
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_runtime_hyde_generation_uses_scoped_credentials_then_marks_used(monkeypatch):
+    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
+
+    app_config = {"openai_api": {"api_key": "configured-server-key"}}
+    handle = SimpleNamespace(
+        provider="openai",
+        api_key="runtime-hyde-key",
+        app_config=app_config,
+    )
+    runtime = _CredentialRuntime("openai")
+    runtime.handle = handle
+    captured: dict[str, Any] = {}
+
+    def fake_analyze(**kwargs):
+        assert runtime.marked == []
+        captured.update(kwargs)
+        return "A complete runtime hypothetical answer with facts."
+
+    monkeypatch.setattr(sgl, "analyze", fake_analyze)
+
+    result = await hyde.generate_hypothetical_answer_async(
+        "runtime question",
+        provider=" OpenAI ",
+        model=" runtime-model ",
+        credential_runtime=runtime,
+        stage_metadata={},
+    )
+
+    assert result == "A complete runtime hypothetical answer with facts."
+    assert runtime.resolved == ["openai"]
+    assert runtime.marked == [handle]
+    assert captured["api_name"] == "openai"
+    assert captured["api_key"] == "runtime-hyde-key"
+    assert captured["app_config"] is app_config
+    assert captured["credentials_resolved"] is True
+    assert captured["raise_on_error"] is True
+    assert captured["model_override"] == "runtime-model"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_runtime_hyde_credential_failure_uses_bounded_heuristic(monkeypatch):
+    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
+    from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+
+    class FailingRuntime:
+        async def resolve(self, provider: str):
+            raise ByokResolutionError("credential_store_unavailable", provider)
+
+    monkeypatch.setattr(
+        sgl,
+        "analyze",
+        lambda **_kwargs: pytest.fail("runtime failure must not use configured credentials"),
+    )
+    metadata: dict[str, Any] = {}
+
+    result = await hyde.generate_hypothetical_answer_async(
+        "credential failure question",
+        credential_runtime=FailingRuntime(),
+        stage_metadata=metadata,
+    )
+
+    assert result.startswith("Summary: An explanation of 'credential failure question'")
+    assert metadata == {
+        "embedding_coverage": "degraded",
+        "failure_code": "credential_store_unavailable",
+    }
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_runtime_hyde_rejects_unstructured_provider_error_without_leaking(monkeypatch):
+    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
+
+    secret = "runtime-provider-secret-detail"
+    runtime = _CredentialRuntime("openai")
+    monkeypatch.setattr(
+        sgl,
+        "analyze",
+        lambda **_kwargs: {"error": f"Provider rejected credentials: {secret}"},
+    )
+    metadata: dict[str, Any] = {}
+
+    result = await hyde.generate_hypothetical_answer_async(
+        "provider error response",
+        credential_runtime=runtime,
+        stage_metadata=metadata,
+    )
+
+    assert result.startswith("Summary: An explanation of 'provider error response'")
+    assert secret not in result
+    assert runtime.marked == []
+    assert metadata == {
+        "embedding_coverage": "degraded",
+        "failure_code": "provider_unavailable",
+    }
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_runtime_hyde_generation_propagates_cancellation(monkeypatch):
+    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
+
+    class CancelledRuntime:
+        async def resolve(self, _provider: str):
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(
+        sgl,
+        "analyze",
+        lambda **_kwargs: pytest.fail("cancelled resolution must not dispatch"),
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await hyde.generate_hypothetical_answer_async(
+            "cancelled question",
+            credential_runtime=CancelledRuntime(),
+            stage_metadata={},
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_runtime_hyde_records_completed_use_before_dispatch_cancellation(monkeypatch):
+    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
+
+    started = threading.Event()
+    release = threading.Event()
+    runtime = _CredentialRuntime("openai")
+
+    def fake_analyze(**_kwargs):
+        started.set()
+        assert release.wait(timeout=1.0)
+        return "A completed runtime hypothetical answer with facts."
+
+    monkeypatch.setattr(sgl, "analyze", fake_analyze)
+    task = asyncio.create_task(
+        hyde.generate_hypothetical_answer_async(
+            "cancel during dispatch",
+            credential_runtime=runtime,
+            stage_metadata={},
+        )
+    )
+    assert await asyncio.to_thread(started.wait, 1.0)
+
+    task.cancel()
+    release.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert runtime.marked == [runtime.handle]
+
+
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_embed_text_sanitizes_embedding_failure(monkeypatch):
     secret = "sk-secret-hyde-embedding"
@@ -468,9 +636,11 @@ async def test_unified_pipeline_with_hyde_merges_results():
         async def retrieve(self, *args, **kwargs):
             return base_docs
 
+    hyde_generation = AsyncMock(return_value="Hypo answer")
     hyde_embedding = AsyncMock(return_value=[0.1, 0.2, 0.3])
     with patch("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.MultiDatabaseRetriever", _FakeMultiRetriever), \
-         patch("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.generate_hypothetical_answer", return_value="Hypo answer"), \
+         patch("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.generate_hypothetical_answer", side_effect=AssertionError("runtime HyDE must not use the sync helper")), \
+         patch("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.generate_hypothetical_answer_async", new=hyde_generation, create=True), \
          patch("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.hyde_embed_text", new=hyde_embedding):
         result = await unified_rag_pipeline(
             query="test hyde",
@@ -493,6 +663,8 @@ async def test_unified_pipeline_with_hyde_merges_results():
         for d in base_docs + hyde_docs:
             assert d.id in ids
         assert captured["retrieval_runtime"] is runtime
+        assert hyde_generation.await_args.kwargs["credential_runtime"] is runtime
+        assert isinstance(hyde_generation.await_args.kwargs["stage_metadata"], dict)
         assert hyde_embedding.await_args.kwargs["credential_runtime"] is runtime
         assert isinstance(hyde_embedding.await_args.kwargs["stage_metadata"], dict)
 

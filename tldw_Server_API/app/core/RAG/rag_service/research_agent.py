@@ -204,7 +204,7 @@ def _normalize_web_results(
     return [item for item in processed_results if isinstance(item, dict)]
 
 
-def _create_local_db_search_action() -> ResearchAction:
+def _create_local_db_search_action(credential_runtime: Any = None) -> ResearchAction:
     """Create action that wraps the existing MultiDatabaseRetriever."""
 
     async def _execute(params: dict[str, Any]) -> ActionOutput:
@@ -219,7 +219,10 @@ def _create_local_db_search_action() -> ResearchAction:
                 search_mode="hybrid",
                 top_k=top_k,
             )
-            retriever = MultiDatabaseRetriever(config=config)
+            retriever_kwargs: dict[str, Any] = {"config": config}
+            if credential_runtime is not None:
+                retriever_kwargs["credential_runtime"] = credential_runtime
+            retriever = MultiDatabaseRetriever(**retriever_kwargs)
 
             # Build kwargs from available DB paths
             retrieve_kwargs: dict[str, Any] = {
@@ -802,7 +805,7 @@ def create_configured_registry(
         credential_runtime: Optional request-scoped provider credential runtime.
     """
     registry = ActionRegistry()
-    registry.register(_create_local_db_search_action())
+    registry.register(_create_local_db_search_action(credential_runtime))
     registry.register(_create_web_search_action())
     registry.register(_create_academic_search_action())
     registry.register(_create_discussion_search_action(default_platforms=discussion_platforms))
@@ -1135,7 +1138,7 @@ async def research_loop(
 
     def _normalized_tuple(values: Any) -> tuple[str, ...]:
         if not isinstance(values, (list, tuple, set)):
-            return tuple()
+            return ()
         normalized = sorted(_normalize_query(v) for v in values if str(v or "").strip())
         return tuple(v for v in normalized if v)
 

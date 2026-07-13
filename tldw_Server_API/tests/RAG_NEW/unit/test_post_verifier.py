@@ -470,6 +470,11 @@ async def test_adaptive_retrieval_threads_runtime_to_retriever_and_hyde_embeddin
             captured["retrieval_runtime"] = kwargs.get("credential_runtime")
             self.retrievers = {verifier_module.DataSource.MEDIA_DB: _MediaRetriever()}
 
+    async def fake_hyde_generation(query: str, provider=None, model=None, **kwargs):
+        captured["hyde_generation_runtime"] = kwargs.get("credential_runtime")
+        captured["hyde_generation_metadata"] = kwargs.get("stage_metadata")
+        return "hypothesis"
+
     async def fake_hyde_embedding(text: str, **kwargs):
         captured["hyde_runtime"] = kwargs.get("credential_runtime")
         captured["hyde_metadata"] = kwargs.get("stage_metadata")
@@ -486,7 +491,17 @@ async def test_adaptive_retrieval_threads_runtime_to_retriever_and_hyde_embeddin
         }
 
     monkeypatch.setattr(verifier_module, "MultiDatabaseRetriever", _MultiDatabaseRetriever)
-    monkeypatch.setattr(verifier_module, "generate_hypothetical_answer", lambda *args: "hypothesis")
+    monkeypatch.setattr(
+        verifier_module,
+        "generate_hypothetical_answer",
+        lambda *args: pytest.fail("runtime HyDE must not use the sync helper"),
+    )
+    monkeypatch.setattr(
+        verifier_module,
+        "generate_hypothetical_answer_async",
+        fake_hyde_generation,
+        raising=False,
+    )
     monkeypatch.setattr(verifier_module, "hyde_embed_text", fake_hyde_embedding)
     monkeypatch.setattr(verifier_module, "multi_strategy_expansion", None)
     monkeypatch.setattr(verifier_module, "AnswerGenerator", None)
@@ -506,8 +521,11 @@ async def test_adaptive_retrieval_threads_runtime_to_retriever_and_hyde_embeddin
     )
 
     assert captured["retrieval_runtime"] is runtime
+    assert captured["hyde_generation_runtime"] is runtime
+    assert isinstance(captured["hyde_generation_metadata"], dict)
     assert captured["hyde_runtime"] is runtime
     assert isinstance(captured["hyde_metadata"], dict)
+    assert captured["hyde_generation_metadata"] is captured["hyde_metadata"]
     assert outcome.embedding_coverage == "degraded"
     assert outcome.embedding_failure_code == "credential_store_unavailable"
 

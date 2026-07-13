@@ -1,13 +1,12 @@
 import pytest
 
-from tldw_Server_API.app.core.RAG.rag_service.query_classifier import QueryClassification
 from tldw_Server_API.app.core.RAG.rag_service import research_agent as ra
+from tldw_Server_API.app.core.RAG.rag_service.query_classifier import QueryClassification
 from tldw_Server_API.app.core.RAG.rag_service.research_agent import create_default_registry
 from tldw_Server_API.tests.RAG_NEW.unit.test_generation_executor import (
-    _RecordingCredentialRuntime,
     _install_explicit_chat_capture,
+    _RecordingCredentialRuntime,
 )
-
 
 pytestmark = pytest.mark.unit
 
@@ -393,6 +392,45 @@ async def test_default_registry_passes_runtime_to_media_actions(monkeypatch):
     )
 
     output = await registry.execute("image_search", {"query": "architecture diagram"})
+
+    assert output.success is True
+    assert captured["credential_runtime"] is runtime
+
+
+@pytest.mark.asyncio
+async def test_default_registry_passes_runtime_to_local_database_action(monkeypatch):
+    from tldw_Server_API.app.core.RAG.rag_service import database_retrievers
+
+    runtime = object()
+    captured: dict[str, object] = {}
+
+    class FakeMultiDatabaseRetriever:
+        def __init__(self, *args, **kwargs):
+            captured.update(kwargs)
+
+        async def retrieve(self, **_kwargs):
+            return []
+
+    class FakeRetrievalConfig:
+        def __init__(self, **_kwargs):
+            pass
+
+    monkeypatch.setattr(
+        database_retrievers,
+        "MultiDatabaseRetriever",
+        FakeMultiDatabaseRetriever,
+    )
+    monkeypatch.setattr(
+        database_retrievers,
+        "RetrievalConfig",
+        FakeRetrievalConfig,
+    )
+    registry = create_default_registry(credential_runtime=runtime)
+
+    output = await registry.execute(
+        "local_db_search",
+        {"query": "runtime local search", "sources": ["media_db"]},
+    )
 
     assert output.success is True
     assert captured["credential_runtime"] is runtime

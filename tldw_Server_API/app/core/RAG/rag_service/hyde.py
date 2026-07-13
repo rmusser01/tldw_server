@@ -14,6 +14,44 @@ from typing import Any, Callable, Optional
 from loguru import logger
 
 
+def _hyde_prompt(query: str) -> str:
+    """Build the shared retrieval-oriented HyDE prompt."""
+    return (
+        "You are helping with retrieval. Write a concise, factual, neutral "
+        "paragraph (2-5 sentences) that likely answers this question. Avoid hedging, "
+        "cite plausible entities, metrics, and terminology.\n\n"
+        f"Question: {query}\n"
+    )
+
+
+def _heuristic_hypothetical_answer(query: str) -> str:
+    """Return the deterministic fallback used by optional HyDE generation."""
+    return f"Summary: An explanation of '{query}' including key facts, definitions, examples, and typical metrics."
+
+
+def _hyde_response_text(response: Any) -> str:
+    """Coerce supported provider response shapes into HyDE text."""
+    if isinstance(response, str):
+        return response
+    if isinstance(response, dict):
+        value = response.get("text") or response.get("content")
+        return value if isinstance(value, str) else ""
+    return "" if response is None else str(response)
+
+
+async def _mark_runtime_used_for_hyde(
+    response: Any,
+    *,
+    credential_runtime: Any,
+    handle: Any,
+) -> None:
+    """Mark credentials only after the provider returns usable, non-error text."""
+    text = _hyde_response_text(response).strip()
+    if not text or text.startswith("Error:"):
+        raise RuntimeError("HyDE provider request failed")
+    await credential_runtime.mark_used(handle)
+
+
 def _generate_with_llm(prompt: str, provider: Optional[str], model: Optional[str]) -> Optional[str]:
     """Call the existing LLM utility to generate text.
 
@@ -63,17 +101,56 @@ def generate_hypothetical_answer(query: str, provider: Optional[str] = None, mod
 
     Falls back to a heuristic template if LLM is unavailable.
     """
-    prompt = (
-        "You are helping with retrieval. Write a concise, factual, neutral "
-        "paragraph (2-5 sentences) that likely answers this question. Avoid hedging, "
-        "cite plausible entities, metrics, and terminology.\n\n"
-        f"Question: {query}\n"
-    )
-    text = _generate_with_llm(prompt, provider, model)
+    text = _generate_with_llm(_hyde_prompt(query), provider, model)
     if text and len(text.split()) >= 5:
         return text
-    # Fallback heuristic
-    return f"Summary: An explanation of '{query}' including key facts, definitions, examples, and typical metrics."
+    return _heuristic_hypothetical_answer(query)
+
+
+async def generate_hypothetical_answer_async(
+    query: str,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    *,
+    credential_runtime: Any,
+    stage_metadata: dict[str, Any] | None = None,
+) -> str:
+    """Generate HyDE text with request-scoped credentials and fail closed."""
+    effective_provider = (provider or "openai").strip().lower()
+    effective_model = (model or "gpt-4o-mini").strip()
+    try:
+        import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
+
+        handle = await credential_runtime.resolve(effective_provider)
+        response = await _run_sync_embedding_call(
+            partial(
+                sgl.analyze,
+                api_name=str(getattr(handle, "provider", effective_provider) or effective_provider),
+                input_data="",
+                custom_prompt_arg=_hyde_prompt(query),
+                api_key=handle.api_key,
+                system_message=None,
+                temp=None,
+                model_override=effective_model,
+                app_config=handle.app_config,
+                credentials_resolved=True,
+                raise_on_error=True,
+            ),
+            on_success=partial(
+                _mark_runtime_used_for_hyde,
+                credential_runtime=credential_runtime,
+                handle=handle,
+            ),
+        )
+        text = _hyde_response_text(response)
+        if len(text.split()) >= 5:
+            return text.strip()
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - optional stage degrades to heuristic
+        _record_embedding_degraded(stage_metadata, exc)
+        logger.warning("Runtime HyDE generation failed")
+    return _heuristic_hypothetical_answer(query)
 
 
 def _embedding_provider_from_config(

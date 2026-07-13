@@ -702,3 +702,48 @@ async def test_tool_loop_does_not_start_planner_after_embedding_setup_exhausts_b
     assert planner_calls == 0
     assert content == "alpha"
     assert len(citations) == 1
+
+
+@pytest.mark.asyncio
+async def test_optional_planner_uses_runtime_and_degrades_without_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+
+    runtime = object()
+    planner_runtimes: list[Any] = []
+    planner_generate_calls = 0
+
+    class Planner:
+        def __init__(self, *args, **kwargs):
+            planner_runtimes.append(kwargs.get("credential_runtime"))
+
+        async def generate(self, **_kwargs):
+            nonlocal planner_generate_calls
+            planner_generate_calls += 1
+            raise ByokResolutionError("credential_store_unavailable", "openai")
+
+    monkeypatch.setattr(agentic_execution, "AnswerGenerator", Planner)
+    metadata: dict[str, Any] = {}
+
+    content, citations, _ = await agentic_execution.tool_loop(
+        [Document(id="planner", content="alpha", source=DataSource.MEDIA_DB, metadata={})],
+        "alpha",
+        AgenticConfig(
+            top_k_docs=1,
+            max_tool_calls=1,
+            enable_metrics=False,
+            use_llm_planner=True,
+        ),
+        credential_runtime=runtime,
+        stage_metadata=metadata,
+    )
+
+    assert planner_runtimes == [runtime]
+    assert planner_generate_calls == 1
+    assert content == "alpha"
+    assert len(citations) == 1
+    assert metadata == {
+        "embedding_coverage": "degraded",
+        "failure_code": "credential_store_unavailable",
+    }

@@ -287,6 +287,7 @@ _QueryIntent: Any = None
 _QueryRouter: Any = None
 _QueryRewriter: Any = None
 _generate_hypothetical_answer: Any = None
+_generate_hypothetical_answer_async: Any = None
 _hyde_embed_text: Any = None
 _expand_acronyms: Any = None
 _expand_synonyms: Any = None
@@ -586,11 +587,16 @@ try:
     from .hyde import (
         generate_hypothetical_answer as _generate_hypothetical_answer,
     )
+    from .hyde import (
+        generate_hypothetical_answer_async as _generate_hypothetical_answer_async,
+    )
 except ImportError:
     _generate_hypothetical_answer = None
+    _generate_hypothetical_answer_async = None
     _hyde_embed_text = None
 
 generate_hypothetical_answer = _generate_hypothetical_answer
+generate_hypothetical_answer_async = _generate_hypothetical_answer_async
 hyde_embed_text = _hyde_embed_text
 
 try:
@@ -3489,11 +3495,18 @@ async def unified_rag_pipeline(
                     hyde_model = hyde_model or (str(raw_model).strip() if raw_model else None)
                 except (ImportError, AttributeError, OSError, TypeError, ValueError):
                     pass
-                hypo = generate_hypothetical_answer(query, hyde_provider, hyde_model)
                 hyde_embedding_metadata: dict[str, Any] = {}
                 if credential_runtime is None:
+                    hypo = generate_hypothetical_answer(query, hyde_provider, hyde_model)
                     vec = await hyde_embed_text(hypo)
                 else:
+                    hypo = await generate_hypothetical_answer_async(
+                        query,
+                        hyde_provider,
+                        hyde_model,
+                        credential_runtime=credential_runtime,
+                        stage_metadata=hyde_embedding_metadata,
+                    )
                     vec = await hyde_embed_text(
                         hypo,
                         credential_runtime=credential_runtime,

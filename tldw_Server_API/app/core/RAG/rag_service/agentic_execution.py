@@ -22,6 +22,7 @@ import numpy as np
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 from tldw_Server_API.app.core.LLM_Calls.structured_output import (
     StructuredOutputOptions,
@@ -776,7 +777,10 @@ async def tool_loop(
             planner_cls = AnswerGenerator
             if planner_cls is None:
                 raise RuntimeError("AnswerGenerator is unavailable")
-            planner = planner_cls(model=None)
+            planner_kwargs: dict[str, Any] = {"model": None}
+            if credential_runtime is not None:
+                planner_kwargs["credential_runtime"] = credential_runtime
+            planner = planner_cls(**planner_kwargs)
             gen = await planner.generate(query=query, context="", prompt_template="default", max_tokens=200)
             text = gen.get("answer", "") if isinstance(gen, dict) else str(gen)
             payload = parse_structured_output(
@@ -796,6 +800,10 @@ async def tool_loop(
                     planned_headings = [str(item)[:80] for item in obj["headings"]][:5]
                 if isinstance(obj.get("keywords"), list):
                     planned_terms = [str(item)[:40] for item in obj["keywords"]][:8]
+        except (ByokResolutionError, ChatAPIError) as exc:
+            _record_embedding_degraded(stage_metadata, exc)
+            planned_headings = []
+            planned_terms = []
         except (ImportError, AttributeError, ConnectionError, RuntimeError, TypeError, ValueError, TimeoutError):
             planned_headings = []
             planned_terms = []

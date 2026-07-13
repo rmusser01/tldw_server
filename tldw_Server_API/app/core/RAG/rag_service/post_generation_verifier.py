@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from .generation import AnswerGenerator as AnswerGeneratorType
     from .types import DataSource, Document
     GenerateHypoFn = Callable[[str, Optional[str], Optional[str]], str]
+    GenerateHypoAsyncFn = Callable[..., Any]
     HydeEmbedFn = Callable[[str], Any]
     MultiStrategyExpansionFn = Callable[..., Any]
 else:
@@ -59,6 +60,7 @@ else:
     MultiDatabaseRetrieverType = Any
     AnswerGeneratorType = Any
     GenerateHypoFn = Any
+    GenerateHypoAsyncFn = Any
     HydeEmbedFn = Any
     MultiStrategyExpansionFn = Any
 
@@ -66,6 +68,7 @@ ClaimsEngine: type[ClaimsEngineType] | None = None
 MultiDatabaseRetriever: type[MultiDatabaseRetrieverType] | None = None
 AnswerGenerator: type[AnswerGeneratorType] | None = None
 generate_hypothetical_answer: GenerateHypoFn | None = None
+generate_hypothetical_answer_async: GenerateHypoAsyncFn | None = None
 hyde_embed_text: HydeEmbedFn | None = None
 multi_strategy_expansion: MultiStrategyExpansionFn | None = None
 
@@ -90,9 +93,14 @@ except ImportError:
 try:
     from . import hyde as _hyde_mod
     generate_hypothetical_answer = cast(Optional[GenerateHypoFn], getattr(_hyde_mod, "generate_hypothetical_answer", None))
+    generate_hypothetical_answer_async = cast(
+        Optional[GenerateHypoAsyncFn],
+        getattr(_hyde_mod, "generate_hypothetical_answer_async", None),
+    )
     hyde_embed_text = cast(Optional[HydeEmbedFn], getattr(_hyde_mod, "embed_text", None))
 except ImportError:
     generate_hypothetical_answer = None
+    generate_hypothetical_answer_async = None
     hyde_embed_text = None
 
 try:
@@ -492,8 +500,19 @@ class PostGenerationVerifier:
                             hyde_vector = None
                             try:
                                 if generate_hypothetical_answer is not None and hyde_embed_text is not None:
-                                    hypo = generate_hypothetical_answer(query, None, None)
                                     hyde_metadata: dict[str, Any] = {}
+                                    if self._credential_runtime is None:
+                                        hypo = generate_hypothetical_answer(query, None, None)
+                                    elif generate_hypothetical_answer_async is not None:
+                                        hypo = await generate_hypothetical_answer_async(
+                                            query,
+                                            None,
+                                            None,
+                                            credential_runtime=self._credential_runtime,
+                                            stage_metadata=hyde_metadata,
+                                        )
+                                    else:
+                                        raise RuntimeError("Runtime HyDE generation is unavailable")
                                     vec = await hyde_embed_text(
                                         hypo,
                                         credential_runtime=self._credential_runtime,
