@@ -11,7 +11,6 @@ from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.exceptions import BadRequestError
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -334,6 +333,8 @@ def test_get_media_ingest_job_rejects_boolean_admin_without_claims(monkeypatch, 
 
     from tldw_Server_API.app.api.v1.endpoints.media.ingest_jobs import (
         get_job_manager,
+    )
+    from tldw_Server_API.app.api.v1.endpoints.media.ingest_jobs import (
         router as ingest_jobs_router,
     )
 
@@ -684,3 +685,511 @@ def test_submit_media_ingest_jobs_routes_heavy_request_to_heavy_queue_when_route
 
     assert resp.status_code == 200, resp.text
     assert captured == ["media-heavy"]
+
+
+def _seed_occurrence_run(*, owner_id="1", include_file=False, planned=False):
+    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestStore,
+    )
+
+    manager = ingest_jobs.get_job_manager()
+    store = PlaylistIngestStore(manager)
+    items = [
+        {
+            "occurrence_id": "occ-url-1",
+            "input_kind": "direct_url",
+            "source_url": "https://www.youtube.com/watch?v=alpha123456",
+            "normalized_source_id": "youtube:video:alpha123456",
+            "source_kind": "youtube_video",
+            "display_metadata": {"title": "Alpha"},
+            "state": "staged",
+            "action": "ingest",
+            "metadata_patch": None,
+        },
+        {
+            "occurrence_id": "occ-url-2",
+            "input_kind": "direct_url",
+            "source_url": "https://www.youtube.com/watch?v=alpha123456",
+            "normalized_source_id": "youtube:video:alpha123456",
+            "source_kind": "youtube_video",
+            "display_metadata": {"title": "Alpha repeated"},
+            "state": "staged",
+            "action": "overwrite",
+            "metadata_patch": {"title": "Reviewed Alpha"},
+        },
+    ]
+    if include_file:
+        items.append(
+            {
+                "occurrence_id": "occ-file-1",
+                "input_kind": "file_stub",
+                "source_url": None,
+                "normalized_source_id": None,
+                "source_kind": "file",
+                "display_metadata": {"name": "clip.mp3", "size_bytes": 4},
+                "state": "awaiting_upload",
+                "action": "ingest",
+                "metadata_patch": None,
+            }
+        )
+    run = store.create_validated_run(owner_id, items=items)
+    if planned:
+        planned_ids = {"occ-url-1": 101, "occ-url-2": 102}
+        if include_file:
+            planned_ids["occ-file-1"] = 103
+        store.attach_collection_plan(owner_id, run.run_id, collection_id=55, planned_item_ids=planned_ids)
+    return manager, store, run
+
+
+def _run_submit_data(run_id, *, urls=None, occurrence_ids=None, attempts=None, planned_item_ids=None):
+    data = {
+        "media_type": "video",
+        "run_id": run_id,
+        "urls": urls or ["https://www.youtube.com/watch?v=alpha123456"],
+        "occurrence_ids": json.dumps(occurrence_ids or ["occ-url-1"]),
+        "attempts": json.dumps(attempts or [1]),
+    }
+    if planned_item_ids is not None:
+        data["planned_item_ids"] = json.dumps(planned_item_ids)
+    return data
+
+
+def test_run_bound_url_submit_uses_server_authority_and_derived_idempotency(
+    media_ingest_jobs_client,
+):
+    manager, store, run = _seed_occurrence_run(planned=True)
+    data = _run_submit_data(
+        run.run_id,
+        urls=[
+            "https://www.youtube.com/watch?v=alpha123456",
+            "https://www.youtube.com/watch?v=alpha123456",
+        ],
+        occurrence_ids=["occ-url-1", "occ-url-2"],
+        attempts=[1, 1],
+        planned_item_ids=[101, 102],
+    )
+    data["idempotency_keys"] = json.dumps(["attacker-key-1", "attacker-key-2"])
+
+    response = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=data,
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert [record["status"] for record in body["submissions"]] == ["accepted", "accepted"]
+    assert [record["occurrence_id"] for record in body["submissions"]] == ["occ-url-1", "occ-url-2"]
+    assert all(record["accepted"] is True for record in body["submissions"])
+    assert all(record["attempt"] == 1 for record in body["submissions"])
+    assert all(record["batch_id"] == body["batch_id"] for record in body["submissions"])
+
+    jobs = manager.list_jobs(domain="media_ingest", owner_user_id="1", limit=10)
+    assert len(jobs) == 2
+    payloads = [json.loads(job["payload"]) if isinstance(job["payload"], str) else job["payload"] for job in jobs]
+    assert {payload["occurrence_id"] for payload in payloads} == {"occ-url-1", "occ-url-2"}
+    assert {payload["source"] for payload in payloads} == {"https://www.youtube.com/watch?v=alpha123456"}
+    assert {payload["run_id"] for payload in payloads} == {run.run_id}
+    assert {payload["attempt"] for payload in payloads} == {1}
+    assert {payload["planned_item_id"] for payload in payloads} == {101, 102}
+    derived = {payload["idempotency_key"] for payload in payloads}
+    assert len(derived) == 2
+    assert not derived & {"attacker-key-1", "attacker-key-2"}
+    assert all(key.startswith("playlist-ingest-v1:") for key in derived)
+    assert [item.state for item in store.list_run_items("1", run.run_id)] == ["queued", "queued"]
+
+
+def test_run_bound_submit_isolates_source_mismatch_without_blocking_valid_occurrence(
+    media_ingest_jobs_client,
+):
+    manager, store, run = _seed_occurrence_run()
+
+    response = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=_run_submit_data(
+            run.run_id,
+            urls=["https://attacker.invalid/wrong", "https://www.youtube.com/watch?v=alpha123456"],
+            occurrence_ids=["occ-url-1", "occ-url-2"],
+            attempts=[1, 1],
+        ),
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert response.status_code == 207, response.text
+    submissions = response.json()["submissions"]
+    assert submissions[0] == {
+        "occurrence_id": "occ-url-1",
+        "status": "rejected",
+        "accepted": False,
+        "job_id": None,
+        "batch_id": response.json()["batch_id"],
+        "error_code": "occurrence_source_mismatch",
+        "message": "Submitted source does not match the run occurrence.",
+        "retryable": False,
+        "attempt": 1,
+    }
+    assert submissions[1]["status"] == "accepted"
+    assert len(manager.list_jobs(domain="media_ingest", owner_user_id="1", limit=10)) == 1
+    assert store.get_run_item("1", run.run_id, "occ-url-1").state == "staged"
+    assert store.get_run_item("1", run.run_id, "occ-url-2").state == "queued"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("occurrence_ids", json.dumps(["occ-url-1"])),
+        ("attempts", json.dumps([1])),
+        ("planned_item_ids", json.dumps([101])),
+    ],
+)
+def test_run_bound_url_submit_rejects_misaligned_arrays_before_jobs(
+    media_ingest_jobs_client,
+    field,
+    value,
+):
+    manager, _store, run = _seed_occurrence_run(planned=True)
+    data = _run_submit_data(
+        run.run_id,
+        urls=[
+            "https://www.youtube.com/watch?v=alpha123456",
+            "https://www.youtube.com/watch?v=alpha123456",
+        ],
+        occurrence_ids=["occ-url-1", "occ-url-2"],
+        attempts=[1, 1],
+        planned_item_ids=[101, 102],
+    )
+    data[field] = value
+
+    response = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=data,
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert response.status_code == 422, response.text
+    assert len(manager.list_jobs(domain="media_ingest", owner_user_id="1", limit=10)) == 0
+
+
+@pytest.mark.parametrize("attempt", ["true", "1.0", "0", "-1", "2"])
+def test_run_bound_submit_rejects_invalid_or_stale_attempt_strictly(
+    media_ingest_jobs_client,
+    attempt,
+):
+    manager, store, run = _seed_occurrence_run()
+
+    response = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=_run_submit_data(run.run_id, attempts=[attempt]),
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert response.status_code in {207, 422}, response.text
+    assert len(manager.list_jobs(domain="media_ingest", owner_user_id="1", limit=10)) == 0
+    assert store.get_run_item("1", run.run_id, "occ-url-1").state == "staged"
+
+
+def test_run_bound_submit_rejects_cross_owner_run_without_leaking_it(
+    media_ingest_jobs_client,
+):
+    manager, _store, run = _seed_occurrence_run(owner_id="other-owner")
+
+    response = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=_run_submit_data(run.run_id),
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert response.status_code == 404, response.text
+    assert response.json()["detail"] == "Playlist ingest run not found."
+    assert manager.list_jobs(domain="media_ingest", owner_user_id=None, limit=10) == []
+
+
+def test_run_bound_submit_treats_server_draining_as_global_before_jobs(
+    media_ingest_jobs_client,
+    monkeypatch,
+):
+    manager, store, run = _seed_occurrence_run()
+    from fastapi import HTTPException
+
+    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
+
+    def reject_during_drain(_app, _kind):
+        raise HTTPException(status_code=503, detail={"code": "server_draining"})
+
+    monkeypatch.setattr(ingest_jobs, "assert_may_start_work", reject_during_drain, raising=True)
+
+    response = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=_run_submit_data(run.run_id),
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert response.status_code == 503, response.text
+    assert manager.list_jobs(domain="media_ingest", owner_user_id="1", limit=10) == []
+    assert store.get_run_item("1", run.run_id, "occ-url-1").state == "staged"
+
+
+@pytest.mark.parametrize(("state", "action"), [("preparing", "skip"), ("terminal", "skip")])
+def test_run_bound_submit_rejects_nonprocessing_task6_states(
+    media_ingest_jobs_client,
+    state,
+    action,
+):
+    manager, store, run = _seed_occurrence_run()
+    with store._connection(write=True) as db:
+        if state == "terminal":
+            store._query(
+                db,
+                "UPDATE media_ingest_run_items SET state = ?, duplicate_policy = ?, outcome = 'skipped_existing' "
+                "WHERE run_id = ? AND occurrence_id = ?",
+                (state, action, run.run_id, "occ-url-1"),
+            )
+        else:
+            store._query(
+                db,
+                "UPDATE media_ingest_run_items SET state = ?, duplicate_policy = ? "
+                "WHERE run_id = ? AND occurrence_id = ?",
+                (state, action, run.run_id, "occ-url-1"),
+            )
+
+    response = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=_run_submit_data(run.run_id),
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert response.status_code == 207, response.text
+    assert response.json()["submissions"][0]["error_code"] == "occurrence_not_processable"
+    assert manager.list_jobs(domain="media_ingest", owner_user_id="1", limit=10) == []
+
+
+def test_run_bound_submit_validates_planned_id_against_stored_authority(
+    media_ingest_jobs_client,
+):
+    manager, store, run = _seed_occurrence_run(planned=True)
+
+    response = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=_run_submit_data(run.run_id, planned_item_ids=[999]),
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert response.status_code == 207, response.text
+    assert response.json()["submissions"][0]["error_code"] == "planned_item_mismatch"
+    assert manager.list_jobs(domain="media_ingest", owner_user_id="1", limit=10) == []
+    assert store.get_run_item("1", run.run_id, "occ-url-1").state == "staged"
+
+
+def test_run_bound_submit_rejects_bool_like_planned_id_strictly(media_ingest_jobs_client):
+    manager, store, run = _seed_occurrence_run(planned=True)
+    data = _run_submit_data(run.run_id)
+    data["planned_item_ids"] = json.dumps([True])
+
+    response = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=data,
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert response.status_code == 422, response.text
+    assert manager.list_jobs(domain="media_ingest", owner_user_id="1", limit=10) == []
+    assert store.get_run_item("1", run.run_id, "occ-url-1").state == "staged"
+
+
+def test_run_bound_submit_rejects_more_than_500_items_before_run_lookup(media_ingest_jobs_client):
+    urls = [f"https://example.com/video/{index}" for index in range(501)]
+
+    response = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data={
+            "media_type": "video",
+            "run_id": "does-not-exist",
+            "urls": urls,
+            "occurrence_ids": json.dumps([f"occ-{index}" for index in range(501)]),
+            "attempts": json.dumps([1] * 501),
+        },
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert response.status_code == 422, response.text
+    assert "between 1 and 500" in response.text
+
+
+def test_run_bound_file_submit_aligns_identity_before_staging(
+    media_ingest_jobs_client,
+    tmp_path,
+):
+    manager, store, run = _seed_occurrence_run(include_file=True, planned=True)
+
+    response = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data={
+            "media_type": "audio",
+            "run_id": run.run_id,
+            "file_occurrence_ids": json.dumps(["occ-file-1"]),
+            "file_attempts": json.dumps([1]),
+            "file_planned_item_ids": json.dumps([103]),
+        },
+        files=[("files", ("clip.mp3", b"test", "audio/mpeg"))],
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert response.status_code == 200, response.text
+    record = response.json()["submissions"][0]
+    assert record["occurrence_id"] == "occ-file-1"
+    assert record["status"] == "accepted"
+    job = manager.get_job(record["job_id"])
+    payload = json.loads(job["payload"]) if isinstance(job["payload"], str) else job["payload"]
+    assert payload["run_id"] == run.run_id
+    assert payload["occurrence_id"] == "occ-file-1"
+    assert payload["attempt"] == 1
+    assert payload["planned_item_id"] == 103
+    assert store.get_run_item("1", run.run_id, "occ-file-1").state == "queued"
+    shutil.rmtree(payload["temp_dir"], ignore_errors=True)
+
+
+def test_run_bound_file_length_mismatch_does_not_stage_or_leak(
+    media_ingest_jobs_client,
+    monkeypatch,
+):
+    manager, store, run = _seed_occurrence_run(include_file=True)
+    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
+
+    stage_calls = 0
+
+    async def fail_if_staged(*_args, **_kwargs):
+        nonlocal stage_calls
+        stage_calls += 1
+        raise AssertionError("length validation must happen before upload staging")
+
+    monkeypatch.setattr(ingest_jobs, "save_uploaded_files", fail_if_staged, raising=True)
+
+    response = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data={
+            "media_type": "audio",
+            "run_id": run.run_id,
+            "file_occurrence_ids": json.dumps([]),
+            "file_attempts": json.dumps([1]),
+        },
+        files=[("files", ("clip.mp3", b"test", "audio/mpeg"))],
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert response.status_code == 422, response.text
+    assert stage_calls == 0
+    assert manager.list_jobs(domain="media_ingest", owner_user_id="1", limit=10) == []
+    assert store.get_run_item("1", run.run_id, "occ-file-1").state == "awaiting_upload"
+
+
+def test_run_bound_file_job_failure_cleans_staging_and_releases_reservation(
+    media_ingest_jobs_client,
+    monkeypatch,
+):
+    manager, store, run = _seed_occurrence_run(include_file=True)
+    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
+
+    cleaned: list[str] = []
+    original_cleanup = ingest_jobs._cleanup_dir
+
+    def record_cleanup(path):
+        cleaned.append(path)
+        original_cleanup(path)
+
+    monkeypatch.setattr(ingest_jobs, "_cleanup_dir", record_cleanup, raising=True)
+    monkeypatch.setattr(
+        ingest_jobs,
+        "_create_media_ingest_job",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("private token=do-not-leak")),
+        raising=True,
+    )
+
+    response = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data={
+            "media_type": "audio",
+            "run_id": run.run_id,
+            "file_occurrence_ids": json.dumps(["occ-file-1"]),
+            "file_attempts": json.dumps([1]),
+        },
+        files=[("files", ("clip.mp3", b"test", "audio/mpeg"))],
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert response.status_code == 207, response.text
+    assert response.json()["submissions"][0]["error_code"] == "job_submission_failed"
+    assert "do-not-leak" not in response.text
+    assert cleaned and all(not Path(path).exists() for path in cleaned)
+    assert manager.list_jobs(domain="media_ingest", owner_user_id="1", limit=10) == []
+    assert store.get_run_item("1", run.run_id, "occ-file-1").state == "awaiting_upload"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://www.youtube.com/playlist?list=PLopaque",
+        "https://youtu.be/alpha123456?list=PLopaque",
+    ],
+)
+def test_submit_media_ingest_jobs_rejects_opaque_playlist_with_safe_422(
+    media_ingest_jobs_client,
+    url,
+):
+    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
+
+    response = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data={"media_type": "video", "urls": url},
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"] == {
+        "code": "playlist_preflight_required",
+        "message": "Playlist URLs must be inspected before job submission.",
+    }
+    assert ingest_jobs.get_job_manager().list_jobs(domain="media_ingest", owner_user_id="1", limit=10) == []
+
+
+def test_run_bound_ambiguous_repeat_reconciles_original_job(
+    media_ingest_jobs_client,
+    monkeypatch,
+):
+    manager, store, run = _seed_occurrence_run()
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestStore,
+    )
+
+    original_bind = PlaylistIngestStore.bind_run_item_job
+    calls = 0
+
+    def fail_first_bind(self, *args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("commit outcome unknown: token=private")
+        return original_bind(self, *args, **kwargs)
+
+    monkeypatch.setattr(PlaylistIngestStore, "bind_run_item_job", fail_first_bind, raising=True)
+    data = _run_submit_data(run.run_id)
+
+    first = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=data,
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+    second = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=data,
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert first.status_code == 207, first.text
+    assert first.json()["submissions"][0]["error_code"] == "occurrence_binding_pending"
+    assert "private" not in first.text
+    assert second.status_code == 200, second.text
+    jobs = manager.list_jobs(domain="media_ingest", owner_user_id="1", limit=10)
+    assert len(jobs) == 1
+    assert second.json()["submissions"][0]["job_id"] == jobs[0]["id"]
+    assert store.get_run_item("1", run.run_id, "occ-url-1").job_id == jobs[0]["id"]

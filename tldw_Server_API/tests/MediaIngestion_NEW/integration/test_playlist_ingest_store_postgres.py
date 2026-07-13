@@ -21,6 +21,89 @@ class _FixedClock:
         self.current += delta
 
 
+def test_postgres_occurrence_job_reservation_and_binding_match_sqlite(pg_temp_db, monkeypatch):
+    monkeypatch.setenv("TEST_MODE", "true")
+    dsn = str(pg_temp_db["dsn"])
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestStore,
+    )
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    from tldw_Server_API.app.core.Jobs.pg_migrations import ensure_jobs_tables_pg
+
+    ensure_jobs_tables_pg(dsn)
+    manager = JobManager(backend="postgres", db_url=dsn, clock=_FixedClock())
+    store = PlaylistIngestStore(manager)
+    run = store.create_validated_run(
+        "pg-job-owner",
+        items=[
+            {
+                "occurrence_id": "pg-job-occ",
+                "input_kind": "direct_url",
+                "source_url": "https://www.youtube.com/watch?v=alpha123456",
+                "normalized_source_id": "youtube:video:alpha123456",
+                "source_kind": "youtube_video",
+                "display_metadata": {"title": "Alpha"},
+                "state": "staged",
+                "action": "ingest",
+                "metadata_patch": None,
+            }
+        ],
+    )
+    identity = "playlist-ingest-v1:pg-derived"
+    reserved = store.prepare_run_item_job_submission(
+        "pg-job-owner",
+        run.run_id,
+        "pg-job-occ",
+        attempt=1,
+        batch_id="pg-job-batch",
+        idempotency_identity=identity,
+        source_kind="url",
+        planned_item_id=None,
+    )
+    job = manager.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="media_ingest_item",
+        payload={
+            "run_id": run.run_id,
+            "occurrence_id": "pg-job-occ",
+            "attempt": 1,
+            "batch_id": "pg-job-batch",
+            "idempotency_key": identity,
+            "source": reserved.source_url,
+            "source_kind": "url",
+        },
+        batch_group="pg-job-batch",
+        owner_user_id="pg-job-owner",
+        idempotency_key=identity,
+    )
+    bound = store.bind_run_item_job(
+        "pg-job-owner",
+        run.run_id,
+        "pg-job-occ",
+        attempt=1,
+        job_id=int(job["id"]),
+        batch_id="pg-job-batch",
+        idempotency_identity=identity,
+    )
+    repeated = store.bind_run_item_job(
+        "pg-job-owner",
+        run.run_id,
+        "pg-job-occ",
+        attempt=1,
+        job_id=int(job["id"]),
+        batch_id="pg-job-batch",
+        idempotency_identity=identity,
+    )
+
+    assert reserved.state == "submit_pending"
+    assert bound == repeated
+    assert bound.state == "queued"
+    assert bound.job_id == int(job["id"])
+    assert store.get_run("pg-job-owner", run.run_id).batch_ids == ["pg-job-batch"]
+
+
 def test_postgres_duplicate_action_state_matches_sqlite_contract(pg_temp_db, monkeypatch):
     monkeypatch.setenv("TEST_MODE", "true")
     dsn = str(pg_temp_db["dsn"])

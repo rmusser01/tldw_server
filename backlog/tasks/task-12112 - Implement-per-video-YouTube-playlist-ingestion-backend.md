@@ -45,12 +45,14 @@ modified_files:
 - tldw_Server_API/tests/Collections/test_conference_media_collections.py
 - tldw_Server_API/tests/DB_Management/test_media_db_media_item_update_ops.py
 - tldw_Server_API/tests/Collections/test_collections_postgres_integration.py
+- tldw_Server_API/app/api/v1/endpoints/media/ingest_jobs.py
+- tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest_jobs_endpoint.py
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Backend Task 6 is reopened for two final recovery defects: PostgreSQL collection lookup must safely extract the playlist run marker from its TEXT metadata column during commit-then-error recovery, and every unresolved duplicate-action failure after run persistence must surface as a sanitized PlaylistRunPendingError carrying the existing run ID. Add strict public-path RED/GREEN coverage, same-run reconciliation, real PostgreSQL verification, and preserve deterministic pre-persistence validation errors. Tasks 7–9 remain pending.
+Backend Task 7 is complete: /api/v1/media/ingest/jobs now binds owner-scoped run occurrences with aligned URL/file arrays, server-derived HMAC idempotency, canonical stored-source authority, durable reservation/job binding, structured partial acceptance, safe staging recovery, and opaque-playlist rejection. The media worker defensively rejects playlists, validates occurrence identity, and requires exactly one result. Verification: RED 26 failed/149 passed; final focused GREEN 180/180, property 4/4, Task 1–7 regression 240/240, legacy /process-videos compatibility 2/2, and real PostgreSQL reservation/bind parity 1/1 with no skip. Ruff and Black pass on all eight touched Python files; compileall and git diff --check pass; Bandit reports zero findings. Tasks 8–9 remain pending.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

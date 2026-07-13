@@ -39,7 +39,10 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_s
     PlaylistIngestStore,
     PlaylistPreflightLeaseLostError,
 )
-from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_preflight import PlaylistPreflightData
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_preflight import (
+    PlaylistPreflightData,
+    classify_playlist_url,
+)
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_preflight_runner import (
     PlaylistPreflightProcessError,
     run_playlist_preflight_process,
@@ -871,6 +874,26 @@ async def _handle_job(job: dict[str, Any], jm: JobManager, progress: _ProgressSt
 
     source_kind = str(payload.get("source_kind") or "").lower() or "url"
     input_ref = payload.get("input_ref") or payload.get("original_filename") or source
+    run_id = payload.get("run_id")
+    occurrence_id = payload.get("occurrence_id")
+    occurrence_attempt = payload.get("attempt")
+    has_occurrence_binding = any(value is not None for value in (run_id, occurrence_id, occurrence_attempt))
+    if has_occurrence_binding and (
+        type(run_id) is not str
+        or not run_id.strip()
+        or type(occurrence_id) is not str
+        or not occurrence_id.strip()
+        or type(occurrence_attempt) is not int
+        or occurrence_attempt < 1
+    ):
+        raise MediaIngestJobError("occurrence_binding_invalid", retryable=False)
+    if source_kind == "url":
+        try:
+            is_playlist = classify_playlist_url(str(source)).is_playlist
+        except ValueError:
+            is_playlist = False
+        if is_playlist:
+            raise MediaIngestJobError("playlist_preflight_required", retryable=False)
 
     form_data = _build_form_data(payload)
 
@@ -991,8 +1014,12 @@ async def _handle_job(job: dict[str, Any], jm: JobManager, progress: _ProgressSt
         progress.message = "finalize"
         jm.update_job_progress(job_id, progress_percent=progress.percent, progress_message=progress.message)
 
-        result_item = results[0] if results else {}
-        media_id = result_item.get("db_id") if isinstance(result_item, dict) else None
+        if not isinstance(results, list) or len(results) != 1:
+            raise MediaIngestJobError("media_ingest_result_count_invalid", retryable=False)
+        result_item = results[0]
+        if not isinstance(result_item, dict):
+            raise MediaIngestJobError("media_ingest_result_invalid", retryable=False)
+        media_id = result_item.get("db_id")
 
         if media_id and getattr(form_data, "generate_embeddings", False):
             asyncio.create_task(
@@ -1008,39 +1035,38 @@ async def _handle_job(job: dict[str, Any], jm: JobManager, progress: _ProgressSt
         progress.message = "completed"
         jm.update_job_progress(job_id, progress_percent=progress.percent, progress_message=progress.message)
 
-        if isinstance(result_item, dict):
-            final_chunking_plan = chunking_plan
-            result_metadata = result_item.get("metadata")
-            if isinstance(result_metadata, dict) and isinstance(
-                result_metadata.get("chunking_plan"),
-                dict,
-            ):
-                final_chunking_plan = result_metadata["chunking_plan"]
-            job_result = {
-                "status": result_item.get("status"),
-                "media_id": result_item.get("db_id"),
-                "media_uuid": result_item.get("media_uuid"),
-                "error": result_item.get("error"),
-                "warnings": result_item.get("warnings"),
-                "db_message": result_item.get("db_message"),
-            }
-            if final_chunking_plan is not None:
-                job_result["chunking_plan"] = final_chunking_plan
-            _sync_collection_item_terminal_result(
-                user_id=user_id,
-                item_id=planned_item_id,
-                latest_job_id=latest_job_id,
-                result_item=result_item,
+        final_chunking_plan = chunking_plan
+        result_metadata = result_item.get("metadata")
+        if isinstance(result_metadata, dict) and isinstance(
+            result_metadata.get("chunking_plan"),
+            dict,
+        ):
+            final_chunking_plan = result_metadata["chunking_plan"]
+        job_result = {
+            "status": result_item.get("status"),
+            "media_id": result_item.get("db_id"),
+            "media_uuid": result_item.get("media_uuid"),
+            "error": result_item.get("error"),
+            "warnings": result_item.get("warnings"),
+            "db_message": result_item.get("db_message"),
+        }
+        if has_occurrence_binding:
+            job_result.update(
+                {
+                    "run_id": run_id,
+                    "occurrence_id": occurrence_id,
+                    "attempt": occurrence_attempt,
+                }
             )
-            return job_result
-        _mark_collection_item_status(
+        if final_chunking_plan is not None:
+            job_result["chunking_plan"] = final_chunking_plan
+        _sync_collection_item_terminal_result(
             user_id=user_id,
             item_id=planned_item_id,
-            status="failed",
             latest_job_id=latest_job_id,
-            error_summary="No result produced",
+            result_item=result_item,
         )
-        return {"status": "Error", "error": "No result produced"}
+        return job_result
 
     except Exception as exc:
         _mark_collection_item_status(

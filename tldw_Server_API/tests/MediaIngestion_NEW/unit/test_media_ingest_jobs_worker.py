@@ -2,7 +2,6 @@ from pathlib import Path
 
 import pytest
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -70,8 +69,8 @@ async def test_media_ingest_worker_honors_cancel_before_processing(monkeypatch, 
     monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
     monkeypatch.delenv("JOBS_DB_URL", raising=False)
 
-    from tldw_Server_API.app.core.Jobs.manager import JobManager
     import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
 
     jm = JobManager()
     payload = {
@@ -115,8 +114,8 @@ async def test_media_ingest_worker_marks_planned_collection_item_completed(monke
     monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
     monkeypatch.delenv("JOBS_DB_URL", raising=False)
 
-    from tldw_Server_API.app.core.Jobs.manager import JobManager
     import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
 
     recorder = _CollectionUpdateRecorder()
     _install_fake_collections_db(monkeypatch, worker, recorder)
@@ -199,8 +198,8 @@ async def test_media_ingest_worker_marks_duplicate_result_skipped_existing(monke
     monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
     monkeypatch.delenv("JOBS_DB_URL", raising=False)
 
-    from tldw_Server_API.app.core.Jobs.manager import JobManager
     import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
 
     recorder = _CollectionUpdateRecorder()
     _install_fake_collections_db(monkeypatch, worker, recorder)
@@ -270,8 +269,8 @@ async def test_media_ingest_worker_marks_missing_media_id_failed(monkeypatch, tm
     monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
     monkeypatch.delenv("JOBS_DB_URL", raising=False)
 
-    from tldw_Server_API.app.core.Jobs.manager import JobManager
     import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
 
     recorder = _CollectionUpdateRecorder()
     _install_fake_collections_db(monkeypatch, worker, recorder)
@@ -339,8 +338,8 @@ async def test_workspace_source_ingest_job_reports_existing_media_readiness(monk
     monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
     monkeypatch.delenv("JOBS_DB_URL", raising=False)
 
-    from tldw_Server_API.app.core.Jobs.manager import JobManager
     import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
 
     class _WorkspaceMediaDB:
         def __init__(self) -> None:
@@ -491,8 +490,8 @@ async def test_media_ingest_worker_marks_planned_collection_item_failed_on_excep
     monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
     monkeypatch.delenv("JOBS_DB_URL", raising=False)
 
-    from tldw_Server_API.app.core.Jobs.manager import JobManager
     import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
 
     recorder = _CollectionUpdateRecorder()
     _install_fake_collections_db(monkeypatch, worker, recorder)
@@ -553,8 +552,8 @@ async def test_media_ingest_worker_updates_progress_fields(monkeypatch, tmp_path
     monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
     monkeypatch.delenv("JOBS_DB_URL", raising=False)
 
-    from tldw_Server_API.app.core.Jobs.manager import JobManager
     import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
 
     class _DummyDB:
         def __init__(self, path: str):
@@ -614,8 +613,8 @@ async def test_media_ingest_worker_returns_auto_chunking_plan(monkeypatch, tmp_p
     monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
     monkeypatch.delenv("JOBS_DB_URL", raising=False)
 
-    from tldw_Server_API.app.core.Jobs.manager import JobManager
     import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
 
     class _DummyDB:
         def __init__(self, path: str):
@@ -707,8 +706,8 @@ async def test_media_ingest_worker_uses_async_auto_chunking_resolver(monkeypatch
     monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
     monkeypatch.delenv("JOBS_DB_URL", raising=False)
 
-    from tldw_Server_API.app.core.Jobs.manager import JobManager
     import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
 
     class _DummyDB:
         def __init__(self, path: str):
@@ -799,8 +798,8 @@ async def test_media_ingest_worker_returns_existing_media_id_for_skipped_dedupe_
     monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
     monkeypatch.delenv("JOBS_DB_URL", raising=False)
 
-    from tldw_Server_API.app.core.Jobs.manager import JobManager
     import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
 
     class _DummyDB:
         def __init__(self, path: str):
@@ -1417,8 +1416,8 @@ async def test_playlist_preflight_worker_marks_owner_library_and_snapshot_duplic
     monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
     monkeypatch.delenv("JOBS_DB_URL", raising=False)
 
-    from tldw_Server_API.app.core.Jobs.manager import JobManager
     import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
 
     jm = JobManager()
     store, preflight, job = _seed_playlist_preflight_job(jm)
@@ -1491,8 +1490,8 @@ async def test_playlist_preflight_worker_library_lookup_failure_records_unknown_
     monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
     monkeypatch.delenv("JOBS_DB_URL", raising=False)
 
-    from tldw_Server_API.app.core.Jobs.manager import JobManager
     import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
 
     jm = JobManager()
     store, preflight, job = _seed_playlist_preflight_job(jm)
@@ -1756,3 +1755,147 @@ async def test_playlist_preflight_worker_unexpected_extraction_failure_blocks_wi
     assert blocked.status == "blocked"
     assert blocked.error == {"code": "playlist_preflight_failed"}
     assert "do-not-expose" not in str(exc_info.value)
+
+
+async def _run_bound_media_worker(monkeypatch, tmp_path, results):
+    import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    class _DummyDB:
+        db_path_str = str(tmp_path / "media.db")
+        client_id = "task7-worker-test"
+
+        def close_connection(self):
+            return None
+
+    async def fake_process_batch_media(**_kwargs):
+        return results
+
+    async def fake_chunking_resolver(*_args, **_kwargs):
+        return None, None
+
+    monkeypatch.setattr(worker, "_create_db", lambda _user_id: _DummyDB(), raising=True)
+    monkeypatch.setattr(worker, "process_batch_media", fake_process_batch_media, raising=True)
+    monkeypatch.setattr(
+        worker,
+        "async_resolve_chunking_options_and_plan",
+        fake_chunking_resolver,
+        raising=True,
+    )
+
+    jm = JobManager(db_path=tmp_path / "jobs.db")
+    row = jm.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="media_ingest_item",
+        payload={
+            "batch_id": "batch-task7",
+            "media_type": "video",
+            "source": "https://www.youtube.com/watch?v=alpha123456",
+            "source_kind": "url",
+            "input_ref": "https://www.youtube.com/watch?v=alpha123456",
+            "run_id": "run-task7",
+            "occurrence_id": "occ-task7",
+            "attempt": 3,
+            "options": {"media_type": "video"},
+        },
+        owner_user_id="1",
+    )
+    return worker, jm, jm.get_job(int(row["id"]))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("results", "expected_code"),
+    [
+        ([], "media_ingest_result_count_invalid"),
+        (
+            [
+                {"status": "Success", "db_id": 1},
+                {"status": "Success", "db_id": 2},
+            ],
+            "media_ingest_result_count_invalid",
+        ),
+        (["not-a-result-object"], "media_ingest_result_invalid"),
+    ],
+)
+async def test_bound_media_worker_requires_exactly_one_dict_result(
+    monkeypatch,
+    tmp_path,
+    results,
+    expected_code,
+):
+    worker, jm, job = await _run_bound_media_worker(monkeypatch, tmp_path, results)
+
+    with pytest.raises(worker.MediaIngestJobError) as exc_info:
+        await worker._handle_job(job, jm, worker._ProgressState())
+
+    assert str(exc_info.value) == expected_code
+    assert exc_info.value.retryable is False
+
+
+@pytest.mark.asyncio
+async def test_bound_media_worker_result_preserves_occurrence_identity(monkeypatch, tmp_path):
+    worker, jm, job = await _run_bound_media_worker(
+        monkeypatch,
+        tmp_path,
+        [
+            {
+                "status": "Success",
+                "db_id": 456,
+                "media_uuid": "media-uuid-456",
+                "warnings": None,
+                "db_message": "Media added to database.",
+            }
+        ],
+    )
+
+    result = await worker._handle_job(job, jm, worker._ProgressState())
+
+    assert result["run_id"] == "run-task7"
+    assert result["occurrence_id"] == "occ-task7"
+    assert result["attempt"] == 3
+    assert result["media_id"] == 456
+
+
+@pytest.mark.asyncio
+async def test_media_worker_defensively_rejects_opaque_playlist_before_processing(monkeypatch, tmp_path):
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
+    monkeypatch.delenv("JOBS_DB_URL", raising=False)
+
+    import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    process_calls = 0
+
+    def fail_if_db_opened(_user_id):
+        nonlocal process_calls
+        process_calls += 1
+        raise AssertionError("playlist rejection must happen before database work")
+
+    monkeypatch.setattr(worker, "_create_db", fail_if_db_opened, raising=True)
+    jm = JobManager()
+    row = jm.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="media_ingest_item",
+        payload={
+            "batch_id": "batch-opaque",
+            "media_type": "video",
+            "source": "https://youtu.be/alpha123456?list=PLopaque",
+            "source_kind": "url",
+            "input_ref": "https://youtu.be/alpha123456?list=PLopaque",
+            "run_id": "run-task7",
+            "occurrence_id": "occ-task7",
+            "attempt": 1,
+            "options": {"media_type": "video"},
+        },
+        owner_user_id="1",
+    )
+
+    with pytest.raises(worker.MediaIngestJobError) as exc_info:
+        await worker._handle_job(jm.get_job(int(row["id"])), jm, worker._ProgressState())
+
+    assert str(exc_info.value) == "playlist_preflight_required"
+    assert exc_info.value.retryable is False
+    assert process_calls == 0

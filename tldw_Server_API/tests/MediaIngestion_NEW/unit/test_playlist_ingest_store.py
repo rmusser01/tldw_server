@@ -1892,3 +1892,142 @@ def test_attach_collection_plan_rolls_back_every_mapping_on_failure(store, monke
     assert loaded.status == "staged"
     assert loaded.version == run.version
     assert [item.planned_collection_item_id for item in items] == [None, None]
+
+
+def test_run_item_job_submission_reservation_and_binding_are_idempotent(store):
+    run = store.create_validated_run(
+        "1",
+        items=[_validated_direct_record(occurrence_id="occ-job")],
+    )
+
+    prepared = store.prepare_run_item_job_submission(
+        "1",
+        run.run_id,
+        "occ-job",
+        attempt=1,
+        batch_id="batch-original",
+        idempotency_identity="playlist-ingest-v1:derived",
+        source_kind="url",
+        planned_item_id=None,
+    )
+    repeated = store.prepare_run_item_job_submission(
+        "1",
+        run.run_id,
+        "occ-job",
+        attempt=1,
+        batch_id="batch-new-request",
+        idempotency_identity="playlist-ingest-v1:derived",
+        source_kind="url",
+        planned_item_id=None,
+    )
+
+    assert prepared.state == repeated.state == "submit_pending"
+    assert prepared.batch_id == repeated.batch_id == "batch-original"
+    assert store.get_run("1", run.run_id).version == run.version + 1
+
+    job = store._jobs.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="media_ingest_item",
+        payload={
+            "run_id": run.run_id,
+            "occurrence_id": "occ-job",
+            "attempt": 1,
+            "batch_id": "batch-original",
+            "idempotency_key": "playlist-ingest-v1:derived",
+            "source": prepared.source_url,
+            "source_kind": "url",
+        },
+        batch_group="batch-original",
+        owner_user_id="1",
+        idempotency_key="playlist-ingest-v1:derived",
+    )
+    bound = store.bind_run_item_job(
+        "1",
+        run.run_id,
+        "occ-job",
+        attempt=1,
+        job_id=int(job["id"]),
+        batch_id="batch-original",
+        idempotency_identity="playlist-ingest-v1:derived",
+    )
+    rebound = store.bind_run_item_job(
+        "1",
+        run.run_id,
+        "occ-job",
+        attempt=1,
+        job_id=int(job["id"]),
+        batch_id="batch-original",
+        idempotency_identity="playlist-ingest-v1:derived",
+    )
+
+    assert bound.state == rebound.state == "queued"
+    assert bound.job_id == rebound.job_id == int(job["id"])
+    assert store.get_run("1", run.run_id).batch_ids == ["batch-original"]
+    events = list(store.list_run_events("1", run.run_id))
+    assert [event.event_type for event in events].count("occurrence_submit_pending") == 1
+    assert [event.event_type for event in events].count("occurrence_job_accepted") == 1
+
+
+@pytest.mark.parametrize(
+    ("attempt", "error_type"),
+    [(True, ValueError), (0, ValueError), (2, RuntimeError)],
+)
+def test_run_item_job_submission_rejects_nonexact_attempt_without_mutation(store, attempt, error_type):
+    run = store.create_validated_run("1", items=[_validated_direct_record(occurrence_id="occ-job")])
+
+    with pytest.raises(error_type, match="attempt"):
+        store.prepare_run_item_job_submission(
+            "1",
+            run.run_id,
+            "occ-job",
+            attempt=attempt,
+            batch_id="batch-1",
+            idempotency_identity="playlist-ingest-v1:derived",
+            source_kind="url",
+            planned_item_id=None,
+        )
+
+    assert store.get_run_item("1", run.run_id, "occ-job").state == "staged"
+
+
+def test_file_job_submission_failure_resets_exact_pending_reservation(store):
+    run = store.create_validated_run(
+        "1",
+        items=[
+            {
+                "occurrence_id": "occ-file",
+                "input_kind": "file_stub",
+                "source_url": None,
+                "normalized_source_id": None,
+                "source_kind": "file",
+                "display_metadata": {"name": "clip.mp3", "size_bytes": 4},
+                "state": "awaiting_upload",
+                "action": "ingest",
+                "metadata_patch": None,
+            }
+        ],
+    )
+    store.prepare_run_item_job_submission(
+        "1",
+        run.run_id,
+        "occ-file",
+        attempt=1,
+        batch_id="batch-file",
+        idempotency_identity="playlist-ingest-v1:file-derived",
+        source_kind="file",
+        planned_item_id=None,
+    )
+
+    reset = store.reset_run_item_job_submission(
+        "1",
+        run.run_id,
+        "occ-file",
+        attempt=1,
+        idempotency_identity="playlist-ingest-v1:file-derived",
+    )
+
+    assert reset.state == "awaiting_upload"
+    assert reset.job_id is None
+    assert reset.batch_id is None
+    assert store.get_run("1", run.run_id).batch_ids == []

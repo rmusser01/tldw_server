@@ -2158,6 +2158,392 @@ class PlaylistIngestStore:
             )
             return updated.rowcount == 1
 
+    def prepare_run_item_job_submission(
+        self,
+        owner_user_id: str,
+        run_id: str,
+        occurrence_id: str,
+        *,
+        attempt: int,
+        batch_id: str,
+        idempotency_identity: str,
+        source_kind: str,
+        planned_item_id: int | None,
+    ) -> MediaIngestRunItemRecord:
+        """Reserve one processing occurrence before upload staging or job creation."""
+        owner = self._owner(owner_user_id)
+        run_identity = self._run_text(run_id, "run_id", max_length=_MAX_RUN_IDENTITY_LENGTH)
+        occurrence = self._run_text(
+            occurrence_id,
+            "occurrence_id",
+            max_length=_MAX_RUN_IDENTITY_LENGTH,
+        )
+        batch = self._run_text(batch_id, "batch_id", max_length=_MAX_RUN_IDENTITY_LENGTH)
+        identity = self._run_text(
+            idempotency_identity,
+            "idempotency_identity",
+            max_length=_MAX_RUN_IDENTITY_LENGTH,
+        )
+        if type(attempt) is not int or attempt < 1:
+            raise ValueError("attempt must be a positive integer")
+        if source_kind not in {"url", "file"}:
+            raise ValueError("source_kind must be url or file")
+        if planned_item_id is not None and (type(planned_item_id) is not int or planned_item_id < 1):
+            raise ValueError("planned_item_id must be a positive integer")
+
+        now = self._now()
+        with self._connection(write=True) as db:
+            lock = " FOR UPDATE OF run, item" if self._postgres else ""
+            expiry_sql = "run.expires_at > ?" if self._postgres else "julianday(run.expires_at) > julianday(?)"
+            row = self._query(
+                db,
+                f"""
+                SELECT run.status AS run_status, run.version AS run_version,
+                       item.*
+                FROM media_ingest_runs AS run
+                JOIN media_ingest_run_items AS item
+                  ON item.run_id = run.run_id AND item.owner_user_id = run.owner_user_id
+                WHERE run.owner_user_id = ? AND run.run_id = ? AND item.occurrence_id = ?
+                  AND {expiry_sql}
+                {lock}
+                """,  # nosec B608
+                (owner, run_identity, occurrence, self._db_datetime(now)),
+            ).fetchone()
+            if row is None:
+                raise self._not_found()
+            data = self._row_dict(row)
+            if str(data["run_status"]) not in {"staged", "running"}:
+                raise PlaylistIngestConflictError("run is not accepting jobs")
+            if int(data["attempt"]) != attempt:
+                raise PlaylistIngestConflictError("occurrence attempt no longer matches")
+            stored_planned = (
+                int(data["planned_collection_item_id"]) if data.get("planned_collection_item_id") is not None else None
+            )
+            if planned_item_id is not None and stored_planned != planned_item_id:
+                raise PlaylistIngestConflictError("planned item no longer matches")
+            action = str(data.get("duplicate_policy") or "ingest")
+            if action not in {"ingest", "overwrite"}:
+                raise PlaylistIngestConflictError("occurrence does not require processing")
+            expected_state = "awaiting_upload" if source_kind == "file" else "staged"
+            expected_input_kind = "file_stub" if source_kind == "file" else None
+            if expected_input_kind and str(data.get("input_kind")) != expected_input_kind:
+                raise PlaylistIngestConflictError("occurrence source kind no longer matches")
+            if source_kind == "url" and (str(data.get("input_kind")) == "file_stub" or not data.get("source_url")):
+                raise PlaylistIngestConflictError("occurrence source kind no longer matches")
+
+            state = str(data["state"])
+            if state == "queued":
+                if data.get("idempotency_identity") != identity or data.get("job_id") is None:
+                    raise PlaylistIngestConflictError("occurrence is already bound")
+                return self._run_item_record(data)
+            if state == "submit_pending":
+                if data.get("idempotency_identity") != identity:
+                    raise PlaylistIngestConflictError("occurrence submission is already pending")
+                return self._run_item_record(data)
+            if state != expected_state:
+                raise PlaylistIngestConflictError("occurrence is not processable")
+
+            updated = self._query(
+                db,
+                """
+                UPDATE media_ingest_run_items
+                SET state = 'submit_pending', batch_id = ?, idempotency_identity = ?,
+                    updated_at = ?
+                WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
+                  AND state = ? AND attempt = ? AND job_id IS NULL
+                """,
+                (
+                    batch,
+                    identity,
+                    self._db_datetime(now),
+                    owner,
+                    run_identity,
+                    occurrence,
+                    expected_state,
+                    attempt,
+                ),
+            )
+            if updated.rowcount != 1:
+                raise PlaylistIngestConflictError("occurrence state no longer matches")
+            version = int(data["run_version"])
+            run_updated = self._query(
+                db,
+                """
+                UPDATE media_ingest_runs SET version = version + 1, updated_at = ?
+                WHERE owner_user_id = ? AND run_id = ? AND version = ?
+                """,
+                (self._db_datetime(now), owner, run_identity, version),
+            )
+            if run_updated.rowcount != 1:
+                raise PlaylistIngestConflictError("run version no longer matches")
+            self._query(
+                db,
+                """
+                INSERT INTO media_ingest_run_events (
+                    run_id, owner_user_id, occurrence_id, batch_id, event_type,
+                    state, attrs_json, occurred_at
+                ) VALUES (?, ?, ?, ?, 'occurrence_submit_pending',
+                          'submit_pending', ?, ?)
+                """,
+                (
+                    run_identity,
+                    owner,
+                    occurrence,
+                    batch,
+                    self._json_value({"attempt": attempt}),
+                    self._db_datetime(now),
+                ),
+            )
+            item_row = self._query(
+                db,
+                """
+                SELECT * FROM media_ingest_run_items
+                WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
+                """,
+                (owner, run_identity, occurrence),
+            ).fetchone()
+        return self._run_item_record(item_row)
+
+    def bind_run_item_job(
+        self,
+        owner_user_id: str,
+        run_id: str,
+        occurrence_id: str,
+        *,
+        attempt: int,
+        job_id: int,
+        batch_id: str,
+        idempotency_identity: str,
+    ) -> MediaIngestRunItemRecord:
+        """Bind the exact owner-scoped idempotent Jobs row to one reserved occurrence."""
+        owner = self._owner(owner_user_id)
+        run_identity = self._run_text(run_id, "run_id", max_length=_MAX_RUN_IDENTITY_LENGTH)
+        occurrence = self._run_text(
+            occurrence_id,
+            "occurrence_id",
+            max_length=_MAX_RUN_IDENTITY_LENGTH,
+        )
+        batch = self._run_text(batch_id, "batch_id", max_length=_MAX_RUN_IDENTITY_LENGTH)
+        identity = self._run_text(
+            idempotency_identity,
+            "idempotency_identity",
+            max_length=_MAX_RUN_IDENTITY_LENGTH,
+        )
+        if type(attempt) is not int or attempt < 1:
+            raise ValueError("attempt must be a positive integer")
+        if type(job_id) is not int or job_id < 1:
+            raise ValueError("job_id must be a positive integer")
+
+        now = self._now()
+        with self._connection(write=True) as db:
+            lock = " FOR UPDATE OF run, item" if self._postgres else ""
+            expiry_sql = "run.expires_at > ?" if self._postgres else "julianday(run.expires_at) > julianday(?)"
+            row = self._query(
+                db,
+                f"""
+                SELECT run.version AS run_version, run.batch_ids_json, item.*
+                FROM media_ingest_runs AS run
+                JOIN media_ingest_run_items AS item
+                  ON item.run_id = run.run_id AND item.owner_user_id = run.owner_user_id
+                WHERE run.owner_user_id = ? AND run.run_id = ? AND item.occurrence_id = ?
+                  AND {expiry_sql}
+                {lock}
+                """,  # nosec B608
+                (owner, run_identity, occurrence, self._db_datetime(now)),
+            ).fetchone()
+            if row is None:
+                raise self._not_found()
+            data = self._row_dict(row)
+            if int(data["attempt"]) != attempt:
+                raise PlaylistIngestConflictError("occurrence attempt no longer matches")
+            if data.get("idempotency_identity") != identity or data.get("batch_id") != batch:
+                raise PlaylistIngestConflictError("occurrence submission identity no longer matches")
+            if str(data["state"]) == "queued":
+                if int(data.get("job_id") or 0) != job_id:
+                    raise PlaylistIngestConflictError("occurrence is already bound")
+                return self._run_item_record(data)
+            if str(data["state"]) != "submit_pending" or data.get("job_id") is not None:
+                raise PlaylistIngestConflictError("occurrence submission is not pending")
+
+            job_lock = " FOR SHARE" if self._postgres else ""
+            job_row = self._query(
+                db,
+                f"""
+                SELECT id, owner_user_id, domain, job_type, batch_group,
+                       idempotency_key, payload
+                FROM jobs WHERE id = ?
+                {job_lock}
+                """,  # nosec B608
+                (job_id,),
+            ).fetchone()
+            if job_row is None:
+                raise PlaylistIngestConflictError("media job is unavailable")
+            job = self._row_dict(job_row)
+            payload = self._json_dict(job.get("payload")) or {}
+            if (
+                str(job.get("owner_user_id") or "") != owner
+                or job.get("domain") != "media_ingest"
+                or job.get("job_type") != "media_ingest_item"
+                or job.get("batch_group") != batch
+                or job.get("idempotency_key") != identity
+                or payload.get("run_id") != run_identity
+                or payload.get("occurrence_id") != occurrence
+                or type(payload.get("attempt")) is not int
+                or payload.get("attempt") != attempt
+            ):
+                raise PlaylistIngestConflictError("media job binding does not match occurrence")
+
+            updated = self._query(
+                db,
+                """
+                UPDATE media_ingest_run_items
+                SET state = 'queued', job_id = ?, updated_at = ?
+                WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
+                  AND state = 'submit_pending' AND attempt = ? AND job_id IS NULL
+                  AND batch_id = ? AND idempotency_identity = ?
+                """,
+                (
+                    job_id,
+                    self._db_datetime(now),
+                    owner,
+                    run_identity,
+                    occurrence,
+                    attempt,
+                    batch,
+                    identity,
+                ),
+            )
+            if updated.rowcount != 1:
+                raise PlaylistIngestConflictError("occurrence submission no longer matches")
+            batch_ids = self._json_list(data.get("batch_ids_json")) or []
+            if batch not in batch_ids:
+                batch_ids.append(batch)
+            version = int(data["run_version"])
+            run_updated = self._query(
+                db,
+                """
+                UPDATE media_ingest_runs
+                SET batch_ids_json = ?, version = version + 1, updated_at = ?
+                WHERE owner_user_id = ? AND run_id = ? AND version = ?
+                """,
+                (self._json_value(batch_ids), self._db_datetime(now), owner, run_identity, version),
+            )
+            if run_updated.rowcount != 1:
+                raise PlaylistIngestConflictError("run version no longer matches")
+            self._query(
+                db,
+                """
+                INSERT INTO media_ingest_run_events (
+                    run_id, owner_user_id, occurrence_id, job_id, batch_id,
+                    event_type, state, attrs_json, occurred_at
+                ) VALUES (?, ?, ?, ?, ?, 'occurrence_job_accepted', 'queued', ?, ?)
+                """,
+                (
+                    run_identity,
+                    owner,
+                    occurrence,
+                    job_id,
+                    batch,
+                    self._json_value({"attempt": attempt}),
+                    self._db_datetime(now),
+                ),
+            )
+            item_row = self._query(
+                db,
+                """
+                SELECT * FROM media_ingest_run_items
+                WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
+                """,
+                (owner, run_identity, occurrence),
+            ).fetchone()
+        return self._run_item_record(item_row)
+
+    def reset_run_item_job_submission(
+        self,
+        owner_user_id: str,
+        run_id: str,
+        occurrence_id: str,
+        *,
+        attempt: int,
+        idempotency_identity: str,
+    ) -> MediaIngestRunItemRecord:
+        """Release an exact reservation when no media job was accepted."""
+        owner = self._owner(owner_user_id)
+        if type(attempt) is not int or attempt < 1:
+            raise ValueError("attempt must be a positive integer")
+        identity = self._run_text(
+            idempotency_identity,
+            "idempotency_identity",
+            max_length=_MAX_RUN_IDENTITY_LENGTH,
+        )
+        now = self._now()
+        with self._connection(write=True) as db:
+            lock = " FOR UPDATE OF run, item" if self._postgres else ""
+            expiry_sql = "run.expires_at > ?" if self._postgres else "julianday(run.expires_at) > julianday(?)"
+            row = self._query(
+                db,
+                f"""
+                SELECT run.version AS run_version, item.*
+                FROM media_ingest_runs AS run
+                JOIN media_ingest_run_items AS item
+                  ON item.run_id = run.run_id AND item.owner_user_id = run.owner_user_id
+                WHERE run.owner_user_id = ? AND run.run_id = ? AND item.occurrence_id = ?
+                  AND {expiry_sql}
+                {lock}
+                """,  # nosec B608
+                (owner, str(run_id), str(occurrence_id), self._db_datetime(now)),
+            ).fetchone()
+            if row is None:
+                raise self._not_found()
+            data = self._row_dict(row)
+            reset_state = "awaiting_upload" if str(data.get("input_kind")) == "file_stub" else "staged"
+            if str(data["state"]) == reset_state and data.get("job_id") is None:
+                return self._run_item_record(data)
+            if (
+                str(data["state"]) != "submit_pending"
+                or int(data["attempt"]) != attempt
+                or data.get("idempotency_identity") != identity
+                or data.get("job_id") is not None
+            ):
+                raise PlaylistIngestConflictError("occurrence submission no longer matches")
+            self._query(
+                db,
+                """
+                UPDATE media_ingest_run_items
+                SET state = ?, batch_id = NULL, idempotency_identity = NULL,
+                    updated_at = ?
+                WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
+                  AND state = 'submit_pending' AND attempt = ?
+                  AND idempotency_identity = ? AND job_id IS NULL
+                """,
+                (
+                    reset_state,
+                    self._db_datetime(now),
+                    owner,
+                    str(run_id),
+                    str(occurrence_id),
+                    attempt,
+                    identity,
+                ),
+            )
+            self._query(
+                db,
+                """
+                UPDATE media_ingest_runs SET version = version + 1, updated_at = ?
+                WHERE owner_user_id = ? AND run_id = ? AND version = ?
+                """,
+                (self._db_datetime(now), owner, str(run_id), int(data["run_version"])),
+            )
+            item_row = self._query(
+                db,
+                """
+                SELECT * FROM media_ingest_run_items
+                WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
+                """,
+                (owner, str(run_id), str(occurrence_id)),
+            ).fetchone()
+        return self._run_item_record(item_row)
+
     def prepare_nonprocessing_run_item(
         self,
         owner_user_id: str,

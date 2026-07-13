@@ -175,3 +175,96 @@ def test_validated_run_preserves_arbitrary_unique_order_and_actions(
     assert [event.occurrence_id for event in events] == [value[0] for value in occurrences]
     assert [event.attrs["action"] for event in events] == [value[1] for value in occurrences]
     assert store.get_run("owner-1", run.run_id).version == 2
+
+
+@pytest.mark.property
+@settings(
+    max_examples=12,
+    suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.too_slow],
+)
+@given(
+    owner_suffix=st.integers(min_value=1, max_value=1_000_000),
+    occurrence_suffix=st.integers(min_value=1, max_value=1_000_000),
+    repeats=st.integers(min_value=1, max_value=5),
+)
+def test_occurrence_attempt_accepts_at_most_one_job_under_repeated_submit(
+    tmp_path,
+    monkeypatch,
+    owner_suffix,
+    occurrence_suffix,
+    repeats,
+):
+    store = _new_store(tmp_path, monkeypatch)
+    owner = f"owner-{owner_suffix}"
+    occurrence = f"occ-{occurrence_suffix}"
+    run = store.create_validated_run(
+        owner,
+        items=[
+            {
+                "occurrence_id": occurrence,
+                "input_kind": "direct_url",
+                "source_url": "https://www.youtube.com/watch?v=alpha123456",
+                "normalized_source_id": "youtube:video:alpha123456",
+                "source_kind": "youtube_video",
+                "display_metadata": {},
+                "state": "staged",
+                "action": "ingest",
+                "metadata_patch": None,
+            }
+        ],
+    )
+    from tldw_Server_API.app.api.v1.endpoints.media.ingest_jobs import (
+        _derive_run_occurrence_idempotency,
+    )
+
+    identity = _derive_run_occurrence_idempotency(
+        key=b"property-test-key",
+        owner_user_id=owner,
+        run_id=run.run_id,
+        occurrence_id=occurrence,
+        attempt=1,
+    )
+    accepted_ids = []
+    for request_index in range(repeats):
+        reserved = store.prepare_run_item_job_submission(
+            owner,
+            run.run_id,
+            occurrence,
+            attempt=1,
+            batch_id=f"batch-{request_index}",
+            idempotency_identity=identity,
+            source_kind="url",
+            planned_item_id=None,
+        )
+        if reserved.job_id is None:
+            job = store._jobs.create_job(
+                domain="media_ingest",
+                queue="default",
+                job_type="media_ingest_item",
+                payload={
+                    "run_id": run.run_id,
+                    "occurrence_id": occurrence,
+                    "attempt": 1,
+                    "batch_id": reserved.batch_id,
+                    "idempotency_key": identity,
+                    "source": reserved.source_url,
+                    "source_kind": "url",
+                },
+                batch_group=reserved.batch_id,
+                owner_user_id=owner,
+                idempotency_key=identity,
+            )
+            reserved = store.bind_run_item_job(
+                owner,
+                run.run_id,
+                occurrence,
+                attempt=1,
+                job_id=int(job["id"]),
+                batch_id=str(reserved.batch_id),
+                idempotency_identity=identity,
+            )
+        accepted_ids.append(reserved.job_id)
+
+    jobs = store._jobs.list_jobs(domain="media_ingest", owner_user_id=owner, limit=10)
+    assert len(jobs) == 1
+    assert accepted_ids == [jobs[0]["id"]] * repeats

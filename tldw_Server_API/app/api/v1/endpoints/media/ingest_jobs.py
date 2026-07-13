@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
+import hmac
 import json
 import os
 import shutil
@@ -17,37 +19,47 @@ from fastapi.responses import StreamingResponse
 from loguru import logger
 from pydantic import BaseModel, Field
 from starlette.responses import JSONResponse
-from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import try_get_collections_db_for_user
+
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequirePermission,
+    User,
     check_rate_limit,
     get_auth_principal,
     get_request_user,
     rbac_rate_limit,
-    RequirePermission,
-    User,
 )
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import require_within_limit
-from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
-from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
+from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import try_get_collections_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.media_add_deps import get_add_media_form
+from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
 from tldw_Server_API.app.api.v1.API_Deps.validations_deps import file_validator_instance
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.media_request_models import AddMediaForm
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+from tldw_Server_API.app.core.AuthNZ.crypto_utils import derive_hmac_key
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_CREATE
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
+from tldw_Server_API.app.core.exceptions import BadRequestError
 from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
     save_uploaded_files,
 )
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+    PlaylistIngestConflictError,
+    PlaylistIngestNotFoundError,
+    PlaylistIngestStore,
+)
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_preflight import (
+    classify_playlist_url,
+)
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id, ensure_traceparent
 from tldw_Server_API.app.core.Streaming.streams import SSEStream
-from tldw_Server_API.app.core.exceptions import BadRequestError
 from tldw_Server_API.app.core.testing import is_test_mode
-from tldw_Server_API.app.services.worker_startup_policy import worker_path_enabled
 from tldw_Server_API.app.services.app_lifecycle import assert_may_start_work
+from tldw_Server_API.app.services.worker_startup_policy import worker_path_enabled
 
 router = APIRouter()
 
@@ -57,6 +69,8 @@ _job_manager_cache: LRUCache = LRUCache(maxsize=MAX_CACHED_JOB_MANAGER_INSTANCES
 _job_manager_lock = threading.Lock()
 _ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
 _TERMINAL_MEDIA_INGEST_JOB_STATUSES = frozenset({"completed", "failed", "cancelled", "quarantined"})
+_MAX_RUN_BOUND_SUBMISSIONS = 500
+_MAX_RUN_BOUND_ID_LENGTH = 255
 
 
 def get_job_manager() -> JobManager:
@@ -89,10 +103,23 @@ class MediaIngestJobItem(BaseModel):
     idempotency_key: str | None = None
 
 
+class MediaIngestOccurrenceSubmission(BaseModel):
+    occurrence_id: str
+    status: str
+    accepted: bool
+    job_id: int | None = None
+    batch_id: str
+    error_code: str | None = None
+    message: str | None = None
+    retryable: bool = False
+    attempt: int
+
+
 class SubmitMediaIngestJobsResponse(BaseModel):
     batch_id: str
     jobs: list[MediaIngestJobItem]
     errors: list[str] = Field(default_factory=list)
+    submissions: list[MediaIngestOccurrenceSubmission] = Field(default_factory=list)
 
 
 class MediaIngestJobStatus(BaseModel):
@@ -214,6 +241,99 @@ def _coerce_positive_int(value: Any) -> int | None:
     except (TypeError, ValueError):
         return None
     return parsed if parsed > 0 else None
+
+
+def _strict_positive_int_list(value: Any, *, name: str) -> list[int]:
+    """Parse bounded canonical positive integers without bool/float coercion."""
+    values = _coerce_form_string_list(value)
+    parsed: list[int] = []
+    for raw in values:
+        if not raw.isascii() or not raw.isdigit() or raw.startswith("0"):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"{name} must contain positive integers.",
+            )
+        number = int(raw)
+        if number < 1 or number > 2_147_483_647:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"{name} must contain positive integers.",
+            )
+        parsed.append(number)
+    return parsed
+
+
+def _bounded_identity_list(value: Any, *, name: str) -> list[str]:
+    values = _coerce_form_string_list(value)
+    if any(len(item) > _MAX_RUN_BOUND_ID_LENGTH for item in values):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"{name} contains an invalid identifier.",
+        )
+    return values
+
+
+def _validate_aligned(values: list[Any], *, count: int, name: str, required: bool) -> None:
+    if (required or values) and len(values) != count:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"{name} must match the number of submitted items.",
+        )
+
+
+def _derive_run_occurrence_idempotency(
+    *,
+    key: bytes,
+    owner_user_id: str,
+    run_id: str,
+    occurrence_id: str,
+    attempt: int,
+) -> str:
+    message = json.dumps(
+        ["media_ingest_occurrence", owner_user_id, run_id, occurrence_id, attempt],
+        ensure_ascii=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return f"playlist-ingest-v1:{hmac.new(key, message, hashlib.sha256).hexdigest()}"
+
+
+def _submission_rejected(
+    *,
+    occurrence_id: str,
+    batch_id: str,
+    attempt: int,
+    code: str,
+    message: str,
+    retryable: bool = False,
+) -> MediaIngestOccurrenceSubmission:
+    return MediaIngestOccurrenceSubmission(
+        occurrence_id=occurrence_id,
+        status="rejected",
+        accepted=False,
+        batch_id=batch_id,
+        error_code=code,
+        message=message,
+        retryable=retryable,
+        attempt=attempt,
+    )
+
+
+def _submission_accepted(
+    *,
+    occurrence_id: str,
+    batch_id: str,
+    attempt: int,
+    job_id: int,
+) -> MediaIngestOccurrenceSubmission:
+    return MediaIngestOccurrenceSubmission(
+        occurrence_id=occurrence_id,
+        status="accepted",
+        accepted=True,
+        job_id=job_id,
+        batch_id=batch_id,
+        retryable=False,
+        attempt=attempt,
+    )
 
 
 def _validate_per_url_binding_list(
@@ -363,9 +483,7 @@ def _is_heavy_media_ingest_request(form_data: AddMediaForm) -> bool:
     media_type = str(getattr(form_data, "media_type", "") or "").strip().lower()
     if media_type in {"audio", "video"}:
         return True
-    if bool(getattr(form_data, "enable_ocr", False)):
-        return True
-    return False
+    return bool(getattr(form_data, "enable_ocr", False))
 
 
 def _heavy_media_ingest_worker_available() -> bool:
@@ -564,6 +682,507 @@ def _resolve_batch_or_session_id(
     raise HTTPException(status_code=400, detail="Either batch_id or session_id is required")
 
 
+async def _submit_run_bound_media_ingest_jobs(
+    *,
+    request: Request,
+    form_data: AddMediaForm,
+    files: list[UploadFile] | None,
+    run_id: str,
+    occurrence_ids: Any,
+    attempts: Any,
+    planned_item_ids: Any,
+    file_occurrence_ids: Any,
+    file_attempts: Any,
+    file_planned_item_ids: Any,
+    current_user: User,
+    jm: JobManager,
+) -> SubmitMediaIngestJobsResponse | JSONResponse:
+    """Submit occurrence-bound jobs while preserving legacy response fields."""
+    owner = str(current_user.id)
+    run_identity = str(run_id).strip()
+    if not run_identity or len(run_identity) > _MAX_RUN_BOUND_ID_LENGTH:
+        raise HTTPException(status_code=422, detail="run_id is invalid.")
+
+    url_list = [str(url).strip() for url in (form_data.urls or []) if str(url).strip()]
+    uploads = list(files or [])
+    url_occurrences = _bounded_identity_list(occurrence_ids, name="occurrence_ids")
+    url_attempts = _strict_positive_int_list(attempts, name="attempts")
+    url_planned = _strict_positive_int_list(planned_item_ids, name="planned_item_ids")
+    upload_occurrences = _bounded_identity_list(file_occurrence_ids, name="file_occurrence_ids")
+    upload_attempts = _strict_positive_int_list(file_attempts, name="file_attempts")
+    upload_planned = _strict_positive_int_list(file_planned_item_ids, name="file_planned_item_ids")
+    _validate_aligned(url_occurrences, count=len(url_list), name="occurrence_ids", required=bool(url_list))
+    _validate_aligned(url_attempts, count=len(url_list), name="attempts", required=bool(url_list))
+    _validate_aligned(url_planned, count=len(url_list), name="planned_item_ids", required=False)
+    _validate_aligned(
+        upload_occurrences,
+        count=len(uploads),
+        name="file_occurrence_ids",
+        required=bool(uploads),
+    )
+    _validate_aligned(upload_attempts, count=len(uploads), name="file_attempts", required=bool(uploads))
+    _validate_aligned(
+        upload_planned,
+        count=len(uploads),
+        name="file_planned_item_ids",
+        required=False,
+    )
+    total = len(url_list) + len(uploads)
+    if not 1 <= total <= _MAX_RUN_BOUND_SUBMISSIONS:
+        raise HTTPException(status_code=422, detail="Run-bound submissions must contain between 1 and 500 items.")
+    all_occurrences = [*url_occurrences, *upload_occurrences]
+    if len(set(all_occurrences)) != len(all_occurrences):
+        raise HTTPException(status_code=422, detail="occurrence_ids must be unique within a submission.")
+
+    store = PlaylistIngestStore(jm)
+    try:
+        run = store.get_run(owner, run_identity)
+        items = {item.occurrence_id: item for item in store.list_run_items(owner, run_identity, limit=500)}
+    except PlaylistIngestNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Playlist ingest run not found.") from exc
+    if run.status not in {"staged", "running"}:
+        raise HTTPException(status_code=409, detail="Playlist ingest run is not accepting jobs.")
+
+    batch_id = str(uuid4())
+    hmac_key = derive_hmac_key()
+    options = form_data.model_dump(mode="json")
+    options.pop("urls", None)
+    options.pop("keywords", None)
+    if run.processing_options:
+        options.update(run.processing_options)
+    selected_queue = (os.getenv("MEDIA_INGEST_JOBS_DEFAULT_QUEUE") or "default").strip() or "default"
+    rid = ensure_request_id(request) if request is not None else None
+    tp = ensure_traceparent(request) if request is not None else ""
+
+    prepared: list[dict[str, Any]] = []
+    submissions: list[MediaIngestOccurrenceSubmission] = []
+    for index, (source, occurrence, attempt) in enumerate(zip(url_list, url_occurrences, url_attempts, strict=True)):
+        item = items.get(occurrence)
+        client_planned = url_planned[index] if url_planned else None
+        rejection: MediaIngestOccurrenceSubmission | None = None
+        if item is None:
+            rejection = _submission_rejected(
+                occurrence_id=occurrence,
+                batch_id=batch_id,
+                attempt=attempt,
+                code="occurrence_not_found",
+                message="Run occurrence was not found.",
+            )
+        elif item.attempt != attempt:
+            rejection = _submission_rejected(
+                occurrence_id=occurrence,
+                batch_id=batch_id,
+                attempt=attempt,
+                code="occurrence_attempt_mismatch",
+                message="Submitted attempt does not match the run occurrence.",
+            )
+        elif client_planned is not None and client_planned != item.planned_collection_item_id:
+            rejection = _submission_rejected(
+                occurrence_id=occurrence,
+                batch_id=batch_id,
+                attempt=attempt,
+                code="planned_item_mismatch",
+                message="Submitted planned item does not match the run occurrence.",
+            )
+        elif (
+            item.input_kind == "file_stub"
+            or item.action not in {"ingest", "overwrite"}
+            or item.state
+            not in {
+                "staged",
+                "submit_pending",
+                "queued",
+            }
+        ):
+            rejection = _submission_rejected(
+                occurrence_id=occurrence,
+                batch_id=batch_id,
+                attempt=attempt,
+                code="occurrence_not_processable",
+                message="Run occurrence does not require URL processing.",
+            )
+        elif source != item.source_url:
+            rejection = _submission_rejected(
+                occurrence_id=occurrence,
+                batch_id=batch_id,
+                attempt=attempt,
+                code="occurrence_source_mismatch",
+                message="Submitted source does not match the run occurrence.",
+            )
+        else:
+            try:
+                classified = classify_playlist_url(str(item.source_url))
+            except ValueError:
+                rejection = _submission_rejected(
+                    occurrence_id=occurrence,
+                    batch_id=batch_id,
+                    attempt=attempt,
+                    code="occurrence_source_invalid",
+                    message="Stored run source is not a valid media URL.",
+                )
+            else:
+                if classified.is_playlist:
+                    raise HTTPException(
+                        status_code=422,
+                        detail={
+                            "code": "playlist_preflight_required",
+                            "message": "Playlist URLs must be inspected before job submission.",
+                        },
+                    )
+        if rejection is not None:
+            submissions.append(rejection)
+            continue
+        prepared.append(
+            {
+                "kind": "url",
+                "index": index,
+                "item": item,
+                "occurrence_id": occurrence,
+                "attempt": attempt,
+                "planned_item_id": item.planned_collection_item_id,
+            }
+        )
+
+    for index, (occurrence, attempt) in enumerate(zip(upload_occurrences, upload_attempts, strict=True)):
+        item = items.get(occurrence)
+        client_planned = upload_planned[index] if upload_planned else None
+        rejection = None
+        if item is None:
+            rejection = _submission_rejected(
+                occurrence_id=occurrence,
+                batch_id=batch_id,
+                attempt=attempt,
+                code="occurrence_not_found",
+                message="Run occurrence was not found.",
+            )
+        elif item.attempt != attempt:
+            rejection = _submission_rejected(
+                occurrence_id=occurrence,
+                batch_id=batch_id,
+                attempt=attempt,
+                code="occurrence_attempt_mismatch",
+                message="Submitted attempt does not match the run occurrence.",
+            )
+        elif client_planned is not None and client_planned != item.planned_collection_item_id:
+            rejection = _submission_rejected(
+                occurrence_id=occurrence,
+                batch_id=batch_id,
+                attempt=attempt,
+                code="planned_item_mismatch",
+                message="Submitted planned item does not match the run occurrence.",
+            )
+        elif (
+            item.input_kind != "file_stub"
+            or item.action != "ingest"
+            or item.state
+            not in {
+                "awaiting_upload",
+                "submit_pending",
+                "queued",
+            }
+        ):
+            rejection = _submission_rejected(
+                occurrence_id=occurrence,
+                batch_id=batch_id,
+                attempt=attempt,
+                code="occurrence_not_processable",
+                message="Run occurrence is not awaiting this file upload.",
+            )
+        if rejection is not None:
+            submissions.append(rejection)
+            continue
+        prepared.append(
+            {
+                "kind": "file",
+                "index": index,
+                "item": item,
+                "occurrence_id": occurrence,
+                "attempt": attempt,
+                "planned_item_id": item.planned_collection_item_id,
+            }
+        )
+
+    jobs: list[MediaIngestJobItem] = []
+    errors: list[str] = []
+    for entry in prepared:
+        occurrence = str(entry["occurrence_id"])
+        attempt = int(entry["attempt"])
+        identity = _derive_run_occurrence_idempotency(
+            key=hmac_key,
+            owner_user_id=owner,
+            run_id=run_identity,
+            occurrence_id=occurrence,
+            attempt=attempt,
+        )
+        try:
+            reserved = store.prepare_run_item_job_submission(
+                owner,
+                run_identity,
+                occurrence,
+                attempt=attempt,
+                batch_id=batch_id,
+                idempotency_identity=identity,
+                source_kind=str(entry["kind"]),
+                planned_item_id=entry["planned_item_id"],
+            )
+        except (PlaylistIngestConflictError, PlaylistIngestNotFoundError):
+            submissions.append(
+                _submission_rejected(
+                    occurrence_id=occurrence,
+                    batch_id=batch_id,
+                    attempt=attempt,
+                    code="occurrence_not_processable",
+                    message="Run occurrence state changed before submission.",
+                    retryable=True,
+                )
+            )
+            continue
+
+        if reserved.state == "queued" and reserved.job_id is not None:
+            existing = jm.get_job(reserved.job_id)
+            if existing is None or str(existing.get("owner_user_id") or "") != owner:
+                submissions.append(
+                    _submission_rejected(
+                        occurrence_id=occurrence,
+                        batch_id=str(reserved.batch_id or batch_id),
+                        attempt=attempt,
+                        code="occurrence_binding_pending",
+                        message="Accepted job binding is temporarily unavailable.",
+                        retryable=True,
+                    )
+                )
+                continue
+            payload = _normalize_payload(existing.get("payload"))
+            jobs.append(
+                MediaIngestJobItem(
+                    id=int(existing["id"]),
+                    uuid=existing.get("uuid"),
+                    source=str(payload.get("source") or ""),
+                    source_kind=str(payload.get("source_kind") or entry["kind"]),
+                    status=str(existing.get("status") or "queued"),
+                    collection_id=(str(payload["collection_id"]) if payload.get("collection_id") is not None else None),
+                    planned_item_id=(
+                        str(payload["planned_item_id"]) if payload.get("planned_item_id") is not None else None
+                    ),
+                    idempotency_key=identity,
+                )
+            )
+            submissions.append(
+                _submission_accepted(
+                    occurrence_id=occurrence,
+                    batch_id=str(reserved.batch_id or batch_id),
+                    attempt=attempt,
+                    job_id=int(existing["id"]),
+                )
+            )
+            continue
+
+        reserved_batch = str(reserved.batch_id or batch_id)
+        temp_dir_path: str | None = None
+        if entry["kind"] == "url":
+            source = str(reserved.source_url)
+            payload = {
+                "batch_id": reserved_batch,
+                "media_type": str(form_data.media_type),
+                "source": source,
+                "source_kind": "url",
+                "input_ref": source,
+                "options": options,
+            }
+        else:
+            upload = uploads[int(entry["index"])]
+            try:
+                with TempDirManager(prefix="media_ingest_job_", cleanup=False) as temp_dir:
+                    temp_dir_path = str(temp_dir)
+                    saved_files, file_errors = await save_uploaded_files(
+                        [upload],
+                        temp_dir=temp_dir,
+                        validator=file_validator_instance,
+                        expected_media_type_key=str(form_data.media_type),
+                    )
+                if file_errors or len(saved_files) != 1:
+                    raise ValueError("upload_staging_failed")
+                saved = saved_files[0]
+                source = str(saved.get("path"))
+                original_filename = saved.get("original_filename")
+                payload = {
+                    "batch_id": reserved_batch,
+                    "media_type": str(form_data.media_type),
+                    "source": source,
+                    "source_kind": "file",
+                    "input_ref": saved.get("input_ref") or original_filename or source,
+                    "original_filename": original_filename,
+                    "temp_dir": temp_dir_path,
+                    "cleanup_temp_dir": True,
+                    "options": options,
+                }
+            except Exception:
+                if temp_dir_path:
+                    _cleanup_dir(temp_dir_path)
+                with contextlib.suppress(Exception):
+                    store.reset_run_item_job_submission(
+                        owner,
+                        run_identity,
+                        occurrence,
+                        attempt=attempt,
+                        idempotency_identity=identity,
+                    )
+                submissions.append(
+                    _submission_rejected(
+                        occurrence_id=occurrence,
+                        batch_id=reserved_batch,
+                        attempt=attempt,
+                        code="upload_staging_failed",
+                        message="Upload staging failed.",
+                        retryable=True,
+                    )
+                )
+                errors.append("Upload staging failed")
+                continue
+
+        payload.update(
+            {
+                "run_id": run_identity,
+                "occurrence_id": occurrence,
+                "attempt": attempt,
+                "idempotency_key": identity,
+            }
+        )
+        if run.collection_id is not None:
+            payload["collection_id"] = run.collection_id
+        if entry["planned_item_id"] is not None:
+            payload["planned_item_id"] = entry["planned_item_id"]
+        try:
+            row = _create_media_ingest_job(
+                jm=jm,
+                selected_queue=selected_queue,
+                payload=payload,
+                current_user=current_user,
+                batch_id=reserved_batch,
+                request_id=rid,
+                trace_id=tp or None,
+            )
+            row_id = row.get("id")
+            if row_id is None:
+                raise ValueError("job_create_failed")
+        except HTTPException as exc:
+            if temp_dir_path:
+                _cleanup_dir(temp_dir_path)
+            with contextlib.suppress(Exception):
+                store.reset_run_item_job_submission(
+                    owner,
+                    run_identity,
+                    occurrence,
+                    attempt=attempt,
+                    idempotency_identity=identity,
+                )
+            if exc.status_code in {429, 503}:
+                raise
+            submissions.append(
+                _submission_rejected(
+                    occurrence_id=occurrence,
+                    batch_id=reserved_batch,
+                    attempt=attempt,
+                    code="job_submission_failed",
+                    message="Media ingest job submission failed.",
+                    retryable=True,
+                )
+            )
+            errors.append("Media ingest job submission failed")
+            continue
+        except Exception:
+            if temp_dir_path:
+                _cleanup_dir(temp_dir_path)
+            with contextlib.suppress(Exception):
+                store.reset_run_item_job_submission(
+                    owner,
+                    run_identity,
+                    occurrence,
+                    attempt=attempt,
+                    idempotency_identity=identity,
+                )
+            submissions.append(
+                _submission_rejected(
+                    occurrence_id=occurrence,
+                    batch_id=reserved_batch,
+                    attempt=attempt,
+                    code="job_submission_failed",
+                    message="Media ingest job submission failed.",
+                    retryable=True,
+                )
+            )
+            errors.append("Media ingest job submission failed")
+            continue
+
+        stored_payload = _normalize_payload(row.get("payload"))
+        if temp_dir_path and stored_payload and stored_payload.get("source") != payload.get("source"):
+            _cleanup_dir(temp_dir_path)
+        try:
+            bound = store.bind_run_item_job(
+                owner,
+                run_identity,
+                occurrence,
+                attempt=attempt,
+                job_id=int(row_id),
+                batch_id=reserved_batch,
+                idempotency_identity=identity,
+            )
+        except Exception:
+            submissions.append(
+                _submission_rejected(
+                    occurrence_id=occurrence,
+                    batch_id=reserved_batch,
+                    attempt=attempt,
+                    code="occurrence_binding_pending",
+                    message="Accepted job binding is temporarily unavailable.",
+                    retryable=True,
+                )
+            )
+            errors.append("Accepted job binding is temporarily unavailable")
+            continue
+        effective_payload = stored_payload or payload
+        jobs.append(
+            MediaIngestJobItem(
+                id=int(row_id),
+                uuid=row.get("uuid"),
+                source=str(effective_payload.get("source") or ""),
+                source_kind=str(effective_payload.get("source_kind") or entry["kind"]),
+                status=str(row.get("status") or "queued"),
+                collection_id=(
+                    str(effective_payload["collection_id"])
+                    if effective_payload.get("collection_id") is not None
+                    else None
+                ),
+                planned_item_id=(
+                    str(effective_payload["planned_item_id"])
+                    if effective_payload.get("planned_item_id") is not None
+                    else None
+                ),
+                idempotency_key=identity,
+            )
+        )
+        submissions.append(
+            _submission_accepted(
+                occurrence_id=occurrence,
+                batch_id=str(bound.batch_id or reserved_batch),
+                attempt=attempt,
+                job_id=int(row_id),
+            )
+        )
+
+    order = {occurrence: index for index, occurrence in enumerate(all_occurrences)}
+    submissions.sort(key=lambda record: order[record.occurrence_id])
+    response = SubmitMediaIngestJobsResponse(
+        batch_id=batch_id,
+        jobs=jobs,
+        errors=errors,
+        submissions=submissions,
+    )
+    if any(not record.accepted for record in submissions):
+        return JSONResponse(status_code=status.HTTP_207_MULTI_STATUS, content=response.model_dump())
+    return response
+
+
 @router.post(
     "/ingest/jobs",
     response_model=SubmitMediaIngestJobsResponse,
@@ -584,6 +1203,24 @@ async def submit_media_ingest_jobs(
     request: Request,
     form_data: AddMediaForm = Depends(get_add_media_form),
     files: list[UploadFile] | None = File(None, description="Optional media uploads"),
+    run_id: str | None = Form(None, description="Owner-scoped playlist ingest run identifier"),
+    occurrence_ids: list[str] | None = Form(
+        None,
+        description="Aligned run occurrence identifiers for URL items",
+    ),
+    attempts: list[str] | None = Form(None, description="Aligned positive attempt numbers for URL items"),
+    file_occurrence_ids: list[str] | None = Form(
+        None,
+        description="Aligned run occurrence identifiers for uploaded files",
+    ),
+    file_attempts: list[str] | None = Form(
+        None,
+        description="Aligned positive attempt numbers for uploaded files",
+    ),
+    file_planned_item_ids: list[str] | None = Form(
+        None,
+        description="Optional aligned planned collection item identifiers for files",
+    ),
     media_collection_id: str | None = Form(
         None,
         description="Optional durable media collection id for this job batch",
@@ -612,6 +1249,7 @@ async def submit_media_ingest_jobs(
     jm: JobManager = Depends(get_job_manager),
     collections_db: CollectionsDatabase | None = Depends(try_get_collections_db_for_user),
 ) -> SubmitMediaIngestJobsResponse:
+    assert_may_start_work(request.app, "media.ingest.jobs.submit")
     rid = ensure_request_id(request) if request is not None else None
     tp = ensure_traceparent(request) if request is not None else ""
 
@@ -620,6 +1258,23 @@ async def submit_media_ingest_jobs(
         form_data.urls = None
 
     _validate_submit_inputs(form_data.media_type, form_data.urls, files)
+
+    run_id_value = _coerce_form_string(run_id)
+    if run_id_value is not None:
+        return await _submit_run_bound_media_ingest_jobs(
+            request=request,
+            form_data=form_data,
+            files=files,
+            run_id=run_id_value,
+            occurrence_ids=occurrence_ids,
+            attempts=attempts,
+            planned_item_ids=planned_item_ids,
+            file_occurrence_ids=file_occurrence_ids,
+            file_attempts=file_attempts,
+            file_planned_item_ids=file_planned_item_ids,
+            current_user=current_user,
+            jm=jm,
+        )
 
     options = form_data.model_dump(mode="json")
     options.pop("urls", None)
@@ -634,6 +1289,21 @@ async def submit_media_ingest_jobs(
 
     url_list = form_data.urls or []
     valid_url_count = len([url for url in url_list if url and str(url).strip()])
+    for url in url_list:
+        if not url or not str(url).strip():
+            continue
+        try:
+            is_playlist = classify_playlist_url(str(url)).is_playlist
+        except ValueError:
+            is_playlist = False
+        if is_playlist:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "playlist_preflight_required",
+                    "message": "Playlist URLs must be inspected before job submission.",
+                },
+            )
     collection_id_value, planned_item_values, idempotency_key_values = _resolve_submit_bindings(
         url_count=valid_url_count,
         media_collection_id=media_collection_id,

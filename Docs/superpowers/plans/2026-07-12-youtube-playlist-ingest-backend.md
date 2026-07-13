@@ -309,29 +309,29 @@ git commit -m "feat: resolve playlist duplicate actions (TASK-12112)"
 
 **Tests:** Endpoint/worker tests, event replay tests, cancellation races, integration workflow.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 7: Tighten media-job submission and worker boundaries
 
-- [ ] **Step 1: Write failing endpoint and worker tests**
+- [x] **Step 1: Write failing endpoint and worker tests**
 
 Cover aligned URL/file occurrence arrays, length mismatch, owner/run/state validation, derived idempotency, repeated ambiguous submit, opaque playlist 422, client URL mismatch, canonical server-authoritative payload, and worker rejection when processing returns zero or multiple items.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest_jobs_endpoint.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest_jobs_worker.py -q`
 
 Expected: FAIL on the new occurrence contract.
 
-- [ ] **Step 3: Extend `/media/ingest/jobs` minimally**
+- [x] **Step 3: Extend `/media/ingest/jobs` minimally**
 
 Accept `run_id`, aligned `occurrence_ids`, `attempts`, and optional planned IDs for URLs; use equivalent `file_*` arrays for uploads. Derive the Jobs idempotency key as an HMAC/hash over authenticated owner, run, occurrence, and attempt. Validate run membership/state before staging files. Resolve the authoritative concrete URL from the run item; reject any non-matching client URL with `occurrence_source_mismatch`, then write only the stored URL into the job payload. Return one structured accepted/rejected record per occurrence while retaining legacy response fields during deprecation.
 
-- [ ] **Step 4: Enforce one concrete worker result**
+- [x] **Step 4: Enforce one concrete worker result**
 
 Reject `classify_playlist_url(source).is_playlist` before job creation and again defensively in the worker. Replace `results[0]` projection with a length check: exactly one dict is required for a media occurrence. Include `run_id`, `occurrence_id`, and attempt in the payload/result for reconciliation.
 
-- [ ] **Step 5: Run tests and commit**
+- [x] **Step 5: Run tests and commit**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest_jobs_endpoint.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest_jobs_worker.py tldw_Server_API/tests/Media/test_media_ingest_jobs_endpoint_sanitization.py -q`
 
