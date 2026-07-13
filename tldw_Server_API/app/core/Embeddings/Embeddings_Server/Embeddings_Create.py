@@ -221,6 +221,7 @@ def _get_explicit_openai_embeddings_batch(
             json=payload,
             timeout=60,
             retry=RetryPolicy(attempts=1),
+            sensitive_observability=True,
         )
         status_code = int(getattr(response, "status_code", 0) or 0)
         if status_code >= 400:
@@ -271,6 +272,7 @@ def _get_explicit_local_api_embeddings_batch(
             json={"texts": texts, "model": model},
             timeout=60,
             retry=RetryPolicy(attempts=1),
+            sensitive_observability=True,
         )
         status_code = int(getattr(response, "status_code", 0) or 0)
         if status_code >= 400:

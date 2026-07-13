@@ -14,8 +14,10 @@ Implements:
 """
 
 import asyncio  # noqa: E402
+import contextvars  # noqa: E402
 import hashlib  # noqa: E402
 import json  # noqa: E402
+import logging  # noqa: E402
 import os  # noqa: E402
 import random  # noqa: E402
 import re  # noqa: E402
@@ -155,6 +157,37 @@ ENFORCE_TLS_MIN = (
 )
 ENFORCE_TLS_MIN = is_truthy(str(ENFORCE_TLS_MIN))
 TLS_MIN_VERSION = (os.getenv("HTTP_TLS_MIN_VERSION") or os.getenv("TLS_MIN_VERSION") or "1.2").strip()
+_SENSITIVE_OBSERVABILITY_URL = "https://sensitive-endpoint.invalid/"
+_SENSITIVE_HTTP_LOG_CONTEXT = contextvars.ContextVar(
+    "tldw_sensitive_http_log_context",
+    default=False,
+)
+
+
+class _SensitiveHTTPLogFilter(logging.Filter):
+    """Suppress third-party URL logs only in a sensitive request context."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if not _SENSITIVE_HTTP_LOG_CONTEXT.get():
+            return True
+        return not record.name.startswith(("httpx", "httpcore"))
+
+
+_SENSITIVE_HTTP_LOG_FILTER = _SensitiveHTTPLogFilter()
+
+
+def _install_sensitive_http_log_filter() -> None:
+    """Install the context-aware filter on active stdlib logging handlers."""
+    loggers = [logging.getLogger(), logging.getLogger("httpx"), logging.getLogger("httpcore")]
+    for name, candidate in list(logging.Logger.manager.loggerDict.items()):
+        if isinstance(candidate, logging.Logger) and name.startswith(("httpx", "httpcore")):
+            loggers.append(candidate)
+    for log in loggers:
+        if _SENSITIVE_HTTP_LOG_FILTER not in log.filters:
+            log.addFilter(_SENSITIVE_HTTP_LOG_FILTER)
+        for handler in log.handlers:
+            if _SENSITIVE_HTTP_LOG_FILTER not in handler.filters:
+                handler.addFilter(_SENSITIVE_HTTP_LOG_FILTER)
 
 
 def _httpx_timeout_from_defaults() -> httpx.Timeout:
@@ -439,6 +472,7 @@ class TransportAdapter(Protocol):
         retry: RetryPolicy | None = None,
         cert_pinning: dict[str, set[str]] | None = None,
         configured_endpoint: ConfiguredEndpointScope | None = None,
+        sensitive_observability: bool = False,
     ) -> SyncResponseLike: ...
 
     async def arequest(
@@ -518,6 +552,7 @@ class HttpxAdapter:
         retry: RetryPolicy | None = None,
         cert_pinning: dict[str, set[str]] | None = None,
         configured_endpoint: ConfiguredEndpointScope | None = None,
+        sensitive_observability: bool = False,
     ) -> httpx.Response:
         return _fetch_httpx_response(
             method=method,
@@ -535,6 +570,7 @@ class HttpxAdapter:
             retry=retry,
             cert_pinning=cert_pinning,
             configured_endpoint=configured_endpoint,
+            sensitive_observability=sensitive_observability,
         )
 
     async def arequest(
@@ -1084,6 +1120,7 @@ def _validate_egress_or_raise(
     *,
     dns_pin_cache: dict[str, tuple[str, ...]] | None = None,
     configured_endpoint: ConfiguredEndpointScope | None = None,
+    sensitive_observability: bool = False,
 ) -> None:
     from urllib.parse import urlparse as _urlparse
 
@@ -1140,8 +1177,19 @@ def _validate_egress_or_raise(
         # metrics
         with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
             get_metrics_registry().increment(
-                "http_client_egress_denials_total", 1, labels={"reason": (reason or "denied")}
+                "http_client_egress_denials_total",
+                1,
+                labels={
+                    "reason": "sensitive_endpoint_denied"
+                    if sensitive_observability
+                    else (reason or "denied")
+                },
             )
+        if sensitive_observability:
+            raise EgressPolicyError(
+                "Sensitive endpoint denied by egress policy",
+                reason_code=getattr(res, "reason_code", None),
+            ) from None
         raise EgressPolicyError(reason, reason_code=getattr(res, "reason_code", None))
 
 
@@ -1801,6 +1849,7 @@ def _check_cert_pinning(
     *,
     configured_endpoint: ConfiguredEndpointScope | None = None,
     accepted_resolved_ips: tuple[str, ...] = (),
+    sensitive_observability: bool = False,
 ) -> None:
     if not host or not pins:
         return
@@ -1826,6 +1875,8 @@ def _check_cert_pinning(
                 validation_kwargs["dns_pin_cache"] = {
                     normalized_host: tuple(accepted_resolved_ips)
                 }
+            if sensitive_observability:
+                validation_kwargs["sensitive_observability"] = True
             _validate_egress_or_raise(url, **validation_kwargs)
         except EgressPolicyError:
             raise
@@ -1870,6 +1921,7 @@ def _check_cert_pins_for_url(
     *,
     configured_endpoint: ConfiguredEndpointScope | None,
     dns_pin_cache: dict[str, tuple[str, ...]],
+    sensitive_observability: bool = False,
 ) -> None:
     """Apply configured certificate pins to one already-validated request hop."""
     if not pins_map:
@@ -1888,6 +1940,7 @@ def _check_cert_pins_for_url(
         TLS_MIN_VERSION,
         configured_endpoint=configured_endpoint,
         accepted_resolved_ips=_accepted_ips_for_url(dns_pin_cache, url),
+        sensitive_observability=sensitive_observability,
     )
 
 
@@ -3263,6 +3316,7 @@ def _fetch_httpx_response(
     retry: RetryPolicy | None = None,
     cert_pinning: dict[str, set[str]] | None = None,
     configured_endpoint: ConfiguredEndpointScope | None = None,
+    sensitive_observability: bool = False,
 ) -> httpx.Response:
     """Sync httpx request with retries and egress enforcement.
 
@@ -3279,6 +3333,7 @@ def _fetch_httpx_response(
         url,
         dns_pin_cache=dns_pin_cache,
         configured_endpoint=configured_endpoint,
+        sensitive_observability=sensitive_observability,
     )
     _validate_proxies_or_raise(proxies)
 
@@ -3286,7 +3341,8 @@ def _fetch_httpx_response(
     sleep_s = 0.0
     t0 = time.time()
     tm = get_tracing_manager()
-    host_attr = _parse_host_from_url(url)
+    observability_url = _SENSITIVE_OBSERVABILITY_URL if sensitive_observability else url
+    host_attr = _parse_host_from_url(observability_url)
     method_upper = str(method).upper()
     _head_disable_h2_tried = False
     _head_get_range_tried = False
@@ -3319,6 +3375,7 @@ def _fetch_httpx_response(
                                 accepted_resolved_ips=_accepted_ips_for_url(
                                     dns_pin_cache, target_url
                                 ),
+                                sensitive_observability=sensitive_observability,
                             )
             except EgressPolicyError:
                 raise
@@ -3360,13 +3417,18 @@ def _fetch_httpx_response(
         sc = _get_httpx_client(proxies=proxies)
         need_close = False
 
+    sensitive_log_token = None
+    if sensitive_observability:
+        _install_sensitive_http_log_filter()
+        sensitive_log_token = _SENSITIVE_HTTP_LOG_CONTEXT.set(True)
+
     try:
         with tm.span(
             "http.client",
             attributes={
                 "http.method": method.upper(),
                 "net.host.name": host_attr,
-                "url.full": _sanitize_url_for_logs(url),
+                "url.full": _sanitize_url_for_logs(observability_url),
             },
         ):
             for attempt in range(1, attempts + 1):
@@ -3377,6 +3439,7 @@ def _fetch_httpx_response(
                         cur_url,
                         dns_pin_cache=dns_pin_cache,
                         configured_endpoint=configured_endpoint,
+                        sensitive_observability=sensitive_observability,
                     )
                     resp, reason = _do_once(sc, cur_url)
                     if resp is None:
@@ -3400,12 +3463,14 @@ def _fetch_httpx_response(
                                         cur_url,
                                         dns_pin_cache=dns_pin_cache,
                                         configured_endpoint=configured_endpoint,
+                                        sensitive_observability=sensitive_observability,
                                     )
                                     _check_cert_pins_for_url(
                                         cur_url,
                                         cert_pinning or _get_client_cert_pins(sc),
                                         configured_endpoint=configured_endpoint,
                                         dns_pin_cache=dns_pin_cache,
+                                        sensitive_observability=sensitive_observability,
                                     )
                                     req_headers = _inject_trace_headers(headers)
                                     req_headers = _strip_sensitive_headers_for_cross_origin(
@@ -3440,7 +3505,7 @@ def _fetch_httpx_response(
                                         tm.set_attributes({"http.status_code": int(r2.status_code)})
                                     _log_outbound_request(
                                         method="GET",
-                                        url=r2.request.url if hasattr(r2.request, "url") else cur_url,
+                                        url=observability_url,
                                         status_code=int(r2.status_code),
                                         start_time=t0,
                                         attempt=attempt,
@@ -3459,7 +3524,7 @@ def _fetch_httpx_response(
                         delay = _decorrelated_jitter_sleep(sleep_s, retry.backoff_base_ms, retry.backoff_cap_s)
                         logger.debug(
                             f"fetch network retry attempt={attempt} reason={rsn} delay={delay:.3f}s "
-                            f"url={_sanitize_url_for_logs(cur_url)}"
+                            f"url={_sanitize_url_for_logs(observability_url)}"
                         )
                         time.sleep(delay)
                         sleep_s = delay
@@ -3492,7 +3557,7 @@ def _fetch_httpx_response(
                         continue
                     if resp.status_code < 400:
                         try:
-                            host = _parse_host_from_url(str(resp.request.url))
+                            host = _parse_host_from_url(observability_url)
                             get_metrics_registry().increment(
                                 "http_client_requests_total", 1, labels={"method": method.upper(), "host": host, "status": str(resp.status_code)}
                             )
@@ -3507,7 +3572,7 @@ def _fetch_httpx_response(
                             tm.set_attributes({"http.status_code": int(resp.status_code)})
                         _log_outbound_request(
                             method=method,
-                            url=resp.request.url,
+                            url=observability_url,
                             status_code=int(resp.status_code),
                             start_time=t0,
                             attempt=attempt,
@@ -3518,7 +3583,7 @@ def _fetch_httpx_response(
                     if not should or attempt == attempts:
                         _log_outbound_request(
                             method=method,
-                            url=resp.request.url,
+                            url=observability_url,
                             status_code=int(resp.status_code),
                             start_time=t0,
                             attempt=attempt,
@@ -3534,7 +3599,7 @@ def _fetch_httpx_response(
                         delay = _decorrelated_jitter_sleep(sleep_s, retry.backoff_base_ms, retry.backoff_cap_s)
                     logger.debug(
                         f"fetch retry attempt={attempt} reason={rsn} delay={delay:.3f}s "
-                        f"url={_sanitize_url_for_logs(cur_url)}"
+                        f"url={_sanitize_url_for_logs(observability_url)}"
                     )
                     with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                         tm.add_event("http.retry", {"attempt": attempt, "reason": rsn})
@@ -3543,7 +3608,7 @@ def _fetch_httpx_response(
                     break
         _log_outbound_request(
             method=method,
-            url=url,
+            url=observability_url,
             status_code=0,
             start_time=t0,
             attempt=attempts,
@@ -3552,6 +3617,8 @@ def _fetch_httpx_response(
         )
         raise RetryExhaustedError("All retry attempts exhausted")  # noqa: TRY003
     finally:
+        if sensitive_log_token is not None:
+            _SENSITIVE_HTTP_LOG_CONTEXT.reset(sensitive_log_token)
         if need_close:
             with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                 sc.close()
@@ -3686,6 +3753,8 @@ def fetch(*args, **kwargs):
 
     - If called with keyword 'method', delegates to the HTTPX response API and
       returns an httpx.Response (backward compatible with existing callers).
+      Set `sensitive_observability=True` when the URL is request-derived and
+      must be redacted from logs, metrics, and tracing attributes.
       When retries are enabled and `files` are provided, file-like objects must
       be seekable; otherwise a ValueError is raised with the message:
       "File-like object must be seekable when retries are enabled. Either disable

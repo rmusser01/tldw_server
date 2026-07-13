@@ -112,6 +112,23 @@ def _effective_embedding_model_id(
     return str(model_name or selected).strip()
 
 
+def _effective_embedding_endpoint(
+    app_config: dict[str, Any],
+    model_id_override: str | None,
+) -> str:
+    """Return the configured endpoint from the selected embedding snapshot."""
+    model_spec = _embedding_model_spec_from_config(app_config, model_id_override)
+    for field_name in ("api_url", "base_url", "api_base_url", "endpoint"):
+        value = (
+            model_spec.get(field_name)
+            if isinstance(model_spec, dict)
+            else getattr(model_spec, field_name, None)
+        )
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
 @dataclass
 class AgenticConfig:
     """Configuration for agentic execution and evidence assembly."""
@@ -526,7 +543,14 @@ class AgenticToolbox:
                     and self.provider_embeddings_allowed
                 ):
                     try:
-                        endpoint = str(self.embedding_call_kwargs.get("base_url_override") or "")
+                        endpoint = str(
+                            self.embedding_call_kwargs.get("base_url_override")
+                            or _effective_embedding_endpoint(
+                                self.embedding_app_config,
+                                getattr(self.cfg, "agentic_provider_embedding_model_id", None),
+                            )
+                            or ""
+                        )
                         endpoint_identity = (
                             hashlib.sha256(endpoint.encode("utf-8")).hexdigest()
                             if endpoint

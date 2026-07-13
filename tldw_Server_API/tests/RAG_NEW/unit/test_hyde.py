@@ -772,30 +772,34 @@ async def test_optional_expansion_provider_failure_degrades_with_bounded_metadat
     )
     provider_error = ByokResolutionError("credential_store_unavailable", "openai")
 
+    calls = 0
+
     class _ExpansionRetriever:
         def __init__(self, *args, **kwargs):
             self.retrievers = {}
-            self.calls = 0
 
         async def retrieve(self, *args, **kwargs):
-            self.calls += 1
-            if self.calls == 1:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
                 return [base_doc]
             raise provider_error
 
     async def _expand(*args, **kwargs):
-        return ["expanded query"]
+        return ["expanded query one", "expanded query two"]
 
     monkeypatch.setattr(unified_pipeline, "MultiDatabaseRetriever", _ExpansionRetriever)
     monkeypatch.setattr(unified_pipeline, "multi_strategy_expansion", _expand)
 
     result = await unified_pipeline.unified_rag_pipeline(
-        query="base query",
+        query="base query and second part",
         sources=["media_db"],
         credential_runtime=object(),
         expand_query=True,
         expansion_strategies=["synonym"],
-        max_query_variations=1,
+        max_query_variations=2,
+        enable_query_decomposition=True,
+        max_subqueries=2,
         adaptive_hybrid_weights=False,
         enable_cache=False,
         enable_reranking=False,
@@ -803,6 +807,7 @@ async def test_optional_expansion_provider_failure_degrades_with_bounded_metadat
     )
 
     assert [document["id"] for document in result.documents] == ["base-1"]
+    assert calls == 2
     assert result.metadata["retrieval_coverage"]["retrieval_expansion"] == {
         "coverage": "degraded",
         "failure_code": "credential_store_unavailable",
@@ -915,6 +920,7 @@ async def test_additional_evidence_provider_failure_degrades_callback_locally(mo
 
         async def accumulate(self, *, initial_results, retrieval_fn, **kwargs):
             assert await retrieval_fn("gap query", set()) == []
+            assert await retrieval_fn("second gap query", set()) == []
             return SimpleNamespace(
                 documents=list(initial_results),
                 total_rounds=1,
@@ -972,7 +978,10 @@ async def test_per_claim_provider_failure_is_not_swallowed_by_nested_fallback(mo
     )
 
     class _ExplodingNotesRetriever:
+        calls = 0
+
         async def retrieve(self, *args, **kwargs):
+            type(self).calls += 1
             raise provider_error
 
     class _Retriever:
@@ -994,8 +1003,10 @@ async def test_per_claim_provider_failure_is_not_swallowed_by_nested_fallback(mo
             pass
 
         async def run(self, **kwargs):
-            documents = await kwargs["retrieve_fn"]("claim text")
-            assert documents == [base_doc]
+            first = await kwargs["retrieve_fn"]("claim text")
+            second = await kwargs["retrieve_fn"]("second claim text")
+            assert first == [base_doc]
+            assert second == [base_doc]
             return {"claims": [], "summary": {}, "verifications": []}
 
     class _Runtime:
@@ -1031,6 +1042,7 @@ async def test_per_claim_provider_failure_is_not_swallowed_by_nested_fallback(mo
     )
 
     assert [document["id"] for document in result.documents] == ["claim-base"]
+    assert _ExplodingNotesRetriever.calls == 1
     assert result.metadata["retrieval_coverage"]["per_claim"] == {
         "coverage": "degraded",
         "failure_code": "provider_configuration_invalid",

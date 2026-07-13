@@ -48,6 +48,22 @@ class HitCache:
         raise AssertionError("cache hits must not be rewritten")
 
 
+class SharedMemoryCache:
+    def __init__(self) -> None:
+        self.values = {}
+        self.get_keys = []
+        self.set_keys = []
+
+    async def get_async(self, key):  # noqa: ANN001 - simple test stub
+        self.get_keys.append(key)
+        return self.values.get(key)
+
+    async def set_async(self, key, value, ttl=None):  # noqa: ANN001 - simple test stub
+        self.set_keys.append(key)
+        self.values[key] = value
+        return True
+
+
 @pytest.mark.asyncio
 async def test_openai_api_url_override_only_when_explicit_provider(monkeypatch):
     config = EmbeddingsConfig(
@@ -179,6 +195,59 @@ async def test_cache_key_includes_openai_api_url_override(monkeypatch):
     expected_key = f"openai:text-embedding-3-small:{text_hash}:https://example.test/v1"
     assert service.cache.get_keys[-1] == expected_key
     assert service.cache.set_keys[-1] == expected_key
+
+
+@pytest.mark.asyncio
+async def test_legacy_local_api_cache_identity_includes_configured_endpoint(monkeypatch):
+    shared_cache = SharedMemoryCache()
+    calls = []
+
+    def make_service(endpoint, marker):
+        config = EmbeddingsConfig(
+            providers=[
+                ProviderConfig(
+                    name="local_api",
+                    api_url=endpoint,
+                    models=["local-model"],
+                )
+            ],
+            batching=BatchingConfig(enabled=False),
+            security=SecurityConfig(enable_rate_limiting=False),
+            default_provider="local_api",
+            default_model="local-model",
+        )
+        service = AsyncEmbeddingService(config=config)
+        service.cache = shared_cache
+
+        async def provider_success(**_kwargs):
+            calls.append(endpoint)
+            return [marker]
+
+        monkeypatch.setattr(service.providers["local_api"], "create_embedding", provider_success)
+        return service
+
+    first_service = make_service("https://local-a.example/embeddings", 1.0)
+    second_service = make_service("https://local-b.example/embeddings", 2.0)
+
+    first = await first_service.create_embedding(
+        "same text",
+        provider="local_api",
+        use_batching=False,
+    )
+    second = await second_service.create_embedding(
+        "same text",
+        provider="local_api",
+        use_batching=False,
+    )
+
+    assert first == [1.0]
+    assert second == [2.0]
+    assert calls == [
+        "https://local-a.example/embeddings",
+        "https://local-b.example/embeddings",
+    ]
+    assert shared_cache.get_keys[0] != shared_cache.get_keys[1]
+    assert shared_cache.set_keys[0] != shared_cache.set_keys[1]
 
 
 def _fallback_config():

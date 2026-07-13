@@ -79,6 +79,7 @@ def test_explicit_openai_key_overrides_model_and_server_keys(monkeypatch, tmp_pa
     assert seen[0]["headers"]["Authorization"] == "Bearer explicit-key"
     assert seen[0]["json"] == {"input": ["hello"], "model": "test-model"}
     assert seen[0]["retry"].attempts == 1
+    assert seen[0]["sensitive_observability"] is True
     assert config["openai_api"]["api_key"] == "server-config-key"
 
 
@@ -289,6 +290,7 @@ def test_explicit_local_api_uses_per_call_key_and_url(monkeypatch, tmp_path):
     assert result == [0.3, 0.4]
     assert seen[0]["url"] == "http://explicit.example/embeddings"
     assert seen[0]["headers"]["Authorization"] == "Bearer local-call-key"
+    assert seen[0]["sensitive_observability"] is True
     assert config["embedding_config"]["models"][model_id]["api_key"] == "model-spec-key"
 
 

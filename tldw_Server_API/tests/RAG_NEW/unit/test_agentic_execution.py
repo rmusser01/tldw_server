@@ -545,6 +545,56 @@ async def test_agentic_provider_vector_cache_identity_includes_config_selected_m
 
 
 @pytest.mark.asyncio
+async def test_legacy_local_api_vector_cache_identity_includes_configured_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core import config as core_config
+    from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create
+
+    current = {"endpoint": "https://local-a.example/embeddings"}
+    dispatched_endpoints: list[str] = []
+
+    def load_config():
+        return {
+            "EMBEDDING_CONFIG": {
+                "default_model_id": "local_api:model-a",
+                "models": {
+                    "local_api:model-a": {
+                        "provider": "local_api",
+                        "model_name_or_path": "model-a",
+                        "api_url": current["endpoint"],
+                    }
+                },
+            }
+        }
+
+    def fake_create(texts, app_config, model_id_override=None, **kwargs):
+        model = app_config["embedding_config"]["models"]["local_api:model-a"]
+        dispatched_endpoints.append(model["api_url"])
+        return [[1.0, 0.0] for _ in texts]
+
+    monkeypatch.setattr(core_config, "load_comprehensive_config", load_config)
+    monkeypatch.setattr(Embeddings_Create, "create_embeddings_batch", fake_create)
+    agentic_execution._INTRA_DOC_VEC_CACHE.clear()
+    cfg = AgenticConfig(
+        top_k_docs=1,
+        max_tool_calls=1,
+        enable_metrics=False,
+        agentic_use_provider_embeddings_within=True,
+    )
+    doc = Document(id="local-endpoint-cache", content="alpha", source=DataSource.MEDIA_DB, metadata={})
+
+    await agentic_execution.tool_loop([doc], "alpha", cfg)
+    current["endpoint"] = "https://local-b.example/embeddings"
+    await agentic_execution.tool_loop([doc], "alpha", cfg)
+
+    assert dispatched_endpoints == [
+        "https://local-a.example/embeddings",
+        "https://local-b.example/embeddings",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_toolbox_disables_provider_embeddings_after_first_document_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

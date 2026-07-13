@@ -715,18 +715,18 @@ class AsyncEmbeddingService:
         provider = self._resolve_provider_alias(provider)
         actual_provider = provider
         actual_model = model
-        provider_config = self.config.get_provider(provider)
+        provider_config = self._get_provider_config(provider)
         explicit_credentials = credentials_resolved is True
         effective_base_url = base_url_override if explicit_credentials else None
         if (
             not explicit_credentials
             and provider_config
-            and provider in {"openai", "huggingface"}
+            and provider in {"openai", "huggingface", "local_api"}
             and provider_config.api_url
         ):
             effective_base_url = provider_config.api_url
             # Ensure explicit provider overrides reach the async providers directly.
-            if explicit_provider:
+            if explicit_provider and provider in {"openai", "huggingface"}:
                 use_batching = False
         if explicit_credentials:
             use_batching = False
@@ -808,8 +808,12 @@ class AsyncEmbeddingService:
         if use_cache:
             cache_key = f"{actual_provider}:{actual_model}:{text_hash}"
             actual_base_url = effective_base_url if explicit_credentials else None
-            actual_provider_config = self.config.get_provider(actual_provider)
-            if not explicit_credentials and actual_provider_config and actual_provider in {"openai", "huggingface"}:
+            actual_provider_config = self._get_provider_config(actual_provider)
+            if (
+                not explicit_credentials
+                and actual_provider_config
+                and actual_provider in {"openai", "huggingface", "local_api"}
+            ):
                 actual_base_url = actual_provider_config.api_url
             if actual_base_url:
                 cache_key = f"{cache_key}:{actual_base_url}"
@@ -826,6 +830,13 @@ class AsyncEmbeddingService:
         if provider == "local_api" and "local" in self.providers:
             return "local"
         return provider
+
+    def _get_provider_config(self, provider: str) -> Any:
+        """Return configuration for an effective provider alias."""
+        provider_config = self.config.get_provider(provider)
+        if provider_config is None and provider == "local_api":
+            provider_config = self.config.get_provider("local")
+        return provider_config
 
     async def create_embeddings_batch(
         self,

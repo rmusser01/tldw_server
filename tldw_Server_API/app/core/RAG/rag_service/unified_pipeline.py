@@ -141,18 +141,6 @@ def _serialize_result_document(doc: Any) -> dict[str, Any]:
     }
 
 
-def _record_optional_retrieval_degradation(
-    metadata: dict[str, Any],
-    component: str,
-    exc: BaseException,
-) -> None:
-    """Record a typed optional-retrieval failure without raw provider detail."""
-    metadata.setdefault("retrieval_coverage", {})[component] = {
-        "coverage": "degraded",
-        "failure_code": _bounded_provider_failure_code(exc),
-    }
-
-
 def _clone_cached_document(doc: Any) -> Any:
     """Return an isolated cache document without duplicating embedding buffers."""
     if isinstance(doc, Document):
@@ -2201,6 +2189,32 @@ async def unified_rag_pipeline(
         query=query,
         metadata={"original_query": query}
     )
+    optional_provider_failure_code: str | None = None
+
+    def _latch_optional_provider_failure(
+        component: str,
+        exc: BaseException,
+    ) -> str:
+        """Latch the first optional retrieval provider failure for this request."""
+        nonlocal optional_provider_failure_code
+        if optional_provider_failure_code is None:
+            optional_provider_failure_code = _bounded_provider_failure_code(exc)
+        result.metadata.setdefault("retrieval_coverage", {})[component] = {
+            "coverage": "degraded",
+            "failure_code": optional_provider_failure_code,
+        }
+        return optional_provider_failure_code
+
+    def _latched_optional_provider_failure(component: str) -> str | None:
+        """Return and record the request's latched optional provider failure."""
+        if credential_runtime is None or optional_provider_failure_code is None:
+            return None
+        result.metadata.setdefault("retrieval_coverage", {})[component] = {
+            "coverage": "degraded",
+            "failure_code": optional_provider_failure_code,
+        }
+        return optional_provider_failure_code
+
     standard_evidence_coordinated = False
     claims_payload = None
     factuality_payload = None
@@ -3690,6 +3704,8 @@ async def unified_rag_pipeline(
                         retrieval_cfg: Optional[Any] = None,
                         top_k_override: Optional[int] = None,
                     ) -> list[Document]:
+                        if _latched_optional_provider_failure(component) is not None:
+                            return []
                         try:
                             evidence = await _resilient_call(
                                 component,
@@ -3708,10 +3724,7 @@ async def unified_rag_pipeline(
                         except _RAG_PROVIDER_FAILURES as exc:
                             if credential_runtime is None:
                                 raise
-                            result.metadata.setdefault("retrieval_coverage", {})[component] = {
-                                "coverage": "degraded",
-                                "failure_code": _bounded_provider_failure_code(exc),
-                            }
+                            _latch_optional_provider_failure(component, exc)
                             return []
                         evidence_docs = getattr(evidence, "documents", None)
                         return list(evidence_docs or [])
@@ -4038,7 +4051,14 @@ async def unified_rag_pipeline(
                                     return res if isinstance(res, list) else []
 
                                 subquery_results: dict[str, Any] = {}
-                                subqueries_to_run = list(subqueries[1:])
+                                subqueries_to_run = (
+                                    []
+                                    if _latched_optional_provider_failure(
+                                        "retrieval_decomposition"
+                                    )
+                                    is not None
+                                    else list(subqueries[1:])
+                                )
                                 try:
                                     max_workers = max(1, int(subquery_max_concurrency or 1))
                                 except (TypeError, ValueError):
@@ -4481,22 +4501,26 @@ async def unified_rag_pipeline(
                     followups = [f"detailed {query}", f"examples {query}"]
                 followups = [q for q in followups if isinstance(q, str) and q.strip()][:max_followup_searches]
                 if followups:
-                    # Run in parallel
-                    tasks = [
-                        _execute_retrieval_variant("retrieval_followup", fq)
-                        for fq in followups
-                    ]
-                    try:
-                        follow_results = await asyncio.gather(*tasks)
-                    except (
-                        ConnectionError,
-                        OSError,
-                        RuntimeError,
-                        TypeError,
-                        ValueError,
-                        asyncio.TimeoutError,
-                    ):
+                    if _latched_optional_provider_failure("retrieval_followup") is not None:
                         follow_results = []
+                    else:
+                        # Calls already running when one fails finish normally; later
+                        # optional callbacks observe the request-scoped latch.
+                        tasks = [
+                            _execute_retrieval_variant("retrieval_followup", fq)
+                            for fq in followups
+                        ]
+                        try:
+                            follow_results = await asyncio.gather(*tasks)
+                        except (
+                            ConnectionError,
+                            OSError,
+                            RuntimeError,
+                            TypeError,
+                            ValueError,
+                            asyncio.TimeoutError,
+                        ):
+                            follow_results = []
                     # Merge by id, keep higher score
                     merged = {d.id: d for d in result.documents}
                     for lst in follow_results:
@@ -4955,6 +4979,8 @@ async def unified_rag_pipeline(
 
                 # Create retrieval function for additional rounds
                 async def _additional_retrieval(gap_query: str, exclude_ids: set):
+                    if _latched_optional_provider_failure("evidence_accumulation") is not None:
+                        return []
                     if not (MultiDatabaseRetriever and RetrievalConfig):
                         return []
                     try:
@@ -4992,11 +5018,7 @@ async def unified_rag_pipeline(
                     except _RAG_PROVIDER_FAILURES as exc:
                         if credential_runtime is None:
                             raise
-                        _record_optional_retrieval_degradation(
-                            result.metadata,
-                            "evidence_accumulation",
-                            exc,
-                        )
+                        _latch_optional_provider_failure("evidence_accumulation", exc)
                         return []
                     except (
                         AttributeError,
@@ -5196,6 +5218,13 @@ async def unified_rag_pipeline(
 
                     # Re-run retrieval with rewritten query
                     if MultiDatabaseRetriever and RetrievalConfig:
+                        latched_code = _latched_optional_provider_failure("query_rewrite")
+                        if latched_code is not None:
+                            rewrite_attempts[-1].update(
+                                retrieval_coverage="degraded",
+                                failure_code=latched_code,
+                            )
+                            break
                         try:
                             db_paths = _build_pipeline_db_paths()
 
@@ -5267,14 +5296,13 @@ async def unified_rag_pipeline(
                         except _RAG_PROVIDER_FAILURES as ret_err:
                             if credential_runtime is None:
                                 raise
-                            _record_optional_retrieval_degradation(
-                                result.metadata,
+                            failure_code = _latch_optional_provider_failure(
                                 "query_rewrite",
                                 ret_err,
                             )
                             rewrite_attempts[-1].update(
                                 retrieval_coverage="degraded",
-                                failure_code=_bounded_provider_failure_code(ret_err),
+                                failure_code=failure_code,
                             )
                             break
                         except (
@@ -6812,6 +6840,8 @@ async def unified_rag_pipeline(
                         )
                     # Build a per-claim retrieval that uses MultiDatabaseRetriever and hybrid search when available
                     async def _retrieve_for_claim(c_text: str, top_k: int = 5):
+                        if _latched_optional_provider_failure("per_claim") is not None:
+                            return result.documents[:top_k] if result.documents else []
                         try:
                             if MultiDatabaseRetriever and RetrievalConfig:
                                 db_paths = _build_pipeline_db_paths()
@@ -6860,11 +6890,7 @@ async def unified_rag_pipeline(
                         except _RAG_PROVIDER_FAILURES as exc:
                             if credential_runtime is None:
                                 raise
-                            _record_optional_retrieval_degradation(
-                                result.metadata,
-                                "per_claim",
-                                exc,
-                            )
+                            _latch_optional_provider_failure("per_claim", exc)
                             return result.documents[:top_k] if result.documents else []
                         except (
                             AttributeError,
@@ -7111,14 +7137,27 @@ async def unified_rag_pipeline(
                                         conf = RetrievalConfig(max_results=min(10, top_k), min_score=min_score, use_fts=True, use_vector=True, include_metadata=True, fts_level=fts_level, enable_text_late_chunking=enable_text_late_chunking, chunk_method=chunk_method, chunk_size=chunk_size, chunk_overlap=chunk_overlap, chunk_language=chunk_language)
                                         numeric_added: list[Document] = []
                                         for tok in list(nf.missing)[:3]:
+                                            latched_code = _latched_optional_provider_failure(
+                                                "numeric_fidelity"
+                                            )
+                                            if latched_code is not None:
+                                                result.metadata.setdefault("numeric_fidelity", {}).update(
+                                                    embedding_coverage="degraded",
+                                                    failure_code=latched_code,
+                                                )
+                                                break
                                             try:
                                                 numeric_added.extend(await mdr.retrieve(query=f"{query} {tok}", sources=[DataSource.MEDIA_DB], config=conf, index_namespace=index_namespace))
                                             except _RAG_PROVIDER_FAILURES as exc:
                                                 if credential_runtime is None:
                                                     raise
+                                                failure_code = _latch_optional_provider_failure(
+                                                    "numeric_fidelity",
+                                                    exc,
+                                                )
                                                 result.metadata.setdefault("numeric_fidelity", {}).update(
                                                     embedding_coverage="degraded",
-                                                    failure_code=_bounded_provider_failure_code(exc),
+                                                    failure_code=failure_code,
                                                 )
                                                 break
                                             except (
