@@ -14,6 +14,10 @@ from typing import Any, Callable, Optional
 
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import (
+    SummaryProviderError,
+)
 from tldw_Server_API.app.core.LLM_Calls.structured_output import (
     StructuredOutputOptions,
     StructuredOutputParseError,
@@ -79,12 +83,21 @@ Respond with a JSON object containing:
 
 JSON Response:"""
 
+_CREDENTIAL_FAILURE_CODES = frozenset(
+    {
+        "invalid_provider_credentials",
+        "credential_store_unavailable",
+        "credential_scope_revoked",
+        "provider_unavailable",
+    }
+)
+
 
 def _fallback_error_label(error: Optional[str]) -> Optional[str]:
     """Map fallback errors to fixed labels safe for result metadata."""
     if error is None:
         return None
-    if error in {"timeout", "batch_timeout"}:
+    if error in {"timeout", "batch_timeout"} | _CREDENTIAL_FAILURE_CODES:
         return error
     return "grading_error"
 
@@ -133,6 +146,7 @@ class DocumentGrader:
         self,
         analyze_fn: Optional[Callable] = None,
         config: Optional[GradingConfig] = None,
+        credential_runtime: Any = None,
     ):
         """
         Initialize the document grader.
@@ -141,9 +155,11 @@ class DocumentGrader:
             analyze_fn: Optional callback function for LLM calls.
                         If not provided, will use the default Summarization_General_Lib.analyze
             config: Optional grading configuration. Uses defaults if not provided.
+            credential_runtime: Optional request-scoped provider credential runtime.
         """
         self._analyze = analyze_fn
         self.config = config or GradingConfig()
+        self.credential_runtime = credential_runtime
 
         # Lazy load analyze function if not provided
         if self._analyze is None:
@@ -220,6 +236,20 @@ class DocumentGrader:
         )
 
         try:
+            credential_handle = None
+            if self.credential_runtime is not None:
+                credential_handle = await self.credential_runtime.resolve(use_provider)
+
+            api_key = credential_handle.api_key if credential_handle is not None else None
+            runtime_kwargs = (
+                {
+                    "app_config": credential_handle.app_config,
+                    "credentials_resolved": True,
+                    "raise_on_error": True,
+                }
+                if credential_handle is not None
+                else {}
+            )
             # Call LLM via asyncio.to_thread to avoid blocking
             raw_response = await asyncio.wait_for(
                 asyncio.to_thread(
@@ -227,14 +257,18 @@ class DocumentGrader:
                     use_provider,
                     "",  # input_data (not used when custom_prompt_arg is provided)
                     prompt,
-                    None,  # api_key
+                    api_key,
                     "You are a document relevance grader. Output valid JSON only.",
                     self.config.temperature,
                     model_override=use_model,
                     streaming=False,
+                    **runtime_kwargs,
                 ),
                 timeout=self.config.timeout_seconds,
             )
+
+            if credential_handle is not None:
+                await self.credential_runtime.mark_used(credential_handle)
 
             latency_ms = int((time.time() - start_time) * 1000)
 
@@ -246,6 +280,19 @@ class DocumentGrader:
         except asyncio.TimeoutError:
             logger.warning(f"Document grading timed out for doc {doc_id}")
             return self._fallback_to_score(doc_id, doc_score, start_time, error="timeout")
+
+        except ByokResolutionError as exc:
+            logger.warning("Document grading credentials unavailable for doc {}", doc_id)
+            return self._fallback_to_score(doc_id, doc_score, start_time, error=exc.code)
+
+        except SummaryProviderError:
+            logger.warning("Document grading provider unavailable for doc {}", doc_id)
+            return self._fallback_to_score(
+                doc_id,
+                doc_score,
+                start_time,
+                error="provider_unavailable",
+            )
 
         except Exception as e:
             logger.warning(f"Document grading failed for doc {doc_id}; using fallback")
@@ -347,6 +394,8 @@ class DocumentGrader:
         latency_ms = int((time.time() - start_time) * 1000)
         error_label = _fallback_error_label(error)
         metadata = {"error": error_label} if error_label else {}
+        if error_label in _CREDENTIAL_FAILURE_CODES:
+            metadata["verification_available"] = False
 
         if not self.config.fallback_to_score:
             # If fallback is disabled, mark as irrelevant
@@ -520,6 +569,20 @@ class DocumentGrader:
                 for r in batch_result.results
             ],
         }
+        degraded_result = next(
+            (
+                result
+                for result in batch_result.results
+                if result.metadata.get("verification_available") is False
+            ),
+            None,
+        )
+        if degraded_result is not None:
+            metadata["verification_available"] = False
+            metadata["failure_code"] = degraded_result.metadata.get(
+                "error",
+                "provider_unavailable",
+            )
 
         return filtered_docs, metadata
 
@@ -535,6 +598,7 @@ async def grade_and_filter_documents(
     timeout_seconds: float = 30.0,
     fallback_to_score: bool = True,
     fallback_min_score: float = 0.3,
+    credential_runtime: Any = None,
 ) -> tuple[list[Any], dict[str, Any]]:
     """
     Convenience function to grade and filter documents in one call.
@@ -549,6 +613,7 @@ async def grade_and_filter_documents(
         timeout_seconds: Timeout for batch grading
         fallback_to_score: Whether to use retrieval score as fallback
         fallback_min_score: Minimum score for fallback relevance
+        credential_runtime: Optional request-scoped provider credential runtime
 
     Returns:
         Tuple of (filtered_documents, grading_metadata)
@@ -562,5 +627,8 @@ async def grade_and_filter_documents(
         fallback_min_score=fallback_min_score,
     )
 
-    grader = DocumentGrader(config=config)
+    grader_kwargs: dict[str, Any] = {"config": config}
+    if credential_runtime is not None:
+        grader_kwargs["credential_runtime"] = credential_runtime
+    grader = DocumentGrader(**grader_kwargs)
     return await grader.filter_relevant(query, documents, threshold, provider, model)

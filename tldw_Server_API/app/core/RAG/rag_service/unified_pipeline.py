@@ -23,6 +23,7 @@ import re
 import sqlite3
 import time
 import uuid
+from collections.abc import Iterator
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from types import SimpleNamespace
@@ -39,6 +40,9 @@ from tldw_Server_API.app.core.LLM_Calls.structured_output import (
     StructuredOutputOptions,
     StructuredOutputParseError,
     parse_structured_output,
+)
+from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import (
+    SummaryProviderError,
 )
 from tldw_Server_API.app.core.testing import (
     is_test_mode as _shared_is_test_mode,
@@ -4164,7 +4168,28 @@ async def unified_rag_pipeline(
                         snippet = (d.content or "")[:300].replace("\n", " ")
                         prompt += f"- {snippet}\n"
                     prompt += "\nJSON:"
-                    llm_out = llm_analyze(api_name=_prov, input_data="", custom_prompt_arg=prompt, model_override=_model)
+                    gap_handle = None
+                    if credential_runtime is not None:
+                        gap_handle = await credential_runtime.resolve(_prov)
+
+                    def _call_gap_analyzer() -> Any:
+                        response = llm_analyze(
+                            api_name=_prov,
+                            input_data="",
+                            custom_prompt_arg=prompt,
+                            model_override=_model,
+                            api_key=(gap_handle.api_key if gap_handle is not None else None),
+                            app_config=(gap_handle.app_config if gap_handle is not None else None),
+                            credentials_resolved=gap_handle is not None,
+                            raise_on_error=gap_handle is not None,
+                        )
+                        if isinstance(response, Iterator):
+                            return "".join(str(chunk) for chunk in response)
+                        return response
+
+                    llm_out = await asyncio.to_thread(_call_gap_analyzer)
+                    if gap_handle is not None:
+                        await credential_runtime.mark_used(gap_handle)
                     if isinstance(llm_out, str):
                         try:
                             parsed = parse_structured_output(
@@ -4179,6 +4204,16 @@ async def unified_rag_pipeline(
                                     followups = [q for q in wrapped_followups if isinstance(q, str) and q.strip()]
                         except (StructuredOutputParseError, TypeError, ValueError):
                             followups = [s.strip("- ") for s in llm_out.splitlines() if s.strip()]
+                except (ByokResolutionError, SummaryProviderError) as exc:
+                    result.metadata["gap_analysis"] = {
+                        "failure_code": (
+                            exc.code
+                            if isinstance(exc, ByokResolutionError)
+                            else "provider_unavailable"
+                        ),
+                        "verification_available": False,
+                    }
+                    followups = []
                 except (
                     AttributeError,
                     ConnectionError,
@@ -4762,7 +4797,10 @@ async def unified_rag_pipeline(
                     fallback_to_score=grading_fallback_to_score,
                     fallback_min_score=grading_fallback_min_score,
                 )
-                grader = DocumentGrader(config=grading_config)
+                grader = DocumentGrader(
+                    config=grading_config,
+                    credential_runtime=credential_runtime,
+                )
 
                 filtered_docs, grading_metadata = await grader.filter_relevant(
                     query=query,
@@ -4783,6 +4821,16 @@ async def unified_rag_pipeline(
                     "avg_relevance": grading_metadata.get("avg_relevance", 0.0),
                     "grading_latency_ms": grading_metadata.get("total_latency_ms", 0),
                 }
+                if grading_metadata.get("verification_available") is False:
+                    result.metadata["document_grading"].update(
+                        {
+                            "failure_code": grading_metadata.get(
+                                "failure_code",
+                                "provider_unavailable",
+                            ),
+                            "verification_available": False,
+                        }
+                    )
 
                 # Check if we should trigger query rewriting loop (Stage 2)
                 avg_relevance = grading_metadata.get("avg_relevance", 0.0)
@@ -4911,7 +4959,10 @@ async def unified_rag_pipeline(
                                         fallback_to_score=grading_fallback_to_score,
                                         fallback_min_score=grading_fallback_min_score,
                                     )
-                                    grader = DocumentGrader(config=grading_config)
+                                    grader = DocumentGrader(
+                                        config=grading_config,
+                                        credential_runtime=credential_runtime,
+                                    )
                                     _, new_grading_metadata = await grader.filter_relevant(
                                         query=rewritten_query,
                                         documents=new_docs,
@@ -5030,7 +5081,11 @@ async def unified_rag_pipeline(
                     # Determine LLM reranker provider/model from config when requested
                     selected_strategy = strategy_map[reranking_strategy]
                     llm_client = None
-                    if selected_strategy == RerankingStrategy.LLM_SCORING:
+                    reranker_credential_handle = None
+                    if selected_strategy in {
+                        RerankingStrategy.LLM_SCORING,
+                        RerankingStrategy.TWO_TIER,
+                    }:
                         try:
                             import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
                             from tldw_Server_API.app.core.config import load_and_log_configs
@@ -5041,26 +5096,65 @@ async def unified_rag_pipeline(
                             model = (cfg.get('RAG_LLM_RERANKER_MODEL') or '').strip()
                             if not model:
                                 # No model set -> fallback to FlashRank
-                                selected_strategy = RerankingStrategy.FLASHRANK
+                                if selected_strategy == RerankingStrategy.LLM_SCORING:
+                                    selected_strategy = RerankingStrategy.FLASHRANK
                             else:
+                                if credential_runtime is not None:
+                                    try:
+                                        reranker_credential_handle = await credential_runtime.resolve(
+                                            prov or "openai"
+                                        )
+                                    except ByokResolutionError as exc:
+                                        result.metadata["reranking"] = {
+                                            "failure_code": exc.code,
+                                            "verification_available": False,
+                                        }
+
                                 class _LLMClient:
-                                    def __init__(self, provider: str, model_name: str):
+                                    def __init__(self, provider: str, model_name: str, handle: Any):
                                         self.provider = provider or 'openai'
                                         self.model_name = model_name
+                                        self.handle = handle
+                                        self.used = False
+
                                     def analyze(self, prompt_text: str):
                                         # Use analyze with prompt as custom_prompt_arg
-                                        return sgl.analyze(
+                                        response = sgl.analyze(
                                             api_name=self.provider,
                                             input_data="",
                                             custom_prompt_arg=prompt_text,
-                                            api_key=None,
+                                            api_key=(
+                                                self.handle.api_key
+                                                if self.handle is not None
+                                                else None
+                                            ),
                                             system_message=None,
                                             temp=None,
                                             model_override=self.model_name,
+                                            app_config=(
+                                                self.handle.app_config
+                                                if self.handle is not None
+                                                else None
+                                            ),
+                                            credentials_resolved=self.handle is not None,
+                                            raise_on_error=self.handle is not None,
                                         )
-                                llm_client = _LLMClient(prov, model)
+                                        if isinstance(response, Iterator):
+                                            response = "".join(
+                                                str(chunk) for chunk in response
+                                            )
+                                        self.used = True
+                                        return response
+
+                                if credential_runtime is None or reranker_credential_handle is not None:
+                                    llm_client = _LLMClient(
+                                        prov,
+                                        model,
+                                        reranker_credential_handle,
+                                    )
                         except (ImportError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
-                            selected_strategy = RerankingStrategy.FLASHRANK
+                            if selected_strategy == RerankingStrategy.LLM_SCORING:
+                                selected_strategy = RerankingStrategy.FLASHRANK
 
                     # Determine model for reranker when applicable
                     model_name_for_reranker = None
@@ -5105,6 +5199,13 @@ async def unified_rag_pipeline(
                             )
                         reranker = create_reranker(selected_strategy, rerank_config, llm_client=llm_client)
                         reranked = await _resilient_call("reranking", reranker.rerank, query, result.documents)
+                        if (
+                            credential_runtime is not None
+                            and reranker_credential_handle is not None
+                            and llm_client is not None
+                            and llm_client.used
+                        ):
+                            await credential_runtime.mark_used(reranker_credential_handle)
                     except Exception as rerank_exc:
                         if reranking_strategy != "two_tier":
                             raise
@@ -5159,6 +5260,17 @@ async def unified_rag_pipeline(
                         if hasattr(reranker, 'last_metadata') and isinstance(reranker.last_metadata, dict):
                             result.metadata.setdefault("reranking_calibration", {})
                             result.metadata["reranking_calibration"].update(reranker.last_metadata)
+                            if reranker.last_metadata.get("verification_available") is False:
+                                result.metadata.setdefault("reranking", {})
+                                result.metadata["reranking"].update(
+                                    {
+                                        "failure_code": reranker.last_metadata.get(
+                                            "failure_code",
+                                            "provider_unavailable",
+                                        ),
+                                        "verification_available": False,
+                                    }
+                                )
                             # Attach learned-fusion specific decoration when applicable
                             _decorate_calibration_metadata()
                     except (AttributeError, RuntimeError, TypeError, ValueError):
@@ -5732,6 +5844,7 @@ async def unified_rag_pipeline(
                     generator = AnswerGenerator(
                         model=generation_model,
                         provider=generation_provider,
+                        credential_runtime=credential_runtime,
                     )
 
                     # Prepare base context from top documents
@@ -5824,8 +5937,50 @@ async def unified_rag_pipeline(
                                 f"Query: {query}\nSnippets:\n" + "\n".join(snippets) + f"\n\nDraft:\n{d_ans_text}\n\nIssues:"
                             )
                             c_start = time.time()
-                            c_text = sgl.analyze(api_name="openai", input_data="", custom_prompt_arg=crit_prompt, model_override=None)
+                            critique_handle = None
+                            if credential_runtime is not None:
+                                critique_handle = await credential_runtime.resolve("openai")
+
+                            def _call_critique() -> Any:
+                                response = sgl.analyze(
+                                    api_name="openai",
+                                    input_data="",
+                                    custom_prompt_arg=crit_prompt,
+                                    model_override=None,
+                                    api_key=(
+                                        critique_handle.api_key
+                                        if critique_handle is not None
+                                        else None
+                                    ),
+                                    app_config=(
+                                        critique_handle.app_config
+                                        if critique_handle is not None
+                                        else None
+                                    ),
+                                    credentials_resolved=critique_handle is not None,
+                                    raise_on_error=critique_handle is not None,
+                                )
+                                if isinstance(response, Iterator):
+                                    return "".join(str(chunk) for chunk in response)
+                                return response
+
+                            c_text = await asyncio.to_thread(_call_critique)
+                            if critique_handle is not None:
+                                await credential_runtime.mark_used(critique_handle)
                             c_dt = time.time() - c_start
+                        except (ByokResolutionError, SummaryProviderError) as exc:
+                            result.metadata.setdefault("synthesis", {})
+                            result.metadata["synthesis"].update(
+                                {
+                                    "failure_code": (
+                                        exc.code
+                                        if isinstance(exc, ByokResolutionError)
+                                        else "provider_unavailable"
+                                    ),
+                                    "verification_available": False,
+                                }
+                            )
+                            c_text = "- Ensure claims are supported by provided snippets."
                         except (ImportError, ConnectionError, OSError, RuntimeError, TypeError, ValueError, asyncio.TimeoutError):
                             c_text = "- Ensure claims are supported by provided snippets.\n- Add missing specifics.\n- Clarify ambiguous statements."
                         if isinstance(c_text, str):
@@ -6120,6 +6275,7 @@ async def unified_rag_pipeline(
                         provider=fast_hallucination_provider,
                         model=fast_hallucination_model,
                         timeout_sec=fast_hallucination_timeout_sec,
+                        credential_runtime=credential_runtime,
                     )
                     fast_grounded = fg_result.is_grounded
                     fast_groundedness_confidence = fg_result.confidence
@@ -6152,10 +6308,48 @@ async def unified_rag_pipeline(
                 # Import shared analyze function for LLM calls
                 import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
 
+                claims_handle = None
+                claims_provider = None
+                claims_state = {"used": False}
+                if credential_runtime is not None:
+                    from tldw_Server_API.app.core.Claims_Extraction.claims_engine import (
+                        _resolve_claims_llm_config,
+                    )
+
+                    claims_provider, _, _ = _resolve_claims_llm_config()
+                    claims_handle = await credential_runtime.resolve(claims_provider)
+
                 def _analyze(api_name: str, input_data: Any, custom_prompt_arg: Optional[str] = None,
                              api_key: Optional[str] = None, system_message: Optional[str] = None,
                              temp: Optional[float] = None, **kwargs):
-                    return sgl.analyze(api_name, input_data, custom_prompt_arg, api_key, system_message, temp, **kwargs)
+                    if claims_handle is None:
+                        return sgl.analyze(
+                            api_name,
+                            input_data,
+                            custom_prompt_arg,
+                            api_key,
+                            system_message,
+                            temp,
+                            **kwargs,
+                        )
+                    response = sgl.analyze(
+                        claims_provider or claims_handle.provider,
+                        input_data,
+                        custom_prompt_arg,
+                        claims_handle.api_key,
+                        system_message,
+                        temp,
+                        app_config=claims_handle.app_config,
+                        credentials_resolved=True,
+                        raise_on_error=True,
+                        **kwargs,
+                    )
+                    if isinstance(response, Iterator):
+                        chunks = [str(chunk) for chunk in response]
+                        claims_state["used"] = True
+                        return "".join(chunks)
+                    claims_state["used"] = True
+                    return response
 
                 if ClaimsEngine:
                     engine = ClaimsEngine(_analyze)
@@ -6406,6 +6600,8 @@ async def unified_rag_pipeline(
                         factuality_payload = claims_run.get("summary")
                         verifications = claims_run.get("verifications", [])
                     # Also store in metadata for debugging/analytics
+                    if claims_handle is not None and claims_state["used"]:
+                        await credential_runtime.mark_used(claims_handle)
                     result.metadata["claims"] = claims_payload
                     result.metadata["factuality"] = factuality_payload
 
@@ -6425,6 +6621,16 @@ async def unified_rag_pipeline(
                             result.metadata["verification_report"] = report.to_dict()
                         except (ImportError, RuntimeError, TypeError, ValueError) as _ereport:
                             logger.debug(f"Verification report generation failed: {_ereport}")
+            except (ByokResolutionError, SummaryProviderError) as exc:
+                result.metadata["claims"] = {
+                    "failure_code": (
+                        exc.code
+                        if isinstance(exc, ByokResolutionError)
+                        else "provider_unavailable"
+                    ),
+                    "verification_available": False,
+                }
+                logger.warning("Claims analysis provider unavailable")
             except (
                 AttributeError,
                 ConnectionError,
@@ -6497,6 +6703,7 @@ async def unified_rag_pipeline(
                                                     generator = AnswerGenerator(
                                                         model=generation_model,
                                                         provider=generation_provider,
+                                                        credential_runtime=credential_runtime,
                                                     )
                                                     context = "\n\n".join([getattr(d, 'content', str(d)) for d in (result.documents[:5] if result.documents else [])])
                                                     regen = await generator.generate(query=query, context=context, prompt_template=generation_prompt, max_tokens=max_generation_tokens)
@@ -6549,6 +6756,7 @@ async def unified_rag_pipeline(
                     max_claims=adaptive_max_claims,
                     time_budget_sec=adaptive_time_budget_sec,
                     use_advanced_rewrites=adaptive_advanced_rewrites,
+                    credential_runtime=credential_runtime,
                 )
                 vres = await verifier.verify_and_maybe_fix(
                     query=query,
@@ -6574,7 +6782,15 @@ async def unified_rag_pipeline(
                     "unsupported_count": vres.unsupported_count,
                     "fixed": vres.fixed,
                     "reason": vres.reason,
+                    "verification_available": getattr(
+                        vres,
+                        "verification_available",
+                        True,
+                    ),
                 })
+                failure_code = getattr(vres, "failure_code", None)
+                if failure_code:
+                    result.metadata["post_verification"]["failure_code"] = failure_code
                 # Gauge for NLI unsupported ratio
                 try:
                     from tldw_Server_API.app.core.Metrics.metrics_manager import set_gauge
@@ -6713,7 +6929,11 @@ async def unified_rag_pipeline(
                         # Quick verify the new answer without repairs to compare factuality
                         new_ratio = None
                         if PostGenerationVerifier and (new_result.generated_answer or "").strip():
-                            v2 = await PostGenerationVerifier(max_retries=0, max_claims=min(10, adaptive_max_claims)).verify_and_maybe_fix(
+                            v2 = await PostGenerationVerifier(
+                                max_retries=0,
+                                max_claims=min(10, adaptive_max_claims),
+                                credential_runtime=credential_runtime,
+                            ).verify_and_maybe_fix(
                                 query=query,
                                 answer=new_result.generated_answer,
                                 base_documents=(new_result.documents[:int(adaptive_rerun_doc_budget)] if (adaptive_rerun_doc_budget and isinstance(adaptive_rerun_doc_budget, int)) else (new_result.documents or [])),
@@ -6899,6 +7119,7 @@ async def unified_rag_pipeline(
                         provider=utility_grading_provider,
                         model=utility_grading_model,
                         timeout_sec=utility_grading_timeout_sec,
+                        credential_runtime=credential_runtime,
                     )
                     result.metadata["utility_grade"] = ug_meta
         except (
@@ -7164,21 +7385,45 @@ async def unified_rag_pipeline(
                                 or "openai"
                             ).strip()
                             _f_model = generation_model or _f_cfg.get("RAG_DEFAULT_LLM_MODEL")
+                            _f_handle = None
+                            if credential_runtime is not None:
+                                _f_handle = await credential_runtime.resolve(_f_prov)
 
                             class _FaithfulnessLLMAdapter:
                                 """Wraps analyze() to satisfy the LLMCallable protocol."""
 
                                 async def generate(self, prompt: str) -> str:
                                     import asyncio as _aio
-                                    result_text = await _aio.get_running_loop().run_in_executor(
-                                        None,
-                                        lambda: _sgl_analyze(
+
+                                    def _call_faithfulness() -> Any:
+                                        response = _sgl_analyze(
                                             api_name=_f_prov,
                                             input_data="",
                                             custom_prompt_arg=prompt,
                                             model_override=_f_model,
-                                        ),
+                                            api_key=(
+                                                _f_handle.api_key
+                                                if _f_handle is not None
+                                                else None
+                                            ),
+                                            app_config=(
+                                                _f_handle.app_config
+                                                if _f_handle is not None
+                                                else None
+                                            ),
+                                            credentials_resolved=_f_handle is not None,
+                                            raise_on_error=_f_handle is not None,
+                                        )
+                                        if isinstance(response, Iterator):
+                                            return "".join(str(chunk) for chunk in response)
+                                        return response
+
+                                    result_text = await _aio.get_running_loop().run_in_executor(
+                                        None,
+                                        _call_faithfulness,
                                     )
+                                    if _f_handle is not None:
+                                        await credential_runtime.mark_used(_f_handle)
                                     return str(result_text) if result_text else ""
 
                             _llm_obj = _FaithfulnessLLMAdapter()
@@ -7205,6 +7450,16 @@ async def unified_rag_pipeline(
                         logger.debug(
                             "Faithfulness eval requested but no LLM available"
                         )
+            except (ByokResolutionError, SummaryProviderError) as exc:
+                result.metadata["faithfulness"] = {
+                    "failure_code": (
+                        exc.code
+                        if isinstance(exc, ByokResolutionError)
+                        else "provider_unavailable"
+                    ),
+                    "verification_available": False,
+                }
+                logger.warning("Faithfulness evaluation provider unavailable")
             except Exception as _fe_err:
                 logger.warning(f"Faithfulness evaluation failed: {_fe_err}")
                 result.errors.append(f"Faithfulness eval failed: {_fe_err}")

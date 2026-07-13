@@ -24,11 +24,17 @@ import contextlib
 import hashlib
 import re
 import time
+from collections.abc import Iterator
 from typing import Any, Literal
 
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
 from tldw_Server_API.app.core.DB_Management.media_db.api import create_media_database
+from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import (
+    SummaryProviderError,
+)
 
 from . import agentic_execution as _agentic_execution
 from .advanced_cache import AGENTIC_CACHE
@@ -627,6 +633,7 @@ async def agentic_rag_pipeline(
             gen = AnswerGenerator(
                 model=generation_model,
                 provider=generation_provider,
+                credential_runtime=credential_runtime,
             )
             ctx = chunk_text
             gen_out = await gen.generate(
@@ -638,8 +645,10 @@ async def agentic_rag_pipeline(
             ans = gen_out["answer"] if isinstance(gen_out, dict) else str(gen_out)
             result.generated_answer = ans
         except (ImportError, AttributeError, ConnectionError, RuntimeError, TypeError, ValueError, TimeoutError) as e:
+            if isinstance(e, (ByokResolutionError, ChatAPIError)):
+                raise
             logger.warning("Agentic generation failed")
-            result.errors.append(str(e))
+            result.errors.append("Answer generation failed")
 
     # Guardrails and verification: hard citations + numeric fidelity + optional claims/NLI
     if result.generated_answer:
@@ -650,10 +659,49 @@ async def agentic_rag_pipeline(
                 import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
 
                 from .claims import ClaimsEngine
+
+                claims_handle = None
+                claims_provider = None
+                claims_state = {"used": False}
+                if credential_runtime is not None:
+                    from tldw_Server_API.app.core.Claims_Extraction.claims_engine import (
+                        _resolve_claims_llm_config,
+                    )
+
+                    claims_provider, _, _ = _resolve_claims_llm_config()
+                    claims_handle = await credential_runtime.resolve(claims_provider)
+
                 def _analyze(api_name: str, input_data: Any, custom_prompt_arg: str | None = None,
                              api_key: str | None = None, system_message: str | None = None,
                              temp: float | None = None, **kwargs):
-                    return sgl.analyze(api_name, input_data, custom_prompt_arg, api_key, system_message, temp, **kwargs)
+                    if claims_handle is None:
+                        return sgl.analyze(
+                            api_name,
+                            input_data,
+                            custom_prompt_arg,
+                            api_key,
+                            system_message,
+                            temp,
+                            **kwargs,
+                        )
+                    response = sgl.analyze(
+                        claims_provider or claims_handle.provider,
+                        input_data,
+                        custom_prompt_arg,
+                        claims_handle.api_key,
+                        system_message,
+                        temp,
+                        app_config=claims_handle.app_config,
+                        credentials_resolved=True,
+                        raise_on_error=True,
+                        **kwargs,
+                    )
+                    if isinstance(response, Iterator):
+                        chunks = [str(chunk) for chunk in response]
+                        claims_state["used"] = True
+                        return "".join(chunks)
+                    claims_state["used"] = True
+                    return response
                 engine = ClaimsEngine(_analyze)
                 async def _retrieve_for_claim(_c_text: str, top_k: int = 3):
                     return [synthetic]
@@ -670,9 +718,21 @@ async def agentic_rag_pipeline(
                     nli_model=nli_model,
                     claims_concurrency=claims_concurrency,
                 )
+                if claims_handle is not None and claims_state["used"]:
+                    await credential_runtime.mark_used(claims_handle)
                 claims_payload = claims_run.get("claims")
                 result.metadata["claims"] = claims_payload
                 result.metadata["factuality"] = claims_run.get("summary")
+            except (ByokResolutionError, SummaryProviderError) as exc:
+                result.metadata["claims"] = {
+                    "failure_code": (
+                        exc.code
+                        if isinstance(exc, ByokResolutionError)
+                        else "provider_unavailable"
+                    ),
+                    "verification_available": False,
+                }
+                logger.warning("Agentic claims provider unavailable")
             except (ImportError, AttributeError, ConnectionError, RuntimeError, TypeError, ValueError, TimeoutError):
                 logger.debug("Agentic claims verification skipped")
 
@@ -759,7 +819,12 @@ async def agentic_rag_pipeline(
         try:
             if enable_claims and result.generated_answer:
                 from .post_generation_verifier import PostGenerationVerifier as _PGV
-                verifier = _PGV(max_retries=0, unsupported_threshold=float(adaptive_unsupported_threshold or 0.15), max_claims=min(10, int(claims_max or 25)))
+                verifier = _PGV(
+                    max_retries=0,
+                    unsupported_threshold=float(adaptive_unsupported_threshold or 0.15),
+                    max_claims=min(10, int(claims_max or 25)),
+                    credential_runtime=credential_runtime,
+                )
                 vres = await verifier.verify_and_maybe_fix(
                     query=effective_query,
                     answer=result.generated_answer,
@@ -783,7 +848,15 @@ async def agentic_rag_pipeline(
                     "unsupported_count": vres.unsupported_count,
                     "fixed": vres.fixed,
                     "reason": vres.reason,
+                    "verification_available": getattr(
+                        vres,
+                        "verification_available",
+                        True,
+                    ),
                 })
+                failure_code = getattr(vres, "failure_code", None)
+                if failure_code:
+                    result.metadata["post_verification"]["failure_code"] = failure_code
                 # Gauge and gate behavior
                 try:
                     from tldw_Server_API.app.core.Metrics.metrics_manager import increment_counter, set_gauge

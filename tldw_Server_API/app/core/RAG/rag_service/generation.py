@@ -374,6 +374,9 @@ class LLMGenerator(BaseGenerator):
         except Exception:
             logger.error("Error generating response")
 
+            if kwargs.get("credential_runtime") is not None:
+                raise
+
             # Try fallback if enabled
             if self.config.fallback_enabled:
                 logger.info("Attempting fallback generation")
@@ -393,6 +396,8 @@ class LLMGenerator(BaseGenerator):
         api_key = kwargs.get("api_key", self.config.api_key)
         temperature = kwargs.get("temperature", self.config.temperature)
         max_tokens = kwargs.get("max_tokens", self.config.max_tokens)
+        credential_runtime = kwargs.get("credential_runtime")
+        credential_handle = None
 
         call_kwargs: dict[str, Any] = {
             "api_provider": provider,
@@ -402,10 +407,46 @@ class LLMGenerator(BaseGenerator):
             "max_tokens": max_tokens,
             "stream": streaming,
         }
-        if api_key:
+        if credential_runtime is not None:
+            credential_handle = await credential_runtime.resolve(provider)
+            call_kwargs.update(
+                api_key=credential_handle.api_key,
+                app_config=credential_handle.app_config,
+                credentials_resolved=True,
+            )
+        elif api_key:
             call_kwargs["api_key"] = api_key
 
-        return await perform_chat_api_call_async(**call_kwargs)
+        response = await perform_chat_api_call_async(**call_kwargs)
+        if credential_handle is None:
+            return response
+        if not streaming:
+            await credential_runtime.mark_used(credential_handle)
+            return response
+
+        async def _tracked_stream() -> AsyncIterator[Any]:
+            output_emitted = False
+            completed = False
+            try:
+                if hasattr(response, "__aiter__"):
+                    async for chunk in response:
+                        if not output_emitted and _extract_stream_text(chunk):
+                            output_emitted = True
+                            await credential_runtime.mark_used(credential_handle)
+                        yield chunk
+                else:
+                    for chunk in response:
+                        if not output_emitted and _extract_stream_text(chunk):
+                            output_emitted = True
+                            await credential_runtime.mark_used(credential_handle)
+                        yield chunk
+                        await asyncio.sleep(0)
+                completed = True
+            finally:
+                if completed and not output_emitted:
+                    await credential_runtime.mark_used(credential_handle)
+
+        return _tracked_stream()
 
 
 class StreamingGenerator(LLMGenerator):
@@ -569,7 +610,11 @@ async def generate_response(context: Any, **kwargs) -> Any:
     generator = create_generator(_sanitize_generation_config(config_dict))
 
     # Generate response
-    result = await generator.generate(context, context.query)
+    result = await generator.generate(
+        context,
+        context.query,
+        credential_runtime=getattr(context, "credential_runtime", None),
+    )
 
     # Add to context
     context.response = result.response
@@ -592,7 +637,13 @@ class AnswerGenerator:
     Returns a plain string or a dict with an `answer` key for backward compatibility.
     """
 
-    def __init__(self, model: Optional[str] = None, provider: Optional[str] = None, system_prompt: Optional[str] = None):
+    def __init__(
+        self,
+        model: Optional[str] = None,
+        provider: Optional[str] = None,
+        system_prompt: Optional[str] = None,
+        credential_runtime: Any = None,
+    ):
         # Lazy-configure provider/model from env/config when not provided
         try:
             from tldw_Server_API.app.core.config import load_and_log_configs
@@ -602,6 +653,7 @@ class AnswerGenerator:
         self.provider = (provider or cfg.get("RAG_DEFAULT_LLM_PROVIDER") or "openai").strip()
         self.model = (model or cfg.get("RAG_DEFAULT_LLM_MODEL") or "gpt-4o-mini").strip()
         self.system_prompt = system_prompt or cfg.get("RAG_DEFAULT_SYSTEM_PROMPT")
+        self.credential_runtime = credential_runtime
 
     async def generate(
         self,
@@ -632,7 +684,11 @@ class AnswerGenerator:
         # Convert raw context string into a single Document to preserve downstream formatting
         doc = Document(id="ctx", content=context or "", metadata={"source": "context", "title": "Context"})
         ctx = _Ctx([doc], query)
-        res = await gen.generate(ctx, query)
+        res = await gen.generate(
+            ctx,
+            query,
+            credential_runtime=self.credential_runtime,
+        )
         # Normalize to simple shape
         return {"answer": res.response, "provider": res.provider, "model": res.model, "tokens_used": res.tokens_used, "generation_time": res.generation_time}
 
@@ -653,7 +709,11 @@ async def generate_streaming_response(context: Any, **kwargs) -> Any:
     generator = create_generator(_sanitize_generation_config(config_dict))
 
     # Store generator in context for streaming
-    base_stream = generator.generate_stream(context, context.query)
+    stream_kwargs: dict[str, Any] = {}
+    credential_runtime = getattr(context, "credential_runtime", None)
+    if credential_runtime is not None:
+        stream_kwargs["credential_runtime"] = credential_runtime
+    base_stream = generator.generate_stream(context, context.query, **stream_kwargs)
 
     # Optional: streaming claims overlay with slight buffer
     enable_claims = bool(kwargs.get("enable_claims", False))

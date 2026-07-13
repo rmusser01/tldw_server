@@ -17,10 +17,15 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Optional, cast
 
 from loguru import logger
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import (
+    SummaryProviderError,
+)
 from tldw_Server_API.app.core.testing import is_truthy
 
 if TYPE_CHECKING:
@@ -113,6 +118,8 @@ class VerificationOutcome:
     new_answer: str | None = None
     claims: list[dict[str, Any]] | None = None
     summary: dict[str, Any] | None = None
+    verification_available: bool = True
+    failure_code: str | None = None
 
 
 class PostGenerationVerifier:
@@ -126,6 +133,7 @@ class PostGenerationVerifier:
         max_claims: int = 20,
         time_budget_sec: float | None = None,
         use_advanced_rewrites: bool | None = None,
+        credential_runtime: Any = None,
     ):
         self._claims_runner = claims_runner
         self._max_retries = max(0, int(max_retries or 0))
@@ -135,6 +143,7 @@ class PostGenerationVerifier:
             self._threshold = 0.15
         self._max_claims = max(1, int(max_claims or 1))
         self._time_budget = float(time_budget_sec) if time_budget_sec is not None else None
+        self._credential_runtime = credential_runtime
         # Toggle for advanced rewrites (HyDE + multi-strategy + diversity). Default enabled.
         if use_advanced_rewrites is None:
             try:
@@ -144,6 +153,76 @@ class PostGenerationVerifier:
                 self._adv = True
         else:
             self._adv = bool(use_advanced_rewrites)
+
+    async def _build_claims_engine(self) -> tuple[Any, Any, dict[str, bool]]:
+        """Bind the synchronous claims callback to request-scoped credentials."""
+        if ClaimsEngine is None:
+            raise RuntimeError("Claims engine unavailable")
+
+        import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
+
+        credential_handle = None
+        claims_provider = None
+        if self._credential_runtime is not None:
+            from tldw_Server_API.app.core.Claims_Extraction.claims_engine import (
+                _resolve_claims_llm_config,
+            )
+
+            claims_provider, _, _ = _resolve_claims_llm_config()
+            credential_handle = await self._credential_runtime.resolve(claims_provider)
+
+        state = {"used": False}
+
+        def _analyze(
+            api_name: str,
+            input_data: Any,
+            custom_prompt_arg: str | None = None,
+            api_key: str | None = None,
+            system_message: str | None = None,
+            temp: float | None = None,
+            **kwargs: Any,
+        ) -> Any:
+            if credential_handle is None:
+                return sgl.analyze(
+                    api_name,
+                    input_data,
+                    custom_prompt_arg,
+                    api_key,
+                    system_message,
+                    temp,
+                    **kwargs,
+                )
+
+            response = sgl.analyze(
+                claims_provider or credential_handle.provider,
+                input_data,
+                custom_prompt_arg,
+                credential_handle.api_key,
+                system_message,
+                temp,
+                app_config=credential_handle.app_config,
+                credentials_resolved=True,
+                raise_on_error=True,
+                **kwargs,
+            )
+            if isinstance(response, Iterator):
+                chunks = []
+                for chunk in response:
+                    chunks.append(str(chunk))
+                state["used"] = True
+                return "".join(chunks)
+            state["used"] = True
+            return response
+
+        return ClaimsEngine(_analyze), credential_handle, state
+
+    async def _mark_claims_used(
+        self,
+        credential_handle: Any,
+        state: dict[str, bool],
+    ) -> None:
+        if credential_handle is not None and state["used"]:
+            await self._credential_runtime.mark_used(credential_handle)
 
     async def verify_and_maybe_fix(
         self,
@@ -200,14 +279,7 @@ class PostGenerationVerifier:
                     claims_payload = (run or {}).get("claims")
                     summary_payload = (run or {}).get("summary")
                 elif ClaimsEngine is not None:
-                    # Use default analyze function
-                    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
-                    def _analyze(api_name: str, input_data: Any, custom_prompt_arg: str | None = None,
-                                 api_key: str | None = None, system_message: str | None = None,
-                                 temp: float | None = None, **kwargs):
-                        return sgl.analyze(api_name, input_data, custom_prompt_arg, api_key, system_message, temp, **kwargs)
-
-                    engine = ClaimsEngine(_analyze)
+                    engine, claims_handle, claims_state = await self._build_claims_engine()
 
                     # Build a claim-level retrieval function
                     async def _retrieve_for_claim(c_text: str, top: int = 5):
@@ -252,8 +324,17 @@ class PostGenerationVerifier:
                         nli_model=os.getenv("RAG_NLI_MODEL") or os.getenv("RAG_NLI_MODEL_PATH"),
                         claims_concurrency=8,
                     )
+                    await self._mark_claims_used(claims_handle, claims_state)
                     claims_payload = (run or {}).get("claims")
                     summary_payload = (run or {}).get("summary")
+        except (ByokResolutionError, SummaryProviderError) as exc:
+            logger.warning("Post-check claims provider unavailable")
+            outcome.verification_available = False
+            outcome.failure_code = (
+                exc.code if isinstance(exc, ByokResolutionError) else "provider_unavailable"
+            )
+            outcome.reason = "verification_unavailable"
+            return outcome
         except Exception as e:  # noqa: BLE001 - claims verification best-effort
             logger.warning(f"Post-check claims verification failed: {_safe_exception_label(e)}")
 
@@ -375,6 +456,7 @@ class PostGenerationVerifier:
                     gen = gen_cls(
                         model=generation_model,
                         provider=generation_provider,
+                        credential_runtime=self._credential_runtime,
                     )
                     context = "\n\n".join([getattr(d, 'content', '') for d in new_docs[:5]])
                     maybe = await gen.generate(query=query, context=context, prompt_template=None, max_tokens=500)
@@ -402,12 +484,7 @@ class PostGenerationVerifier:
                     ))
                     sum2 = (run2 or {}).get("summary") or {}
                 elif ClaimsEngine is not None:
-                    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
-                    def _analyze2(api_name: str, input_data: Any, custom_prompt_arg: str | None = None,
-                                   api_key: str | None = None, system_message: str | None = None,
-                                   temp: float | None = None, **kwargs):
-                        return sgl.analyze(api_name, input_data, custom_prompt_arg, api_key, system_message, temp, **kwargs)
-                    eng2 = ClaimsEngine(_analyze2)
+                    eng2, claims_handle, claims_state = await self._build_claims_engine()
                     run2 = await eng2.run(
                         answer=new_answer,
                         query=query,
@@ -421,9 +498,18 @@ class PostGenerationVerifier:
                         nli_model=os.getenv("RAG_NLI_MODEL") or os.getenv("RAG_NLI_MODEL_PATH"),
                         claims_concurrency=4,
                     )
+                    await self._mark_claims_used(claims_handle, claims_state)
                     sum2 = (run2 or {}).get("summary") or {}
                 else:
                     sum2 = {}
+            except (ByokResolutionError, SummaryProviderError) as exc:
+                logger.warning("Adaptive recheck provider unavailable")
+                outcome.verification_available = False
+                outcome.failure_code = (
+                    exc.code if isinstance(exc, ByokResolutionError) else "provider_unavailable"
+                )
+                outcome.reason = "verification_unavailable"
+                break
             except Exception as e:  # noqa: BLE001 - recheck best-effort
                 logger.debug(f"Adaptive recheck failed: {_safe_exception_label(e)}")
                 sum2 = {}

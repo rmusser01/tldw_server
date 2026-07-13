@@ -16,6 +16,10 @@ from typing import Any, Callable, Optional
 
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import (
+    SummaryProviderError,
+)
 from tldw_Server_API.app.core.LLM_Calls.structured_output import (
     StructuredOutputOptions,
     StructuredOutputParseError,
@@ -140,6 +144,7 @@ class FastGroundednessGrader:
         provider: str = "openai",
         model: Optional[str] = None,
         timeout_sec: float = 5.0,
+        credential_runtime: Any = None,
     ):
         """
         Initialize the fast groundedness grader.
@@ -149,11 +154,13 @@ class FastGroundednessGrader:
             provider: LLM provider to use.
             model: Optional model override.
             timeout_sec: Timeout for the grading call.
+            credential_runtime: Optional request-scoped provider credential runtime.
         """
         self._analyze = analyze_fn
         self.provider = provider
         self.model = model
         self.timeout_sec = timeout_sec
+        self.credential_runtime = credential_runtime
 
         # Lazy load analyze function if not provided
         if self._analyze is None:
@@ -222,6 +229,20 @@ class FastGroundednessGrader:
             cfg_provider, cfg_model, cfg_temp = _resolve_quality_config("RAG_GROUNDEDNESS")
             use_provider = self.provider or cfg_provider
             use_model = self.model or cfg_model
+            credential_handle = None
+            if self.credential_runtime is not None:
+                credential_handle = await self.credential_runtime.resolve(use_provider)
+
+            api_key = credential_handle.api_key if credential_handle is not None else None
+            runtime_kwargs = (
+                {
+                    "app_config": credential_handle.app_config,
+                    "credentials_resolved": True,
+                    "raise_on_error": True,
+                }
+                if credential_handle is not None
+                else {}
+            )
 
             # Make LLM call with timeout
             raw_response = await asyncio.wait_for(
@@ -230,13 +251,17 @@ class FastGroundednessGrader:
                     use_provider,
                     "",  # input_data (not used when custom_prompt_arg is set)
                     prompt,
-                    None,  # api_key
+                    api_key,
                     "You are a groundedness checker. Output valid JSON only.",
                     cfg_temp,
                     model_override=use_model,
+                    **runtime_kwargs,
                 ),
                 timeout=self.timeout_sec,
             )
+
+            if credential_handle is not None:
+                await self.credential_runtime.mark_used(credential_handle)
 
             latency_ms = int((time.time() - start_time) * 1000)
 
@@ -253,6 +278,21 @@ class FastGroundednessGrader:
                 method="error_fallback",
                 metadata={"error": "timeout"},
             )
+
+        except ByokResolutionError as exc:
+            logger.warning("Fast groundedness credentials unavailable")
+            fallback = self._heuristic_groundedness(query, answer, documents, start_time)
+            fallback.metadata = {"error": exc.code, "verification_available": False}
+            return fallback
+
+        except SummaryProviderError:
+            logger.warning("Fast groundedness provider unavailable")
+            fallback = self._heuristic_groundedness(query, answer, documents, start_time)
+            fallback.metadata = {
+                "error": "provider_unavailable",
+                "verification_available": False,
+            }
+            return fallback
 
         except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
             logger.warning("Fast groundedness check failed; using heuristic fallback")
@@ -380,6 +420,7 @@ class UtilityGrader:
         provider: str = "openai",
         model: Optional[str] = None,
         timeout_sec: float = 5.0,
+        credential_runtime: Any = None,
     ):
         """
         Initialize the utility grader.
@@ -389,11 +430,13 @@ class UtilityGrader:
             provider: LLM provider to use.
             model: Optional model override.
             timeout_sec: Timeout for the grading call.
+            credential_runtime: Optional request-scoped provider credential runtime.
         """
         self._analyze = analyze_fn
         self.provider = provider
         self.model = model
         self.timeout_sec = timeout_sec
+        self.credential_runtime = credential_runtime
 
         # Lazy load analyze function if not provided
         if self._analyze is None:
@@ -456,6 +499,20 @@ class UtilityGrader:
             cfg_provider, cfg_model, cfg_temp = _resolve_quality_config("RAG_UTILITY")
             use_provider = self.provider or cfg_provider
             use_model = self.model or cfg_model
+            credential_handle = None
+            if self.credential_runtime is not None:
+                credential_handle = await self.credential_runtime.resolve(use_provider)
+
+            api_key = credential_handle.api_key if credential_handle is not None else None
+            runtime_kwargs = (
+                {
+                    "app_config": credential_handle.app_config,
+                    "credentials_resolved": True,
+                    "raise_on_error": True,
+                }
+                if credential_handle is not None
+                else {}
+            )
 
             # Make LLM call with timeout
             raw_response = await asyncio.wait_for(
@@ -464,13 +521,17 @@ class UtilityGrader:
                     use_provider,
                     "",  # input_data
                     prompt,
-                    None,  # api_key
+                    api_key,
                     "You are a response quality evaluator. Output valid JSON only.",
                     cfg_temp,
                     model_override=use_model,
+                    **runtime_kwargs,
                 ),
                 timeout=self.timeout_sec,
             )
+
+            if credential_handle is not None:
+                await self.credential_runtime.mark_used(credential_handle)
 
             latency_ms = int((time.time() - start_time) * 1000)
 
@@ -486,6 +547,21 @@ class UtilityGrader:
                 method="error_fallback",
                 metadata={"error": "timeout"},
             )
+
+        except ByokResolutionError as exc:
+            logger.warning("Utility grading credentials unavailable")
+            fallback = self._heuristic_utility(query, answer, start_time)
+            fallback.metadata = {"error": exc.code, "verification_available": False}
+            return fallback
+
+        except SummaryProviderError:
+            logger.warning("Utility grading provider unavailable")
+            fallback = self._heuristic_utility(query, answer, start_time)
+            fallback.metadata = {
+                "error": "provider_unavailable",
+                "verification_available": False,
+            }
+            return fallback
 
         except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
             logger.warning("Utility grading failed; using heuristic fallback")
@@ -582,6 +658,7 @@ async def check_fast_groundedness(
     model: Optional[str] = None,
     timeout_sec: float = 5.0,
     analyze_fn: Optional[Callable] = None,
+    credential_runtime: Any = None,
 ) -> tuple[FastGroundednessResult, dict[str, Any]]:
     """
     Convenience function to check answer groundedness.
@@ -594,6 +671,7 @@ async def check_fast_groundedness(
         model: Optional model override
         timeout_sec: Timeout for the check
         analyze_fn: Optional analyze function override
+        credential_runtime: Optional request-scoped provider credential runtime
 
     Returns:
         Tuple of (FastGroundednessResult, metadata_dict)
@@ -603,6 +681,7 @@ async def check_fast_groundedness(
         provider=provider or "openai",
         model=model,
         timeout_sec=timeout_sec,
+        credential_runtime=credential_runtime,
     )
 
     result = await grader.grade(query, answer, documents)
@@ -615,6 +694,7 @@ async def check_fast_groundedness(
         "latency_ms": result.latency_ms,
         "method": result.method,
     }
+    metadata.update(result.metadata)
 
     return result, metadata
 
@@ -626,6 +706,7 @@ async def grade_utility(
     model: Optional[str] = None,
     timeout_sec: float = 5.0,
     analyze_fn: Optional[Callable] = None,
+    credential_runtime: Any = None,
 ) -> tuple[UtilityResult, dict[str, Any]]:
     """
     Convenience function to grade answer utility.
@@ -637,6 +718,7 @@ async def grade_utility(
         model: Optional model override
         timeout_sec: Timeout for grading
         analyze_fn: Optional analyze function override
+        credential_runtime: Optional request-scoped provider credential runtime
 
     Returns:
         Tuple of (UtilityResult, metadata_dict)
@@ -646,6 +728,7 @@ async def grade_utility(
         provider=provider or "openai",
         model=model,
         timeout_sec=timeout_sec,
+        credential_runtime=credential_runtime,
     )
 
     result = await grader.grade(query, answer)
@@ -657,5 +740,6 @@ async def grade_utility(
         "latency_ms": result.latency_ms,
         "method": result.method,
     }
+    metadata.update(result.metadata)
 
     return result, metadata

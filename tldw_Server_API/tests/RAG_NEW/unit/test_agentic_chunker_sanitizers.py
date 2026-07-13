@@ -179,7 +179,7 @@ async def test_vlm_late_chunking_skip_debug_omits_raw_exception(
 
 
 @pytest.mark.asyncio
-async def test_generation_fallback_warning_omits_raw_exception_but_preserves_result_error(
+async def test_generation_fallback_uses_bounded_error_and_omits_raw_exception(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     logger_stub = _LoggerStub()
@@ -212,7 +212,8 @@ async def test_generation_fallback_warning_omits_raw_exception_but_preserves_res
     )
 
     assert result.generated_answer is None
-    assert result.errors == [_SENSITIVE_MESSAGE]
+    assert result.errors == ["Answer generation failed"]
+    assert _SENSITIVE_MESSAGE not in result.errors
     assert logger_stub.warnings == ["Agentic generation failed"]
     _assert_no_sensitive_log_fragments(logger_stub.warnings)
 

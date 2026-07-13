@@ -1261,6 +1261,7 @@ class LLMReranker(BaseReranker):
         """
         super().__init__(config)
         self.llm_client = llm_client
+        self.last_metadata: dict[str, Any] = {}
 
     async def rerank(
         self,
@@ -1269,6 +1270,7 @@ class LLMReranker(BaseReranker):
         original_scores: Optional[list[float]] = None
     ) -> list[ScoredDocument]:
         """Rerank using LLM for relevance scoring."""
+        self.last_metadata = {}
         if not self.llm_client or not documents:
             # Fallback to original scores
             return [
@@ -1287,6 +1289,20 @@ class LLMReranker(BaseReranker):
         for i in range(0, len(documents), batch_size):
             batch = documents[i:i + batch_size]
             batch_scores = await self._score_batch(query, batch)
+
+            if self.last_metadata.get("degraded"):
+                return [
+                    ScoredDocument(
+                        document=doc,
+                        original_score=(
+                            original_scores[index] if original_scores else doc.score
+                        ),
+                        rerank_score=(
+                            original_scores[index] if original_scores else doc.score
+                        ),
+                    )
+                    for index, doc in enumerate(documents[: self.config.top_k])
+                ]
 
             for j, doc in enumerate(batch):
                 scored_docs.append(ScoredDocument(
@@ -1378,9 +1394,14 @@ class LLMReranker(BaseReranker):
                 except asyncio.TimeoutError:
                     _inc_counter("reranker.llm.timeouts")
                     score_val = 0.5
-                except Exception:  # noqa: BLE001 - LLM scoring best-effort
+                except Exception:  # noqa: BLE001 - optional stage degrades safely
                     _inc_counter("reranker.llm.exceptions")
-                    score_val = 0.5
+                    self.last_metadata = {
+                        "degraded": True,
+                        "failure_code": "provider_unavailable",
+                        "verification_available": False,
+                    }
+                    return [doc.score for doc in documents]
             elif sgl is not None:
                 try:
                     # Use default provider from env/config inside analyze
@@ -1625,6 +1646,24 @@ class TwoTierReranker(BaseReranker):
         llm_t0 = time.time()
         llm_results: list[ScoredDocument] = await llm.rerank(query, llm_input, original_scores=None)
         llm_dt = time.time() - llm_t0
+        llm_metadata = getattr(llm, "last_metadata", {})
+        if isinstance(llm_metadata, dict) and llm_metadata.get("degraded"):
+            self.last_metadata = {"strategy": "two_tier", **llm_metadata}
+            return [
+                ScoredDocument(
+                    document=doc,
+                    original_score=(
+                        original_scores[index] if original_scores else doc.score
+                    ),
+                    rerank_score=(
+                        original_scores[index] if original_scores else doc.score
+                    ),
+                    relevance_score=(
+                        original_scores[index] if original_scores else doc.score
+                    ),
+                )
+                for index, doc in enumerate(documents[: self.config.top_k])
+            ]
         try:
             from tldw_Server_API.app.core.Metrics.metrics_manager import observe_histogram
             observe_histogram("rag_phase_duration_seconds", llm_dt, labels={"phase": "rerank_llm", "difficulty": "na"})

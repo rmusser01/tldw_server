@@ -1,8 +1,10 @@
 from typing import Any
+from types import SimpleNamespace
 
 import pytest
 
 import tldw_Server_API.app.core.RAG.rag_service.streaming_executor as streaming_executor
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAuthenticationError
 from tldw_Server_API.app.core.RAG.rag_service.request_resolution import ResolvedRAGRequest
 from tldw_Server_API.app.core.RAG.rag_service.retrieval_plan import RetrievalPlan
 from tldw_Server_API.app.core.RAG.rag_service.streaming_executor import (
@@ -113,6 +115,77 @@ async def test_stream_rag_events_emits_structured_error():
 
     assert [event["type"] for event in events] == ["contexts", "reasoning", "error"]  # nosec B101
     assert events[2] == {"type": "error", "message": _PUBLIC_STREAM_ERROR_MESSAGE}  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_streaming_generation_marks_partial_output_and_propagates_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    class RecordingRuntime:
+        def __init__(self) -> None:
+            self.handle = SimpleNamespace(
+                provider="test-provider",
+                api_key="runtime-stream-key",
+                app_config={"TestProvider": {"api_timeout": 9}},
+                credentials_resolved=True,
+            )
+            self.resolved: list[str] = []
+            self.marked: list[Any] = []
+
+        async def resolve(self, provider: str) -> Any:
+            self.resolved.append(provider)
+            return self.handle
+
+        async def mark_used(self, handle: Any) -> None:
+            self.marked.append(handle)
+
+    runtime = RecordingRuntime()
+
+    async def empty_standard_pipeline(**kwargs: Any) -> UnifiedSearchResult:
+        return UnifiedSearchResult(documents=[], query=str(kwargs.get("query", "")))
+
+    async def fake_chat_call(**kwargs: Any) -> Any:
+        captured.update(kwargs)
+
+        async def upstream():
+            yield {"choices": [{"delta": {"content": "partial answer"}}]}
+            raise ChatAuthenticationError("raw provider secret", provider="test-provider")
+
+        return upstream()
+
+    import tldw_Server_API.app.core.Chat.chat_service as chat_service
+
+    monkeypatch.setattr(chat_service, "perform_chat_api_call_async", fake_chat_call)
+    resolved_request = _resolved_request("standard")
+    resolved_request.payload.update(
+        {"claims_top_k": 3, "claims_max": 10, "claims_concurrency": 4}
+    )
+
+    events = [
+        event
+        async for event in stream_rag_events(
+            resolved_request=resolved_request,
+            retrieval_plan=_retrieval_plan(),
+            standard_pipeline=empty_standard_pipeline,
+            extra_context={"credential_runtime": runtime},
+        )
+    ]
+
+    assert [event["type"] for event in events] == [  # nosec B101
+        "contexts",
+        "reasoning",
+        "delta",
+        "error",
+    ]
+    assert events[2]["text"] == "partial answer"  # nosec B101
+    assert events[3]["code"] == "provider_authentication_failed"  # nosec B101
+    assert "raw provider secret" not in str(events)  # nosec B101
+    assert runtime.resolved == ["test-provider"]  # nosec B101
+    assert runtime.marked == [runtime.handle]  # nosec B101
+    assert captured["api_key"] == "runtime-stream-key"  # nosec B101
+    assert captured["credentials_resolved"] is True  # nosec B101
 
 
 @pytest.mark.asyncio
