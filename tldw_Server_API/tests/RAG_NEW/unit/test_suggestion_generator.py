@@ -7,6 +7,10 @@ from tldw_Server_API.app.core.RAG.rag_service.suggestion_generator import (
     generate_suggestions,
 )
 import tldw_Server_API.app.core.RAG.rag_service.suggestion_generator as suggestion_generator
+from tldw_Server_API.tests.RAG_NEW.unit.test_generation_executor import (
+    _RecordingCredentialRuntime,
+    _install_explicit_chat_capture,
+)
 
 
 pytestmark = pytest.mark.unit
@@ -143,3 +147,56 @@ async def test_generate_suggestions_parses_fenced_json_with_think_tags(monkeypat
         "What are the prerequisites?",
         "How do I benchmark this?",
     ]
+
+
+@pytest.mark.asyncio
+async def test_generate_suggestions_uses_explicit_runtime_credentials(monkeypatch):
+    runtime = _RecordingCredentialRuntime()
+    captured = _install_explicit_chat_capture(
+        monkeypatch,
+        '["How is credential precedence tested?", "Which failures are terminal?"]',
+    )
+
+    suggestions = await generate_suggestions(
+        query="credential runtime",
+        response_text="Credentials are resolved per effective provider.",
+        llm_provider="anthropic",
+        llm_model="claude-test",
+        num_suggestions=2,
+        credential_runtime=runtime,
+    )
+
+    assert suggestions == [
+        "How is credential precedence tested?",
+        "Which failures are terminal?",
+    ]
+    assert runtime.resolved == ["anthropic"]
+    assert runtime.marked == [runtime.handle]
+    assert captured["kwargs"]["api_key"] == "runtime-only-key"
+    assert captured["kwargs"]["app_config"] == runtime.handle.app_config
+    assert captured["kwargs"]["credentials_resolved"] is True
+
+
+@pytest.mark.asyncio
+async def test_generate_suggestions_runtime_failure_uses_heuristic_without_failover():
+    class FailingRuntime:
+        def __init__(self) -> None:
+            self.resolved: list[str] = []
+
+        async def resolve(self, provider):
+            self.resolved.append(provider)
+            raise RuntimeError("secret-key /private/credential-store.db")
+
+    runtime = FailingRuntime()
+    suggestions = await generate_suggestions(
+        query="credential runtime",
+        response_text="Credentials are resolved per effective provider.",
+        llm_provider="anthropic",
+        llm_model="claude-test",
+        num_suggestions=2,
+        credential_runtime=runtime,
+    )
+
+    assert len(suggestions) == 2
+    assert runtime.resolved == ["anthropic"]
+    assert "secret-key" not in str(suggestions)

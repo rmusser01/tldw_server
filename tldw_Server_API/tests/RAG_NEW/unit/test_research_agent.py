@@ -3,6 +3,10 @@ import pytest
 from tldw_Server_API.app.core.RAG.rag_service.query_classifier import QueryClassification
 from tldw_Server_API.app.core.RAG.rag_service import research_agent as ra
 from tldw_Server_API.app.core.RAG.rag_service.research_agent import create_default_registry
+from tldw_Server_API.tests.RAG_NEW.unit.test_generation_executor import (
+    _RecordingCredentialRuntime,
+    _install_explicit_chat_capture,
+)
 
 
 pytestmark = pytest.mark.unit
@@ -305,3 +309,90 @@ async def test_research_loop_skips_duplicate_web_search_signature(monkeypatch):
     )
     assert out.metadata["action_dedup"]["duplicates_skipped"] >= 1
     assert calls["to_thread"] == 1
+
+
+@pytest.mark.asyncio
+async def test_research_loop_uses_explicit_runtime_credentials(monkeypatch):
+    runtime = _RecordingCredentialRuntime()
+    captured = _install_explicit_chat_capture(
+        monkeypatch,
+        '{"reasoning":"enough evidence","action":"done","params":{"reason":"done"}}',
+    )
+    classification = QueryClassification(
+        skip_search=False,
+        search_local_db=True,
+        standalone_query="credential runtime research",
+    )
+
+    output = await ra.research_loop(
+        query="credential runtime research",
+        classification=classification,
+        mode="speed",
+        llm_provider="anthropic",
+        llm_model="claude-test",
+        max_iterations=1,
+        credential_runtime=runtime,
+    )
+
+    assert output.completed is True
+    assert runtime.resolved == ["anthropic"]
+    assert runtime.marked == [runtime.handle]
+    assert captured["kwargs"]["api_key"] == "runtime-only-key"
+    assert captured["kwargs"]["app_config"] == runtime.handle.app_config
+    assert captured["kwargs"]["credentials_resolved"] is True
+
+
+@pytest.mark.asyncio
+async def test_research_loop_runtime_failure_records_bounded_unavailability(monkeypatch):
+    class FailingRuntime:
+        async def resolve(self, _provider):
+            raise RuntimeError("secret-key /private/credential-store.db")
+
+    warnings: list[str] = []
+    monkeypatch.setattr(ra.logger, "warning", warnings.append)
+    classification = QueryClassification(
+        skip_search=False,
+        search_local_db=True,
+        standalone_query="credential runtime research",
+    )
+
+    output = await ra.research_loop(
+        query="credential runtime research",
+        classification=classification,
+        mode="speed",
+        llm_provider="anthropic",
+        llm_model="claude-test",
+        max_iterations=1,
+        credential_runtime=FailingRuntime(),
+    )
+
+    assert output.metadata["provider_stage"] == {
+        "failure_code": "provider_unavailable",
+        "verification_available": False,
+    }
+    assert warnings == ["Research loop provider unavailable"]
+    assert "secret-key" not in str(output)
+    assert "/private/" not in str(output)
+
+
+@pytest.mark.asyncio
+async def test_default_registry_passes_runtime_to_media_actions(monkeypatch):
+    from tldw_Server_API.app.core.RAG.rag_service import media_search
+
+    runtime = _RecordingCredentialRuntime()
+    captured: dict[str, object] = {}
+
+    async def fake_search_images(**kwargs):
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(media_search, "search_images", fake_search_images)
+    registry = create_default_registry(
+        enable_image_search=True,
+        credential_runtime=runtime,
+    )
+
+    output = await registry.execute("image_search", {"query": "architecture diagram"})
+
+    assert output.success is True
+    assert captured["credential_runtime"] is runtime

@@ -30,6 +30,7 @@ from tldw_Server_API.app.core.RAG.rag_service.faithfulness import FaithfulnessEv
 from tldw_Server_API.app.core.RAG.rag_service.post_generation_verifier import (
     PostGenerationVerifier,
 )
+from tldw_Server_API.app.core.RAG.rag_service.query_classifier import QueryClassification
 from tldw_Server_API.app.core.RAG.rag_service.request_resolution import ResolvedRAGRequest
 from tldw_Server_API.app.core.RAG.rag_service.retrieval_plan import RetrievalPlan
 from tldw_Server_API.app.core.RAG.rag_service.result_model import RAGResult
@@ -62,6 +63,38 @@ class _RecordingCredentialRuntime:
         self.marked.append(handle)
 
 
+def _install_explicit_chat_capture(
+    monkeypatch: pytest.MonkeyPatch,
+    response: Any,
+) -> dict[str, Any]:
+    """Capture a real chat-service boundary while forbidding server fallback."""
+    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.LLM_Calls import adapter_utils
+
+    def fail_server_fallback(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("server credential fallback must not run")
+
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(adapter_utils, "ensure_app_config", fail_server_fallback)
+    monkeypatch.setattr(
+        adapter_utils,
+        "resolve_provider_api_key_from_config",
+        fail_server_fallback,
+    )
+
+    async def fake_chat_call(**kwargs: Any) -> Any:
+        provider, request, _internal = chat_service._build_adapter_request_from_chat_args(
+            kwargs
+        )
+        captured["provider"] = provider
+        captured["kwargs"] = kwargs
+        captured["request"] = request
+        return response() if callable(response) else response
+
+    monkeypatch.setattr(chat_service, "perform_chat_api_call_async", fake_chat_call)
+    return captured
+
+
 def _stub_real_sgl_dispatch(
     monkeypatch: pytest.MonkeyPatch,
     response: str,
@@ -76,6 +109,166 @@ def _stub_real_sgl_dispatch(
 
     monkeypatch.setattr(sgl, "_dispatch_to_api", dispatch)
     return calls
+
+
+@pytest.mark.asyncio
+async def test_unified_pipeline_propagates_runtime_to_direct_auxiliaries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _RecordingCredentialRuntime()
+    captured: dict[str, Any] = {"chain_runtimes": []}
+    document = Document(
+        id="doc-aux-runtime",
+        content="Credential runtime evidence.",
+        metadata={},
+        source=DataSource.MEDIA_DB,
+        score=0.9,
+    )
+
+    class FakeRetriever:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        async def retrieve(self, *args: Any, **kwargs: Any) -> list[Document]:
+            return [document]
+
+    class FakeAnswerGenerator:
+        def __init__(self, **kwargs: Any) -> None:
+            captured["generation_runtime"] = kwargs.get("credential_runtime")
+
+        async def generate(self, **kwargs: Any) -> dict[str, str]:
+            return {"answer": "Credential-scoped answer."}
+
+    async def fake_classifier(**kwargs: Any) -> QueryClassification:
+        captured["classifier_runtime"] = kwargs.get("credential_runtime")
+        return QueryClassification(
+            search_local_db=True,
+            standalone_query="credential runtime",
+            confidence=0.9,
+        )
+
+    class FakeAccumulator:
+        def __init__(self, **kwargs: Any) -> None:
+            captured["accumulator_runtime"] = kwargs.get("credential_runtime")
+
+        async def accumulate(self, **kwargs: Any) -> Any:
+            return SimpleNamespace(
+                documents=kwargs["initial_results"],
+                total_rounds=1,
+                is_sufficient=True,
+                sufficiency_reason="enough",
+                metadata={"initial_docs": 1, "docs_added": 0},
+            )
+
+    async def fake_knowledge_strips(**kwargs: Any) -> Any:
+        captured["knowledge_runtime"] = kwargs.get("credential_runtime")
+        return kwargs["documents"], {
+            "total_strips": 1,
+            "relevant_strips": 1,
+            "filtered_strips": 1,
+            "avg_relevance": 0.9,
+        }
+
+    class FakeChainBuilder:
+        def __init__(self, **kwargs: Any) -> None:
+            captured["chain_runtimes"].append(kwargs.get("credential_runtime"))
+
+        async def build_chains(self, **kwargs: Any) -> Any:
+            return SimpleNamespace(
+                chains=[],
+                overall_confidence=0.0,
+                multi_hop_detected=False,
+                metadata={"total_nodes": 0, "total_claims": 0, "supported_claims": 0},
+            )
+
+    async def fake_suggestions(**kwargs: Any) -> list[str]:
+        captured["suggestion_runtime"] = kwargs.get("credential_runtime")
+        return ["What should I inspect next?"]
+
+    monkeypatch.setattr(unified_pipeline_module, "MultiDatabaseRetriever", FakeRetriever)
+    monkeypatch.setattr(unified_pipeline_module, "AnswerGenerator", FakeAnswerGenerator)
+    monkeypatch.setattr(unified_pipeline_module, "classify_and_reformulate", fake_classifier)
+    monkeypatch.setattr(unified_pipeline_module, "EvidenceAccumulator", FakeAccumulator)
+    monkeypatch.setattr(unified_pipeline_module, "process_knowledge_strips", fake_knowledge_strips)
+    monkeypatch.setattr(unified_pipeline_module, "EvidenceChainBuilder", FakeChainBuilder)
+    monkeypatch.setattr(unified_pipeline_module, "generate_suggestions", fake_suggestions)
+
+    await unified_pipeline_module.unified_rag_pipeline(
+        query="credential runtime",
+        sources=["media_db"],
+        enable_cache=False,
+        enable_query_classification=True,
+        enable_research_loop=False,
+        enable_evidence_accumulation=True,
+        enable_knowledge_strips=True,
+        enable_evidence_chains=True,
+        enable_suggestions=True,
+        enable_generation=True,
+        enable_reranking=False,
+        enable_pre_retrieval_clarification=False,
+        credential_runtime=runtime,
+    )
+
+    assert captured["classifier_runtime"] is runtime
+    assert captured["accumulator_runtime"] is runtime
+    assert captured["knowledge_runtime"] is runtime
+    assert captured["chain_runtimes"] and all(
+        item is runtime for item in captured["chain_runtimes"]
+    )
+    assert captured["suggestion_runtime"] is runtime
+
+
+@pytest.mark.asyncio
+async def test_unified_pipeline_propagates_runtime_to_research_registry_and_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _RecordingCredentialRuntime()
+    captured: dict[str, Any] = {}
+
+    async def fake_classifier(**kwargs: Any) -> QueryClassification:
+        captured["classifier_runtime"] = kwargs.get("credential_runtime")
+        return QueryClassification(
+            search_local_db=True,
+            standalone_query="credential runtime research",
+            confidence=0.9,
+        )
+
+    def fake_registry(**kwargs: Any) -> object:
+        captured["registry_runtime"] = kwargs.get("credential_runtime")
+        return object()
+
+    async def fake_research_loop(**kwargs: Any) -> Any:
+        captured["research_runtime"] = kwargs.get("credential_runtime")
+        return SimpleNamespace(
+            all_results=[],
+            total_iterations=1,
+            total_results=0,
+            total_duration_sec=0.0,
+            completed=True,
+            final_reasoning="done",
+            metadata={"action_dedup": {}, "url_dedup": {}},
+            steps=[],
+        )
+
+    monkeypatch.setattr(unified_pipeline_module, "classify_and_reformulate", fake_classifier)
+    monkeypatch.setattr(unified_pipeline_module, "create_default_registry", fake_registry)
+    monkeypatch.setattr(unified_pipeline_module, "research_loop", fake_research_loop)
+
+    await unified_pipeline_module.unified_rag_pipeline(
+        query="credential runtime research",
+        sources=["media_db"],
+        enable_cache=False,
+        enable_query_classification=True,
+        enable_research_loop=True,
+        enable_generation=False,
+        enable_reranking=False,
+        enable_pre_retrieval_clarification=False,
+        credential_runtime=runtime,
+    )
+
+    assert captured["classifier_runtime"] is runtime
+    assert captured["registry_runtime"] is runtime
+    assert captured["research_runtime"] is runtime
 
 
 async def _run_unified_bound_sgl_stage(

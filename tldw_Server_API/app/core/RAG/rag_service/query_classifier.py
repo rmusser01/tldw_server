@@ -249,6 +249,7 @@ async def classify_query(
     llm_provider: str = "openai",
     llm_model: str | None = None,
     timeout_sec: float = 10.0,
+    credential_runtime: Any = None,
 ) -> QueryClassification:
     """Classify a query to determine search routing and reformulation.
 
@@ -261,6 +262,7 @@ async def classify_query(
         llm_provider: LLM provider name (e.g., "openai", "anthropic").
         llm_model: Optional model override (defaults to provider's default).
         timeout_sec: Maximum seconds to wait for LLM response.
+        credential_runtime: Optional request-scoped provider credential runtime.
 
     Returns:
         QueryClassification with routing decisions and reformulated query.
@@ -293,11 +295,21 @@ async def classify_query(
         }
         if model:
             call_kwargs["model"] = model
+        credential_handle = None
+        if credential_runtime is not None:
+            credential_handle = await credential_runtime.resolve(provider)
+            call_kwargs.update(
+                api_key=credential_handle.api_key,
+                app_config=credential_handle.app_config,
+                credentials_resolved=True,
+            )
 
         raw_response = await asyncio.wait_for(
             perform_chat_api_call_async(**call_kwargs),
             timeout=timeout_sec,
         )
+        if credential_handle is not None:
+            await credential_runtime.mark_used(credential_handle)
 
         # Extract text content from response
         response_text = ""
@@ -339,7 +351,11 @@ async def classify_query(
             "LLM query classification failed ({exc_type}), falling back to heuristic",
             exc_type=type(exc).__name__,
         )
-        return _heuristic_classify(query, chat_history)
+        fallback = _heuristic_classify(query, chat_history)
+        if credential_runtime is not None:
+            fallback.confidence = min(fallback.confidence, 0.5)
+            fallback.reasoning = "provider_unavailable"
+        return fallback
 
 
 # ---------------------------------------------------------------------------
@@ -365,6 +381,7 @@ async def reformulate_query(
     llm_provider: str = "openai",
     llm_model: str | None = None,
     timeout_sec: float = 8.0,
+    credential_runtime: Any = None,
 ) -> str:
     """Reformulate a conversational follow-up into a standalone query.
 
@@ -374,6 +391,7 @@ async def reformulate_query(
         llm_provider: LLM provider name.
         llm_model: Optional model override.
         timeout_sec: Maximum seconds to wait for LLM response.
+        credential_runtime: Optional request-scoped provider credential runtime.
 
     Returns:
         A standalone, self-contained query string.
@@ -412,11 +430,21 @@ async def reformulate_query(
         }
         if model:
             call_kwargs["model"] = model
+        credential_handle = None
+        if credential_runtime is not None:
+            credential_handle = await credential_runtime.resolve(provider)
+            call_kwargs.update(
+                api_key=credential_handle.api_key,
+                app_config=credential_handle.app_config,
+                credentials_resolved=True,
+            )
 
         raw_response = await asyncio.wait_for(
             perform_chat_api_call_async(**call_kwargs),
             timeout=timeout_sec,
         )
+        if credential_handle is not None:
+            await credential_runtime.mark_used(credential_handle)
 
         # Extract text content from response
         response_text = ""
@@ -458,6 +486,7 @@ async def classify_and_reformulate(
     chat_history: list[dict[str, str]] | None = None,
     llm_provider: str = "openai",
     llm_model: str | None = None,
+    credential_runtime: Any = None,
 ) -> QueryClassification:
     """Classify query and ensure standalone_query is properly reformulated.
 
@@ -471,6 +500,7 @@ async def classify_and_reformulate(
         chat_history: Optional conversation history.
         llm_provider: LLM provider name.
         llm_model: Optional model override.
+        credential_runtime: Optional request-scoped provider credential runtime.
 
     Returns:
         QueryClassification with fully resolved standalone_query.
@@ -480,6 +510,7 @@ async def classify_and_reformulate(
         chat_history=chat_history,
         llm_provider=llm_provider,
         llm_model=llm_model,
+        credential_runtime=credential_runtime,
     )
 
     # If chat history exists and the standalone_query is still the same as
@@ -495,6 +526,7 @@ async def classify_and_reformulate(
                 chat_history=chat_history,
                 llm_provider=llm_provider,
                 llm_model=llm_model,
+                credential_runtime=credential_runtime,
             )
             classification.standalone_query = reformulated
 

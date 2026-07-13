@@ -609,7 +609,7 @@ def _create_reasoning_preamble_action(
     )
 
 
-def _create_image_search_action() -> ResearchAction:
+def _create_image_search_action(credential_runtime: Any = None) -> ResearchAction:
     """Create the 'image_search' action for finding relevant images."""
 
     async def _execute(params: dict[str, Any]) -> ActionOutput:
@@ -624,12 +624,18 @@ def _create_image_search_action() -> ResearchAction:
 
         try:
             from .media_search import search_images
+            runtime_kwargs = (
+                {"credential_runtime": credential_runtime}
+                if credential_runtime is not None
+                else {}
+            )
             images = await search_images(
                 query=query,
                 llm_provider=llm_provider,
                 llm_model=llm_model,
                 max_results=max_results,
                 search_engine=search_engine,
+                **runtime_kwargs,
             )
             return ActionOutput(
                 action_name="image_search",
@@ -657,7 +663,7 @@ def _create_image_search_action() -> ResearchAction:
     )
 
 
-def _create_video_search_action() -> ResearchAction:
+def _create_video_search_action(credential_runtime: Any = None) -> ResearchAction:
     """Create the 'video_search' action for finding relevant videos."""
 
     async def _execute(params: dict[str, Any]) -> ActionOutput:
@@ -672,12 +678,18 @@ def _create_video_search_action() -> ResearchAction:
 
         try:
             from .media_search import search_videos
+            runtime_kwargs = (
+                {"credential_runtime": credential_runtime}
+                if credential_runtime is not None
+                else {}
+            )
             videos = await search_videos(
                 query=query,
                 llm_provider=llm_provider,
                 llm_model=llm_model,
                 max_results=max_results,
                 search_engine=search_engine,
+                **runtime_kwargs,
             )
             return ActionOutput(
                 action_name="video_search",
@@ -743,14 +755,21 @@ def create_default_registry(
     enable_image_search: bool = False,
     enable_video_search: bool = False,
     on_progress: Callable[[ResearchProgressEvent], Any] | None = None,
+    credential_runtime: Any = None,
 ) -> ActionRegistry:
     """Create an ActionRegistry with built-in actions registered."""
+    runtime_kwargs = (
+        {"credential_runtime": credential_runtime}
+        if credential_runtime is not None
+        else {}
+    )
     return create_configured_registry(
         discussion_platforms=discussion_platforms,
         enable_url_scraping=enable_url_scraping,
         enable_image_search=enable_image_search,
         enable_video_search=enable_video_search,
         on_progress=on_progress,
+        **runtime_kwargs,
     )
 
 
@@ -761,6 +780,7 @@ def create_configured_registry(
     enable_image_search: bool = False,
     enable_video_search: bool = False,
     on_progress: Callable[[ResearchProgressEvent], Any] | None = None,
+    credential_runtime: Any = None,
 ) -> ActionRegistry:
     """Create an ActionRegistry with built-in actions and runtime toggles.
 
@@ -771,6 +791,7 @@ def create_configured_registry(
         enable_image_search: Whether to register image_search action.
         enable_video_search: Whether to register video_search action.
         on_progress: Optional progress callback for reasoning preamble events.
+        credential_runtime: Optional request-scoped provider credential runtime.
     """
     registry = ActionRegistry()
     registry.register(_create_local_db_search_action())
@@ -781,9 +802,9 @@ def create_configured_registry(
         registry.register(_create_scrape_url_action())
     registry.register(_create_reasoning_preamble_action(on_progress=on_progress))
     if enable_image_search:
-        registry.register(_create_image_search_action())
+        registry.register(_create_image_search_action(credential_runtime))
     if enable_video_search:
-        registry.register(_create_video_search_action())
+        registry.register(_create_video_search_action(credential_runtime))
     registry.register(_create_done_action())
     return registry
 
@@ -1022,6 +1043,7 @@ async def research_loop(
     enable_action_dedup: bool = True,
     enable_image_search: bool = False,
     enable_video_search: bool = False,
+    credential_runtime: Any = None,
 ) -> ResearchOutput:
     """Run the iterative agentic research loop.
 
@@ -1040,6 +1062,7 @@ async def research_loop(
         enable_action_dedup: Whether to skip repeated equivalent actions and reuse prior results.
         enable_image_search: Whether image_search action is available.
         enable_video_search: Whether video_search action is available.
+        credential_runtime: Optional request-scoped provider credential runtime.
 
     Returns:
         ResearchOutput with all steps, results, and metadata.
@@ -1048,12 +1071,18 @@ async def research_loop(
     standalone_query = classification.standalone_query or query
 
     if registry is None:
+        registry_kwargs = (
+            {"credential_runtime": credential_runtime}
+            if credential_runtime is not None
+            else {}
+        )
         registry = create_configured_registry(
             discussion_platforms=discussion_platforms,
             enable_url_scraping=enable_url_scraping,
             enable_image_search=enable_image_search,
             enable_video_search=enable_video_search,
             on_progress=on_progress,
+            **registry_kwargs,
         )
 
     if max_iterations is None:
@@ -1174,11 +1203,21 @@ async def research_loop(
             }
             if model:
                 call_kwargs["model"] = model
+            credential_handle = None
+            if credential_runtime is not None:
+                credential_handle = await credential_runtime.resolve(provider)
+                call_kwargs.update(
+                    api_key=credential_handle.api_key,
+                    app_config=credential_handle.app_config,
+                    credentials_resolved=True,
+                )
 
             raw_response = await asyncio.wait_for(
                 perform_chat_api_call_async(**call_kwargs),
                 timeout=30.0,
             )
+            if credential_handle is not None:
+                await credential_runtime.mark_used(credential_handle)
 
             # Extract text
             response_text = ""
@@ -1203,7 +1242,14 @@ async def research_loop(
             action_dict = _parse_research_action(response_text)
 
         except Exception as exc:
-            logger.warning(f"Research loop LLM call failed at iteration {iteration}: {exc!r}")
+            if credential_runtime is not None:
+                logger.warning("Research loop provider unavailable")
+                output.metadata["provider_stage"] = {
+                    "failure_code": "provider_unavailable",
+                    "verification_available": False,
+                }
+            else:
+                logger.warning(f"Research loop LLM call failed at iteration {iteration}: {exc!r}")
             break
 
         action_name = action_dict.get("action", "done")

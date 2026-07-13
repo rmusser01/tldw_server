@@ -26,6 +26,9 @@ from tldw_Server_API.app.core.RAG.rag_service.knowledge_strips import (
     _estimate_tokens,
 )
 from tldw_Server_API.app.core.RAG.rag_service.types import Document, DataSource
+from tldw_Server_API.tests.RAG_NEW.unit.test_generation_executor import (
+    _RecordingCredentialRuntime,
+)
 
 
 class TestHelperFunctions:
@@ -387,6 +390,52 @@ class TestKnowledgeStripsProcessor:
         assert "rag-knowledge-strips.db" not in joined
         assert "strip-secret-token" not in joined
 
+    @pytest.mark.asyncio
+    async def test_reused_runtime_processor_resets_per_process_state(self):
+        """Runtime trust and usage state should not leak across process calls."""
+        runtime = _RecordingCredentialRuntime()
+        outcomes = iter(
+            [
+                RuntimeError("provider unavailable"),
+                '[{"strip_num": 1, "relevance": 0.9}]',
+                '[{"strip_num": 1, "relevance": 0.8}]',
+            ]
+        )
+
+        def _mock_analyze(*args, **kwargs):
+            outcome = next(outcomes)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+
+        docs = [
+            Document(
+                id="doc1",
+                content="Machine learning relies on data.",
+                source=DataSource.MEDIA_DB,
+                metadata={},
+            )
+        ]
+        processor = KnowledgeStripsProcessor(
+            strip_size_tokens=200,
+            min_relevance_score=0.0,
+            analyze_fn=_mock_analyze,
+            llm_provider="anthropic",
+            credential_runtime=runtime,
+            credential_handle=runtime.handle,
+        )
+
+        failed = await processor.process("machine learning", docs)
+        recovered = await processor.process("machine learning", docs)
+        repeated = await processor.process("machine learning", docs)
+
+        assert failed.metadata["verification_available"] is False
+        assert failed.metadata["failure_code"] == "provider_unavailable"
+        assert recovered.metadata["verification_available"] is True
+        assert "failure_code" not in recovered.metadata
+        assert repeated.metadata["verification_available"] is True
+        assert runtime.marked == [runtime.handle, runtime.handle]
+
 
 class TestProcessKnowledgeStrips:
     """Tests for the convenience function."""
@@ -434,6 +483,76 @@ class TestProcessKnowledgeStrips:
 
         assert docs == []
         assert metadata["total_strips"] == 0
+
+    @pytest.mark.asyncio
+    async def test_runtime_llm_grading_dispatches_explicit_credentials(
+        self,
+        monkeypatch,
+        sample_documents,
+    ):
+        import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
+
+        runtime = _RecordingCredentialRuntime()
+        calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+        def fake_dispatch(*args, **kwargs):
+            calls.append((args, kwargs))
+            return '[{"strip_num": 1, "relevance": 0.95}]'
+
+        monkeypatch.setattr(sgl, "_dispatch_to_api", fake_dispatch)
+
+        docs, metadata = await process_knowledge_strips(
+            query="Python programming",
+            documents=sample_documents,
+            strip_size_tokens=200,
+            min_relevance=0.0,
+            max_strips=10,
+            use_llm_grading=True,
+            llm_provider="anthropic",
+            llm_model="claude-test",
+            credential_runtime=runtime,
+        )
+
+        assert docs
+        assert len(calls) == 1
+        args, kwargs = calls[0]
+        assert args[0].strip()
+        assert args[1] is None
+        assert args[2] == "anthropic"
+        assert args[3] == "runtime-only-key"
+        assert kwargs["app_config"] == runtime.handle.app_config
+        assert kwargs["credentials_resolved"] is True
+        assert kwargs["raise_on_error"] is True
+        assert runtime.resolved == ["anthropic"]
+        assert runtime.marked == [runtime.handle]
+        assert metadata["verification_available"] is True
+
+    @pytest.mark.asyncio
+    async def test_runtime_llm_grading_failure_degrades_with_bounded_trust(
+        self,
+        sample_documents,
+    ):
+        class FailingRuntime:
+            async def resolve(self, _provider):
+                raise RuntimeError("secret-key /private/credential-store.db")
+
+        docs, metadata = await process_knowledge_strips(
+            query="Python programming",
+            documents=sample_documents,
+            strip_size_tokens=200,
+            min_relevance=0.0,
+            max_strips=10,
+            use_llm_grading=True,
+            llm_provider="anthropic",
+            llm_model="claude-test",
+            credential_runtime=FailingRuntime(),
+        )
+
+        assert docs
+        assert metadata["verification_available"] is False
+        assert metadata["failure_code"] == "provider_unavailable"
+        assert "secret-key" not in str(metadata)
+        assert "/private/" not in str(metadata)
 
 
 class TestDocumentRebuilding:

@@ -153,6 +153,7 @@ async def generate_suggestions(
     llm_model: str | None = None,
     num_suggestions: int = 5,
     llm_timeout_sec: float = 3.0,
+    credential_runtime: Any = None,
 ) -> list[str]:
     """Generate follow-up question suggestions based on query and response.
 
@@ -165,6 +166,7 @@ async def generate_suggestions(
         num_suggestions: Number of suggestions to generate (default 5).
         llm_timeout_sec: Max time to wait for suggestion LLM before deterministic
             fallback suggestions are returned.
+        credential_runtime: Optional request-scoped provider credential runtime.
 
     Returns:
         List of follow-up question strings. Falls back to heuristic
@@ -210,11 +212,21 @@ async def generate_suggestions(
         }
         if model:
             call_kwargs["model"] = model
+        credential_handle = None
+        if credential_runtime is not None:
+            credential_handle = await credential_runtime.resolve(provider)
+            call_kwargs.update(
+                api_key=credential_handle.api_key,
+                app_config=credential_handle.app_config,
+                credentials_resolved=True,
+            )
 
         raw_response = await asyncio.wait_for(
             perform_chat_api_call_async(**call_kwargs),
             timeout=max(0.1, float(llm_timeout_sec)),
         )
+        if credential_handle is not None:
+            await credential_runtime.mark_used(credential_handle)
 
         # Extract text from response
         response_content = ""

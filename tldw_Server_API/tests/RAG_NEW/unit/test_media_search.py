@@ -2,6 +2,10 @@ import pytest
 from loguru import logger
 
 from tldw_Server_API.app.core.RAG.rag_service import media_search as ms
+from tldw_Server_API.tests.RAG_NEW.unit.test_generation_executor import (
+    _RecordingCredentialRuntime,
+    _install_explicit_chat_capture,
+)
 
 
 pytestmark = pytest.mark.unit
@@ -193,3 +197,24 @@ async def test_search_videos_fallback_log_sanitizes_exception_repr(
     assert secret not in joined_logs
     assert path not in joined_logs
     assert "RuntimeError" not in joined_logs
+
+
+@pytest.mark.asyncio
+async def test_media_reformulation_uses_explicit_runtime_credentials(monkeypatch):
+    runtime = _RecordingCredentialRuntime()
+    captured = _install_explicit_chat_capture(monkeypatch, "credential runtime diagram")
+
+    result = await ms._reformulate_query(
+        query="Show a credential runtime architecture diagram",
+        system_prompt="Optimize the media query",
+        llm_provider="anthropic",
+        llm_model="claude-test",
+        credential_runtime=runtime,
+    )
+
+    assert result == "credential runtime diagram"
+    assert runtime.resolved == ["anthropic"]
+    assert runtime.marked == [runtime.handle]
+    assert captured["kwargs"]["api_key"] == "runtime-only-key"
+    assert captured["kwargs"]["app_config"] == runtime.handle.app_config
+    assert captured["kwargs"]["credentials_resolved"] is True

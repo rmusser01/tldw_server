@@ -2654,6 +2654,11 @@ async def unified_rag_pipeline(
                     chat_history=chat_history,
                     llm_provider=_cls_provider,
                     llm_model=_cls_model,
+                    **(
+                        {"credential_runtime": credential_runtime}
+                        if credential_runtime is not None
+                        else {}
+                    ),
                 )
                 result.timings["query_classification"] = time.time() - _cls_start
                 result.metadata["query_classification"] = {
@@ -2741,6 +2746,11 @@ async def unified_rag_pipeline(
                     chat_history=chat_history,
                     llm_provider=_ref_provider,
                     llm_model=_ref_model,
+                    **(
+                        {"credential_runtime": credential_runtime}
+                        if credential_runtime is not None
+                        else {}
+                    ),
                 )
                 if reformulated and reformulated != query:
                     result.metadata["reformulated_query"] = reformulated
@@ -2803,6 +2813,11 @@ async def unified_rag_pipeline(
                             enable_image_search=bool(enable_image_search),
                             enable_video_search=bool(enable_video_search),
                             on_progress=_progress_cb,
+                            **(
+                                {"credential_runtime": credential_runtime}
+                                if credential_runtime is not None
+                                else {}
+                            ),
                         )
 
                 _research_output = await research_loop(
@@ -2820,6 +2835,11 @@ async def unified_rag_pipeline(
                     enable_action_dedup=bool(enable_research_action_dedup),
                     enable_image_search=bool(enable_image_search),
                     enable_video_search=bool(enable_video_search),
+                    **(
+                        {"credential_runtime": credential_runtime}
+                        if credential_runtime is not None
+                        else {}
+                    ),
                 )
 
                 # Convert research results to Document objects
@@ -2852,6 +2872,14 @@ async def unified_rag_pipeline(
                     "action_dedup": _research_output.metadata.get("action_dedup", {}),
                     "discussion_platforms": discussion_platforms or ["reddit", "stackoverflow", "hackernews"],
                     "url_dedup": _research_output.metadata.get("url_dedup", {}),
+                    **(
+                        dict(_research_output.metadata.get("provider_stage") or {})
+                        if isinstance(
+                            _research_output.metadata.get("provider_stage"),
+                            dict,
+                        )
+                        else {}
+                    ),
                     "steps": [
                         {
                             "iteration": s.iteration,
@@ -2888,9 +2916,15 @@ async def unified_rag_pipeline(
 
                 # Skip cache/retrieval after a successful research loop so the
                 # assembled research evidence remains the source of truth.
-                _skip_retrieval_stack = True
-                _skip_retrieval_reason = "research_loop"
-                result.metadata["research_retrieval_bypassed"] = True
+                _research_provider_stage = _research_output.metadata.get("provider_stage")
+                _research_available = not (
+                    isinstance(_research_provider_stage, dict)
+                    and _research_provider_stage.get("verification_available") is False
+                )
+                if _research_available:
+                    _skip_retrieval_stack = True
+                    _skip_retrieval_reason = "research_loop"
+                    result.metadata["research_retrieval_bypassed"] = True
 
             except Exception as _res_exc:
                 logger.warning(f"Research loop failed, falling back to standard pipeline: {_res_exc!r}")
@@ -4735,6 +4769,11 @@ async def unified_rag_pipeline(
                 accumulator = EvidenceAccumulator(
                     max_rounds=accumulation_max_rounds,
                     enable_gap_assessment=True,
+                    **(
+                        {"credential_runtime": credential_runtime}
+                        if credential_runtime is not None
+                        else {}
+                    ),
                 )
 
                 # Create retrieval function for additional rounds
@@ -4801,6 +4840,13 @@ async def unified_rag_pipeline(
                     "initial_docs": accumulation_result.metadata.get("initial_docs", 0),
                     "final_docs": len(accumulation_result.documents),
                     "docs_added": accumulation_result.metadata.get("docs_added", 0),
+                    **(
+                        {
+                            key: accumulation_result.metadata[key]
+                            for key in ("verification_available", "failure_code")
+                            if key in accumulation_result.metadata
+                        }
+                    ),
                 }
                 result.timings["evidence_accumulation"] = time.time() - accumulation_start
 
@@ -5710,6 +5756,17 @@ async def unified_rag_pipeline(
                     min_relevance=strip_min_relevance,
                     max_strips=max_strips,
                     use_llm_grading=False,  # Use heuristic for speed by default
+                    **(
+                        {
+                            "llm_provider": classifier_provider
+                            or generation_provider
+                            or "openai",
+                            "llm_model": classifier_model or generation_model,
+                            "credential_runtime": credential_runtime,
+                        }
+                        if credential_runtime is not None
+                        else {}
+                    ),
                 )
 
                 if filtered_docs:
@@ -5724,6 +5781,13 @@ async def unified_rag_pipeline(
                     "strip_size_tokens": strip_size_tokens,
                     "min_relevance": strip_min_relevance,
                     "resulting_docs": len(filtered_docs) if filtered_docs else 0,
+                    **(
+                        {
+                            key: strips_metadata[key]
+                            for key in ("verification_available", "failure_code")
+                            if key in strips_metadata
+                        }
+                    ),
                 }
 
                 result.timings["knowledge_strips"] = time.time() - strips_start
@@ -5760,6 +5824,11 @@ async def unified_rag_pipeline(
                 if evidence_chain_result is None:
                     chain_builder = EvidenceChainBuilder(
                         enable_llm_extraction=True,
+                        **(
+                            {"credential_runtime": credential_runtime}
+                            if credential_runtime is not None
+                            else {}
+                        ),
                     )
 
                     # Build chains - note: we don't have the answer yet, so chains are built from docs
@@ -5776,6 +5845,13 @@ async def unified_rag_pipeline(
                         "overall_confidence": evidence_chain_result.overall_confidence,
                         "multi_hop_detected": evidence_chain_result.multi_hop_detected,
                         "total_nodes": evidence_chain_result.metadata.get("total_nodes", 0),
+                        **(
+                            {
+                                key: evidence_chain_result.metadata[key]
+                                for key in ("verification_available", "failure_code")
+                                if key in evidence_chain_result.metadata
+                            }
+                        ),
                     }
 
                 result.timings["evidence_chains"] = time.time() - chain_start
@@ -6190,6 +6266,11 @@ async def unified_rag_pipeline(
                                 llm_model=classifier_model or generation_model,
                                 num_suggestions=num_suggestions,
                                 llm_timeout_sec=3.0,
+                                **(
+                                    {"credential_runtime": credential_runtime}
+                                    if credential_runtime is not None
+                                    else {}
+                                ),
                             )
                             result.metadata["suggestions"] = _suggestions
                             result.timings["suggestions"] = time.time() - _suggestions_start
@@ -7190,7 +7271,14 @@ async def unified_rag_pipeline(
         # Now that we have the generated answer, rebuild evidence chains with claim extraction
         if enable_evidence_chains and result.generated_answer and result.documents and EvidenceChainBuilder:
             try:
-                chain_builder = EvidenceChainBuilder(enable_llm_extraction=True)
+                chain_builder = EvidenceChainBuilder(
+                    enable_llm_extraction=True,
+                    **(
+                        {"credential_runtime": credential_runtime}
+                        if credential_runtime is not None
+                        else {}
+                    ),
+                )
 
                 # Rebuild chains with the generated answer for claim extraction
                 evidence_chain_result = await chain_builder.build_chains(
@@ -7218,6 +7306,13 @@ async def unified_rag_pipeline(
                         "total_claims": evidence_chain_result.metadata.get("total_claims", 0),
                         "supported_claims": evidence_chain_result.metadata.get("supported_claims", 0),
                         "chains": chains_data[:5],  # Include top 5 chains
+                        **(
+                            {
+                                key: evidence_chain_result.metadata[key]
+                                for key in ("verification_available", "failure_code")
+                                if key in evidence_chain_result.metadata
+                            }
+                        ),
                     }
 
                     # Optionally include full chain data for debugging
