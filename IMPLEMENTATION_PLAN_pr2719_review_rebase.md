@@ -33,12 +33,12 @@
 
 **Success Criteria**: One shared helper waits for the extension service worker in both callers; startup cleanup reports/preserves close failures; the fixture keeps `/api/v1/media/` in OpenAPI for capability detection, does not advertise unimplemented POST search, and serves both Media list slash forms; both CodeRabbit out-of-diff negative RAG checks wait until `/api/v1/rag/health` is recorded before asserting no authenticated request.
 **Tests**: `cd apps/tldw-frontend && bunx playwright test e2e/manual-api-key-persistence.spec.ts --reporter=line`; `cd apps/tldw-frontend && bunx playwright test e2e/extension-api-key-persistence.spec.ts --reporter=line`; `cd apps/extension && bun run compile`. Expected: 3/3 WebUI tests, 3/3 extension tests, and compile exit 0.
-**Status**: Not Started
+**Status**: Complete
 
-- [ ] In `extension-api-key-persistence.spec.ts`, add `getExtensionServiceWorker(context)` and reuse it in `resolveExtensionId` and `setExtensionStorage`; replace silent `context.close()` suppression with diagnostic handling that preserves the startup error.
-- [ ] In `manual-api-key-fixture.ts`, remove the unimplemented `/api/v1/media/search` advertisement and return the empty Media payload for both `/api/v1/media` and `/api/v1/media/`.
-- [ ] In both persistence specs, poll until a post-offset `/api/v1/rag/health` request exists before asserting that none of those requests is authenticated. These are CodeRabbit review-body comments that GitHub could not attach inline.
-- [ ] Run both focused Playwright suites and extension compile with the exact commands above.
+- [x] In `extension-api-key-persistence.spec.ts`, add `getExtensionServiceWorker(context)` and reuse it in `resolveExtensionId` and `setExtensionStorage`; replace silent `context.close()` suppression with diagnostic handling that preserves the startup error.
+- [x] In `manual-api-key-fixture.ts`, remove the unimplemented `/api/v1/media/search` advertisement and return the empty Media payload for both `/api/v1/media` and `/api/v1/media/`.
+- [x] In both persistence specs, poll until a post-offset `/api/v1/rag/health` request exists before asserting that none of those requests is authenticated. These are CodeRabbit review-body comments that GitHub could not attach inline.
+- [x] Run both focused Playwright suites and extension compile with the exact commands above.
 
 ## Stage 3: Vitest environment isolation
 **Goal**: Use Vitest-managed environment stubs in all newly added auth-migration cases.

@@ -67,11 +67,10 @@ export const startManualApiKeyFixture = async (
         ? {
             openapi: "3.1.0",
             paths: {
-              "/api/v1/media/": { get: {} },
-              "/api/v1/media/search": { post: {} }
+              "/api/v1/media/": { get: {} }
             }
           }
-        : pathname === "/api/v1/media"
+        : pathname === "/api/v1/media" || pathname === "/api/v1/media/"
           ? {
               items: [],
               pagination: {

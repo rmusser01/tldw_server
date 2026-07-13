@@ -60,11 +60,12 @@ const prepareExtension = (
   return destination
 }
 
+const getExtensionServiceWorker = async (context: BrowserContext) =>
+  context.serviceWorkers()[0] ||
+  (await context.waitForEvent("serviceworker", { timeout: 15_000 }))
+
 const resolveExtensionId = async (context: BrowserContext): Promise<string> => {
-  let target = context.serviceWorkers()[0]
-  if (!target) {
-    target = await context.waitForEvent("serviceworker", { timeout: 15_000 })
-  }
+  const target = await getExtensionServiceWorker(context)
   const match = target.url().match(/^chrome-extension:\/\/([a-p]{32})\//)
   if (!match) throw new Error(`Could not derive extension id from ${target.url()}`)
   return match[1]
@@ -75,8 +76,7 @@ const setExtensionStorage = async (
   area: "local" | "sync",
   values: Record<string, unknown>
 ): Promise<void> => {
-  const worker = context.serviceWorkers()[0]
-  if (!worker) throw new Error("Extension service worker is unavailable")
+  const worker = await getExtensionServiceWorker(context)
   await worker.evaluate(
     ({ storageArea, storageValues }) =>
       new Promise<void>((resolve, reject) => {
@@ -124,9 +124,16 @@ const launchExtension = async (
     })
     const page = context.pages()[0] || (await context.newPage())
     return { context, page, extensionId }
-  } catch (error) {
-    await context.close().catch(() => undefined)
-    throw error
+  } catch (startupError) {
+    try {
+      await context.close()
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [startupError, cleanupError],
+        "Extension startup and cleanup both failed"
+      )
+    }
+    throw startupError
   }
 }
 
@@ -281,6 +288,14 @@ const expectProductionRagRequest = async (
     return
   }
 
+  await expect
+    .poll(() =>
+      fixture
+        .requests()
+        .slice(requestOffset)
+        .some((request) => request.path === "/api/v1/rag/health")
+    )
+    .toBe(true)
   await expect(
     page.getByText("RAG: needs attention", { exact: true })
   ).toBeVisible()
