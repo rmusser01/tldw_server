@@ -1319,6 +1319,100 @@ async def test_playlist_preflight_mid_extraction_lease_loss_preserves_reclaimer_
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("failed_status", ["running", "ready"])
+async def test_playlist_preflight_active_worker_blocks_after_transient_snapshot_failure(
+    monkeypatch,
+    tmp_path,
+    failed_status,
+):
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
+    monkeypatch.delenv("JOBS_DB_URL", raising=False)
+
+    import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestStore,
+    )
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    jm = JobManager()
+    store, preflight, job = _seed_playlist_preflight_job(jm)
+    extracted = _playlist_preflight_data([{"source_url": "https://youtu.be/snapshot-failure"}])
+    original_replace = PlaylistIngestStore.replace_preflight_snapshot
+    failed_once = False
+    attempted_statuses = []
+
+    def fail_once(self, owner_user_id, preflight_id, *, status, **kwargs):
+        nonlocal failed_once
+        attempted_statuses.append(status)
+        if status == failed_status and not failed_once:
+            failed_once = True
+            raise RuntimeError("serialization failure with private details")
+        return original_replace(
+            self,
+            owner_user_id,
+            preflight_id,
+            status=status,
+            **kwargs,
+        )
+
+    async def fake_runner(_url, **_kwargs):
+        return extracted
+
+    class _OwnerMediaDB:
+        def get_media_by_urls(self, _urls, **_kwargs):
+            return []
+
+        def close_connection(self):
+            return None
+
+    monkeypatch.setattr(PlaylistIngestStore, "replace_preflight_snapshot", fail_once, raising=True)
+    monkeypatch.setattr(worker, "run_playlist_preflight_process", fake_runner, raising=True)
+    monkeypatch.setattr(worker, "_create_db", lambda _user_id: _OwnerMediaDB(), raising=True)
+
+    with pytest.raises(worker.MediaIngestJobError) as exc_info:
+        await worker._handle_job(job, jm, worker._ProgressState())
+
+    assert str(exc_info.value) == "playlist_snapshot_write_failed"
+    assert attempted_statuses[-1] == "blocked"
+    blocked = store.get_preflight("7", preflight.preflight_id)
+    assert blocked.status == "blocked"
+    assert blocked.error == {"code": "playlist_snapshot_write_failed"}
+    assert list(store.list_preflight_items("7", preflight.preflight_id, limit=10)) == []
+
+
+def test_playlist_preflight_snapshot_failure_fallback_is_single_attempt():
+    import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+
+    attempts = []
+
+    class _FailingStore:
+        def replace_preflight_snapshot(self, _owner_user_id, _preflight_id, *, status, **kwargs):
+            attempts.append((status, kwargs))
+            raise RuntimeError("persistent serialization failure")
+
+    with pytest.raises(worker.MediaIngestJobError) as exc_info:
+        worker._replace_playlist_preflight_snapshot_guarded(
+            _FailingStore(),
+            owner_user_id="7",
+            preflight_id="preflight-id",
+            job_id=11,
+            lease_id="lease-id",
+            worker_id="worker-id",
+            status="ready",
+            items=[{"occurrence_id": "item-id"}],
+        )
+
+    assert str(exc_info.value) == "playlist_snapshot_write_failed"
+    assert [status for status, _kwargs in attempts] == ["ready", "blocked"]
+    assert all(
+        kwargs["expected_job_id"] == 11
+        and kwargs["expected_lease_id"] == "lease-id"
+        and kwargs["expected_worker_id"] == "worker-id"
+        for _status, kwargs in attempts
+    )
+
+
+@pytest.mark.asyncio
 async def test_playlist_preflight_worker_marks_owner_library_and_snapshot_duplicates(monkeypatch, tmp_path):
     monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
     monkeypatch.delenv("JOBS_DB_URL", raising=False)

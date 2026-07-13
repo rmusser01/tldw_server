@@ -419,6 +419,24 @@ def _raise_if_playlist_preflight_cancelled(
     raise MediaIngestJobError("playlist_preflight_cancelled", retryable=False)
 
 
+def _raise_playlist_preflight_lease_error(
+    exc: PlaylistPreflightLeaseLostError,
+    store: PlaylistIngestStore,
+    *,
+    owner_user_id: str,
+    preflight_id: str,
+) -> None:
+    if exc.cancelled:
+        _block_playlist_preflight(
+            store,
+            owner_user_id=owner_user_id,
+            preflight_id=preflight_id,
+            code="playlist_preflight_cancelled",
+        )
+        raise MediaIngestJobError("playlist_preflight_cancelled", retryable=False) from exc
+    raise MediaIngestJobError("playlist_preflight_lease_lost", retryable=False) from exc
+
+
 def _replace_playlist_preflight_snapshot_guarded(
     store: PlaylistIngestStore,
     *,
@@ -445,16 +463,33 @@ def _replace_playlist_preflight_snapshot_guarded(
             expected_worker_id=worker_id,
         )
     except PlaylistPreflightLeaseLostError as exc:
-        if exc.cancelled:
-            _block_playlist_preflight(
+        _raise_playlist_preflight_lease_error(
+            exc,
+            store,
+            owner_user_id=owner_user_id,
+            preflight_id=preflight_id,
+        )
+    except Exception as exc:
+        try:
+            store.replace_preflight_snapshot(
+                owner_user_id,
+                preflight_id,
+                status="blocked",
+                items=[],
+                error={"code": "playlist_snapshot_write_failed"},
+                expected_job_id=job_id,
+                expected_lease_id=lease_id,
+                expected_worker_id=worker_id,
+            )
+        except PlaylistPreflightLeaseLostError as fallback_exc:
+            _raise_playlist_preflight_lease_error(
+                fallback_exc,
                 store,
                 owner_user_id=owner_user_id,
                 preflight_id=preflight_id,
-                code="playlist_preflight_cancelled",
             )
-            raise MediaIngestJobError("playlist_preflight_cancelled", retryable=False) from exc
-        raise MediaIngestJobError("playlist_preflight_lease_lost", retryable=False) from exc
-    except Exception as exc:
+        except Exception as fallback_exc:
+            raise MediaIngestJobError("playlist_snapshot_write_failed", retryable=False) from fallback_exc
         raise MediaIngestJobError("playlist_snapshot_write_failed", retryable=False) from exc
 
 
