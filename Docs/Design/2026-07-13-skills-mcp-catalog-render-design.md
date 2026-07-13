@@ -226,6 +226,8 @@ Outcomes use existing behavior:
 
 The module does not create grants, prompt for approval, or weaken a decision.
 
+The shared policy-grant validator must admit `skill` as an approval subject type. Grant values continue through `normalize_permission_subject_value()`, so mixed-case Skill grants use the same lowercase canonical form as runtime subjects and rules. This changes no grant storage schema and adds no Skill-specific lease implementation.
+
 ## Render Sequence
 
 1. MCP coordinator validates module and tool access.
