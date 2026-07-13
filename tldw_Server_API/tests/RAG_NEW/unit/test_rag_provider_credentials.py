@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from functools import wraps
 import inspect
 import json
+from functools import wraps
 from types import SimpleNamespace
 from typing import Any
 
@@ -36,13 +36,12 @@ from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import (
     unified_rag_pipeline,
 )
 
-
 pytestmark = pytest.mark.unit
 _SENTINEL_SECRET = "rag-runtime-secret-must-not-leak"
 
 
 class _RecordingRuntime:
-    created: list["_RecordingRuntime"] = []
+    created: list[_RecordingRuntime] = []
 
     def __init__(self, **scope: Any) -> None:
         self.scope = scope
@@ -504,7 +503,7 @@ async def test_stream_runtime_closes_when_body_iterator_is_closed_early(
     )
 
     iterator = response.body_iterator
-    await anext(iterator)
+    await iterator.__anext__()
     await iterator.aclose()
 
     assert _RecordingRuntime.created[0].close_calls == 1  # nosec B101
@@ -534,6 +533,15 @@ def test_checkpoint_sanitizer_excludes_runtime() -> None:
             ChatConfigurationError(_SENTINEL_SECRET, provider="openai"),
             503,
             "provider_configuration_invalid",
+        ),
+        (
+            ChatConfigurationError(
+                _SENTINEL_SECRET,
+                provider="openai",
+                error_code="missing_provider_credentials",
+            ),
+            503,
+            "missing_provider_credentials",
         ),
         (
             ByokResolutionError("credential_store_unavailable", "openai"),

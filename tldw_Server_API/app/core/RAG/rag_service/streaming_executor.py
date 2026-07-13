@@ -72,7 +72,9 @@ def classify_rag_provider_error(exc: BaseException) -> tuple[str, int, str] | No
         code = "provider_authentication_failed"
         return code, 502, _RAG_PROVIDER_ERROR_MESSAGES[code]
     if isinstance(exc, ChatConfigurationError):
-        code = "provider_configuration_invalid"
+        code = str(getattr(exc, "error_code", "provider_configuration_invalid"))
+        if code not in {"missing_provider_credentials", "provider_configuration_invalid"}:
+            code = "provider_configuration_invalid"
         return code, 503, _RAG_PROVIDER_ERROR_MESSAGES[code]
     if isinstance(exc, ChatAPIError):
         try:

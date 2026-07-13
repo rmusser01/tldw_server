@@ -24,7 +24,11 @@ from typing import TYPE_CHECKING, Any, Callable, Optional, cast
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError, ChatAuthenticationError
+from tldw_Server_API.app.core.Chat.Chat_Deps import (
+    ChatAPIError,
+    ChatAuthenticationError,
+    ChatConfigurationError,
+)
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import (
     SummaryProviderError,
 )
@@ -135,6 +139,10 @@ def _record_embedding_degradation(
         code = exc.code
     elif isinstance(exc, ChatAuthenticationError):
         code = "invalid_provider_credentials"
+    elif isinstance(exc, ChatConfigurationError):
+        code = str(getattr(exc, "error_code", "") or "")
+        if code != "missing_provider_credentials":
+            code = "provider_unavailable"
     elif isinstance(exc, ChatAPIError):
         code = "provider_unavailable"
     else:
@@ -481,6 +489,7 @@ class PostGenerationVerifier:
                                     failure_code = hyde_metadata.get("failure_code")
                                     if failure_code in {
                                         "invalid_provider_credentials",
+                                        "missing_provider_credentials",
                                         "credential_store_unavailable",
                                         "credential_scope_revoked",
                                         "provider_unavailable",

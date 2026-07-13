@@ -207,6 +207,67 @@ async def test_tool_loop_uses_runtime_credentials_for_hosted_provider_embeddings
 
 
 @pytest.mark.asyncio
+async def test_tool_loop_provider_embedding_latency_consumes_time_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core import config as core_config
+    from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create
+
+    now = 0.0
+    search_calls = 0
+    embedding_settings = {
+        "default_model_id": "openai:text-embedding-3-small",
+        "models": {
+            "openai:text-embedding-3-small": SimpleNamespace(provider="openai"),
+        },
+    }
+
+    def fake_create(texts, app_config, model_id_override=None, **kwargs):
+        nonlocal now
+        now = 2.0
+        return [[1.0, 0.0] for _ in texts]
+
+    def search_within(*args, **kwargs):
+        nonlocal search_calls
+        search_calls += 1
+        return [(0, 5)]
+
+    monkeypatch.setattr(agentic_execution, "_now", lambda: now)
+    monkeypatch.setattr(
+        agentic_execution,
+        "make_default_registry",
+        lambda toolbox: {"search_within": search_within},
+    )
+    monkeypatch.setattr(
+        core_config,
+        "load_comprehensive_config",
+        lambda: {"EMBEDDING_CONFIG": embedding_settings},
+    )
+    monkeypatch.setattr(Embeddings_Create, "create_embeddings_batch", fake_create)
+    agentic_execution._INTRA_DOC_VEC_CACHE.clear()
+    cfg = AgenticConfig(
+        top_k_docs=1,
+        max_tool_calls=1,
+        time_budget_sec=1.0,
+        enable_metrics=False,
+        agentic_use_provider_embeddings_within=True,
+        agentic_provider_embedding_model_id="openai:text-embedding-3-small",
+    )
+
+    content, citations, trace = await agentic_execution.tool_loop(
+        [Document(id="slow", content="alpha", source=DataSource.MEDIA_DB, metadata={})],
+        "alpha",
+        cfg,
+        credential_runtime=_CredentialRuntime("openai"),
+    )
+
+    assert content == "alpha"
+    assert len(citations) == 1
+    assert trace == []
+    assert search_calls == 0
+
+
+@pytest.mark.asyncio
 async def test_tool_loop_local_huggingface_embeddings_do_not_resolve_credentials(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -251,6 +312,61 @@ async def test_tool_loop_local_huggingface_embeddings_do_not_resolve_credentials
     assert runtime.resolved == []
     assert runtime.marked == []
     assert captured["kwargs"] == {}
+
+
+@pytest.mark.asyncio
+async def test_tool_loop_runtime_local_api_uses_exact_endpoint_without_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core import config as core_config
+    from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create
+
+    runtime = _CredentialRuntime("openai")
+    captured: dict[str, Any] = {}
+    embedding_settings = {
+        "default_model_id": "local_api:agentic-model",
+        "models": {
+            "local_api:agentic-model": SimpleNamespace(
+                provider="local_api",
+                api_url="https://agentic-local.example/embeddings",
+                api_key="configured-key-must-not-be-used",
+            ),
+        },
+    }
+
+    def fake_create(texts, app_config, model_id_override=None, **kwargs):
+        captured["kwargs"] = kwargs
+        return [[1.0, 0.0] for _ in texts]
+
+    monkeypatch.setattr(
+        core_config,
+        "load_comprehensive_config",
+        lambda: {"EMBEDDING_CONFIG": embedding_settings},
+    )
+    monkeypatch.setattr(Embeddings_Create, "create_embeddings_batch", fake_create)
+    agentic_execution._INTRA_DOC_VEC_CACHE.clear()
+    cfg = AgenticConfig(
+        top_k_docs=1,
+        max_tool_calls=1,
+        enable_metrics=False,
+        agentic_use_provider_embeddings_within=True,
+        agentic_provider_embedding_model_id="local_api:agentic-model",
+    )
+
+    await agentic_execution.tool_loop(
+        [Document(id="local-api", content="alpha", source=DataSource.MEDIA_DB, metadata={})],
+        "alpha",
+        cfg,
+        credential_runtime=runtime,
+    )
+
+    assert runtime.resolved == []
+    assert runtime.marked == []
+    assert captured["kwargs"] == {
+        "api_key_override": None,
+        "base_url_override": "https://agentic-local.example/embeddings",
+        "credentials_resolved": True,
+    }
 
 
 @pytest.mark.asyncio

@@ -17,7 +17,6 @@ from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
     normalize_provider_name,
 )
 
-
 _Resolver = Callable[..., Awaitable[ResolvedByokCredentials]]
 _FallbackResolver = Callable[[str], str | None]
 
@@ -46,7 +45,7 @@ def _copy_app_config(
     copied: dict[str, Any] | None = None
     try:
         copied = copy.deepcopy(app_config)
-    except Exception:
+    except Exception:  # noqa: BLE001 - hostile credential metadata must fail closed
         copy_failed = True
     if copy_failed:
         raise RuntimeError("Provider credential configuration is unavailable")
@@ -185,7 +184,7 @@ class _ResolvedEntry:
                     await touch_callback()
                 except asyncio.CancelledError:
                     raise
-                except Exception:
+                except Exception:  # noqa: BLE001 - refresh failures retain the current entry
                     return
 
             resolution._touch_cb = touch_without_leaking_failure
@@ -209,6 +208,7 @@ class ProviderCredentialRuntime:
         "_cache",
         "_inflight",
         "_refresh_tasks",
+        "_usage_tasks",
         "_refresh_locks",
         "_refreshed_generations",
         "_generations",
@@ -236,6 +236,7 @@ class ProviderCredentialRuntime:
         self._cache: dict[str, _ResolvedEntry] = {}
         self._inflight: dict[str, asyncio.Task[_ResolvedEntry]] = {}
         self._refresh_tasks: dict[str, asyncio.Task[_ResolvedEntry]] = {}
+        self._usage_tasks: dict[_ResolvedEntry, asyncio.Task[None]] = {}
         self._refresh_locks: dict[str, asyncio.Lock] = {}
         self._refreshed_generations: dict[str, int] = {}
         self._generations: dict[str, int] = {}
@@ -297,8 +298,20 @@ class ProviderCredentialRuntime:
         if entry.used:
             return
 
-        entry.used = True
-        await entry.resolution.touch_last_used()
+        task = self._usage_tasks.get(entry)
+        if task is None:
+            task = asyncio.create_task(self._mark_entry_used(handle.provider, entry))
+            self._usage_tasks[entry] = task
+            task.add_done_callback(
+                lambda completed, owned_entry=entry: self._forget_usage_task(
+                    owned_entry,
+                    completed,
+                )
+            )
+
+        await self._await_usage_task(task)
+        if self._closed:
+            raise RuntimeError("Provider credential runtime is closed")
 
     async def close(self) -> None:
         """Cancel owned work and release all execution-scoped references."""
@@ -364,7 +377,7 @@ class ProviderCredentialRuntime:
             raise
         except ByokResolutionError as exc:
             failure_code = exc.code
-        except Exception:
+        except Exception:  # noqa: BLE001 - unexpected resolver failures are sanitized below
             unexpected_failure = True
 
         if failure_code is not None:
@@ -381,7 +394,7 @@ class ProviderCredentialRuntime:
                 and resolution.status in {ByokResolutionStatus.RESOLVED, ByokResolutionStatus.ABSENT}
                 and normalize_provider_name(resolution.provider) == provider
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - malformed resolver objects fail validation
             valid = False
         if not valid or resolution is None:
             raise RuntimeError("Provider credential resolution failed")
@@ -393,12 +406,38 @@ class ProviderCredentialRuntime:
                 self._refreshed_generations[provider] = generation
         return entry
 
+    async def _mark_entry_used(
+        self,
+        provider: str,
+        entry: _ResolvedEntry,
+    ) -> None:
+        """Persist usage before publishing the entry as used."""
+        await entry.resolution.touch_last_used()
+        if self._cache.get(provider) is entry:
+            entry.used = True
+
+    async def _await_usage_task(self, task: asyncio.Task[None]) -> None:
+        """Shield and drain usage persistence before cancellation escapes."""
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            while not task.done():
+                try:
+                    await asyncio.shield(task)
+                except asyncio.CancelledError:
+                    continue
+                except Exception:  # noqa: BLE001 - caller cancellation remains authoritative
+                    break
+            if self._closed:
+                raise RuntimeError("Provider credential runtime is closed") from None
+            raise
+
     async def _await_owned(self, task: asyncio.Task[_ResolvedEntry]) -> _ResolvedEntry:
         try:
             return await asyncio.shield(task)
         except asyncio.CancelledError:
             if self._closed:
-                raise RuntimeError("Provider credential runtime is closed")
+                raise RuntimeError("Provider credential runtime is closed") from None
             raise
 
     def _new_handle(
@@ -436,17 +475,31 @@ class ProviderCredentialRuntime:
         if not task.cancelled():
             task.exception()
 
+    def _forget_usage_task(
+        self,
+        entry: _ResolvedEntry,
+        task: asyncio.Task[None],
+    ) -> None:
+        if self._usage_tasks.get(entry) is task:
+            self._usage_tasks.pop(entry, None)
+        if not task.cancelled():
+            task.exception()
+
     async def _close_owned(self) -> None:
-        tasks = set(self._inflight.values()) | set(self._refresh_tasks.values())
-        for task in tasks:
+        cancellable_tasks = set(self._inflight.values()) | set(self._refresh_tasks.values())
+        usage_tasks = set(self._usage_tasks.values())
+        for task in cancellable_tasks:
             if not task.done():
                 task.cancel()
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+        if cancellable_tasks:
+            await asyncio.gather(*cancellable_tasks, return_exceptions=True)
+        if usage_tasks:
+            await asyncio.gather(*usage_tasks, return_exceptions=True)
 
         self._cache.clear()
         self._inflight.clear()
         self._refresh_tasks.clear()
+        self._usage_tasks.clear()
         self._refresh_locks.clear()
         self._refreshed_generations.clear()
         self._generations.clear()
@@ -463,7 +516,7 @@ class ProviderCredentialRuntime:
         try:
             if not task.cancelled():
                 task.exception()
-        except (asyncio.CancelledError, Exception):
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001 - callback observes task failure
             return
         finally:
             if self._close_task is task:

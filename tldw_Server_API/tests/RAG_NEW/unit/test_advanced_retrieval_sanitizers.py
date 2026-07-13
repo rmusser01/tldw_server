@@ -51,7 +51,8 @@ class _CredentialRuntime:
         return self.handle
 
     async def mark_used(self, handle: Any) -> None:
-        self.marked.append(handle)
+        if handle not in self.marked:
+            self.marked.append(handle)
 
 
 def _docs() -> list[Document]:
@@ -88,6 +89,31 @@ async def test_query_embedding_fallback_warning_omits_backend_exception(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_optional_embedding_auth_failure_reports_bounded_credential_code(monkeypatch):
+    from tldw_Server_API.app.core.Embeddings.async_embeddings import EmbeddingProviderError
+
+    class _AuthFailureService:
+        async def create_embedding(self, **kwargs):
+            raise EmbeddingProviderError("openai", code="authentication", status_code=401)
+
+    metadata: dict[str, Any] = {}
+    monkeypatch.setattr(ar, "get_async_embedding_service", lambda: _AuthFailureService())
+
+    documents = _docs()
+    result = await ar.apply_multi_vector_passages(
+        "private query",
+        documents,
+        stage_metadata=metadata,
+    )
+
+    assert result is documents
+    assert metadata == {
+        "embedding_coverage": "degraded",
+        "failure_code": "invalid_provider_credentials",
+    }
+
+
+@pytest.mark.asyncio
 async def test_span_embedding_fallback_warning_omits_backend_exception(monkeypatch):
     logger_stub = _LoggerStub()
     documents = _docs()
@@ -119,12 +145,20 @@ async def test_multi_vector_uses_runtime_credentials_for_hosted_huggingface(monk
             return provider
 
         async def create_embedding(self, **kwargs):
+            callback = kwargs.pop("on_provider_success", None)
             captured.append(kwargs)
-            return [1.0, 0.0]
+            embedding = [1.0, 0.0]
+            if callback is not None:
+                await callback()
+            return embedding
 
         async def create_embeddings_batch(self, texts, **kwargs):
+            callback = kwargs.pop("on_provider_success", None)
             captured.append({"texts": texts, **kwargs})
-            return [[1.0, 0.0] for _ in texts]
+            embeddings = [[1.0, 0.0] for _ in texts]
+            if callback is not None:
+                await callback()
+            return embeddings
 
     monkeypatch.setattr(ar, "get_async_embedding_service", lambda: _HostedService())
 
@@ -174,8 +208,39 @@ async def test_multi_vector_does_not_resolve_local_embedding_provider(monkeypatc
 
     assert runtime.resolved == []
     assert runtime.marked == []
-    assert "credentials_resolved" not in captured[0]
+    assert captured[0]["credentials_resolved"] is True
     assert "api_key_override" not in captured[0]
+    assert captured[1]["credentials_resolved"] is True
+
+
+@pytest.mark.asyncio
+async def test_multi_vector_missing_hosted_key_degrades_with_bounded_metadata(monkeypatch):
+    class _MissingKeyRuntime:
+        async def resolve(self, provider: str):
+            return SimpleNamespace(provider=provider, api_key=None, app_config={})
+
+    class _HostedService:
+        config = SimpleNamespace(default_provider="openai", default_model="embed-model")
+
+        def _resolve_provider_alias(self, provider: str) -> str:
+            return provider
+
+    metadata: dict[str, Any] = {}
+    documents = _docs()
+    monkeypatch.setattr(ar, "get_async_embedding_service", lambda: _HostedService())
+
+    result = await ar.apply_multi_vector_passages(
+        "alpha",
+        documents,
+        credential_runtime=_MissingKeyRuntime(),
+        stage_metadata=metadata,
+    )
+
+    assert result is documents
+    assert metadata == {
+        "embedding_coverage": "degraded",
+        "failure_code": "missing_provider_credentials",
+    }
 
 
 @pytest.mark.asyncio
@@ -221,7 +286,11 @@ async def test_multi_vector_marks_successful_query_use_before_span_degradation(m
             return provider
 
         async def create_embedding(self, **kwargs):
-            return [1.0, 0.0]
+            embedding = [1.0, 0.0]
+            callback = kwargs.get("on_provider_success")
+            if callback is not None:
+                await callback()
+            return embedding
 
         async def create_embeddings_batch(self, texts, **kwargs):
             raise RuntimeError("span provider failed with secret=runtime-embedding-key")
@@ -243,6 +312,66 @@ async def test_multi_vector_marks_successful_query_use_before_span_degradation(m
         "embedding_coverage": "degraded",
         "failure_code": "provider_unavailable",
     }
+
+
+@pytest.mark.asyncio
+async def test_multi_vector_full_cache_hit_does_not_mark_runtime_used(monkeypatch):
+    runtime = _CredentialRuntime("openai")
+
+    class _CachedHostedService:
+        config = SimpleNamespace(default_provider="openai", default_model="embed-model")
+
+        def _resolve_provider_alias(self, provider: str) -> str:
+            return provider
+
+        async def create_embedding(self, **kwargs):
+            return [1.0, 0.0]
+
+        async def create_embeddings_batch(self, texts, **kwargs):
+            return [[1.0, 0.0] for _ in texts]
+
+    monkeypatch.setattr(ar, "get_async_embedding_service", lambda: _CachedHostedService())
+
+    result = await ar.apply_multi_vector_passages(
+        "alpha",
+        _docs(),
+        credential_runtime=runtime,
+    )
+
+    assert result
+    assert runtime.marked == []
+
+
+@pytest.mark.asyncio
+async def test_multi_vector_span_dispatch_marks_after_query_cache_hit(monkeypatch):
+    runtime = _CredentialRuntime("openai")
+
+    class _PartiallyCachedHostedService:
+        config = SimpleNamespace(default_provider="openai", default_model="embed-model")
+
+        def _resolve_provider_alias(self, provider: str) -> str:
+            return provider
+
+        async def create_embedding(self, **kwargs):
+            return [1.0, 0.0]
+
+        async def create_embeddings_batch(self, texts, **kwargs):
+            embeddings = [[1.0, 0.0] for _ in texts]
+            callback = kwargs.get("on_provider_success")
+            if callback is not None:
+                await callback()
+            return embeddings
+
+    monkeypatch.setattr(ar, "get_async_embedding_service", lambda: _PartiallyCachedHostedService())
+
+    result = await ar.apply_multi_vector_passages(
+        "alpha",
+        _docs(),
+        credential_runtime=runtime,
+    )
+
+    assert result
+    assert runtime.marked == [runtime.handle]
 
 
 @pytest.mark.asyncio
@@ -382,6 +511,161 @@ async def test_required_media_embedding_auth_failure_raises_bounded_chat_error(m
 
 
 @pytest.mark.asyncio
+async def test_required_media_missing_hosted_key_raises_bounded_configuration_error(monkeypatch):
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+    from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create
+
+    class _MissingKeyRuntime:
+        async def resolve(self, provider: str):
+            return SimpleNamespace(
+                provider=provider,
+                api_key=None,
+                app_config={"openai_api": {"api_key": "server-secret-must-not-leak"}},
+            )
+
+    config = {
+        "embedding_config": {
+            "default_model_id": "openai:text-embedding-3-small",
+            "models": {
+                "openai:text-embedding-3-small": SimpleNamespace(provider="openai"),
+            },
+        }
+    }
+
+    retriever = object.__new__(dr.MediaDBRetriever)
+    retriever.vector_store = SimpleNamespace(_initialized=True)
+    retriever.user_id = "42"
+    retriever.config = dr.RetrievalConfig(max_results=3, use_vector=True, use_fts=False)
+    retriever.credential_runtime = _MissingKeyRuntime()
+    monkeypatch.setattr(Embeddings_Create, "get_embedding_config", lambda: config)
+
+    with pytest.raises(ChatConfigurationError) as exc_info:
+        await retriever._retrieve_vector("alpha", index_namespace="runtime-index")
+
+    assert exc_info.value.error_code == "missing_provider_credentials"
+    assert "server-secret-must-not-leak" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_required_media_missing_local_api_endpoint_fails_closed(monkeypatch):
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+    from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create
+
+    config = {
+        "embedding_config": {
+            "default_model_id": "local_api:missing-endpoint",
+            "models": {
+                "local_api:missing-endpoint": SimpleNamespace(
+                    provider="local_api",
+                    api_key="configured-key-must-not-be-used",
+                ),
+            },
+        }
+    }
+
+    retriever = object.__new__(dr.MediaDBRetriever)
+    retriever.vector_store = SimpleNamespace(_initialized=True)
+    retriever.user_id = "42"
+    retriever.config = dr.RetrievalConfig(max_results=3, use_vector=True, use_fts=False)
+    retriever.credential_runtime = object()
+    monkeypatch.setattr(Embeddings_Create, "get_embedding_config", lambda: config)
+
+    with pytest.raises(ChatConfigurationError) as exc_info:
+        await retriever._retrieve_vector("alpha", index_namespace="runtime-index")
+
+    assert exc_info.value.error_code == "provider_configuration_invalid"
+    assert "configured-key-must-not-be-used" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_multi_database_retriever_propagates_required_media_auth_failure():
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAuthenticationError
+    from tldw_Server_API.app.core.RAG.rag_service.types import DataSource
+
+    class _FailingMediaRetriever(dr.MediaDBRetriever):
+        def __init__(self):
+            self.config = dr.RetrievalConfig()
+
+        async def _retrieve_vector(self, *args, **kwargs):
+            raise ChatAuthenticationError(
+                "Embedding provider authentication failed.",
+                provider="openai",
+            )
+
+    class _SuccessfulRetriever:
+        async def retrieve(self, query):
+            return [Document(id="note-1", content="partial", metadata={}, score=0.9)]
+
+    retriever = object.__new__(dr.MultiDatabaseRetriever)
+    retriever.retrievers = {
+        DataSource.MEDIA_DB: _FailingMediaRetriever(),
+        DataSource.NOTES: _SuccessfulRetriever(),
+    }
+    retriever.credential_runtime = object()
+    config = dr.RetrievalConfig(max_results=5, use_vector=True, use_fts=False)
+
+    with pytest.raises(ChatAuthenticationError) as exc_info:
+        await retriever.retrieve("alpha", config=config)
+
+    assert exc_info.value.provider == "openai"
+    assert str(exc_info.value) == "Embedding provider authentication failed."
+
+
+@pytest.mark.asyncio
+async def test_multi_database_retriever_keeps_legacy_partial_success_for_typed_failure():
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAuthenticationError
+    from tldw_Server_API.app.core.RAG.rag_service.types import DataSource
+
+    class _FailingMediaRetriever(dr.MediaDBRetriever):
+        def __init__(self):
+            self.config = dr.RetrievalConfig()
+
+        async def _retrieve_vector(self, *args, **kwargs):
+            raise ChatAuthenticationError("legacy provider failure", provider="openai")
+
+    class _SuccessfulRetriever:
+        async def retrieve(self, query):
+            return [Document(id="note-1", content="partial", metadata={}, score=0.9)]
+
+    retriever = object.__new__(dr.MultiDatabaseRetriever)
+    retriever.retrievers = {
+        DataSource.MEDIA_DB: _FailingMediaRetriever(),
+        DataSource.NOTES: _SuccessfulRetriever(),
+    }
+    retriever.credential_runtime = None
+
+    documents = await retriever.retrieve(
+        "alpha",
+        config=dr.RetrievalConfig(max_results=5, use_vector=True, use_fts=False),
+    )
+
+    assert [document.id for document in documents] == ["note-1"]
+
+
+@pytest.mark.asyncio
+async def test_multi_database_retriever_keeps_ordinary_partial_source_success():
+    from tldw_Server_API.app.core.RAG.rag_service.types import DataSource
+
+    class _FailingRetriever:
+        async def retrieve(self, query):
+            raise RuntimeError("ordinary source failure")
+
+    class _SuccessfulRetriever:
+        async def retrieve(self, query):
+            return [Document(id="note-1", content="partial", metadata={}, score=0.9)]
+
+    retriever = object.__new__(dr.MultiDatabaseRetriever)
+    retriever.retrievers = {
+        DataSource.PROMPTS: _FailingRetriever(),
+        DataSource.NOTES: _SuccessfulRetriever(),
+    }
+
+    documents = await retriever.retrieve("alpha")
+
+    assert [document.id for document in documents] == ["note-1"]
+
+
+@pytest.mark.asyncio
 async def test_media_scoped_model_override_resolves_its_actual_hosted_provider(monkeypatch):
     from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create
 
@@ -430,3 +714,95 @@ async def test_media_scoped_model_override_resolves_its_actual_hosted_provider(m
     assert runtime.resolved == ["openai"]
     assert captured["model_id_override"] == "openai:text-embedding-3-small"
     assert captured["kwargs"]["credentials_resolved"] is True
+
+
+@pytest.mark.asyncio
+async def test_media_scoped_local_api_uses_exact_endpoint_without_configured_key(monkeypatch):
+    from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create
+
+    runtime = _CredentialRuntime("openai")
+    captured: dict[str, Any] = {}
+    config = {
+        "embedding_config": {
+            "default_model_id": "local_api:default-model",
+            "models": {
+                "local_api:default-model": SimpleNamespace(
+                    provider="local_api",
+                    api_url="https://default-local.example/embeddings",
+                    api_key="default-key-must-not-be-used",
+                ),
+                "local_api:scoped-model": SimpleNamespace(
+                    provider="local_api",
+                    api_url="https://scoped-local.example/embeddings",
+                    api_key="scoped-key-must-not-be-used",
+                ),
+            },
+        }
+    }
+
+    class _VectorStore:
+        _initialized = True
+
+        async def search(self, **kwargs):
+            return []
+
+    def fake_create(texts, user_app_config, model_id_override=None, **kwargs):
+        captured["model_id_override"] = model_id_override
+        captured["kwargs"] = kwargs
+        return [[1.0, 0.0]]
+
+    retriever = object.__new__(dr.MediaDBRetriever)
+    retriever.vector_store = _VectorStore()
+    retriever.user_id = "42"
+    retriever.config = dr.RetrievalConfig(max_results=3, use_vector=True, use_fts=False)
+    retriever.credential_runtime = runtime
+    monkeypatch.setattr(
+        retriever,
+        "_resolve_scoped_query_embedding_override",
+        lambda **kwargs: "local_api:scoped-model",
+    )
+    monkeypatch.setattr(Embeddings_Create, "get_embedding_config", lambda: config)
+    monkeypatch.setattr(Embeddings_Create, "create_embeddings_batch", fake_create)
+
+    await retriever._retrieve_vector(
+        "alpha",
+        index_namespace="runtime-index",
+        allowed_media_ids=[7],
+    )
+
+    assert runtime.resolved == []
+    assert runtime.marked == []
+    assert captured["model_id_override"] == "local_api:scoped-model"
+    assert captured["kwargs"] == {
+        "api_key_override": None,
+        "base_url_override": "https://scoped-local.example/embeddings",
+        "credentials_resolved": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_direct_media_retriever_keeps_legacy_embedding_provider_failure(monkeypatch):
+    from tldw_Server_API.app.core.Embeddings.async_embeddings import EmbeddingProviderError
+    from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create
+
+    config = {
+        "embedding_config": {
+            "default_model_id": "openai:text-embedding-3-small",
+            "models": {
+                "openai:text-embedding-3-small": SimpleNamespace(provider="openai"),
+            },
+        }
+    }
+
+    def fail_embedding(*args, **kwargs):
+        raise EmbeddingProviderError("openai", code="authentication", status_code=401)
+
+    retriever = object.__new__(dr.MediaDBRetriever)
+    retriever.vector_store = SimpleNamespace(_initialized=True)
+    retriever.user_id = "42"
+    retriever.config = dr.RetrievalConfig(max_results=3, use_vector=True, use_fts=False)
+    retriever.credential_runtime = None
+    monkeypatch.setattr(Embeddings_Create, "get_embedding_config", lambda: config)
+    monkeypatch.setattr(Embeddings_Create, "create_embeddings_batch", fail_embedding)
+
+    assert await retriever._retrieve_vector("alpha", index_namespace="legacy-index") == []

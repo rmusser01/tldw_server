@@ -58,12 +58,39 @@ from .hyde import (
     _mark_runtime_used_for_embeddings,
     _resolve_runtime_embedding_call,
     _run_sync_embedding_call,
+    _runtime_local_embedding_call_kwargs,
 )
 from .retrieval_executor import execute_retrieval_phase
 from .retrieval_plan import RetrievalPlan
 
 _RERANK_DEBUG_DOCUMENT_CONTENT_MAX_CHARS = 500
 _RAG_PROVIDER_FAILURES = (ByokResolutionError, ChatAPIError)
+
+
+class _ProviderFailureBypass(BaseException):
+    """Carry a typed provider failure across retry/circuit accounting unchanged."""
+
+    __slots__ = ("failure",)
+
+    def __init__(self, failure: BaseException) -> None:
+        self.failure = failure
+        super().__init__()
+
+
+def _bounded_provider_failure_code(exc: BaseException) -> str:
+    """Map a typed provider failure to an allowlisted metadata code."""
+    allowed = {
+        "invalid_provider_credentials",
+        "missing_provider_credentials",
+        "credential_store_unavailable",
+        "credential_scope_revoked",
+    }
+    code = str(getattr(exc, "code", "") or getattr(exc, "error_code", "") or "")
+    if code in allowed:
+        return code
+    if getattr(exc, "status_code", None) in {401, 403}:
+        return "invalid_provider_credentials"
+    return "provider_unavailable"
 
 
 def _serialize_result_document(doc: Any) -> dict[str, Any]:
@@ -2273,7 +2300,13 @@ async def unified_rag_pipeline(
             return await asyncio.wait_for(coro, timeout=timeout)
         return await coro
 
-    async def _resilient_call(component: str, func, *args, **kwargs):
+    async def _resilient_call(
+        component: str,
+        func,
+        *args,
+        bypass_provider_failures: bool = False,
+        **kwargs,
+    ):
         """Apply circuit breaker, retries, and timeout around async operations when enabled."""
         breaker = None
         if enable_resilience and circuit_breaker and get_coordinator and CircuitBreakerConfig:
@@ -2285,12 +2318,20 @@ async def unified_rag_pipeline(
             except (AttributeError, KeyError, TypeError):
                 breaker = None
 
+        async def _invoke():
+            try:
+                if asyncio.iscoroutinefunction(func):
+                    return await func(*args, **kwargs)
+                return func(*args, **kwargs)
+            except _RAG_PROVIDER_FAILURES as exc:
+                if bypass_provider_failures:
+                    raise _ProviderFailureBypass(exc) from None
+                raise
+
         async def _attempt():
             if breaker is not None:
-                return await breaker.call(func, *args, **kwargs)
-            if asyncio.iscoroutinefunction(func):
-                return await func(*args, **kwargs)
-            return func(*args, **kwargs)
+                return await breaker.call(_invoke)
+            return await _invoke()
 
         if enable_resilience and (retry_attempts or 0) > 1 and RetryPolicy and RetryConfig:
             policy = RetryPolicy(RetryConfig(max_attempts=int(retry_attempts or 1)))
@@ -2298,7 +2339,10 @@ async def unified_rag_pipeline(
         else:
             call_coro = _attempt()
 
-        return await _with_timeout(call_coro, timeout_seconds)
+        try:
+            return await _with_timeout(call_coro, timeout_seconds)
+        except _ProviderFailureBypass as bypass:
+            raise bypass.failure from None
 
     # Initialize monitoring if requested
     metrics = None
@@ -3633,19 +3677,29 @@ async def unified_rag_pipeline(
                         retrieval_cfg: Optional[Any] = None,
                         top_k_override: Optional[int] = None,
                     ) -> list[Document]:
-                        evidence = await _resilient_call(
-                            component,
-                            execute_retrieval_phase,
-                            resolved_request=resolved_request,
-                            retrieval_plan=_effective_retrieval_plan_for_query(
-                                query_text,
-                                top_k_override=top_k_override,
-                            ),
-                            retriever=retriever,
-                            retrieval_config=retrieval_cfg or config,
-                            allowed_media_ids=include_media_ids,
-                            allowed_note_ids=include_note_ids,
-                        )
+                        try:
+                            evidence = await _resilient_call(
+                                component,
+                                execute_retrieval_phase,
+                                resolved_request=resolved_request,
+                                retrieval_plan=_effective_retrieval_plan_for_query(
+                                    query_text,
+                                    top_k_override=top_k_override,
+                                ),
+                                retriever=retriever,
+                                retrieval_config=retrieval_cfg or config,
+                                allowed_media_ids=include_media_ids,
+                                allowed_note_ids=include_note_ids,
+                                bypass_provider_failures=credential_runtime is not None,
+                            )
+                        except _RAG_PROVIDER_FAILURES as exc:
+                            if credential_runtime is None:
+                                raise
+                            result.metadata.setdefault("retrieval_coverage", {})[component] = {
+                                "coverage": "degraded",
+                                "failure_code": _bounded_provider_failure_code(exc),
+                            }
+                            return []
                         evidence_docs = getattr(evidence, "documents", None)
                         return list(evidence_docs or [])
 
@@ -3660,6 +3714,7 @@ async def unified_rag_pipeline(
                         retrieval_config=config,
                         allowed_media_ids=include_media_ids,
                         allowed_note_ids=include_note_ids,
+                        bypass_provider_failures=credential_runtime is not None,
                     )
                     documents = list(retrieved_evidence.documents)
 
@@ -4115,6 +4170,8 @@ async def unified_rag_pipeline(
                 asyncio.TimeoutError,
                 sqlite3.Error,
             ) as e:
+                if credential_runtime is not None and isinstance(e, _RAG_PROVIDER_FAILURES):
+                    raise
                 result.errors.append(f"Document retrieval failed: {str(e)}")
                 logger.error(f"Retrieval error: {e}")
                 # Sample payload exemplar on retrieval failure
@@ -7129,6 +7186,7 @@ async def unified_rag_pipeline(
                 embedding_failure_code = getattr(vres, "embedding_failure_code", None)
                 if embedding_failure_code in {
                     "invalid_provider_credentials",
+                    "missing_provider_credentials",
                     "credential_store_unavailable",
                     "credential_scope_revoked",
                     "provider_unavailable",
@@ -7989,11 +8047,14 @@ async def unified_batch_pipeline(
             provider = _embedding_provider_from_config(cfg)
             handle = None
             call_kwargs: dict[str, Any] = {}
-            if credential_runtime is not None and provider == "openai":
-                handle, call_kwargs = await _resolve_runtime_embedding_call(
-                    credential_runtime,
-                    provider,
-                )
+            if credential_runtime is not None:
+                if provider == "openai":
+                    handle, call_kwargs = await _resolve_runtime_embedding_call(
+                        credential_runtime,
+                        provider,
+                    )
+                else:
+                    call_kwargs = _runtime_local_embedding_call_kwargs(cfg, provider)
             vectors = await _run_sync_embedding_call(
                 partial(
                     create_embeddings_batch,

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAuthenticationError
 from tldw_Server_API.app.core.RAG.rag_service import agentic_chunker as ac
 from tldw_Server_API.app.core.RAG.rag_service import claims as claims_mod
 from tldw_Server_API.app.core.RAG.rag_service import database_retrievers
@@ -105,6 +106,70 @@ async def test_coarse_retrieval_fallback_warning_omits_raw_exception(
     assert result.metadata["coarse_docs"] == []
     assert any("Agentic coarse retrieval failed" in msg for msg in logger_stub.warnings)
     _assert_no_sensitive_log_fragments(logger_stub.warnings)
+
+
+@pytest.mark.asyncio
+async def test_coarse_retrieval_propagates_required_provider_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider_error = ChatAuthenticationError(
+        "Embedding provider authentication failed.",
+        provider="openai",
+    )
+
+    class _ProviderFailingRetriever:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        async def retrieve(self, *args: object, **kwargs: object) -> list[Document]:
+            raise provider_error
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(ac, "logger", logger_stub)
+    monkeypatch.setattr(ac, "MultiDatabaseRetriever", _ProviderFailingRetriever)
+
+    with pytest.raises(ChatAuthenticationError) as exc_info:
+        await ac.agentic_rag_pipeline(
+            query="required provider failure",
+            sources=["media_db"],
+            search_mode="fts",
+            agentic=ac.AgenticConfig(enable_metrics=False),
+            enable_generation=False,
+            enable_citations=False,
+            credential_runtime=object(),
+        )
+
+    assert exc_info.value is provider_error
+    assert logger_stub.warnings == []
+
+
+@pytest.mark.asyncio
+async def test_coarse_retrieval_keeps_legacy_typed_failure_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _ProviderFailingRetriever:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        async def retrieve(self, *args: object, **kwargs: object) -> list[Document]:
+            raise ChatAuthenticationError("legacy provider failure", provider="openai")
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(ac, "logger", logger_stub)
+    monkeypatch.setattr(ac, "MultiDatabaseRetriever", _ProviderFailingRetriever)
+
+    result = await ac.agentic_rag_pipeline(
+        query="legacy provider fallback",
+        sources=["media_db"],
+        search_mode="fts",
+        agentic=ac.AgenticConfig(enable_metrics=False),
+        enable_generation=False,
+        enable_citations=False,
+    )
+
+    assert result.documents
+    assert result.metadata["coarse_docs"] == []
+    assert any("Agentic coarse retrieval failed" in msg for msg in logger_stub.warnings)
 
 
 @pytest.mark.asyncio

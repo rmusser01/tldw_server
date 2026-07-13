@@ -48,6 +48,7 @@ from .hyde import (
     _mark_runtime_used_for_embeddings,
     _resolve_runtime_embedding_call,
     _run_sync_embedding_call,
+    _runtime_local_embedding_call_kwargs,
 )
 from .retrieval_plan import RetrievalPlan
 from .types import DataSource, Document
@@ -1788,11 +1789,18 @@ class MediaDBRetriever(BaseRetriever):
                     credential_runtime = getattr(self, "credential_runtime", None)
                     handle = None
                     call_kwargs: dict[str, Any] = {}
-                    if credential_runtime is not None and provider == "openai":
-                        handle, call_kwargs = await _resolve_runtime_embedding_call(
-                            credential_runtime,
-                            provider,
-                        )
+                    if credential_runtime is not None:
+                        if provider == "openai":
+                            handle, call_kwargs = await _resolve_runtime_embedding_call(
+                                credential_runtime,
+                                provider,
+                            )
+                        else:
+                            call_kwargs = _runtime_local_embedding_call_kwargs(
+                                user_app_config,
+                                provider,
+                                model_id_override,
+                            )
                     embeddings = await _run_sync_embedding_call(
                         partial(
                             create_embeddings_batch,
@@ -1825,7 +1833,10 @@ class MediaDBRetriever(BaseRetriever):
                     if hasattr(query_vector, 'tolist'):
                         query_vector = query_vector.tolist()
                 except (ByokResolutionError, ChatAPIError):
-                    raise
+                    if getattr(self, "credential_runtime", None) is not None:
+                        raise
+                    logger.error("Failed to generate query embedding")
+                    return []
                 except (
                     ImportError,
                     AttributeError,
@@ -1837,10 +1848,33 @@ class MediaDBRetriever(BaseRetriever):
                     ValueError,
                 ) as exc:
                     from tldw_Server_API.app.core.Embeddings.async_embeddings import (
+                        EmbeddingCredentialError,
+                        EmbeddingEndpointError,
                         EmbeddingProviderError,
                     )
 
-                    if isinstance(exc, EmbeddingProviderError):
+                    if (
+                        getattr(self, "credential_runtime", None) is not None
+                        and isinstance(exc, EmbeddingCredentialError)
+                    ):
+                        raise ChatConfigurationError(
+                            "Embedding provider credentials are not configured.",
+                            provider=exc.provider or provider or "unknown",
+                            error_code="missing_provider_credentials",
+                        ) from None
+                    if (
+                        getattr(self, "credential_runtime", None) is not None
+                        and isinstance(exc, EmbeddingEndpointError)
+                    ):
+                        raise ChatConfigurationError(
+                            "Embedding provider endpoint is not configured.",
+                            provider=exc.provider or provider or "unknown",
+                            error_code="provider_configuration_invalid",
+                        ) from None
+                    if (
+                        getattr(self, "credential_runtime", None) is not None
+                        and isinstance(exc, EmbeddingProviderError)
+                    ):
                         provider_name = exc.provider or provider or "unknown"
                         if exc.code == "authentication":
                             raise ChatAuthenticationError(
@@ -2097,7 +2131,10 @@ class MediaDBRetriever(BaseRetriever):
             return _finalize_docs(documents)
 
         except (ByokResolutionError, ChatAPIError):
-            raise
+            if getattr(self, "credential_runtime", None) is not None:
+                raise
+            logger.error("Vector search failed")
+            return await self._retrieve_fts(query, media_type, **kwargs)
         except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError) as e:
             logger.error(f"Vector search failed: {e}")
             # Fallback to FTS
@@ -3715,6 +3752,7 @@ class MultiDatabaseRetriever:
             user_id: User ID for vector store access
         """
         self.retrievers: dict[DataSource, BaseRetriever] = {}
+        self.credential_runtime = credential_runtime
 
         # Initialize retrievers for available databases
         media_db_path = db_paths.get("media_db")
@@ -3956,6 +3994,11 @@ class MultiDatabaseRetriever:
 
         # Flatten and filter out failures
         for res in results:
+            if (
+                getattr(self, "credential_runtime", None) is not None
+                and isinstance(res, (ByokResolutionError, ChatAPIError))
+            ):
+                raise res
             if isinstance(res, Exception):
                 # Skip failed sources (partial success expected)
                 continue

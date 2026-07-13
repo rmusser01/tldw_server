@@ -33,6 +33,7 @@ from .hyde import (
     _embedding_provider_from_config,
     _record_embedding_degraded,
     _resolve_runtime_embedding_call,
+    _runtime_local_embedding_call_kwargs,
 )
 from .types import Document
 
@@ -599,6 +600,11 @@ async def tool_loop(
     credential_runtime: Any = None,
     stage_metadata: dict[str, Any] | None = None,
 ) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
+    deadline = (
+        _now() + float(cfg.time_budget_sec)
+        if getattr(cfg, "time_budget_sec", None) is not None
+        else None
+    )
     embedding_call_kwargs: dict[str, Any] = {}
     handle = None
     provider_embeddings_allowed = True
@@ -613,11 +619,18 @@ async def tool_loop(
                 getattr(cfg, "agentic_provider_embedding_model_id", None),
             )
             # Hugging Face in this synchronous service is an in-process provider.
-            if credential_runtime is not None and provider == "openai":
-                handle, embedding_call_kwargs = await _resolve_runtime_embedding_call(
-                    credential_runtime,
-                    provider,
-                )
+            if credential_runtime is not None:
+                if provider == "openai":
+                    handle, embedding_call_kwargs = await _resolve_runtime_embedding_call(
+                        credential_runtime,
+                        provider,
+                    )
+                else:
+                    embedding_call_kwargs = _runtime_local_embedding_call_kwargs(
+                        {"embedding_config": embedding_settings},
+                        provider,
+                        getattr(cfg, "agentic_provider_embedding_model_id", None),
+                    )
         except asyncio.CancelledError:
             raise
         except (
@@ -646,7 +659,6 @@ async def tool_loop(
     registry = make_default_registry(tb)
     remaining_tokens = int(getattr(cfg, "max_tokens_read", 0) or 0)
     max_steps = min(100, max(1, int(getattr(cfg, "max_tool_calls", 1) or 1)))
-    deadline = (_now() + float(cfg.time_budget_sec)) if getattr(cfg, "time_budget_sec", None) is not None else None
 
     assembled: list[tuple[Document, int, int]] = []
     steps = 0

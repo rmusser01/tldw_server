@@ -14,7 +14,22 @@ class ChatAuthenticationError(ChatAPIError):
 
 class ChatConfigurationError(ChatAPIError):
     """Exception for configuration issues (e.g., missing key, invalid model)."""
-    def __init__(self, message="Chat provider configuration error.", provider=None):
+    _ERROR_CODES = frozenset({
+        "provider_configuration_invalid",
+        "missing_provider_credentials",
+    })
+
+    def __init__(
+        self,
+        message="Chat provider configuration error.",
+        provider=None,
+        error_code="provider_configuration_invalid",
+    ):
+        self.error_code = (
+            error_code
+            if error_code in self._ERROR_CODES
+            else "provider_configuration_invalid"
+        )
         super().__init__(message, status_code=500, provider=provider) # Default to 500
 
 class ChatBadRequestError(ChatAPIError):

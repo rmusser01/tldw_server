@@ -8,6 +8,7 @@ import hashlib
 import threading
 import time
 import weakref
+from collections.abc import Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Optional
 
@@ -672,6 +673,7 @@ class AsyncEmbeddingService:
         api_key_override: Optional[str] = None,
         base_url_override: Optional[str] = None,
         credentials_resolved: bool = False,
+        on_provider_success: Callable[[], Awaitable[None]] | None = None,
     ) -> list[float]:
         """
         Create embedding with full async pipeline.
@@ -683,6 +685,8 @@ class AsyncEmbeddingService:
             user_id: User identifier for rate limiting
             use_cache: Whether to use caching
             use_batching: Whether to use batching
+            on_provider_success: Zero-argument callback awaited only after direct
+                primary-provider success; skipped on cache hit, failure, or fallback.
 
         Returns:
             Embedding vector
@@ -717,6 +721,8 @@ class AsyncEmbeddingService:
                 isinstance(effective_base_url, str) and effective_base_url.strip()
             ):
                 raise EmbeddingEndpointError(provider)
+        if on_provider_success is not None:
+            use_batching = False
 
         # Create deterministic cache key across processes
         text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
@@ -732,6 +738,7 @@ class AsyncEmbeddingService:
                 return cached_embedding
 
         # Use batching if enabled
+        primary_provider_dispatched = False
         if use_batching and self.batcher.enabled:
             embedding = await self.batcher.submit_request(
                 text=text,
@@ -757,6 +764,7 @@ class AsyncEmbeddingService:
                 elif effective_base_url and provider in {"openai", "huggingface"}:
                     call_kwargs["base_url_override"] = effective_base_url
                 embedding = await provider_instance.create_embedding(**call_kwargs)
+                primary_provider_dispatched = True
             except _ASYNC_EMBEDDINGS_PROVIDER_EXCEPTIONS as e:
                 if isinstance(e, EmbeddingProviderError):
                     raise
@@ -774,6 +782,9 @@ class AsyncEmbeddingService:
                 embedding, actual_provider, actual_model = await self._try_fallback_providers(
                     text, model, provider, user_id, e
                 )
+
+        if primary_provider_dispatched and on_provider_success is not None:
+            await on_provider_success()
 
         # Cache the result
         if use_cache:
@@ -808,6 +819,7 @@ class AsyncEmbeddingService:
         api_key_override: Optional[str] = None,
         base_url_override: Optional[str] = None,
         credentials_resolved: bool = False,
+        on_provider_success: Callable[[], Awaitable[None]] | None = None,
     ) -> list[list[float]]:
         """
         Create embeddings for multiple texts.
@@ -818,6 +830,8 @@ class AsyncEmbeddingService:
             provider: Provider to use
             user_id: User identifier
             parallel: Whether to process in parallel
+            on_provider_success: Zero-argument callback awaited once per direct
+                primary-provider success; skipped on cache hit, failure, or fallback.
 
         Returns:
             List of embedding vectors
@@ -833,6 +847,7 @@ class AsyncEmbeddingService:
                     api_key_override=api_key_override,
                     base_url_override=base_url_override,
                     credentials_resolved=credentials_resolved,
+                    on_provider_success=on_provider_success,
                 )
                 for text in texts
             ]
@@ -849,6 +864,7 @@ class AsyncEmbeddingService:
                     api_key_override=api_key_override,
                     base_url_override=base_url_override,
                     credentials_resolved=credentials_resolved,
+                    on_provider_success=on_provider_success,
                 )
                 embeddings.append(embedding)
             return embeddings

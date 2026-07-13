@@ -10,7 +10,10 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAuthenticationError
+from tldw_Server_API.app.core.Chat.Chat_Deps import (
+    ChatAuthenticationError,
+    ChatConfigurationError,
+)
 from tldw_Server_API.app.core.Claims_Extraction import monitoring as claims_monitoring
 from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry
 from tldw_Server_API.app.core.RAG.rag_service import post_generation_verifier as verifier_module
@@ -46,6 +49,27 @@ def _base_docs() -> list[Document]:
         Document(id="1", content="A", metadata={"source": DataSource.MEDIA_DB}),
         Document(id="2", content="B", metadata={"source": DataSource.MEDIA_DB}),
     ]
+
+
+def test_embedding_degradation_preserves_missing_credentials_code() -> None:
+    outcome = verifier_module.VerificationOutcome(
+        unsupported_ratio=1.0,
+        total_claims=1,
+        unsupported_count=1,
+        fixed=False,
+    )
+
+    verifier_module._record_embedding_degradation(
+        outcome,
+        ChatConfigurationError(
+            "secret configuration details",
+            provider="openai",
+            error_code="missing_provider_credentials",
+        ),
+    )
+
+    assert outcome.embedding_coverage == "degraded"
+    assert outcome.embedding_failure_code == "missing_provider_credentials"
 
 
 @pytest.mark.unit

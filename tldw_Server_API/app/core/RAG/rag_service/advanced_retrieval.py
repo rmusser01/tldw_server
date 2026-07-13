@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from dataclasses import dataclass
+from functools import partial
 from typing import Any
 
 from loguru import logger
@@ -128,7 +129,11 @@ async def apply_multi_vector_passages(
     svc = get_async_embedding_service()
 
     handle = None
-    call_kwargs: dict[str, Any] = {}
+    call_kwargs: dict[str, Any] = (
+        {"credentials_resolved": True}
+        if credential_runtime is not None
+        else {}
+    )
     if credential_runtime is not None:
         raw_provider = str(getattr(getattr(svc, "config", None), "default_provider", "") or "")
         alias_resolver = getattr(svc, "_resolve_provider_alias", None)
@@ -144,6 +149,10 @@ async def apply_multi_vector_passages(
                     "provider": provider,
                     "model": getattr(getattr(svc, "config", None), "default_model", None),
                     **runtime_kwargs,
+                    "on_provider_success": partial(
+                        credential_runtime.mark_used,
+                        handle,
+                    ),
                 }
             except asyncio.CancelledError:
                 raise
@@ -160,12 +169,17 @@ async def apply_multi_vector_passages(
                 _record_embedding_degraded(stage_metadata, exc)
                 logger.warning("Query embedding failed; skipping multi-vector passages")
                 return documents
+        elif provider == "local_api":
+            provider_config = getattr(svc, "config", None)
+            get_provider = getattr(provider_config, "get_provider", None)
+            configured = get_provider(provider) if callable(get_provider) else None
+            endpoint = getattr(configured, "api_url", None)
+            if isinstance(endpoint, str) and endpoint.strip():
+                call_kwargs["base_url_override"] = endpoint.strip()
 
     # Embed query
     try:
         q_vec = await svc.create_embedding(text=query, user_id=user_id, **call_kwargs)
-        if handle is not None:
-            await credential_runtime.mark_used(handle)
     except asyncio.CancelledError:
         raise
     except (AttributeError, ConnectionError, OSError, RuntimeError, TimeoutError, TypeError, ValueError) as exc:

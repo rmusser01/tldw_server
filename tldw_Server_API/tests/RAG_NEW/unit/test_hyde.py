@@ -2,7 +2,7 @@ import asyncio
 import threading
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -176,6 +176,43 @@ async def test_embed_text_does_not_resolve_local_huggingface(monkeypatch):
 
 
 @pytest.mark.unit
+@pytest.mark.asyncio
+async def test_embed_text_runtime_local_api_uses_exact_endpoint_without_key(monkeypatch):
+    from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create
+
+    captured: dict[str, Any] = {}
+    runtime = _CredentialRuntime("openai")
+    config = {
+        "embedding_config": {
+            "default_model_id": "local_api:runtime-model",
+            "models": {
+                "local_api:runtime-model": SimpleNamespace(
+                    provider="local_api",
+                    api_url="https://runtime-local.example/embeddings",
+                    api_key="configured-key-must-not-be-used",
+                ),
+            },
+        }
+    }
+
+    def fake_create(texts, user_app_config, model_id_override=None, **kwargs):
+        captured["kwargs"] = kwargs
+        return [[0.1, 0.2]]
+
+    monkeypatch.setattr(Embeddings_Create, "get_embedding_config", lambda: config)
+    monkeypatch.setattr(Embeddings_Create, "create_embeddings_batch", fake_create)
+
+    assert await hyde.embed_text("local api", credential_runtime=runtime) == [0.1, 0.2]
+    assert runtime.resolved == []
+    assert runtime.marked == []
+    assert captured["kwargs"] == {
+        "api_key_override": None,
+        "base_url_override": "https://runtime-local.example/embeddings",
+        "credentials_resolved": True,
+    }
+
+
+@pytest.mark.unit
 def test_embedding_provider_resolution_matches_sync_ambiguous_bare_model_precedence():
     config = {
         "embedding_config": {
@@ -279,7 +316,7 @@ async def test_sync_embedding_thread_drains_after_repeated_cancellation():
     assert waiter is not None and not waiter.cancelled()
 
     task.cancel()
-    await asyncio.sleep(0.01)
+    await asyncio.sleep(0)
     assert not task.done()
 
     release.set()
@@ -317,6 +354,42 @@ async def test_sync_embedding_thread_records_completed_use_before_cancellation()
         await task
 
     assert marked == [[1.0]]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_sync_embedding_thread_drains_mark_used_after_worker_completion():
+    mark_started = asyncio.Event()
+    mark_release = asyncio.Event()
+    mark_calls = 0
+    mark_completions = 0
+
+    async def record_success(result):
+        nonlocal mark_calls, mark_completions
+        mark_calls += 1
+        mark_started.set()
+        await mark_release.wait()
+        mark_completions += 1
+
+    task = asyncio.create_task(
+        hyde._run_sync_embedding_call(lambda: [1.0], on_success=record_success)
+    )
+    await asyncio.wait_for(mark_started.wait(), timeout=1)
+
+    task.cancel()
+    await asyncio.sleep(0)
+    task.cancel()
+    await asyncio.sleep(0)
+    assert not task.done()
+    assert mark_calls == 1
+    assert mark_completions == 0
+
+    mark_release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert mark_calls == 1
+    assert mark_completions == 1
 
 
 @pytest.mark.unit
@@ -380,6 +453,319 @@ async def test_unified_pipeline_with_hyde_merges_results():
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_unified_pipeline_propagates_required_retrieval_provider_failure(monkeypatch):
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAuthenticationError
+    from tldw_Server_API.app.core.RAG.rag_service import unified_pipeline
+
+    provider_error = ChatAuthenticationError(
+        "Embedding provider authentication failed.",
+        provider="openai",
+    )
+
+    class _FailingRetriever:
+        def __init__(self, *args, **kwargs):
+            self.retrievers = {}
+
+        async def retrieve(self, *args, **kwargs):
+            raise provider_error
+
+    logger = Mock()
+    monkeypatch.setattr(unified_pipeline, "MultiDatabaseRetriever", _FailingRetriever)
+    monkeypatch.setattr(unified_pipeline, "logger", logger)
+
+    with pytest.raises(ChatAuthenticationError) as exc_info:
+        await unified_pipeline.unified_rag_pipeline(
+            query="required provider retrieval",
+            sources=["media_db"],
+            adaptive_hybrid_weights=False,
+            enable_cache=False,
+            enable_reranking=False,
+            enable_generation=False,
+            credential_runtime=object(),
+        )
+
+    assert exc_info.value is provider_error
+    logger.error.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_unified_pipeline_keeps_legacy_typed_retrieval_fts_fallback(monkeypatch):
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAuthenticationError
+    from tldw_Server_API.app.core.RAG.rag_service import database_retrievers, unified_pipeline
+
+    fallback_doc = Document(
+        id="fallback-typed",
+        content="fallback",
+        metadata={},
+        source=DataSource.MEDIA_DB,
+        score=0.7,
+    )
+
+    class _FailingRetriever:
+        def __init__(self, *args, **kwargs):
+            self.retrievers = {}
+
+        async def retrieve(self, *args, **kwargs):
+            raise ChatAuthenticationError("legacy provider failure", provider="openai")
+
+    class _FallbackMediaRetriever:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def retrieve(self, *args, **kwargs):
+            return [fallback_doc]
+
+    monkeypatch.setattr(unified_pipeline, "MultiDatabaseRetriever", _FailingRetriever)
+    monkeypatch.setattr(database_retrievers, "MediaDBRetriever", _FallbackMediaRetriever)
+
+    result = await unified_pipeline.unified_rag_pipeline(
+        query="legacy typed retrieval",
+        sources=["media_db"],
+        media_db_path="media.db",
+        search_mode="hybrid",
+        adaptive_hybrid_weights=False,
+        enable_cache=False,
+        enable_reranking=False,
+        enable_generation=False,
+    )
+
+    assert [document["id"] for document in result.documents] == ["fallback-typed"]
+    assert result.metadata["fallbacks"]["media_db_fts_on_error"] is True
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_unified_pipeline_keeps_ordinary_retrieval_fts_fallback(monkeypatch):
+    from tldw_Server_API.app.core.RAG.rag_service import database_retrievers, unified_pipeline
+
+    fallback_doc = Document(
+        id="fallback-1",
+        content="fallback",
+        metadata={},
+        source=DataSource.MEDIA_DB,
+        score=0.7,
+    )
+
+    class _FailingRetriever:
+        def __init__(self, *args, **kwargs):
+            self.retrievers = {}
+
+        async def retrieve(self, *args, **kwargs):
+            raise RuntimeError("ordinary retrieval failure")
+
+    class _FallbackMediaRetriever:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def retrieve(self, *args, **kwargs):
+            return [fallback_doc]
+
+    monkeypatch.setattr(unified_pipeline, "MultiDatabaseRetriever", _FailingRetriever)
+    monkeypatch.setattr(database_retrievers, "MediaDBRetriever", _FallbackMediaRetriever)
+
+    result = await unified_pipeline.unified_rag_pipeline(
+        query="ordinary retrieval",
+        sources=["media_db"],
+        media_db_path="media.db",
+        search_mode="hybrid",
+        adaptive_hybrid_weights=False,
+        enable_cache=False,
+        enable_reranking=False,
+        enable_generation=False,
+    )
+
+    assert [document["id"] for document in result.documents] == ["fallback-1"]
+    assert result.metadata["fallbacks"]["media_db_fts_on_error"] is True
+
+
+class _CountingBreaker:
+    def __init__(self) -> None:
+        self.failure_count = 0
+        self.state = "closed"
+
+    async def call(self, func, *args, **kwargs):
+        try:
+            return await func(*args, **kwargs)
+        except Exception:
+            self.failure_count += 1
+            raise
+
+
+class _TestCoordinator:
+    def __init__(self) -> None:
+        self.circuit_breakers: dict[str, _CountingBreaker] = {}
+
+    def register_circuit_breaker(self, component: str, _config: Any) -> None:
+        self.circuit_breakers[component] = _CountingBreaker()
+
+
+class _TestRetryConfig:
+    def __init__(self, *, max_attempts: int) -> None:
+        self.max_attempts = max_attempts
+
+
+class _TestRetryPolicy:
+    def __init__(self, config: _TestRetryConfig) -> None:
+        self.max_attempts = config.max_attempts
+
+    async def execute(self, func):
+        for attempt in range(self.max_attempts):
+            try:
+                return await func()
+            except Exception:
+                if attempt + 1 == self.max_attempts:
+                    raise
+
+
+def _install_counting_resilience(monkeypatch, unified_pipeline):
+    coordinator = _TestCoordinator()
+    monkeypatch.setattr(unified_pipeline, "get_coordinator", lambda: coordinator)
+    monkeypatch.setattr(unified_pipeline, "CircuitBreakerConfig", lambda: object())
+    monkeypatch.setattr(unified_pipeline, "RetryConfig", _TestRetryConfig)
+    monkeypatch.setattr(unified_pipeline, "RetryPolicy", _TestRetryPolicy)
+    return coordinator
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_required_provider_failure_bypasses_retry_and_circuit_accounting(monkeypatch):
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAuthenticationError
+    from tldw_Server_API.app.core.RAG.rag_service import unified_pipeline
+
+    provider_error = ChatAuthenticationError(
+        "Embedding provider authentication failed.",
+        provider="openai",
+    )
+    calls = 0
+
+    class _FailingRetriever:
+        def __init__(self, *args, **kwargs):
+            self.retrievers = {}
+
+        async def retrieve(self, *args, **kwargs):
+            nonlocal calls
+            calls += 1
+            raise provider_error
+
+    coordinator = _install_counting_resilience(monkeypatch, unified_pipeline)
+    monkeypatch.setattr(unified_pipeline, "MultiDatabaseRetriever", _FailingRetriever)
+
+    with pytest.raises(ChatAuthenticationError) as exc_info:
+        await unified_pipeline.unified_rag_pipeline(
+            query="required provider retrieval",
+            sources=["media_db"],
+            credential_runtime=object(),
+            enable_resilience=True,
+            circuit_breaker=True,
+            retry_attempts=3,
+            adaptive_hybrid_weights=False,
+            enable_cache=False,
+            enable_reranking=False,
+            enable_generation=False,
+        )
+
+    breaker = coordinator.circuit_breakers["retrieval"]
+    assert exc_info.value is provider_error
+    assert calls == 1
+    assert breaker.failure_count == 0
+    assert breaker.state == "closed"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_ordinary_retrieval_failure_keeps_retry_and_circuit_accounting(monkeypatch):
+    from tldw_Server_API.app.core.RAG.rag_service import unified_pipeline
+
+    calls = 0
+
+    class _FailingRetriever:
+        def __init__(self, *args, **kwargs):
+            self.retrievers = {}
+
+        async def retrieve(self, *args, **kwargs):
+            nonlocal calls
+            calls += 1
+            raise RuntimeError("ordinary retrieval failure")
+
+    coordinator = _install_counting_resilience(monkeypatch, unified_pipeline)
+    monkeypatch.setattr(unified_pipeline, "MultiDatabaseRetriever", _FailingRetriever)
+
+    result = await unified_pipeline.unified_rag_pipeline(
+        query="ordinary resilient retrieval",
+        sources=["media_db"],
+        credential_runtime=object(),
+        enable_resilience=True,
+        circuit_breaker=True,
+        retry_attempts=3,
+        adaptive_hybrid_weights=False,
+        enable_cache=False,
+        enable_reranking=False,
+        enable_generation=False,
+    )
+
+    breaker = coordinator.circuit_breakers["retrieval"]
+    assert result.documents == []
+    assert calls == 3
+    assert breaker.failure_count == 3
+    assert breaker.state == "closed"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_optional_expansion_provider_failure_degrades_with_bounded_metadata(monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+    from tldw_Server_API.app.core.RAG.rag_service import unified_pipeline
+
+    base_doc = Document(
+        id="base-1",
+        content="Base result",
+        metadata={},
+        source=DataSource.MEDIA_DB,
+        score=0.9,
+    )
+    provider_error = ByokResolutionError("credential_store_unavailable", "openai")
+
+    class _ExpansionRetriever:
+        def __init__(self, *args, **kwargs):
+            self.retrievers = {}
+            self.calls = 0
+
+        async def retrieve(self, *args, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                return [base_doc]
+            raise provider_error
+
+    async def _expand(*args, **kwargs):
+        return ["expanded query"]
+
+    monkeypatch.setattr(unified_pipeline, "MultiDatabaseRetriever", _ExpansionRetriever)
+    monkeypatch.setattr(unified_pipeline, "multi_strategy_expansion", _expand)
+
+    result = await unified_pipeline.unified_rag_pipeline(
+        query="base query",
+        sources=["media_db"],
+        credential_runtime=object(),
+        expand_query=True,
+        expansion_strategies=["synonym"],
+        max_query_variations=1,
+        adaptive_hybrid_weights=False,
+        enable_cache=False,
+        enable_reranking=False,
+        enable_generation=False,
+    )
+
+    assert [document["id"] for document in result.documents] == ["base-1"]
+    assert result.metadata["retrieval_coverage"]["retrieval_expansion"] == {
+        "coverage": "degraded",
+        "failure_code": "credential_store_unavailable",
+    }
+    assert "credential_store_unavailable" not in result.errors
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_batch_clustering_uses_runtime_credentials_for_hosted_embeddings(monkeypatch):
     from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create
     from tldw_Server_API.app.core.RAG.rag_service import unified_pipeline
@@ -420,5 +806,54 @@ async def test_batch_clustering_uses_runtime_credentials_for_hosted_embeddings(m
     assert captured["kwargs"] == {
         "api_key_override": "runtime-embedding-key",
         "base_url_override": "https://batch-embeddings.example/v1",
+        "credentials_resolved": True,
+    }
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_batch_clustering_runtime_local_api_uses_endpoint_without_key(monkeypatch):
+    from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create
+    from tldw_Server_API.app.core.RAG.rag_service import unified_pipeline
+    from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import UnifiedSearchResult
+
+    runtime = _CredentialRuntime("openai")
+    captured: dict[str, Any] = {}
+    config = {
+        "embedding_config": {
+            "default_model_id": "local_api:batch-model",
+            "models": {
+                "local_api:batch-model": SimpleNamespace(
+                    provider="local_api",
+                    api_url="https://batch-local.example/embeddings",
+                    api_key="configured-key-must-not-be-used",
+                ),
+            },
+        }
+    }
+
+    def fake_create(texts, user_app_config, model_id_override=None, **kwargs):
+        captured["kwargs"] = kwargs
+        return [[1.0, 0.0], [0.0, 1.0]]
+
+    async def fake_pipeline(**kwargs):
+        return UnifiedSearchResult(documents=[], query=kwargs["query"])
+
+    monkeypatch.setattr(unified_pipeline, "_shared_is_test_mode", lambda: False)
+    monkeypatch.delenv("RAG_BATCH_DISABLE_CLUSTERING", raising=False)
+    monkeypatch.setattr(Embeddings_Create, "get_embedding_config", lambda: config)
+    monkeypatch.setattr(Embeddings_Create, "create_embeddings_batch", fake_create)
+    monkeypatch.setattr(unified_pipeline, "unified_rag_pipeline", fake_pipeline)
+
+    await unified_batch_pipeline(
+        ["first question", "second question"],
+        credential_runtime=runtime,
+    )
+
+    assert runtime.resolved == []
+    assert runtime.marked == []
+    assert captured["kwargs"] == {
+        "api_key_override": None,
+        "base_url_override": "https://batch-local.example/embeddings",
         "credentials_resolved": True,
     }

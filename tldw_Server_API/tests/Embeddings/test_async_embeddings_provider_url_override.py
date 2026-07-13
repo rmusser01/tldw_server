@@ -1,11 +1,11 @@
 import asyncio
+from functools import partial
 
 import pytest
 from loguru import logger
 
 from tldw_Server_API.app.core.Embeddings import async_embeddings
 from tldw_Server_API.app.core.Embeddings.async_embeddings import AsyncEmbeddingService
-from tldw_Server_API.app.core.exceptions import NetworkError
 from tldw_Server_API.app.core.Embeddings.connection_pool import get_pool_manager
 from tldw_Server_API.app.core.Embeddings.simplified_config import (
     BatchingConfig,
@@ -13,7 +13,7 @@ from tldw_Server_API.app.core.Embeddings.simplified_config import (
     ProviderConfig,
     SecurityConfig,
 )
-
+from tldw_Server_API.app.core.exceptions import NetworkError
 
 SECRET = "upstream-secret-body"
 
@@ -38,6 +38,14 @@ class TrackingCache:
     async def set_async(self, key, value, ttl=None):  # noqa: ANN001 - simple test stub
         self.set_keys.append(key)
         return True
+
+
+class HitCache:
+    async def get_async(self, key):  # noqa: ANN001 - simple test stub
+        return [0.7, 0.8]
+
+    async def set_async(self, key, value, ttl=None):  # noqa: ANN001 - simple test stub
+        raise AssertionError("cache hits must not be rewritten")
 
 
 @pytest.mark.asyncio
@@ -244,6 +252,190 @@ async def test_explicit_concurrent_calls_keep_keys_and_urls_isolated(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_provider_success_callback_runs_after_cache_miss_dispatch(monkeypatch):
+    service = AsyncEmbeddingService(config=_fallback_config())
+    service.cache = DummyCache()
+    callback_calls = 0
+
+    async def provider_success(**_kwargs):
+        return [0.1, 0.2]
+
+    async def record_success():
+        nonlocal callback_calls
+        callback_calls += 1
+
+    monkeypatch.setattr(service.providers["openai"], "create_embedding", provider_success)
+
+    result = await service.create_embedding(
+        "hello",
+        provider="openai",
+        use_cache=True,
+        api_key_override="runtime-key",
+        credentials_resolved=True,
+        on_provider_success=record_success,
+    )
+
+    assert result == [0.1, 0.2]
+    assert callback_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_provider_success_callback_does_not_run_for_cache_hit(monkeypatch):
+    service = AsyncEmbeddingService(config=_fallback_config())
+    service.cache = HitCache()
+    callback_calls = 0
+
+    async def fail_provider(**_kwargs):
+        raise AssertionError("cache hit must not dispatch provider")
+
+    async def record_success():
+        nonlocal callback_calls
+        callback_calls += 1
+
+    monkeypatch.setattr(service.providers["openai"], "create_embedding", fail_provider)
+
+    result = await service.create_embedding(
+        "hello",
+        provider="openai",
+        use_cache=True,
+        api_key_override="runtime-key",
+        credentials_resolved=True,
+        on_provider_success=record_success,
+    )
+
+    assert result == [0.7, 0.8]
+    assert callback_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_provider_success_callback_does_not_run_for_provider_failure(monkeypatch):
+    service = AsyncEmbeddingService(config=_fallback_config())
+    service.cache = DummyCache()
+    callback_calls = 0
+
+    async def provider_failure(**_kwargs):
+        raise RuntimeError("provider failed")
+
+    async def record_success():
+        nonlocal callback_calls
+        callback_calls += 1
+
+    monkeypatch.setattr(service.providers["openai"], "create_embedding", provider_failure)
+
+    with pytest.raises(async_embeddings.EmbeddingProviderError):
+        await service.create_embedding(
+            "hello",
+            provider="openai",
+            use_cache=False,
+            api_key_override="runtime-key",
+            credentials_resolved=True,
+            on_provider_success=record_success,
+        )
+
+    assert callback_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_batch_provider_success_callback_runs_once_per_cache_miss(monkeypatch):
+    service = AsyncEmbeddingService(config=_fallback_config())
+    service.cache = DummyCache()
+    callback_calls = 0
+
+    async def provider_success(**_kwargs):
+        return [0.1, 0.2]
+
+    async def record_success():
+        nonlocal callback_calls
+        callback_calls += 1
+
+    monkeypatch.setattr(service.providers["openai"], "create_embedding", provider_success)
+
+    result = await service.create_embeddings_batch(
+        ["one", "two"],
+        provider="openai",
+        api_key_override="runtime-key",
+        credentials_resolved=True,
+        on_provider_success=record_success,
+    )
+
+    assert result == [[0.1, 0.2], [0.1, 0.2]]
+    assert callback_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_provider_success_callback_drains_runtime_usage_on_cancellation(monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+        ByokResolutionStatus,
+        ResolvedByokCredentials,
+    )
+    from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+        ProviderCredentialRuntime,
+    )
+
+    touch_started = asyncio.Event()
+    release_touch = asyncio.Event()
+    touch_completed = asyncio.Event()
+
+    async def touch() -> None:
+        touch_started.set()
+        await release_touch.wait()
+        touch_completed.set()
+
+    async def resolver(provider: str, **_kwargs):
+        return ResolvedByokCredentials(
+            provider=provider,
+            api_key="runtime-key",
+            app_config={},
+            credential_fields={},
+            source="user",
+            allowlisted=True,
+            status=ByokResolutionStatus.RESOLVED,
+            auth_source="api_key",
+            _touch_cb=touch,
+        )
+
+    runtime = ProviderCredentialRuntime(
+        user_id=41,
+        team_ids=[],
+        org_ids=[],
+        trusted_base_url_override=True,
+        fallback_resolver=lambda _provider: None,
+        resolver=resolver,
+    )
+    handle = await runtime.resolve("openai")
+    service = AsyncEmbeddingService(config=_fallback_config())
+    service.cache = DummyCache()
+
+    async def provider_success(**_kwargs):
+        return [0.1, 0.2]
+
+    monkeypatch.setattr(service.providers["openai"], "create_embedding", provider_success)
+    task = asyncio.create_task(
+        service.create_embedding(
+            "hello",
+            provider="openai",
+            use_cache=False,
+            api_key_override="runtime-key",
+            credentials_resolved=True,
+            on_provider_success=partial(runtime.mark_used, handle),
+        )
+    )
+    await touch_started.wait()
+
+    task.cancel()
+    await asyncio.sleep(0)
+    task.cancel()
+    await asyncio.sleep(0)
+    assert task.done() is False
+
+    release_touch.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert touch_completed.is_set()
+    await runtime.close()
+
+
+@pytest.mark.asyncio
 async def test_explicit_missing_key_never_falls_back(monkeypatch):
     service = AsyncEmbeddingService(config=_fallback_config())
     service.cache = DummyCache()
@@ -357,6 +549,55 @@ async def test_legacy_network_failure_can_use_fallback(monkeypatch):
     result = await service.create_embedding("hello", provider="openai", use_cache=False, use_batching=False)
 
     assert result == [0.4, 0.5]
+
+
+@pytest.mark.asyncio
+async def test_runtime_local_batch_failure_never_uses_hosted_fallback(monkeypatch):
+    config = EmbeddingsConfig(
+        providers=[
+            ProviderConfig(
+                name="local",
+                fallback_provider="openai",
+                models=["local-model"],
+            ),
+            ProviderConfig(
+                name="openai",
+                api_key="server-key-must-not-be-used",
+                models=["hosted-model"],
+                fallback_model="hosted-model",
+            ),
+        ],
+        batching=BatchingConfig(enabled=False),
+        security=SecurityConfig(enable_rate_limiting=False),
+        default_provider="local",
+        default_model="local-model",
+    )
+    service = AsyncEmbeddingService(config=config)
+    service.cache = DummyCache()
+    hosted_calls = 0
+
+    async def local_failure(**_kwargs):
+        raise RuntimeError("local provider failed with sensitive details")
+
+    async def hosted_success(**_kwargs):
+        nonlocal hosted_calls
+        hosted_calls += 1
+        return [0.4, 0.5]
+
+    monkeypatch.setattr(service.providers["local"], "create_embedding", local_failure)
+    monkeypatch.setattr(service.providers["openai"], "create_embedding", hosted_success)
+
+    with pytest.raises(async_embeddings.EmbeddingProviderError) as exc_info:
+        await service.create_embeddings_batch(
+            ["hello"],
+            provider="local",
+            credentials_resolved=True,
+        )
+
+    assert exc_info.value.code == "provider_failure"
+    assert exc_info.value.provider == "local"
+    assert exc_info.value.__cause__ is None
+    assert hosted_calls == 0
 
 
 @pytest.mark.asyncio

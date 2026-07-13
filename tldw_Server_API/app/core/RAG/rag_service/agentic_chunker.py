@@ -324,6 +324,11 @@ async def agentic_rag_pipeline(
             allowed_media_ids=allowed_media_ids,
         )
         docs = list(retrieved_evidence.documents)
+    except (ByokResolutionError, ChatAPIError):
+        if credential_runtime is not None:
+            raise
+        logger.warning("Agentic coarse retrieval failed")
+        docs = []
     except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError, TimeoutError):
         logger.opt(exception=True).warning("Agentic coarse retrieval failed")
         docs = []
@@ -358,6 +363,10 @@ async def agentic_rag_pipeline(
             )
             if fallback_docs:
                 docs = fallback_docs
+        except (ByokResolutionError, ChatAPIError):
+            if credential_runtime is not None:
+                raise
+            logger.warning("Agentic Media DB fallback retrieval failed")
         except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError, TimeoutError):
             logger.warning("Agentic Media DB fallback retrieval failed")
 
@@ -905,6 +914,7 @@ async def agentic_rag_pipeline(
                 embedding_failure_code = getattr(vres, "embedding_failure_code", None)
                 if embedding_failure_code in {
                     "invalid_provider_credentials",
+                    "missing_provider_credentials",
                     "credential_store_unavailable",
                     "credential_scope_revoked",
                     "provider_unavailable",

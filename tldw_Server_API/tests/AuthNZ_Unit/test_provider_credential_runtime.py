@@ -27,7 +27,6 @@ from tldw_Server_API.app.core.RAG.rag_service.checkpoint import (
     CheckpointManager,
 )
 
-
 SECRET = "sk-runtime-sentinel-secret-value"
 
 
@@ -308,6 +307,117 @@ async def test_only_current_generation_marks_use_and_marks_once() -> None:
     assert original_touches == 0
     assert refreshed_touches == 1
     await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_mark_used_callers_share_persistence_and_wait_for_completion() -> None:
+    touch_started = asyncio.Event()
+    release_touch = asyncio.Event()
+    touches = 0
+
+    async def touch() -> None:
+        nonlocal touches
+        touches += 1
+        touch_started.set()
+        await release_touch.wait()
+
+    async def resolver(provider: str, **_kwargs) -> ResolvedByokCredentials:
+        return _resolution(provider, touch=touch)
+
+    runtime = _runtime(resolver)
+    handle = await runtime.resolve("openai")
+    first = asyncio.create_task(runtime.mark_used(handle))
+    await touch_started.wait()
+    second = asyncio.create_task(runtime.mark_used(handle))
+    await asyncio.sleep(0)
+
+    assert touches == 1
+    assert first.done() is False
+    assert second.done() is False
+    assert runtime._cache["openai"].used is False
+
+    release_touch.set()
+    await asyncio.gather(first, second)
+    assert runtime._cache["openai"].used is True
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_mark_used_waiter_drains_persistence_once() -> None:
+    touch_started = asyncio.Event()
+    release_touch = asyncio.Event()
+    touches = 0
+    completions = 0
+
+    async def touch() -> None:
+        nonlocal touches, completions
+        touches += 1
+        touch_started.set()
+        await release_touch.wait()
+        completions += 1
+
+    async def resolver(provider: str, **_kwargs) -> ResolvedByokCredentials:
+        return _resolution(provider, touch=touch)
+
+    runtime = _runtime(resolver)
+    handle = await runtime.resolve("openai")
+    waiter = asyncio.create_task(runtime.mark_used(handle))
+    await touch_started.wait()
+
+    waiter.cancel()
+    await asyncio.sleep(0)
+    waiter.cancel()
+    await asyncio.sleep(0)
+    assert waiter.done() is False
+    assert touches == 1
+    assert completions == 0
+
+    release_touch.set()
+    with pytest.raises(asyncio.CancelledError):
+        await waiter
+    await runtime.mark_used(handle)
+
+    assert touches == 1
+    assert completions == 1
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_close_owns_and_drains_inflight_usage_persistence() -> None:
+    touch_started = asyncio.Event()
+    touch_cancelled = asyncio.Event()
+    touch_completed = asyncio.Event()
+    release_touch = asyncio.Event()
+
+    async def touch() -> None:
+        touch_started.set()
+        try:
+            await release_touch.wait()
+        except asyncio.CancelledError:
+            touch_cancelled.set()
+            raise
+        touch_completed.set()
+
+    async def resolver(provider: str, **_kwargs) -> ResolvedByokCredentials:
+        return _resolution(provider, touch=touch)
+
+    runtime = _runtime(resolver)
+    handle = await runtime.resolve("openai")
+    entry = runtime._cache["openai"]
+    usage_waiter = asyncio.create_task(runtime.mark_used(handle))
+    await touch_started.wait()
+    close_waiter = asyncio.create_task(runtime.close())
+    try:
+        await asyncio.sleep(0)
+        assert touch_cancelled.is_set() is False
+        assert close_waiter.done() is False
+    finally:
+        release_touch.set()
+        await asyncio.gather(usage_waiter, close_waiter, return_exceptions=True)
+
+    assert touch_completed.is_set()
+    assert entry.used is True
+    assert runtime._usage_tasks == {}
 
 
 @pytest.mark.asyncio

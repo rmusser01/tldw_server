@@ -80,6 +80,26 @@ def _embedding_provider_from_config(
 ) -> str | None:
     """Return the provider for the exact embedding model selected by a call."""
     raw_config = user_app_config.get("embedding_config") or user_app_config.get("EMBEDDING_CONFIG") or {}
+    selected = str(model_id_override or raw_config.get("default_model_id") or "").strip()
+    model_spec = _embedding_model_spec_from_config(user_app_config, model_id_override)
+    provider = (
+        model_spec.get("provider")
+        if isinstance(model_spec, dict)
+        else getattr(model_spec, "provider", None)
+    )
+    if provider:
+        return str(provider).strip().lower()
+    if ":" in selected:
+        return selected.split(":", 1)[0].strip().lower() or None
+    return None
+
+
+def _embedding_model_spec_from_config(
+    user_app_config: dict[str, Any],
+    model_id_override: str | None = None,
+) -> Any:
+    """Return the exact embedding model configuration selected by a call."""
+    raw_config = user_app_config.get("embedding_config") or user_app_config.get("EMBEDDING_CONFIG") or {}
     models = raw_config.get("models") or {}
     selected = str(model_id_override or raw_config.get("default_model_id") or "").strip()
     if not selected:
@@ -105,16 +125,35 @@ def _embedding_provider_from_config(
             if len(matches) == 1:
                 model_spec = matches[0]
 
-    provider = (
-        model_spec.get("provider")
-        if isinstance(model_spec, dict)
-        else getattr(model_spec, "provider", None)
-    )
-    if provider:
-        return str(provider).strip().lower()
-    if ":" in selected:
-        return selected.split(":", 1)[0].strip().lower() or None
-    return None
+    return model_spec
+
+
+def _runtime_local_embedding_call_kwargs(
+    user_app_config: dict[str, Any],
+    provider: str | None,
+    model_id_override: str | None = None,
+) -> dict[str, Any]:
+    """Build a key-free execution boundary for runtime-bound local embeddings."""
+    normalized = str(provider or "").strip().lower()
+    if normalized not in {"local", "local_api"}:
+        return {}
+    call_kwargs: dict[str, Any] = {
+        "api_key_override": None,
+        "credentials_resolved": True,
+    }
+    if normalized == "local_api":
+        from tldw_Server_API.app.core.Embeddings.async_embeddings import EmbeddingEndpointError
+
+        model_spec = _embedding_model_spec_from_config(user_app_config, model_id_override)
+        endpoint = (
+            model_spec.get("api_url")
+            if isinstance(model_spec, dict)
+            else getattr(model_spec, "api_url", None)
+        )
+        if not isinstance(endpoint, str) or not endpoint.strip():
+            raise EmbeddingEndpointError(normalized)
+        call_kwargs["base_url_override"] = endpoint.strip()
+    return call_kwargs
 
 
 def _credential_base_url(handle: Any) -> str | None:
@@ -136,9 +175,14 @@ async def _resolve_runtime_embedding_call(
     provider: str,
 ) -> tuple[Any, dict[str, Any]]:
     """Resolve one hosted embedding call into explicit, fail-closed overrides."""
+    from tldw_Server_API.app.core.Embeddings.async_embeddings import EmbeddingCredentialError
+
     handle = await credential_runtime.resolve(provider)
+    api_key = getattr(handle, "api_key", None)
+    if not isinstance(api_key, str) or not api_key.strip():
+        raise EmbeddingCredentialError(provider)
     return handle, {
-        "api_key_override": getattr(handle, "api_key", None),
+        "api_key_override": api_key,
         "base_url_override": _credential_base_url(handle),
         "credentials_resolved": True,
     }
@@ -148,9 +192,17 @@ def _record_embedding_degraded(stage_metadata: dict[str, Any] | None, exc: BaseE
     """Record only bounded optional-stage failure metadata."""
     if stage_metadata is None:
         return
+    from tldw_Server_API.app.core.Embeddings.async_embeddings import EmbeddingCredentialError
+
     code = str(getattr(exc, "code", "") or "")
+    status_code = getattr(exc, "status_code", None)
+    if isinstance(exc, EmbeddingCredentialError):
+        code = "missing_provider_credentials"
+    elif code == "authentication" or status_code in {401, 403}:
+        code = "invalid_provider_credentials"
     if code not in {
         "invalid_provider_credentials",
+        "missing_provider_credentials",
         "credential_store_unavailable",
         "credential_scope_revoked",
     }:
@@ -161,40 +213,47 @@ def _record_embedding_degraded(stage_metadata: dict[str, Any] | None, exc: BaseE
     )
 
 
+async def _drain_embedding_task(
+    task: asyncio.Task[Any],
+) -> tuple[bool, Any]:
+    """Drain a shielded task despite repeated cancellation requests."""
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            continue
+        except Exception:  # noqa: BLE001 - caller cancellation remains authoritative
+            break
+    if task.cancelled():
+        return False, None
+    try:
+        return True, task.result()
+    except Exception:  # noqa: BLE001 - caller cancellation remains authoritative
+        return False, None
+
+
 async def _run_sync_embedding_call(
     call: Callable[[], Any],
     *,
     on_success: Callable[[Any], Awaitable[None]] | None = None,
 ) -> Any:
-    """Drain a sync embedding thread before propagating caller cancellation."""
+    """Drain provider work and success bookkeeping before cancellation escapes."""
     work_task = asyncio.create_task(asyncio.to_thread(call))
     try:
         result = await asyncio.shield(work_task)
     except asyncio.CancelledError:
-        while not work_task.done():
-            try:
-                await asyncio.shield(work_task)
-            except asyncio.CancelledError:
-                continue
-            except Exception:  # noqa: BLE001 - discard failure after cancellation
-                break
-        if on_success is not None and not work_task.cancelled():
-            try:
-                result = work_task.result()
-            except Exception:  # noqa: BLE001 - cancellation remains authoritative
-                result = None
-            else:
-                mark_task = asyncio.create_task(on_success(result))
-                while not mark_task.done():
-                    try:
-                        await asyncio.shield(mark_task)
-                    except asyncio.CancelledError:
-                        continue
-                    except Exception:  # noqa: BLE001 - cancellation remains authoritative
-                        break
+        completed, result = await _drain_embedding_task(work_task)
+        if completed and on_success is not None:
+            mark_task = asyncio.create_task(on_success(result))
+            await _drain_embedding_task(mark_task)
         raise
     if on_success is not None:
-        await on_success(result)
+        mark_task = asyncio.create_task(on_success(result))
+        try:
+            await asyncio.shield(mark_task)
+        except asyncio.CancelledError:
+            await _drain_embedding_task(mark_task)
+            raise
     return result
 
 
@@ -230,11 +289,14 @@ async def embed_text(
         handle = None
         call_kwargs: dict[str, Any] = {}
         # Hugging Face in this synchronous service is an in-process provider.
-        if credential_runtime is not None and provider == "openai":
-            handle, call_kwargs = await _resolve_runtime_embedding_call(
-                credential_runtime,
-                provider,
-            )
+        if credential_runtime is not None:
+            if provider == "openai":
+                handle, call_kwargs = await _resolve_runtime_embedding_call(
+                    credential_runtime,
+                    provider,
+                )
+            else:
+                call_kwargs = _runtime_local_embedding_call_kwargs(cfg, provider)
         embeddings = await _run_sync_embedding_call(
             partial(
                 create_embeddings_batch,
