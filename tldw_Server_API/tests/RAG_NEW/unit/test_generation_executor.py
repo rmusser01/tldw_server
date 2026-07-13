@@ -491,6 +491,110 @@ async def test_unified_pipeline_propagates_runtime_to_research_registry_and_loop
     assert captured["research_runtime"] is runtime
 
 
+@pytest.mark.asyncio
+async def test_unified_research_aggregates_bounded_media_provider_trust(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _RecordingCredentialRuntime()
+    image = {"title": "Image", "url": "https://example.test/image"}
+    video = {"title": "Video", "url": "https://example.test/video"}
+
+    async def fake_classifier(**_kwargs: Any) -> QueryClassification:
+        return QueryClassification(
+            search_local_db=True,
+            standalone_query="media trust",
+            confidence=0.9,
+        )
+
+    async def fake_research_loop(**_kwargs: Any) -> Any:
+        return SimpleNamespace(
+            all_results=[],
+            total_iterations=3,
+            total_results=2,
+            total_duration_sec=0.0,
+            completed=True,
+            final_reasoning="done",
+            metadata={"action_dedup": {}, "url_dedup": {}},
+            steps=[
+                SimpleNamespace(
+                    iteration=1,
+                    action_name="image_search",
+                    reasoning="find an image",
+                    duration_sec=0.0,
+                    output=SimpleNamespace(
+                        success=True,
+                        results=[image],
+                        result_count=1,
+                        metadata={
+                            "type": "images",
+                            "verification_available": True,
+                        },
+                    ),
+                ),
+                SimpleNamespace(
+                    iteration=2,
+                    action_name="video_search",
+                    reasoning="find a video",
+                    duration_sec=0.0,
+                    output=SimpleNamespace(
+                        success=True,
+                        results=[video],
+                        result_count=1,
+                        metadata={
+                            "type": "videos",
+                            "verification_available": True,
+                        },
+                    ),
+                ),
+                SimpleNamespace(
+                    iteration=3,
+                    action_name="image_search",
+                    reasoning="no matching image",
+                    duration_sec=0.0,
+                    output=SimpleNamespace(
+                        success=True,
+                        results=[],
+                        result_count=0,
+                        metadata={
+                            "type": "images",
+                            "failure_code": "provider_unavailable",
+                            "verification_available": False,
+                            "raw_detail": "secret-key /private/provider-store.db",
+                        },
+                    ),
+                ),
+            ],
+        )
+
+    monkeypatch.setattr(unified_pipeline_module, "classify_and_reformulate", fake_classifier)
+    monkeypatch.setattr(unified_pipeline_module, "create_default_registry", lambda **_kwargs: object())
+    monkeypatch.setattr(unified_pipeline_module, "research_loop", fake_research_loop)
+
+    result = await unified_pipeline_module.unified_rag_pipeline(
+        query="media trust",
+        sources=["media_db"],
+        enable_cache=False,
+        enable_query_classification=True,
+        enable_research_loop=True,
+        enable_image_search=True,
+        enable_video_search=True,
+        enable_generation=False,
+        enable_reranking=False,
+        enable_pre_retrieval_clarification=False,
+        credential_runtime=runtime,
+    )
+
+    assert result.metadata["images"] == [image]
+    assert result.metadata["videos"] == [video]
+    assert result.metadata["research"]["media_provider_stage"] == {
+        "failure_code": "provider_unavailable",
+        "verification_available": False,
+    }
+    assert "raw_detail" not in str(
+        result.metadata["research"]["media_provider_stage"]
+    )
+
+
 async def _run_unified_bound_sgl_stage(
     monkeypatch: pytest.MonkeyPatch,
     stage: str,

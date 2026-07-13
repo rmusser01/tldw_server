@@ -2923,17 +2923,52 @@ async def unified_rag_pipeline(
                 if enable_image_search or enable_video_search:
                     _images = []
                     _videos = []
+                    _media_provider_stage: dict[str, Any] = {}
                     for _step in _research_output.steps:
-                        if _step.output and _step.output.success and _step.output.results:
-                            _step_type = (_step.output.metadata or {}).get("type", "")
+                        if not _step.output or not _step.output.success:
+                            continue
+                        _step_metadata = (
+                            _step.output.metadata
+                            if isinstance(_step.output.metadata, dict)
+                            else {}
+                        )
+                        _step_type = _step_metadata.get("type", "")
+                        if _step_type not in {"images", "videos"}:
+                            continue
+                        if _step.output.results:
                             if _step_type == "images":
                                 _images.extend(_step.output.results)
-                            elif _step_type == "videos":
+                            else:
                                 _videos.extend(_step.output.results)
+                        _verification_available = _step_metadata.get(
+                            "verification_available"
+                        )
+                        if isinstance(_verification_available, bool):
+                            _bounded_stage = {
+                                "verification_available": _verification_available
+                            }
+                            if (
+                                _verification_available is False
+                                and _step_metadata.get("failure_code")
+                                == "provider_unavailable"
+                            ):
+                                _bounded_stage["failure_code"] = "provider_unavailable"
+                            if (
+                                _verification_available is False
+                                or _media_provider_stage.get(
+                                    "verification_available"
+                                )
+                                is not False
+                            ):
+                                _media_provider_stage = _bounded_stage
                     if _images:
                         result.metadata["images"] = _images
                     if _videos:
                         result.metadata["videos"] = _videos
+                    if _media_provider_stage:
+                        result.metadata["research"]["media_provider_stage"] = (
+                            _media_provider_stage
+                        )
 
                 logger.info(
                     f"Research loop completed: {_research_output.total_iterations} iterations, "

@@ -274,8 +274,21 @@ class KnowledgeStripsProcessor:
 
         # Step 2: Score each strip for relevance
         if self._analyze:
-            # Use LLM-based scoring
-            all_strips = await self._score_strips_llm(query, all_strips)
+            if self.credential_runtime is not None and self.credential_handle is None:
+                try:
+                    self.credential_handle = await self.credential_runtime.resolve(
+                        self.llm_provider
+                    )
+                    if self.credential_handle is None:
+                        raise RuntimeError("provider unavailable")
+                except Exception:
+                    logger.warning("LLM strip grading credentials unavailable")
+                    self._llm_unavailable = True
+                    all_strips = self._score_strips_heuristic(query, all_strips)
+                else:
+                    all_strips = await self._score_strips_llm(query, all_strips)
+            else:
+                all_strips = await self._score_strips_llm(query, all_strips)
         else:
             # Use heuristic scoring
             all_strips = self._score_strips_heuristic(query, all_strips)

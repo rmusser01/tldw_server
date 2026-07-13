@@ -470,6 +470,82 @@ class TestKnowledgeStripsProcessor:
         assert repeated.metadata["verification_available"] is True
         assert runtime.marked == [runtime.handle, runtime.handle]
 
+    @pytest.mark.asyncio
+    async def test_direct_runtime_processor_resolves_missing_handle(self):
+        runtime = _RecordingCredentialRuntime()
+        calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+        def _mock_analyze(*args, **kwargs):
+            calls.append((args, kwargs))
+            return '[{"strip_num": 1, "relevance": 0.91}]'
+
+        docs = [
+            Document(
+                id="direct-runtime",
+                content="Runtime-scoped grading evidence.",
+                source=DataSource.MEDIA_DB,
+                metadata={},
+            )
+        ]
+        processor = KnowledgeStripsProcessor(
+            strip_size_tokens=200,
+            min_relevance_score=0.0,
+            analyze_fn=_mock_analyze,
+            llm_provider="anthropic",
+            llm_model="claude-test",
+            credential_runtime=runtime,
+        )
+
+        result = await processor.process("grading evidence", docs)
+
+        assert runtime.resolved == ["anthropic"]
+        assert runtime.marked == [runtime.handle]
+        assert len(calls) == 1
+        args, kwargs = calls[0]
+        assert args[0] == "anthropic"
+        assert args[3] == "runtime-only-key"
+        assert kwargs["app_config"] == runtime.handle.app_config
+        assert kwargs["credentials_resolved"] is True
+        assert kwargs["raise_on_error"] is True
+        assert result.metadata["verification_available"] is True
+
+    @pytest.mark.asyncio
+    async def test_direct_runtime_processor_resolution_failure_skips_analyzer(self):
+        analyzer_called = False
+
+        class FailingRuntime:
+            async def resolve(self, _provider):
+                raise RuntimeError("secret-key /private/provider-store.db")
+
+        def _unexpected_analyze(*_args, **_kwargs):
+            nonlocal analyzer_called
+            analyzer_called = True
+            raise AssertionError("analyzer must not run without runtime credentials")
+
+        docs = [
+            Document(
+                id="direct-runtime-failure",
+                content="Heuristic fallback evidence.",
+                source=DataSource.MEDIA_DB,
+                metadata={},
+            )
+        ]
+        processor = KnowledgeStripsProcessor(
+            strip_size_tokens=200,
+            min_relevance_score=0.0,
+            analyze_fn=_unexpected_analyze,
+            llm_provider="anthropic",
+            credential_runtime=FailingRuntime(),
+        )
+
+        result = await processor.process("fallback evidence", docs)
+
+        assert analyzer_called is False
+        assert result.metadata["verification_available"] is False
+        assert result.metadata["failure_code"] == "provider_unavailable"
+        assert "secret-key" not in str(result.metadata)
+        assert "/private/" not in str(result.metadata)
+
 
 class TestProcessKnowledgeStrips:
     """Tests for the convenience function."""
