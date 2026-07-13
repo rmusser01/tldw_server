@@ -21,6 +21,10 @@ _CURSOR_ORDER = "ordinal_asc"
 _MAX_CURSOR_LENGTH = 4096
 _MAX_CURSOR_PAYLOAD = 2048
 _MAX_PAGE_SIZE = 500
+_PREFLIGHT_JOB_DOMAIN = "media_ingest"
+_PREFLIGHT_JOB_TYPE = "playlist_preflight"
+_PREFLIGHT_JOB_SENTINEL = datetime(9999, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
+_PREFLIGHT_ORPHAN_CLAIM_SENTINEL = datetime(9999, 12, 31, 23, 59, 58, tzinfo=timezone.utc)
 _COMPACT_DISPLAY_METADATA_FIELDS = frozenset(
     {
         "title",
@@ -210,6 +214,16 @@ class PlaylistIngestStore:
         normalized = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
         normalized = normalized.astimezone(timezone.utc)
         return normalized if self._postgres else normalized.isoformat()
+
+    def _job_datetime(self, value: datetime) -> datetime | str:
+        """Match JobManager's backend-native schedule serialization."""
+        normalized = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        normalized = normalized.astimezone(timezone.utc)
+        return normalized if self._postgres else normalized.strftime("%Y-%m-%d %H:%M:%S")
+
+    def _unexpired_sql(self) -> str:
+        """Compare timestamps safely across SQLite's supported text formats."""
+        return "expires_at > ?" if self._postgres else "julianday(expires_at) > julianday(?)"
 
     def _future_expiry(self, value: datetime, *, now: datetime) -> datetime:
         normalized = self._datetime(value)
@@ -510,7 +524,7 @@ class PlaylistIngestStore:
         *,
         source_url: str,
         source_kind: str,
-        expires_at: datetime,
+        ttl_seconds: int,
         global_capacity: int,
         owner_capacity: int,
         playlist_id: str | None = None,
@@ -521,9 +535,9 @@ class PlaylistIngestStore:
             raise ValueError("global_capacity must be positive")
         if type(owner_capacity) is not int or owner_capacity < 1:
             raise ValueError("owner_capacity must be positive")
+        if type(ttl_seconds) is not int or ttl_seconds < 1:
+            raise ValueError("ttl_seconds must be positive")
         preflight_id = str(uuid4())
-        now = self._now()
-        expires = self._future_expiry(expires_at, now=now)
         with self._connection(write=True) as db:
             if self._postgres:
                 self._query(
@@ -533,45 +547,72 @@ class PlaylistIngestStore:
                 )
             global_row = self._query(
                 db,
-                """
-                SELECT COUNT(*) AS active_count FROM playlist_preflights
-                WHERE status IN ('pending', 'running') AND expires_at > ?
-                """,
-                (self._db_datetime(now),),
+                (
+                    """
+                    SELECT COUNT(*) AS active_count FROM playlist_preflights
+                    WHERE status IN ('pending', 'running') AND expires_at > NOW()
+                    """
+                    if self._postgres
+                    else """
+                    SELECT COUNT(*) AS active_count FROM playlist_preflights
+                    WHERE status IN ('pending', 'running')
+                      AND julianday(expires_at) > julianday('now')
+                    """
+                ),
             ).fetchone()
             owner_row = self._query(
                 db,
-                """
-                SELECT COUNT(*) AS active_count FROM playlist_preflights
-                WHERE owner_user_id = ? AND status IN ('pending', 'running')
-                  AND expires_at > ?
-                """,
-                (owner, self._db_datetime(now)),
+                (
+                    """
+                    SELECT COUNT(*) AS active_count FROM playlist_preflights
+                    WHERE owner_user_id = ? AND status IN ('pending', 'running')
+                      AND expires_at > NOW()
+                    """
+                    if self._postgres
+                    else """
+                    SELECT COUNT(*) AS active_count FROM playlist_preflights
+                    WHERE owner_user_id = ? AND status IN ('pending', 'running')
+                      AND julianday(expires_at) > julianday('now')
+                    """
+                ),
+                (owner,),
             ).fetchone()
             if (
                 int(self._row_dict(global_row)["active_count"]) >= global_capacity
                 or int(self._row_dict(owner_row)["active_count"]) >= owner_capacity
             ):
                 raise PlaylistPreflightCapacityError("preflight_busy")
-            self._query(
-                db,
-                """
-                INSERT INTO playlist_preflights (
-                    preflight_id, owner_user_id, status, source_url, source_kind,
-                    playlist_id, job_id, created_at, updated_at, expires_at
-                ) VALUES (?, ?, 'pending', ?, ?, ?, NULL, ?, ?, ?)
-                """,
-                (
-                    preflight_id,
-                    owner,
-                    str(source_url),
-                    str(source_kind),
-                    playlist_id,
-                    self._db_datetime(now),
-                    self._db_datetime(now),
-                    self._db_datetime(expires),
-                ),
-            )
+            if self._postgres:
+                self._query(
+                    db,
+                    """
+                    INSERT INTO playlist_preflights (
+                        preflight_id, owner_user_id, status, source_url, source_kind,
+                        playlist_id, job_id, created_at, updated_at, expires_at
+                    ) VALUES (?, ?, 'pending', ?, ?, ?, NULL, NOW(), NOW(),
+                              NOW() + (? * INTERVAL '1 second'))
+                    """,
+                    (preflight_id, owner, str(source_url), str(source_kind), playlist_id, ttl_seconds),
+                )
+            else:
+                self._query(
+                    db,
+                    """
+                    INSERT INTO playlist_preflights (
+                        preflight_id, owner_user_id, status, source_url, source_kind,
+                        playlist_id, job_id, created_at, updated_at, expires_at
+                    ) VALUES (?, ?, 'pending', ?, ?, ?, NULL, DATETIME('now'), DATETIME('now'),
+                              DATETIME('now', ?))
+                    """,
+                    (
+                        preflight_id,
+                        owner,
+                        str(source_url),
+                        str(source_kind),
+                        playlist_id,
+                        f"+{ttl_seconds} seconds",
+                    ),
+                )
         return self.get_preflight(owner, preflight_id)
 
     def bind_preflight_job(
@@ -579,29 +620,36 @@ class PlaylistIngestStore:
         owner_user_id: str,
         preflight_id: str,
         job_id: int,
+        *,
+        expected_queue: str,
+        expected_payload: Mapping[str, Any],
     ) -> PlaylistPreflightRecord:
         """Bind and publish one scheduled internal job in the same transaction."""
         owner = self._owner(owner_user_id)
         if type(job_id) is not int or job_id < 1:
             raise ValueError("job_id must be positive")
-        now = self._now()
+        queue = str(expected_queue or "").strip()
+        if not queue:
+            raise ValueError("expected_queue is required")
+        expected_payload_json = json.dumps(dict(expected_payload), sort_keys=True, separators=(",", ":"))
         with self._connection(write=True) as db:
             preflight_query = (
                 """
                 SELECT status, job_id FROM playlist_preflights
-                WHERE owner_user_id = ? AND preflight_id = ? AND expires_at > ?
+                WHERE owner_user_id = ? AND preflight_id = ? AND expires_at > NOW()
                 FOR UPDATE
                 """
                 if self._postgres
                 else """
                 SELECT status, job_id FROM playlist_preflights
-                WHERE owner_user_id = ? AND preflight_id = ? AND expires_at > ?
+                WHERE owner_user_id = ? AND preflight_id = ?
+                  AND julianday(expires_at) > julianday('now')
                 """
             )
             preflight = self._query(
                 db,
                 preflight_query,
-                (owner, str(preflight_id), self._db_datetime(now)),
+                (owner, str(preflight_id)),
             ).fetchone()
             if preflight is None:
                 raise self._not_found()
@@ -611,12 +659,12 @@ class PlaylistIngestStore:
 
             job_query = (
                 """
-                SELECT id, owner_user_id, domain, queue, job_type, status, available_at
+                SELECT id, owner_user_id, domain, queue, job_type, status, available_at, payload
                 FROM jobs WHERE id = ? FOR UPDATE
                 """
                 if self._postgres
                 else """
-                SELECT id, owner_user_id, domain, queue, job_type, status, available_at
+                SELECT id, owner_user_id, domain, queue, job_type, status, available_at, payload
                 FROM jobs WHERE id = ?
                 """
             )
@@ -624,35 +672,63 @@ class PlaylistIngestStore:
             if job is None:
                 raise PlaylistIngestConflictError("preflight job is unavailable")
             job_data = self._row_dict(job)
-            available_at = self._datetime(job_data["available_at"])
+            raw_payload = self._jobs._parse_json_value(job_data.get("payload"))
+            actual_payload = self._jobs._maybe_decrypt_json(raw_payload)
+            actual_payload_json = (
+                json.dumps(dict(actual_payload), sort_keys=True, separators=(",", ":"))
+                if isinstance(actual_payload, Mapping)
+                else ""
+            )
             if (
                 str(job_data.get("owner_user_id") or "") != owner
-                or str(job_data.get("domain") or "") != "media_ingest"
-                or str(job_data.get("job_type") or "") != "playlist_preflight"
+                or str(job_data.get("domain") or "") != _PREFLIGHT_JOB_DOMAIN
+                or str(job_data.get("queue") or "") != queue
+                or str(job_data.get("job_type") or "") != _PREFLIGHT_JOB_TYPE
                 or str(job_data.get("status") or "") != "queued"
-                or available_at <= now
+                or self._datetime(job_data["available_at"]) != _PREFLIGHT_JOB_SENTINEL
+                or actual_payload_json != expected_payload_json
             ):
                 raise PlaylistIngestConflictError("preflight job is unavailable")
 
-            self._query(
+            bound = self._query(
                 db,
-                """
-                UPDATE playlist_preflights SET job_id = ?, updated_at = ?
-                WHERE owner_user_id = ? AND preflight_id = ? AND job_id IS NULL
-                """,
-                (job_id, self._db_datetime(now), owner, str(preflight_id)),
+                (
+                    """
+                    UPDATE playlist_preflights SET job_id = ?, updated_at = NOW()
+                    WHERE owner_user_id = ? AND preflight_id = ? AND job_id IS NULL
+                    """
+                    if self._postgres
+                    else """
+                    UPDATE playlist_preflights SET job_id = ?, updated_at = DATETIME('now')
+                    WHERE owner_user_id = ? AND preflight_id = ? AND job_id IS NULL
+                    """
+                ),
+                (job_id, owner, str(preflight_id)),
             )
+            if bound.rowcount != 1:
+                raise PlaylistIngestConflictError("preflight job is unavailable")
             published = self._query(
                 db,
-                """
-                UPDATE jobs SET available_at = ?, updated_at = ?
-                WHERE id = ? AND owner_user_id = ? AND status = 'queued'
-                """,
                 (
-                    self._db_datetime(now),
-                    self._db_datetime(now),
+                    """
+                    UPDATE jobs SET available_at = NOW(), updated_at = NOW()
+                    WHERE id = ? AND owner_user_id = ? AND domain = ? AND queue = ?
+                      AND job_type = ? AND status = 'queued' AND available_at = ?
+                    """
+                    if self._postgres
+                    else """
+                    UPDATE jobs SET available_at = DATETIME('now'), updated_at = DATETIME('now')
+                    WHERE id = ? AND owner_user_id = ? AND domain = ? AND queue = ?
+                      AND job_type = ? AND status = 'queued' AND available_at = ?
+                    """
+                ),
+                (
                     job_id,
                     owner,
+                    _PREFLIGHT_JOB_DOMAIN,
+                    queue,
+                    _PREFLIGHT_JOB_TYPE,
+                    self._job_datetime(_PREFLIGHT_JOB_SENTINEL),
                 ),
             )
             if published.rowcount != 1:
@@ -662,28 +738,205 @@ class PlaylistIngestStore:
                     self._query(
                         db,
                         """
-                        UPDATE job_counters
-                        SET ready_count = ready_count + 1,
-                            scheduled_count = GREATEST(scheduled_count - 1, 0),
+                        INSERT INTO job_counters (
+                            domain, queue, job_type, ready_count, scheduled_count,
+                            processing_count, quarantined_count
+                        ) VALUES (?, ?, ?, 1, 0, 0, 0)
+                        ON CONFLICT (domain, queue, job_type) DO UPDATE
+                        SET ready_count = job_counters.ready_count + 1,
+                            scheduled_count = GREATEST(job_counters.scheduled_count - 1, 0),
                             updated_at = NOW()
-                        WHERE domain = ? AND queue = ? AND job_type = ?
                         """,
-                        ("media_ingest", str(job_data["queue"]), "playlist_preflight"),
+                        (_PREFLIGHT_JOB_DOMAIN, queue, _PREFLIGHT_JOB_TYPE),
                     )
                 else:
                     self._query(
                         db,
                         """
-                        UPDATE job_counters
+                        INSERT INTO job_counters (
+                            domain, queue, job_type, ready_count, scheduled_count,
+                            processing_count, quarantined_count
+                        ) VALUES (?, ?, ?, 1, 0, 0, 0)
+                        ON CONFLICT (domain, queue, job_type) DO UPDATE
                         SET ready_count = ready_count + 1,
                             scheduled_count = CASE
                                 WHEN scheduled_count > 0 THEN scheduled_count - 1 ELSE 0 END,
                             updated_at = DATETIME('now')
-                        WHERE domain = ? AND queue = ? AND job_type = ?
                         """,
-                        ("media_ingest", str(job_data["queue"]), "playlist_preflight"),
+                        (_PREFLIGHT_JOB_DOMAIN, queue, _PREFLIGHT_JOB_TYPE),
                     )
         return self.get_preflight(owner, preflight_id)
+
+    def list_orphaned_preflight_jobs(
+        self,
+        owner_user_id: str,
+        *,
+        queue: str,
+        grace_seconds: int,
+        limit: int,
+    ) -> list[tuple[int, str | None]]:
+        """Return a bounded owner-scoped set of old never-published jobs."""
+        owner = self._owner(owner_user_id)
+        if type(grace_seconds) is not int or grace_seconds < 1:
+            raise ValueError("grace_seconds must be positive")
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("limit must be between 1 and 100")
+        sentinel = self._job_datetime(_PREFLIGHT_JOB_SENTINEL)
+        claimed = self._job_datetime(_PREFLIGHT_ORPHAN_CLAIM_SENTINEL)
+        with self._connection(write=False) as db:
+            rows = self._query(
+                db,
+                (
+                    """
+                    SELECT j.id, j.payload FROM jobs j
+                    LEFT JOIN playlist_preflights p ON p.job_id = j.id
+                    WHERE j.owner_user_id = ? AND j.domain = ? AND j.queue = ?
+                      AND j.job_type = ? AND j.status = 'queued'
+                      AND j.available_at IN (?, ?) AND p.preflight_id IS NULL
+                      AND j.created_at <= NOW() - (? * INTERVAL '1 second')
+                    ORDER BY j.id ASC LIMIT ?
+                    """
+                    if self._postgres
+                    else """
+                    SELECT j.id, j.payload FROM jobs j
+                    LEFT JOIN playlist_preflights p ON p.job_id = j.id
+                    WHERE j.owner_user_id = ? AND j.domain = ? AND j.queue = ?
+                      AND j.job_type = ? AND j.status = 'queued'
+                      AND j.available_at IN (?, ?) AND p.preflight_id IS NULL
+                      AND julianday(j.created_at) <= julianday('now', ?)
+                    ORDER BY j.id ASC LIMIT ?
+                    """
+                ),
+                (
+                    owner,
+                    _PREFLIGHT_JOB_DOMAIN,
+                    str(queue),
+                    _PREFLIGHT_JOB_TYPE,
+                    sentinel,
+                    claimed,
+                    grace_seconds if self._postgres else f"-{grace_seconds} seconds",
+                    limit,
+                ),
+            ).fetchall()
+        candidates: list[tuple[int, str | None]] = []
+        for row in rows:
+            data = self._row_dict(row)
+            payload = self._jobs._maybe_decrypt_json(self._jobs._parse_json_value(data.get("payload")))
+            preflight_id = payload.get("preflight_id") if isinstance(payload, Mapping) else None
+            candidates.append((int(data["id"]), str(preflight_id) if preflight_id else None))
+        return candidates
+
+    def claim_orphaned_preflight_job(
+        self,
+        owner_user_id: str,
+        *,
+        preflight_id: str | None,
+        job_id: int,
+        queue: str,
+        grace_seconds: int,
+    ) -> bool:
+        """Fence one old unbound job before cancellation through JobManager."""
+        owner = self._owner(owner_user_id)
+        sentinel = self._job_datetime(_PREFLIGHT_JOB_SENTINEL)
+        claimed = self._job_datetime(_PREFLIGHT_ORPHAN_CLAIM_SENTINEL)
+        with self._connection(write=True) as db:
+            preflight_data: dict[str, Any] | None = None
+            if preflight_id:
+                preflight = self._query(
+                    db,
+                    (
+                        """
+                        SELECT status, job_id FROM playlist_preflights
+                        WHERE owner_user_id = ? AND preflight_id = ? FOR UPDATE
+                        """
+                        if self._postgres
+                        else """
+                        SELECT status, job_id FROM playlist_preflights
+                        WHERE owner_user_id = ? AND preflight_id = ?
+                        """
+                    ),
+                    (owner, preflight_id),
+                ).fetchone()
+                preflight_data = self._row_dict(preflight) if preflight is not None else None
+                if preflight_data is not None and preflight_data.get("job_id") is not None:
+                    return False
+
+            job = self._query(
+                db,
+                (
+                    """
+                    SELECT id, payload FROM jobs
+                    WHERE id = ? AND owner_user_id = ? AND domain = ? AND queue = ?
+                      AND job_type = ? AND status = 'queued' AND available_at IN (?, ?)
+                      AND created_at <= NOW() - (? * INTERVAL '1 second')
+                    FOR UPDATE
+                    """
+                    if self._postgres
+                    else """
+                    SELECT id, payload FROM jobs
+                    WHERE id = ? AND owner_user_id = ? AND domain = ? AND queue = ?
+                      AND job_type = ? AND status = 'queued' AND available_at IN (?, ?)
+                      AND julianday(created_at) <= julianday('now', ?)
+                    """
+                ),
+                (
+                    job_id,
+                    owner,
+                    _PREFLIGHT_JOB_DOMAIN,
+                    str(queue),
+                    _PREFLIGHT_JOB_TYPE,
+                    sentinel,
+                    claimed,
+                    grace_seconds if self._postgres else f"-{grace_seconds} seconds",
+                ),
+            ).fetchone()
+            if job is None:
+                return False
+            payload = self._jobs._maybe_decrypt_json(self._jobs._parse_json_value(self._row_dict(job).get("payload")))
+            if preflight_id and (not isinstance(payload, Mapping) or payload.get("preflight_id") != preflight_id):
+                return False
+
+            fenced = self._query(
+                db,
+                """
+                UPDATE jobs SET available_at = ?
+                WHERE id = ? AND owner_user_id = ? AND domain = ? AND queue = ?
+                  AND job_type = ? AND status = 'queued' AND available_at IN (?, ?)
+                """,
+                (
+                    claimed,
+                    job_id,
+                    owner,
+                    _PREFLIGHT_JOB_DOMAIN,
+                    str(queue),
+                    _PREFLIGHT_JOB_TYPE,
+                    sentinel,
+                    claimed,
+                ),
+            )
+            if fenced.rowcount != 1:
+                return False
+            if preflight_id and preflight_data is not None and preflight_data.get("job_id") is None:
+                self._query(
+                    db,
+                    (
+                        """
+                        UPDATE playlist_preflights
+                        SET status = 'blocked', updated_at = NOW(), expires_at = NOW()
+                        WHERE owner_user_id = ? AND preflight_id = ? AND job_id IS NULL
+                          AND status = 'pending'
+                        """
+                        if self._postgres
+                        else """
+                        UPDATE playlist_preflights
+                        SET status = 'blocked', updated_at = DATETIME('now'), expires_at = DATETIME('now')
+                        WHERE owner_user_id = ? AND preflight_id = ? AND job_id IS NULL
+                          AND status = 'pending'
+                        """
+                    ),
+                    (owner, preflight_id),
+                )
+        return True
 
     def expire_preflight(
         self,
@@ -736,10 +989,18 @@ class PlaylistIngestStore:
         with self._connection(write=False) as db:
             row = self._query(
                 db,
-                """
-                SELECT * FROM playlist_preflights
-                WHERE owner_user_id = ? AND preflight_id = ? AND expires_at > ?
-                """,
+                (
+                    """
+                    SELECT * FROM playlist_preflights
+                    WHERE owner_user_id = ? AND preflight_id = ? AND expires_at > ?
+                    """
+                    if self._postgres
+                    else """
+                    SELECT * FROM playlist_preflights
+                    WHERE owner_user_id = ? AND preflight_id = ?
+                      AND julianday(expires_at) > julianday(?)
+                    """
+                ),
                 (owner, str(preflight_id), self._db_datetime(self._now())),
             ).fetchone()
         if row is None:
@@ -779,17 +1040,12 @@ class PlaylistIngestStore:
 
         now = self._now()
         with self._connection(write=True) as db:
-            if self._postgres:
-                mutable_preflight_query = """
+            mutable_preflight_query = f"""
                     SELECT status, expires_at, job_id FROM playlist_preflights
-                    WHERE owner_user_id = ? AND preflight_id = ? AND expires_at > ?
-                    FOR UPDATE
-                """
-            else:
-                mutable_preflight_query = """
-                    SELECT status, expires_at, job_id FROM playlist_preflights
-                    WHERE owner_user_id = ? AND preflight_id = ? AND expires_at > ?
-                """
+                    WHERE owner_user_id = ? AND preflight_id = ? AND {self._unexpired_sql()}
+                """ + (  # nosec B608
+                " FOR UPDATE" if self._postgres else ""
+            )
             row = self._query(
                 db,
                 mutable_preflight_query,
@@ -913,7 +1169,7 @@ class PlaylistIngestStore:
                 db,
                 f"""
                 SELECT 1 FROM {parent_table}
-                WHERE owner_user_id = ? AND {parent_id_column} = ? AND expires_at > ?
+                WHERE owner_user_id = ? AND {parent_id_column} = ? AND {self._unexpired_sql()}
                 """,  # nosec B608
                 (owner, resource_id, self._db_datetime(self._now())),
             ).fetchone()
@@ -985,10 +1241,11 @@ class PlaylistIngestStore:
         with self._connection(write=True) as db:
             preflight = self._query(
                 db,
-                """
+                f"""
                 SELECT expires_at FROM playlist_preflights
-                WHERE owner_user_id = ? AND preflight_id = ? AND status = 'ready' AND expires_at > ?
-                """,
+                WHERE owner_user_id = ? AND preflight_id = ? AND status = 'ready'
+                  AND {self._unexpired_sql()}
+                """,  # nosec B608
                 (owner, str(preflight_id), self._db_datetime(now)),
             ).fetchone()
             if preflight is None:
@@ -1067,10 +1324,10 @@ class PlaylistIngestStore:
         with self._connection(write=False) as db:
             row = self._query(
                 db,
-                """
+                f"""
                 SELECT * FROM playlist_materializations
-                WHERE owner_user_id = ? AND materialization_id = ? AND expires_at > ?
-                """,
+                WHERE owner_user_id = ? AND materialization_id = ? AND {self._unexpired_sql()}
+                """,  # nosec B608
                 (owner, str(materialization_id), self._db_datetime(self._now())),
             ).fetchone()
         if row is None:
@@ -1125,11 +1382,11 @@ class PlaylistIngestStore:
             for materialization_id in materializations:
                 parent = self._query(
                     db,
-                    """
+                    f"""
                     SELECT 1 FROM playlist_materializations
                     WHERE owner_user_id = ? AND materialization_id = ?
-                      AND status = 'ready' AND expires_at > ?
-                    """,
+                      AND status = 'ready' AND {self._unexpired_sql()}
+                    """,  # nosec B608
                     (owner, materialization_id, self._db_datetime(now)),
                 ).fetchone()
                 if parent is None:
@@ -1206,10 +1463,10 @@ class PlaylistIngestStore:
         with self._connection(write=False) as db:
             row = self._query(
                 db,
-                """
+                f"""
                 SELECT * FROM media_ingest_runs
-                WHERE owner_user_id = ? AND run_id = ? AND expires_at > ?
-                """,
+                WHERE owner_user_id = ? AND run_id = ? AND {self._unexpired_sql()}
+                """,  # nosec B608
                 (owner, str(run_id), self._db_datetime(self._now())),
             ).fetchone()
         if row is None:
@@ -1258,17 +1515,12 @@ class PlaylistIngestStore:
         owner = self._owner(owner_user_id)
         now = self._now()
         with self._connection(write=True) as db:
-            if self._postgres:
-                run_version_query = """
+            run_version_query = f"""
                     SELECT version FROM media_ingest_runs
-                    WHERE owner_user_id = ? AND run_id = ? AND expires_at > ?
-                    FOR UPDATE
-                """
-            else:
-                run_version_query = """
-                    SELECT version FROM media_ingest_runs
-                    WHERE owner_user_id = ? AND run_id = ? AND expires_at > ?
-                """
+                    WHERE owner_user_id = ? AND run_id = ? AND {self._unexpired_sql()}
+                """ + (  # nosec B608
+                " FOR UPDATE" if self._postgres else ""
+            )
             row = self._query(
                 db,
                 run_version_query,
@@ -1341,10 +1593,10 @@ class PlaylistIngestStore:
         with self._connection(write=False) as db:
             exists = self._query(
                 db,
-                """
+                f"""
                 SELECT 1 FROM media_ingest_runs
-                WHERE owner_user_id = ? AND run_id = ? AND expires_at > ?
-                """,
+                WHERE owner_user_id = ? AND run_id = ? AND {self._unexpired_sql()}
+                """,  # nosec B608
                 (owner, str(run_id), self._db_datetime(self._now())),
             ).fetchone()
             if exists is None:
@@ -1378,10 +1630,10 @@ class PlaylistIngestStore:
         with self._connection(write=True) as db:
             exists = self._query(
                 db,
-                """
+                f"""
                 SELECT 1 FROM media_ingest_runs
-                WHERE owner_user_id = ? AND run_id = ? AND expires_at > ?
-                """,
+                WHERE owner_user_id = ? AND run_id = ? AND {self._unexpired_sql()}
+                """,  # nosec B608
                 (owner, str(run_id), self._db_datetime(self._now())),
             ).fetchone()
             if exists is None:

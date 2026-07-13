@@ -14,7 +14,7 @@ NOW = datetime(2026, 7, 12, 12, 0, tzinfo=timezone.utc)
 
 class _Clock:
     def __init__(self) -> None:
-        self.current = NOW
+        self.current = datetime.now(timezone.utc)
 
     def now_utc(self) -> datetime:
         return self.current
@@ -156,6 +156,164 @@ def test_preflight_post_returns_202_and_durably_bound_internal_job(preflight_api
 
     stored = PlaylistIngestStore(manager).get_preflight("1", body["preflight_id"])
     assert stored.job_id == int(job["id"])
+
+
+def test_preflight_publication_is_immediately_acquirable_with_real_sqlite_clock(tmp_path, monkeypatch):
+    monkeypatch.setenv("TEST_MODE", "true")
+    monkeypatch.setenv("JOBS_COUNTERS_ENABLED", "true")
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
+        PlaylistIngestService,
+    )
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    manager = JobManager(db_path=tmp_path / "real-clock-publication.db")
+    created = PlaylistIngestService(manager).create_preflight(
+        "real-clock-owner",
+        url="https://www.youtube.com/playlist?list=PLrealclock",
+        max_items=25,
+        timeout_seconds=15,
+    )
+    with manager._connect() as connection:
+        published_counters = connection.execute(
+            """
+            SELECT ready_count, scheduled_count, processing_count FROM job_counters
+            WHERE domain = 'media_ingest' AND queue = 'default' AND job_type = 'playlist_preflight'
+            """
+        ).fetchone()
+    assert dict(published_counters) == {"ready_count": 1, "scheduled_count": 0, "processing_count": 0}
+
+    claimed = manager.acquire_next_job(
+        domain="media_ingest",
+        queue="default",
+        worker_id="real-clock-worker",
+        lease_seconds=120,
+        job_type="playlist_preflight",
+    )
+
+    assert claimed is not None
+    assert int(claimed["id"]) == created.record.job_id
+    assert claimed["payload"]["preflight_id"] == created.preflight_id
+    with manager._connect() as connection:
+        acquired_counters = connection.execute(
+            """
+            SELECT ready_count, scheduled_count, processing_count FROM job_counters
+            WHERE domain = 'media_ingest' AND queue = 'default' AND job_type = 'playlist_preflight'
+            """
+        ).fetchone()
+    assert dict(acquired_counters) == {"ready_count": 0, "scheduled_count": 0, "processing_count": 1}
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestStore,
+    )
+
+    store = PlaylistIngestStore(manager)
+    claim = {
+        "expected_job_id": int(claimed["id"]),
+        "expected_lease_id": str(claimed["lease_id"]),
+        "expected_worker_id": str(claimed["worker_id"]),
+    }
+    store.replace_preflight_snapshot(
+        "real-clock-owner",
+        created.preflight_id,
+        status="running",
+        items=[],
+        **claim,
+    )
+    assert PlaylistIngestService(manager).get_preflight("real-clock-owner", created.preflight_id).status == "running"
+    store.replace_preflight_snapshot(
+        "real-clock-owner",
+        created.preflight_id,
+        status="ready",
+        items=[
+            {
+                "occurrence_id": "real-clock-occurrence",
+                "ordinal": 1,
+                "source_url": "https://www.youtube.com/watch?v=realclock",
+                "source_kind": "youtube_video",
+            }
+        ],
+        **claim,
+    )
+    page = PlaylistIngestService(manager).list_preflight_items(
+        "real-clock-owner",
+        created.preflight_id,
+        limit=10,
+        cursor=None,
+    )
+    materialized = PlaylistIngestService(manager).create_materialization(
+        "real-clock-owner",
+        created.preflight_id,
+        ["real-clock-occurrence"],
+    )
+    assert [item.occurrence_id for item in page] == ["real-clock-occurrence"]
+    assert [item.occurrence_id for item in materialized.items] == ["real-clock-occurrence"]
+
+
+def test_unbound_sentinel_job_is_reconciled_before_next_admission(tmp_path, monkeypatch):
+    monkeypatch.setenv("TEST_MODE", "true")
+    monkeypatch.setenv("PLAYLIST_PREFLIGHT_GLOBAL_CAPACITY", "1")
+    monkeypatch.setenv("PLAYLIST_PREFLIGHT_OWNER_CAPACITY", "1")
+    monkeypatch.setenv("PLAYLIST_PREFLIGHT_ORPHAN_GRACE_SECONDS", "1")
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
+        PlaylistIngestService,
+    )
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestStore,
+    )
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    manager = JobManager(db_path=tmp_path / "orphan-reconciliation.db")
+    original_bind = PlaylistIngestStore.bind_preflight_job
+
+    def crash_after_create(*_args, **_kwargs):
+        raise SystemExit("simulated process death")
+
+    monkeypatch.setattr(PlaylistIngestStore, "bind_preflight_job", crash_after_create)
+    with pytest.raises(SystemExit, match="simulated process death"):
+        PlaylistIngestService(manager).create_preflight(
+            "orphan-owner",
+            url="https://www.youtube.com/playlist?list=PLorphan",
+            max_items=20,
+            timeout_seconds=10,
+        )
+    monkeypatch.setattr(PlaylistIngestStore, "bind_preflight_job", original_bind)
+
+    orphan = manager.list_jobs(domain="media_ingest", owner_user_id="orphan-owner", limit=10)[0]
+    assert str(orphan["available_at"]).startswith("9999-12-31")
+    assert (
+        manager.acquire_next_job(
+            domain="media_ingest",
+            queue="default",
+            worker_id="must-not-acquire",
+            lease_seconds=120,
+            job_type="playlist_preflight",
+        )
+        is None
+    )
+    with manager._connect() as connection:
+        connection.execute(
+            "UPDATE jobs SET created_at = DATETIME('now', '-2 minutes') WHERE id = ?",
+            (int(orphan["id"]),),
+        )
+        connection.commit()
+
+    admitted = PlaylistIngestService(manager).create_preflight(
+        "orphan-owner",
+        url="https://www.youtube.com/playlist?list=PLafterorphan",
+        max_items=20,
+        timeout_seconds=10,
+    )
+
+    assert admitted.preflight_id
+    assert manager.get_job(int(orphan["id"]))["status"] == "cancelled"
+    with manager._connect() as connection:
+        stale_preflight = connection.execute(
+            "SELECT status FROM playlist_preflights WHERE owner_user_id = ? AND preflight_id != ?",
+            ("orphan-owner", admitted.preflight_id),
+        ).fetchone()
+    assert stale_preflight["status"] == "blocked"
 
 
 @pytest.mark.parametrize(
@@ -456,6 +614,7 @@ def test_preflight_busy_and_blocked_errors_are_stable_and_sanitized(preflight_ap
     )
     assert busy.status_code == 429
     assert busy.json()["detail"] == "preflight_busy"
+    assert busy.headers["Retry-After"] == "5"
 
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
         PlaylistIngestStore,
@@ -558,3 +717,66 @@ def test_version_two_routes_are_advertised_separately_from_legacy(preflight_api,
     assert accepted["contract_version"] == 2
     assert legacy.status_code == 200, legacy.text
     assert "contract_version" not in legacy.json()
+
+
+def test_preflight_post_request_schemas_are_bounded_and_extra_forbid(preflight_api):
+    client, _manager, _clock, _owner = preflight_api
+
+    document = client.get("/openapi.json").json()
+    preflight_schema = document["paths"]["/api/v1/media/playlist-preflights"]["post"]["requestBody"]["content"][
+        "application/json"
+    ]["schema"]
+    materialization_schema = document["paths"]["/api/v1/media/playlist-preflights/{preflight_id}/materializations"][
+        "post"
+    ]["requestBody"]["content"]["application/json"]["schema"]
+
+    assert preflight_schema["title"] == "PlaylistPreflightCreateRequest"
+    assert preflight_schema["additionalProperties"] is False
+    assert preflight_schema["properties"]["url"] == {
+        "maxLength": 8192,
+        "minLength": 1,
+        "title": "Url",
+        "type": "string",
+    }
+    assert preflight_schema["properties"]["max_items"]["maximum"] == 500
+    assert preflight_schema["properties"]["timeout_seconds"]["maximum"] == 60
+    assert materialization_schema["title"] == "PlaylistMaterializationCreateRequest"
+    assert materialization_schema["additionalProperties"] is False
+    assert materialization_schema["properties"]["occurrence_ids"]["minItems"] == 1
+    assert materialization_schema["properties"]["occurrence_ids"]["maxItems"] == 500
+
+
+def test_preflight_response_links_include_deployment_root_path(tmp_path, monkeypatch):
+    monkeypatch.setenv("TEST_MODE", "true")
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("SINGLE_USER_API_KEY", "test-api-key-12345")
+
+    from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
+    from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
+    from tldw_Server_API.app.api.v1.endpoints import media
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    manager = JobManager(db_path=tmp_path / "root-path.db")
+    app = FastAPI(root_path="/deployment")
+    app.include_router(media.router, prefix="/api/v1/media", tags=["media"])
+    app.dependency_overrides[get_request_user] = lambda: User(
+        id=1,
+        username="root-path-owner",
+        email=None,
+        is_active=True,
+    )
+    app.dependency_overrides[get_job_manager] = lambda: manager
+
+    with TestClient(
+        app,
+        base_url="http://testserver/deployment",
+        headers={"X-API-KEY": "test-api-key-12345"},
+    ) as client:
+        response = client.post(
+            "/api/v1/media/playlist-preflights",
+            json={"url": "https://www.youtube.com/playlist?list=PLrootpath"},
+        )
+
+    assert response.status_code == 202, response.text
+    assert response.json()["status_url"].startswith("/deployment/api/v1/media/playlist-preflights/")
+    assert response.json()["items_url"] == f"{response.json()['status_url']}/items"

@@ -1,4 +1,5 @@
 import base64
+import json
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -844,6 +845,135 @@ def test_create_preflight_rejects_nonfuture_expiry(store):
         )
 
 
+@pytest.mark.parametrize(
+    ("mutation", "value"),
+    [
+        ("owner_user_id", "wrong-owner"),
+        ("domain", "wrong-domain"),
+        ("queue", "wrong-queue"),
+        ("job_type", "wrong-type"),
+        ("status", "processing"),
+        ("available_at", "published"),
+        ("available_at", "ordinary-schedule"),
+        ("payload_preflight_id", "wrong-preflight"),
+        ("payload_max_items", 21),
+        ("payload_timeout_seconds", 11),
+    ],
+)
+def test_preflight_bind_rejects_every_mismatched_job_attribute_without_publication(
+    tmp_path,
+    monkeypatch,
+    mutation,
+    value,
+):
+    monkeypatch.setenv("TEST_MODE", "true")
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestConflictError,
+        PlaylistIngestStore,
+    )
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    manager = JobManager(db_path=tmp_path / f"bind-{mutation}-{value}.db")
+    playlist_store = PlaylistIngestStore(manager)
+    owner = "bind-owner"
+    preflight = playlist_store.create_preflight(
+        owner,
+        source_url="https://www.youtube.com/playlist?list=PLbind",
+        source_kind="youtube_playlist",
+        playlist_id="PLbind",
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+    )
+    payload = {
+        "preflight_id": preflight.preflight_id,
+        "max_items": 20,
+        "timeout_seconds": 10,
+    }
+    sentinel = datetime(9999, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
+    job = manager.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="playlist_preflight",
+        payload=payload,
+        owner_user_id=owner,
+        priority=5,
+        max_retries=0,
+        available_at=sentinel,
+    )
+
+    with manager._connect() as connection:
+        if mutation.startswith("payload_"):
+            changed_payload = dict(payload)
+            changed_payload[mutation.removeprefix("payload_")] = value
+            connection.execute(
+                "UPDATE jobs SET payload = ? WHERE id = ?",
+                (json.dumps(changed_payload), int(job["id"])),
+            )
+        elif mutation == "available_at" and value == "published":
+            connection.execute("UPDATE jobs SET available_at = DATETIME('now') WHERE id = ?", (int(job["id"]),))
+        elif mutation == "available_at":
+            connection.execute(
+                "UPDATE jobs SET available_at = DATETIME('now', '+1 day') WHERE id = ?",
+                (int(job["id"]),),
+            )
+        else:
+            connection.execute(f"UPDATE jobs SET {mutation} = ? WHERE id = ?", (value, int(job["id"])))  # nosec B608
+        connection.commit()
+    before = manager.get_job(int(job["id"]))
+
+    with pytest.raises(PlaylistIngestConflictError, match="preflight job is unavailable"):
+        playlist_store.bind_preflight_job(
+            owner,
+            preflight.preflight_id,
+            int(job["id"]),
+            expected_queue="default",
+            expected_payload=payload,
+        )
+
+    assert playlist_store.get_preflight(owner, preflight.preflight_id).job_id is None
+    after = manager.get_job(int(job["id"]))
+    assert after["status"] == before["status"]
+    assert after["available_at"] == before["available_at"]
+
+
+def test_preflight_bind_decrypts_and_matches_the_exact_expected_payload(tmp_path, monkeypatch):
+    monkeypatch.setenv("TEST_MODE", "true")
+    monkeypatch.setenv("JOBS_ENCRYPT_MEDIA_INGEST", "true")
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestStore,
+    )
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    manager = JobManager(db_path=tmp_path / "encrypted-bind.db")
+    playlist_store = PlaylistIngestStore(manager)
+    preflight = playlist_store.create_preflight(
+        "encrypted-owner",
+        source_url="https://www.youtube.com/playlist?list=PLencrypted",
+        source_kind="youtube_playlist",
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+    )
+    payload = {"preflight_id": preflight.preflight_id, "max_items": 20, "timeout_seconds": 10}
+    job = manager.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="playlist_preflight",
+        payload=payload,
+        owner_user_id="encrypted-owner",
+        available_at=datetime(9999, 12, 31, 23, 59, 59, tzinfo=timezone.utc),
+    )
+
+    bound = playlist_store.bind_preflight_job(
+        "encrypted-owner",
+        preflight.preflight_id,
+        int(job["id"]),
+        expected_queue="default",
+        expected_payload=payload,
+    )
+
+    assert bound.job_id == int(job["id"])
+
+
 def test_create_materialization_rejects_nonfuture_expiry(store):
     ready = _seed_preflight(store, item_count=1)
 
@@ -964,7 +1094,7 @@ def test_postgres_preflight_admission_uses_transaction_advisory_lock_before_capa
         source_url="https://www.youtube.com/playlist?list=PLlock",
         source_kind="youtube_playlist",
         playlist_id="PLlock",
-        expires_at=NOW + timedelta(hours=1),
+        ttl_seconds=3600,
         global_capacity=2,
         owner_capacity=1,
     )
@@ -977,6 +1107,69 @@ def test_postgres_preflight_admission_uses_transaction_advisory_lock_before_capa
     assert len(count_indexes) == 2
     assert advisory_index < min(count_indexes) < insert_index
     assert queries[advisory_index][1] == (store._jobs._pg_advisory_key("playlist_preflight_admission"),)
+    assert all("NOW()" in queries[index][0] for index in count_indexes)
+    assert all(len(queries[index][1]) <= 1 for index in count_indexes)
+
+
+def test_postgres_preflight_bind_uses_database_now_and_exact_publication_constraints(store, monkeypatch):
+    queries: list[tuple[str, tuple]] = []
+    payload = {"preflight_id": "preflight-id", "max_items": 20, "timeout_seconds": 10}
+
+    class _Result:
+        rowcount = 1
+
+        def __init__(self, row=None):
+            self.row = row
+
+        def fetchone(self):
+            return self.row
+
+    @contextmanager
+    def fake_connection(*, write):
+        assert write is True
+        yield object()
+
+    def fake_query(_db, sql, params=()):
+        queries.append((sql, tuple(params)))
+        if "SELECT status, job_id" in sql:
+            return _Result({"status": "pending", "job_id": None})
+        if "SELECT id, owner_user_id" in sql:
+            return _Result(
+                {
+                    "id": 42,
+                    "owner_user_id": "owner-1",
+                    "domain": "media_ingest",
+                    "queue": "default",
+                    "job_type": "playlist_preflight",
+                    "status": "queued",
+                    "available_at": datetime(9999, 12, 31, 23, 59, 59, tzinfo=timezone.utc),
+                    "payload": payload,
+                }
+            )
+        return _Result()
+
+    store._postgres = True
+    monkeypatch.setattr(store, "_connection", fake_connection)
+    monkeypatch.setattr(store, "_query", fake_query)
+    monkeypatch.setattr(store, "get_preflight", lambda *_args: object())
+
+    store.bind_preflight_job(
+        "owner-1",
+        "preflight-id",
+        42,
+        expected_queue="default",
+        expected_payload=payload,
+    )
+
+    preflight_lock = next(index for index, (sql, _) in enumerate(queries) if "SELECT status, job_id" in sql)
+    job_lock = next(index for index, (sql, _) in enumerate(queries) if "SELECT id, owner_user_id" in sql)
+    publication = next((sql, params) for sql, params in queries if "UPDATE jobs SET available_at" in sql)
+    assert preflight_lock < job_lock
+    assert "expires_at > NOW()" in queries[preflight_lock][0]
+    assert "available_at = NOW()" in publication[0]
+    assert "updated_at = NOW()" in publication[0]
+    for constraint in ("owner_user_id", "domain", "queue", "job_type", "status", "available_at"):
+        assert constraint in publication[0]
 
 
 def test_postgres_ready_guard_locks_preflight_then_exact_active_lease(store, monkeypatch):

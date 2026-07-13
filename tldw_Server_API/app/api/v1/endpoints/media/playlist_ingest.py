@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response, status
 from loguru import logger
 from pydantic import ValidationError
 
@@ -42,7 +42,6 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_s
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 
 router = APIRouter()
-_RESOURCE_BASE = "/api/v1/media/playlist-preflights"
 _PREFLIGHT_DEPENDENCIES = [
     Depends(RequirePermission(MEDIA_CREATE)),
     Depends(rbac_rate_limit("media.create")),
@@ -51,6 +50,15 @@ _PREFLIGHT_READ_DEPENDENCIES = [
     Depends(RequirePermission(MEDIA_READ)),
     Depends(rbac_rate_limit("media.read")),
 ]
+
+
+def _request_body_schema(model: type) -> dict[str, Any]:
+    return {
+        "requestBody": {
+            "required": True,
+            "content": {"application/json": {"schema": model.model_json_schema()}},
+        }
+    }
 
 
 def _owner(current_user: User) -> str:
@@ -66,7 +74,7 @@ def _raise_http(exc: Exception) -> None:
     if isinstance(exc, InvalidPlaylistUrlError):
         raise HTTPException(status_code=422, detail="invalid_playlist_url") from exc
     if isinstance(exc, PlaylistPreflightBusyError):
-        raise HTTPException(status_code=429, detail="preflight_busy") from exc
+        raise HTTPException(status_code=429, detail="preflight_busy", headers={"Retry-After": "5"}) from exc
     if isinstance(exc, PlaylistPreflightIncompleteError):
         raise HTTPException(status_code=409, detail="preflight_incomplete") from exc
     if isinstance(exc, PlaylistSelectionError):
@@ -100,8 +108,10 @@ def _item_response(item: PlaylistItemRecord) -> PlaylistPreflightItemResponse:
     summary="Create an asynchronous playlist preflight resource",
     tags=["Media Playlist Ingest v2"],
     dependencies=_PREFLIGHT_DEPENDENCIES,
+    openapi_extra=_request_body_schema(PlaylistPreflightCreateRequest),
 )
 def create_playlist_preflight(
+    request_scope: Request,
     payload: Any = Body(...),
     current_user: User = Depends(get_request_user),
     job_manager: JobManager = Depends(get_job_manager),
@@ -119,11 +129,12 @@ def create_playlist_preflight(
         )
     except Exception as exc:  # noqa: BLE001 - trust boundary maps every failure to a safe code
         _raise_http(exc)
-    status_url = f"{_RESOURCE_BASE}/{created.preflight_id}"
+    status_url = request_scope.url_for("playlist_preflight_summary", preflight_id=created.preflight_id).path
+    items_url = request_scope.url_for("playlist_preflight_items", preflight_id=created.preflight_id).path
     return PlaylistPreflightAcceptedResponse(
         preflight_id=created.preflight_id,
         status_url=status_url,
-        items_url=f"{status_url}/items",
+        items_url=items_url,
         expires_at=created.record.expires_at,
         limits=PlaylistPreflightLimits(
             max_items=created.max_items,
@@ -139,6 +150,7 @@ def create_playlist_preflight(
     summary="Get an asynchronous playlist preflight summary",
     tags=["Media Playlist Ingest v2"],
     dependencies=_PREFLIGHT_READ_DEPENDENCIES,
+    name="playlist_preflight_summary",
 )
 def get_playlist_preflight(
     preflight_id: str,
@@ -170,6 +182,7 @@ def get_playlist_preflight(
     summary="List an immutable playlist preflight item page",
     tags=["Media Playlist Ingest v2"],
     dependencies=_PREFLIGHT_READ_DEPENDENCIES,
+    name="playlist_preflight_items",
 )
 def list_playlist_preflight_items(
     preflight_id: str,
@@ -201,6 +214,7 @@ def list_playlist_preflight_items(
     summary="Materialize selected playlist occurrences",
     tags=["Media Playlist Ingest v2"],
     dependencies=_PREFLIGHT_DEPENDENCIES,
+    openapi_extra=_request_body_schema(PlaylistMaterializationCreateRequest),
 )
 def create_playlist_materialization(
     preflight_id: str,

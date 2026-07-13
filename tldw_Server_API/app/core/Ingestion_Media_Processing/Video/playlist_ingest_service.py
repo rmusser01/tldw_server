@@ -11,6 +11,7 @@ from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 from loguru import logger
 
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+    _PREFLIGHT_JOB_SENTINEL,
     PlaylistIngestNotFoundError,
     PlaylistIngestStore,
     PlaylistItemRecord,
@@ -97,6 +98,14 @@ def _bounded_env_int(name: str, default: int, *, minimum: int, maximum: int) -> 
     except ValueError:
         value = default
     return min(maximum, max(minimum, value))
+
+
+def _playlist_preflight_queue() -> str:
+    return (
+        (os.getenv("MEDIA_INGEST_JOBS_QUEUE") or "").strip()
+        or (os.getenv("MEDIA_INGEST_JOBS_DEFAULT_QUEUE") or "").strip()
+        or "default"
+    )
 
 
 def _trusted_youtube_playlist(url: str) -> tuple[str, PlaylistUrlClassification]:
@@ -200,13 +209,44 @@ class PlaylistIngestService:
             minimum=60,
             maximum=86400,
         )
+        queue = _playlist_preflight_queue()
+        orphan_grace_seconds = _bounded_env_int(
+            "PLAYLIST_PREFLIGHT_ORPHAN_GRACE_SECONDS",
+            30,
+            minimum=1,
+            maximum=3600,
+        )
+        orphan_limit = _bounded_env_int(
+            "PLAYLIST_PREFLIGHT_ORPHAN_LIMIT",
+            20,
+            minimum=1,
+            maximum=100,
+        )
+        for orphan_job_id, orphan_preflight_id in self._store.list_orphaned_preflight_jobs(
+            owner_user_id,
+            queue=queue,
+            grace_seconds=orphan_grace_seconds,
+            limit=orphan_limit,
+        ):
+            if not self._store.claim_orphaned_preflight_job(
+                owner_user_id,
+                preflight_id=orphan_preflight_id,
+                job_id=orphan_job_id,
+                queue=queue,
+                grace_seconds=orphan_grace_seconds,
+            ):
+                continue
+            try:
+                self._jobs.cancel_job(orphan_job_id, reason="playlist_preflight_orphaned")
+            except Exception:  # noqa: BLE001 - fenced sentinel remains non-acquirable for retry
+                logger.warning("Failed to cancel a fenced orphan playlist preflight job")
         try:
             preflight = self._store.reserve_preflight(
                 owner_user_id,
                 source_url=canonical_url,
                 source_kind=classified.source_kind,
                 playlist_id=classified.playlist_id,
-                expires_at=self._store._now() + timedelta(seconds=ttl_seconds),
+                ttl_seconds=ttl_seconds,
                 global_capacity=global_capacity,
                 owner_capacity=owner_capacity,
             )
@@ -215,26 +255,28 @@ class PlaylistIngestService:
 
         job: dict | None = None
         try:
-            queue = (os.getenv("MEDIA_INGEST_JOBS_DEFAULT_QUEUE") or "default").strip() or "default"
+            payload = {
+                "preflight_id": preflight.preflight_id,
+                "max_items": int(max_items),
+                "timeout_seconds": int(timeout_seconds),
+            }
             job = self._jobs.create_job(
                 domain="media_ingest",
                 queue=queue,
                 job_type="playlist_preflight",
-                payload={
-                    "preflight_id": preflight.preflight_id,
-                    "max_items": int(max_items),
-                    "timeout_seconds": int(timeout_seconds),
-                },
+                payload=payload,
                 owner_user_id=str(owner_user_id),
                 priority=5,
                 max_retries=0,
-                available_at=self._store._now() + timedelta(days=1),
+                available_at=_PREFLIGHT_JOB_SENTINEL,
                 idempotency_key=f"playlist_preflight:{owner_user_id}:{preflight.preflight_id}",
             )
             bound = self._store.bind_preflight_job(
                 owner_user_id,
                 preflight.preflight_id,
                 int(job["id"]),
+                expected_queue=queue,
+                expected_payload=payload,
             )
         except Exception as exc:
             if job is not None and job.get("id") is not None:

@@ -145,6 +145,58 @@ def test_postgres_preflight_admission_serializes_empty_capacity_predicate(pg_tem
     assert len(manager.list_jobs(domain="media_ingest", owner_user_id="pg-capacity-owner", limit=10)) == 1
 
 
+def test_postgres_preflight_publication_uses_database_clock_and_is_immediately_acquirable(pg_temp_db, monkeypatch):
+    monkeypatch.setenv("TEST_MODE", "true")
+    dsn = str(pg_temp_db["dsn"])
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestStore,
+    )
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    from tldw_Server_API.app.core.Jobs.pg_migrations import ensure_jobs_tables_pg
+
+    ensure_jobs_tables_pg(dsn)
+    manager = JobManager(backend="postgres", db_url=dsn, clock=_FixedClock())
+    store = PlaylistIngestStore(manager)
+    preflight = store.reserve_preflight(
+        "pg-publication-owner",
+        source_url="https://www.youtube.com/playlist?list=PLpgpublication",
+        source_kind="youtube_playlist",
+        playlist_id="PLpgpublication",
+        ttl_seconds=600,
+        global_capacity=2,
+        owner_capacity=1,
+    )
+    payload = {"preflight_id": preflight.preflight_id, "max_items": 20, "timeout_seconds": 10}
+    job = manager.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="playlist_preflight",
+        payload=payload,
+        owner_user_id="pg-publication-owner",
+        available_at=datetime(9999, 12, 31, 23, 59, 59, tzinfo=timezone.utc),
+    )
+
+    bound = store.bind_preflight_job(
+        "pg-publication-owner",
+        preflight.preflight_id,
+        int(job["id"]),
+        expected_queue="default",
+        expected_payload=payload,
+    )
+    claimed = manager.acquire_next_job(
+        domain="media_ingest",
+        queue="default",
+        lease_seconds=120,
+        worker_id="pg-publication-worker",
+        job_type="playlist_preflight",
+    )
+
+    assert bound.job_id == int(job["id"])
+    assert claimed is not None
+    assert int(claimed["id"]) == int(job["id"])
+
+
 def test_postgres_ready_snapshot_guard_rejects_cancelled_linked_job(pg_temp_db, monkeypatch):
     monkeypatch.setenv("TEST_MODE", "true")
     dsn = str(pg_temp_db["dsn"])
