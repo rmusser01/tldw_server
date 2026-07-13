@@ -33,11 +33,13 @@
 - Modify `apps/mcp-unified/src/mcp_unified/profiles/subjects.py`: extract bounded `skill_name` subjects.
 - Modify `apps/mcp-unified/src/mcp_unified/profiles/permission_rules.py`: lowercase Skill patterns and subjects consistently.
 - Modify `apps/mcp-unified/src/mcp_unified/policy_grants/models.py`: admit canonical Skill subjects to existing approval leases.
+- Modify `apps/mcp-unified/src/mcp_unified/gateway/cli.py`: expose authoritative Skill approval subjects through the operator CLI.
 - Modify `tldw_Server_API/app/core/MCP_unified/tests/test_profile_permission_rules.py`: canonical Skill matching.
 - Modify `tldw_Server_API/app/core/MCP_unified/tests/test_gateway_policy_simulation.py`: extraction and simulated deny/ask/lease behavior.
 - Modify `tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py`: real profile-runtime deny/ask/lease behavior.
 - Modify `tldw_Server_API/app/core/MCP_unified/tests/test_gateway_policy_grant_manager.py`: Skill approval-grant validation coverage.
 - Modify `tldw_Server_API/app/core/MCP_unified/tests/test_policy_grant_stores.py`: in-memory and SQLite Skill grant persistence coverage.
+- Modify `tldw_Server_API/app/core/MCP_unified/tests/test_gateway_cli_package.py`: persistent Skill approval-grant CLI lifecycle coverage.
 - Create `tldw_Server_API/app/core/MCP_unified/modules/implementations/skills_module.py`: tool schemas, context binding, service delegation, rendering, and safe errors.
 - Create `tldw_Server_API/app/core/MCP_unified/tests/test_skills_module.py`: module contracts and user-isolation integration tests.
 - Modify `tldw_Server_API/Config_Files/mcp_modules.yaml`: enable the read-only Skills module.
@@ -475,11 +477,11 @@ git commit -m "docs(mcp): register and document Skills tools"
 
 **Tests**: Full focused matrix below.
 
-**Status**: In Progress
+**Status**: Complete
 
 ### Task 5.1: Run focused verification
 
-- [ ] Run service and module tests:
+- [x] Run service and module tests:
 
 ```bash
 source ../../.venv/bin/activate
@@ -491,7 +493,7 @@ python -m pytest -q \
   tldw_Server_API/app/core/MCP_unified/tests/test_basic_functionality.py
 ```
 
-- [ ] Run permission and gateway tests:
+- [x] Run permission and gateway tests:
 
 ```bash
 source ../../.venv/bin/activate
@@ -504,14 +506,26 @@ python -m pytest -q \
   -k 'skill or permission_rule or approval_lease'
 ```
 
-- [ ] Run the standalone package boundary tests affected by `apps/mcp-unified` changes:
+- [x] Run the standalone package boundary tests affected by `apps/mcp-unified` changes:
 
 ```bash
 source ../../.venv/bin/activate
 python -m pytest -q tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py
 ```
 
-- [ ] Run Bandit on every touched Python path:
+- [x] Run the Skill approval-grant CLI lifecycle and policy-grant regression tests:
+
+```bash
+source ../../.venv/bin/activate
+python -m pytest -q \
+  tldw_Server_API/app/core/MCP_unified/tests/test_gateway_cli_package.py \
+  -k 'approval_grant_lifecycle'
+python -m pytest -q \
+  tldw_Server_API/app/core/MCP_unified/tests/test_gateway_policy_grant_manager.py \
+  tldw_Server_API/app/core/MCP_unified/tests/test_policy_grant_stores.py
+```
+
+- [x] Run Bandit on every touched Python path:
 
 ```bash
 source ../../.venv/bin/activate
@@ -519,6 +533,7 @@ python -m bandit -r \
   apps/mcp-unified/src/mcp_unified/profiles/subjects.py \
   apps/mcp-unified/src/mcp_unified/profiles/permission_rules.py \
   apps/mcp-unified/src/mcp_unified/policy_grants/models.py \
+  apps/mcp-unified/src/mcp_unified/gateway/cli.py \
   tldw_Server_API/app/core/Skills/skills_service.py \
   tldw_Server_API/app/core/MCP_unified/modules/implementations/skills_module.py \
   tldw_Server_API/app/core/MCP_unified/module_surface.py \
@@ -528,6 +543,7 @@ python -m bandit -r \
   tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py \
   tldw_Server_API/app/core/MCP_unified/tests/test_gateway_policy_grant_manager.py \
   tldw_Server_API/app/core/MCP_unified/tests/test_policy_grant_stores.py \
+  tldw_Server_API/app/core/MCP_unified/tests/test_gateway_cli_package.py \
   tldw_Server_API/app/core/MCP_unified/tests/test_skills_module.py \
   tldw_Server_API/app/core/MCP_unified/tests/test_dynamic_module_catalog.py \
   tldw_Server_API/app/core/MCP_unified/tests/test_basic_functionality.py \
@@ -535,7 +551,7 @@ python -m bandit -r \
   -f json -o /tmp/bandit_TASK_2294_1.json
 ```
 
-- [ ] Run repository hygiene checks:
+- [x] Run repository hygiene checks:
 
 ```bash
 git diff --check
@@ -543,15 +559,16 @@ git status --short
 git diff --stat origin/dev...HEAD
 ```
 
-- [ ] Inspect `/tmp/bandit_TASK_2294_1.json`; fix any new finding in touched code before proceeding.
+- [x] Inspect `/tmp/bandit_TASK_2294_1.json`; fix any new finding in touched code before proceeding.
 
 ### Task 5.2: Review and finalize tracking
 
-- [ ] Review the final diff against every design decision and Backlog acceptance criterion. Confirm no model/tool execution, frontend changes, workflow code, new persistence, or unrelated formatting entered the branch.
-- [ ] Update every stage status in this plan from `Not Started` to `Complete` only after its commands pass.
-- [ ] Use Backlog MCP to record modified files, implementation plan, verification commands/results, Bandit result, known skips, and final summary for `TASK-2294.1`.
-- [ ] Check all acceptance criteria and Definition of Done items only when evidence exists.
-- [ ] Commit tracking-only closeout changes:
+- [x] Review the final diff against every design decision and Backlog acceptance criterion. Confirm no model/tool execution, frontend changes, workflow code, new persistence, or unrelated formatting entered the branch.
+- [x] Address the final-review CLI approval-subject finding and complete a focused clean re-review.
+- [x] Update every stage status in this plan from `Not Started` to `Complete` only after its commands pass.
+- [x] Use Backlog MCP to record modified files, implementation plan, verification commands/results, Bandit result, known skips, and final summary for `TASK-2294.1`.
+- [x] Check all acceptance criteria and Definition of Done items only when evidence exists.
+- [x] Commit tracking-only closeout changes:
 
 ```bash
 git add Docs/Plans/IMPLEMENTATION_PLAN_skills_mcp_catalog_render_TASK_2294_1.md \
@@ -559,7 +576,7 @@ git add Docs/Plans/IMPLEMENTATION_PLAN_skills_mcp_catalog_render_TASK_2294_1.md 
 git commit -m "chore: close TASK-2294.1 verification"
 ```
 
-- [ ] Use `superpowers:requesting-code-review` for a final correctness and scope review before pushing or opening a PR against `dev`.
+- [x] Use `superpowers:requesting-code-review` for a final correctness and scope review before pushing or opening a PR against `dev`.
 
 ## Plan Self-Review Checklist
 
