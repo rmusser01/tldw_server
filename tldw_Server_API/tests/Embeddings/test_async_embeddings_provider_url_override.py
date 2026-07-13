@@ -336,6 +336,58 @@ async def test_provider_success_callback_does_not_run_for_provider_failure(monke
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("malformed_vector", [[], [float("nan")], ["not-numeric"]])
+async def test_runtime_success_callback_rejects_malformed_vector_before_usage_or_cache(
+    monkeypatch,
+    malformed_vector,
+):
+    service = AsyncEmbeddingService(config=_fallback_config())
+    service.cache = TrackingCache()
+    callback_calls = 0
+
+    async def malformed_success(**_kwargs):
+        return malformed_vector
+
+    async def record_success():
+        nonlocal callback_calls
+        callback_calls += 1
+
+    monkeypatch.setattr(service.providers["openai"], "create_embedding", malformed_success)
+
+    with pytest.raises(async_embeddings.EmbeddingProviderError) as exc_info:
+        await service.create_embedding(
+            "hello",
+            provider="openai",
+            use_cache=True,
+            api_key_override="runtime-key",
+            credentials_resolved=True,
+            on_provider_success=record_success,
+        )
+
+    assert exc_info.value.code == "provider_failure"
+    assert callback_calls == 0
+    assert service.cache.set_keys == []
+
+
+@pytest.mark.asyncio
+async def test_legacy_call_without_success_callback_keeps_malformed_vector_compatibility(monkeypatch):
+    service = AsyncEmbeddingService(config=_fallback_config())
+    service.cache = DummyCache()
+
+    async def malformed_success(**_kwargs):
+        return []
+
+    monkeypatch.setattr(service.providers["openai"], "create_embedding", malformed_success)
+
+    assert await service.create_embedding(
+        "hello",
+        provider="openai",
+        use_cache=False,
+        use_batching=False,
+    ) == []
+
+
+@pytest.mark.asyncio
 async def test_batch_provider_success_callback_runs_once_per_cache_miss(monkeypatch):
     service = AsyncEmbeddingService(config=_fallback_config())
     service.cache = DummyCache()

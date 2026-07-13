@@ -48,6 +48,33 @@ class _FakeLogger:
 
 
 @pytest.mark.unit
+def test_embedding_degradation_preserves_invalid_configuration_taxonomy():
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+    from tldw_Server_API.app.core.Embeddings.async_embeddings import EmbeddingEndpointError
+    from tldw_Server_API.app.core.RAG.rag_service import unified_pipeline
+
+    for error in (
+        EmbeddingEndpointError("local_api"),
+        ChatConfigurationError(
+            "secret invalid endpoint detail",
+            provider="local_api",
+            error_code="provider_configuration_invalid",
+        ),
+    ):
+        metadata = {}
+        hyde._record_embedding_degraded(metadata, error)
+        assert metadata == {
+            "embedding_coverage": "degraded",
+            "failure_code": "provider_configuration_invalid",
+        }
+        assert unified_pipeline._bounded_provider_failure_code(error) == (
+            "provider_configuration_invalid"
+            if isinstance(error, ChatConfigurationError)
+            else "provider_unavailable"
+        )
+
+
+@pytest.mark.unit
 def test_generate_with_llm_sanitizes_generation_failure(monkeypatch):
     secret = "sk-secret-hyde-generation"
 
@@ -390,6 +417,25 @@ async def test_sync_embedding_thread_drains_mark_used_after_worker_completion():
 
     assert mark_calls == 1
     assert mark_completions == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("vector", [["0.1", "0.2"], [10**10000]])
+async def test_mark_runtime_used_rejects_malformed_vector(vector):
+    from tldw_Server_API.app.core.Embeddings.async_embeddings import EmbeddingProviderError
+
+    runtime = _CredentialRuntime("openai")
+
+    with pytest.raises(EmbeddingProviderError) as exc_info:
+        await hyde._mark_runtime_used_for_embeddings(
+            [vector],
+            credential_runtime=runtime,
+            handle=runtime.handle,
+        )
+
+    assert exc_info.value.code == "provider_failure"
+    assert runtime.marked == []
 
 
 @pytest.mark.unit
@@ -762,6 +808,235 @@ async def test_optional_expansion_provider_failure_degrades_with_bounded_metadat
         "failure_code": "credential_store_unavailable",
     }
     assert "credential_store_unavailable" not in result.errors
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_standard_numeric_retry_provider_failure_degrades_and_stops(monkeypatch):
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+    from tldw_Server_API.app.core.RAG.rag_service import unified_pipeline
+
+    calls = 0
+    base_doc = Document(
+        id="numeric-base",
+        content="The source value is 42.",
+        metadata={},
+        source=DataSource.MEDIA_DB,
+        score=0.9,
+    )
+    provider_error = ChatConfigurationError(
+        "secret endpoint configuration detail",
+        provider="local_api",
+        error_code="provider_configuration_invalid",
+    )
+
+    class _Retriever:
+        def __init__(self, *args, **kwargs):
+            self.retrievers = {}
+
+        async def retrieve(self, *args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return [base_doc]
+            raise provider_error
+
+    class _Generator:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def generate(self, **kwargs):
+            return {"answer": "The safe completed answer contains 99."}
+
+    numeric = SimpleNamespace(
+        present=set(),
+        missing=("99", "100"),
+        union_source_numbers={"42"},
+    )
+    monkeypatch.setattr(unified_pipeline, "MultiDatabaseRetriever", _Retriever)
+    monkeypatch.setattr(unified_pipeline, "AnswerGenerator", _Generator)
+    monkeypatch.setattr(unified_pipeline, "check_numeric_fidelity", lambda *args, **kwargs: numeric)
+
+    result = await unified_pipeline.unified_rag_pipeline(
+        query="numeric retry",
+        sources=["media_db"],
+        media_db_path="media.db",
+        credential_runtime=object(),
+        adaptive_hybrid_weights=False,
+        enable_cache=False,
+        enable_reranking=False,
+        enable_generation=True,
+        enable_numeric_fidelity=True,
+        numeric_fidelity_behavior="retry",
+    )
+
+    assert calls == 2
+    assert result.generated_answer == "The safe completed answer contains 99."
+    assert result.metadata["numeric_fidelity"]["embedding_coverage"] == "degraded"
+    assert result.metadata["numeric_fidelity"]["failure_code"] == "provider_configuration_invalid"
+    assert "secret endpoint configuration detail" not in repr(result.metadata)
+    assert "secret endpoint configuration detail" not in repr(result.errors)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_additional_evidence_provider_failure_degrades_callback_locally(monkeypatch):
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+    from tldw_Server_API.app.core.RAG.rag_service import unified_pipeline
+
+    calls = 0
+    base_doc = Document(
+        id="evidence-base",
+        content="Base evidence remains available.",
+        metadata={},
+        source=DataSource.MEDIA_DB,
+        score=0.9,
+    )
+    provider_error = ChatConfigurationError(
+        "secret additional retrieval detail",
+        provider="local_api",
+        error_code="provider_configuration_invalid",
+    )
+
+    class _Retriever:
+        def __init__(self, *args, **kwargs):
+            self.retrievers = {}
+
+        async def retrieve(self, *args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return [base_doc]
+            raise provider_error
+
+    class _Accumulator:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def accumulate(self, *, initial_results, retrieval_fn, **kwargs):
+            assert await retrieval_fn("gap query", set()) == []
+            return SimpleNamespace(
+                documents=list(initial_results),
+                total_rounds=1,
+                is_sufficient=False,
+                sufficiency_reason="provider unavailable",
+                metadata={"initial_docs": len(initial_results), "docs_added": 0},
+            )
+
+    monkeypatch.setattr(unified_pipeline, "MultiDatabaseRetriever", _Retriever)
+    monkeypatch.setattr(unified_pipeline, "EvidenceAccumulator", _Accumulator)
+
+    result = await unified_pipeline.unified_rag_pipeline(
+        query="additional evidence",
+        sources=["media_db"],
+        media_db_path="media.db",
+        credential_runtime=object(),
+        adaptive_hybrid_weights=False,
+        enable_cache=False,
+        enable_reranking=False,
+        enable_generation=False,
+        enable_evidence_accumulation=True,
+    )
+
+    assert calls == 2
+    assert [document["id"] for document in result.documents] == ["evidence-base"]
+    assert result.metadata["retrieval_coverage"]["evidence_accumulation"] == {
+        "coverage": "degraded",
+        "failure_code": "provider_configuration_invalid",
+    }
+    assert "secret additional retrieval detail" not in repr(result.metadata)
+    assert "secret additional retrieval detail" not in repr(result.errors)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_per_claim_provider_failure_is_not_swallowed_by_nested_fallback(monkeypatch):
+    import tldw_Server_API.app.core.Claims_Extraction.claims_engine as claims_engine
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+    from tldw_Server_API.app.core.RAG.rag_service import unified_pipeline
+
+    class _RuntimeConfigurationError(ChatConfigurationError, RuntimeError):
+        pass
+
+    provider_error = _RuntimeConfigurationError(
+        "secret per-claim retrieval detail",
+        provider="local_api",
+        error_code="provider_configuration_invalid",
+    )
+    base_doc = Document(
+        id="claim-base",
+        content="Base claim evidence remains available.",
+        metadata={},
+        source=DataSource.NOTES,
+        score=0.9,
+    )
+
+    class _ExplodingNotesRetriever:
+        async def retrieve(self, *args, **kwargs):
+            raise provider_error
+
+    class _Retriever:
+        def __init__(self, *args, **kwargs):
+            self.retrievers = {DataSource.NOTES: _ExplodingNotesRetriever()}
+
+        async def retrieve(self, *args, **kwargs):
+            return [base_doc]
+
+    class _Generator:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def generate(self, **kwargs):
+            return {"answer": "A completed claim-bearing answer."}
+
+    class _ClaimsEngine:
+        def __init__(self, _analyze):
+            pass
+
+        async def run(self, **kwargs):
+            documents = await kwargs["retrieve_fn"]("claim text")
+            assert documents == [base_doc]
+            return {"claims": [], "summary": {}, "verifications": []}
+
+    class _Runtime:
+        async def resolve(self, provider):
+            return SimpleNamespace(
+                provider=provider,
+                api_key="runtime-key",
+                app_config={},
+            )
+
+        async def mark_used(self, handle):
+            raise AssertionError("claims provider was not called")
+
+    monkeypatch.setattr(unified_pipeline, "MultiDatabaseRetriever", _Retriever)
+    monkeypatch.setattr(unified_pipeline, "AnswerGenerator", _Generator)
+    monkeypatch.setattr(unified_pipeline, "ClaimsEngine", _ClaimsEngine)
+    monkeypatch.setattr(
+        claims_engine,
+        "_resolve_claims_llm_config",
+        lambda: ("local_api", None, 0.1),
+    )
+
+    result = await unified_pipeline.unified_rag_pipeline(
+        query="per-claim retrieval",
+        sources=["notes"],
+        notes_db_path="notes.db",
+        credential_runtime=_Runtime(),
+        adaptive_hybrid_weights=False,
+        enable_cache=False,
+        enable_reranking=False,
+        enable_generation=True,
+        enable_claims=True,
+    )
+
+    assert [document["id"] for document in result.documents] == ["claim-base"]
+    assert result.metadata["retrieval_coverage"]["per_claim"] == {
+        "coverage": "degraded",
+        "failure_code": "provider_configuration_invalid",
+    }
+    assert "secret per-claim retrieval detail" not in repr(result.metadata)
+    assert "secret per-claim retrieval detail" not in repr(result.errors)
 
 
 @pytest.mark.unit

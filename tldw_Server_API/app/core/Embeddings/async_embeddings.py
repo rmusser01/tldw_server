@@ -86,6 +86,23 @@ class EmbeddingProviderError(RuntimeError):
         super().__init__(f"Embedding provider error: {self.code} ({self.provider}{status_suffix})")
 
 
+def _validate_runtime_embedding_vector(value: Any, provider: str) -> list[float]:
+    """Return one finite numeric vector or raise a sanitized provider error."""
+    try:
+        array = np.asarray(value)
+        if (
+            array.ndim != 1
+            or array.size == 0
+            or not np.issubdtype(array.dtype, np.number)
+        ):
+            raise ValueError
+        if not np.isfinite(array).all():
+            raise ValueError
+        return value if isinstance(value, list) else array.tolist()
+    except _ASYNC_EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
+        raise EmbeddingProviderError(provider, code="provider_failure") from None
+
+
 def _embedding_error_status(value: Any) -> int | None:
     """Extract only a bounded HTTP status from an exception or provider payload."""
     if isinstance(value, dict):
@@ -784,6 +801,7 @@ class AsyncEmbeddingService:
                 )
 
         if primary_provider_dispatched and on_provider_success is not None:
+            embedding = _validate_runtime_embedding_vector(embedding, provider)
             await on_provider_success()
 
         # Cache the result

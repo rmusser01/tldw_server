@@ -72,6 +72,27 @@ def test_embedding_degradation_preserves_missing_credentials_code() -> None:
     assert outcome.embedding_failure_code == "missing_provider_credentials"
 
 
+def test_embedding_degradation_preserves_invalid_configuration_code() -> None:
+    outcome = verifier_module.VerificationOutcome(
+        unsupported_ratio=1.0,
+        total_claims=1,
+        unsupported_count=1,
+        fixed=False,
+    )
+
+    verifier_module._record_embedding_degradation(
+        outcome,
+        ChatConfigurationError(
+            "secret endpoint configuration details",
+            provider="local_api",
+            error_code="provider_configuration_invalid",
+        ),
+    )
+
+    assert outcome.embedding_coverage == "degraded"
+    assert outcome.embedding_failure_code == "provider_configuration_invalid"
+
+
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_post_verifier_metrics_increment_on_unsupported(monkeypatch):

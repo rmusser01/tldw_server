@@ -82,6 +82,7 @@ def _bounded_provider_failure_code(exc: BaseException) -> str:
     allowed = {
         "invalid_provider_credentials",
         "missing_provider_credentials",
+        "provider_configuration_invalid",
         "credential_store_unavailable",
         "credential_scope_revoked",
     }
@@ -137,6 +138,18 @@ def _serialize_result_document(doc: Any) -> dict[str, Any]:
         "content": getattr(doc, "content", None),
         "score": getattr(doc, "score", 0.0),
         "metadata": metadata,
+    }
+
+
+def _record_optional_retrieval_degradation(
+    metadata: dict[str, Any],
+    component: str,
+    exc: BaseException,
+) -> None:
+    """Record a typed optional-retrieval failure without raw provider detail."""
+    metadata.setdefault("retrieval_coverage", {})[component] = {
+        "coverage": "degraded",
+        "failure_code": _bounded_provider_failure_code(exc),
     }
 
 
@@ -4976,6 +4989,15 @@ async def unified_rag_pipeline(
                         )
                         # Filter out already-seen documents
                         return [d for d in new_docs if d.id not in exclude_ids]
+                    except _RAG_PROVIDER_FAILURES as exc:
+                        if credential_runtime is None:
+                            raise
+                        _record_optional_retrieval_degradation(
+                            result.metadata,
+                            "evidence_accumulation",
+                            exc,
+                        )
+                        return []
                     except (
                         AttributeError,
                         ConnectionError,
@@ -5242,6 +5264,19 @@ async def unified_rag_pipeline(
                                     current_query = rewritten_query
                                     break
 
+                        except _RAG_PROVIDER_FAILURES as ret_err:
+                            if credential_runtime is None:
+                                raise
+                            _record_optional_retrieval_degradation(
+                                result.metadata,
+                                "query_rewrite",
+                                ret_err,
+                            )
+                            rewrite_attempts[-1].update(
+                                retrieval_coverage="degraded",
+                                failure_code=_bounded_provider_failure_code(ret_err),
+                            )
+                            break
                         except (
                             AttributeError,
                             ConnectionError,
@@ -6807,6 +6842,8 @@ async def unified_rag_pipeline(
                                         try:
                                             more = await retr.retrieve(query=c_text)
                                             docs.extend(more)
+                                        except _RAG_PROVIDER_FAILURES:
+                                            raise
                                         except (
                                             AttributeError,
                                             ConnectionError,
@@ -6820,6 +6857,15 @@ async def unified_rag_pipeline(
                                 # Sort and cap
                                 docs = sorted(docs, key=lambda d: getattr(d, 'score', 0.0), reverse=True)
                                 return docs[:top_k]
+                        except _RAG_PROVIDER_FAILURES as exc:
+                            if credential_runtime is None:
+                                raise
+                            _record_optional_retrieval_degradation(
+                                result.metadata,
+                                "per_claim",
+                                exc,
+                            )
+                            return result.documents[:top_k] if result.documents else []
                         except (
                             AttributeError,
                             ConnectionError,
@@ -7067,6 +7113,14 @@ async def unified_rag_pipeline(
                                         for tok in list(nf.missing)[:3]:
                                             try:
                                                 numeric_added.extend(await mdr.retrieve(query=f"{query} {tok}", sources=[DataSource.MEDIA_DB], config=conf, index_namespace=index_namespace))
+                                            except _RAG_PROVIDER_FAILURES as exc:
+                                                if credential_runtime is None:
+                                                    raise
+                                                result.metadata.setdefault("numeric_fidelity", {}).update(
+                                                    embedding_coverage="degraded",
+                                                    failure_code=_bounded_provider_failure_code(exc),
+                                                )
+                                                break
                                             except (
                                                 AttributeError,
                                                 ConnectionError,
@@ -7187,6 +7241,7 @@ async def unified_rag_pipeline(
                 if embedding_failure_code in {
                     "invalid_provider_credentials",
                     "missing_provider_credentials",
+                    "provider_configuration_invalid",
                     "credential_store_unavailable",
                     "credential_scope_revoked",
                     "provider_unavailable",

@@ -66,6 +66,22 @@ _decompose_query = _agentic_execution.decompose_query
 _tool_loop = _agentic_execution.tool_loop
 
 
+def _bounded_provider_failure_code(exc: BaseException) -> str:
+    """Map a typed provider failure to an allowlisted metadata code."""
+    code = str(getattr(exc, "code", "") or getattr(exc, "error_code", "") or "")
+    if code in {
+        "invalid_provider_credentials",
+        "missing_provider_credentials",
+        "provider_configuration_invalid",
+        "credential_store_unavailable",
+        "credential_scope_revoked",
+    }:
+        return code
+    if getattr(exc, "status_code", None) in {401, 403}:
+        return "invalid_provider_credentials"
+    return "provider_unavailable"
+
+
 def _cache_get(key: str) -> dict[str, Any] | None:
     v = AGENTIC_CACHE.get("ephemeral_chunk", key)
     if isinstance(v, dict):
@@ -853,6 +869,14 @@ async def agentic_rag_pipeline(
                                                     index_namespace=effective_index_namespace,
                                                 )
                                             )
+                                        except (ByokResolutionError, ChatAPIError) as exc:
+                                            if credential_runtime is None:
+                                                raise
+                                            result.metadata.setdefault("numeric_fidelity", {}).update(
+                                                embedding_coverage="degraded",
+                                                failure_code=_bounded_provider_failure_code(exc),
+                                            )
+                                            break
                                         except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError, TimeoutError):
                                             continue
                                     if added:
@@ -915,6 +939,7 @@ async def agentic_rag_pipeline(
                 if embedding_failure_code in {
                     "invalid_provider_credentials",
                     "missing_provider_credentials",
+                    "provider_configuration_invalid",
                     "credential_store_unavailable",
                     "credential_scope_revoked",
                     "provider_unavailable",

@@ -10,6 +10,7 @@ import asyncio
 import configparser
 import hashlib
 import json
+import math
 import os
 import re
 import threading
@@ -17,6 +18,7 @@ import time
 import warnings
 import weakref
 from functools import partial, wraps
+from numbers import Real
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
@@ -109,11 +111,14 @@ def _import_onnxruntime():
 import contextlib
 
 from tldw_Server_API.app.core.config import resolve_repo_relative_path, rg_policy_path
+from tldw_Server_API.app.core.Embeddings.async_embeddings import (
+    EmbeddingEndpointError,
+    EmbeddingProviderError,
+)
 from tldw_Server_API.app.core.Embeddings.audit_adapter import (
     log_memory_limit_exceeded,
     log_model_evicted,
 )
-from tldw_Server_API.app.core.Embeddings.async_embeddings import EmbeddingProviderError
 from tldw_Server_API.app.core.exceptions import InvalidStoragePathError, NetworkError, RetryExhaustedError
 from tldw_Server_API.app.core.LLM_Calls.chat_calls import get_openai_embeddings_batch
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram  # Keep your existing metrics
@@ -177,6 +182,21 @@ def _get_http_status_from_exception(exc: Exception) -> int | None:
         return None
 
 
+def _is_finite_numeric_embedding(vector: Any) -> bool:
+    """Return whether an API response contains a usable numeric vector."""
+    if not isinstance(vector, list) or not vector:
+        return False
+    try:
+        return all(
+            not isinstance(value, bool)
+            and isinstance(value, Real)
+            and math.isfinite(float(value))
+            for value in vector
+        )
+    except (OverflowError, TypeError, ValueError):
+        return False
+
+
 def _get_explicit_openai_embeddings_batch(
     texts: list[str],
     *,
@@ -213,7 +233,7 @@ def _get_explicit_openai_embeddings_batch(
         embeddings = []
         for row in rows:
             embedding = row.get("embedding") if isinstance(row, dict) else None
-            if not isinstance(embedding, list):
+            if not _is_finite_numeric_embedding(embedding):
                 raise EmbeddingProviderError("openai", code="provider_failure") from None
             embeddings.append(embedding)
         return embeddings
@@ -223,6 +243,52 @@ def _get_explicit_openai_embeddings_batch(
         status_code = _get_http_status_from_exception(exc)
         code = "authentication" if status_code in {401, 403} else "provider_failure"
         raise EmbeddingProviderError("openai", code=code, status_code=status_code) from None
+    finally:
+        if response is not None:
+            with contextlib.suppress(_EMBEDDINGS_NONCRITICAL_EXCEPTIONS):
+                response.close()
+
+
+def _get_explicit_local_api_embeddings_batch(
+    texts: list[str],
+    *,
+    model: str,
+    api_key: str | None,
+    endpoint: str,
+) -> list[list[float]]:
+    """Call a local embedding endpoint without exposing execution credentials."""
+    from tldw_Server_API.app.core.http_client import RetryPolicy, fetch
+
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    response = None
+    try:
+        response = fetch(
+            method="POST",
+            url=endpoint,
+            headers=headers,
+            json={"texts": texts, "model": model},
+            timeout=60,
+            retry=RetryPolicy(attempts=1),
+        )
+        status_code = int(getattr(response, "status_code", 0) or 0)
+        if status_code >= 400:
+            code = "authentication" if status_code in {401, 403} else "provider_failure"
+            raise EmbeddingProviderError("local_api", code=code, status_code=status_code) from None
+        data = response.json()
+        embeddings = data.get("embeddings") if isinstance(data, dict) else None
+        if not isinstance(embeddings, list) or len(embeddings) != len(texts):
+            raise EmbeddingProviderError("local_api", code="provider_failure") from None
+        if not all(_is_finite_numeric_embedding(embedding) for embedding in embeddings):
+            raise EmbeddingProviderError("local_api", code="provider_failure") from None
+        return embeddings
+    except EmbeddingProviderError:
+        raise
+    except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as exc:
+        status_code = _get_http_status_from_exception(exc)
+        code = "authentication" if status_code in {401, 403} else "provider_failure"
+        raise EmbeddingProviderError("local_api", code=code, status_code=status_code) from None
     finally:
         if response is not None:
             with contextlib.suppress(_EMBEDDINGS_NONCRITICAL_EXCEPTIONS):
@@ -1044,6 +1110,8 @@ def exponential_backoff(max_retries: int = 3, base_delay: int = 1):
     def decorator(fn):
         @wraps(fn)
         def wrapper(*args, **kwargs):
+            if kwargs.get("credentials_resolved") is True:
+                return fn(*args, **kwargs)
             for attempt in range(max_retries + 1):  # +1 to include the initial attempt
                 try:
                     return fn(*args, **kwargs)
@@ -1828,6 +1896,9 @@ def create_embeddings_batch(
         # Pydantic will parse and validate. If it fails, it raises a ValidationError.
         embedding_service_config = EmbeddingConfigSchema(**user_app_config["embedding_config"])
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:  # Catch Pydantic ValidationError or other parsing issues
+        if credentials_resolved is True:
+            logger.error("Runtime-explicit embedding configuration is invalid")
+            raise ValueError("Invalid embedding_config structure.") from None
         logger.exception(f"Failed to parse embedding_config: {str(e)}")
         raise ValueError(f"Invalid embedding_config structure: {e}") from e
 
@@ -2105,30 +2176,36 @@ def create_embeddings_batch(
                 raise ValueError(f"Model spec for {model_id_to_use} is not LocalAPICfg.")
 
             # TODO: Implement chunking for texts if len(texts) is large, based on model_spec.chunk_size
-            logger.debug(
-                f"Creating {len(texts)} embeddings via local API ({model_spec.api_url}) with model {model_spec.model_name_or_path}"
-            )
-            headers = {"Content-Type": "application/json"}
-            api_key = api_key_override if credentials_resolved is True else model_spec.api_key
-            if api_key:
-                headers["Authorization"] = f"Bearer {api_key}"
+            if credentials_resolved is True:
+                if not (isinstance(base_url_override, str) and base_url_override.strip()):
+                    raise EmbeddingEndpointError("local_api") from None
+                embeddings_list = _get_explicit_local_api_embeddings_batch(
+                    texts,
+                    model=model_spec.model_name_or_path,
+                    api_key=api_key_override,
+                    endpoint=base_url_override,
+                )
+            else:
+                logger.debug(
+                    f"Creating {len(texts)} embeddings via local API ({model_spec.api_url}) with model {model_spec.model_name_or_path}"
+                )
+                headers = {"Content-Type": "application/json"}
+                if model_spec.api_key:
+                    headers["Authorization"] = f"Bearer {model_spec.api_key}"
 
-            payload = {"texts": texts, "model": model_spec.model_name_or_path}
+                payload = {"texts": texts, "model": model_spec.model_name_or_path}
 
-            # The outbound call is already wrapped by exponential backoff and the per-config rate limiter
-            from tldw_Server_API.app.core.http_client import fetch as _fetch
+                # The outbound call is already wrapped by exponential backoff and the per-config rate limiter
+                from tldw_Server_API.app.core.http_client import fetch as _fetch
 
-            request_url = (
-                base_url_override if credentials_resolved is True and base_url_override else model_spec.api_url
-            )
-            resp = _fetch(method="POST", url=request_url, headers=headers, json=payload, timeout=60)
-            if resp.status_code >= 400:
-                resp.raise_for_status()
-            response_data = resp.json()
-            if "embeddings" not in response_data or not isinstance(response_data["embeddings"], list):
-                logger.error(f"Local API at {model_spec.api_url} returned unexpected data format: {response_data}")
-                raise ValueError("Local API embedding response format error.")
-            embeddings_list = response_data["embeddings"]
+                resp = _fetch(method="POST", url=model_spec.api_url, headers=headers, json=payload, timeout=60)
+                if resp.status_code >= 400:
+                    resp.raise_for_status()
+                response_data = resp.json()
+                if "embeddings" not in response_data or not isinstance(response_data["embeddings"], list):
+                    logger.error(f"Local API at {model_spec.api_url} returned unexpected data format: {response_data}")
+                    raise ValueError("Local API embedding response format error.")
+                embeddings_list = response_data["embeddings"]
 
         else:
             logger.error(f"Unsupported embedding provider: {provider} for model_id '{model_id_to_use}'")
@@ -2150,7 +2227,10 @@ def create_embeddings_batch(
                 "error_type": type(ve).__name__,
             },
         )
-        logger.exception(f"Configuration or Value error in create_embeddings_batch: {ve}")
+        if credentials_resolved is True:
+            logger.error("Runtime-explicit embedding configuration or validation failed")
+        else:
+            logger.exception(f"Configuration or Value error in create_embeddings_batch: {ve}")
         raise
     except RuntimeError as rte:  # Model loading, conversion, or runtime issues
         log_counter(
@@ -2161,7 +2241,10 @@ def create_embeddings_batch(
                 "error_type": type(rte).__name__,
             },
         )
-        logger.exception(f"Runtime error in create_embeddings_batch: {rte}")
+        if credentials_resolved is True:
+            logger.error("Runtime-explicit embedding provider call failed")
+        else:
+            logger.exception(f"Runtime error in create_embeddings_batch: {rte}")
         raise
     except (NetworkError, RetryExhaustedError) as req_e:
         log_counter(
@@ -2172,7 +2255,10 @@ def create_embeddings_batch(
                 "error_type": type(req_e).__name__,
             },
         )
-        logger.exception(f"Network error after retries in create_embeddings_batch: {req_e}")
+        if credentials_resolved is True:
+            logger.error("Runtime-explicit embedding network call failed")
+        else:
+            logger.exception(f"Network error after retries in create_embeddings_batch: {req_e}")
         raise
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:  # Catch-all for unexpected errors
         log_counter(
@@ -2183,10 +2269,13 @@ def create_embeddings_batch(
                 "error_type": type(e).__name__,
             },
         )
-        logger.exception(
-            f"Unexpected error in create_embeddings_batch for model_id '{model_id_to_use if 'model_id_to_use' in locals() else 'unknown'}' "
-            f"(Provider: {provider if 'provider' in locals() else 'unknown'}): {e}"
-        )
+        if credentials_resolved is True:
+            logger.error("Runtime-explicit embedding call failed")
+        else:
+            logger.exception(
+                f"Unexpected error in create_embeddings_batch for model_id '{model_id_to_use if 'model_id_to_use' in locals() else 'unknown'}' "
+                f"(Provider: {provider if 'provider' in locals() else 'unknown'}): {e}"
+            )
         raise
 
 

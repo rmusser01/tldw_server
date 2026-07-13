@@ -6,7 +6,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAuthenticationError
+from tldw_Server_API.app.core.Chat.Chat_Deps import (
+    ChatAuthenticationError,
+    ChatConfigurationError,
+)
 from tldw_Server_API.app.core.RAG.rag_service import agentic_chunker as ac
 from tldw_Server_API.app.core.RAG.rag_service import claims as claims_mod
 from tldw_Server_API.app.core.RAG.rag_service import database_retrievers
@@ -505,3 +508,68 @@ async def test_agentic_outer_cache_cannot_hide_later_runtime_resolution_failure(
         "embedding_coverage": "degraded",
         "failure_code": "credential_store_unavailable",
     }
+
+
+@pytest.mark.asyncio
+async def test_agentic_numeric_retry_provider_failure_degrades_and_stops(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.RAG.rag_service import guardrails as guardrails_mod
+
+    calls = 0
+    provider_error = ChatConfigurationError(
+        "secret agentic numeric retrieval detail",
+        provider="local_api",
+        error_code="provider_configuration_invalid",
+    )
+
+    class _Retriever:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        async def retrieve(self, *args: object, **kwargs: object) -> list[Document]:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return [_doc()]
+            raise provider_error
+
+    class _Generator:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        async def generate(self, *args: object, **kwargs: object) -> dict[str, str]:
+            return {"answer": "The safe completed answer contains 99."}
+
+    numeric = SimpleNamespace(
+        present=set(),
+        missing=("99", "100"),
+        union_source_numbers=set(),
+    )
+    monkeypatch.setattr(ac, "MultiDatabaseRetriever", _Retriever)
+    monkeypatch.setattr(generation_mod, "AnswerGenerator", _Generator)
+    monkeypatch.setattr(
+        guardrails_mod,
+        "check_numeric_fidelity",
+        lambda *args, **kwargs: numeric,
+    )
+
+    result = await ac.agentic_rag_pipeline(
+        query="agentic numeric retry",
+        sources=["media_db"],
+        media_db_path="media.db",
+        search_mode="hybrid",
+        agentic=ac.AgenticConfig(top_k_docs=1, enable_metrics=False),
+        credential_runtime=object(),
+        enable_generation=True,
+        enable_numeric_fidelity=True,
+        numeric_fidelity_behavior="retry",
+        enable_citations=False,
+    )
+
+    assert calls == 2
+    assert result.generated_answer == "The safe completed answer contains 99."
+    assert result.metadata["numeric_fidelity"]["embedding_coverage"] == "degraded"
+    assert result.metadata["numeric_fidelity"]["failure_code"] == "provider_configuration_invalid"
+    assert "secret agentic numeric retrieval detail" not in repr(result.metadata)
+    assert "secret agentic numeric retrieval detail" not in repr(result.errors)

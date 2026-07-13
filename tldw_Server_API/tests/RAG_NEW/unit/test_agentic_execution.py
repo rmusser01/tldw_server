@@ -419,3 +419,236 @@ async def test_agentic_provider_vector_cache_identity_includes_authorized_endpoi
 
     assert calls == ["https://endpoint-a.example/v1", "https://endpoint-b.example/v1"]
     assert all("runtime-agentic-key" not in key for key in agentic_execution._INTRA_DOC_VEC_CACHE)
+
+
+@pytest.mark.asyncio
+async def test_tool_loop_uses_one_scrubbed_embedding_config_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core import config as core_config
+    from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create
+
+    secret_values = {
+        "server-openai-key",
+        "model-openai-key",
+        "nested-credential",
+        "changed-local-key",
+    }
+    snapshots = iter(
+        [
+            {
+                "openai_api": {"api_key": "server-openai-key"},
+                "EMBEDDING_CONFIG": {
+                    "default_model_id": "openai:model-a",
+                    "models": {
+                        "openai:model-a": {
+                            "provider": "openai",
+                            "model_name_or_path": "model-a",
+                            "api_key": "model-openai-key",
+                            "credentials": {"token": "nested-credential"},
+                        }
+                    },
+                },
+            },
+            {
+                "EMBEDDING_CONFIG": {
+                    "default_model_id": "local_api:changed-model",
+                    "models": {
+                        "local_api:changed-model": {
+                            "provider": "local_api",
+                            "model_name_or_path": "changed-model",
+                            "api_url": "https://changed-local.example/embeddings",
+                            "api_key": "changed-local-key",
+                        }
+                    },
+                }
+            },
+        ]
+    )
+    load_calls = 0
+    captured: dict[str, Any] = {}
+
+    def load_config():
+        nonlocal load_calls
+        load_calls += 1
+        return next(snapshots)
+
+    def fake_create(texts, app_config, model_id_override=None, **kwargs):
+        captured.update(app_config=app_config, model_id=model_id_override, kwargs=kwargs)
+        return [[1.0, 0.0] for _ in texts]
+
+    monkeypatch.setattr(core_config, "load_comprehensive_config", load_config)
+    monkeypatch.setattr(Embeddings_Create, "create_embeddings_batch", fake_create)
+    agentic_execution._INTRA_DOC_VEC_CACHE.clear()
+
+    await agentic_execution.tool_loop(
+        [Document(id="snapshot", content="alpha", source=DataSource.MEDIA_DB, metadata={})],
+        "alpha",
+        AgenticConfig(
+            top_k_docs=1,
+            max_tool_calls=1,
+            enable_metrics=False,
+            agentic_use_provider_embeddings_within=True,
+        ),
+        credential_runtime=_CredentialRuntime("openai"),
+    )
+
+    assert load_calls == 1
+    assert captured["app_config"]["embedding_config"]["default_model_id"] == "openai:model-a"
+    assert "changed-local.example" not in repr(captured["app_config"])
+    assert "openai_api" not in captured["app_config"]
+    assert not any(secret in repr(captured["app_config"]) for secret in secret_values)
+    assert captured["kwargs"]["api_key_override"] == "runtime-agentic-key"
+
+
+@pytest.mark.asyncio
+async def test_agentic_provider_vector_cache_identity_includes_config_selected_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core import config as core_config
+    from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create
+
+    current = {"model_id": "openai:model-a"}
+    dispatched_models: list[str] = []
+
+    def load_config():
+        model_id = current["model_id"]
+        return {
+            "EMBEDDING_CONFIG": {
+                "default_model_id": model_id,
+                "models": {model_id: {"provider": "openai", "model_name_or_path": model_id}},
+            }
+        }
+
+    def fake_create(texts, app_config, model_id_override=None, **kwargs):
+        dispatched_models.append(app_config["embedding_config"]["default_model_id"])
+        return [[1.0, 0.0] for _ in texts]
+
+    monkeypatch.setattr(core_config, "load_comprehensive_config", load_config)
+    monkeypatch.setattr(Embeddings_Create, "create_embeddings_batch", fake_create)
+    agentic_execution._INTRA_DOC_VEC_CACHE.clear()
+    cfg = AgenticConfig(
+        top_k_docs=1,
+        max_tool_calls=1,
+        enable_metrics=False,
+        agentic_use_provider_embeddings_within=True,
+    )
+    doc = Document(id="model-cache", content="alpha", source=DataSource.MEDIA_DB, metadata={})
+    runtime = _CredentialRuntime("openai")
+
+    await agentic_execution.tool_loop([doc], "alpha", cfg, credential_runtime=runtime)
+    current["model_id"] = "openai:model-b"
+    await agentic_execution.tool_loop([doc], "alpha", cfg, credential_runtime=runtime)
+
+    assert dispatched_models == ["openai:model-a", "openai:model-b"]
+    assert all("runtime-agentic-key" not in key for key in agentic_execution._INTRA_DOC_VEC_CACHE)
+
+
+@pytest.mark.asyncio
+async def test_toolbox_disables_provider_embeddings_after_first_document_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core import config as core_config
+    from tldw_Server_API.app.core.Embeddings import async_embeddings
+    from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create
+
+    calls = 0
+    embedding_settings = {
+        "default_model_id": "openai:model-a",
+        "models": {"openai:model-a": {"provider": "openai", "model_name_or_path": "model-a"}},
+    }
+
+    def fail_create(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        raise async_embeddings.EmbeddingProviderError("openai", code="provider_failure")
+
+    monkeypatch.setattr(
+        core_config,
+        "load_comprehensive_config",
+        lambda: {"EMBEDDING_CONFIG": embedding_settings},
+    )
+    monkeypatch.setattr(Embeddings_Create, "create_embeddings_batch", fail_create)
+    agentic_execution._INTRA_DOC_VEC_CACHE.clear()
+    metadata: dict[str, Any] = {}
+    docs = [
+        Document(id=f"failure-{idx}", content="alpha", source=DataSource.MEDIA_DB, metadata={})
+        for idx in range(3)
+    ]
+
+    content, citations, _ = await agentic_execution.tool_loop(
+        docs,
+        "alpha",
+        AgenticConfig(
+            top_k_docs=3,
+            max_tool_calls=3,
+            enable_metrics=False,
+            agentic_use_provider_embeddings_within=True,
+        ),
+        credential_runtime=_CredentialRuntime("openai"),
+        stage_metadata=metadata,
+    )
+
+    assert calls == 1
+    assert content
+    assert citations
+    assert metadata == {
+        "embedding_coverage": "degraded",
+        "failure_code": "provider_unavailable",
+    }
+
+
+@pytest.mark.asyncio
+async def test_tool_loop_does_not_start_planner_after_embedding_setup_exhausts_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core import config as core_config
+    from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create
+
+    now = 0.0
+    planner_calls = 0
+    embedding_settings = {
+        "default_model_id": "openai:model-a",
+        "models": {"openai:model-a": {"provider": "openai", "model_name_or_path": "model-a"}},
+    }
+
+    def fake_create(texts, app_config, model_id_override=None, **kwargs):
+        nonlocal now
+        now = 2.0
+        return [[1.0, 0.0] for _ in texts]
+
+    class Planner:
+        def __init__(self, *args, **kwargs):
+            nonlocal planner_calls
+            planner_calls += 1
+
+        async def generate(self, **kwargs):
+            raise AssertionError("planner must not run after the deadline")
+
+    monkeypatch.setattr(agentic_execution, "_now", lambda: now)
+    monkeypatch.setattr(agentic_execution, "AnswerGenerator", Planner)
+    monkeypatch.setattr(
+        core_config,
+        "load_comprehensive_config",
+        lambda: {"EMBEDDING_CONFIG": embedding_settings},
+    )
+    monkeypatch.setattr(Embeddings_Create, "create_embeddings_batch", fake_create)
+    agentic_execution._INTRA_DOC_VEC_CACHE.clear()
+
+    content, citations, _ = await agentic_execution.tool_loop(
+        [Document(id="deadline", content="alpha", source=DataSource.MEDIA_DB, metadata={})],
+        "alpha",
+        AgenticConfig(
+            top_k_docs=1,
+            max_tool_calls=1,
+            time_budget_sec=1.0,
+            enable_metrics=False,
+            use_llm_planner=True,
+            agentic_use_provider_embeddings_within=True,
+        ),
+        credential_runtime=_CredentialRuntime("openai"),
+    )
+
+    assert planner_calls == 0
+    assert content == "alpha"
+    assert len(citations) == 1

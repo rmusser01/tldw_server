@@ -141,7 +141,10 @@ def _record_embedding_degradation(
         code = "invalid_provider_credentials"
     elif isinstance(exc, ChatConfigurationError):
         code = str(getattr(exc, "error_code", "") or "")
-        if code != "missing_provider_credentials":
+        if code not in {
+            "missing_provider_credentials",
+            "provider_configuration_invalid",
+        }:
             code = "provider_unavailable"
     elif isinstance(exc, ChatAPIError):
         code = "provider_unavailable"
@@ -490,6 +493,7 @@ class PostGenerationVerifier:
                                     if failure_code in {
                                         "invalid_provider_credentials",
                                         "missing_provider_credentials",
+                                        "provider_configuration_invalid",
                                         "credential_store_unavailable",
                                         "credential_scope_revoked",
                                         "provider_unavailable",

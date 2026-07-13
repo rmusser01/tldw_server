@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import copy
 import hashlib
 import re
 import threading
@@ -30,6 +31,7 @@ from tldw_Server_API.app.core.LLM_Calls.structured_output import (
 from .agentic_tools import make_default_registry
 from .evidence_models import DerivedEvidence, RetrievedEvidence
 from .hyde import (
+    _embedding_model_spec_from_config,
     _embedding_provider_from_config,
     _record_embedding_degraded,
     _resolve_runtime_embedding_call,
@@ -48,6 +50,66 @@ except ImportError:
 
 
 _INTRA_DOC_VEC_CACHE: dict[str, Any] = {}
+_EMBEDDING_SECRET_FIELD_MARKERS = (
+    "api_key",
+    "authorization",
+    "cookie",
+    "credential",
+    "password",
+    "secret",
+    "token",
+)
+
+
+def _scrub_embedding_secrets(value: Any) -> Any:
+    """Remove secret-bearing fields from a defensive embedding-config copy."""
+    if isinstance(value, dict):
+        for key in list(value):
+            normalized = str(key).strip().lower().replace("-", "_")
+            if any(marker in normalized for marker in _EMBEDDING_SECRET_FIELD_MARKERS):
+                value.pop(key, None)
+            else:
+                value[key] = _scrub_embedding_secrets(value[key])
+        return value
+    if isinstance(value, list):
+        return [_scrub_embedding_secrets(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_scrub_embedding_secrets(item) for item in value)
+    attributes = getattr(value, "__dict__", None)
+    if isinstance(attributes, dict):
+        for name in list(attributes):
+            normalized = str(name).strip().lower().replace("-", "_")
+            if any(marker in normalized for marker in _EMBEDDING_SECRET_FIELD_MARKERS):
+                with contextlib.suppress(AttributeError, TypeError, ValueError):
+                    delattr(value, name)
+            else:
+                _scrub_embedding_secrets(attributes[name])
+    return value
+
+
+def _embedding_config_snapshot(app_config: dict[str, Any], *, scrub_secrets: bool) -> dict[str, Any]:
+    """Return the single embedding configuration used for resolution and dispatch."""
+    raw = app_config.get("EMBEDDING_CONFIG") or app_config.get("embedding_config") or {}
+    snapshot = copy.deepcopy(raw)
+    if scrub_secrets:
+        snapshot = _scrub_embedding_secrets(snapshot)
+    return {"embedding_config": snapshot}
+
+
+def _effective_embedding_model_id(
+    app_config: dict[str, Any],
+    model_id_override: str | None,
+) -> str:
+    """Return a stable identity for the exact configured embedding model."""
+    raw = app_config.get("embedding_config") or app_config.get("EMBEDDING_CONFIG") or {}
+    selected = str(model_id_override or raw.get("default_model_id") or "").strip()
+    model_spec = _embedding_model_spec_from_config(app_config, model_id_override)
+    model_name = (
+        model_spec.get("model_name_or_path")
+        if isinstance(model_spec, dict)
+        else getattr(model_spec, "model_name_or_path", None)
+    )
+    return str(model_name or selected).strip()
 
 
 @dataclass
@@ -428,6 +490,9 @@ class AgenticToolbox:
         cfg: Any,
         *,
         query: str = "",
+        embedding_app_config: dict[str, Any] | None = None,
+        embedding_provider: str | None = None,
+        embedding_model_id: str = "",
         embedding_call_kwargs: dict[str, Any] | None = None,
         provider_embeddings_allowed: bool = True,
         stage_metadata: dict[str, Any] | None = None,
@@ -435,6 +500,9 @@ class AgenticToolbox:
         self.docs = docs
         self.cfg = cfg
         self.query = query
+        self.embedding_app_config = embedding_app_config or {"embedding_config": {}}
+        self.embedding_provider = str(embedding_provider or "").strip().lower()
+        self.embedding_model_id = str(embedding_model_id or "").strip()
         self.embedding_call_kwargs = embedding_call_kwargs or {}
         self.provider_embeddings_allowed = provider_embeddings_allowed
         self.stage_metadata = stage_metadata
@@ -466,7 +534,7 @@ class AgenticToolbox:
                         )
                         key = (
                             f"{doc.id}|{len(text)}|{hash(text)}|{hash(self.query)}|"
-                            f"{getattr(self.cfg, 'agentic_provider_embedding_model_id', '') or ''}|"
+                            f"{self.embedding_provider}|{self.embedding_model_id}|"
                             f"{endpoint_identity}|prov"
                         )
                         cached = _INTRA_DOC_VEC_CACHE.get(key)
@@ -480,18 +548,14 @@ class AgenticToolbox:
                                     increment_counter("agentic_cache_hits_total", 1, labels={"cache_type": "intra_doc"})
                             continue
                         else:
-                            from tldw_Server_API.app.core.config import load_comprehensive_config
                             from tldw_Server_API.app.core.Embeddings.Embeddings_Server.Embeddings_Create import (
                                 create_embeddings_batch,
                             )
 
-                            app_cfg = load_comprehensive_config() or {}
-                            embedding_settings = app_cfg.get("EMBEDDING_CONFIG", {})
-                            app_config = {"embedding_config": embedding_settings}
                             texts = [self.query] + [text[start:end] for (start, end) in paragraphs]
                             vecs_list = create_embeddings_batch(
                                 texts,
-                                app_config,
+                                self.embedding_app_config,
                                 getattr(self.cfg, "agentic_provider_embedding_model_id", None),
                                 **self.embedding_call_kwargs,
                             )
@@ -507,6 +571,7 @@ class AgenticToolbox:
                             continue
                     except (ImportError, AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError, TimeoutError) as exc:
                         _record_embedding_degraded(self.stage_metadata, exc)
+                        self.provider_embeddings_allowed = False
                 self._para_vecs[doc.id] = [_hash_embed(text[start:end], getattr(self.cfg, "semantic_dim", 2048)) for (start, end) in paragraphs]
 
     def search_within(self, doc: Document, query: str, max_hits: int = 8, window: int = 300) -> list[tuple[int, int]]:
@@ -606,29 +671,39 @@ async def tool_loop(
         else None
     )
     embedding_call_kwargs: dict[str, Any] = {}
+    embedding_app_config: dict[str, Any] = {"embedding_config": {}}
+    embedding_provider: str | None = None
+    embedding_model_id = ""
     handle = None
     provider_embeddings_allowed = True
     if getattr(cfg, "agentic_use_provider_embeddings_within", False):
         try:
             from tldw_Server_API.app.core.config import load_comprehensive_config
 
-            app_cfg = load_comprehensive_config() or {}
-            embedding_settings = app_cfg.get("EMBEDDING_CONFIG", {})
-            provider = _embedding_provider_from_config(
-                {"embedding_config": embedding_settings},
+            loaded_config = load_comprehensive_config() or {}
+            embedding_app_config = _embedding_config_snapshot(
+                loaded_config,
+                scrub_secrets=credential_runtime is not None,
+            )
+            embedding_provider = _embedding_provider_from_config(
+                embedding_app_config,
+                getattr(cfg, "agentic_provider_embedding_model_id", None),
+            )
+            embedding_model_id = _effective_embedding_model_id(
+                embedding_app_config,
                 getattr(cfg, "agentic_provider_embedding_model_id", None),
             )
             # Hugging Face in this synchronous service is an in-process provider.
             if credential_runtime is not None:
-                if provider == "openai":
+                if embedding_provider == "openai":
                     handle, embedding_call_kwargs = await _resolve_runtime_embedding_call(
                         credential_runtime,
-                        provider,
+                        embedding_provider,
                     )
                 else:
                     embedding_call_kwargs = _runtime_local_embedding_call_kwargs(
-                        {"embedding_config": embedding_settings},
-                        provider,
+                        embedding_app_config,
+                        embedding_provider,
                         getattr(cfg, "agentic_provider_embedding_model_id", None),
                     )
         except asyncio.CancelledError:
@@ -650,6 +725,9 @@ async def tool_loop(
         docs,
         cfg,
         query=query,
+        embedding_app_config=embedding_app_config,
+        embedding_provider=embedding_provider,
+        embedding_model_id=embedding_model_id,
         embedding_call_kwargs=embedding_call_kwargs,
         provider_embeddings_allowed=provider_embeddings_allowed,
         stage_metadata=stage_metadata,
@@ -669,7 +747,7 @@ async def tool_loop(
 
     planned_headings: list[str] = []
     planned_terms: list[str] = []
-    if getattr(cfg, "use_llm_planner", False):
+    if getattr(cfg, "use_llm_planner", False) and time_left():
         try:
             planner_cls = AnswerGenerator
             if planner_cls is None:

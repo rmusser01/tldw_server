@@ -5,8 +5,10 @@ This module provides helpers to generate a hypothetical answer for a query
 using a lightweight LLM and to compute its embedding for use in retrieval.
 """
 import asyncio
+import math
 from collections.abc import Awaitable
 from functools import partial
+from numbers import Real
 from typing import Any, Callable, Optional
 
 from loguru import logger
@@ -192,17 +194,26 @@ def _record_embedding_degraded(stage_metadata: dict[str, Any] | None, exc: BaseE
     """Record only bounded optional-stage failure metadata."""
     if stage_metadata is None:
         return
-    from tldw_Server_API.app.core.Embeddings.async_embeddings import EmbeddingCredentialError
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+    from tldw_Server_API.app.core.Embeddings.async_embeddings import (
+        EmbeddingCredentialError,
+        EmbeddingEndpointError,
+    )
 
-    code = str(getattr(exc, "code", "") or "")
+    code = str(getattr(exc, "code", "") or getattr(exc, "error_code", "") or "")
     status_code = getattr(exc, "status_code", None)
     if isinstance(exc, EmbeddingCredentialError):
         code = "missing_provider_credentials"
+    elif isinstance(exc, EmbeddingEndpointError):
+        code = "provider_configuration_invalid"
+    elif isinstance(exc, ChatConfigurationError):
+        code = str(getattr(exc, "error_code", "") or "provider_configuration_invalid")
     elif code == "authentication" or status_code in {401, 403}:
         code = "invalid_provider_credentials"
     if code not in {
         "invalid_provider_credentials",
         "missing_provider_credentials",
+        "provider_configuration_invalid",
         "credential_store_unavailable",
         "credential_scope_revoked",
     }:
@@ -264,8 +275,29 @@ async def _mark_runtime_used_for_embeddings(
     handle: Any,
 ) -> None:
     """Mark runtime credentials used only after a usable vector is returned."""
-    if handle is not None and embeddings and embeddings[0] is not None:
-        await credential_runtime.mark_used(handle)
+    if handle is None:
+        return
+    from tldw_Server_API.app.core.Embeddings.async_embeddings import EmbeddingProviderError
+
+    try:
+        vector = embeddings[0]
+        if hasattr(vector, "tolist"):
+            vector = vector.tolist()
+        if not isinstance(vector, (list, tuple)) or not vector:
+            raise ValueError
+        if not all(
+            not isinstance(value, bool)
+            and isinstance(value, Real)
+            and math.isfinite(float(value))
+            for value in vector
+        ):
+            raise ValueError
+    except (AttributeError, IndexError, OverflowError, TypeError, ValueError):
+        raise EmbeddingProviderError(
+            str(getattr(handle, "provider", "") or "unknown"),
+            code="provider_failure",
+        ) from None
+    await credential_runtime.mark_used(handle)
 
 
 async def embed_text(
