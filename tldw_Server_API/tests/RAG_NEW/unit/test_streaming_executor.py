@@ -1,3 +1,4 @@
+import asyncio
 from typing import Any
 from types import SimpleNamespace
 
@@ -5,6 +6,7 @@ import pytest
 
 import tldw_Server_API.app.core.RAG.rag_service.streaming_executor as streaming_executor
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAuthenticationError
+from tldw_Server_API.app.core.RAG.rag_service.generation import GenerationConfig, LLMGenerator
 from tldw_Server_API.app.core.RAG.rag_service.request_resolution import ResolvedRAGRequest
 from tldw_Server_API.app.core.RAG.rag_service.retrieval_plan import RetrievalPlan
 from tldw_Server_API.app.core.RAG.rag_service.streaming_executor import (
@@ -47,6 +49,138 @@ def _retrieval_plan() -> RetrievalPlan:
         index_namespace=None,
         collection_names={"media_db": "user_1_media_embeddings"},
     )
+
+
+class _StreamingRuntime:
+    def __init__(self) -> None:
+        self.handle = SimpleNamespace(
+            provider="test-provider",
+            api_key="runtime-stream-key",
+            app_config={"TestProvider": {"api_timeout": 9}},
+            credentials_resolved=True,
+        )
+        self.marked: list[Any] = []
+
+    async def resolve(self, provider: str) -> Any:
+        return self.handle
+
+    async def mark_used(self, handle: Any) -> None:
+        self.marked.append(handle)
+
+
+async def _consume_tracked_stream(
+    monkeypatch: pytest.MonkeyPatch,
+    upstream: Any,
+    runtime: _StreamingRuntime,
+) -> list[Any]:
+    async def fake_chat_call(**kwargs: Any) -> Any:
+        return upstream
+
+    import tldw_Server_API.app.core.Chat.chat_service as chat_service
+
+    monkeypatch.setattr(chat_service, "perform_chat_api_call_async", fake_chat_call)
+    tracked = await LLMGenerator(
+        GenerationConfig(provider="test-provider", model="test-model", streaming=True)
+    )._call_llm("prompt", credential_runtime=runtime)
+    return [chunk async for chunk in tracked]
+
+
+@pytest.mark.parametrize(
+    "control_chunks",
+    [
+        [": keepalive\n\n", "event: message\n", "id: 7\n", "retry: 1000\n"],
+        ["keepalive", "event: ping"],
+    ],
+)
+@pytest.mark.asyncio
+async def test_stream_controls_then_failure_remain_unmarked(
+    monkeypatch: pytest.MonkeyPatch,
+    control_chunks: list[str],
+) -> None:
+    runtime = _StreamingRuntime()
+
+    async def upstream() -> Any:
+        for chunk in control_chunks:
+            yield chunk
+        raise ChatAuthenticationError("private upstream", provider="test-provider")
+
+    with pytest.raises(ChatAuthenticationError):
+        await _consume_tracked_stream(monkeypatch, upstream(), runtime)
+
+    assert runtime.marked == []  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_stream_preoutput_failure_remains_unmarked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _StreamingRuntime()
+
+    async def upstream() -> Any:
+        if False:
+            yield "unreachable"
+        raise ChatAuthenticationError("private upstream", provider="test-provider")
+
+    with pytest.raises(ChatAuthenticationError):
+        await _consume_tracked_stream(monkeypatch, upstream(), runtime)
+
+    assert runtime.marked == []  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_stream_controls_then_cancellation_remain_unmarked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _StreamingRuntime()
+
+    async def upstream() -> Any:
+        yield ": keepalive\n\n"
+        raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        await _consume_tracked_stream(monkeypatch, upstream(), runtime)
+
+    assert runtime.marked == []  # nosec B101
+
+
+@pytest.mark.parametrize("stream_kind", ["sync", "async"])
+@pytest.mark.asyncio
+async def test_clean_empty_stream_marks_once(
+    monkeypatch: pytest.MonkeyPatch,
+    stream_kind: str,
+) -> None:
+    runtime = _StreamingRuntime()
+
+    if stream_kind == "async":
+        async def empty_async() -> Any:
+            if False:
+                yield "unreachable"
+
+        upstream: Any = empty_async()
+    else:
+        upstream = iter(())
+
+    chunks = await _consume_tracked_stream(monkeypatch, upstream, runtime)
+
+    assert chunks == []  # nosec B101
+    assert runtime.marked == [runtime.handle]  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_mixed_sse_controls_then_data_marks_once_before_later_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _StreamingRuntime()
+
+    async def upstream() -> Any:
+        yield "event: message\n"
+        yield 'data: {"choices":[{"delta":{"content":"answer"}}]}'
+        raise ChatAuthenticationError("private upstream", provider="test-provider")
+
+    with pytest.raises(ChatAuthenticationError):
+        await _consume_tracked_stream(monkeypatch, upstream(), runtime)
+
+    assert runtime.marked == [runtime.handle]  # nosec B101
 
 
 async def _fake_generate_streaming_response(context: Any, **kwargs: Any) -> Any:  # noqa: ARG001

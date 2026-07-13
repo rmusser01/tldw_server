@@ -255,8 +255,8 @@ class DocumentGrader:
                 asyncio.to_thread(
                     self._analyze,
                     use_provider,
-                    "",  # input_data (not used when custom_prompt_arg is provided)
                     prompt,
+                    None,
                     api_key,
                     "You are a document relevance grader. Output valid JSON only.",
                     self.config.temperature,
@@ -266,6 +266,12 @@ class DocumentGrader:
                 ),
                 timeout=self.config.timeout_seconds,
             )
+
+            if isinstance(raw_response, str) and raw_response.startswith("Error:"):
+                raise SummaryProviderError(
+                    code="provider_failure",
+                    provider=use_provider,
+                )
 
             if credential_handle is not None:
                 await self.credential_runtime.mark_used(credential_handle)
@@ -279,7 +285,12 @@ class DocumentGrader:
 
         except asyncio.TimeoutError:
             logger.warning(f"Document grading timed out for doc {doc_id}")
-            return self._fallback_to_score(doc_id, doc_score, start_time, error="timeout")
+            error = (
+                "provider_unavailable"
+                if self.credential_runtime is not None
+                else "timeout"
+            )
+            return self._fallback_to_score(doc_id, doc_score, start_time, error=error)
 
         except ByokResolutionError as exc:
             logger.warning("Document grading credentials unavailable for doc {}", doc_id)

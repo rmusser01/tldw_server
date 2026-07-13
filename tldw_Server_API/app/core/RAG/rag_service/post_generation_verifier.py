@@ -311,20 +311,22 @@ class PostGenerationVerifier:
                         except Exception:  # noqa: BLE001 - retrieval fallback should be safe
                             return base_documents[:top]
 
-                    run = await engine.run(
-                        answer=answer,
-                        query=query,
-                        documents=base_documents,
-                        claim_extractor="auto",
-                        claim_verifier="hybrid",
-                        claims_top_k=5,
-                        claims_conf_threshold=0.7,
-                        claims_max=self._max_claims,
-                        retrieve_fn=_retrieve_for_claim,
-                        nli_model=os.getenv("RAG_NLI_MODEL") or os.getenv("RAG_NLI_MODEL_PATH"),
-                        claims_concurrency=8,
-                    )
-                    await self._mark_claims_used(claims_handle, claims_state)
+                    try:
+                        run = await engine.run(
+                            answer=answer,
+                            query=query,
+                            documents=base_documents,
+                            claim_extractor="auto",
+                            claim_verifier="hybrid",
+                            claims_top_k=5,
+                            claims_conf_threshold=0.7,
+                            claims_max=self._max_claims,
+                            retrieve_fn=_retrieve_for_claim,
+                            nli_model=os.getenv("RAG_NLI_MODEL") or os.getenv("RAG_NLI_MODEL_PATH"),
+                            claims_concurrency=8,
+                        )
+                    finally:
+                        await self._mark_claims_used(claims_handle, claims_state)
                     claims_payload = (run or {}).get("claims")
                     summary_payload = (run or {}).get("summary")
         except (ByokResolutionError, SummaryProviderError) as exc:
@@ -485,20 +487,22 @@ class PostGenerationVerifier:
                     sum2 = (run2 or {}).get("summary") or {}
                 elif ClaimsEngine is not None:
                     eng2, claims_handle, claims_state = await self._build_claims_engine()
-                    run2 = await eng2.run(
-                        answer=new_answer,
-                        query=query,
-                        documents=new_docs,
-                        claim_extractor="auto",
-                        claim_verifier="hybrid",
-                        claims_top_k=5,
-                        claims_conf_threshold=0.7,
-                        claims_max=max(5, min(10, self._max_claims)),
-                        retrieve_fn=None,
-                        nli_model=os.getenv("RAG_NLI_MODEL") or os.getenv("RAG_NLI_MODEL_PATH"),
-                        claims_concurrency=4,
-                    )
-                    await self._mark_claims_used(claims_handle, claims_state)
+                    try:
+                        run2 = await eng2.run(
+                            answer=new_answer,
+                            query=query,
+                            documents=new_docs,
+                            claim_extractor="auto",
+                            claim_verifier="hybrid",
+                            claims_top_k=5,
+                            claims_conf_threshold=0.7,
+                            claims_max=max(5, min(10, self._max_claims)),
+                            retrieve_fn=None,
+                            nli_model=os.getenv("RAG_NLI_MODEL") or os.getenv("RAG_NLI_MODEL_PATH"),
+                            claims_concurrency=4,
+                        )
+                    finally:
+                        await self._mark_claims_used(claims_handle, claims_state)
                     sum2 = (run2 or {}).get("summary") or {}
                 else:
                     sum2 = {}

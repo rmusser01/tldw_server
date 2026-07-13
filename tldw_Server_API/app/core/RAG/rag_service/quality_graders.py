@@ -249,8 +249,8 @@ class FastGroundednessGrader:
                 asyncio.to_thread(
                     self._analyze,
                     use_provider,
-                    "",  # input_data (not used when custom_prompt_arg is set)
                     prompt,
+                    None,
                     api_key,
                     "You are a groundedness checker. Output valid JSON only.",
                     cfg_temp,
@@ -259,6 +259,12 @@ class FastGroundednessGrader:
                 ),
                 timeout=self.timeout_sec,
             )
+
+            if isinstance(raw_response, str) and raw_response.startswith("Error:"):
+                raise SummaryProviderError(
+                    code="provider_failure",
+                    provider=use_provider,
+                )
 
             if credential_handle is not None:
                 await self.credential_runtime.mark_used(credential_handle)
@@ -276,7 +282,14 @@ class FastGroundednessGrader:
                 rationale="Timeout during groundedness check",
                 latency_ms=int((time.time() - start_time) * 1000),
                 method="error_fallback",
-                metadata={"error": "timeout"},
+                metadata=(
+                    {
+                        "error": "provider_unavailable",
+                        "verification_available": False,
+                    }
+                    if self.credential_runtime is not None
+                    else {"error": "timeout"}
+                ),
             )
 
         except ByokResolutionError as exc:
@@ -519,8 +532,8 @@ class UtilityGrader:
                 asyncio.to_thread(
                     self._analyze,
                     use_provider,
-                    "",  # input_data
                     prompt,
+                    None,
                     api_key,
                     "You are a response quality evaluator. Output valid JSON only.",
                     cfg_temp,
@@ -529,6 +542,12 @@ class UtilityGrader:
                 ),
                 timeout=self.timeout_sec,
             )
+
+            if isinstance(raw_response, str) and raw_response.startswith("Error:"):
+                raise SummaryProviderError(
+                    code="provider_failure",
+                    provider=use_provider,
+                )
 
             if credential_handle is not None:
                 await self.credential_runtime.mark_used(credential_handle)
@@ -545,7 +564,14 @@ class UtilityGrader:
                 explanation="Timeout during utility grading",
                 latency_ms=int((time.time() - start_time) * 1000),
                 method="error_fallback",
-                metadata={"error": "timeout"},
+                metadata=(
+                    {
+                        "error": "provider_unavailable",
+                        "verification_available": False,
+                    }
+                    if self.credential_runtime is not None
+                    else {"error": "timeout"}
+                ),
             )
 
         except ByokResolutionError as exc:

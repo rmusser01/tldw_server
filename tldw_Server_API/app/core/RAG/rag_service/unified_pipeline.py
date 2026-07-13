@@ -383,6 +383,15 @@ from .result_model import RAGResult
 from .retrieval_plan import build_retrieval_plan
 from .types import DataSource, Document
 
+
+def _consume_bound_sgl_response(response: Any, provider: str) -> Any:
+    """Consume a bound SGL response and reject its legacy error-string form."""
+    if isinstance(response, Iterator):
+        response = "".join(str(chunk) for chunk in response)
+    if isinstance(response, str) and response.startswith("Error:"):
+        raise SummaryProviderError(code="provider_failure", provider=provider)
+    return response
+
 try:
     from tldw_Server_API.app.core.Text2SQL.source_registry import (
         normalize_sources_internal as _normalize_sources_internal,
@@ -4175,17 +4184,15 @@ async def unified_rag_pipeline(
                     def _call_gap_analyzer() -> Any:
                         response = llm_analyze(
                             api_name=_prov,
-                            input_data="",
-                            custom_prompt_arg=prompt,
+                            input_data=prompt,
+                            custom_prompt_arg=None,
                             model_override=_model,
                             api_key=(gap_handle.api_key if gap_handle is not None else None),
                             app_config=(gap_handle.app_config if gap_handle is not None else None),
                             credentials_resolved=gap_handle is not None,
                             raise_on_error=gap_handle is not None,
                         )
-                        if isinstance(response, Iterator):
-                            return "".join(str(chunk) for chunk in response)
-                        return response
+                        return _consume_bound_sgl_response(response, _prov)
 
                     llm_out = await asyncio.to_thread(_call_gap_analyzer)
                     if gap_handle is not None:
@@ -5115,14 +5122,15 @@ async def unified_rag_pipeline(
                                         self.provider = provider or 'openai'
                                         self.model_name = model_name
                                         self.handle = handle
+                                        self.credentials_resolved = handle is not None
                                         self.used = False
 
                                     def analyze(self, prompt_text: str):
                                         # Use analyze with prompt as custom_prompt_arg
                                         response = sgl.analyze(
                                             api_name=self.provider,
-                                            input_data="",
-                                            custom_prompt_arg=prompt_text,
+                                            input_data=prompt_text,
+                                            custom_prompt_arg=None,
                                             api_key=(
                                                 self.handle.api_key
                                                 if self.handle is not None
@@ -5139,10 +5147,10 @@ async def unified_rag_pipeline(
                                             credentials_resolved=self.handle is not None,
                                             raise_on_error=self.handle is not None,
                                         )
-                                        if isinstance(response, Iterator):
-                                            response = "".join(
-                                                str(chunk) for chunk in response
-                                            )
+                                        response = _consume_bound_sgl_response(
+                                            response,
+                                            self.provider,
+                                        )
                                         self.used = True
                                         return response
 
@@ -5944,8 +5952,8 @@ async def unified_rag_pipeline(
                             def _call_critique() -> Any:
                                 response = sgl.analyze(
                                     api_name="openai",
-                                    input_data="",
-                                    custom_prompt_arg=crit_prompt,
+                                    input_data=crit_prompt,
+                                    custom_prompt_arg=None,
                                     model_override=None,
                                     api_key=(
                                         critique_handle.api_key
@@ -5960,9 +5968,7 @@ async def unified_rag_pipeline(
                                     credentials_resolved=critique_handle is not None,
                                     raise_on_error=critique_handle is not None,
                                 )
-                                if isinstance(response, Iterator):
-                                    return "".join(str(chunk) for chunk in response)
-                                return response
+                                return _consume_bound_sgl_response(response, "openai")
 
                             c_text = await asyncio.to_thread(_call_critique)
                             if critique_handle is not None:
@@ -6310,7 +6316,7 @@ async def unified_rag_pipeline(
 
                 claims_handle = None
                 claims_provider = None
-                claims_state = {"used": False}
+                claims_state = {"used": False, "marked": False}
                 if credential_runtime is not None:
                     from tldw_Server_API.app.core.Claims_Extraction.claims_engine import (
                         _resolve_claims_llm_config,
@@ -6353,6 +6359,19 @@ async def unified_rag_pipeline(
 
                 if ClaimsEngine:
                     engine = ClaimsEngine(_analyze)
+
+                    async def _run_claims_engine(**run_kwargs: Any) -> dict[str, Any]:
+                        try:
+                            return await engine.run(**run_kwargs)
+                        finally:
+                            if (
+                                claims_handle is not None
+                                and claims_state["used"]
+                                and not claims_state["marked"]
+                            ):
+                                await credential_runtime.mark_used(claims_handle)
+                                claims_state["marked"] = True
+
                     # Default NLI model from environment if not provided
                     if not nli_model:
                         import os
@@ -6553,7 +6572,7 @@ async def unified_rag_pipeline(
                             }
                         else:
                             # Fall back to on-the-fly extraction from the generated answer
-                            claims_run = await engine.run(
+                            claims_run = await _run_claims_engine(
                                 answer=result.generated_answer,
                                 query=query,
                                 documents=result.documents or [],
@@ -6581,7 +6600,7 @@ async def unified_rag_pipeline(
                         asyncio.TimeoutError,
                     ) as _eclaims:
                         logger.debug(f"Pre-extracted claims path failed: {_eclaims}")
-                        claims_run = await engine.run(
+                        claims_run = await _run_claims_engine(
                             answer=result.generated_answer,
                             query=query,
                             documents=result.documents or [],
@@ -6600,8 +6619,13 @@ async def unified_rag_pipeline(
                         factuality_payload = claims_run.get("summary")
                         verifications = claims_run.get("verifications", [])
                     # Also store in metadata for debugging/analytics
-                    if claims_handle is not None and claims_state["used"]:
+                    if (
+                        claims_handle is not None
+                        and claims_state["used"]
+                        and not claims_state["marked"]
+                    ):
                         await credential_runtime.mark_used(claims_handle)
+                        claims_state["marked"] = True
                     result.metadata["claims"] = claims_payload
                     result.metadata["factuality"] = factuality_payload
 
@@ -7388,6 +7412,7 @@ async def unified_rag_pipeline(
                             _f_handle = None
                             if credential_runtime is not None:
                                 _f_handle = await credential_runtime.resolve(_f_prov)
+                            _f_state = {"marked": False}
 
                             class _FaithfulnessLLMAdapter:
                                 """Wraps analyze() to satisfy the LLMCallable protocol."""
@@ -7398,8 +7423,8 @@ async def unified_rag_pipeline(
                                     def _call_faithfulness() -> Any:
                                         response = _sgl_analyze(
                                             api_name=_f_prov,
-                                            input_data="",
-                                            custom_prompt_arg=prompt,
+                                            input_data=prompt,
+                                            custom_prompt_arg=None,
                                             model_override=_f_model,
                                             api_key=(
                                                 _f_handle.api_key
@@ -7414,16 +7439,18 @@ async def unified_rag_pipeline(
                                             credentials_resolved=_f_handle is not None,
                                             raise_on_error=_f_handle is not None,
                                         )
-                                        if isinstance(response, Iterator):
-                                            return "".join(str(chunk) for chunk in response)
-                                        return response
+                                        return _consume_bound_sgl_response(
+                                            response,
+                                            _f_prov,
+                                        )
 
                                     result_text = await _aio.get_running_loop().run_in_executor(
                                         None,
                                         _call_faithfulness,
                                     )
-                                    if _f_handle is not None:
+                                    if _f_handle is not None and not _f_state["marked"]:
                                         await credential_runtime.mark_used(_f_handle)
+                                        _f_state["marked"] = True
                                     return str(result_text) if result_text else ""
 
                             _llm_obj = _FaithfulnessLLMAdapter()
@@ -7433,7 +7460,10 @@ async def unified_rag_pipeline(
                             )
 
                     if _llm_obj is not None:
-                        _faith_eval = _FaithEval(_llm_obj)
+                        _faith_eval = _FaithEval(
+                            _llm_obj,
+                            propagate_errors=credential_runtime is not None,
+                        )
                         _faith_result = await _faith_eval.evaluate_detailed(
                             result.generated_answer, _ctx_text
                         )
@@ -7461,8 +7491,15 @@ async def unified_rag_pipeline(
                 }
                 logger.warning("Faithfulness evaluation provider unavailable")
             except Exception as _fe_err:
-                logger.warning(f"Faithfulness evaluation failed: {_fe_err}")
-                result.errors.append(f"Faithfulness eval failed: {_fe_err}")
+                if credential_runtime is not None:
+                    result.metadata["faithfulness"] = {
+                        "failure_code": "provider_unavailable",
+                        "verification_available": False,
+                    }
+                    logger.warning("Faithfulness evaluation provider unavailable")
+                else:
+                    logger.warning(f"Faithfulness evaluation failed: {_fe_err}")
+                    result.errors.append(f"Faithfulness eval failed: {_fe_err}")
 
         # Debug output if requested
         if debug_mode:

@@ -241,20 +241,36 @@ def _extract_stream_text(chunk: Any) -> Optional[str]:
         stripped = chunk.strip()
         if not stripped:
             return None
-        if stripped.lower().startswith("data:"):
-            data = stripped[5:].strip()
-            if data.lower() == "[done]":
-                return None
-            try:
-                payload = json.loads(data)
-            except json.JSONDecodeError:
-                return data or None
-            if isinstance(payload, dict):
-                return _extract_openai_text_content(payload)
-            if isinstance(payload, str):
-                return payload or None
-            return None
-        return stripped
+        text_parts: list[str] = []
+        for line in stripped.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            lowered = line.lower()
+            if (
+                line.startswith(":")
+                or lowered.startswith(("event:", "id:", "retry:"))
+                or lowered in {"keepalive", "ping", "pong", "heartbeat"}
+            ):
+                continue
+            if lowered.startswith("data:"):
+                data = line[5:].strip()
+                if not data or data.lower() == "[done]":
+                    continue
+                try:
+                    payload = json.loads(data)
+                except json.JSONDecodeError:
+                    text_parts.append(data)
+                    continue
+                if isinstance(payload, dict):
+                    text = _extract_openai_text_content(payload)
+                    if text:
+                        text_parts.append(text)
+                elif isinstance(payload, str) and payload:
+                    text_parts.append(payload)
+                continue
+            text_parts.append(line)
+        return "\n".join(text_parts) or None
     try:
         return str(chunk)
     except (TypeError, ValueError):

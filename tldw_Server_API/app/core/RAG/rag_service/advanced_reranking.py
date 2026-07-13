@@ -1393,6 +1393,13 @@ class LLMReranker(BaseReranker):
                     score_val = _parse_float_score(out, default=0.5)
                 except asyncio.TimeoutError:
                     _inc_counter("reranker.llm.timeouts")
+                    if getattr(self.llm_client, "credentials_resolved", False):
+                        self.last_metadata = {
+                            "degraded": True,
+                            "failure_code": "provider_unavailable",
+                            "verification_available": False,
+                        }
+                        return [doc.score for doc in documents]
                     score_val = 0.5
                 except Exception:  # noqa: BLE001 - optional stage degrades safely
                     _inc_counter("reranker.llm.exceptions")

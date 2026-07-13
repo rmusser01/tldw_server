@@ -705,21 +705,23 @@ async def agentic_rag_pipeline(
                 engine = ClaimsEngine(_analyze)
                 async def _retrieve_for_claim(_c_text: str, top_k: int = 3):
                     return [synthetic]
-                claims_run = await engine.run(
-                    answer=result.generated_answer,
-                    query=effective_query,
-                    documents=[synthetic],
-                    claim_extractor="auto",
-                    claim_verifier=claim_verifier,
-                    claims_top_k=claims_top_k,
-                    claims_conf_threshold=claims_conf_threshold,
-                    claims_max=claims_max,
-                    retrieve_fn=_retrieve_for_claim,
-                    nli_model=nli_model,
-                    claims_concurrency=claims_concurrency,
-                )
-                if claims_handle is not None and claims_state["used"]:
-                    await credential_runtime.mark_used(claims_handle)
+                try:
+                    claims_run = await engine.run(
+                        answer=result.generated_answer,
+                        query=effective_query,
+                        documents=[synthetic],
+                        claim_extractor="auto",
+                        claim_verifier=claim_verifier,
+                        claims_top_k=claims_top_k,
+                        claims_conf_threshold=claims_conf_threshold,
+                        claims_max=claims_max,
+                        retrieve_fn=_retrieve_for_claim,
+                        nli_model=nli_model,
+                        claims_concurrency=claims_concurrency,
+                    )
+                finally:
+                    if claims_handle is not None and claims_state["used"]:
+                        await credential_runtime.mark_used(claims_handle)
                 claims_payload = claims_run.get("claims")
                 result.metadata["claims"] = claims_payload
                 result.metadata["factuality"] = claims_run.get("summary")

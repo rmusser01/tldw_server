@@ -77,7 +77,6 @@ from tldw_Server_API.app.core.Claims_Extraction.runtime_config import (
 from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
 
 _CLAIMS_ENGINE_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,
