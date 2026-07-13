@@ -399,7 +399,7 @@ describe("TldwApiClient quickstart auth bootstrap", () => {
     config
   }) => {
     if (deploymentMode) {
-      process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = deploymentMode
+      vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", deploymentMode)
     }
     mocks.storage.set("tldwConfig", {
       authMode: "single-user",
@@ -448,7 +448,7 @@ describe("TldwApiClient quickstart auth bootstrap", () => {
   })
 
   it("uses an active quickstart cookie session after scrubbing a legacy key", async () => {
-    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
     mocks.storage.set("tldwConfig", {
       authMode: "single-user",
       serverUrl: "https://api.example.test/path",

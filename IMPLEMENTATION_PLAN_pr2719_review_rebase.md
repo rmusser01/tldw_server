@@ -46,11 +46,11 @@
 - Modify: `apps/packages/ui/src/services/__tests__/tldw-api-client.quickstart-auth.test.ts`
 
 **Success Criteria**: The two reviewed newly added direct environment writes (parameterized deployment mode and active quickstart cookie-session case) use `vi.stubEnv`; existing unrelated legacy test style is not broadened.
-**Tests**: From `apps/packages/ui`, run `bunx vitest run src/services/__tests__/tldw-api-client.quickstart-auth.test.ts src/services/__tests__/tldw-api-client.auth-source.test.ts src/services/__tests__/tldw-api-client.request-config.test.ts`; repeat the quickstart file with `NEXT_PUBLIC_X_API_KEY=ambient-test-key` and with `VITE_TLDW_API_KEY=ambient-test-key`. Expected: 50 tests for the matrix and 22 tests for each ambient-key run.
-**Status**: Not Started
+**Tests**: From `apps/packages/ui`, run `bunx vitest run src/services/__tests__/tldw-api-client.quickstart-auth.test.ts src/services/__tests__/tldw-api-client.connection-sync.test.ts src/services/tldw/__tests__/single-user-credential.test.ts`; repeat the quickstart file with `NEXT_PUBLIC_X_API_KEY=ambient-test-key` and with `VITE_TLDW_API_KEY=ambient-test-key`. Expected: 50 tests for the matrix and 22 tests for each ambient-key run.
+**Status**: Complete
 
-- [ ] Replace only lines currently assigning `process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE` in the new migration parameterized case and quickstart-cookie precedence case with `vi.stubEnv`.
-- [ ] Run the focused and ambient auth test commands.
+- [x] Replace only lines currently assigning `process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE` in the new migration parameterized case and quickstart-cookie precedence case with `vi.stubEnv`.
+- [x] Run the focused and ambient auth test commands.
 
 ## Stage 4: Verification and PR update
 **Goal**: Verify, commit, force-update the rebased branch safely, and close addressed review threads.
