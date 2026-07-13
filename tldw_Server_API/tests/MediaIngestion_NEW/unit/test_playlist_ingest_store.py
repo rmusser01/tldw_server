@@ -1370,3 +1370,74 @@ def test_cleanup_expired_is_owner_safe(store):
     with pytest.raises(PlaylistIngestNotFoundError):
         store.get_preflight("1", expired.preflight_id)
     assert store.cleanup_expired("2", now=store.test_clock.now_utc())["preflights"] == 1
+
+
+def test_cleanup_keeps_active_db_time_preflight_linked_to_acquirable_job(tmp_path, monkeypatch):
+    monkeypatch.setenv("TEST_MODE", "true")
+    monkeypatch.setenv("PLAYLIST_PREFLIGHT_TTL_SECONDS", "600")
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
+        PlaylistIngestService,
+    )
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestStore,
+    )
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    manager = JobManager(db_path=tmp_path / "cleanup-active-db-time.db")
+    service = PlaylistIngestService(manager)
+    created = service.create_preflight(
+        "cleanup-owner",
+        url="https://www.youtube.com/playlist?list=PLcleanupactive",
+        max_items=20,
+        timeout_seconds=10,
+    )
+    store = PlaylistIngestStore(manager)
+    cutoff = datetime.now(timezone.utc)
+
+    deleted = store.cleanup_expired("cleanup-owner", now=cutoff)
+
+    assert deleted["preflights"] == 0
+    remaining = store.get_preflight("cleanup-owner", created.preflight_id)
+    assert remaining.job_id == created.record.job_id
+    claimed = manager.acquire_next_job(
+        domain="media_ingest",
+        queue="default",
+        worker_id="cleanup-active-worker",
+        lease_seconds=120,
+        job_type="playlist_preflight",
+    )
+    assert claimed is not None
+    assert int(claimed["id"]) == remaining.job_id
+
+
+@pytest.mark.parametrize("storage_format", ["iso", "database"])
+def test_cleanup_deletes_historical_expiry_formats(tmp_path, monkeypatch, storage_format):
+    monkeypatch.setenv("TEST_MODE", "true")
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestStore,
+    )
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    manager = JobManager(db_path=tmp_path / f"cleanup-expired-{storage_format}.db")
+    store = PlaylistIngestStore(manager)
+    now = datetime.now(timezone.utc)
+    preflight = store.create_preflight(
+        "cleanup-owner",
+        source_url="https://example.com/historical-expiry",
+        source_kind="url",
+        expires_at=now + timedelta(hours=1),
+    )
+    expired = now - timedelta(hours=1)
+    stored_expiry = expired.isoformat() if storage_format == "iso" else expired.strftime("%Y-%m-%d %H:%M:%S")
+    with manager._connect() as connection:
+        connection.execute(
+            "UPDATE playlist_preflights SET expires_at = ? WHERE preflight_id = ?",
+            (stored_expiry, preflight.preflight_id),
+        )
+        connection.commit()
+
+    deleted = store.cleanup_expired("cleanup-owner", now=now)
+
+    assert deleted["preflights"] == 1

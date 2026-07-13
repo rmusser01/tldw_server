@@ -225,6 +225,10 @@ class PlaylistIngestStore:
         """Compare timestamps safely across SQLite's supported text formats."""
         return "expires_at > ?" if self._postgres else "julianday(expires_at) > julianday(?)"
 
+    def _expired_sql(self) -> str:
+        """Return the backend-safe complement used by cleanup predicates."""
+        return "expires_at <= ?" if self._postgres else "julianday(expires_at) <= julianday(?)"
+
     def _future_expiry(self, value: datetime, *, now: datetime) -> datetime:
         normalized = self._datetime(value)
         if normalized <= now:
@@ -1776,57 +1780,57 @@ class PlaylistIngestStore:
 
             self._query(
                 db,
-                """
+                f"""
                 DELETE FROM media_ingest_run_events WHERE owner_user_id = ? AND run_id IN (
-                    SELECT run_id FROM media_ingest_runs WHERE owner_user_id = ? AND expires_at <= ?
+                    SELECT run_id FROM media_ingest_runs WHERE owner_user_id = ? AND {self._expired_sql()}
                 )
-                """,
+                """,  # nosec B608
                 (owner, owner, cutoff),
             )
             self._query(
                 db,
-                """
+                f"""
                 DELETE FROM media_ingest_run_items WHERE owner_user_id = ? AND run_id IN (
-                    SELECT run_id FROM media_ingest_runs WHERE owner_user_id = ? AND expires_at <= ?
+                    SELECT run_id FROM media_ingest_runs WHERE owner_user_id = ? AND {self._expired_sql()}
                 )
-                """,
+                """,  # nosec B608
                 (owner, owner, cutoff),
             )
             runs = self._query(
                 db,
-                "DELETE FROM media_ingest_runs WHERE owner_user_id = ? AND expires_at <= ?",
+                f"DELETE FROM media_ingest_runs WHERE owner_user_id = ? AND {self._expired_sql()}",  # nosec B608
                 (owner, cutoff),
             ).rowcount
             self._query(
                 db,
-                """
+                f"""
                 DELETE FROM playlist_materialization_items
                 WHERE owner_user_id = ? AND materialization_id IN (
                     SELECT materialization_id FROM playlist_materializations
-                    WHERE owner_user_id = ? AND expires_at <= ?
+                    WHERE owner_user_id = ? AND {self._expired_sql()}
                 )
-                """,
+                """,  # nosec B608
                 (owner, owner, cutoff),
             )
             materializations = self._query(
                 db,
-                "DELETE FROM playlist_materializations WHERE owner_user_id = ? AND expires_at <= ?",
+                f"DELETE FROM playlist_materializations WHERE owner_user_id = ? AND {self._expired_sql()}",  # nosec B608
                 (owner, cutoff),
             ).rowcount
             self._query(
                 db,
-                """
+                f"""
                 DELETE FROM playlist_preflight_items
                 WHERE owner_user_id = ? AND preflight_id IN (
                     SELECT preflight_id FROM playlist_preflights
-                    WHERE owner_user_id = ? AND expires_at <= ?
+                    WHERE owner_user_id = ? AND {self._expired_sql()}
                 )
-                """,
+                """,  # nosec B608
                 (owner, owner, cutoff),
             )
             preflights = self._query(
                 db,
-                "DELETE FROM playlist_preflights WHERE owner_user_id = ? AND expires_at <= ?",
+                f"DELETE FROM playlist_preflights WHERE owner_user_id = ? AND {self._expired_sql()}",  # nosec B608
                 (owner, cutoff),
             ).rowcount
         return {
