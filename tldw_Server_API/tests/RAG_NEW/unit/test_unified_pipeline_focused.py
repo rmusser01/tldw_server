@@ -365,7 +365,6 @@ class TestUnifiedPipelineFeatures:
                 enable_date_filter=True,
                 date_range={"start": "2024-01-01", "end": "2024-01-31"},
             ),
-            await capture_namespace(auto_temporal_filters=True),
             await capture_namespace(enable_text_late_chunking=True),
             await capture_namespace(
                 enable_text_late_chunking=True,
@@ -435,6 +434,7 @@ class TestUnifiedPipelineFeatures:
             ("hyde", {"enable_hyde": True}),
             ("prf", {"enable_prf": True}),
             ("query_decomposition", {"enable_query_decomposition": True}),
+            ("gap_analysis", {"enable_gap_analysis": True}),
         ],
     )
     async def test_secondary_retrieval_modes_bypass_cache(
@@ -455,7 +455,12 @@ class TestUnifiedPipelineFeatures:
         ), patch(
             'tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.generate_hypothetical_answer',
             None,
+        ), patch(
+            'tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib.analyze',
+            return_value="[]",
         ):
+            cache = MagicMock()
+            mock_shared_cache.return_value = cache
             retriever = MagicMock()
             retriever.retrieve = AsyncMock(return_value=[
                 Document(id="fresh", content="fresh evidence", metadata={})
@@ -472,6 +477,8 @@ class TestUnifiedPipelineFeatures:
             )
 
         mock_shared_cache.assert_not_called()
+        cache.get.assert_not_called()
+        cache.set.assert_not_called()
         retriever.retrieve.assert_awaited_once()
         assert result.cache_hit is False
         assert result.metadata["cache_bypassed"] == {
@@ -519,6 +526,172 @@ class TestUnifiedPipelineFeatures:
         assert result.metadata["cache_bypassed"] == {
             "reason": "explicit_source_selection",
         }
+
+    @pytest.mark.asyncio
+    async def test_auto_temporal_windows_bypass_cache_across_repeated_requests(self):
+        cache = MagicMock()
+        with patch(
+            'tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.get_shared_cache',
+            return_value=cache,
+        ) as mock_shared_cache, patch(
+            'tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.MultiDatabaseRetriever'
+        ) as mock_retriever:
+            retriever = MagicMock()
+            retriever.retrieve = AsyncMock(side_effect=lambda *_args, **_kwargs: [
+                Document(id="temporal", content="recent evidence", metadata={})
+            ])
+            mock_retriever.return_value = retriever
+            common = {
+                "query": "recent evidence",
+                "top_k": 1,
+                "auto_temporal_filters": True,
+                "enable_cache": True,
+                "enable_generation": False,
+                "enable_reranking": False,
+                "adaptive_cache": False,
+            }
+            first = await unified_rag_pipeline(**common)
+            second = await unified_rag_pipeline(**common)
+
+        mock_shared_cache.assert_not_called()
+        cache.get.assert_not_called()
+        cache.set.assert_not_called()
+        assert retriever.retrieve.await_count == 2
+        for result in (first, second):
+            assert result.cache_hit is False
+            assert result.metadata["cache_bypassed"] == {
+                "reason": "auto_temporal_window",
+            }
+
+    @pytest.mark.asyncio
+    async def test_research_loop_evidence_is_not_cached_as_base_retrieval(self):
+        from tldw_Server_API.app.core.RAG.rag_service.query_classifier import (
+            QueryClassification,
+        )
+        from tldw_Server_API.app.core.RAG.rag_service.research_agent import (
+            ResearchOutput,
+        )
+
+        classification = QueryClassification(
+            skip_search=False,
+            search_local_db=True,
+            search_web=True,
+            search_academic=False,
+            search_discussions=False,
+            standalone_query="research query",
+            detected_intent="factual",
+            confidence=0.8,
+            reasoning="Needs research",
+        )
+        research_output = ResearchOutput(
+            query="research query",
+            standalone_query="research query",
+            all_results=[
+                {
+                    "id": "research-doc",
+                    "content": "external research evidence",
+                    "source": "web",
+                    "score": 0.9,
+                }
+            ],
+            total_iterations=1,
+            total_results=1,
+            total_duration_sec=0.1,
+            final_reasoning="complete",
+            completed=True,
+        )
+        cache = MagicMock()
+
+        with patch(
+            'tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.get_shared_cache',
+            return_value=cache,
+        ) as mock_shared_cache, patch(
+            'tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.MultiDatabaseRetriever'
+        ) as mock_retriever, patch(
+            'tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.classify_and_reformulate',
+            AsyncMock(return_value=classification),
+        ), patch(
+            'tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.research_loop',
+            AsyncMock(return_value=research_output),
+        ), patch(
+            'tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.create_default_registry',
+            None,
+        ):
+            result = await unified_rag_pipeline(
+                query="research query",
+                enable_query_classification=True,
+                enable_research_loop=True,
+                enable_cache=True,
+                enable_generation=False,
+                enable_reranking=False,
+                adaptive_cache=False,
+            )
+
+        mock_retriever.assert_not_called()
+        mock_shared_cache.assert_not_called()
+        cache.set.assert_not_called()
+        assert result.documents[0]["id"] == "research-doc"
+        assert result.metadata["retrieval_bypassed"]["reason"] == "research_loop"
+
+    @pytest.mark.asyncio
+    async def test_classification_external_prefetch_is_not_cached_as_base_retrieval(self):
+        from tldw_Server_API.app.core.RAG.rag_service.query_classifier import (
+            QueryClassification,
+        )
+
+        classification = QueryClassification(
+            skip_search=False,
+            search_local_db=False,
+            search_web=True,
+            search_academic=False,
+            search_discussions=False,
+            standalone_query="external query",
+            detected_intent="factual",
+            confidence=0.8,
+            reasoning="External only",
+        )
+        cache = MagicMock()
+
+        with patch(
+            'tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.get_shared_cache',
+            return_value=cache,
+        ) as mock_shared_cache, patch(
+            'tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.MultiDatabaseRetriever'
+        ) as mock_retriever, patch(
+            'tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.classify_and_reformulate',
+            AsyncMock(return_value=classification),
+        ), patch(
+            'tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs.perform_websearch',
+            return_value={"results": []},
+        ), patch(
+            'tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs.process_web_search_results',
+            return_value={
+                "results": [
+                    {
+                        "title": "External result",
+                        "url": "https://example.com/external",
+                        "content": "external evidence",
+                    }
+                ]
+            },
+        ):
+            result = await unified_rag_pipeline(
+                query="external query",
+                enable_query_classification=True,
+                enable_cache=True,
+                enable_generation=False,
+                enable_reranking=False,
+                adaptive_cache=False,
+                top_k=1,
+            )
+
+        mock_retriever.assert_not_called()
+        mock_shared_cache.assert_not_called()
+        cache.set.assert_not_called()
+        assert result.documents[0]["id"] == "https://example.com/external"
+        assert result.metadata["retrieval_bypassed"]["reason"] == (
+            "classification_external_prefetch"
+        )
 
     @pytest.mark.asyncio
     async def test_cache_namespace_uses_post_routing_retrieval_values(self):

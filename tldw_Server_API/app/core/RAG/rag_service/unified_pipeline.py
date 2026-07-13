@@ -2337,14 +2337,23 @@ async def unified_rag_pipeline(
             (enable_hyde, "hyde"),
             (enable_prf, "prf"),
             (enable_query_decomposition, "query_decomposition"),
+            (enable_gap_analysis, "gap_analysis"),
         )
         if enabled
     ]
-    retrieval_cache_eligible = bool(enable_cache and not cache_bypass_modes)
+    retrieval_cache_eligible = bool(
+        enable_cache
+        and not cache_bypass_modes
+        and not auto_temporal_filters
+    )
     if enable_cache and cache_bypass_modes:
         result.metadata["cache_bypassed"] = {
             "reason": "secondary_retrieval_mode",
             "modes": cache_bypass_modes,
+        }
+    elif enable_cache and auto_temporal_filters:
+        result.metadata["cache_bypassed"] = {
+            "reason": "auto_temporal_window",
         }
 
     def _ensure_profile_resolution_metadata() -> dict[str, Any]:
@@ -2385,6 +2394,7 @@ async def unified_rag_pipeline(
     cache_instance = None
     cache_setup_attempted = False
     cache_retrieval_snapshot: Optional[list[Any]] = None
+    base_retrieval_executed = False
     cache_max_size = 1000
     try:
         from tldw_Server_API.app.core.config import RAG_SERVICE_CONFIG
@@ -3786,6 +3796,7 @@ async def unified_rag_pipeline(
                         _otel_cm = None
                         _otel_span = None
                 if MultiDatabaseRetriever and RetrievalConfig:
+                    base_retrieval_executed = True
 
                     # Set up database paths
                     db_paths = _build_pipeline_db_paths()
@@ -4459,7 +4470,14 @@ async def unified_rag_pipeline(
                 "documents_preserved": int(len(result.documents or [])),
             }
 
-        if retrieval_cache_eligible and not result.cache_hit and result.documents:
+        if (
+            retrieval_cache_eligible
+            and base_retrieval_executed
+            and not result.cache_hit
+            and not _skip_retrieval_stack
+            and not _skip_local_retrieval
+            and result.documents
+        ):
             _apply_workspace_filtering_to_result()
             cache_retrieval_snapshot = _clone_cached_documents(
                 list(result.documents)
