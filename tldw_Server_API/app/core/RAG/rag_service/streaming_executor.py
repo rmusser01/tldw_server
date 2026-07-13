@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import os
 import types
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -102,15 +101,6 @@ def rag_provider_error_event(exc: BaseException) -> RAGStreamEvent | None:
         "status_code": status_code,
         "message": message,
     }
-
-
-def _accepts_keyword(callable_obj: Callable[..., Any], keyword: str) -> bool:
-    """Return whether a transitional pipeline callable accepts a keyword."""
-    try:
-        parameters = inspect.signature(callable_obj).parameters.values()
-    except (TypeError, ValueError):
-        return False
-    return any(parameter.kind == inspect.Parameter.VAR_KEYWORD or parameter.name == keyword for parameter in parameters)
 
 
 def _value(
@@ -330,7 +320,6 @@ async def _run_agentic_prefetch(
         **(
             {"credential_runtime": pipeline_kwargs.get("credential_runtime")}
             if pipeline_kwargs.get("credential_runtime") is not None
-            and _accepts_keyword(agentic_pipeline, "credential_runtime")
             else {}
         ),
     )

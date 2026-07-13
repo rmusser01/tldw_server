@@ -188,15 +188,6 @@ def _rag_provider_http_exception(exc: BaseException) -> HTTPException:
     )
 
 
-def _accepts_keyword(callable_obj: Any, keyword: str) -> bool:
-    """Return whether a transitional pipeline callable accepts a keyword."""
-    try:
-        parameters = inspect.signature(callable_obj).parameters.values()
-    except (TypeError, ValueError):
-        return False
-    return any(parameter.kind == inspect.Parameter.VAR_KEYWORD or parameter.name == keyword for parameter in parameters)
-
-
 def _copy_rag_request_with_updates(
     request: UnifiedRAGRequest,
     updates: dict[str, Any],
@@ -1318,11 +1309,7 @@ async def unified_search_endpoint(
                     low_confidence_behavior=str(effective_payload.get("low_confidence_behavior", "continue")),
                     resolved_request=resolved_request,
                     retrieval_plan=retrieval_plan,
-                    **(
-                        {"credential_runtime": credential_runtime}
-                        if _accepts_keyword(agentic_rag_pipeline, "credential_runtime")
-                        else {}
-                    ),
+                    credential_runtime=credential_runtime,
                 )
             except _RAG_PROVIDER_FAILURES:
                 raise
@@ -2024,14 +2011,8 @@ async def unified_search_stream_endpoint(
         "max_generation_tokens": request.max_generation_tokens,
         "top_k": request.top_k,
     }
-    try:
-        credential_runtime = _build_credential_runtime(request_raw, current_user)
-    except _RAG_PROVIDER_FAILURES as exc:
-        raise _rag_provider_http_exception(exc) from exc
-
-    stream_context = {
+    base_stream_context = {
         **stream_pipeline_kwargs,
-        "credential_runtime": credential_runtime,
         "build_agentic_execution_context": build_agentic_execution_context,
         "generate_streaming_response": generate_streaming_response,
         "request_defaults": request_defaults,
@@ -2039,13 +2020,18 @@ async def unified_search_stream_endpoint(
     }
 
     async def event_generator():
+        credential_runtime: ProviderCredentialRuntime | None = None
         try:
+            credential_runtime = _build_credential_runtime(request_raw, current_user)
             async for event in stream_rag_events(
                 resolved_request=resolved_request,
                 retrieval_plan=stream_bundle.retrieval_plan,
                 standard_pipeline=unified_rag_pipeline,
                 agentic_pipeline=agentic_rag_pipeline,
-                extra_context=stream_context,
+                extra_context={
+                    **base_stream_context,
+                    "credential_runtime": credential_runtime,
+                },
             ):
                 yield json.dumps(_sanitize_rag_stream_event(event)) + "\n"
         except asyncio.CancelledError:
@@ -2055,14 +2041,11 @@ async def unified_search_stream_endpoint(
             if provider_event is not None:
                 yield json.dumps(_sanitize_rag_stream_event(provider_event)) + "\n"
         finally:
-            await credential_runtime.close()
+            if credential_runtime is not None:
+                await credential_runtime.close()
 
-    try:
-        # lgtm[py/stack-trace-exposure]: stream events are sanitized before serialization.
-        return StreamingResponse(event_generator(), media_type="application/x-ndjson")
-    except BaseException:
-        await credential_runtime.close()
-        raise
+    # lgtm[py/stack-trace-exposure]: stream events are sanitized before serialization.
+    return StreamingResponse(event_generator(), media_type="application/x-ndjson")
 
 
 @router.get(

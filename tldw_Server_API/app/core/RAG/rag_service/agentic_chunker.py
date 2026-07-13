@@ -246,6 +246,7 @@ async def agentic_rag_pipeline(
     low_confidence_behavior: str = "continue",
     resolved_request: ResolvedRAGRequest | None = None,
     retrieval_plan: RetrievalPlan | None = None,
+    credential_runtime: Any = None,
 ) -> UnifiedSearchResult:
     """Agentic RAG: coarse retrieve, assemble ephemeral chunk, optional answer.
 

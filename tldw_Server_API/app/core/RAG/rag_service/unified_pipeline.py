@@ -7466,42 +7466,45 @@ async def unified_batch_pipeline(
             tasks[task] = idx
 
         pending = set(tasks.keys())
-        while pending:
-            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
-            for task in done:
-                head_idx = tasks.get(task)
-                if head_idx is None:
-                    continue
-                result: Optional[UnifiedPipelineResult] = None
-                err: Optional[BaseException] = None
-                try:
-                    result = await task
-                    head_results[head_idx] = result
-                except BaseException as exc:  # noqa: BLE001 - surface as error
-                    if isinstance(exc, _RAG_PROVIDER_FAILURES):
-                        for pending_task in pending:
-                            pending_task.cancel()
-                        if pending:
-                            await asyncio.gather(*pending, return_exceptions=True)
-                        raise
-                    err = exc
-                    head_results[head_idx] = exc
+        try:
+            while pending:
+                done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+                for task in done:
+                    head_idx = tasks.get(task)
+                    if head_idx is None:
+                        continue
+                    result: Optional[UnifiedPipelineResult] = None
+                    err: Optional[BaseException] = None
+                    try:
+                        result = await task
+                        head_results[head_idx] = result
+                    except BaseException as exc:  # noqa: BLE001 - surface as error
+                        if isinstance(exc, _RAG_PROVIDER_FAILURES):
+                            raise
+                        err = exc
+                        head_results[head_idx] = exc
 
-                head_key = heads[head_idx]
-                members = clusters.get(head_key, [])
-                for i_uq in members:
-                    orig_indices = normalized_map.get(unique_keys[i_uq], [])
-                    for local_idx in orig_indices:
-                        global_idx = _resolve_index(local_idx)
-                        query_text = queries[local_idx] if local_idx < len(queries) else ""
-                        if on_query_done:
-                            try:
-                                callback_result = on_query_done(global_idx, query_text, result, err)
-                                if asyncio.iscoroutine(callback_result):
-                                    await callback_result
-                            except Exception as cb_err:  # noqa: BLE001 - callbacks must not fail pipeline
-                                logger.warning(f"Batch on_query_done callback failed: {cb_err}")
-                        await _notify_progress(1)
+                    head_key = heads[head_idx]
+                    members = clusters.get(head_key, [])
+                    for i_uq in members:
+                        orig_indices = normalized_map.get(unique_keys[i_uq], [])
+                        for local_idx in orig_indices:
+                            global_idx = _resolve_index(local_idx)
+                            query_text = queries[local_idx] if local_idx < len(queries) else ""
+                            if on_query_done:
+                                try:
+                                    callback_result = on_query_done(global_idx, query_text, result, err)
+                                    if asyncio.iscoroutine(callback_result):
+                                        await callback_result
+                                except Exception as cb_err:  # noqa: BLE001 - callbacks must not fail pipeline
+                                    logger.warning(f"Batch on_query_done callback failed: {cb_err}")
+                            await _notify_progress(1)
+        except BaseException:
+            for child_task in tasks:
+                if not child_task.done():
+                    child_task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
     else:
         try:
             from .batch_utils import run_batch as _run_batch

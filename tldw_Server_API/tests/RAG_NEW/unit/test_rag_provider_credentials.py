@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from functools import wraps
 import inspect
 import json
 from types import SimpleNamespace
@@ -14,12 +15,16 @@ from loguru import logger
 from starlette.requests import Request
 
 import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_endpoint
+import tldw_Server_API.app.core.RAG.rag_service.unified_pipeline as unified_pipeline_module
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAuthenticationError,
     ChatBadRequestError,
     ChatConfigurationError,
+)
+from tldw_Server_API.app.core.RAG.rag_service.agentic_chunker import (
+    agentic_rag_pipeline as production_agentic_rag_pipeline,
 )
 from tldw_Server_API.app.core.RAG.rag_service.request_bundle import ResolvedRequestBundle
 from tldw_Server_API.app.core.RAG.rag_service.request_resolution import ResolvedRAGRequest
@@ -218,6 +223,7 @@ async def test_agentic_search_passes_same_runtime_without_putting_it_in_payload(
     _install_runtime(monkeypatch)
     _install_common_endpoint_fakes(monkeypatch, bundle=bundle)
 
+    @wraps(production_agentic_rag_pipeline)
     async def fake_agentic_pipeline(**kwargs: Any) -> UnifiedSearchResult:
         captured.update(kwargs)
         return _result()
@@ -264,16 +270,61 @@ async def test_stream_runtime_lives_until_body_iterator_finishes(
         collections_db=SimpleNamespace(),
     )
 
-    runtime = _RecordingRuntime.created[0]
-    assert runtime.close_calls == 0  # nosec B101
+    assert _RecordingRuntime.created == []  # nosec B101
     chunks = [chunk async for chunk in response.body_iterator]
 
+    runtime = _RecordingRuntime.created[0]
     assert captured["extra_context"]["credential_runtime"] is runtime  # nosec B101
     assert runtime.close_calls == 1  # nosec B101
     assert (
         _SENTINEL_SECRET
         not in b"".join(chunk if isinstance(chunk, bytes) else chunk.encode() for chunk in chunks).decode()
     )  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_stream_does_not_create_runtime_when_body_is_never_iterated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle = _bundle("standard")
+    _install_runtime(monkeypatch)
+    _install_common_endpoint_fakes(monkeypatch, bundle=bundle)
+
+    response = await rag_endpoint.unified_search_stream_endpoint(
+        request_raw=_request("/api/v1/rag/search/stream"),
+        request=rag_endpoint.UnifiedRAGRequest(query="credential runtime", enable_generation=True),
+        current_user=_user(),
+        media_db=_db("media.db"),
+        chacha_db=_db("notes.db"),
+        prompts_db=_db("prompts.db"),
+        collections_db=SimpleNamespace(),
+    )
+
+    assert response.body_iterator is not None  # nosec B101
+    assert _RecordingRuntime.created == []  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_stream_aclose_before_first_iteration_does_not_create_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle = _bundle("standard")
+    _install_runtime(monkeypatch)
+    _install_common_endpoint_fakes(monkeypatch, bundle=bundle)
+
+    response = await rag_endpoint.unified_search_stream_endpoint(
+        request_raw=_request("/api/v1/rag/search/stream"),
+        request=rag_endpoint.UnifiedRAGRequest(query="credential runtime", enable_generation=True),
+        current_user=_user(),
+        media_db=_db("media.db"),
+        chacha_db=_db("notes.db"),
+        prompts_db=_db("prompts.db"),
+        collections_db=SimpleNamespace(),
+    )
+
+    await response.body_iterator.aclose()
+
+    assert _RecordingRuntime.created == []  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -315,6 +366,62 @@ async def test_batch_passes_one_runtime_and_closes_after_all_queries(
     assert captured["credential_runtime"] is runtime  # nosec B101
     assert len(_RecordingRuntime.created) == 1  # nosec B101
     assert runtime.close_calls == 1  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_batch_cancellation_waits_for_started_queries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = asyncio.Event()
+    release_normally = asyncio.Event()
+    release_cancellation_cleanup = asyncio.Event()
+    child_tasks: set[asyncio.Task[Any]] = set()
+    cancelled_tasks: set[asyncio.Task[Any]] = set()
+
+    async def blocking_pipeline(**kwargs: Any) -> UnifiedSearchResult:
+        task = asyncio.current_task()
+        assert task is not None  # nosec B101
+        child_tasks.add(task)
+        if len(child_tasks) == 2:
+            started.set()
+        try:
+            await release_normally.wait()
+        except asyncio.CancelledError:
+            cancelled_tasks.add(task)
+            await release_cancellation_cleanup.wait()
+            raise
+        return _result()
+
+    monkeypatch.setenv("RAG_BATCH_DISABLE_CLUSTERING", "1")
+    monkeypatch.setattr(unified_pipeline_module, "unified_rag_pipeline", blocking_pipeline)
+    batch_task = asyncio.create_task(
+        unified_batch_pipeline(
+            queries=["one", "two"],
+            max_concurrent=2,
+            on_query_done=lambda *args: None,
+        )
+    )
+    await asyncio.wait_for(started.wait(), timeout=1)
+
+    batch_task.cancel()
+    for _ in range(20):
+        if len(cancelled_tasks) == 2:
+            break
+        await asyncio.sleep(0)
+
+    try:
+        assert len(cancelled_tasks) == 2  # nosec B101
+        assert not batch_task.done()  # nosec B101
+    finally:
+        release_cancellation_cleanup.set()
+        release_normally.set()
+        try:
+            await batch_task
+        except asyncio.CancelledError:
+            pass
+        await asyncio.gather(*child_tasks, return_exceptions=True)
+
+    assert all(task.done() for task in child_tasks)  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -542,8 +649,10 @@ async def test_agentic_typed_failure_bypasses_raw_fallback(
 
 
 def test_pipeline_entry_points_expose_optional_runtime_keyword() -> None:
+    agentic_parameter = inspect.signature(production_agentic_rag_pipeline).parameters["credential_runtime"]
     rag_parameter = inspect.signature(unified_rag_pipeline).parameters["credential_runtime"]
     batch_parameter = inspect.signature(unified_batch_pipeline).parameters["credential_runtime"]
 
+    assert agentic_parameter.default is None  # nosec B101
     assert rag_parameter.default is None  # nosec B101
     assert batch_parameter.default is None  # nosec B101
