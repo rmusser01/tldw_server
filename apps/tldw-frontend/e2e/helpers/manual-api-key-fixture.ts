@@ -43,6 +43,19 @@ export const startManualApiKeyFixture = async (
       authenticated
     })
 
+    if (
+      request.method === "GET" &&
+      (pathname === "/api/v1/health" || pathname === "/api/v1/health/live")
+    ) {
+      response.writeHead(200, { "Content-Type": "application/json" })
+      response.end(
+        JSON.stringify({
+          status: pathname.endsWith("/live") ? "alive" : "ok"
+        })
+      )
+      return
+    }
+
     if (!authenticated) {
       response.writeHead(401, { "Content-Type": "application/json" })
       response.end(JSON.stringify({ detail: "Invalid API key" }))
@@ -50,13 +63,28 @@ export const startManualApiKeyFixture = async (
     }
 
     const body =
-      pathname === "/api/v1/users/me/profile"
-        ? { id: 1, username: "manual-persistence-e2e" }
-        : pathname === "/api/v1/health"
-          ? { status: "ok" }
-          : pathname === "/api/v1/rag/health"
-            ? { status: "healthy" }
-            : {}
+      pathname === "/openapi.json"
+        ? {
+            openapi: "3.1.0",
+            paths: {
+              "/api/v1/media/": { get: {} }
+            }
+          }
+        : pathname === "/api/v1/media" || pathname === "/api/v1/media/"
+          ? {
+              items: [],
+              pagination: {
+                page: 1,
+                results_per_page: 20,
+                total_items: 0,
+                total_pages: 0
+              }
+            }
+          : pathname === "/api/v1/users/me/profile"
+            ? { id: 1, username: "manual-persistence-e2e" }
+            : pathname === "/api/v1/rag/health"
+              ? { status: "healthy" }
+              : {}
 
     response.writeHead(200, { "Content-Type": "application/json" })
     response.end(JSON.stringify(body))

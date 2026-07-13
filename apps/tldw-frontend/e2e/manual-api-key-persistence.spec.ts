@@ -84,14 +84,9 @@ const expectProductionRagRequest = async (
     return
   }
 
-  await expect
-    .poll(() =>
-      fixture
-        .requests()
-        .slice(requestOffset)
-        .some((request) => !request.authenticated)
-    )
-    .toBe(true)
+  await expect(
+    page.getByText("RAG: needs attention", { exact: true })
+  ).toBeVisible()
   expect(
     fixture
       .requests()
@@ -102,6 +97,20 @@ const expectProductionRagRequest = async (
       )
   ).toBe(false)
 }
+
+const hasAuthenticatedMediaListRequest = (
+  fixture: ManualApiKeyFixture,
+  offset: number
+): boolean =>
+  fixture
+    .requests()
+    .slice(offset)
+    .some(
+      (request) =>
+        request.method === "GET" &&
+        request.path === "/api/v1/media" &&
+        request.authenticated === true
+    )
 
 test.describe.serial("manual WebUI API-key persistence", () => {
   let fixture: ManualApiKeyFixture
@@ -145,6 +154,72 @@ test.describe.serial("manual WebUI API-key persistence", () => {
         apiKeyServerOrigin: fixture.url
       })
       await expectProductionRagRequest(page, fixture, true)
+    })
+  })
+
+  test("legacy device key authenticates media after hard reload", async ({ browserName: _browserName }, testInfo) => {
+    const profile = testInfo.outputPath("legacy-media-profile")
+    const expectedConfig = {
+      authMode: "single-user",
+      authSource: "manual",
+      serverUrl: fixture.url,
+      apiKey: MANUAL_API_KEY,
+      credentialSource: "manual",
+      apiKeyPersistence: "device",
+      apiKeyServerOrigin: fixture.url
+    }
+
+    await withPersistentBrowser(profile, async (_context, page) => {
+      await page.addInitScript(
+        ({ serverUrl, apiKey }) => {
+          if (localStorage.getItem("__legacy_api_key_seeded")) return
+          localStorage.setItem("__legacy_api_key_seeded", "true")
+          localStorage.setItem("__tldw_first_run_complete", "true")
+          localStorage.setItem("tldw_skip_landing_hub", "true")
+          localStorage.setItem("assistant_setup_dismissed", "true")
+          // Legacy WebUI saves mirrored the selected server for bootstrap.
+          localStorage.setItem("tldw-api-host", serverUrl)
+          localStorage.setItem(
+            "tldwConfig",
+            JSON.stringify({
+              authMode: "single-user",
+              serverUrl,
+              apiKey
+            })
+          )
+        },
+        { serverUrl: fixture.url, apiKey: MANUAL_API_KEY }
+      )
+
+      const initialRequestOffset = fixture.requests().length
+      await page.goto(`${WEB_URL}/media`, { waitUntil: "domcontentloaded" })
+      await expect
+        .poll(() =>
+          hasAuthenticatedMediaListRequest(fixture, initialRequestOffset)
+        )
+        .toBe(true)
+      await expect(
+        page.getByText("Add your credentials to use Media", { exact: true })
+      ).toHaveCount(0)
+      expect(
+        await page.evaluate(() =>
+          JSON.parse(localStorage.getItem("tldwConfig") || "null")
+        )
+      ).toEqual(expectedConfig)
+
+      const requestOffset = fixture.requests().length
+      await page.reload({ waitUntil: "domcontentloaded" })
+      await expect
+        .poll(() => hasAuthenticatedMediaListRequest(fixture, requestOffset))
+        .toBe(true)
+      await expect(
+        page.getByText("Add your credentials to use Media", { exact: true })
+      ).toHaveCount(0)
+      expect(
+        await page.evaluate(() =>
+          JSON.parse(localStorage.getItem("tldwConfig") || "null")
+        )
+      ).toEqual(expectedConfig)
     })
   })
 
