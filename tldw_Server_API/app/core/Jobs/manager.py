@@ -9,7 +9,7 @@ import secrets
 import sqlite3
 import time
 import uuid as _uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from contextvars import ContextVar
 from datetime import datetime
 from datetime import timezone as _tz
@@ -1318,6 +1318,7 @@ class JobManager:
         idempotency_key: str | None = None,
         request_id: str | None = None,
         trace_id: str | None = None,
+        _transaction_guard: Callable[[Any], None] | None = None,
     ) -> dict[str, Any]:
         """Create a new job.
 
@@ -1458,6 +1459,7 @@ class JobManager:
                         if owner_user_id
                         else None
                     ),
+                    transaction_guard=_transaction_guard,
                     counters_enabled=JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")),
                 )
                 d = self._map_admission_result(result)
@@ -1514,6 +1516,7 @@ class JobManager:
                                 domain,
                                 owner_user_id,
                             ),
+                            transaction_guard=_transaction_guard,
                             counters_enabled=JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")),
                         )
                         d = self._map_admission_result(result)

@@ -313,6 +313,8 @@ git commit -m "feat: resolve playlist duplicate actions (TASK-12112)"
 
 ### Task 7: Tighten media-job submission and worker boundaries
 
+**Status:** Complete
+
 **Specification review follow-up:** Complete
 
 - [x] **Step 1: Write failing endpoint and worker tests**
@@ -413,6 +415,38 @@ git commit -m "feat: bind media jobs to ingest occurrences (TASK-12110)"
   Verification evidence: endpoint `110 passed`; store `122 passed`; worker plus SQLite migrations `70 passed`; PostgreSQL migrations, quota concurrency, and playlist-store integration `21 passed`. Ruff, Black, compileall, and `git diff --check` exited zero. Bandit scanned all six touched production paths and reported zero findings. Focused RED/GREEN evidence is recorded in TASK-12112.
 
   Independent-review remediation: lifecycle-safe already-bound retries; fail-closed encrypted binding views; retain staging metadata after deletion failure; reuse completed staging across cooperative retries; reject shared-path deletion and case-insensitive manifest-name collisions; keep pre-record retries pending; release only exact owner reservations after confirmed pre-manifest cleanup with a NULL-staging CAS; sanitize JSON decoder integer-limit `ValueError` before lookup/staging; strengthen overwrite, malformed-JSON, and file-race coverage. Status: Complete. Independent re-review found no remaining Critical or Important issues.
+
+**Final submission-lifecycle safety follow-up:** Complete
+
+- [x] **Group F — Durable submission lease, heartbeat, and generation CAS**
+
+  Add additive SQLite/PostgreSQL migration coverage and record/store tests for an opaque lease token, bounded expiry, and monotonic generation on every acquired or taken-over `submit_pending` reservation. Use the injected Jobs clock and short configured test leases without sleeps. An active retry with a valid complete manifest may reuse it through an explicit generation CAS; a retry seeing a NULL or incomplete staging pointer waits only while the current lease is valid, then atomically takes over after expiry with a caller-proposed new token. Require the current token for pointer/manifest recording and held-job creation/binding, not only for renewal around those steps. Prove pre-record and pre-manifest crash recovery, one-winner expiry takeover, lease renewal during upload chunks and create/bind critical sections, and generation-owned staging paths. A stale owner must fail record/clear/reset/bind CAS, may delete only its own abandoned uncommitted directory, and must never delete the new owner's directory. Preserve the original batch, idempotency identity, and queue across takeover.
+
+  RED: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Jobs/test_jobs_migrations_sqlite.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_store.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest_jobs_endpoint.py -k "submission_lease or lease_takeover or upload_heartbeat or stale_owner" -q`; expected failures are absent lease columns/record fields and mutation CAS authority. GREEN: rerun that command, then the complete migration/store/endpoint suites and `RUN_JOBS=1 python -m pytest tldw_Server_API/tests/Jobs/test_jobs_migrations_postgres.py tldw_Server_API/tests/MediaIngestion_NEW/integration/test_playlist_ingest_store_postgres.py -k "submission_lease or lease_takeover" -q`.
+
+- [x] **Group G — Expired-run held-job cancellation and quota release**
+
+  Add SQLite and real-PostgreSQL tests proving the `cleanup_expired_resources`/`cleanup_expired` path locks expired run/item/job authority, cancels only an exact owner/run/occurrence/attempt/job/batch/idempotency/queue match that is still queued at the held sentinel, releases queued quota and decrements scheduled counters, and only then deletes run authority in the same Jobs transaction. Assert a fresh quota-limited submit is admitted after cleanup. Published, processing, and terminal jobs must survive. Inject a failure after cancellation and prove the entire transaction rolls back before any authority is deleted. Only after the transaction commits may staging cleanup retire an unreferenced directory; a published job's staging reference stays protected after run authority disappears.
+
+  RED: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && JOBS_COUNTERS_ENABLED=true python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_store.py -k "cleanup_expired and (held_job or published_job or rollback or quota)" -q`; expected failure is the current child-first deletion without held-job reconciliation. GREEN: implement the transaction contract while reusing existing cancellation/counter semantics where practical, rerun that command and the complete store suite, then `RUN_JOBS=1 JOBS_COUNTERS_ENABLED=true python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/integration/test_playlist_ingest_store_postgres.py -k "cleanup_expired and (held_job or published_job or rollback or quota)" -q`.
+
+- [x] **Group H — Canonical staging paths and exact candidate reference lookup**
+
+  Add real filesystem tests for dot/dot-dot aliases, symlinked directories and components, root escapes, casefold-based manifest filename collisions with deterministic behavior across case-sensitive/case-insensitive platforms, and platform separator edge cases. Validate lexical canonical form before resolution or deletion, reject every symlink component, and canonicalize candidate and live-reference paths through one fail-closed helper. Replace the broad owner `list_jobs(limit=101)` scan with bounded exact candidate lookups so more than 100 unrelated active jobs do not starve cleanup and an encrypted exact reference still preserves its candidate without broad unbounded decryption.
+
+  RED: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest_jobs_endpoint.py -k "staging_path_alias or symlink or root_escape or manifest_casefold or more_than_100_jobs or encrypted_exact_reference" -q`; expected failures are alias acceptance and over-100 cleanup starvation. GREEN: implement the shared validator and bounded exact candidate binding lookup, then rerun the RED selector and all staging/cleanup/encryption endpoint tests.
+
+- [x] **Group I — Already-bound future schedule compatibility**
+
+  Add a store test showing an exact already-bound queued job with any non-sentinel `available_at`, including a future retry/backoff timestamp, is a valid idempotent binding. Keep the sentinel as the only held-repair state and continue rejecting non-queued unbound jobs.
+
+  RED: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_store.py -k "already_bound_future_available_at" -q`; expected failure is the current wall-clock `is_published` check. GREEN: simplify the already-bound lifecycle predicate and rerun complete store tests plus PostgreSQL binding parity.
+
+- [x] **Group J — Final verification, independent review, and commit**
+
+  Run endpoint/store/worker/migrations/manager/cleanup, Tasks 1–7/property coverage, real PostgreSQL lease+cleanup parity, encrypted binding coverage, Black, Ruff, compileall, `git diff --check`, and Bandit over every touched production path. Request an independent correctness/security re-review, remediate any Critical or Important findings with another RED/GREEN cycle, record exact evidence in TASK-12112, and commit as `fix: finalize playlist submission lifecycle safety (TASK-12112)`.
+
+  Final evidence: endpoint/store `264 passed`; SQLite JobManager/idempotency/admin-counter/fault `31 passed, 2 skipped`; specification focus `27 passed`; Ruff and Black clean on all 16 touched Python files; compileall clean on seven production modules; `git diff --check` clean; Bandit zero findings across 15,690 LOC. Real PostgreSQL migrations/integration passed `18 passed` before the final SQLite-only counter-attribution correction. The post-correction PostgreSQL reprovisioning retry reached the three-attempt infrastructure cap (two unreachable skips and one aborted provisioning run), so it is recorded as not freshly rerun. Independent reviews returned `✅ Spec compliant` and `Ready to proceed? Yes`.
 
 ### Task 8: Add run routes, reconciliation, event replay, cancellation, and retry
 

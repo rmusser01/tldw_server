@@ -335,6 +335,9 @@ CREATE TABLE IF NOT EXISTS media_ingest_run_items (
   idempotency_identity TEXT,
   submission_queue TEXT,
   staging_temp_dir TEXT,
+  submission_lease_token TEXT,
+  submission_lease_expires_at TEXT,
+  submission_lease_generation INTEGER NOT NULL DEFAULT 0 CHECK (submission_lease_generation >= 0),
   planned_collection_item_id INTEGER,
   progress_percent REAL CHECK (progress_percent IS NULL OR (progress_percent >= 0 AND progress_percent <= 100)),
   progress_message TEXT,
@@ -448,6 +451,15 @@ def ensure_jobs_tables(db_path: Path | None = None) -> Path:
                 conn.execute("ALTER TABLE media_ingest_run_items ADD COLUMN submission_queue TEXT")
             with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
                 conn.execute("ALTER TABLE media_ingest_run_items ADD COLUMN staging_temp_dir TEXT")
+            with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
+                conn.execute("ALTER TABLE media_ingest_run_items ADD COLUMN submission_lease_token TEXT")
+            with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
+                conn.execute("ALTER TABLE media_ingest_run_items ADD COLUMN submission_lease_expires_at TEXT")
+            with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
+                conn.execute(
+                    "ALTER TABLE media_ingest_run_items "
+                    "ADD COLUMN submission_lease_generation INTEGER NOT NULL DEFAULT 0"
+                )
             conn.commit()
         try:
             logger.info(f"Ensured Jobs schema at {Path(db_path).resolve()}")

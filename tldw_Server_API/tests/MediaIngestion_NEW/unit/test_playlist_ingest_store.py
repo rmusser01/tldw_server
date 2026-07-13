@@ -1,8 +1,10 @@
 import base64
 import json
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -1439,7 +1441,8 @@ def test_postgres_cleanup_locks_all_expired_parents_before_child_deletes(store, 
 
     locked = [index for index, (sql, _params) in enumerate(queries) if "FOR UPDATE" in sql]
     first_delete = next(index for index, (sql, _params) in enumerate(queries) if "DELETE FROM" in sql)
-    assert len(locked) == 3
+    assert len(locked) == 5
+    assert any("FROM media_ingest_run_items" in queries[index][0] for index in locked)
     assert max(locked) < first_delete
     assert all("owner-1" not in sql for sql, _params in queries)
 
@@ -1594,6 +1597,225 @@ def test_cleanup_expired_is_owner_safe(store):
     with pytest.raises(PlaylistIngestNotFoundError):
         store.get_preflight("1", expired.preflight_id)
     assert store.cleanup_expired("2", now=store.test_clock.now_utc())["preflights"] == 1
+
+
+def test_cleanup_expired_resources_cancels_exact_held_job_and_releases_scheduled_counter(
+    store,
+    monkeypatch,
+):
+    from tldw_Server_API.app.core.exceptions import JobSubmissionLimitError
+
+    monkeypatch.setenv("JOBS_COUNTERS_ENABLED", "true")
+    monkeypatch.setenv("JOBS_QUOTA_MAX_QUEUED_MEDIA_INGEST_USER_1", "1")
+    with store._jobs._connect() as connection:
+        row = connection.execute(
+            """
+            SELECT scheduled_count FROM job_counters
+            WHERE domain = 'media_ingest' AND queue = 'default'
+              AND job_type = 'media_ingest_item'
+            """
+        ).fetchone()
+    prior_scheduled_count = int(row[0]) if row is not None else 0
+    run, _reserved, job = _seed_held_run_job(store, occurrence_id="occ-cleanup-held")
+    with store._jobs._connect() as connection:
+        created_counter = connection.execute(
+            """
+            SELECT scheduled_count FROM job_counters
+            WHERE domain = 'media_ingest' AND queue = 'default'
+              AND job_type = 'media_ingest_item'
+            """
+        ).fetchone()
+    assert created_counter is not None
+    assert int(created_counter[0]) == prior_scheduled_count + 1
+    with pytest.raises(JobSubmissionLimitError, match="max queued"):
+        store._jobs.create_job(
+            domain="media_ingest",
+            queue="default",
+            job_type="media_ingest_item",
+            payload={"source": "https://example.com/quota-before-cleanup"},
+            owner_user_id="1",
+        )
+    store.test_clock.advance(timedelta(days=8))
+
+    deleted = store.cleanup_expired_resources("1", now=store.test_clock.current)
+
+    assert deleted["runs"] == 1
+    assert store._jobs.get_job(int(job["id"]))["status"] == "cancelled"
+    with store._jobs._connect() as connection:
+        row = connection.execute(
+            """
+            SELECT ready_count, scheduled_count FROM job_counters
+            WHERE domain = 'media_ingest' AND queue = 'default'
+              AND job_type = 'media_ingest_item'
+            """
+        ).fetchone()
+    assert row is not None
+    assert int(row[0]) == 0
+    assert int(row[1]) == prior_scheduled_count
+    admitted = store._jobs.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="media_ingest_item",
+        payload={"source": "https://example.com/quota-after-cleanup"},
+        owner_user_id="1",
+    )
+    assert admitted["status"] == "queued"
+
+
+def test_cleanup_expired_resources_preserves_published_job(store):
+    run, reserved, job = _seed_held_run_job(store, occurrence_id="occ-cleanup-published")
+    store.bind_run_item_job(
+        "1",
+        run.run_id,
+        "occ-cleanup-published",
+        attempt=1,
+        job_id=int(job["id"]),
+        batch_id="batch-held",
+        idempotency_identity="playlist-ingest-v1:held",
+        submission_lease_token=reserved.submission_lease_token,
+    )
+    store.test_clock.advance(timedelta(days=8))
+
+    deleted = store.cleanup_expired_resources("1", now=store.test_clock.current)
+
+    assert deleted["runs"] == 1
+    assert store._jobs.get_job(int(job["id"]))["status"] == "queued"
+
+
+@pytest.mark.parametrize("job_status", ["processing", "completed", "failed", "cancelled", "quarantined"])
+def test_cleanup_expired_resources_preserves_processing_and_terminal_jobs(store, job_status):
+    occurrence_id = f"occ-cleanup-{job_status}"
+    run, reserved, job = _seed_held_run_job(store, occurrence_id=occurrence_id)
+    store.bind_run_item_job(
+        "1",
+        run.run_id,
+        occurrence_id,
+        attempt=1,
+        job_id=int(job["id"]),
+        batch_id="batch-held",
+        idempotency_identity="playlist-ingest-v1:held",
+        submission_lease_token=reserved.submission_lease_token,
+    )
+    with store._connection(write=True) as db:
+        store._query(
+            db,
+            "UPDATE jobs SET status = ? WHERE id = ?",
+            (job_status, int(job["id"])),
+        )
+    store.test_clock.advance(timedelta(days=8))
+
+    deleted = store.cleanup_expired_resources("1", now=store.test_clock.current)
+
+    assert deleted["runs"] == 1
+    assert store._jobs.get_job(int(job["id"]))["status"] == job_status
+
+
+def test_cleanup_expired_resources_rolls_back_held_cancellation_on_delete_failure(
+    store,
+    monkeypatch,
+):
+    run, _reserved, job = _seed_held_run_job(store, occurrence_id="occ-cleanup-rollback")
+    store.test_clock.advance(timedelta(days=8))
+    original_query = store._query
+
+    def fail_after_cancel(db, sql, params=()):
+        if "DELETE FROM media_ingest_run_events" in sql:
+            raise RuntimeError("synthetic cleanup delete failure")
+        return original_query(db, sql, params)
+
+    monkeypatch.setattr(store, "_query", fail_after_cancel)
+
+    with pytest.raises(RuntimeError, match="synthetic cleanup delete failure"):
+        store.cleanup_expired_resources("1", now=store.test_clock.current)
+
+    assert store._jobs.get_job(int(job["id"]))["status"] == "queued"
+    with store._jobs._connect() as connection:
+        remaining = connection.execute(
+            "SELECT COUNT(*) FROM media_ingest_runs WHERE run_id = ?",
+            (run.run_id,),
+        ).fetchone()[0]
+    assert remaining == 1
+
+
+def test_cleanup_expired_resources_retires_unreferenced_staging_after_commit(
+    store,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    run, _reserved, job, staging_dir = _seed_file_run_job(
+        store,
+        tmp_path,
+        occurrence_id="occ-cleanup-file-held",
+    )
+    store.test_clock.advance(timedelta(days=8))
+
+    deleted = store.cleanup_expired_resources("1", now=store.test_clock.current)
+
+    assert deleted["runs"] == 1
+    assert store._jobs.get_job(int(job["id"]))["status"] == "cancelled"
+    assert not staging_dir.exists()
+    with store._jobs._connect() as connection:
+        remaining = connection.execute(
+            "SELECT COUNT(*) FROM media_ingest_runs WHERE run_id = ?",
+            (run.run_id,),
+        ).fetchone()[0]
+    assert remaining == 0
+
+
+def test_cleanup_expired_resources_rollback_does_not_delete_staging(
+    store,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    run, _reserved, job, staging_dir = _seed_file_run_job(
+        store,
+        tmp_path,
+        occurrence_id="occ-cleanup-file-rollback",
+    )
+    store.test_clock.advance(timedelta(days=8))
+    original_query = store._query
+
+    def fail_after_cancel(db, sql, params=()):
+        if "DELETE FROM media_ingest_run_events" in sql:
+            raise RuntimeError("synthetic cleanup delete failure")
+        return original_query(db, sql, params)
+
+    monkeypatch.setattr(store, "_query", fail_after_cancel)
+
+    with pytest.raises(RuntimeError, match="synthetic cleanup delete failure"):
+        store.cleanup_expired_resources("1", now=store.test_clock.current)
+
+    assert staging_dir.exists()
+    assert store._jobs.get_job(int(job["id"]))["status"] == "queued"
+    with store._jobs._connect() as connection:
+        remaining = connection.execute(
+            "SELECT COUNT(*) FROM media_ingest_runs WHERE run_id = ?",
+            (run.run_id,),
+        ).fetchone()[0]
+    assert remaining == 1
+
+
+def test_cleanup_expired_resources_preserves_published_staging_reference(
+    store,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    _run, _reserved, job, staging_dir = _seed_file_run_job(
+        store,
+        tmp_path,
+        occurrence_id="occ-cleanup-file-published",
+        publish=True,
+    )
+    store.test_clock.advance(timedelta(days=8))
+
+    deleted = store.cleanup_expired_resources("1", now=store.test_clock.current)
+
+    assert deleted["runs"] == 1
+    assert store._jobs.get_job(int(job["id"]))["status"] == "queued"
+    assert staging_dir.exists()
 
 
 def test_cleanup_keeps_active_db_time_preflight_linked_to_acquirable_job(tmp_path, monkeypatch):
@@ -1979,6 +2201,7 @@ def test_run_item_job_submission_reservation_and_binding_are_idempotent(store):
         job_id=int(job["id"]),
         batch_id="batch-original",
         idempotency_identity="playlist-ingest-v1:derived",
+        submission_lease_token=prepared.submission_lease_token,
     )
     rebound = store.bind_run_item_job(
         "1",
@@ -1996,6 +2219,328 @@ def test_run_item_job_submission_reservation_and_binding_are_idempotent(store):
     events = list(store.list_run_events("1", run.run_id))
     assert [event.event_type for event in events].count("occurrence_submit_pending") == 1
     assert [event.event_type for event in events].count("occurrence_job_accepted") == 1
+
+
+def test_submission_lease_waits_then_atomically_takes_over_with_stable_identity(store):
+    run = store.create_validated_run("1", items=[_validated_direct_record(occurrence_id="occ-lease")])
+
+    first = store.prepare_run_item_job_submission(
+        "1",
+        run.run_id,
+        "occ-lease",
+        attempt=1,
+        batch_id="batch-original",
+        idempotency_identity="playlist-ingest-v1:stable",
+        submission_queue="heavy",
+        source_kind="url",
+        planned_item_id=None,
+        submission_lease_token="lease-owner-a",
+        submission_lease_seconds=10,
+    )
+    waiting = store.prepare_run_item_job_submission(
+        "1",
+        run.run_id,
+        "occ-lease",
+        attempt=1,
+        batch_id="batch-retry",
+        idempotency_identity="playlist-ingest-v1:rotated",
+        submission_queue="default",
+        source_kind="url",
+        planned_item_id=None,
+        submission_lease_token="lease-owner-b",
+        submission_lease_seconds=10,
+    )
+
+    assert first.submission_lease_token == waiting.submission_lease_token == "lease-owner-a"
+    assert first.submission_lease_generation == waiting.submission_lease_generation == 1
+    assert first.submission_lease_expires_at == NOW + timedelta(seconds=10)
+
+    store.test_clock.advance(timedelta(seconds=11))
+    taken = store.prepare_run_item_job_submission(
+        "1",
+        run.run_id,
+        "occ-lease",
+        attempt=1,
+        batch_id="batch-retry",
+        idempotency_identity="playlist-ingest-v1:rotated",
+        submission_queue="default",
+        source_kind="url",
+        planned_item_id=None,
+        submission_lease_token="lease-owner-b",
+        submission_lease_seconds=20,
+    )
+
+    assert taken.submission_lease_token == "lease-owner-b"
+    assert taken.submission_lease_generation == 2
+    assert taken.submission_lease_expires_at == store.test_clock.current + timedelta(seconds=20)
+    assert taken.batch_id == "batch-original"
+    assert taken.idempotency_identity == "playlist-ingest-v1:stable"
+    assert taken.submission_queue == "heavy"
+
+
+def test_submission_lease_takeover_race_has_one_new_owner(store):
+    run = store.create_validated_run("1", items=[_validated_direct_record(occurrence_id="occ-race")])
+    store.prepare_run_item_job_submission(
+        "1",
+        run.run_id,
+        "occ-race",
+        attempt=1,
+        batch_id="batch-race",
+        idempotency_identity="playlist-ingest-v1:race",
+        source_kind="url",
+        planned_item_id=None,
+        submission_lease_token="lease-crashed",
+        submission_lease_seconds=5,
+    )
+    store.test_clock.advance(timedelta(seconds=6))
+
+    def take_over(token: str):
+        record = store.prepare_run_item_job_submission(
+            "1",
+            run.run_id,
+            "occ-race",
+            attempt=1,
+            batch_id="batch-ignored",
+            idempotency_identity="playlist-ingest-v1:ignored",
+            source_kind="url",
+            planned_item_id=None,
+            submission_lease_token=token,
+            submission_lease_seconds=30,
+        )
+        return token, record.submission_lease_token, record.submission_lease_generation
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(take_over, ["lease-racer-a", "lease-racer-b"]))
+
+    assert sum(proposed == stored for proposed, stored, _generation in results) == 1
+    assert {generation for _proposed, _stored, generation in results} == {2}
+
+
+def test_url_submission_owner_can_release_lease_without_rotating_identity(store):
+    run = store.create_validated_run(
+        "1",
+        items=[_validated_direct_record(occurrence_id="occ-url-release")],
+    )
+    reserved = store.prepare_run_item_job_submission(
+        "1",
+        run.run_id,
+        "occ-url-release",
+        attempt=1,
+        batch_id="batch-url-release",
+        idempotency_identity="playlist-ingest-v1:url-release",
+        source_kind="url",
+        planned_item_id=None,
+        submission_lease_token="lease-url-owner",
+    )
+
+    assert not store.release_run_item_url_submission_lease(
+        "1",
+        run.run_id,
+        "occ-url-release",
+        attempt=1,
+        batch_id="batch-url-release",
+        idempotency_identity="playlist-ingest-v1:url-release",
+        submission_lease_token="lease-url-stale",
+    )
+    assert store.release_run_item_url_submission_lease(
+        "1",
+        run.run_id,
+        "occ-url-release",
+        attempt=1,
+        batch_id="batch-url-release",
+        idempotency_identity="playlist-ingest-v1:url-release",
+        submission_lease_token="lease-url-owner",
+    )
+    released = store.get_run_item("1", run.run_id, "occ-url-release")
+    assert released.submission_lease_token is None
+    assert released.submission_lease_expires_at is None
+    assert released.batch_id == reserved.batch_id
+    assert released.idempotency_identity == reserved.idempotency_identity
+
+    taken = store.prepare_run_item_job_submission(
+        "1",
+        run.run_id,
+        "occ-url-release",
+        attempt=1,
+        batch_id="ignored-batch",
+        idempotency_identity="playlist-ingest-v1:ignored",
+        source_kind="url",
+        planned_item_id=None,
+        submission_lease_token="lease-url-retry",
+    )
+    assert taken.submission_lease_token == "lease-url-retry"
+    assert taken.submission_lease_generation == reserved.submission_lease_generation + 1
+    assert taken.batch_id == reserved.batch_id
+    assert taken.idempotency_identity == reserved.idempotency_identity
+
+
+def test_completed_file_staging_takeover_uses_generation_cas_and_preserves_pointer(store):
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestConflictError,
+    )
+
+    run = store.create_validated_run(
+        "1",
+        items=[
+            _validated_direct_record(
+                occurrence_id="occ-completed-takeover",
+                input_kind="file_stub",
+                source_url=None,
+                normalized_source_id=None,
+                source_kind="file",
+                state="awaiting_upload",
+            )
+        ],
+    )
+    reserved = store.prepare_run_item_job_submission(
+        "1",
+        run.run_id,
+        "occ-completed-takeover",
+        attempt=1,
+        batch_id="batch-completed-takeover",
+        idempotency_identity="playlist-ingest-v1:completed-takeover",
+        source_kind="file",
+        planned_item_id=None,
+        submission_lease_token="lease-original",
+    )
+    staging_dir = "/tmp/media_ingest_job_completed_takeover"
+    store.record_run_item_staging(
+        "1",
+        run.run_id,
+        "occ-completed-takeover",
+        attempt=1,
+        batch_id="batch-completed-takeover",
+        idempotency_identity="playlist-ingest-v1:completed-takeover",
+        submission_lease_token="lease-original",
+        temp_dir=staging_dir,
+    )
+
+    taken = store.takeover_completed_run_item_submission_lease(
+        "1",
+        run.run_id,
+        "occ-completed-takeover",
+        attempt=1,
+        batch_id="batch-completed-takeover",
+        idempotency_identity="playlist-ingest-v1:completed-takeover",
+        expected_submission_lease_token="lease-original",
+        expected_submission_lease_generation=reserved.submission_lease_generation,
+        submission_lease_token="lease-retry",
+    )
+
+    assert taken.submission_lease_token == "lease-retry"
+    assert taken.submission_lease_generation == reserved.submission_lease_generation + 1
+    assert taken.staging_temp_dir == staging_dir
+    with pytest.raises(PlaylistIngestConflictError, match="lease"):
+        store.takeover_completed_run_item_submission_lease(
+            "1",
+            run.run_id,
+            "occ-completed-takeover",
+            attempt=1,
+            batch_id="batch-completed-takeover",
+            idempotency_identity="playlist-ingest-v1:completed-takeover",
+            expected_submission_lease_token="lease-original",
+            expected_submission_lease_generation=reserved.submission_lease_generation,
+            submission_lease_token="lease-racer",
+        )
+    assert not store.clear_run_item_staging(
+        "1",
+        run.run_id,
+        "occ-completed-takeover",
+        attempt=1,
+        batch_id="batch-completed-takeover",
+        idempotency_identity="playlist-ingest-v1:completed-takeover",
+        submission_lease_token="lease-original",
+        temp_dir=staging_dir,
+    )
+    assert store.clear_run_item_staging(
+        "1",
+        run.run_id,
+        "occ-completed-takeover",
+        attempt=1,
+        batch_id="batch-completed-takeover",
+        idempotency_identity="playlist-ingest-v1:completed-takeover",
+        submission_lease_token="lease-retry",
+        temp_dir=staging_dir,
+    )
+
+
+def test_submission_lease_token_gates_staging_heartbeat_and_reset(store):
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestConflictError,
+    )
+
+    run = store.create_validated_run(
+        "1",
+        items=[
+            _validated_direct_record(
+                occurrence_id="occ-file-lease",
+                input_kind="file_stub",
+                source_url=None,
+                normalized_source_id=None,
+                source_kind="file",
+                state="awaiting_upload",
+            )
+        ],
+    )
+    reserved = store.prepare_run_item_job_submission(
+        "1",
+        run.run_id,
+        "occ-file-lease",
+        attempt=1,
+        batch_id="batch-file-lease",
+        idempotency_identity="playlist-ingest-v1:file-lease",
+        source_kind="file",
+        planned_item_id=None,
+        submission_lease_token="lease-current",
+        submission_lease_seconds=10,
+    )
+    store.test_clock.advance(timedelta(seconds=8))
+    renewed = store.renew_run_item_submission_lease(
+        "1",
+        run.run_id,
+        "occ-file-lease",
+        attempt=1,
+        batch_id="batch-file-lease",
+        idempotency_identity="playlist-ingest-v1:file-lease",
+        submission_lease_token="lease-current",
+        submission_lease_seconds=20,
+    )
+    assert renewed.submission_lease_expires_at == store.test_clock.current + timedelta(seconds=20)
+    assert renewed.submission_lease_generation == reserved.submission_lease_generation
+
+    with pytest.raises(PlaylistIngestConflictError, match="lease"):
+        store.record_run_item_staging(
+            "1",
+            run.run_id,
+            "occ-file-lease",
+            attempt=1,
+            batch_id="batch-file-lease",
+            idempotency_identity="playlist-ingest-v1:file-lease",
+            submission_lease_token="lease-stale",
+            temp_dir="/tmp/media_ingest_job_stale",
+        )
+    recorded = store.record_run_item_staging(
+        "1",
+        run.run_id,
+        "occ-file-lease",
+        attempt=1,
+        batch_id="batch-file-lease",
+        idempotency_identity="playlist-ingest-v1:file-lease",
+        submission_lease_token="lease-current",
+        temp_dir="/tmp/media_ingest_job_current",
+    )
+    assert recorded.staging_temp_dir == "/tmp/media_ingest_job_current"
+
+    assert not store.clear_run_item_staging(
+        "1",
+        run.run_id,
+        "occ-file-lease",
+        attempt=1,
+        batch_id="batch-file-lease",
+        idempotency_identity="playlist-ingest-v1:file-lease",
+        submission_lease_token="lease-stale",
+        temp_dir="/tmp/media_ingest_job_current",
+    )
 
 
 def test_run_item_submission_reuses_stored_identity_and_queue_after_rotation(store):
@@ -2215,8 +2760,91 @@ def _seed_held_run_job(store, *, occurrence_id="occ-held"):
     return run, reserved, job
 
 
+def _seed_file_run_job(store, tmp_path, *, occurrence_id: str, publish: bool = False):
+    from tldw_Server_API.app.api.v1.endpoints.media.ingest_jobs import _run_file_staging_prefix
+
+    batch_id = f"batch-{occurrence_id}"
+    identity = f"playlist-ingest-v1:{occurrence_id}"
+    run = store.create_validated_run(
+        "1",
+        items=[
+            _validated_direct_record(
+                occurrence_id=occurrence_id,
+                input_kind="file_stub",
+                source_url=None,
+                normalized_source_id=None,
+                source_kind="file",
+                state="awaiting_upload",
+            )
+        ],
+    )
+    reserved = store.prepare_run_item_job_submission(
+        "1",
+        run.run_id,
+        occurrence_id,
+        attempt=1,
+        batch_id=batch_id,
+        idempotency_identity=identity,
+        submission_queue="default",
+        source_kind="file",
+        planned_item_id=None,
+    )
+    prefix = _run_file_staging_prefix(
+        batch_id=batch_id,
+        idempotency_identity=identity,
+        submission_lease_token=reserved.submission_lease_token,
+    )
+    staging_dir = tmp_path / f"{prefix}cleanup"
+    staging_dir.mkdir()
+    source = staging_dir / "clip.mp3"
+    source.write_bytes(b"test")
+    store.record_run_item_staging(
+        "1",
+        run.run_id,
+        occurrence_id,
+        attempt=1,
+        batch_id=batch_id,
+        idempotency_identity=identity,
+        submission_lease_token=reserved.submission_lease_token,
+        temp_dir=str(staging_dir),
+    )
+    job = store._jobs.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="media_ingest_item",
+        payload={
+            "run_id": run.run_id,
+            "occurrence_id": occurrence_id,
+            "attempt": 1,
+            "batch_id": batch_id,
+            "idempotency_key": identity,
+            "source": str(source),
+            "source_kind": "file",
+            "temp_dir": str(staging_dir),
+            "cleanup_temp_dir": True,
+            "options": {"overwrite_existing": False},
+        },
+        owner_user_id="1",
+        batch_group=batch_id,
+        idempotency_key=identity,
+        available_at=datetime(9999, 12, 31, 23, 59, 59, tzinfo=timezone.utc),
+    )
+    if publish:
+        store.bind_run_item_job(
+            "1",
+            run.run_id,
+            occurrence_id,
+            attempt=1,
+            job_id=int(job["id"]),
+            batch_id=batch_id,
+            idempotency_identity=identity,
+            submission_lease_token=reserved.submission_lease_token,
+        )
+    return run, reserved, job, Path(staging_dir)
+
+
 def test_bind_run_item_job_publishes_held_job_atomically(store):
-    run, _reserved, job = _seed_held_run_job(store)
+    run, reserved, job = _seed_held_run_job(store)
 
     assert (
         store._jobs.acquire_next_job(
@@ -2236,6 +2864,7 @@ def test_bind_run_item_job_publishes_held_job_atomically(store):
         job_id=int(job["id"]),
         batch_id="batch-held",
         idempotency_identity="playlist-ingest-v1:held",
+        submission_lease_token=reserved.submission_lease_token,
     )
     acquired = store._jobs.acquire_next_job(
         domain="media_ingest",
@@ -2254,7 +2883,7 @@ def test_bind_run_item_job_rejects_nonaccepting_run_and_leaves_job_held(store):
         PlaylistIngestConflictError,
     )
 
-    run, _reserved, job = _seed_held_run_job(store)
+    run, reserved, job = _seed_held_run_job(store)
     with store._connection(write=True) as db:
         store._query(
             db,
@@ -2271,6 +2900,7 @@ def test_bind_run_item_job_rejects_nonaccepting_run_and_leaves_job_held(store):
             job_id=int(job["id"]),
             batch_id="batch-held",
             idempotency_identity="playlist-ingest-v1:held",
+            submission_lease_token=reserved.submission_lease_token,
         )
 
     assert store.get_run_item("1", run.run_id, "occ-held").state == "submit_pending"
@@ -2286,7 +2916,7 @@ def test_bind_run_item_job_rejects_nonaccepting_run_and_leaves_job_held(store):
 
 
 def test_bind_run_item_job_repairs_exact_bound_but_held_job(store):
-    run, _reserved, job = _seed_held_run_job(store)
+    run, reserved, job = _seed_held_run_job(store)
     with store._connection(write=True) as db:
         store._query(
             db,
@@ -2305,6 +2935,7 @@ def test_bind_run_item_job_repairs_exact_bound_but_held_job(store):
         job_id=int(job["id"]),
         batch_id="batch-held",
         idempotency_identity="playlist-ingest-v1:held",
+        submission_lease_token=reserved.submission_lease_token,
     )
     acquired = store._jobs.acquire_next_job(
         domain="media_ingest",
@@ -2320,7 +2951,7 @@ def test_bind_run_item_job_repairs_exact_bound_but_held_job(store):
 
 @pytest.mark.parametrize("complete", [False, True])
 def test_bind_run_item_job_is_idempotent_after_published_job_advances_lifecycle(store, complete):
-    run, _reserved, job = _seed_held_run_job(store)
+    run, reserved, job = _seed_held_run_job(store)
     bound = store.bind_run_item_job(
         "1",
         run.run_id,
@@ -2329,6 +2960,7 @@ def test_bind_run_item_job_is_idempotent_after_published_job_advances_lifecycle(
         job_id=int(job["id"]),
         batch_id="batch-held",
         idempotency_identity="playlist-ingest-v1:held",
+        submission_lease_token=reserved.submission_lease_token,
     )
     acquired = store._jobs.acquire_next_job(
         domain="media_ingest",
@@ -2353,6 +2985,39 @@ def test_bind_run_item_job_is_idempotent_after_published_job_advances_lifecycle(
     assert rebound.job_id == bound.job_id == job["id"]
 
 
+def test_bind_run_item_job_accepts_already_bound_future_available_at(store):
+    run, reserved, job = _seed_held_run_job(store, occurrence_id="occ-future-bound")
+    bound = store.bind_run_item_job(
+        "1",
+        run.run_id,
+        "occ-future-bound",
+        attempt=1,
+        job_id=int(job["id"]),
+        batch_id="batch-held",
+        idempotency_identity="playlist-ingest-v1:held",
+        submission_lease_token=reserved.submission_lease_token,
+    )
+    future_retry = store.test_clock.current + timedelta(minutes=15)
+    with store._connection(write=True) as db:
+        store._query(
+            db,
+            "UPDATE jobs SET status = 'queued', available_at = ? WHERE id = ?",
+            (store._job_datetime(future_retry), int(job["id"])),
+        )
+
+    rebound = store.bind_run_item_job(
+        "1",
+        run.run_id,
+        "occ-future-bound",
+        attempt=1,
+        job_id=int(job["id"]),
+        batch_id="batch-held",
+        idempotency_identity="playlist-ingest-v1:held",
+    )
+
+    assert bound.job_id == rebound.job_id == int(job["id"])
+
+
 def test_persisted_file_staging_candidates_are_bounded_to_abandoned_pending_items(store):
     run = store.create_validated_run(
         "1",
@@ -2370,7 +3035,7 @@ def test_persisted_file_staging_candidates_are_bounded_to_abandoned_pending_item
             }
         ],
     )
-    store.prepare_run_item_job_submission(
+    reserved = store.prepare_run_item_job_submission(
         "1",
         run.run_id,
         "occ-staging",
@@ -2389,6 +3054,7 @@ def test_persisted_file_staging_candidates_are_bounded_to_abandoned_pending_item
         attempt=1,
         batch_id="batch-staging",
         idempotency_identity="playlist-ingest-v1:staging",
+        submission_lease_token=reserved.submission_lease_token,
         temp_dir="/tmp/media_ingest_job_staging",
     )
 
@@ -2448,7 +3114,7 @@ def test_file_job_binding_rejects_a_different_persisted_staging_directory(store)
             )
         ],
     )
-    store.prepare_run_item_job_submission(
+    reserved = store.prepare_run_item_job_submission(
         "1",
         run.run_id,
         "occ-staging-mismatch",
@@ -2466,6 +3132,7 @@ def test_file_job_binding_rejects_a_different_persisted_staging_directory(store)
         attempt=1,
         batch_id="batch-staging-mismatch",
         idempotency_identity="playlist-ingest-v1:staging-mismatch",
+        submission_lease_token=reserved.submission_lease_token,
         temp_dir="/tmp/media_ingest_job_reserved",
     )
     job = store._jobs.create_job(
@@ -2498,6 +3165,7 @@ def test_file_job_binding_rejects_a_different_persisted_staging_directory(store)
             job_id=int(job["id"]),
             batch_id="batch-staging-mismatch",
             idempotency_identity="playlist-ingest-v1:staging-mismatch",
+            submission_lease_token=reserved.submission_lease_token,
         )
 
 
@@ -2513,7 +3181,7 @@ def test_live_staging_reference_check_is_owner_scoped_and_excludes_only_candidat
         )
 
     expired_run = store.create_validated_run("1", items=[file_item("occ-expired")])
-    store.prepare_run_item_job_submission(
+    expired_reserved = store.prepare_run_item_job_submission(
         "1",
         expired_run.run_id,
         "occ-expired",
@@ -2532,11 +3200,12 @@ def test_live_staging_reference_check_is_owner_scoped_and_excludes_only_candidat
         attempt=1,
         batch_id="batch-expired",
         idempotency_identity="playlist-ingest-v1:expired",
+        submission_lease_token=expired_reserved.submission_lease_token,
         temp_dir=shared_path,
     )
     store.test_clock.advance(timedelta(days=8))
     live_run = store.create_validated_run("1", items=[file_item("occ-live")])
-    store.prepare_run_item_job_submission(
+    live_reserved = store.prepare_run_item_job_submission(
         "1",
         live_run.run_id,
         "occ-live",
@@ -2554,6 +3223,7 @@ def test_live_staging_reference_check_is_owner_scoped_and_excludes_only_candidat
         attempt=1,
         batch_id="batch-live",
         idempotency_identity="playlist-ingest-v1:live",
+        submission_lease_token=live_reserved.submission_lease_token,
         temp_dir=shared_path,
     )
 
@@ -2610,7 +3280,7 @@ def test_file_job_submission_failure_resets_exact_pending_reservation(store):
             }
         ],
     )
-    store.prepare_run_item_job_submission(
+    reserved = store.prepare_run_item_job_submission(
         "1",
         run.run_id,
         "occ-file",
@@ -2628,6 +3298,7 @@ def test_file_job_submission_failure_resets_exact_pending_reservation(store):
         attempt=1,
         batch_id="batch-file",
         idempotency_identity="playlist-ingest-v1:file-derived",
+        submission_lease_token=reserved.submission_lease_token,
     )
 
     assert reset.state == "awaiting_upload"
@@ -2642,7 +3313,7 @@ def test_pending_job_submission_reset_requires_exact_reservation_batch(store):
     )
 
     run = store.create_validated_run("1", items=[_validated_direct_record(occurrence_id="occ-job")])
-    store.prepare_run_item_job_submission(
+    reserved = store.prepare_run_item_job_submission(
         "1",
         run.run_id,
         "occ-job",
@@ -2661,6 +3332,7 @@ def test_pending_job_submission_reset_requires_exact_reservation_batch(store):
             attempt=1,
             batch_id="batch-other",
             idempotency_identity="playlist-ingest-v1:derived",
+            submission_lease_token=reserved.submission_lease_token,
         )
 
     pending = store.get_run_item("1", run.run_id, "occ-job")
@@ -2692,7 +3364,7 @@ def test_pending_file_submission_reset_requires_cleared_staging_pointer(store, t
     identity = "playlist-ingest-v1:file-reset"
     batch_id = "batch-file-reset"
     staging_dir = tmp_path / "staging"
-    store.prepare_run_item_job_submission(
+    reserved = store.prepare_run_item_job_submission(
         "1",
         run.run_id,
         "occ-file-reset",
@@ -2709,6 +3381,7 @@ def test_pending_file_submission_reset_requires_cleared_staging_pointer(store, t
         attempt=1,
         batch_id=batch_id,
         idempotency_identity=identity,
+        submission_lease_token=reserved.submission_lease_token,
         temp_dir=str(staging_dir),
     )
 
@@ -2720,6 +3393,7 @@ def test_pending_file_submission_reset_requires_cleared_staging_pointer(store, t
             attempt=1,
             batch_id=batch_id,
             idempotency_identity=identity,
+            submission_lease_token=reserved.submission_lease_token,
         )
 
     pending = store.get_run_item("1", run.run_id, "occ-file-reset")

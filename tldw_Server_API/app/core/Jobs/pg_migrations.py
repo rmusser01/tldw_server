@@ -300,6 +300,9 @@ CREATE TABLE IF NOT EXISTS media_ingest_run_items (
   idempotency_identity TEXT,
   submission_queue TEXT,
   staging_temp_dir TEXT,
+  submission_lease_token TEXT,
+  submission_lease_expires_at TIMESTAMPTZ,
+  submission_lease_generation INTEGER NOT NULL DEFAULT 0 CHECK (submission_lease_generation >= 0),
   planned_collection_item_id BIGINT,
   progress_percent REAL CHECK (progress_percent IS NULL OR (progress_percent >= 0 AND progress_percent <= 100)),
   progress_message TEXT,
@@ -442,6 +445,15 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
                 f.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS batch_group TEXT")
                 f.execute("ALTER TABLE media_ingest_run_items ADD COLUMN IF NOT EXISTS submission_queue TEXT")
                 f.execute("ALTER TABLE media_ingest_run_items ADD COLUMN IF NOT EXISTS staging_temp_dir TEXT")
+                f.execute("ALTER TABLE media_ingest_run_items ADD COLUMN IF NOT EXISTS submission_lease_token TEXT")
+                f.execute(
+                    "ALTER TABLE media_ingest_run_items "
+                    "ADD COLUMN IF NOT EXISTS submission_lease_expires_at TIMESTAMPTZ"
+                )
+                f.execute(
+                    "ALTER TABLE media_ingest_run_items "
+                    "ADD COLUMN IF NOT EXISTS submission_lease_generation INTEGER NOT NULL DEFAULT 0"
+                )
                 # Forward-migrate archive table compressed columns (if table exists)
                 try:
                     f.execute("ALTER TABLE jobs_archive ADD COLUMN IF NOT EXISTS payload_compressed BYTEA")

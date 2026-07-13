@@ -25,7 +25,10 @@ def _new_store(tmp_path, monkeypatch):
 
 
 @pytest.mark.property
-@settings(max_examples=30, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@settings(
+    max_examples=30,
+    suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.too_slow],
+)
 @given(
     occurrence_ids=st.lists(
         st.integers(min_value=0, max_value=1_000_000).map(lambda value: f"occ-{value}"),
@@ -249,10 +252,12 @@ def test_occurrence_attempt_accepts_at_most_one_job_under_repeated_submit(
                     "idempotency_key": identity,
                     "source": reserved.source_url,
                     "source_kind": "url",
+                    "options": {"overwrite_existing": False},
                 },
                 batch_group=reserved.batch_id,
                 owner_user_id=owner,
                 idempotency_key=identity,
+                available_at=datetime(9999, 12, 31, 23, 59, 59, tzinfo=timezone.utc),
             )
             reserved = store.bind_run_item_job(
                 owner,
@@ -262,6 +267,7 @@ def test_occurrence_attempt_accepts_at_most_one_job_under_repeated_submit(
                 job_id=int(job["id"]),
                 batch_id=str(reserved.batch_id),
                 idempotency_identity=identity,
+                submission_lease_token=reserved.submission_lease_token,
             )
         accepted_ids.append(reserved.job_id)
 

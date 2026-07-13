@@ -76,6 +76,9 @@ EXPECTED_PLAYLIST_COLUMNS = {
         "display_metadata_json",
         "submission_queue",
         "staging_temp_dir",
+        "submission_lease_token",
+        "submission_lease_expires_at",
+        "submission_lease_generation",
     },
     "media_ingest_run_events": {
         "event_id",
@@ -172,7 +175,13 @@ def test_sqlite_forward_migration_adds_playlist_submission_authority_columns(tmp
     db_path = ensure_jobs_tables(tmp_path / "jobs_playlist_upgrade.db")
     with sqlite3.connect(db_path) as conn:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(media_ingest_run_items)")}
-        for column in ("submission_queue", "staging_temp_dir"):
+        for column in (
+            "submission_queue",
+            "staging_temp_dir",
+            "submission_lease_token",
+            "submission_lease_expires_at",
+            "submission_lease_generation",
+        ):
             if column in columns:
                 conn.execute(f"ALTER TABLE media_ingest_run_items DROP COLUMN {column}")
 
@@ -180,7 +189,13 @@ def test_sqlite_forward_migration_adds_playlist_submission_authority_columns(tmp
 
     with sqlite3.connect(db_path) as conn:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(media_ingest_run_items)")}
-    assert {"submission_queue", "staging_temp_dir"} <= columns
+    assert {
+        "submission_queue",
+        "staging_temp_dir",
+        "submission_lease_token",
+        "submission_lease_expires_at",
+        "submission_lease_generation",
+    } <= columns
 
 
 def test_sqlite_playlist_ingest_catalog_has_required_columns_indexes_and_uniques(tmp_path):

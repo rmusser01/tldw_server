@@ -35,6 +35,9 @@ EXPECTED_PLAYLIST_COLUMNS = {
         "attempt",
         "submission_queue",
         "staging_temp_dir",
+        "submission_lease_token",
+        "submission_lease_expires_at",
+        "submission_lease_generation",
     },
     "media_ingest_run_events": {"event_id", "run_id", "occurrence_id", "job_id", "state", "outcome"},
 }
@@ -118,6 +121,9 @@ def test_pg_forward_migration_adds_playlist_submission_authority_columns(jobs_pg
     with psycopg.connect(jobs_pg_dsn, autocommit=True) as conn, conn.cursor() as cur:
         cur.execute("ALTER TABLE media_ingest_run_items DROP COLUMN IF EXISTS submission_queue")
         cur.execute("ALTER TABLE media_ingest_run_items DROP COLUMN IF EXISTS staging_temp_dir")
+        cur.execute("ALTER TABLE media_ingest_run_items DROP COLUMN IF EXISTS submission_lease_token")
+        cur.execute("ALTER TABLE media_ingest_run_items DROP COLUMN IF EXISTS submission_lease_expires_at")
+        cur.execute("ALTER TABLE media_ingest_run_items DROP COLUMN IF EXISTS submission_lease_generation")
 
     ensure_jobs_tables_pg(jobs_pg_dsn)
 
@@ -129,10 +135,24 @@ def test_pg_forward_migration_adds_playlist_submission_authority_columns(jobs_pg
               AND table_name = 'media_ingest_run_items'
               AND column_name = ANY(%s)
             """,
-            (["submission_queue", "staging_temp_dir"],),
+            (
+                [
+                    "submission_queue",
+                    "staging_temp_dir",
+                    "submission_lease_token",
+                    "submission_lease_expires_at",
+                    "submission_lease_generation",
+                ],
+            ),
         )
         columns = {row[0] for row in cur.fetchall()}
-    assert columns == {"submission_queue", "staging_temp_dir"}
+    assert columns == {
+        "submission_queue",
+        "staging_temp_dir",
+        "submission_lease_token",
+        "submission_lease_expires_at",
+        "submission_lease_generation",
+    }
 
 
 def test_postgres_schema_has_playlist_ingest_tables(jobs_pg_dsn):

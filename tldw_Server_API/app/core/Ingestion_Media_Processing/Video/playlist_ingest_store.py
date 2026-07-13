@@ -15,7 +15,13 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Generic, TypeVar, overload
 from uuid import uuid4
 
+from loguru import logger
+
 from tldw_Server_API.app.core.AuthNZ.crypto_utils import derive_hmac_key
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_staging import (
+    cleanup_exact_run_file_staging,
+    validated_run_file_staging_dir,
+)
 
 _NOT_FOUND_MESSAGE = "playlist resource not found"
 _CURSOR_ORDER = "ordinal_asc"
@@ -32,6 +38,7 @@ _PREFLIGHT_JOB_TYPE = "playlist_preflight"
 _PREFLIGHT_JOB_SENTINEL = datetime(9999, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
 _PREFLIGHT_ORPHAN_CLAIM_SENTINEL = datetime(9999, 12, 31, 23, 59, 58, tzinfo=timezone.utc)
 _RUN_BOUND_JOB_SENTINEL = _PREFLIGHT_JOB_SENTINEL
+_STAGING_JOB_REFERENCE_SCAN_LIMIT = 100
 _COMPACT_DISPLAY_METADATA_FIELDS = frozenset(
     {
         "title",
@@ -159,6 +166,9 @@ class MediaIngestRunItemRecord:
     idempotency_identity: str | None
     submission_queue: str | None
     staging_temp_dir: str | None
+    submission_lease_token: str | None
+    submission_lease_expires_at: datetime | None
+    submission_lease_generation: int
     progress_percent: float | None
     progress_message: str | None
     retryable: bool
@@ -211,6 +221,15 @@ class PlaylistPage(Sequence[T], Generic[T]):
 
     def __iter__(self) -> Iterator[T]:
         return iter(self.items)
+
+
+@dataclass(frozen=True, slots=True)
+class _RunStagingCleanupCandidate:
+    run_id: str
+    occurrence_id: str
+    batch_id: str
+    idempotency_identity: str
+    temp_dir: str
 
 
 class PlaylistIngestStore:
@@ -322,6 +341,17 @@ class PlaylistIngestStore:
         if type(value) is not str or not value or value.strip() != value or len(value) > max_length:
             raise ValueError(f"{name} must be a canonical non-empty string")
         return value
+
+    @classmethod
+    def _submission_lease_args(cls, token: Any, seconds: Any) -> tuple[str, int]:
+        lease_token = cls._run_text(
+            token if token is not None else uuid4().hex,
+            "submission_lease_token",
+            max_length=_MAX_RUN_IDENTITY_LENGTH,
+        )
+        if type(seconds) is not int or not 1 <= seconds <= 900:
+            raise ValueError("submission_lease_seconds must be between 1 and 900")
+        return lease_token, seconds
 
     @classmethod
     def _normalize_validated_run_item(cls, item: Mapping[str, Any]) -> dict[str, Any]:
@@ -583,6 +613,13 @@ class PlaylistIngestStore:
             idempotency_identity=data.get("idempotency_identity"),
             submission_queue=data.get("submission_queue"),
             staging_temp_dir=data.get("staging_temp_dir"),
+            submission_lease_token=data.get("submission_lease_token"),
+            submission_lease_expires_at=(
+                cls._datetime(data["submission_lease_expires_at"])
+                if data.get("submission_lease_expires_at") is not None
+                else None
+            ),
+            submission_lease_generation=int(data.get("submission_lease_generation") or 0),
             progress_percent=(float(data["progress_percent"]) if data.get("progress_percent") is not None else None),
             progress_message=data.get("progress_message"),
             retryable=bool(data["retryable"]),
@@ -2185,6 +2222,8 @@ class PlaylistIngestStore:
         source_kind: str,
         planned_item_id: int | None,
         submission_queue: str = "default",
+        submission_lease_token: str | None = None,
+        submission_lease_seconds: int = 120,
     ) -> MediaIngestRunItemRecord:
         """Reserve one processing occurrence before upload staging or job creation."""
         owner = self._owner(owner_user_id)
@@ -2204,6 +2243,10 @@ class PlaylistIngestStore:
             submission_queue,
             "submission_queue",
             max_length=_MAX_RUN_IDENTITY_LENGTH,
+        )
+        lease_token, lease_seconds = self._submission_lease_args(
+            submission_lease_token,
+            submission_lease_seconds,
         )
         if type(attempt) is not int or attempt < 1:
             raise ValueError("attempt must be a positive integer")
@@ -2292,7 +2335,49 @@ class PlaylistIngestStore:
                     if initialized.rowcount != 1:
                         raise PlaylistIngestConflictError("occurrence submission queue no longer matches")
                     data["submission_queue"] = stored_queue
-                return self._run_item_record(data)
+                if state == "queued":
+                    return self._run_item_record(data)
+                lease_expiry_value = data.get("submission_lease_expires_at")
+                lease_expiry = self._datetime(lease_expiry_value) if lease_expiry_value is not None else None
+                if data.get("submission_lease_token") and lease_expiry is not None and lease_expiry > now:
+                    return self._run_item_record(data)
+                previous_generation = int(data.get("submission_lease_generation") or 0)
+                renewed = self._query(
+                    db,
+                    """
+                    UPDATE media_ingest_run_items
+                    SET submission_lease_token = ?, submission_lease_expires_at = ?,
+                        submission_lease_generation = submission_lease_generation + 1,
+                        updated_at = ?
+                    WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
+                      AND state = 'submit_pending' AND attempt = ? AND job_id IS NULL
+                      AND batch_id = ? AND idempotency_identity = ?
+                      AND submission_lease_generation = ?
+                    """,
+                    (
+                        lease_token,
+                        self._db_datetime(now + timedelta(seconds=lease_seconds)),
+                        self._db_datetime(now),
+                        owner,
+                        run_identity,
+                        occurrence,
+                        attempt,
+                        data.get("batch_id"),
+                        stored_identity,
+                        previous_generation,
+                    ),
+                )
+                if renewed.rowcount != 1:
+                    raise PlaylistIngestConflictError("occurrence submission lease no longer matches")
+                taken_row = self._query(
+                    db,
+                    """
+                    SELECT * FROM media_ingest_run_items
+                    WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
+                    """,
+                    (owner, run_identity, occurrence),
+                ).fetchone()
+                return self._run_item_record(taken_row)
             if state != expected_state:
                 raise PlaylistIngestConflictError("occurrence is not processable")
 
@@ -2301,7 +2386,9 @@ class PlaylistIngestStore:
                 """
                 UPDATE media_ingest_run_items
                 SET state = 'submit_pending', batch_id = ?, idempotency_identity = ?,
-                    submission_queue = ?,
+                    submission_queue = ?, submission_lease_token = ?,
+                    submission_lease_expires_at = ?,
+                    submission_lease_generation = submission_lease_generation + 1,
                     updated_at = ?
                 WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
                   AND state = ? AND attempt = ? AND job_id IS NULL
@@ -2310,6 +2397,8 @@ class PlaylistIngestStore:
                     batch,
                     identity,
                     queue,
+                    lease_token,
+                    self._db_datetime(now + timedelta(seconds=lease_seconds)),
                     self._db_datetime(now),
                     owner,
                     run_identity,
@@ -2358,6 +2447,379 @@ class PlaylistIngestStore:
                 (owner, run_identity, occurrence),
             ).fetchone()
         return self._run_item_record(item_row)
+
+    def renew_run_item_submission_lease(
+        self,
+        owner_user_id: str,
+        run_id: str,
+        occurrence_id: str,
+        *,
+        attempt: int,
+        batch_id: str,
+        idempotency_identity: str,
+        submission_lease_token: str,
+        submission_lease_seconds: int = 120,
+    ) -> MediaIngestRunItemRecord:
+        """Extend one exact unexpired submission lease without changing generation."""
+        owner = self._owner(owner_user_id)
+        if type(attempt) is not int or attempt < 1:
+            raise ValueError("attempt must be a positive integer")
+        run_identity = self._run_text(run_id, "run_id", max_length=_MAX_RUN_IDENTITY_LENGTH)
+        occurrence = self._run_text(
+            occurrence_id,
+            "occurrence_id",
+            max_length=_MAX_RUN_IDENTITY_LENGTH,
+        )
+        batch = self._run_text(batch_id, "batch_id", max_length=_MAX_RUN_IDENTITY_LENGTH)
+        identity = self._run_text(
+            idempotency_identity,
+            "idempotency_identity",
+            max_length=_MAX_RUN_IDENTITY_LENGTH,
+        )
+        lease_token, lease_seconds = self._submission_lease_args(
+            submission_lease_token,
+            submission_lease_seconds,
+        )
+        now = self._now()
+        with self._connection(write=True) as db:
+            expiry_predicate = (
+                "submission_lease_expires_at > ?"
+                if self._postgres
+                else "julianday(submission_lease_expires_at) > julianday(?)"
+            )
+            updated = self._query(
+                db,
+                f"""
+                UPDATE media_ingest_run_items
+                SET submission_lease_expires_at = ?, updated_at = ?
+                WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
+                  AND state = 'submit_pending' AND attempt = ? AND job_id IS NULL
+                  AND batch_id = ? AND idempotency_identity = ?
+                  AND submission_lease_token = ? AND {expiry_predicate}
+                """,  # nosec B608
+                (
+                    self._db_datetime(now + timedelta(seconds=lease_seconds)),
+                    self._db_datetime(now),
+                    owner,
+                    run_identity,
+                    occurrence,
+                    attempt,
+                    batch,
+                    identity,
+                    lease_token,
+                    self._db_datetime(now),
+                ),
+            )
+            if updated.rowcount != 1:
+                raise PlaylistIngestConflictError("occurrence submission lease no longer matches")
+            row = self._query(
+                db,
+                """
+                SELECT * FROM media_ingest_run_items
+                WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
+                """,
+                (owner, run_identity, occurrence),
+            ).fetchone()
+        return self._run_item_record(row)
+
+    @contextmanager
+    def guard_run_item_staging_manifest_publication(
+        self,
+        owner_user_id: str,
+        run_id: str,
+        occurrence_id: str,
+        *,
+        attempt: int,
+        batch_id: str,
+        idempotency_identity: str,
+        submission_lease_token: str,
+        submission_lease_generation: int,
+        temp_dir: str,
+    ) -> Iterator[None]:
+        """Lock exact staging authority while its completion manifest is published."""
+        owner = self._owner(owner_user_id)
+        if type(attempt) is not int or attempt < 1:
+            raise ValueError("attempt must be a positive integer")
+        if type(submission_lease_generation) is not int or submission_lease_generation < 1:
+            raise ValueError("submission_lease_generation must be positive")
+        run_identity = self._run_text(run_id, "run_id", max_length=_MAX_RUN_IDENTITY_LENGTH)
+        occurrence = self._run_text(
+            occurrence_id,
+            "occurrence_id",
+            max_length=_MAX_RUN_IDENTITY_LENGTH,
+        )
+        batch = self._run_text(batch_id, "batch_id", max_length=_MAX_RUN_IDENTITY_LENGTH)
+        identity = self._run_text(
+            idempotency_identity,
+            "idempotency_identity",
+            max_length=_MAX_RUN_IDENTITY_LENGTH,
+        )
+        lease_token, _unused = self._submission_lease_args(submission_lease_token, 120)
+        staging_dir = self._run_text(temp_dir, "temp_dir", max_length=_MAX_RUN_URL_LENGTH)
+        now = self._db_datetime(self._now())
+        query = (
+            """
+            UPDATE media_ingest_run_items
+            SET updated_at = updated_at
+            WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
+              AND input_kind = 'file_stub' AND state = 'submit_pending'
+              AND attempt = ? AND job_id IS NULL AND batch_id = ?
+              AND idempotency_identity = ? AND staging_temp_dir = ?
+              AND submission_lease_token = ? AND submission_lease_generation = ?
+              AND submission_lease_expires_at > ?
+              AND EXISTS (
+                SELECT 1 FROM media_ingest_runs AS run
+                WHERE run.owner_user_id = media_ingest_run_items.owner_user_id
+                  AND run.run_id = media_ingest_run_items.run_id
+                  AND run.status IN ('staged', 'running') AND run.expires_at > ?
+              )
+            """
+            if self._postgres
+            else """
+            UPDATE media_ingest_run_items
+            SET updated_at = updated_at
+            WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
+              AND input_kind = 'file_stub' AND state = 'submit_pending'
+              AND attempt = ? AND job_id IS NULL AND batch_id = ?
+              AND idempotency_identity = ? AND staging_temp_dir = ?
+              AND submission_lease_token = ? AND submission_lease_generation = ?
+              AND julianday(submission_lease_expires_at) > julianday(?)
+              AND EXISTS (
+                SELECT 1 FROM media_ingest_runs AS run
+                WHERE run.owner_user_id = media_ingest_run_items.owner_user_id
+                  AND run.run_id = media_ingest_run_items.run_id
+                  AND run.status IN ('staged', 'running')
+                  AND julianday(run.expires_at) > julianday(?)
+              )
+            """
+        )
+        with self._connection(write=True) as db:
+            updated = self._query(
+                db,
+                query,
+                (
+                    owner,
+                    run_identity,
+                    occurrence,
+                    attempt,
+                    batch,
+                    identity,
+                    staging_dir,
+                    lease_token,
+                    submission_lease_generation,
+                    now,
+                    now,
+                ),
+            )
+            if updated.rowcount != 1:
+                raise PlaylistIngestConflictError("occurrence submission lease no longer matches")
+            yield
+
+    def takeover_completed_run_item_submission_lease(
+        self,
+        owner_user_id: str,
+        run_id: str,
+        occurrence_id: str,
+        *,
+        attempt: int,
+        batch_id: str,
+        idempotency_identity: str,
+        expected_submission_lease_token: str,
+        expected_submission_lease_generation: int,
+        submission_lease_token: str,
+        submission_lease_seconds: int = 120,
+    ) -> MediaIngestRunItemRecord:
+        """Transfer a pending file lease after its completed manifest was validated."""
+        owner = self._owner(owner_user_id)
+        if type(attempt) is not int or attempt < 1:
+            raise ValueError("attempt must be a positive integer")
+        run_identity = self._run_text(run_id, "run_id", max_length=_MAX_RUN_IDENTITY_LENGTH)
+        occurrence = self._run_text(
+            occurrence_id,
+            "occurrence_id",
+            max_length=_MAX_RUN_IDENTITY_LENGTH,
+        )
+        batch = self._run_text(batch_id, "batch_id", max_length=_MAX_RUN_IDENTITY_LENGTH)
+        identity = self._run_text(
+            idempotency_identity,
+            "idempotency_identity",
+            max_length=_MAX_RUN_IDENTITY_LENGTH,
+        )
+        expected_token, _unused = self._submission_lease_args(expected_submission_lease_token, 120)
+        new_token, lease_seconds = self._submission_lease_args(
+            submission_lease_token,
+            submission_lease_seconds,
+        )
+        if type(expected_submission_lease_generation) is not int or expected_submission_lease_generation < 1:
+            raise ValueError("expected_submission_lease_generation must be positive")
+        now = self._now()
+        with self._connection(write=True) as db:
+            updated = self._query(
+                db,
+                """
+                UPDATE media_ingest_run_items
+                SET submission_lease_token = ?, submission_lease_expires_at = ?,
+                    submission_lease_generation = submission_lease_generation + 1,
+                    updated_at = ?
+                WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
+                  AND input_kind = 'file_stub' AND state = 'submit_pending'
+                  AND attempt = ? AND job_id IS NULL AND batch_id = ?
+                  AND idempotency_identity = ? AND staging_temp_dir IS NOT NULL
+                  AND submission_lease_token = ? AND submission_lease_generation = ?
+                """,
+                (
+                    new_token,
+                    self._db_datetime(now + timedelta(seconds=lease_seconds)),
+                    self._db_datetime(now),
+                    owner,
+                    run_identity,
+                    occurrence,
+                    attempt,
+                    batch,
+                    identity,
+                    expected_token,
+                    expected_submission_lease_generation,
+                ),
+            )
+            if updated.rowcount != 1:
+                raise PlaylistIngestConflictError("occurrence submission lease no longer matches")
+            row = self._query(
+                db,
+                """
+                SELECT * FROM media_ingest_run_items
+                WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
+                """,
+                (owner, run_identity, occurrence),
+            ).fetchone()
+        return self._run_item_record(row)
+
+    def release_run_item_url_submission_lease(
+        self,
+        owner_user_id: str,
+        run_id: str,
+        occurrence_id: str,
+        *,
+        attempt: int,
+        batch_id: str,
+        idempotency_identity: str,
+        submission_lease_token: str,
+    ) -> bool:
+        """Voluntarily release a current URL lease while preserving submission identity."""
+        owner = self._owner(owner_user_id)
+        if type(attempt) is not int or attempt < 1:
+            raise ValueError("attempt must be a positive integer")
+        run_identity = self._run_text(run_id, "run_id", max_length=_MAX_RUN_IDENTITY_LENGTH)
+        occurrence = self._run_text(
+            occurrence_id,
+            "occurrence_id",
+            max_length=_MAX_RUN_IDENTITY_LENGTH,
+        )
+        batch = self._run_text(batch_id, "batch_id", max_length=_MAX_RUN_IDENTITY_LENGTH)
+        identity = self._run_text(
+            idempotency_identity,
+            "idempotency_identity",
+            max_length=_MAX_RUN_IDENTITY_LENGTH,
+        )
+        lease_token, _unused = self._submission_lease_args(submission_lease_token, 120)
+        now = self._now()
+        expiry_predicate = (
+            "submission_lease_expires_at > ?"
+            if self._postgres
+            else "julianday(submission_lease_expires_at) > julianday(?)"
+        )
+        with self._connection(write=True) as db:
+            updated = self._query(
+                db,
+                f"""
+                UPDATE media_ingest_run_items
+                SET submission_lease_token = NULL, submission_lease_expires_at = NULL,
+                    updated_at = ?
+                WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
+                  AND input_kind <> 'file_stub' AND state = 'submit_pending'
+                  AND attempt = ? AND job_id IS NULL
+                  AND batch_id = ? AND idempotency_identity = ?
+                  AND submission_lease_token = ? AND {expiry_predicate}
+                """,  # nosec B608
+                (
+                    self._db_datetime(now),
+                    owner,
+                    run_identity,
+                    occurrence,
+                    attempt,
+                    batch,
+                    identity,
+                    lease_token,
+                    self._db_datetime(now),
+                ),
+            )
+        return updated.rowcount == 1
+
+    def assert_run_item_submission_lease_for_job_create(
+        self,
+        db: Any,
+        owner_user_id: str,
+        run_id: str,
+        occurrence_id: str,
+        *,
+        attempt: int,
+        batch_id: str,
+        idempotency_identity: str,
+        submission_lease_token: str,
+    ) -> None:
+        """Lock and validate one lease inside the transaction that inserts its held job."""
+        owner = self._owner(owner_user_id)
+        if type(attempt) is not int or attempt < 1:
+            raise ValueError("attempt must be a positive integer")
+        run_identity = self._run_text(run_id, "run_id", max_length=_MAX_RUN_IDENTITY_LENGTH)
+        occurrence = self._run_text(
+            occurrence_id,
+            "occurrence_id",
+            max_length=_MAX_RUN_IDENTITY_LENGTH,
+        )
+        batch = self._run_text(batch_id, "batch_id", max_length=_MAX_RUN_IDENTITY_LENGTH)
+        identity = self._run_text(
+            idempotency_identity,
+            "idempotency_identity",
+            max_length=_MAX_RUN_IDENTITY_LENGTH,
+        )
+        lease_token, _unused = self._submission_lease_args(submission_lease_token, 120)
+        now = self._now()
+        item_expiry = (
+            "submission_lease_expires_at > ?"
+            if self._postgres
+            else "julianday(submission_lease_expires_at) > julianday(?)"
+        )
+        run_expiry = "run.expires_at > ?" if self._postgres else "julianday(run.expires_at) > julianday(?)"
+        updated = self._query(
+            db,
+            f"""
+            UPDATE media_ingest_run_items
+            SET updated_at = updated_at
+            WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
+              AND state = 'submit_pending' AND attempt = ? AND job_id IS NULL
+              AND batch_id = ? AND idempotency_identity = ?
+              AND submission_lease_token = ? AND {item_expiry}
+              AND EXISTS (
+                SELECT 1 FROM media_ingest_runs AS run
+                WHERE run.owner_user_id = media_ingest_run_items.owner_user_id
+                  AND run.run_id = media_ingest_run_items.run_id
+                  AND run.status IN ('staged', 'running') AND {run_expiry}
+              )
+            """,  # nosec B608
+            (
+                owner,
+                run_identity,
+                occurrence,
+                attempt,
+                batch,
+                identity,
+                lease_token,
+                self._db_datetime(now),
+                self._db_datetime(now),
+            ),
+        )
+        if updated.rowcount != 1:
+            raise PlaylistIngestConflictError("occurrence submission lease no longer matches")
 
     def _publish_run_bound_job(
         self,
@@ -2429,6 +2891,7 @@ class PlaylistIngestStore:
         attempt: int,
         batch_id: str,
         idempotency_identity: str,
+        submission_lease_token: str,
         temp_dir: str,
     ) -> MediaIngestRunItemRecord:
         """Persist the exact file-staging directory for a pending reservation."""
@@ -2442,19 +2905,26 @@ class PlaylistIngestStore:
             max_length=_MAX_RUN_IDENTITY_LENGTH,
         )
         staging_dir = self._run_text(temp_dir, "temp_dir", max_length=_MAX_RUN_URL_LENGTH)
+        lease_token, _lease_seconds = self._submission_lease_args(submission_lease_token, 120)
         if type(attempt) is not int or attempt < 1:
             raise ValueError("attempt must be a positive integer")
         now = self._now()
         with self._connection(write=True) as db:
+            expiry_predicate = (
+                "submission_lease_expires_at > ?"
+                if self._postgres
+                else "julianday(submission_lease_expires_at) > julianday(?)"
+            )
             updated = self._query(
                 db,
-                """
+                f"""
                 UPDATE media_ingest_run_items
                 SET staging_temp_dir = ?, updated_at = ?
                 WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
                   AND input_kind = 'file_stub' AND state = 'submit_pending'
                   AND attempt = ? AND batch_id = ? AND idempotency_identity = ?
-                """,
+                  AND submission_lease_token = ? AND {expiry_predicate}
+                """,  # nosec B608
                 (
                     staging_dir,
                     self._db_datetime(now),
@@ -2464,10 +2934,12 @@ class PlaylistIngestStore:
                     attempt,
                     batch,
                     identity,
+                    lease_token,
+                    self._db_datetime(now),
                 ),
             )
             if updated.rowcount != 1:
-                raise PlaylistIngestConflictError("occurrence staging reservation no longer matches")
+                raise PlaylistIngestConflictError("occurrence submission lease no longer matches")
             row = self._query(
                 db,
                 """
@@ -2487,22 +2959,31 @@ class PlaylistIngestStore:
         attempt: int,
         batch_id: str,
         idempotency_identity: str,
+        submission_lease_token: str,
         temp_dir: str,
     ) -> bool:
         """Clear one persisted staging path only when every reservation field matches."""
         owner = self._owner(owner_user_id)
+        lease_token, _lease_seconds = self._submission_lease_args(submission_lease_token, 120)
         if type(attempt) is not int or attempt < 1:
             raise ValueError("attempt must be a positive integer")
         with self._connection(write=True) as db:
+            now = self._now()
+            expiry_predicate = (
+                "submission_lease_expires_at > ?"
+                if self._postgres
+                else "julianday(submission_lease_expires_at) > julianday(?)"
+            )
             updated = self._query(
                 db,
-                """
+                f"""
                 UPDATE media_ingest_run_items
                 SET staging_temp_dir = NULL
                 WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
                   AND attempt = ? AND batch_id = ? AND idempotency_identity = ?
+                  AND submission_lease_token = ? AND {expiry_predicate}
                   AND staging_temp_dir = ?
-                """,
+                """,  # nosec B608
                 (
                     owner,
                     str(run_id),
@@ -2510,6 +2991,8 @@ class PlaylistIngestStore:
                     attempt,
                     str(batch_id),
                     str(idempotency_identity),
+                    lease_token,
+                    self._db_datetime(now),
                     str(temp_dir),
                 ),
             )
@@ -2551,6 +3034,64 @@ class PlaylistIngestStore:
                 (owner, cutoff, now, limit),
             ).fetchall()
         return [self._run_item_record(row) for row in rows]
+
+    def clear_abandoned_run_item_staging(
+        self,
+        owner_user_id: str,
+        run_id: str,
+        occurrence_id: str,
+        *,
+        attempt: int,
+        batch_id: str,
+        idempotency_identity: str,
+        temp_dir: str,
+    ) -> bool:
+        """Clear an exact pointer only while its parent run is expired or nonaccepting."""
+        owner = self._owner(owner_user_id)
+        now = self._db_datetime(self._now())
+        if self._postgres:
+            query = """
+                UPDATE media_ingest_run_items AS item
+                SET staging_temp_dir = NULL
+                FROM media_ingest_runs AS run
+                WHERE item.owner_user_id = ? AND item.run_id = ? AND item.occurrence_id = ?
+                  AND item.state = 'submit_pending' AND item.attempt = ?
+                  AND item.batch_id = ? AND item.idempotency_identity = ?
+                  AND item.staging_temp_dir = ?
+                  AND run.owner_user_id = item.owner_user_id AND run.run_id = item.run_id
+                  AND (run.status NOT IN ('staged', 'running') OR run.expires_at <= ?)
+            """
+        else:
+            query = """
+                UPDATE media_ingest_run_items AS item
+                SET staging_temp_dir = NULL
+                WHERE item.owner_user_id = ? AND item.run_id = ? AND item.occurrence_id = ?
+                  AND item.state = 'submit_pending' AND item.attempt = ?
+                  AND item.batch_id = ? AND item.idempotency_identity = ?
+                  AND item.staging_temp_dir = ?
+                  AND EXISTS (
+                    SELECT 1 FROM media_ingest_runs AS run
+                    WHERE run.owner_user_id = item.owner_user_id AND run.run_id = item.run_id
+                      AND (run.status NOT IN ('staged', 'running')
+                           OR julianday(run.expires_at) <= julianday(?))
+                  )
+            """
+        with self._connection(write=True) as db:
+            updated = self._query(
+                db,
+                query,
+                (
+                    owner,
+                    str(run_id),
+                    str(occurrence_id),
+                    int(attempt),
+                    str(batch_id),
+                    str(idempotency_identity),
+                    str(temp_dir),
+                    now,
+                ),
+            )
+        return updated.rowcount == 1
 
     def has_live_run_item_staging_reference(
         self,
@@ -2594,6 +3135,87 @@ class PlaylistIngestStore:
             ).fetchone()
         return row is not None
 
+    def _has_live_job_staging_reference(
+        self,
+        owner_user_id: str,
+        candidate: _RunStagingCleanupCandidate,
+    ) -> bool:
+        """Fail closed when a non-cleanup-cancelled job may reference a staging path."""
+        candidate_path = validated_run_file_staging_dir(
+            temp_dir=candidate.temp_dir,
+            batch_id=candidate.batch_id,
+            idempotency_identity=candidate.idempotency_identity,
+        )
+        if candidate_path is None:
+            return True
+        cursor_created_at: datetime | None = None
+        cursor_id: int | None = None
+        while True:
+            jobs = self._jobs.list_jobs(
+                domain="media_ingest",
+                owner_user_id=owner_user_id,
+                job_type="media_ingest_item",
+                batch_group=candidate.batch_id,
+                created_before=cursor_created_at,
+                before_id=cursor_id,
+                limit=_STAGING_JOB_REFERENCE_SCAN_LIMIT,
+                sort_by="created_at",
+                sort_order="desc",
+            )
+            for job in jobs:
+                if job.get("status") == "cancelled" and job.get("cancellation_reason") == "expired_playlist_ingest_run":
+                    continue
+                view = self._jobs.normalize_job_binding_view(job, owner_user_id=owner_user_id)
+                if view is None:
+                    return True
+                referenced_temp_dir = view["payload"].get("temp_dir")
+                if referenced_temp_dir is None:
+                    continue
+                referenced = validated_run_file_staging_dir(
+                    temp_dir=referenced_temp_dir,
+                    batch_id=str(view.get("batch_group") or ""),
+                    idempotency_identity=str(view.get("idempotency_key") or ""),
+                )
+                if referenced is None or referenced == candidate_path:
+                    return True
+            if len(jobs) < _STAGING_JOB_REFERENCE_SCAN_LIMIT:
+                return False
+            last_job = jobs[-1]
+            try:
+                cursor_created_at = self._datetime(last_job["created_at"])
+                cursor_id = int(last_job["id"])
+            except (KeyError, TypeError, ValueError):
+                return True
+
+    def _retire_expired_run_staging(
+        self,
+        owner_user_id: str,
+        candidates: Sequence[_RunStagingCleanupCandidate],
+    ) -> None:
+        """Retire committed expired-run staging only after fresh reference checks."""
+        for candidate in candidates:
+            try:
+                if self.has_live_run_item_staging_reference(
+                    owner_user_id,
+                    candidate.temp_dir,
+                    excluding_run_id=candidate.run_id,
+                    excluding_occurrence_id=candidate.occurrence_id,
+                ) or self._has_live_job_staging_reference(owner_user_id, candidate):
+                    continue
+                cleanup_exact_run_file_staging(
+                    temp_dir=candidate.temp_dir,
+                    batch_id=candidate.batch_id,
+                    idempotency_identity=candidate.idempotency_identity,
+                )
+            except Exception as exc:  # noqa: BLE001 - post-commit cleanup must fail closed
+                logger.warning(
+                    "Skipped expired playlist staging retirement for run {} occurrence {} after {}",
+                    candidate.run_id,
+                    candidate.occurrence_id,
+                    type(exc).__name__,
+                )
+                continue
+
     def bind_run_item_job(
         self,
         owner_user_id: str,
@@ -2604,6 +3226,7 @@ class PlaylistIngestStore:
         job_id: int,
         batch_id: str,
         idempotency_identity: str,
+        submission_lease_token: str | None = None,
     ) -> MediaIngestRunItemRecord:
         """Bind the exact owner-scoped idempotent Jobs row to one reserved occurrence."""
         owner = self._owner(owner_user_id)
@@ -2681,15 +3304,17 @@ class PlaylistIngestStore:
             reserved_staging_dir = data.get("staging_temp_dir") if is_file_item else None
             available_at = binding_view.get("available_at") if binding_view is not None else None
             is_held = available_at is not None and self._datetime(available_at) == _RUN_BOUND_JOB_SENTINEL
-            is_published = available_at is None or (
-                available_at is not None
-                and self._datetime(available_at) <= datetime.now(timezone.utc) + timedelta(seconds=5)
-            )
             job_status = str(binding_view.get("status") or "") if binding_view is not None else ""
             lifecycle_state_matches = (job_status == "queued" and is_held) or (
                 already_bound
-                and is_published
                 and job_status in {"queued", "processing", "completed", "failed", "cancelled", "quarantined"}
+            )
+            lease_expiry_value = data.get("submission_lease_expires_at")
+            lease_is_current = (
+                isinstance(submission_lease_token, str)
+                and submission_lease_token == data.get("submission_lease_token")
+                and lease_expiry_value is not None
+                and self._datetime(lease_expiry_value) > now
             )
             if (
                 binding_view is None
@@ -2719,6 +3344,8 @@ class PlaylistIngestStore:
                 )
             ):
                 raise PlaylistIngestConflictError("media job binding does not match occurrence")
+            if (not already_bound or is_held) and not lease_is_current:
+                raise PlaylistIngestConflictError("occurrence submission lease no longer matches")
 
             if already_bound:
                 if is_held:
@@ -2742,7 +3369,9 @@ class PlaylistIngestStore:
                 db,
                 """
                 UPDATE media_ingest_run_items
-                SET state = 'queued', job_id = ?, staging_temp_dir = ?, updated_at = ?
+                SET state = 'queued', job_id = ?, staging_temp_dir = ?,
+                    submission_lease_token = NULL, submission_lease_expires_at = NULL,
+                    updated_at = ?
                 WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
                   AND state = 'submit_pending' AND attempt = ? AND job_id IS NULL
                   AND batch_id = ? AND idempotency_identity = ?
@@ -2819,6 +3448,7 @@ class PlaylistIngestStore:
         attempt: int,
         batch_id: str,
         idempotency_identity: str,
+        submission_lease_token: str,
     ) -> MediaIngestRunItemRecord:
         """Release an exact reservation when no media job was accepted."""
         owner = self._owner(owner_user_id)
@@ -2836,6 +3466,7 @@ class PlaylistIngestStore:
             "idempotency_identity",
             max_length=_MAX_RUN_IDENTITY_LENGTH,
         )
+        lease_token, _lease_seconds = self._submission_lease_args(submission_lease_token, 120)
         now = self._now()
         with self._connection(write=True) as db:
             lock = " FOR UPDATE OF run, item" if self._postgres else ""
@@ -2868,6 +3499,9 @@ class PlaylistIngestStore:
                 or int(data["attempt"]) != attempt
                 or data.get("batch_id") != batch
                 or data.get("idempotency_identity") != identity
+                or data.get("submission_lease_token") != lease_token
+                or data.get("submission_lease_expires_at") is None
+                or self._datetime(data["submission_lease_expires_at"]) <= now
                 or data.get("job_id") is not None
                 or data.get("staging_temp_dir") is not None
             ):
@@ -2877,10 +3511,12 @@ class PlaylistIngestStore:
                 """
                 UPDATE media_ingest_run_items
                 SET state = ?, batch_id = NULL, idempotency_identity = NULL,
+                    submission_lease_token = NULL, submission_lease_expires_at = NULL,
                     updated_at = ?
                 WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
                   AND state = 'submit_pending' AND attempt = ?
                   AND batch_id = ? AND idempotency_identity = ? AND job_id IS NULL
+                  AND submission_lease_token = ?
                   AND staging_temp_dir IS NULL
                 """,
                 (
@@ -2892,6 +3528,7 @@ class PlaylistIngestStore:
                     attempt,
                     batch,
                     identity,
+                    lease_token,
                 ),
             )
             if updated.rowcount != 1:
@@ -3278,7 +3915,123 @@ class PlaylistIngestStore:
             attached_run = self._run_record(attached_row)
         return attached_run
 
-    def cleanup_expired(
+    def _cancel_expired_run_held_jobs(
+        self,
+        db: Any,
+        *,
+        owner_user_id: str,
+        cutoff: datetime | str,
+    ) -> int:
+        """Cancel exact run-bound jobs that are still queued behind the hold sentinel."""
+        expiry_predicate = "run.expires_at <= ?" if self._postgres else "julianday(run.expires_at) <= julianday(?)"
+        lock = " FOR UPDATE OF item, job" if self._postgres else ""
+        rows = self._query(
+            db,
+            f"""
+            SELECT item.run_id, item.occurrence_id, item.attempt, item.job_id,
+                   item.batch_id, item.idempotency_identity, item.submission_queue,
+                   job.id, job.uuid, job.owner_user_id, job.domain, job.queue,
+                   job.job_type, job.status, job.available_at, job.batch_group,
+                   job.idempotency_key, job.created_at, job.payload
+            FROM media_ingest_run_items AS item
+            JOIN media_ingest_runs AS run
+              ON run.owner_user_id = item.owner_user_id AND run.run_id = item.run_id
+            JOIN jobs AS job ON (
+              job.id = item.job_id
+              OR (
+                item.job_id IS NULL
+                AND job.owner_user_id = item.owner_user_id
+                AND job.domain = 'media_ingest'
+                AND job.queue = item.submission_queue
+                AND job.job_type = 'media_ingest_item'
+                AND job.batch_group = item.batch_id
+                AND job.idempotency_key = item.idempotency_identity
+              )
+            )
+            WHERE run.owner_user_id = ? AND {expiry_predicate}
+              AND item.state IN ('submit_pending', 'queued')
+            ORDER BY item.run_id, item.occurrence_id
+            {lock}
+            """,  # nosec B608
+            (owner_user_id, cutoff),
+        ).fetchall()
+        cancelled = 0
+        for row in rows:
+            data = self._row_dict(row)
+            view = self._jobs.normalize_job_binding_view(data, owner_user_id=owner_user_id)
+            payload = view.get("payload") if view is not None else None
+            available_at = view.get("available_at") if view is not None else None
+            if (
+                view is None
+                or view.get("domain") != "media_ingest"
+                or view.get("job_type") != "media_ingest_item"
+                or view.get("status") != "queued"
+                or available_at is None
+                or self._datetime(available_at) != _RUN_BOUND_JOB_SENTINEL
+                or view.get("queue") != data.get("submission_queue")
+                or view.get("batch_group") != data.get("batch_id")
+                or view.get("idempotency_key") != data.get("idempotency_identity")
+                or not isinstance(payload, Mapping)
+                or payload.get("run_id") != data.get("run_id")
+                or payload.get("occurrence_id") != data.get("occurrence_id")
+                or type(payload.get("attempt")) is not int
+                or payload.get("attempt") != int(data.get("attempt") or 0)
+            ):
+                continue
+            updated = self._query(
+                db,
+                (
+                    """
+                    UPDATE jobs SET status = 'cancelled', cancelled_at = NOW(),
+                                    cancellation_reason = 'expired_playlist_ingest_run',
+                                    updated_at = NOW()
+                    WHERE id = ? AND owner_user_id = ? AND status = 'queued'
+                      AND available_at = ?
+                    """
+                    if self._postgres
+                    else """
+                    UPDATE jobs SET status = 'cancelled', cancelled_at = DATETIME('now'),
+                                    cancellation_reason = 'expired_playlist_ingest_run',
+                                    updated_at = DATETIME('now')
+                    WHERE id = ? AND owner_user_id = ? AND status = 'queued'
+                      AND available_at = ?
+                    """
+                ),
+                (
+                    int(view["id"]),
+                    owner_user_id,
+                    self._job_datetime(_RUN_BOUND_JOB_SENTINEL),
+                ),
+            )
+            if updated.rowcount != 1:
+                continue
+            cancelled += 1
+            if self._jobs._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")):
+                self._query(
+                    db,
+                    (
+                        """
+                        UPDATE job_counters
+                        SET scheduled_count = GREATEST(scheduled_count - 1, 0),
+                            updated_at = NOW()
+                        WHERE domain = 'media_ingest' AND queue = ?
+                          AND job_type = 'media_ingest_item'
+                        """
+                        if self._postgres
+                        else """
+                        UPDATE job_counters
+                        SET scheduled_count = CASE
+                                WHEN scheduled_count > 0 THEN scheduled_count - 1 ELSE 0 END,
+                            updated_at = DATETIME('now')
+                        WHERE domain = 'media_ingest' AND queue = ?
+                          AND job_type = 'media_ingest_item'
+                        """
+                    ),
+                    (str(view["queue"]),),
+                )
+        return cancelled
+
+    def cleanup_expired_resources(
         self,
         owner_user_id: str,
         *,
@@ -3287,6 +4040,7 @@ class PlaylistIngestStore:
         """Delete only expired playlist resources owned by the caller."""
         owner = self._owner(owner_user_id)
         cutoff = self._db_datetime(now or self._now())
+        staging_candidates: list[_RunStagingCleanupCandidate] = []
         with self._connection(write=True) as db:
             if self._postgres:
                 preflight_rows = self._query(
@@ -3321,6 +4075,45 @@ class PlaylistIngestStore:
                 run_ids = [str(self._row_dict(row)["run_id"]) for row in run_rows]
 
                 if run_ids:
+                    staging_rows = self._query(
+                        db,
+                        """
+                        SELECT run_id, occurrence_id, batch_id, idempotency_identity,
+                               staging_temp_dir
+                        FROM media_ingest_run_items
+                        WHERE owner_user_id = ? AND run_id = ANY(?)
+                          AND staging_temp_dir IS NOT NULL
+                        ORDER BY run_id, occurrence_id
+                        FOR UPDATE
+                        """,
+                        (owner, run_ids),
+                    ).fetchall()
+                    for row in staging_rows:
+                        data = self._row_dict(row)
+                        if all(
+                            isinstance(data.get(field), str) and data[field]
+                            for field in (
+                                "run_id",
+                                "occurrence_id",
+                                "batch_id",
+                                "idempotency_identity",
+                                "staging_temp_dir",
+                            )
+                        ):
+                            staging_candidates.append(
+                                _RunStagingCleanupCandidate(
+                                    run_id=data["run_id"],
+                                    occurrence_id=data["occurrence_id"],
+                                    batch_id=data["batch_id"],
+                                    idempotency_identity=data["idempotency_identity"],
+                                    temp_dir=data["staging_temp_dir"],
+                                )
+                            )
+                    self._cancel_expired_run_held_jobs(
+                        db,
+                        owner_user_id=owner,
+                        cutoff=cutoff,
+                    )
                     self._query(
                         db,
                         """
@@ -3387,72 +4180,123 @@ class PlaylistIngestStore:
                     ).rowcount
                 else:
                     preflights = 0
-                return {
+                result = {
                     "preflights": int(preflights),
                     "materializations": int(materializations),
                     "runs": int(runs),
                 }
+            else:
+                staging_rows = self._query(
+                    db,
+                    """
+                    SELECT item.run_id, item.occurrence_id, item.batch_id,
+                           item.idempotency_identity, item.staging_temp_dir
+                    FROM media_ingest_run_items AS item
+                    JOIN media_ingest_runs AS run
+                      ON run.owner_user_id = item.owner_user_id AND run.run_id = item.run_id
+                    WHERE item.owner_user_id = ? AND item.staging_temp_dir IS NOT NULL
+                      AND julianday(run.expires_at) <= julianday(?)
+                    ORDER BY item.run_id, item.occurrence_id
+                    """,
+                    (owner, cutoff),
+                ).fetchall()
+                for row in staging_rows:
+                    data = self._row_dict(row)
+                    if all(
+                        isinstance(data.get(field), str) and data[field]
+                        for field in (
+                            "run_id",
+                            "occurrence_id",
+                            "batch_id",
+                            "idempotency_identity",
+                            "staging_temp_dir",
+                        )
+                    ):
+                        staging_candidates.append(
+                            _RunStagingCleanupCandidate(
+                                run_id=data["run_id"],
+                                occurrence_id=data["occurrence_id"],
+                                batch_id=data["batch_id"],
+                                idempotency_identity=data["idempotency_identity"],
+                                temp_dir=data["staging_temp_dir"],
+                            )
+                        )
+                self._cancel_expired_run_held_jobs(
+                    db,
+                    owner_user_id=owner,
+                    cutoff=cutoff,
+                )
+                self._query(
+                    db,
+                    f"""
+                    DELETE FROM media_ingest_run_events WHERE owner_user_id = ? AND run_id IN (
+                        SELECT run_id FROM media_ingest_runs WHERE owner_user_id = ? AND {self._expired_sql()}
+                    )
+                    """,  # nosec B608
+                    (owner, owner, cutoff),
+                )
+                self._query(
+                    db,
+                    f"""
+                    DELETE FROM media_ingest_run_items WHERE owner_user_id = ? AND run_id IN (
+                        SELECT run_id FROM media_ingest_runs WHERE owner_user_id = ? AND {self._expired_sql()}
+                    )
+                    """,  # nosec B608
+                    (owner, owner, cutoff),
+                )
+                runs = self._query(
+                    db,
+                    f"DELETE FROM media_ingest_runs WHERE owner_user_id = ? AND {self._expired_sql()}",  # nosec B608
+                    (owner, cutoff),
+                ).rowcount
+                self._query(
+                    db,
+                    f"""
+                    DELETE FROM playlist_materialization_items
+                    WHERE owner_user_id = ? AND materialization_id IN (
+                        SELECT materialization_id FROM playlist_materializations
+                        WHERE owner_user_id = ? AND {self._expired_sql()}
+                    )
+                    """,  # nosec B608
+                    (owner, owner, cutoff),
+                )
+                materializations = self._query(
+                    db,
+                    f"DELETE FROM playlist_materializations WHERE owner_user_id = ? AND {self._expired_sql()}",  # nosec B608
+                    (owner, cutoff),
+                ).rowcount
+                self._query(
+                    db,
+                    f"""
+                    DELETE FROM playlist_preflight_items
+                    WHERE owner_user_id = ? AND preflight_id IN (
+                        SELECT preflight_id FROM playlist_preflights
+                        WHERE owner_user_id = ? AND {self._expired_sql()}
+                    )
+                    """,  # nosec B608
+                    (owner, owner, cutoff),
+                )
+                preflights = self._query(
+                    db,
+                    f"DELETE FROM playlist_preflights WHERE owner_user_id = ? AND {self._expired_sql()}",  # nosec B608
+                    (owner, cutoff),
+                ).rowcount
+                result = {
+                    "preflights": int(preflights),
+                    "materializations": int(materializations),
+                    "runs": int(runs),
+                }
+        self._retire_expired_run_staging(owner, staging_candidates)
+        return result
 
-            self._query(
-                db,
-                f"""
-                DELETE FROM media_ingest_run_events WHERE owner_user_id = ? AND run_id IN (
-                    SELECT run_id FROM media_ingest_runs WHERE owner_user_id = ? AND {self._expired_sql()}
-                )
-                """,  # nosec B608
-                (owner, owner, cutoff),
-            )
-            self._query(
-                db,
-                f"""
-                DELETE FROM media_ingest_run_items WHERE owner_user_id = ? AND run_id IN (
-                    SELECT run_id FROM media_ingest_runs WHERE owner_user_id = ? AND {self._expired_sql()}
-                )
-                """,  # nosec B608
-                (owner, owner, cutoff),
-            )
-            runs = self._query(
-                db,
-                f"DELETE FROM media_ingest_runs WHERE owner_user_id = ? AND {self._expired_sql()}",  # nosec B608
-                (owner, cutoff),
-            ).rowcount
-            self._query(
-                db,
-                f"""
-                DELETE FROM playlist_materialization_items
-                WHERE owner_user_id = ? AND materialization_id IN (
-                    SELECT materialization_id FROM playlist_materializations
-                    WHERE owner_user_id = ? AND {self._expired_sql()}
-                )
-                """,  # nosec B608
-                (owner, owner, cutoff),
-            )
-            materializations = self._query(
-                db,
-                f"DELETE FROM playlist_materializations WHERE owner_user_id = ? AND {self._expired_sql()}",  # nosec B608
-                (owner, cutoff),
-            ).rowcount
-            self._query(
-                db,
-                f"""
-                DELETE FROM playlist_preflight_items
-                WHERE owner_user_id = ? AND preflight_id IN (
-                    SELECT preflight_id FROM playlist_preflights
-                    WHERE owner_user_id = ? AND {self._expired_sql()}
-                )
-                """,  # nosec B608
-                (owner, owner, cutoff),
-            )
-            preflights = self._query(
-                db,
-                f"DELETE FROM playlist_preflights WHERE owner_user_id = ? AND {self._expired_sql()}",  # nosec B608
-                (owner, cutoff),
-            ).rowcount
-        return {
-            "preflights": int(preflights),
-            "materializations": int(materializations),
-            "runs": int(runs),
-        }
+    def cleanup_expired(
+        self,
+        owner_user_id: str,
+        *,
+        now: datetime | None = None,
+    ) -> dict[str, int]:
+        """Backward-compatible alias for expired playlist resource cleanup."""
+        return self.cleanup_expired_resources(owner_user_id, now=now)
 
 
 __all__ = [

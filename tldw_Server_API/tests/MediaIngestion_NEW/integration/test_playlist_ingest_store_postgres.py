@@ -81,6 +81,7 @@ def test_postgres_occurrence_job_reservation_and_binding_match_sqlite(pg_temp_db
             attempt=1,
             batch_id="pg-other-batch",
             idempotency_identity=identity,
+            submission_lease_token=reserved.submission_lease_token,
         )
     assert store.get_run_item("pg-job-owner", run.run_id, "pg-job-occ").state == "submit_pending"
     job = manager.create_job(
@@ -101,6 +102,16 @@ def test_postgres_occurrence_job_reservation_and_binding_match_sqlite(pg_temp_db
         owner_user_id="pg-job-owner",
         idempotency_key=identity,
         available_at=datetime(9999, 12, 31, 23, 59, 59, tzinfo=timezone.utc),
+        _transaction_guard=lambda db: store.assert_run_item_submission_lease_for_job_create(
+            db,
+            "pg-job-owner",
+            run.run_id,
+            "pg-job-occ",
+            attempt=1,
+            batch_id="pg-job-batch",
+            idempotency_identity=identity,
+            submission_lease_token=reserved.submission_lease_token,
+        ),
     )
     exact = manager.get_job_by_idempotency(
         domain="media_ingest",
@@ -128,6 +139,7 @@ def test_postgres_occurrence_job_reservation_and_binding_match_sqlite(pg_temp_db
         job_id=int(job["id"]),
         batch_id="pg-job-batch",
         idempotency_identity=identity,
+        submission_lease_token=reserved.submission_lease_token,
     )
     repeated = store.bind_run_item_job(
         "pg-job-owner",
@@ -405,7 +417,7 @@ def test_postgres_live_staging_reference_is_owner_scoped(pg_temp_db, monkeypatch
                 }
             ],
         )
-        store.prepare_run_item_job_submission(
+        reserved = store.prepare_run_item_job_submission(
             "pg-staging-owner",
             run.run_id,
             occurrence_id,
@@ -423,6 +435,7 @@ def test_postgres_live_staging_reference_is_owner_scoped(pg_temp_db, monkeypatch
             attempt=1,
             batch_id=batch_id,
             idempotency_identity=identity,
+            submission_lease_token=reserved.submission_lease_token,
             temp_dir="/tmp/media_ingest_job_pg_shared_alias",
         )
         return run
@@ -443,6 +456,305 @@ def test_postgres_live_staging_reference_is_owner_scoped(pg_temp_db, monkeypatch
         excluding_run_id=expired.run_id,
         excluding_occurrence_id="pg-expired",
     )
+
+
+def test_postgres_submission_lease_takeover_race_has_one_new_owner(pg_temp_db, monkeypatch):
+    monkeypatch.setenv("TEST_MODE", "true")
+    dsn = str(pg_temp_db["dsn"])
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestStore,
+    )
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    from tldw_Server_API.app.core.Jobs.pg_migrations import ensure_jobs_tables_pg
+
+    ensure_jobs_tables_pg(dsn)
+    clock = _FixedClock()
+
+    def new_store():
+        return PlaylistIngestStore(JobManager(backend="postgres", db_url=dsn, clock=clock))
+
+    seed = new_store()
+    run = seed.create_validated_run(
+        "pg-lease-owner",
+        items=[
+            {
+                "occurrence_id": "pg-lease-occ",
+                "input_kind": "direct_url",
+                "source_url": "https://www.youtube.com/watch?v=alpha123456",
+                "normalized_source_id": "youtube:video:alpha123456",
+                "source_kind": "youtube_video",
+                "display_metadata": {"title": "Alpha"},
+                "state": "staged",
+                "action": "ingest",
+                "metadata_patch": None,
+            }
+        ],
+    )
+    seed.prepare_run_item_job_submission(
+        "pg-lease-owner",
+        run.run_id,
+        "pg-lease-occ",
+        attempt=1,
+        batch_id="pg-lease-batch",
+        idempotency_identity="playlist-ingest-v1:pg-lease",
+        source_kind="url",
+        planned_item_id=None,
+        submission_lease_token="pg-lease-crashed",
+        submission_lease_seconds=5,
+    )
+    clock.advance(timedelta(seconds=6))
+
+    def take_over(token: str):
+        record = new_store().prepare_run_item_job_submission(
+            "pg-lease-owner",
+            run.run_id,
+            "pg-lease-occ",
+            attempt=1,
+            batch_id="ignored-batch",
+            idempotency_identity="playlist-ingest-v1:ignored",
+            source_kind="url",
+            planned_item_id=None,
+            submission_lease_token=token,
+            submission_lease_seconds=30,
+        )
+        return token, record.submission_lease_token, record.submission_lease_generation
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(take_over, ["pg-racer-a", "pg-racer-b"]))
+
+    assert sum(proposed == stored for proposed, stored, _generation in results) == 1
+    assert {generation for _proposed, _stored, generation in results} == {2}
+
+
+def test_postgres_expired_cleanup_cancels_only_held_job_and_releases_quota(
+    pg_temp_db,
+    monkeypatch,
+):
+    monkeypatch.setenv("TEST_MODE", "true")
+    monkeypatch.setenv("JOBS_COUNTERS_ENABLED", "true")
+    monkeypatch.setenv("JOBS_QUOTA_MAX_QUEUED_MEDIA_INGEST_USER_pg-cleanup-held", "1")
+    dsn = str(pg_temp_db["dsn"])
+
+    from tldw_Server_API.app.core.exceptions import JobSubmissionLimitError
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        _RUN_BOUND_JOB_SENTINEL,
+        PlaylistIngestStore,
+    )
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    from tldw_Server_API.app.core.Jobs.pg_migrations import ensure_jobs_tables_pg
+
+    ensure_jobs_tables_pg(dsn)
+    clock = _FixedClock()
+    manager = JobManager(backend="postgres", db_url=dsn, clock=clock)
+    store = PlaylistIngestStore(manager)
+
+    def seed(owner: str, occurrence_id: str, identity: str):
+        run = store.create_validated_run(
+            owner,
+            items=[
+                {
+                    "occurrence_id": occurrence_id,
+                    "input_kind": "direct_url",
+                    "source_url": f"https://example.com/{occurrence_id}",
+                    "normalized_source_id": f"url:https://example.com/{occurrence_id}",
+                    "source_kind": "generic_url",
+                    "display_metadata": {"title": occurrence_id},
+                    "state": "staged",
+                    "action": "ingest",
+                    "metadata_patch": None,
+                }
+            ],
+        )
+        reserved = store.prepare_run_item_job_submission(
+            owner,
+            run.run_id,
+            occurrence_id,
+            attempt=1,
+            batch_id=f"batch-{occurrence_id}",
+            idempotency_identity=identity,
+            source_kind="url",
+            planned_item_id=None,
+        )
+        job = manager.create_job(
+            domain="media_ingest",
+            queue="default",
+            job_type="media_ingest_item",
+            payload={
+                "run_id": run.run_id,
+                "occurrence_id": occurrence_id,
+                "attempt": 1,
+                "batch_id": f"batch-{occurrence_id}",
+                "idempotency_key": identity,
+                "source": reserved.source_url,
+                "source_kind": "url",
+                "options": {"overwrite_existing": False},
+            },
+            owner_user_id=owner,
+            batch_group=f"batch-{occurrence_id}",
+            idempotency_key=identity,
+            available_at=_RUN_BOUND_JOB_SENTINEL,
+        )
+        return run, reserved, job
+
+    held_run, _held_reserved, held_job = seed(
+        "pg-cleanup-held",
+        "pg-cleanup-held-occ",
+        "playlist-ingest-v1:pg-cleanup-held",
+    )
+    terminal_run, terminal_reserved, terminal_job = seed(
+        "pg-cleanup-terminal",
+        "pg-cleanup-terminal-occ",
+        "playlist-ingest-v1:pg-cleanup-terminal",
+    )
+    store.bind_run_item_job(
+        "pg-cleanup-terminal",
+        terminal_run.run_id,
+        "pg-cleanup-terminal-occ",
+        attempt=1,
+        job_id=int(terminal_job["id"]),
+        batch_id="batch-pg-cleanup-terminal-occ",
+        idempotency_identity="playlist-ingest-v1:pg-cleanup-terminal",
+        submission_lease_token=terminal_reserved.submission_lease_token,
+    )
+    connection = manager._connect()
+    try:
+        with manager._pg_cursor(connection) as cursor:
+            cursor.execute("UPDATE jobs SET status = 'completed' WHERE id = %s", (int(terminal_job["id"]),))
+        connection.commit()
+    finally:
+        connection.close()
+    with pytest.raises(JobSubmissionLimitError, match="max queued"):
+        manager.create_job(
+            domain="media_ingest",
+            queue="default",
+            job_type="media_ingest_item",
+            payload={"source": "https://example.com/quota-before-cleanup"},
+            owner_user_id="pg-cleanup-held",
+        )
+
+    clock.advance(timedelta(days=8))
+    assert store.cleanup_expired_resources("pg-cleanup-held", now=clock.now_utc())["runs"] == 1
+    assert store.cleanup_expired_resources("pg-cleanup-terminal", now=clock.now_utc())["runs"] == 1
+
+    assert manager.get_job(int(held_job["id"]))["status"] == "cancelled"
+    assert manager.get_job(int(terminal_job["id"]))["status"] == "completed"
+    admitted = manager.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="media_ingest_item",
+        payload={"source": "https://example.com/quota-after-cleanup"},
+        owner_user_id="pg-cleanup-held",
+    )
+    assert admitted["status"] == "queued"
+    connection = manager._connect()
+    try:
+        with manager._pg_cursor(connection) as cursor:
+            cursor.execute(
+                """
+                SELECT scheduled_count FROM job_counters
+                WHERE domain = 'media_ingest' AND queue = 'default'
+                  AND job_type = 'media_ingest_item'
+                """
+            )
+            counter = cursor.fetchone()
+        assert counter is not None
+        assert int(counter["scheduled_count"]) == 0
+    finally:
+        connection.close()
+    assert held_run.run_id != terminal_run.run_id
+
+
+def test_postgres_expired_cleanup_rolls_back_held_cancellation_on_delete_failure(
+    pg_temp_db,
+    monkeypatch,
+):
+    monkeypatch.setenv("TEST_MODE", "true")
+    dsn = str(pg_temp_db["dsn"])
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        _RUN_BOUND_JOB_SENTINEL,
+        PlaylistIngestStore,
+    )
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    from tldw_Server_API.app.core.Jobs.pg_migrations import ensure_jobs_tables_pg
+
+    ensure_jobs_tables_pg(dsn)
+    clock = _FixedClock()
+    manager = JobManager(backend="postgres", db_url=dsn, clock=clock)
+    store = PlaylistIngestStore(manager)
+    run = store.create_validated_run(
+        "pg-cleanup-rollback",
+        items=[
+            {
+                "occurrence_id": "pg-cleanup-rollback-occ",
+                "input_kind": "direct_url",
+                "source_url": "https://example.com/rollback",
+                "normalized_source_id": "url:https://example.com/rollback",
+                "source_kind": "generic_url",
+                "display_metadata": {"title": "Rollback"},
+                "state": "staged",
+                "action": "ingest",
+                "metadata_patch": None,
+            }
+        ],
+    )
+    identity = "playlist-ingest-v1:pg-cleanup-rollback"
+    reserved = store.prepare_run_item_job_submission(
+        "pg-cleanup-rollback",
+        run.run_id,
+        "pg-cleanup-rollback-occ",
+        attempt=1,
+        batch_id="pg-cleanup-rollback-batch",
+        idempotency_identity=identity,
+        source_kind="url",
+        planned_item_id=None,
+    )
+    job = manager.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="media_ingest_item",
+        payload={
+            "run_id": run.run_id,
+            "occurrence_id": "pg-cleanup-rollback-occ",
+            "attempt": 1,
+            "batch_id": "pg-cleanup-rollback-batch",
+            "idempotency_key": identity,
+            "source": reserved.source_url,
+            "source_kind": "url",
+            "options": {"overwrite_existing": False},
+        },
+        owner_user_id="pg-cleanup-rollback",
+        batch_group="pg-cleanup-rollback-batch",
+        idempotency_key=identity,
+        available_at=_RUN_BOUND_JOB_SENTINEL,
+    )
+    clock.advance(timedelta(days=8))
+    original_query = store._query
+
+    def fail_after_cancel(db, sql, params=()):
+        if "DELETE FROM media_ingest_run_events" in sql:
+            raise RuntimeError("synthetic postgres cleanup delete failure")
+        return original_query(db, sql, params)
+
+    monkeypatch.setattr(store, "_query", fail_after_cancel)
+
+    with pytest.raises(RuntimeError, match="synthetic postgres cleanup delete failure"):
+        store.cleanup_expired_resources("pg-cleanup-rollback", now=clock.now_utc())
+
+    assert manager.get_job(int(job["id"]))["status"] == "queued"
+    connection = manager._connect()
+    try:
+        with manager._pg_cursor(connection) as cursor:
+            cursor.execute(
+                "SELECT COUNT(*) AS count FROM media_ingest_runs WHERE run_id = %s",
+                (run.run_id,),
+            )
+            remaining = cursor.fetchone()
+        assert remaining is not None
+        assert int(remaining["count"]) == 1
+    finally:
+        connection.close()
 
 
 def test_postgres_validated_manifest_rejects_stale_materialization_authority(pg_temp_db, monkeypatch):

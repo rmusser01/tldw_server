@@ -241,6 +241,7 @@ def create_job_admission(
     submits_per_minute_quota: int,
     counters_enabled: bool,
     quota_lock_key: int | None = None,
+    transaction_guard: Callable[[Any], None] | None = None,
 ) -> AdmissionResult:
     """Create or replay a queued job admission inside a Postgres transaction."""
 
@@ -248,6 +249,8 @@ def create_job_admission(
 
     with conn:
         with cursor_factory(conn) as cur:
+            if transaction_guard is not None:
+                transaction_guard(cur)
             if quota_lock_key is not None and (max_queued_quota or submits_per_minute_quota):
                 cur.execute("SELECT pg_advisory_xact_lock(%s)", (quota_lock_key,))
             quota_result = _quota_rejection(
@@ -285,16 +288,16 @@ def create_job_admission(
                     }
                 if inserted and counters_enabled:
                     _bump_counters_best_effort(cur, command=command, available_at=command.available_at)
-                event = _insert_created_event(
-                    cur,
-                    row=row,
-                    idempotent=not inserted,
-                    request_id=command.request_id,
-                    trace_id=command.trace_id,
-                )
                 if inserted:
+                    event = _insert_created_event(
+                        cur,
+                        row=row,
+                        idempotent=False,
+                        request_id=command.request_id,
+                        trace_id=command.trace_id,
+                    )
                     return AdmissionResult.applied(row=row, durable_events=(event,))
-                return AdmissionResult.existing(row=row, durable_events=(event,))
+                return AdmissionResult.existing(row=row)
 
             row = _insert_job(
                 cur,

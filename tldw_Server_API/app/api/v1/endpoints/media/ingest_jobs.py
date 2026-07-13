@@ -7,8 +7,8 @@ import hmac
 import json
 import os
 import shutil
-import tempfile
 import threading
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -47,6 +47,15 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
     save_uploaded_files,
 )
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_staging import (
+    cleanup_exact_run_file_staging as _cleanup_exact_run_file_staging,
+)
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_staging import (
+    run_file_staging_prefix as _run_file_staging_prefix,
+)
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_staging import (
+    validated_run_file_staging_dir as _validated_run_file_staging_dir,
+)
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
     _RUN_BOUND_JOB_SENTINEL,
     PlaylistIngestConflictError,
@@ -78,6 +87,8 @@ _MAX_STAGING_JOB_REFERENCE_SCAN = 100
 _SAFE_STAGING_CLEANUP_RESULTS = frozenset({"absent", "deleted"})
 _RUN_FILE_STAGING_MANIFEST = ".tldw-upload.json"
 _MAX_RUN_FILE_STAGING_MANIFEST_BYTES = 8 * 1024
+_RUN_ITEM_BIND_RECONCILE_ATTEMPTS = 6
+_RUN_ITEM_BIND_RECONCILE_DELAY_SECONDS = 0.01
 
 
 def get_job_manager() -> JobManager:
@@ -364,40 +375,18 @@ def _derive_run_occurrence_idempotency(
     return f"playlist-ingest-v1:{hmac.new(key, message, hashlib.sha256).hexdigest()}"
 
 
-def _run_file_staging_prefix(*, batch_id: str, idempotency_identity: str) -> str:
-    """Return an opaque temp-dir prefix shared by retries of one reservation."""
-    marker = hashlib.sha256(f"{batch_id}\0{idempotency_identity}".encode()).hexdigest()[:24]
-    return f"media_ingest_job_{marker}_"
-
-
-def _validated_run_file_staging_dir(
-    *,
-    temp_dir: Any,
-    batch_id: str,
-    idempotency_identity: str,
-) -> Path | None:
-    """Resolve one reservation staging directory without accepting aliases."""
-    if not isinstance(temp_dir, str) or not temp_dir:
-        return None
-    try:
-        temp_root = Path(tempfile.gettempdir()).resolve()
-        candidate = Path(temp_dir).resolve()
-        prefix = _run_file_staging_prefix(
-            batch_id=batch_id,
-            idempotency_identity=idempotency_identity,
-        )
-    except (OSError, RuntimeError):
-        return None
-    if candidate.parent != temp_root or not candidate.name.startswith(prefix):
-        return None
-    return candidate
-
-
 def _write_run_file_staging_manifest(
     *,
+    store: PlaylistIngestStore,
+    owner_user_id: str,
+    run_id: str,
+    occurrence_id: str,
+    attempt: int,
     temp_dir: str,
     batch_id: str,
     idempotency_identity: str,
+    submission_lease_token: str,
+    submission_lease_generation: int,
     saved_file: dict[str, Any],
 ) -> None:
     """Atomically mark one validated staged upload as reusable by exact retries."""
@@ -442,7 +431,18 @@ def _write_run_file_staging_manifest(
     pending_path = candidate / f"{_RUN_FILE_STAGING_MANIFEST}.{uuid4().hex}.tmp"
     try:
         pending_path.write_bytes(encoded)
-        os.replace(pending_path, manifest_path)
+        with store.guard_run_item_staging_manifest_publication(
+            owner_user_id,
+            run_id,
+            occurrence_id,
+            attempt=attempt,
+            batch_id=batch_id,
+            idempotency_identity=idempotency_identity,
+            submission_lease_token=submission_lease_token,
+            submission_lease_generation=submission_lease_generation,
+            temp_dir=temp_dir,
+        ):
+            os.replace(pending_path, manifest_path)
     finally:
         with contextlib.suppress(OSError):
             pending_path.unlink()
@@ -506,34 +506,6 @@ def _read_run_file_staging_manifest(
     }
 
 
-def _cleanup_exact_run_file_staging(
-    *,
-    temp_dir: Any,
-    batch_id: str,
-    idempotency_identity: str,
-    authoritative_temp_dir: Any = None,
-) -> str:
-    """Classify cleanup of one exact persisted path without scanning the temp root."""
-    candidate = _validated_run_file_staging_dir(
-        temp_dir=temp_dir,
-        batch_id=batch_id,
-        idempotency_identity=idempotency_identity,
-    )
-    if candidate is None:
-        return "invalid"
-    try:
-        if isinstance(authoritative_temp_dir, str) and authoritative_temp_dir:
-            if candidate == Path(authoritative_temp_dir).resolve():
-                return "protected"
-        if not candidate.exists():
-            return "absent"
-        shutil.rmtree(candidate)
-        return "deleted" if not candidate.exists() else "failed"
-    except (OSError, RuntimeError):
-        logger.debug("Failed to reconcile media ingest staging directory")
-        return "failed"
-
-
 def _retire_persisted_run_file_staging(
     *,
     store: PlaylistIngestStore,
@@ -543,6 +515,7 @@ def _retire_persisted_run_file_staging(
     attempt: int,
     batch_id: str,
     idempotency_identity: str,
+    submission_lease_token: str,
     temp_dir: str | None,
     authoritative_temp_dir: Any = None,
 ) -> bool:
@@ -559,6 +532,7 @@ def _retire_persisted_run_file_staging(
         return True
     if result not in _SAFE_STAGING_CLEANUP_RESULTS:
         return False
+
     try:
         return bool(
             store.clear_run_item_staging(
@@ -568,12 +542,69 @@ def _retire_persisted_run_file_staging(
                 attempt=attempt,
                 batch_id=batch_id,
                 idempotency_identity=idempotency_identity,
+                submission_lease_token=submission_lease_token,
                 temp_dir=temp_dir,
             )
         )
     except Exception:
         logger.warning("Failed to clear retired media-ingest staging metadata")
         return False
+
+
+def _retire_nonauthoritative_run_file_staging(
+    *,
+    store: PlaylistIngestStore,
+    owner_user_id: str,
+    run_id: str,
+    occurrence_id: str,
+    batch_id: str,
+    idempotency_identity: str,
+    temp_dir: str,
+) -> bool:
+    """Retire one generation path only after its durable pointer was replaced."""
+    try:
+        authoritative = store.get_run_item(owner_user_id, run_id, occurrence_id).staging_temp_dir
+    except Exception:
+        return False
+    result = _cleanup_exact_run_file_staging(
+        temp_dir=temp_dir,
+        batch_id=batch_id,
+        idempotency_identity=idempotency_identity,
+        authoritative_temp_dir=authoritative,
+    )
+    return result in _SAFE_STAGING_CLEANUP_RESULTS
+
+
+async def _await_existing_run_item_job_binding(
+    *,
+    store: PlaylistIngestStore,
+    owner_user_id: str,
+    run_id: str,
+    occurrence_id: str,
+    attempt: int,
+    job_id: int,
+    batch_id: str,
+    idempotency_identity: str,
+):
+    """Resolve a narrow race where another lease owner binds the same accepted job."""
+    for retry_index in range(_RUN_ITEM_BIND_RECONCILE_ATTEMPTS):
+        try:
+            item = store.get_run_item(owner_user_id, run_id, occurrence_id)
+            if item.state == "queued" and item.job_id == job_id:
+                return store.bind_run_item_job(
+                    owner_user_id,
+                    run_id,
+                    occurrence_id,
+                    attempt=attempt,
+                    job_id=job_id,
+                    batch_id=batch_id,
+                    idempotency_identity=idempotency_identity,
+                )
+        except (PlaylistIngestConflictError, PlaylistIngestNotFoundError):
+            return None
+        if retry_index + 1 < _RUN_ITEM_BIND_RECONCILE_ATTEMPTS:
+            await asyncio.sleep(_RUN_ITEM_BIND_RECONCILE_DELAY_SECONDS)
+    return None
 
 
 def _cleanup_abandoned_run_file_staging(
@@ -620,26 +651,54 @@ def _cleanup_abandoned_run_file_staging(
                 excluding_occurrence_id=str(candidate.occurrence_id),
             ):
                 continue
-            owner_jobs = jm.list_jobs(
-                domain="media_ingest",
-                owner_user_id=owner_user_id,
-                job_type="media_ingest_item",
-                limit=_MAX_STAGING_JOB_REFERENCE_SCAN + 1,
-            )
-            if len(owner_jobs) > _MAX_STAGING_JOB_REFERENCE_SCAN:
-                continue
             job_reference_found = False
-            for owner_job in owner_jobs:
-                binding_view = jm.normalize_job_binding_view(
-                    owner_job,
+            cursor_created_at: datetime | None = None
+            cursor_id: int | None = None
+            while True:
+                owner_jobs = jm.list_jobs(
+                    domain="media_ingest",
                     owner_user_id=owner_user_id,
+                    job_type="media_ingest_item",
+                    batch_group=batch,
+                    created_before=cursor_created_at,
+                    before_id=cursor_id,
+                    limit=_MAX_STAGING_JOB_REFERENCE_SCAN,
+                    sort_by="created_at",
+                    sort_order="desc",
                 )
-                if binding_view is None:
+                for owner_job in owner_jobs:
+                    binding_view = jm.normalize_job_binding_view(
+                        owner_job,
+                        owner_user_id=owner_user_id,
+                    )
+                    if binding_view is None:
+                        job_reference_found = True
+                        break
+                    referenced_temp_dir = binding_view["payload"].get("temp_dir")
+                    if referenced_temp_dir is None:
+                        continue
+                    referenced = _validated_run_file_staging_dir(
+                        temp_dir=referenced_temp_dir,
+                        batch_id=str(binding_view.get("batch_group") or ""),
+                        idempotency_identity=str(binding_view.get("idempotency_key") or ""),
+                    )
+                    candidate_path = _validated_run_file_staging_dir(
+                        temp_dir=temp_dir,
+                        batch_id=batch,
+                        idempotency_identity=identity,
+                    )
+                    if referenced is None or candidate_path is None or referenced == candidate_path:
+                        job_reference_found = True
+                        break
+                if job_reference_found or len(owner_jobs) < _MAX_STAGING_JOB_REFERENCE_SCAN:
+                    break
+                last_job = owner_jobs[-1]
+                cursor_created_at = _parse_job_created_at(last_job.get("created_at"))
+                raw_cursor_id = last_job.get("id")
+                if cursor_created_at is None or raw_cursor_id is None:
                     job_reference_found = True
                     break
-                if binding_view["payload"].get("temp_dir") == temp_dir:
-                    job_reference_found = True
-                    break
+                cursor_id = int(raw_cursor_id)
             if job_reference_found:
                 continue
         except Exception:
@@ -653,7 +712,7 @@ def _cleanup_abandoned_run_file_staging(
         if cleanup_result not in _SAFE_STAGING_CLEANUP_RESULTS:
             continue
         try:
-            cleared = store.clear_run_item_staging(
+            cleared = store.clear_abandoned_run_item_staging(
                 owner_user_id,
                 candidate.run_id,
                 candidate.occurrence_id,
@@ -931,6 +990,7 @@ def _create_media_ingest_job(
     request_id: str | None,
     trace_id: str | None,
     available_at: datetime | None = None,
+    transaction_guard: Callable[[Any], None] | None = None,
 ) -> dict[str, Any]:
     try:
         return jm.create_job(
@@ -946,6 +1006,7 @@ def _create_media_ingest_job(
             request_id=request_id,
             trace_id=trace_id,
             available_at=available_at,
+            _transaction_guard=transaction_guard,
         )
     except JobSubmissionLimitError as exc:
         message = str(exc).strip() or "Media ingest job submission limit exceeded"
@@ -1336,6 +1397,13 @@ async def _submit_run_bound_media_ingest_jobs(
 
     jobs: list[MediaIngestJobItem] = []
     errors: list[str] = []
+    try:
+        submission_lease_seconds = max(
+            5,
+            min(int(os.getenv("MEDIA_INGEST_SUBMISSION_LEASE_SECONDS", "120")), 900),
+        )
+    except ValueError:
+        submission_lease_seconds = 120
     for entry in prepared:
         occurrence = str(entry["occurrence_id"])
         attempt = int(entry["attempt"])
@@ -1346,6 +1414,7 @@ async def _submit_run_bound_media_ingest_jobs(
             occurrence_id=occurrence,
             attempt=attempt,
         )
+        proposed_lease_token = uuid4().hex
         try:
             reserved = store.prepare_run_item_job_submission(
                 owner,
@@ -1357,6 +1426,8 @@ async def _submit_run_bound_media_ingest_jobs(
                 submission_queue=candidate_queue,
                 source_kind=str(entry["kind"]),
                 planned_item_id=entry["planned_item_id"],
+                submission_lease_token=proposed_lease_token,
+                submission_lease_seconds=submission_lease_seconds,
             )
         except (PlaylistIngestConflictError, PlaylistIngestNotFoundError):
             submissions.append(
@@ -1388,7 +1459,7 @@ async def _submit_run_bound_media_ingest_jobs(
         entry_options = dict(base_options)
         entry_options["overwrite_existing"] = reserved.action == "overwrite"
         reserved_batch = str(reserved.batch_id or batch_id)
-        owns_reservation = reserved_batch == batch_id
+        owns_reservation = reserved.submission_lease_token == proposed_lease_token
         if reserved.state == "queued" and reserved.job_id is not None:
             existing = jm.normalize_job_binding_view(
                 jm.get_job(reserved.job_id),
@@ -1404,6 +1475,7 @@ async def _submit_run_bound_media_ingest_jobs(
                         job_id=int(reserved.job_id),
                         batch_id=reserved_batch,
                         idempotency_identity=identity,
+                        submission_lease_token=reserved.submission_lease_token,
                     )
                     if existing is not None
                     else None
@@ -1434,7 +1506,11 @@ async def _submit_run_bound_media_ingest_jobs(
             continue
 
         recovering_reservation = reserved.state == "submit_pending" and not owns_reservation
-        if recovering_reservation:
+        reconciling_reservation = recovering_reservation or (
+            reserved.state == "submit_pending" and owns_reservation and reserved.submission_lease_generation > 1
+        )
+        existing = None
+        if reconciling_reservation:
             try:
                 existing = _find_exact_occurrence_job(
                     jm,
@@ -1455,21 +1531,21 @@ async def _submit_run_bound_media_ingest_jobs(
                     )
                 )
                 continue
+            raw_existing = existing
             existing = jm.normalize_job_binding_view(existing, owner_user_id=owner)
-            if existing is not None and entry["kind"] == "file" and reserved.staging_temp_dir:
-                if not _retire_persisted_run_file_staging(
-                    store=store,
-                    owner_user_id=owner,
-                    run_id=run_identity,
-                    occurrence_id=occurrence,
-                    attempt=attempt,
-                    batch_id=reserved_batch,
-                    idempotency_identity=identity,
-                    temp_dir=reserved.staging_temp_dir,
-                    authoritative_temp_dir=existing["payload"].get("temp_dir"),
-                ):
-                    existing = None
-            if existing is not None:
+            if raw_existing is not None and existing is None:
+                submissions.append(
+                    _submission_rejected(
+                        occurrence_id=occurrence,
+                        batch_id=reserved_batch,
+                        attempt=attempt,
+                        code="occurrence_binding_pending",
+                        message="Accepted job binding is temporarily unavailable.",
+                        retryable=True,
+                    )
+                )
+                continue
+            if existing is not None and owns_reservation:
                 try:
                     bound = store.bind_run_item_job(
                         owner,
@@ -1479,17 +1555,47 @@ async def _submit_run_bound_media_ingest_jobs(
                         job_id=int(existing["id"]),
                         batch_id=reserved_batch,
                         idempotency_identity=identity,
+                        submission_lease_token=reserved.submission_lease_token,
                     )
                 except Exception:
-                    existing = None
-            if existing is not None:
-                jobs.append(_job_item_from_row(existing, fallback_kind=str(entry["kind"]), idempotency_key=identity))
+                    bound = None
+                if bound is None:
+                    submissions.append(
+                        _submission_rejected(
+                            occurrence_id=occurrence,
+                            batch_id=reserved_batch,
+                            attempt=attempt,
+                            code="occurrence_binding_pending",
+                            message="Accepted job binding is temporarily unavailable.",
+                            retryable=True,
+                        )
+                    )
+                    continue
+                jobs.append(
+                    _job_item_from_row(
+                        existing,
+                        fallback_kind=str(entry["kind"]),
+                        idempotency_key=identity,
+                    )
+                )
                 submissions.append(
                     _submission_accepted(
                         occurrence_id=occurrence,
                         batch_id=str(bound.batch_id or reserved_batch),
                         attempt=attempt,
                         job_id=int(existing["id"]),
+                    )
+                )
+                continue
+            if existing is not None and not owns_reservation and entry["kind"] == "url":
+                submissions.append(
+                    _submission_rejected(
+                        occurrence_id=occurrence,
+                        batch_id=reserved_batch,
+                        attempt=attempt,
+                        code="occurrence_binding_pending",
+                        message="Accepted job binding is temporarily unavailable.",
+                        retryable=True,
                     )
                 )
                 continue
@@ -1515,6 +1621,108 @@ async def _submit_run_bound_media_ingest_jobs(
                     )
                 )
                 continue
+            try:
+                reserved = store.takeover_completed_run_item_submission_lease(
+                    owner,
+                    run_identity,
+                    occurrence,
+                    attempt=attempt,
+                    batch_id=reserved_batch,
+                    idempotency_identity=identity,
+                    expected_submission_lease_token=str(reserved.submission_lease_token or ""),
+                    expected_submission_lease_generation=reserved.submission_lease_generation,
+                    submission_lease_token=proposed_lease_token,
+                    submission_lease_seconds=submission_lease_seconds,
+                )
+                owns_reservation = True
+                recovering_reservation = False
+            except Exception:
+                submissions.append(
+                    _submission_rejected(
+                        occurrence_id=occurrence,
+                        batch_id=reserved_batch,
+                        attempt=attempt,
+                        code="occurrence_binding_pending",
+                        message="Accepted job binding is temporarily unavailable.",
+                        retryable=True,
+                    )
+                )
+                continue
+        elif recovering_reservation:
+            submissions.append(
+                _submission_rejected(
+                    occurrence_id=occurrence,
+                    batch_id=reserved_batch,
+                    attempt=attempt,
+                    code="occurrence_binding_pending",
+                    message="Accepted job binding is temporarily unavailable.",
+                    retryable=True,
+                )
+            )
+            continue
+
+        lease_token = str(reserved.submission_lease_token or "")
+
+        def renew_submission_lease(
+            occurrence_id: str = occurrence,
+            attempt_number: int = attempt,
+            batch_identity: str = reserved_batch,
+            submission_identity: str = identity,
+            token: str = lease_token,
+        ) -> None:
+            store.renew_run_item_submission_lease(
+                owner,
+                run_identity,
+                occurrence_id,
+                attempt=attempt_number,
+                batch_id=batch_identity,
+                idempotency_identity=submission_identity,
+                submission_lease_token=token,
+                submission_lease_seconds=submission_lease_seconds,
+            )
+
+        def release_url_submission_lease(
+            source_kind: str = str(entry["kind"]),
+            owns_lease: bool = owns_reservation,
+            occurrence_id: str = occurrence,
+            attempt_number: int = attempt,
+            batch_identity: str = reserved_batch,
+            submission_identity: str = identity,
+            token: str = lease_token,
+        ) -> None:
+            if source_kind != "url" or not owns_lease:
+                return
+            try:
+                store.release_run_item_url_submission_lease(
+                    owner,
+                    run_identity,
+                    occurrence_id,
+                    attempt=attempt_number,
+                    batch_id=batch_identity,
+                    idempotency_identity=submission_identity,
+                    submission_lease_token=token,
+                )
+            except Exception:
+                logger.warning("Failed to release media-ingest URL submission lease")
+
+        def guard_submission_lease_for_job_create(
+            db: Any,
+            occurrence_id: str = occurrence,
+            attempt_number: int = attempt,
+            batch_identity: str = reserved_batch,
+            submission_identity: str = identity,
+            token: str = lease_token,
+        ) -> None:
+            store.assert_run_item_submission_lease_for_job_create(
+                db,
+                owner,
+                run_identity,
+                occurrence_id,
+                attempt=attempt_number,
+                batch_id=batch_identity,
+                idempotency_identity=submission_identity,
+                submission_lease_token=token,
+            )
 
         temp_dir_path: str | None = None
         file_staging_prefix: str | None = None
@@ -1547,6 +1755,7 @@ async def _submit_run_bound_media_ingest_jobs(
             file_staging_prefix = _run_file_staging_prefix(
                 batch_id=reserved_batch,
                 idempotency_identity=identity,
+                submission_lease_token=lease_token,
             )
             try:
                 with TempDirManager(prefix=file_staging_prefix, cleanup=False) as temp_dir:
@@ -1558,6 +1767,7 @@ async def _submit_run_bound_media_ingest_jobs(
                         attempt=attempt,
                         batch_id=reserved_batch,
                         idempotency_identity=identity,
+                        submission_lease_token=lease_token,
                         temp_dir=temp_dir_path,
                     )
                     saved_files, file_errors = await save_uploaded_files(
@@ -1565,16 +1775,25 @@ async def _submit_run_bound_media_ingest_jobs(
                         temp_dir=temp_dir,
                         validator=file_validator_instance,
                         expected_media_type_key=str(form_data.media_type),
+                        progress_callback=renew_submission_lease,
                     )
                 if file_errors or len(saved_files) != 1:
                     raise ValueError("upload_staging_failed")
                 saved = saved_files[0]
                 source = str(saved.get("path"))
                 original_filename = saved.get("original_filename")
+                renew_submission_lease()
                 _write_run_file_staging_manifest(
+                    store=store,
+                    owner_user_id=owner,
+                    run_id=run_identity,
+                    occurrence_id=occurrence,
+                    attempt=attempt,
                     temp_dir=temp_dir_path,
                     batch_id=reserved_batch,
                     idempotency_identity=identity,
+                    submission_lease_token=lease_token,
+                    submission_lease_generation=reserved.submission_lease_generation,
                     saved_file=saved,
                 )
                 completed_staging_is_shared = True
@@ -1589,15 +1808,26 @@ async def _submit_run_bound_media_ingest_jobs(
                     "cleanup_temp_dir": True,
                     "options": entry_options,
                 }
-            except Exception:
+            except Exception as exc:
                 staging_retired = temp_dir_path is None
                 if temp_dir_path:
-                    cleanup_result = _cleanup_exact_run_file_staging(
-                        temp_dir=temp_dir_path,
-                        batch_id=reserved_batch,
-                        idempotency_identity=identity,
-                    )
-                    staging_retired = cleanup_result in _SAFE_STAGING_CLEANUP_RESULTS
+                    if isinstance(exc, PlaylistIngestConflictError):
+                        staging_retired = _retire_nonauthoritative_run_file_staging(
+                            store=store,
+                            owner_user_id=owner,
+                            run_id=run_identity,
+                            occurrence_id=occurrence,
+                            batch_id=reserved_batch,
+                            idempotency_identity=identity,
+                            temp_dir=temp_dir_path,
+                        )
+                    else:
+                        cleanup_result = _cleanup_exact_run_file_staging(
+                            temp_dir=temp_dir_path,
+                            batch_id=reserved_batch,
+                            idempotency_identity=identity,
+                        )
+                        staging_retired = cleanup_result in _SAFE_STAGING_CLEANUP_RESULTS
                     if staging_retired:
                         try:
                             store.clear_run_item_staging(
@@ -1607,6 +1837,7 @@ async def _submit_run_bound_media_ingest_jobs(
                                 attempt=attempt,
                                 batch_id=reserved_batch,
                                 idempotency_identity=identity,
+                                submission_lease_token=lease_token,
                                 temp_dir=temp_dir_path,
                             )
                         except Exception:
@@ -1620,20 +1851,33 @@ async def _submit_run_bound_media_ingest_jobs(
                             attempt=attempt,
                             batch_id=reserved_batch,
                             idempotency_identity=identity,
+                            submission_lease_token=lease_token,
                         )
                     except Exception:
                         logger.warning("Failed to release media-ingest upload reservation")
-                submissions.append(
-                    _submission_rejected(
-                        occurrence_id=occurrence,
-                        batch_id=reserved_batch,
-                        attempt=attempt,
-                        code="upload_staging_failed",
-                        message="Upload staging failed.",
-                        retryable=True,
+                if isinstance(exc, PlaylistIngestConflictError):
+                    submissions.append(
+                        _submission_rejected(
+                            occurrence_id=occurrence,
+                            batch_id=reserved_batch,
+                            attempt=attempt,
+                            code="occurrence_binding_pending",
+                            message="Accepted job binding is temporarily unavailable.",
+                            retryable=True,
+                        )
                     )
-                )
-                errors.append("Upload staging failed")
+                else:
+                    submissions.append(
+                        _submission_rejected(
+                            occurrence_id=occurrence,
+                            batch_id=reserved_batch,
+                            attempt=attempt,
+                            code="upload_staging_failed",
+                            message="Upload staging failed.",
+                            retryable=True,
+                        )
+                    )
+                    errors.append("Upload staging failed")
                 continue
 
         payload.update(
@@ -1649,6 +1893,7 @@ async def _submit_run_bound_media_ingest_jobs(
         if entry["planned_item_id"] is not None:
             payload["planned_item_id"] = entry["planned_item_id"]
         try:
+            renew_submission_lease()
             row = _create_media_ingest_job(
                 jm=jm,
                 selected_queue=selected_queue,
@@ -1658,6 +1903,7 @@ async def _submit_run_bound_media_ingest_jobs(
                 request_id=rid,
                 trace_id=tp or None,
                 available_at=_RUN_BOUND_JOB_SENTINEL,
+                transaction_guard=guard_submission_lease_for_job_create,
             )
             row = jm.normalize_job_binding_view(row, owner_user_id=owner)
             row_id = row.get("id") if row is not None else None
@@ -1674,8 +1920,10 @@ async def _submit_run_bound_media_ingest_jobs(
                         attempt=attempt,
                         batch_id=reserved_batch,
                         idempotency_identity=identity,
+                        submission_lease_token=lease_token,
                         temp_dir=temp_dir_path,
                     )
+                release_url_submission_lease()
                 raise
             try:
                 existing = _find_exact_occurrence_job(
@@ -1686,6 +1934,7 @@ async def _submit_run_bound_media_ingest_jobs(
                     idempotency_key=identity,
                 )
             except Exception:
+                release_url_submission_lease()
                 submissions.append(
                     _submission_rejected(
                         occurrence_id=occurrence,
@@ -1710,6 +1959,7 @@ async def _submit_run_bound_media_ingest_jobs(
                         attempt=attempt,
                         batch_id=reserved_batch,
                         idempotency_identity=identity,
+                        submission_lease_token=lease_token,
                         temp_dir=temp_dir_path,
                     ):
                         submissions.append(
@@ -1726,6 +1976,7 @@ async def _submit_run_bound_media_ingest_jobs(
                         continue
                     temp_dir_path = None
                 try:
+                    renew_submission_lease()
                     bound = store.bind_run_item_job(
                         owner,
                         run_identity,
@@ -1734,20 +1985,33 @@ async def _submit_run_bound_media_ingest_jobs(
                         job_id=int(existing["id"]),
                         batch_id=reserved_batch,
                         idempotency_identity=identity,
+                        submission_lease_token=lease_token,
                     )
                 except Exception:
-                    submissions.append(
-                        _submission_rejected(
-                            occurrence_id=occurrence,
-                            batch_id=reserved_batch,
-                            attempt=attempt,
-                            code="occurrence_binding_pending",
-                            message="Accepted job binding is temporarily unavailable.",
-                            retryable=True,
-                        )
+                    bound = await _await_existing_run_item_job_binding(
+                        store=store,
+                        owner_user_id=owner,
+                        run_id=run_identity,
+                        occurrence_id=occurrence,
+                        attempt=attempt,
+                        job_id=int(existing["id"]),
+                        batch_id=reserved_batch,
+                        idempotency_identity=identity,
                     )
-                    errors.append("Accepted job binding is temporarily unavailable")
-                    continue
+                    if bound is None:
+                        release_url_submission_lease()
+                        submissions.append(
+                            _submission_rejected(
+                                occurrence_id=occurrence,
+                                batch_id=reserved_batch,
+                                attempt=attempt,
+                                code="occurrence_binding_pending",
+                                message="Accepted job binding is temporarily unavailable.",
+                                retryable=True,
+                            )
+                        )
+                        errors.append("Accepted job binding is temporarily unavailable")
+                        continue
                 jobs.append(_job_item_from_row(existing, fallback_kind=str(entry["kind"]), idempotency_key=identity))
                 submissions.append(
                     _submission_accepted(
@@ -1759,20 +2023,33 @@ async def _submit_run_bound_media_ingest_jobs(
                 )
                 continue
 
-            if temp_dir_path and not completed_staging_is_shared:
-                _retire_persisted_run_file_staging(
-                    store=store,
-                    owner_user_id=owner,
-                    run_id=run_identity,
-                    occurrence_id=occurrence,
-                    attempt=attempt,
-                    batch_id=reserved_batch,
-                    idempotency_identity=identity,
-                    temp_dir=temp_dir_path,
-                )
+            if temp_dir_path:
+                if completed_staging_is_shared:
+                    _retire_nonauthoritative_run_file_staging(
+                        store=store,
+                        owner_user_id=owner,
+                        run_id=run_identity,
+                        occurrence_id=occurrence,
+                        batch_id=reserved_batch,
+                        idempotency_identity=identity,
+                        temp_dir=temp_dir_path,
+                    )
+                else:
+                    _retire_persisted_run_file_staging(
+                        store=store,
+                        owner_user_id=owner,
+                        run_id=run_identity,
+                        occurrence_id=occurrence,
+                        attempt=attempt,
+                        batch_id=reserved_batch,
+                        idempotency_identity=identity,
+                        submission_lease_token=lease_token,
+                        temp_dir=temp_dir_path,
+                    )
             if isinstance(exc, HTTPException) and exc.status_code in {429, 503}:
+                release_url_submission_lease()
                 raise
-            if not owns_reservation:
+            if isinstance(exc, PlaylistIngestConflictError) or not owns_reservation:
                 submissions.append(
                     _submission_rejected(
                         occurrence_id=occurrence,
@@ -1785,6 +2062,7 @@ async def _submit_run_bound_media_ingest_jobs(
                 )
                 errors.append("Accepted job binding is temporarily unavailable")
                 continue
+            release_url_submission_lease()
             submissions.append(
                 _submission_rejected(
                     occurrence_id=occurrence,
@@ -1808,6 +2086,7 @@ async def _submit_run_bound_media_ingest_jobs(
                 attempt=attempt,
                 batch_id=reserved_batch,
                 idempotency_identity=identity,
+                submission_lease_token=lease_token,
                 temp_dir=temp_dir_path,
             ):
                 submissions.append(
@@ -1824,6 +2103,7 @@ async def _submit_run_bound_media_ingest_jobs(
                 continue
             temp_dir_path = None
         try:
+            renew_submission_lease()
             bound = store.bind_run_item_job(
                 owner,
                 run_identity,
@@ -1832,20 +2112,33 @@ async def _submit_run_bound_media_ingest_jobs(
                 job_id=int(row_id),
                 batch_id=reserved_batch,
                 idempotency_identity=identity,
+                submission_lease_token=lease_token,
             )
         except Exception:
-            submissions.append(
-                _submission_rejected(
-                    occurrence_id=occurrence,
-                    batch_id=reserved_batch,
-                    attempt=attempt,
-                    code="occurrence_binding_pending",
-                    message="Accepted job binding is temporarily unavailable.",
-                    retryable=True,
-                )
+            bound = await _await_existing_run_item_job_binding(
+                store=store,
+                owner_user_id=owner,
+                run_id=run_identity,
+                occurrence_id=occurrence,
+                attempt=attempt,
+                job_id=int(row_id),
+                batch_id=reserved_batch,
+                idempotency_identity=identity,
             )
-            errors.append("Accepted job binding is temporarily unavailable")
-            continue
+            if bound is None:
+                release_url_submission_lease()
+                submissions.append(
+                    _submission_rejected(
+                        occurrence_id=occurrence,
+                        batch_id=reserved_batch,
+                        attempt=attempt,
+                        code="occurrence_binding_pending",
+                        message="Accepted job binding is temporarily unavailable.",
+                        retryable=True,
+                    )
+                )
+                errors.append("Accepted job binding is temporarily unavailable")
+                continue
         effective_payload = stored_payload or payload
         jobs.append(
             MediaIngestJobItem(
