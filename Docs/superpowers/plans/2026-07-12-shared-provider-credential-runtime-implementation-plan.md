@@ -298,39 +298,40 @@ git commit -m "refactor(chat): use shared provider credential runtime"
 
 **Tests:** New RAG credential tests plus focused existing component/integration tests.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 5: Create and propagate RAG runtimes at endpoint boundaries
 
 **Files:**
 - Modify: `tldw_Server_API/app/api/v1/endpoints/rag_unified.py:158-242,1219-2040`
+- Modify: `tldw_Server_API/app/core/RAG/rag_service/agentic_chunker.py:202-250`
 - Modify: `tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py:1500-1600`
 - Modify: `tldw_Server_API/app/core/RAG/rag_service/streaming_executor.py:300-490`
 - Create: `tldw_Server_API/tests/RAG_NEW/unit/test_rag_provider_credentials.py`
 - Modify: `tldw_Server_API/tests/RAG_NEW/integration/test_rag_integration.py`
 
-- [ ] **Step 1: Write failing propagation/error tests**
+- [x] **Step 1: Write failing propagation/error tests**
 
 Patch the server fallback resolver to raise and assert `/rag/search`, `/rag/search/stream`, agentic, and batch create one runtime from `current_user` and request state. Assert the runtime is absent from `ResolvedRAGRequest.payload`, response JSON, logs, and checkpoint-safe config. Assert typed credential exceptions bypass broad raw-string handlers and map to sanitized 400/502/503 responses.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/RAG_NEW/unit/test_rag_provider_credentials.py tldw_Server_API/tests/RAG_NEW/integration/test_rag_integration.py -q`
 
 Expected: FAIL because endpoints do not create or pass the runtime.
 
-- [ ] **Step 3: Add the ephemeral execution argument**
+- [x] **Step 3: Add the ephemeral execution argument**
 
 Add optional `credential_runtime` keyword parameters to pipeline entry points and put the runtime directly in execution kwargs/`extra_context`, never in request payloads. Standard/agentic/batch endpoints construct it from authenticated server state; system callers that omit it retain legacy config. Add one endpoint mapper from typed credential/runtime errors to bounded codes and use it before existing broad handlers. Close non-stream/batch runtimes in endpoint `finally` blocks; put streaming cleanup in the event generator's `finally` so secrets remain available through consumption and are released on completion, error, or cancellation.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run the Step 2 command. Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
-git add tldw_Server_API/app/api/v1/endpoints/rag_unified.py tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py tldw_Server_API/app/core/RAG/rag_service/streaming_executor.py tldw_Server_API/tests/RAG_NEW
+git add tldw_Server_API/app/api/v1/endpoints/rag_unified.py tldw_Server_API/app/core/RAG/rag_service/agentic_chunker.py tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py tldw_Server_API/app/core/RAG/rag_service/streaming_executor.py tldw_Server_API/tests/RAG_NEW
 git commit -m "feat(rag): propagate provider credential runtime"
 ```
 
