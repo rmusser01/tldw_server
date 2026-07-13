@@ -54,4 +54,33 @@ describe("RAG terminal stream contract", () => {
       RagTerminalStreamError
     )
   })
+
+  it("strips unknown terminal fields before returning a stream event", () => {
+    const sentinel = "sk-untrusted-terminal-field"
+    const parsed = parseRagStreamLine(
+      JSON.stringify({
+        schema_version: 1,
+        type: "error",
+        code: "credential_store_unavailable",
+        status_code: 503,
+        upstream_dispatched: true,
+        output_emitted: false,
+        allow_non_stream_fallback: false,
+        message: "Provider credential storage is temporarily unavailable.",
+        untrusted_detail: sentinel
+      })
+    )
+
+    expect(parsed).toEqual({
+      schema_version: 1,
+      type: "error",
+      code: "credential_store_unavailable",
+      status_code: 503,
+      upstream_dispatched: true,
+      output_emitted: false,
+      allow_non_stream_fallback: false,
+      message: "Provider credential storage is temporarily unavailable."
+    })
+    expect(JSON.stringify(parsed)).not.toContain(sentinel)
+  })
 })

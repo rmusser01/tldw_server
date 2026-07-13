@@ -45,6 +45,21 @@
       "may_replay": true
     },
     {
+      "name": "fallback_true_for_provider_configuration_error",
+      "event": {
+        "schema_version": 1,
+        "type": "error",
+        "code": "provider_configuration_invalid",
+        "status_code": 503,
+        "upstream_dispatched": false,
+        "output_emitted": false,
+        "allow_non_stream_fallback": true,
+        "message": "The selected provider configuration is invalid."
+      },
+      "valid": false,
+      "may_replay": false
+    },
+    {
       "name": "missing_schema_version",
       "event": {
         "type": "error",

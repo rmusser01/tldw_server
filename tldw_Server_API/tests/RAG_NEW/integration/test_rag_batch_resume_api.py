@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import Request
 from fastapi.testclient import TestClient
+from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_auth_principal
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
@@ -359,10 +360,12 @@ def test_rag_batch_resume_rejects_revoked_checkpoint_membership(
     tmp_path,
 ):
     cp_mod = _set_checkpoint_dir(monkeypatch, tmp_path)
-    checkpoint = cp_mod.CheckpointManager().create(
+    manager = cp_mod.CheckpointManager()
+    credential_sentinel = "sk-revoked-checkpoint-credential-must-not-leak"
+    checkpoint = manager.create(
         "rag_batch",
-        total_items=0,
-        config={"queries": []},
+        total_items=1,
+        config={"queries": ["revoked scope must stop before credential resolution"]},
         metadata={
             "credential_scope": {
                 "owner_user_id": 42,
@@ -371,15 +374,48 @@ def test_rag_batch_resume_rejects_revoked_checkpoint_membership(
             }
         },
     )
+    assert checkpoint.total_items == 1
+    checkpoint_path = manager.get_checkpoint_path(checkpoint.checkpoint_id)
+    checkpoint_before = checkpoint_path.read_bytes()
+    assert credential_sentinel.encode() not in checkpoint_before
     _override_principal(_user_principal(42))
     _patch_current_memberships(monkeypatch)
+    _install_recording_runtime(monkeypatch)
 
-    response = client_with_overrides.post(
-        f"/api/v1/rag/batch/resume/{checkpoint.checkpoint_id}"
-    )
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+
+    server_fallback_calls: list[str] = []
+    provider_calls: list[str] = []
+
+    def fail_server_fallback(provider: str):
+        server_fallback_calls.append(provider)
+        return credential_sentinel
+
+    async def fail_provider_dispatch(*_args, **_kwargs):
+        provider_calls.append("unified_batch_pipeline")
+        raise AssertionError("provider dispatch reached")
+
+    monkeypatch.setattr(rag_ep, "resolve_provider_api_key", fail_server_fallback)
+    monkeypatch.setattr(rag_ep, "unified_batch_pipeline", fail_provider_dispatch)
+
+    logs: list[str] = []
+    sink_id = logger.add(logs.append, format="{message}")
+    try:
+        response = client_with_overrides.post(
+            f"/api/v1/rag/batch/resume/{checkpoint.checkpoint_id}"
+        )
+    finally:
+        logger.remove(sink_id)
 
     assert response.status_code == 403
     assert response.json()["detail"] == "credential_scope_revoked"
+    assert _RecordingRuntime.instances == []
+    assert server_fallback_calls == []
+    assert provider_calls == []
+    assert credential_sentinel not in response.text
+    assert credential_sentinel not in "".join(logs)
+    assert checkpoint_path.read_bytes() == checkpoint_before
+    assert credential_sentinel.encode() not in checkpoint_path.read_bytes()
 
 
 def test_rag_batch_resume_fails_closed_when_membership_store_is_unavailable(

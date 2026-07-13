@@ -1,8 +1,8 @@
 """
 Integration tests for RAG system.
 
-Tests the complete RAG pipeline with real components and databases.
-No mocking - uses actual implementations.
+Tests the complete RAG pipeline with real components and databases while patching
+external provider boundaries where deterministic integration coverage requires it.
 """
 
 import inspect

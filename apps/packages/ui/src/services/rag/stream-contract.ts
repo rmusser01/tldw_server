@@ -11,6 +11,7 @@ export type RagTerminalEvent = {
 
 const TERMINAL_CODE_PATTERN = /^[a-z][a-z0-9_]{0,63}$/
 const MAX_TERMINAL_MESSAGE_LENGTH = 240
+const REPLAY_CERTIFICATION_CODE = "stream_transport_unavailable"
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value)
@@ -78,12 +79,26 @@ export const parseRagTerminalEvent = (
     value.type === "error" &&
     (value.code === "complete" ||
       (value.allow_non_stream_fallback === true &&
-        (value.upstream_dispatched !== false || value.output_emitted !== false)))
+        (value.code !== REPLAY_CERTIFICATION_CODE ||
+          value.upstream_dispatched !== false ||
+          value.output_emitted !== false)))
   ) {
     throw new RagTerminalStreamError("Invalid RAG terminal stream event.")
   }
 
-  return value as RagTerminalEvent
+  const event: RagTerminalEvent = {
+    schema_version: 1,
+    type: value.type,
+    code: value.code as string,
+    upstream_dispatched: value.upstream_dispatched as boolean,
+    output_emitted: value.output_emitted as boolean,
+    allow_non_stream_fallback: value.allow_non_stream_fallback as boolean,
+    message: value.message as string
+  }
+  if ("status_code" in value) {
+    event.status_code = value.status_code as number
+  }
+  return event
 }
 
 export const parseRagStreamLine = (line: string): unknown => {
@@ -93,13 +108,13 @@ export const parseRagStreamLine = (line: string): unknown => {
   } catch {
     throw new RagTerminalStreamError("Invalid RAG stream event.")
   }
-  parseRagTerminalEvent(parsed)
-  return parsed
+  return parseRagTerminalEvent(parsed) ?? parsed
 }
 
 export const mayReplayNonStream = (event: RagTerminalEvent): boolean =>
   event.schema_version === 1 &&
   event.type === "error" &&
+  event.code === REPLAY_CERTIFICATION_CODE &&
   event.upstream_dispatched === false &&
   event.output_emitted === false &&
   event.allow_non_stream_fallback === true

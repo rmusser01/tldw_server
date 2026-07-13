@@ -54,6 +54,7 @@ GenerationCallable = Callable[..., Awaitable[Any]]
 _PUBLIC_STREAM_ERROR_MESSAGE = "Search failed due to an internal error."
 _PUBLIC_STREAM_COMPLETE_MESSAGE = "Search completed."
 _RAG_STREAM_SCHEMA_VERSION = 1
+_RAG_REPLAY_CERTIFICATION_CODE = "stream_transport_unavailable"
 _RAG_TERMINAL_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _MAX_TERMINAL_MESSAGE_LENGTH = 240
 _RAG_PROVIDER_ERROR_MESSAGES = {
@@ -158,7 +159,11 @@ def is_valid_rag_terminal_event(event: object) -> bool:
     if code == "complete":
         return False
     if allow_fallback:
-        return upstream_dispatched is False and output_emitted is False
+        return (
+            code == _RAG_REPLAY_CERTIFICATION_CODE
+            and upstream_dispatched is False
+            and output_emitted is False
+        )
     return True
 
 
@@ -169,6 +174,7 @@ def may_replay_non_stream(event: object) -> bool:
         and isinstance(event, dict)
         and event["schema_version"] == _RAG_STREAM_SCHEMA_VERSION
         and event["type"] == "error"
+        and event["code"] == _RAG_REPLAY_CERTIFICATION_CODE
         and event["upstream_dispatched"] is False
         and event["output_emitted"] is False
         and event["allow_non_stream_fallback"] is True

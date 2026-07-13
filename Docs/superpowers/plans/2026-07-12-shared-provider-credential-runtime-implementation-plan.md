@@ -670,18 +670,23 @@ git commit -m "fix(knowledge): fail closed on terminal RAG stream errors"
 
 **Tests:** Cross-surface backend/frontend integration, Playwright Knowledge QA, static checks, Bandit.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 12: Add cross-surface no-fallback and secret-leak regressions
 
 **Files:**
 - Modify: `tldw_Server_API/tests/RAG_NEW/integration/test_rag_integration.py`
+- Modify: `tldw_Server_API/tests/RAG_NEW/integration/test_rag_batch_resume_api.py`
 - Modify: `tldw_Server_API/tests/Chat/integration/test_chat_endpoint_simplified.py`
+- Modify: `tldw_Server_API/tests/fixtures/rag_terminal_stream_events.json`
+- Modify: `tldw_Server_API/app/core/RAG/rag_service/streaming_executor.py`
+- Modify: `apps/packages/ui/src/services/rag/stream-contract.ts`
+- Modify: `apps/packages/ui/src/services/rag/__tests__/stream-contract.test.ts`
 - Modify: `apps/tldw-frontend/e2e/workflows/knowledge-qa.spec.ts`
 
 - [ ] **Step 1: Write final failing integration tests**
 
-Run Chat and Knowledge QA with sentinel user credentials while monkeypatching server fallback to raise. Cover standard/streaming, distinct providers in one RAG request, OAuth refresh, invalid configured BYOK, store outage, revoked background scope, retrieval cache hit, and hosted query embedding. Capture Loguru, response bodies, checkpoint/cache files, and browser events and assert the sentinel never appears.
+Run Chat and Knowledge QA with sentinel user credentials while monkeypatching server fallback to raise. Cover standard/streaming, distinct providers in one RAG request, OAuth refresh, invalid configured BYOK, store outage, revoked background scope, retrieval cache hit, and hosted query embedding. Capture Loguru, response bodies, checkpoint/cache files, and browser events and assert the sentinel never appears. Exercise invalid credentials and store failures through the real BYOK resolver, make revoked checkpoint authorization prove the runtime and provider boundary are never reached, and feed an unsafe extra terminal field through the browser parser so persistence assertions are non-vacuous. Add an adversarial shared-contract case proving provider/configuration errors cannot certify non-stream replay even when their booleans claim otherwise; only `stream_transport_unavailable` may carry the pre-dispatch replay certificate, and terminal parsing must return an allowlisted projection rather than retaining unknown fields.
 
 - [ ] **Step 2: Run focused cross-surface suites**
 

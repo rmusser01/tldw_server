@@ -1797,7 +1797,8 @@ test.describe("KnowledgeQA Workflow", () => {
             upstream_dispatched: true,
             output_emitted: false,
             allow_non_stream_fallback: false,
-            message: "Provider credential storage is temporarily unavailable."
+            message: "Provider credential storage is temporarily unavailable.",
+            untrusted_detail: sentinel
           })}\n`
         })
       })

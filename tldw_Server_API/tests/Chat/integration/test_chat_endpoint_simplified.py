@@ -5,6 +5,7 @@ Simplified chat endpoint tests using real database and authentication.
 import asyncio
 import json
 import os
+import sqlite3
 from contextlib import ExitStack
 from typing import Optional
 from types import SimpleNamespace
@@ -16,6 +17,7 @@ from loguru import logger
 from starlette.responses import StreamingResponse
 
 from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
+from tldw_Server_API.app.core.AuthNZ import byok_runtime
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
     ByokResolutionError,
     ByokResolutionStatus,
@@ -327,14 +329,44 @@ def test_chat_terminal_credential_resolution_never_falls_back_or_leaks(
     authenticated_client,
     mock_chacha_db,
     setup_dependencies,
+    monkeypatch,
     error_code,
 ):
-    async def resolver(provider: str, **_kwargs):
-        secret_present_only_in_resolver = _CHAT_USER_SECRET
-        assert secret_present_only_in_resolver
-        raise ByokResolutionError(error_code, provider)
+    resolution_path: list[str] = []
 
-    runtime_type = _real_credential_runtime_type(resolver)
+    if error_code == "invalid_provider_credentials":
+
+        class FakeUserRepo:
+            async def fetch_secret_for_user(self, user_id: int, provider: str):
+                assert (user_id, provider) == (1, "openai")
+                resolution_path.append(error_code)
+                return {
+                    "encrypted_blob": f"{_CHAT_USER_SECRET}:invalid-envelope",
+                    "last_used_at": None,
+                }
+
+        async def get_user_repo():
+            return FakeUserRepo()
+
+    else:
+
+        async def get_user_repo():
+            resolution_path.append(error_code)
+            raise sqlite3.OperationalError(
+                f"credential store failed: {_CHAT_USER_SECRET}"
+            )
+
+    monkeypatch.setattr(byok_runtime, "_get_user_repo", get_user_repo)
+    monkeypatch.setattr(byok_runtime, "is_byok_enabled", lambda: True)
+    monkeypatch.setattr(
+        byok_runtime,
+        "is_provider_allowlisted",
+        lambda _provider: True,
+    )
+
+    runtime_type = _real_credential_runtime_type(
+        byok_runtime.resolve_byok_credentials
+    )
     provider_manager = MagicMock()
     provider_manager.circuit_breakers = {
         "openai": SimpleNamespace(can_attempt_call=lambda: True)
@@ -372,6 +404,7 @@ def test_chat_terminal_credential_resolution_never_falls_back_or_leaks(
 
     assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
     assert response.json()["detail"]["error_code"] == error_code
+    assert resolution_path == [error_code]
     assert _CHAT_USER_SECRET not in response.text
     assert _CHAT_USER_SECRET not in "".join(logs)
     server_fallback.assert_not_called()
