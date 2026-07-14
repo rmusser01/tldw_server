@@ -40,6 +40,11 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     managed_media_database,
 )
+from tldw_Server_API.app.core.DB_Management.scope_context import (
+    ScopeContext,
+    content_authorization_cache_scope,
+    get_scope,
+)
 from tldw_Server_API.app.core.LLM_Calls.structured_output import (
     StructuredOutputOptions,
     StructuredOutputParseError,
@@ -2003,6 +2008,36 @@ async def unified_rag_pipeline(
         )
     """
 
+    ambient_scope = get_scope()
+    authorization_cache_scope: dict[str, object] | None = None
+    authorization_cache_error: str | None = None
+    if ambient_scope is not None:
+        if isinstance(ambient_scope, ScopeContext):
+            try:
+                authorization_cache_scope = content_authorization_cache_scope(
+                    ambient_scope
+                )
+            except (TypeError, ValueError):
+                authorization_cache_error = "malformed"
+        else:
+            authorization_cache_error = "malformed"
+
+    runtime_user_id = (
+        getattr(credential_runtime, "_user_id", None)
+        if credential_runtime is not None
+        else None
+    )
+    if runtime_user_id is not None:
+        if ambient_scope is None:
+            authorization_cache_error = "missing"
+        elif authorization_cache_scope is None:
+            authorization_cache_error = "malformed"
+        elif (
+            type(authorization_cache_scope["user_id"]) is not type(runtime_user_id)
+            or authorization_cache_scope["user_id"] != runtime_user_id
+        ):
+            authorization_cache_error = "user_mismatch"
+
     request_metadata: dict[str, Any] = {}
     inbound_metadata = kwargs.get("metadata")
     if isinstance(inbound_metadata, dict):
@@ -2355,6 +2390,12 @@ async def unified_rag_pipeline(
         result.metadata["cache_bypassed"] = {
             "reason": "auto_temporal_window",
         }
+    if enable_cache and authorization_cache_error is not None:
+        retrieval_cache_eligible = False
+        result.metadata["cache_bypassed"] = {
+            "reason": "content_authorization_scope_unavailable",
+            "code": authorization_cache_error,
+        }
 
     def _ensure_profile_resolution_metadata() -> dict[str, Any]:
         profile_resolution = result.metadata.get("profile_resolution")
@@ -2408,13 +2449,20 @@ async def unified_rag_pipeline(
                 return os.fspath(value)
             return None
 
-        runtime_user_id = (
-            getattr(credential_runtime, "_user_id", None)
-            if credential_runtime is not None
-            else user_id
+        authorization_user_id = (
+            authorization_cache_scope.get("user_id")
+            if authorization_cache_scope is not None
+            else None
         )
-        if runtime_user_id is not None:
-            owner_scope = {"kind": "user", "id": str(runtime_user_id)}
+        if authorization_user_id is not None:
+            owner_scope = {"kind": "user", "id": str(authorization_user_id)}
+        elif runtime_user_id is not None:
+            owner_scope = {
+                "kind": "user",
+                "id": str(runtime_user_id),
+            }
+        elif credential_runtime is None and user_id is not None:
+            owner_scope = {"kind": "user", "id": str(user_id)}
         else:
             owner_paths = {
                 "media": _cache_path_value(media_db_path)
@@ -2469,13 +2517,17 @@ async def unified_rag_pipeline(
             "index_namespace": str(retrieval_index_namespace or ""),
             "collection_names": collection_scope,
         }
-        return "|".join(
-            (
-                f"owner:{_cache_identity_digest(owner_scope)}",
-                f"workspace:{_cache_identity_digest({'id': 'global' if workspace_id is None else str(workspace_id)})}",
-                f"retrieval:{_cache_identity_digest(retrieval_scope)}",
+        namespace_parts = [
+            f"owner:{_cache_identity_digest(owner_scope)}",
+            f"workspace:{_cache_identity_digest({'id': 'global' if workspace_id is None else str(workspace_id)})}",
+            f"retrieval:{_cache_identity_digest(retrieval_scope)}",
+        ]
+        if authorization_cache_scope is not None:
+            namespace_parts.insert(
+                1,
+                f"authorization:{_cache_identity_digest(authorization_cache_scope)}",
             )
-        )
+        return "|".join(namespace_parts)
 
     def _get_cache_instance():
         nonlocal cache_instance, cache_setup_attempted

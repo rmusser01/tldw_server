@@ -12,17 +12,53 @@ import json
 import sqlite3
 import time
 import types
-from typing import Any
+from contextlib import nullcontext
+from typing import Any, Callable
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from loguru import logger
 
 import tldw_Server_API.app.core.RAG.rag_service.unified_pipeline as up
+from tldw_Server_API.app.core.DB_Management.scope_context import (
+    ScopeContext,
+    get_scope,
+    scoped_context,
+)
 from tldw_Server_API.app.core.RAG.rag_service.retrieval_plan import RetrievalPlan
 from tldw_Server_API.app.core.RAG.rag_service.semantic_cache import SemanticCache
 from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
+
+
+class _MemoryRetrievalCache:
+    """Small namespace-local cache used to exercise the shared-cache boundary."""
+
+    def __init__(self) -> None:
+        self.values: dict[str, Any] = {}
+
+    def get(self, query: str) -> Any:
+        return copy.deepcopy(self.values.get(query))
+
+    def find_similar(self, _query: str) -> None:
+        return None
+
+    def set(self, query: str, value: Any, ttl: int | None = None) -> None:
+        del ttl
+        self.values[query] = copy.deepcopy(value)
+
+
+def _memory_shared_cache_factory() -> tuple[
+    dict[str, _MemoryRetrievalCache],
+    Callable[..., _MemoryRetrievalCache],
+]:
+    """Return a cache factory that shares values only within one namespace."""
+    caches: dict[str, _MemoryRetrievalCache] = {}
+
+    def factory(*, namespace: str, **_kwargs: Any) -> _MemoryRetrievalCache:
+        return caches.setdefault(namespace, _MemoryRetrievalCache())
+
+    return caches, factory
 
 
 @pytest.mark.unit
@@ -285,16 +321,17 @@ class TestUnifiedPipelineFeatures:
                     Document(id="scope-doc", content="scope evidence", metadata={})
                 ])
                 mock_retriever.return_value = retriever
-                await unified_rag_pipeline(
-                    query="same query",
-                    user_id="public-value",
-                    workspace_id="same-workspace",
-                    index_namespace="same-corpus",
-                    enable_cache=True,
-                    enable_generation=False,
-                    enable_reranking=False,
-                    credential_runtime=types.SimpleNamespace(_user_id=trusted_user_id),
-                )
+                with scoped_context(user_id=trusted_user_id):
+                    await unified_rag_pipeline(
+                        query="same query",
+                        user_id="public-value",
+                        workspace_id="same-workspace",
+                        index_namespace="same-corpus",
+                        enable_cache=True,
+                        enable_generation=False,
+                        enable_reranking=False,
+                        credential_runtime=types.SimpleNamespace(_user_id=trusted_user_id),
+                    )
 
             assert len(captured) == 1
             return captured[0]
@@ -349,7 +386,18 @@ class TestUnifiedPipelineFeatures:
                     Document(id="scope-doc", content="scope evidence", metadata={})
                 ])
                 mock_retriever.return_value = retriever
-                await unified_rag_pipeline(**pipeline_kwargs)
+                runtime_user_id = getattr(
+                    pipeline_kwargs.get("credential_runtime"),
+                    "_user_id",
+                    None,
+                )
+                scope_manager = (
+                    scoped_context(user_id=runtime_user_id)
+                    if runtime_user_id is not None
+                    else nullcontext()
+                )
+                with scope_manager:
+                    await unified_rag_pipeline(**pipeline_kwargs)
 
             assert len(captured) == 1
             return captured[0]
@@ -417,6 +465,21 @@ class TestUnifiedPipelineFeatures:
             user_id=None,
             media_db_path="/srv/tenant-b/media.db",
         )
+        ownerless_server_a = await capture_namespace(
+            credential_runtime=types.SimpleNamespace(_user_id=None),
+            user_id="public-a",
+            media_db_path=None,
+        )
+        ownerless_server_b = await capture_namespace(
+            credential_runtime=types.SimpleNamespace(_user_id=None),
+            user_id="public-b",
+            media_db_path=None,
+        )
+        assert ownerless_server_a.partition("|")[0] == ownerless_server_b.partition("|")[0], (
+            "ownerless runtimes must retain server owner identity",
+            ownerless_server_a.partition("|")[0],
+            ownerless_server_b.partition("|")[0],
+        )
         checks = {
             "retrieval_fields_change_identity": all(
                 namespace != baseline for namespace in variants
@@ -425,6 +488,301 @@ class TestUnifiedPipelineFeatures:
             "ownerless_db_paths_are_distinct": ownerless_a != ownerless_b,
         }
         assert checks == dict.fromkeys(checks, True)
+
+    @pytest.mark.asyncio
+    async def test_cache_namespace_tracks_current_content_authorization_scope(self):
+        async def capture_namespace(
+            scope_kwargs: dict[str, Any],
+            *,
+            runtime: Any = None,
+        ) -> str:
+            captured: list[str] = []
+
+            class NullCache:
+                def get(self, _query: str) -> None:
+                    return None
+
+                def find_similar(self, _query: str) -> None:
+                    return None
+
+                def set(self, _query: str, _value: Any, ttl: int | None = None) -> None:
+                    del ttl
+
+            def fake_shared_cache(**kwargs: Any) -> NullCache:
+                captured.append(kwargs["namespace"])
+                return NullCache()
+
+            with patch.object(up, "get_shared_cache", side_effect=fake_shared_cache), patch.object(
+                up,
+                "MultiDatabaseRetriever",
+            ) as mock_retriever:
+                retriever = MagicMock()
+                retriever.retrieve = AsyncMock(
+                    return_value=[Document(id="scope-doc", content="scope evidence", metadata={})]
+                )
+                mock_retriever.return_value = retriever
+                with scoped_context(user_id=7, **scope_kwargs):
+                    await unified_rag_pipeline(
+                        query="authorization namespace query",
+                        workspace_id="same-workspace",
+                        enable_cache=True,
+                        enable_generation=False,
+                        enable_reranking=False,
+                        adaptive_cache=False,
+                        credential_runtime=runtime or types.SimpleNamespace(_user_id=7),
+                    )
+
+            assert len(captured) == 1
+            return captured[0]
+
+        baseline_scope = {
+            "org_ids": [2, 1],
+            "team_ids": [20, 10],
+            "active_org_id": 1,
+            "active_team_id": 10,
+            "is_admin": False,
+            "session_role": "content_reader",
+        }
+        baseline = await capture_namespace(baseline_scope)
+        equivalent = await capture_namespace(
+            {
+                **baseline_scope,
+                "org_ids": [1, 2, 1],
+                "team_ids": [10, 20, 10],
+            }
+        )
+        private_runtime_fields = await capture_namespace(
+            baseline_scope,
+            runtime=types.SimpleNamespace(
+                _user_id=7,
+                _team_ids=[999],
+                _org_ids=[998],
+                _active_team_id=999,
+                _active_org_id=998,
+                _is_admin=True,
+            ),
+        )
+        variants = [
+            await capture_namespace({**baseline_scope, "team_ids": [10]}),
+            await capture_namespace({**baseline_scope, "org_ids": [1]}),
+            await capture_namespace({**baseline_scope, "active_org_id": 2}),
+            await capture_namespace({**baseline_scope, "active_team_id": 20}),
+            await capture_namespace({**baseline_scope, "is_admin": True}),
+            await capture_namespace({**baseline_scope, "session_role": "content_writer"}),
+        ]
+
+        assert equivalent == baseline
+        assert private_runtime_fields == baseline
+        assert all(namespace != baseline for namespace in variants)
+        assert len(set(variants)) == len(variants)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("ambient_scope", "runtime_user_id", "expected_code"),
+        [
+            (None, 42, "missing"),
+            (types.SimpleNamespace(user_id=42), 42, "malformed"),
+            (
+                ScopeContext(
+                    user_id="42",  # type: ignore[arg-type]
+                    org_ids=[],
+                    team_ids=[],
+                    active_org_id=None,
+                    active_team_id=None,
+                ),
+                42,
+                "malformed",
+            ),
+            (
+                ScopeContext(
+                    user_id=41,
+                    org_ids=[],
+                    team_ids=[],
+                    active_org_id=None,
+                    active_team_id=None,
+                ),
+                42,
+                "user_mismatch",
+            ),
+            (
+                ScopeContext(
+                    user_id=42,
+                    org_ids=[],
+                    team_ids=[],
+                    active_org_id=None,
+                    active_team_id=None,
+                ),
+                42.0,
+                "user_mismatch",
+            ),
+        ],
+    )
+    async def test_authenticated_cache_bypasses_without_matching_ambient_scope(
+        self,
+        ambient_scope: Any,
+        runtime_user_id: Any,
+        expected_code: str,
+    ) -> None:
+        cache = MagicMock()
+        cache.get.return_value = None
+        cache.find_similar.return_value = None
+
+        with patch.object(
+            up,
+            "get_scope",
+            return_value=ambient_scope,
+        ) as mock_get_scope, patch.object(
+            up,
+            "get_shared_cache",
+            return_value=cache,
+        ) as mock_shared_cache, patch.object(
+            up,
+            "MultiDatabaseRetriever",
+        ) as mock_retriever:
+            retriever = MagicMock()
+            retriever.retrieve = AsyncMock(
+                return_value=[Document(id="fresh", content="current RLS evidence", metadata={})]
+            )
+            mock_retriever.return_value = retriever
+            result = await unified_rag_pipeline(
+                query="authorization cache bypass",
+                enable_cache=True,
+                enable_generation=False,
+                enable_reranking=False,
+                adaptive_cache=False,
+                credential_runtime=types.SimpleNamespace(_user_id=runtime_user_id),
+            )
+
+        mock_get_scope.assert_called_once_with()
+        mock_shared_cache.assert_not_called()
+        cache.get.assert_not_called()
+        cache.set.assert_not_called()
+        retriever.retrieve.assert_awaited_once()
+        assert result.cache_hit is False
+        assert result.metadata["cache_bypassed"] == {
+            "reason": "content_authorization_scope_unavailable",
+            "code": expected_code,
+        }
+        assert "42" not in json.dumps(result.metadata["cache_bypassed"])
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("privileged_scope", "privileged_document_id"),
+        [
+            ({"team_ids": [12], "active_team_id": 12}, "team-document"),
+            ({"is_admin": True}, "admin-document"),
+        ],
+    )
+    async def test_shared_cache_rechecks_current_rls_after_authorization_change(
+        self,
+        privileged_scope: dict[str, Any],
+        privileged_document_id: str,
+    ) -> None:
+        _caches, shared_cache_factory = _memory_shared_cache_factory()
+
+        async def scope_aware_retrieve(*_args: Any, **_kwargs: Any) -> list[Document]:
+            scope = get_scope()
+            assert isinstance(scope, ScopeContext)
+            if scope.is_admin:
+                document_id = "admin-document"
+            elif scope.active_team_id is not None:
+                document_id = "team-document"
+            else:
+                document_id = "personal-document"
+            return [Document(id=document_id, content=document_id, metadata={})]
+
+        with patch.object(up, "get_shared_cache", side_effect=shared_cache_factory), patch.object(
+            up,
+            "MultiDatabaseRetriever",
+        ) as mock_retriever:
+            retriever = MagicMock()
+            retriever.retrieve = AsyncMock(side_effect=scope_aware_retrieve)
+            mock_retriever.return_value = retriever
+            common = {
+                "query": "same protected query",
+                "enable_cache": True,
+                "enable_generation": False,
+                "enable_reranking": False,
+                "adaptive_cache": False,
+                "credential_runtime": types.SimpleNamespace(_user_id=55),
+            }
+            with scoped_context(user_id=55, **privileged_scope):
+                privileged = await unified_rag_pipeline(**common)
+            with scoped_context(user_id=55):
+                current = await unified_rag_pipeline(**common)
+            with scoped_context(user_id=55):
+                current_hit = await unified_rag_pipeline(**common)
+
+        assert privileged.documents[0]["id"] == privileged_document_id
+        assert current.documents[0]["id"] == "personal-document"
+        assert current_hit.documents[0]["id"] == "personal-document"
+        assert privileged.cache_hit is False
+        assert current.cache_hit is False
+        assert current_hit.cache_hit is True
+        assert retriever.retrieve.await_count == 2
+
+    @pytest.mark.concurrent
+    @pytest.mark.asyncio
+    async def test_concurrent_authorization_scopes_preserve_their_cached_documents(self) -> None:
+        _caches, shared_cache_factory = _memory_shared_cache_factory()
+        first_started = asyncio.Event()
+        second_started = asyncio.Event()
+        gate_initial_retrievals = True
+
+        async def scope_aware_retrieve(*_args: Any, **_kwargs: Any) -> list[Document]:
+            scope = get_scope()
+            assert isinstance(scope, ScopeContext)
+            team_id = scope.active_team_id
+            assert team_id in {10, 20}
+            if gate_initial_retrievals:
+                own_event, peer_event = (
+                    (first_started, second_started)
+                    if team_id == 10
+                    else (second_started, first_started)
+                )
+                own_event.set()
+                await peer_event.wait()
+            document_id = f"team-{team_id}-document"
+            return [Document(id=document_id, content=document_id, metadata={})]
+
+        async def run_for_team(team_id: int) -> Any:
+            with scoped_context(
+                user_id=91,
+                team_ids=[team_id],
+                active_team_id=team_id,
+            ):
+                return await unified_rag_pipeline(
+                    query="concurrent protected query",
+                    enable_cache=True,
+                    enable_generation=False,
+                    enable_reranking=False,
+                    adaptive_cache=False,
+                    credential_runtime=types.SimpleNamespace(
+                        _user_id=91,
+                        _team_ids=[999],
+                    ),
+                )
+
+        with patch.object(up, "get_shared_cache", side_effect=shared_cache_factory), patch.object(
+            up,
+            "MultiDatabaseRetriever",
+        ) as mock_retriever:
+            retriever = MagicMock()
+            retriever.retrieve = AsyncMock(side_effect=scope_aware_retrieve)
+            mock_retriever.return_value = retriever
+
+            first, second = await asyncio.gather(run_for_team(10), run_for_team(20))
+            gate_initial_retrievals = False
+            first_hit = await run_for_team(10)
+            second_hit = await run_for_team(20)
+
+        assert first.documents[0]["id"] == "team-10-document"
+        assert second.documents[0]["id"] == "team-20-document"
+        assert first_hit.documents[0]["id"] == "team-10-document"
+        assert second_hit.documents[0]["id"] == "team-20-document"
+        assert first_hit.cache_hit is True
+        assert second_hit.cache_hit is True
+        assert retriever.retrieve.await_count == 2
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -786,8 +1144,9 @@ class TestUnifiedPipelineFeatures:
                 "enable_reranking": False,
                 "credential_runtime": types.SimpleNamespace(_user_id=7),
             }
-            await unified_rag_pipeline(**common)
-            await unified_rag_pipeline(**common, enable_intent_routing=True)
+            with scoped_context(user_id=7):
+                await unified_rag_pipeline(**common)
+                await unified_rag_pipeline(**common, enable_intent_routing=True)
 
         assert len(captured) == 2
         assert captured[0] != captured[1]
@@ -828,14 +1187,15 @@ class TestUnifiedPipelineFeatures:
                     Document(id="fresh", content="fresh evidence", metadata={})
                 ])
                 mock_retriever.return_value = retriever
-                result = await unified_rag_pipeline(
-                    query="scoped setup failure",
-                    enable_cache=True,
-                    enable_generation=False,
-                    enable_reranking=False,
-                    adaptive_cache=False,
-                    credential_runtime=types.SimpleNamespace(_user_id=42),
-                )
+                with scoped_context(user_id=42):
+                    result = await unified_rag_pipeline(
+                        query="scoped setup failure",
+                        enable_cache=True,
+                        enable_generation=False,
+                        enable_reranking=False,
+                        adaptive_cache=False,
+                        credential_runtime=types.SimpleNamespace(_user_id=42),
+                    )
         finally:
             logger.remove(sink_id)
 
