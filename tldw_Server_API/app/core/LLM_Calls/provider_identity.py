@@ -61,9 +61,27 @@ def canonical_provider_name(provider: str) -> str:
     return _ALIAS_TO_CANONICAL.get(_normalize_provider_token(spelling), spelling)
 
 
+def _registered_storage_spellings(provider: str) -> tuple[str, ...]:
+    """Return every hyphen/underscore spelling accepted by the adapter registry."""
+    literal = _normalize_provider_spelling(provider)
+    parts = _normalize_provider_token(literal).split("-")
+    variants = [parts[0]]
+    for part in parts[1:]:
+        variants = [
+            f"{prefix}{separator}{part}"
+            for prefix in variants
+            for separator in ("-", "_")
+        ]
+    return tuple(dict.fromkeys((literal, *variants)))
+
+
 def provider_lookup_names(provider: str) -> tuple[str, ...]:
     """Return canonical storage name first, followed by deterministic legacy aliases."""
     canonical = canonical_provider_name(provider)
-    names = [canonical]
-    names.extend(alias for alias in PROVIDER_ALIASES.get(canonical, ()) if alias != canonical)
+    aliases = PROVIDER_ALIASES.get(canonical)
+    if aliases is None:
+        return (canonical,)
+    names: list[str] = []
+    for registered_name in (canonical, *aliases):
+        names.extend(_registered_storage_spellings(registered_name))
     return tuple(dict.fromkeys(names))

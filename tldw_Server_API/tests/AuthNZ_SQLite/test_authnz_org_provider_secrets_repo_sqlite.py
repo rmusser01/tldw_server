@@ -127,6 +127,51 @@ async def test_shared_fetch_reads_one_legacy_alias(shared_repo_state, scope_type
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("scope_type", ["team", "org"])
+async def test_shared_fetch_and_list_cover_accepted_underscore_alias(
+    shared_repo_state,
+    scope_type,
+):
+    state, repo = shared_repo_state
+    scope_id = _scope_id(state, scope_type)
+    await _insert_shared_row(
+        state["pool"],
+        scope_type=scope_type,
+        scope_id=scope_id,
+        provider="aws_bedrock",
+        encrypted_blob="accepted-underscore-alias",
+    )
+
+    row = await repo.fetch_secret(scope_type, scope_id, "bedrock")
+    assert row is not None
+    assert row["provider"] == "aws_bedrock"
+    listed = await repo.list_secrets(scope_type=scope_type, scope_id=scope_id)
+    assert [(item["provider"], item["key_hint"]) for item in listed] == [
+        ("bedrock", "aws_bedrock")
+    ]
+
+    revoked_at = datetime.now(timezone.utc).isoformat()
+    await state["pool"].execute(
+        """
+        UPDATE org_provider_secrets
+        SET revoked_at = ?, updated_at = ?
+        WHERE scope_type = ? AND scope_id = ? AND provider = ?
+        """,
+        (revoked_at, revoked_at, scope_type, scope_id, "aws_bedrock"),
+    )
+    assert await repo.fetch_secret(scope_type, scope_id, "bedrock") is None
+    tombstone = await repo.fetch_secret(
+        scope_type,
+        scope_id,
+        "bedrock",
+        include_revoked=True,
+    )
+    assert tombstone is not None
+    assert tombstone["provider"] == "aws_bedrock"
+    assert await repo.list_secrets(scope_type=scope_type, scope_id=scope_id) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope_type", ["team", "org"])
 async def test_shared_fetch_rejects_conflicting_legacy_aliases(shared_repo_state, scope_type):
     from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
         ProviderCredentialAliasConflictError,

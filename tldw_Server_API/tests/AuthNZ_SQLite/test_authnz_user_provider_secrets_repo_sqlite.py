@@ -103,6 +103,41 @@ async def test_user_provider_secrets_repo_sqlite(tmp_path, monkeypatch) -> None:
     assert unknown is not None
     assert unknown["provider"] == "foo_bar"
 
+    raw_now = now.isoformat()
+    await pool.execute(
+        """
+        INSERT INTO user_provider_secrets (
+            user_id, provider, encrypted_blob, key_hint, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (user_id, "aws_bedrock", encrypted_blob, key_hint, raw_now, raw_now),
+    )
+    accepted_alias = await repo.fetch_secret_for_user(user_id, "bedrock")
+    assert accepted_alias is not None
+    assert accepted_alias["provider"] == "aws_bedrock"
+    active_by_provider = {
+        item["provider"]: item for item in await repo.list_secrets_for_user(user_id)
+    }
+    assert active_by_provider["bedrock"]["key_hint"] == key_hint
+
+    revoked_at = datetime.now(timezone.utc).isoformat()
+    await pool.execute(
+        """
+        UPDATE user_provider_secrets
+        SET revoked_at = ?, updated_at = ?
+        WHERE user_id = ? AND provider = ?
+        """,
+        (revoked_at, revoked_at, user_id, "aws_bedrock"),
+    )
+    assert await repo.fetch_secret_for_user(user_id, "bedrock") is None
+    accepted_tombstone = await repo.fetch_secret_for_user(
+        user_id,
+        "bedrock",
+        include_revoked=True,
+    )
+    assert accepted_tombstone is not None
+    assert accepted_tombstone["provider"] == "aws_bedrock"
+
     await repo.touch_last_used(user_id, "openai", now)
     refreshed = await repo.fetch_secret_for_user(user_id, "openai")
     assert refreshed is not None
@@ -114,5 +149,6 @@ async def test_user_provider_secrets_repo_sqlite(tmp_path, monkeypatch) -> None:
     assert missing is None
     revoked_rows = await repo.list_secrets_for_user(user_id, include_revoked=True)
     revoked_by_provider = {row["provider"]: row for row in revoked_rows}
-    assert set(revoked_by_provider) == {"openai", "foo_bar"}
+    assert set(revoked_by_provider) == {"openai", "foo_bar", "bedrock"}
     assert revoked_by_provider["openai"]["revoked_at"] is not None
+    assert revoked_by_provider["bedrock"]["revoked_at"] is not None

@@ -13,10 +13,22 @@ def test_provider_identity_contract_is_canonical_first_and_deterministic():
     assert provider_lookup_names("oai") == ("openai", "oai")
     assert provider_lookup_names("openai-compatible") == (
         "custom-openai-api",
+        "custom-openai_api",
+        "custom_openai-api",
         "custom_openai_api",
         "custom-openai",
+        "custom_openai",
         "openai-compatible",
+        "openai_compatible",
         "customopenai",
+    )
+    assert canonical_provider_name("aws_bedrock") == "bedrock"
+    assert provider_lookup_names("aws_bedrock") == (
+        "bedrock",
+        "aws-bedrock",
+        "aws_bedrock",
+        "amazon-bedrock",
+        "amazon_bedrock",
     )
 
 

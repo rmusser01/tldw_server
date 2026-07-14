@@ -373,7 +373,10 @@ async def test_revoked_selected_shared_scope_blocks_alias_and_lower_fallback(
 
 @pytest.mark.asyncio
 @pytest.mark.concurrent
-async def test_runtime_coalesces_alias_and_canonical_shared_resolution(tmp_path, monkeypatch):
+async def test_runtime_coalesces_accepted_underscore_alias_and_canonical_resolution(
+    tmp_path,
+    monkeypatch,
+):
     state = await _setup_byok_sqlite(tmp_path, monkeypatch)
     user_id = int(state["user"]["id"])
     org_id = int(state["org"]["id"])
@@ -382,14 +385,14 @@ async def test_runtime_coalesces_alias_and_canonical_shared_resolution(tmp_path,
         state["pool"],
         scope_type="team",
         scope_id=team_id,
-        provider="oai",
+        provider="aws_bedrock",
         api_key="sk-team-alias-5555",
     )
     await _upsert_shared_key(
         AuthnzOrgProviderSecretsRepo(state["pool"]),
         "org",
         org_id,
-        "openai",
+        "bedrock",
         "sk-org-lower-6666",
     )
 
@@ -420,17 +423,17 @@ async def test_runtime_coalesces_alias_and_canonical_shared_resolution(tmp_path,
 
     async def resolve_canonical():
         second_started.set()
-        return await runtime.resolve("openai")
+        return await runtime.resolve("bedrock")
 
     try:
-        alias_task = asyncio.create_task(runtime.resolve("oai"))
+        alias_task = asyncio.create_task(runtime.resolve("aws_bedrock"))
         await entered.wait()
         canonical_task = asyncio.create_task(resolve_canonical())
         await second_started.wait()
         release.set()
         alias_handle, canonical_handle = await asyncio.gather(alias_task, canonical_task)
 
-        assert resolver_calls == ["openai"]
+        assert resolver_calls == ["bedrock"]
         assert alias_handle.api_key == "sk-team-alias-5555"
         assert canonical_handle.api_key == "sk-team-alias-5555"
         assert fallback_calls == []
