@@ -99,6 +99,12 @@ async def test_jwt_quota_enforced_for_chat_and_rag_sqlite(monkeypatch, tmp_path)
                 ("su", "su@example.com", "x"),
             )
         user_id = await pool.fetchval("SELECT id FROM users WHERE username = ?", "su")
+        from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
+
+        await AuthnzUsersRepo(db_pool=pool).assign_role_if_missing(
+            user_id=int(user_id),
+            role_name="user",
+        )
 
         # Monkeypatch chat API call at endpoint layer to avoid external calls
         import tldw_Server_API.app.api.v1.endpoints.chat as chat_endpoint
@@ -216,6 +222,12 @@ async def test_api_key_quota_enforced_for_rag_and_chat_sqlite(monkeypatch, tmp_p
                 ("alice", "alice@example.com", "x"),
             )
         user_id = await pool.fetchval("SELECT id FROM users WHERE username = ?", "alice")
+        from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
+
+        await AuthnzUsersRepo(db_pool=pool).assign_role_if_missing(
+            user_id=int(user_id),
+            role_name="user",
+        )
 
         # Create virtual API key with max_calls=1 for rag.search
         from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager

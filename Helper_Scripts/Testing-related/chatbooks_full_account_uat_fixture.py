@@ -37,7 +37,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.api import (
     get_unvectorized_chunk_count,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.legacy_transcripts import upsert_transcript
-from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
+from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB, reset_users_db
 from tldw_Server_API.app.core.UserProfiles.overrides_repo import UserProfileOverridesRepo
 
 SOURCE_EMAIL = "chatbooks-backup-source@example.com"
@@ -142,11 +142,17 @@ async def _activate_phase(root: Path, phase: str) -> Path:
             "JWT_SECRET_KEY": sha256_bytes(b"chatbooks-full-account-uat-jwt"),
         }
     )
-    await reset_db_pool()
-    reset_settings()
-    clear_config_cache()
+    await reset_runtime_state()
     await ensure_authnz_schema_ready_once()
     return phase_root
+
+
+async def reset_runtime_state() -> None:
+    """Clear AuthNZ and config singletons between fixture phases or callers."""
+    await reset_db_pool()
+    await reset_users_db()
+    reset_settings()
+    clear_config_cache()
 
 
 async def _create_user(*, username: str, email: str) -> int:

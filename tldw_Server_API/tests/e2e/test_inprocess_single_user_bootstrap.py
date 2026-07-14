@@ -7,11 +7,22 @@ import os
 
 import pytest
 
+from . import conftest as e2e_conftest
 from .fixtures import api_client
 
 
 def _is_truthy_env(name: str) -> bool:
     return os.getenv(name, "").lower() in {"1", "true", "yes", "y", "on"}
+
+
+@pytest.mark.critical
+def test_inprocess_auth_mode_detection_uses_explicit_profile(monkeypatch):
+    """In-process collection must not probe an external server for its auth mode."""
+    monkeypatch.setenv("E2E_INPROCESS", "1")
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("E2E_TEST_BASE_URL", "http://127.0.0.1:1")
+
+    assert e2e_conftest._detect_auth_mode() == "single_user"
 
 
 @pytest.mark.critical

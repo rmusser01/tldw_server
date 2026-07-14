@@ -33,6 +33,7 @@ async def test_diag_peek_with_policy_id(monkeypatch, tmp_path):
 
         from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
         from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+        from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
         from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
 
         pool = await get_db_pool()
@@ -49,6 +50,10 @@ async def test_diag_peek_with_policy_id(monkeypatch, tmp_path):
             uuid_value=uuid4(),
         )
         user_id = int(created_user["id"])
+        await AuthnzUsersRepo(db_pool=pool).assign_role_if_missing(
+            user_id=user_id,
+            role_name="admin",
+        )
         mgr = APIKeyManager(pool)
         await mgr.initialize()
         key_rec = await mgr.create_api_key(user_id=user_id, name=f"{username}-key")
