@@ -34,6 +34,19 @@ from tldw_Server_API.app.core.Skills.skills_service import (
 pytestmark = pytest.mark.unit
 
 
+@pytest.fixture(autouse=True)
+def catalog_protocol_stub(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[Mock, AsyncMock]:
+    list_tools = AsyncMock(
+        return_value={"tools": [{"name": "rag.search", "canExecute": True}]}
+    )
+    protocol = SimpleNamespace(_handle_tools_list=list_tools)
+    factory = Mock(return_value=protocol)
+    monkeypatch.setattr(skills_module, "MCPProtocol", factory, raising=False)
+    return factory, list_tools
+
+
 @dataclass
 class UserCatalog:
     user_id: int
@@ -502,6 +515,7 @@ async def test_render_is_forced_dry_and_preserves_arguments(
         "skill_name": "review-paper",
         "rendered_prompt": "Review --formal /* literal */\nnext",
         "declared_tools": ["rag.search"],
+        "catalog_matches": ["rag.search"],
         "model_override": None,
         "execution_mode": "inline",
         "supporting_files_omitted": False,
@@ -513,6 +527,92 @@ async def test_render_is_forced_dry_and_preserves_arguments(
         "--formal /* literal */\nnext",
     )
     execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_render_matches_exact_catalog_and_preserves_declaration_order(
+    user_catalogs: dict[int, UserCatalog],
+    monkeypatch: pytest.MonkeyPatch,
+    catalog_protocol_stub: tuple[Mock, AsyncMock],
+) -> None:
+    await _seed_review_skill(user_catalogs[1].service)
+    original_get_skill = SkillsService.get_skill
+
+    async def declared_tools(
+        self: SkillsService,
+        name: str,
+        *,
+        enforce_integrity: bool = True,
+    ) -> dict[str, Any]:
+        skill = await original_get_skill(self, name, enforce_integrity=enforce_integrity)
+        skill["allowed_tools"] = [
+            " rag.search ",
+            "Bash(git *)",
+            "rag.search",
+            "Bash(",
+            "RAG.SEARCH",
+            "missing.tool",
+        ]
+        return skill
+
+    monkeypatch.setattr(SkillsService, "get_skill", declared_tools)
+    factory, list_tools = catalog_protocol_stub
+    list_tools.return_value = {
+        "tools": [
+            {"name": "Bash", "canExecute": True},
+            {"name": "rag.search", "canExecute": True},
+            {"name": "missing.tool", "canExecute": False},
+            {"name": "undeclared.tool", "canExecute": True},
+            {"name": 7, "canExecute": True},
+            "malformed",
+        ]
+    }
+    module = await _module()
+
+    result = await module.execute_tool(
+        "skills.render",
+        {"skill_name": "review-paper"},
+        context=user_catalogs[1].context,
+    )
+
+    assert result["catalog_matches"] == ["rag.search", "Bash"]
+    assert "undeclared.tool" not in result["catalog_matches"]
+    factory.assert_called_once_with()
+    list_tools.assert_awaited_once_with({}, user_catalogs[1].context)
+
+
+@pytest.mark.asyncio
+async def test_render_with_no_declarations_skips_catalog_lookup(
+    user_catalogs: dict[int, UserCatalog],
+    monkeypatch: pytest.MonkeyPatch,
+    catalog_protocol_stub: tuple[Mock, AsyncMock],
+) -> None:
+    await _seed_review_skill(user_catalogs[1].service)
+    original_get_skill = SkillsService.get_skill
+
+    async def no_declared_tools(
+        self: SkillsService,
+        name: str,
+        *,
+        enforce_integrity: bool = True,
+    ) -> dict[str, Any]:
+        skill = await original_get_skill(self, name, enforce_integrity=enforce_integrity)
+        skill["allowed_tools"] = []
+        return skill
+
+    monkeypatch.setattr(SkillsService, "get_skill", no_declared_tools)
+    factory, list_tools = catalog_protocol_stub
+    module = await _module()
+
+    result = await module.execute_tool(
+        "skills.render",
+        {"skill_name": "review-paper"},
+        context=user_catalogs[1].context,
+    )
+
+    assert result["catalog_matches"] == []
+    factory.assert_not_called()
+    list_tools.assert_not_awaited()
 
 
 @pytest.mark.asyncio

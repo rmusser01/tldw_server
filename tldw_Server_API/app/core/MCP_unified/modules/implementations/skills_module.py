@@ -22,6 +22,7 @@ from ....Skills.exceptions import SkillNotFoundError
 from ....Skills.runtime_metadata import build_skill_runtime_metadata
 from ....Skills.skill_executor import SkillExecutor
 from ....Skills.skills_service import SKILL_NAME_PATTERN, SkillMetadata, SkillsService
+from ...protocol import MCPProtocol
 from ..base import BaseModule, create_tool_definition
 
 DEFAULT_LIST_PAGE_SIZE = 50
@@ -40,6 +41,52 @@ def _clamped_integer(value: Any, *, default: int, minimum: int, maximum: int) ->
     if isinstance(value, bool) or not isinstance(value, int):
         return default
     return max(minimum, min(value, maximum))
+
+
+def _declaration_base_name(declaration: str) -> str | None:
+    """Return the exact catalog name represented by one declaration."""
+    if "(" not in declaration:
+        return declaration
+    base_name, restriction = declaration.split("(", 1)
+    if (
+        not declaration.endswith(")")
+        or not base_name.strip()
+        or not restriction[:-1].strip()
+    ):
+        return None
+    return base_name.strip()
+
+
+def _catalog_matches_from_listing(
+    declarations: list[str],
+    listing: Any,
+) -> list[str] | None:
+    """Return unique declared names executable in a well-formed listing."""
+    if not isinstance(listing, dict):
+        return None
+    tools = listing.get("tools")
+    if not isinstance(tools, list):
+        return None
+    executable_names: set[str] = set()
+    for tool in tools:
+        if not isinstance(tool, dict):
+            continue
+        name = tool.get("name")
+        if (
+            isinstance(name, str)
+            and name.strip()
+            and tool.get("canExecute") is True
+        ):
+            executable_names.add(name)
+    matches: list[str] = []
+    seen: set[str] = set()
+    for declaration in declarations:
+        name = _declaration_base_name(declaration)
+        if name is None or name not in executable_names or name in seen:
+            continue
+        seen.add(name)
+        matches.append(name)
+    return matches
 
 
 class SkillsModule(BaseModule):
@@ -161,11 +208,16 @@ class SkillsModule(BaseModule):
                 lambda service: self._get_skill(service, args),
             )
         if tool_name == "skills.render":
-            return await self._run_with_service(
+            rendered = await self._run_with_service(
                 context,
                 tool_name,
                 lambda service: self._render_skill(service, args),
             )
+            rendered["catalog_matches"] = await self._resolve_catalog_matches(
+                rendered["declared_tools"],
+                context,
+            )
+            return rendered
         raise ValueError(f"Unknown tool: {tool_name}")
 
     def validate_tool_arguments(self, tool_name: str, arguments: dict[str, Any]) -> None:
@@ -320,6 +372,16 @@ class SkillsModule(BaseModule):
             "dry_run": True,
             "version": skill_data.get("version"),
         }
+
+    @staticmethod
+    async def _resolve_catalog_matches(
+        declarations: list[str],
+        context: Any,
+    ) -> list[str] | None:
+        if not declarations:
+            return []
+        listing = await MCPProtocol()._handle_tools_list({}, context)
+        return _catalog_matches_from_listing(declarations, listing)
 
     @staticmethod
     def _format_metadata(metadata: SkillMetadata) -> dict[str, Any]:
