@@ -84,4 +84,24 @@ describe("ACP connection auth", () => {
       api_key: "stored-single-user-key"
     })
   })
+
+  it("does not apply the single-user runtime override in multi-user mode", () => {
+    setRuntimeSingleUserApiKeyOverride("runtime-single-user-key")
+
+    expect(
+      buildACPAuthHeaders({
+        authMode: "multi-user",
+        accessToken: "multi-user-token",
+        serverUrl: "http://127.0.0.1:8000"
+      })
+    ).toMatchObject({ Authorization: "Bearer multi-user-token" })
+
+    expect(
+      buildACPAuthParams({
+        authMode: "multi-user",
+        accessToken: "multi-user-token",
+        serverUrl: "http://127.0.0.1:8000"
+      })
+    ).toEqual({ token: "multi-user-token", api_key: undefined })
+  })
 })

@@ -352,6 +352,9 @@ export const QuizPlayground: React.FC = () => {
                 key={`take-${tabResetVersion.take}`}
                 startQuizId={takeTabIntent?.startQuizId ?? null}
                 highlightQuizId={takeTabIntent?.highlightQuizId ?? null}
+                forceShowWorkspaceItems={
+                  takeTabIntent?.forceShowWorkspaceItems ?? false
+                }
                 navigationSource={takeTabIntent?.sourceTab ?? null}
                 assignmentMode={takeTabIntent?.assignmentMode ?? null}
                 assignmentDueAt={takeTabIntent?.assignmentDueAt ?? null}

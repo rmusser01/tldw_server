@@ -5,6 +5,7 @@ import { fetchTldwVoiceCatalog } from "@/services/tldw/audio-voices"
 import { inferTldwProviderFromModel } from "@/services/tts-provider"
 import { StudioPane, estimateGenerationSeconds } from "../StudioPane"
 import { buildUnknownResearchWorkspaceCapabilities } from "../research-workspace-capabilities"
+import { createGroundedClaimVerification } from "./studio-test-fixtures"
 
 const {
   mockRagSearch,
@@ -14,6 +15,7 @@ const {
   mockGetWorkspaceOutputStatus,
   mockDownloadOutput,
   mockGenerateFlashcardsService,
+  mockGenerateResearchWorkspaceArtifact,
   mockListVisualStyles,
   mockAddArtifact,
   mockUpdateArtifactStatus,
@@ -53,6 +55,7 @@ const {
   const getWorkspaceOutputStatus = vi.fn()
   const downloadOutput = vi.fn()
   const generateFlashcardsService = vi.fn()
+  const generateResearchWorkspaceArtifact = vi.fn()
   const listVisualStyles = vi.fn()
   const addArtifact = vi.fn()
   const updateArtifactStatus = vi.fn()
@@ -203,6 +206,7 @@ const {
     mockGetWorkspaceOutputStatus: getWorkspaceOutputStatus,
     mockDownloadOutput: downloadOutput,
     mockGenerateFlashcardsService: generateFlashcardsService,
+    mockGenerateResearchWorkspaceArtifact: generateResearchWorkspaceArtifact,
     mockListVisualStyles: listVisualStyles,
     mockAddArtifact: addArtifact,
     mockUpdateArtifactStatus: updateArtifactStatus,
@@ -298,6 +302,10 @@ vi.mock("@/services/flashcards", () => ({
   createDeck: mockCreateDeck,
   createFlashcard: mockCreateFlashcard,
   createFlashcardsBulk: mockCreateFlashcardsBulk
+}))
+
+vi.mock("@/services/researchWorkspaceArtifacts", () => ({
+  generateResearchWorkspaceArtifact: mockGenerateResearchWorkspaceArtifact
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
@@ -507,12 +515,33 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
       { id: "llama-3.1-8b", name: "Llama 3.1 8B", provider: "ollama", type: "chat" }
     ])
     mockRagSearch.mockResolvedValue({ generation: "summary" })
+    mockGenerateResearchWorkspaceArtifact.mockResolvedValue({
+      artifact_type: "audio_overview",
+      content: "Audio script",
+      data: {},
+      claim_verification: createGroundedClaimVerification()
+    })
     mockSynthesizeSpeech.mockResolvedValue(new ArrayBuffer(8))
     mockGenerateSlidesFromMedia.mockResolvedValue({
       id: "presentation-1",
       title: "Slides",
       theme: "default",
-      slides: [],
+      slides: [
+        {
+          order: 0,
+          layout: "title",
+          title: "ATP Overview",
+          content: "Cellular respiration depends on ATP transfer.",
+          speaker_notes: "Introduce ATP as the energy currency of the cell."
+        },
+        {
+          order: 1,
+          layout: "content",
+          title: "Key Mechanism",
+          content: "Mitochondria convert chemical energy into ATP through respiration.",
+          speaker_notes: "Connect the mechanism back to the selected source."
+        }
+      ],
       version: 1,
       created_at: "2026-02-18T00:00:00.000Z"
     })
@@ -788,6 +817,97 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
         expect.objectContaining({
           visualStyleId: "timeline",
           visualStyleScope: "builtin"
+        })
+      )
+    })
+  })
+
+  it("retains presentation metadata on completed slides artifacts", async () => {
+    renderExpandedStudioPane()
+
+    fireEvent.click(screen.getByRole("button", { name: /More outputs/ }))
+    fireEvent.click(screen.getByRole("button", { name: "Slides" }))
+
+    await waitFor(() => {
+      expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
+        expect.stringMatching(/^artifact-/),
+        "completed",
+        expect.objectContaining({
+          presentationId: "presentation-1",
+          presentationVersion: 1,
+          content: expect.stringContaining("## Slide 1: ATP Overview")
+        })
+      )
+    })
+  })
+
+  it("fails slides artifacts when the API returns placeholder slide content", async () => {
+    mockGenerateSlidesFromMedia.mockResolvedValueOnce({
+      id: "presentation-placeholder",
+      title: "Slides",
+      theme: "default",
+      slides: [
+        {
+          order: 0,
+          layout: "content",
+          title: "Invalid",
+          content: "slides go here",
+          speaker_notes: "invalid"
+        }
+      ],
+      version: 1,
+      created_at: "2026-02-18T00:00:00.000Z"
+    })
+
+    renderExpandedStudioPane()
+
+    fireEvent.click(screen.getByRole("button", { name: /More outputs/ }))
+    fireEvent.click(screen.getByRole("button", { name: "Slides" }))
+
+    await waitFor(() => {
+      expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
+        expect.stringMatching(/^artifact-/),
+        "failed",
+        expect.objectContaining({
+          errorMessage: expect.stringContaining("usable presentation")
+        })
+      )
+    })
+    expect(mockUpdateArtifactStatus).not.toHaveBeenCalledWith(
+      expect.any(String),
+      "completed",
+      expect.objectContaining({ presentationId: "presentation-placeholder" })
+    )
+  })
+
+  it("fails API-backed slides artifacts when the presentation id is missing", async () => {
+    mockGenerateSlidesFromMedia.mockResolvedValueOnce({
+      id: "",
+      title: "Slides",
+      theme: "default",
+      slides: [
+        {
+          order: 0,
+          layout: "content",
+          title: "ATP Overview",
+          content: "Cellular respiration depends on ATP transfer.",
+          speaker_notes: "Introduce ATP as the energy currency of the cell."
+        }
+      ],
+      version: 1,
+      created_at: "2026-02-18T00:00:00.000Z"
+    })
+
+    renderExpandedStudioPane()
+    fireEvent.click(screen.getByRole("button", { name: /More outputs/ }))
+    fireEvent.click(screen.getByRole("button", { name: "Slides" }))
+
+    await waitFor(() => {
+      expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
+        expect.stringMatching(/^artifact-/),
+        "failed",
+        expect.objectContaining({
+          errorMessage: expect.stringContaining("usable presentation")
         })
       )
     })

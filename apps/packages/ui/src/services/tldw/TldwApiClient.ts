@@ -1827,14 +1827,23 @@ export class TldwApiClientBase {
       : null
     if (storedManual) {
       const origin = normalizeServerOrigin(storedManual.serverUrl)
+      const hasOwn = (key: keyof TldwConfig) =>
+        Object.prototype.hasOwnProperty.call(storedManual, key)
+      const hasNoCredentialMetadata =
+        !hasOwn("credentialSource") &&
+        !hasOwn("apiKeyPersistence") &&
+        !hasOwn("apiKeyServerOrigin")
+      const hasLegacyAuthSource =
+        !hasOwn("authSource") || storedManual.authSource === "manual"
       const hasLegacyManualKey =
+        !isHostedTldwDeployment() &&
+        !quickstartWebUiServerUrl &&
         storedManual.authMode === "single-user" &&
-        storedManual.authSource === "manual" &&
+        hasLegacyAuthSource &&
         typeof storedManual.apiKey === "string" &&
         Boolean(storedManual.apiKey.trim()) &&
-        !storedManual.credentialSource &&
-        !storedManual.apiKeyPersistence &&
-        !storedManual.apiKeyServerOrigin &&
+        !isPlaceholderApiKey(storedManual.apiKey) &&
+        hasNoCredentialMetadata &&
         Boolean(origin) &&
         !activeCookieSession &&
         !envApiKey &&
@@ -1844,6 +1853,7 @@ export class TldwApiClientBase {
       if (hasLegacyManualKey && origin) {
         persistedManual = {
           ...storedManual,
+          authSource: "manual",
           credentialSource: "manual",
           apiKeyPersistence: "device",
           apiKeyServerOrigin: origin

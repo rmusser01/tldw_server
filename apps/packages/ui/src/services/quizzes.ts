@@ -280,6 +280,8 @@ type QuizGenerateRequestBase = {
   focus_topics?: string[]
   model?: string
   api_provider?: string
+  claims_verification_provider?: string | null
+  claims_verification_model?: string | null
   workspace_id?: string | null
   workspace_tag?: string | null
 }
@@ -409,6 +411,7 @@ export type AttemptListParams = {
 export type QuizGenerateResponse = {
   quiz: Quiz
   questions: QuestionAdmin[]
+  claim_verification?: Record<string, unknown> | null
 }
 
 export type QuizImportQuestion = {

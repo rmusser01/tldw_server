@@ -63,6 +63,16 @@ async def get_add_media_form(
         None,
         description="List of URLs of the media items to add",
     ),
+    research_discovery_id: str | None = Form(
+        None,
+        max_length=128,
+        description="Persisted Research Discovery snapshot id",
+    ),
+    research_discovery_selections: str | None = Form(
+        None,
+        max_length=8192,
+        description="JSON array of Research Discovery result/candidate selections",
+    ),
     title: str | None = Form(
         None,
         description="Optional title (applied if only one item processed)",
@@ -373,6 +383,8 @@ async def get_add_media_form(
         form_instance = AddMediaForm(
             media_type=media_type,
             urls=urls,
+            research_discovery_id=research_discovery_id,
+            research_discovery_selections=research_discovery_selections,
             title=title,
             author=author,
             keywords=keywords,

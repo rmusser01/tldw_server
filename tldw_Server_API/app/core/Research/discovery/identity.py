@@ -10,7 +10,7 @@ from typing import Any
 from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 from .catalog import default_source_catalog
-from .models import DiscoveryProvenance, DiscoveryResult
+from .models import DiscoveryProvenance, DiscoveryResult, recommended_phase2a_media_candidate
 
 
 _SENSITIVE_METADATA_KEY_ALIASES = {
@@ -245,7 +245,7 @@ def _build_discovery_result(
     provenance = tuple(_build_provenance(record) for record in ranked_records)
     doi = _first_normalized_doi(ranked_records, provider_ids)
     oa_candidates = _build_group_oa_candidates(fingerprint, ranked_records, doi, provider_ids)
-    recommended_candidate_id = oa_candidates[0].candidate_id if oa_candidates else None
+    recommended_candidate = recommended_phase2a_media_candidate(oa_candidates)
     warnings = _merge_warnings(ranked_records)
     identifier_strength = _identifier_strength(primary)
     source_priority = _source_priority(primary)
@@ -272,8 +272,8 @@ def _build_discovery_result(
         updated_at=_first_nonempty(ranked_records, "updated_at") or _first_nonempty(ranked_records, "updated"),
         source_category=_coerce_string(primary.get("source_category") or primary.get("category")),
         oa_candidates=oa_candidates,
-        recommended_candidate_id=recommended_candidate_id,
-        ingest_eligible=any(candidate.safe_url for candidate in oa_candidates),
+        recommended_candidate_id=(recommended_candidate.candidate_id if recommended_candidate else None),
+        ingest_eligible=recommended_candidate is not None,
         dedupe_confidence=_dedupe_confidence(fingerprint, identifier_strength),
         ranking_signals={
             "fingerprint": fingerprint,

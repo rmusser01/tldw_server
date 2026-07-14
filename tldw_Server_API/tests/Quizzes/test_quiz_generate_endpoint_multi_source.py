@@ -141,6 +141,34 @@ async def test_generate_quiz_forwards_model_and_api_provider(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_generate_quiz_forwards_claims_verification_provider_override(monkeypatch):
+    captured: dict = {}
+
+    async def fake_generate_quiz_from_sources(**kwargs):
+        captured.update(kwargs)
+        return {"quiz": {"id": 1}, "questions": [], "claim_verification": {"verdict": "grounded"}}
+
+    monkeypatch.setattr(quizzes_endpoint, "generate_quiz_from_sources", fake_generate_quiz_from_sources)
+
+    request = QuizGenerateRequest.model_validate(
+        {
+            "media_id": 42,
+            "num_questions": 3,
+            "model": "generation-model",
+            "api_provider": "llamacpp",
+            "claims_verification_provider": "openrouter",
+            "claims_verification_model": "claims-model",
+        }
+    )
+    await quizzes_endpoint.generate_quiz(request=request, db=Mock(), media_db=Mock())
+
+    assert captured["api_provider"] == "llamacpp"
+    assert captured["model"] == "generation-model"
+    assert captured["claims_verification_provider"] == "openrouter"
+    assert captured["claims_verification_model"] == "claims-model"
+
+
+@pytest.mark.asyncio
 async def test_generate_quiz_maps_provenance_validation_error_to_422(monkeypatch):
     async def fake_generate_quiz_from_sources(**kwargs):
         raise QuizProvenanceValidationError("invalid source citations")

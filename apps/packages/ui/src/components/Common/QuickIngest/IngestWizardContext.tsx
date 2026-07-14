@@ -21,6 +21,7 @@ import {
   DEFAULT_PRESET,
   mergePresetConfig,
   configMatchesPreset,
+  type PresetMap,
 } from "./presets"
 import type {
   FirstSourceQuickIngestKind,
@@ -76,11 +77,6 @@ type Action =
 // Helpers
 // ---------------------------------------------------------------------------
 
-const resolvePresetConfig = (
-  preset: Exclude<IngestPreset, "custom">,
-  customOptions: Partial<PresetConfig>
-): PresetConfig => mergePresetConfig(DEFAULT_PRESETS[preset], customOptions)
-
 const mergeCustomOptions = (
   current: Partial<PresetConfig>,
   incoming: Partial<PresetConfig>
@@ -129,6 +125,27 @@ const mergeCustomOptions = (
   return next
 }
 
+const mergeCurrentPresetConfig = (
+  current: PresetConfig,
+  incoming: Partial<PresetConfig>
+): PresetConfig => {
+  const next = mergePresetConfig(current, incoming)
+
+  if (incoming.advancedValues) {
+    const advancedValues = { ...(current.advancedValues ?? {}) }
+    for (const [key, value] of Object.entries(incoming.advancedValues)) {
+      if (value === undefined) {
+        delete advancedValues[key]
+      } else {
+        advancedValues[key] = value
+      }
+    }
+    next.advancedValues = advancedValues
+  }
+
+  return next
+}
+
 const buildInitialProgress = (items: WizardQueueItem[]): ItemProgress[] =>
   items
     .filter(
@@ -144,10 +161,11 @@ const buildInitialProgress = (items: WizardQueueItem[]): ItemProgress[] =>
     }))
 
 const findMatchingPreset = (
-  config: PresetConfig
+  config: PresetConfig,
+  presetMap: PresetMap
 ): Exclude<IngestPreset, "custom"> | null => {
   for (const preset of ["quick", "standard", "deep"] as const) {
-    if (configMatchesPreset(config, preset)) {
+    if (configMatchesPreset(config, preset, presetMap)) {
       return preset
     }
   }
@@ -161,13 +179,15 @@ const INITIAL_PROCESSING_STATE: WizardProcessingState = {
   estimatedRemaining: 0,
 }
 
-const createInitialState = (): IngestWizardState => ({
+const createInitialState = (
+  presetMap: PresetMap = DEFAULT_PRESETS
+): IngestWizardState => ({
   currentStep: 1,
   highestStep: 1,
   queueItems: [],
   selectedPreset: DEFAULT_PRESET,
   customBasePreset: DEFAULT_PRESET,
-  presetConfig: DEFAULT_PRESETS[DEFAULT_PRESET],
+  presetConfig: presetMap[DEFAULT_PRESET],
   customOptions: {},
   playlistPreflightSeed: null,
   firstSourceAddMode: null,
@@ -178,18 +198,26 @@ const createInitialState = (): IngestWizardState => ({
 })
 
 const createInitialStateFromSeed = (
-  seed?: Partial<IngestWizardState>
+  seed: Partial<IngestWizardState> | undefined,
+  presetMap: PresetMap
 ): IngestWizardState => {
-  const base = createInitialState()
+  const base = createInitialState(presetMap)
   if (!seed) return base
+
+  const selectedPreset = seed.selectedPreset ?? base.selectedPreset
+  const presetConfig =
+    seed.presetConfig ??
+    (selectedPreset === "custom"
+      ? base.presetConfig
+      : presetMap[selectedPreset])
 
   return {
     ...base,
     ...seed,
     queueItems: seed.queueItems ?? base.queueItems,
-    selectedPreset: seed.selectedPreset ?? base.selectedPreset,
+    selectedPreset,
     customBasePreset: seed.customBasePreset ?? base.customBasePreset,
-    presetConfig: seed.presetConfig ?? base.presetConfig,
+    presetConfig,
     customOptions: seed.customOptions ?? base.customOptions,
     playlistPreflightSeed:
       seed.playlistPreflightSeed ?? base.playlistPreflightSeed,
@@ -217,7 +245,11 @@ const createInitialStateFromSeed = (
 const clampStep = (step: number): WizardStep =>
   Math.max(1, Math.min(5, step)) as WizardStep
 
-const reducer = (state: IngestWizardState, action: Action): IngestWizardState => {
+const reducer = (
+  state: IngestWizardState,
+  action: Action,
+  presetMap: PresetMap
+): IngestWizardState => {
   switch (action.type) {
     case "GO_TO_STEP": {
       // Can only go backward (to a step <= highestStep)
@@ -247,10 +279,10 @@ const reducer = (state: IngestWizardState, action: Action): IngestWizardState =>
         return {
           ...state,
           selectedPreset: "custom",
-          presetConfig: resolvePresetConfig(
-            state.customBasePreset,
-            state.customOptions
-          ),
+          customBasePreset:
+            state.selectedPreset === "custom"
+              ? state.customBasePreset
+              : state.selectedPreset,
         }
       }
 
@@ -259,7 +291,7 @@ const reducer = (state: IngestWizardState, action: Action): IngestWizardState =>
         selectedPreset: action.preset,
         customBasePreset: action.preset,
         customOptions: {},
-        presetConfig: DEFAULT_PRESETS[action.preset],
+        presetConfig: presetMap[action.preset],
       }
     }
 
@@ -269,8 +301,11 @@ const reducer = (state: IngestWizardState, action: Action): IngestWizardState =>
         state.selectedPreset === "custom"
           ? state.customBasePreset
           : state.selectedPreset
-      const presetConfig = resolvePresetConfig(basePreset, customOptions)
-      const matchedPreset = findMatchingPreset(presetConfig)
+      const presetConfig = mergeCurrentPresetConfig(
+        state.presetConfig,
+        action.options
+      )
+      const matchedPreset = findMatchingPreset(presetConfig, presetMap)
 
       if (matchedPreset) {
         return {
@@ -278,7 +313,7 @@ const reducer = (state: IngestWizardState, action: Action): IngestWizardState =>
           selectedPreset: matchedPreset,
           customBasePreset: matchedPreset,
           customOptions: {},
-          presetConfig: DEFAULT_PRESETS[matchedPreset],
+          presetConfig: presetMap[matchedPreset],
         }
       }
 
@@ -342,7 +377,7 @@ const reducer = (state: IngestWizardState, action: Action): IngestWizardState =>
         },
       }
 
-    case "UPDATE_ITEM_PROGRESS":
+    case "UPDATE_ITEM_PROGRESS": {
       const existingProgressItem = state.processingState.perItemProgress.find(
         (p) => p.id === action.progress.id
       )
@@ -365,6 +400,7 @@ const reducer = (state: IngestWizardState, action: Action): IngestWizardState =>
           ),
         },
       }
+    }
 
     case "UPDATE_PROCESSING_STATE":
       if (
@@ -409,7 +445,7 @@ const reducer = (state: IngestWizardState, action: Action): IngestWizardState =>
       return { ...state, isMinimized: false }
 
     case "RESET":
-      return createInitialState()
+      return createInitialState(presetMap)
 
     default:
       return state
@@ -462,17 +498,24 @@ type IngestWizardProviderProps = {
   children: React.ReactNode
   initialState?: Partial<IngestWizardState>
   onStateChange?: (state: IngestWizardState) => void
+  presetMap?: PresetMap
 }
 
 export const IngestWizardProvider: React.FC<IngestWizardProviderProps> = ({
   children,
   initialState,
   onStateChange,
+  presetMap = DEFAULT_PRESETS,
 }) => {
+  const reducerWithPresetMap = useCallback(
+    (state: IngestWizardState, action: Action) =>
+      reducer(state, action, presetMap),
+    [presetMap]
+  )
   const [state, dispatch] = useReducer(
-    reducer,
+    reducerWithPresetMap,
     initialState,
-    createInitialStateFromSeed
+    (seed) => createInitialStateFromSeed(seed, presetMap)
   )
 
   useEffect(() => {

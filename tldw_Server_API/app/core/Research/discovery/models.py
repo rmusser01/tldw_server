@@ -82,6 +82,27 @@ class DiscoveryOACandidate:
     warnings: tuple[str, ...]
 
 
+PHASE2A_MEDIA_HANDOFF_TYPES = frozenset({"pdf"})
+
+
+def is_phase2a_media_handoff_candidate(candidate: DiscoveryOACandidate) -> bool:
+    """Return whether Media can ingest this discovery candidate in Phase 2A."""
+    return (
+        candidate.candidate_type in PHASE2A_MEDIA_HANDOFF_TYPES
+        and bool(candidate.safe_url)
+        and not candidate.url_redacted
+        and not candidate.requires_reresolution
+    )
+
+
+def recommended_phase2a_media_candidate(
+    candidates: tuple[DiscoveryOACandidate, ...],
+) -> DiscoveryOACandidate | None:
+    """Return the highest-ranked stable PDF candidate, if one exists."""
+    ordered = sorted(candidates, key=lambda candidate: (candidate.rank, candidate.candidate_id))
+    return next((candidate for candidate in ordered if is_phase2a_media_handoff_candidate(candidate)), None)
+
+
 @dataclass(frozen=True)
 class DiscoveryProvenance:
     source_id: str

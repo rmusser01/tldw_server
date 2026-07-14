@@ -1698,6 +1698,16 @@ def load_settings():
                                 float(_cp.get('Claims', 'CLAIMS_LLM_TEMPERATURE', fallback='0.1')) if _cp else 0.1
                             ))
                         ),
+                        "CLAIMS_VERIFICATION_PROVIDER": (
+                            _env.get("CLAIMS_VERIFICATION_PROVIDER") if _env.get("CLAIMS_VERIFICATION_PROVIDER") is not None else (
+                                _cp.get('Claims', 'CLAIMS_VERIFICATION_PROVIDER', fallback='') if _cp else ''
+                            )
+                        ),
+                        "CLAIMS_VERIFICATION_MODEL": (
+                            _env.get("CLAIMS_VERIFICATION_MODEL") if _env.get("CLAIMS_VERIFICATION_MODEL") is not None else (
+                                _cp.get('Claims', 'CLAIMS_VERIFICATION_MODEL', fallback='') if _cp else ''
+                            )
+                        ),
                         "CLAIMS_JOB_BUDGET_ENABLED": (
                             (_env.get("CLAIMS_JOB_BUDGET_ENABLED").lower() == "true") if _env.get("CLAIMS_JOB_BUDGET_ENABLED") is not None else (
                                 _cp.getboolean('Claims', 'CLAIMS_JOB_BUDGET_ENABLED', fallback=False) if _cp else False
@@ -1765,7 +1775,8 @@ def load_settings():
                         "ENABLE_INGESTION_CLAIMS", "CLAIM_EXTRACTOR_MODE", "CLAIMS_MAX_PER_CHUNK",
                         "CLAIMS_EMBED", "CLAIMS_EMBED_MODEL_ID", "CLAIMS_CLUSTER_METHOD",
                         "CLAIMS_CLUSTER_SIMILARITY_THRESHOLD", "CLAIMS_CLUSTER_BATCH_SIZE",
-                        "CLAIMS_LLM_PROVIDER", "CLAIMS_LLM_TEMPERATURE", "CLAIMS_JOB_BUDGET_ENABLED",
+                        "CLAIMS_LLM_PROVIDER", "CLAIMS_LLM_TEMPERATURE", "CLAIMS_VERIFICATION_PROVIDER",
+                        "CLAIMS_VERIFICATION_MODEL", "CLAIMS_JOB_BUDGET_ENABLED",
                         "CLAIMS_JOB_MAX_COST_USD", "CLAIMS_JOB_MAX_TOKENS", "CLAIMS_JOB_BUDGET_STRICT",
                         "CLAIMS_LOCAL_NER_MODEL", "CLAIMS_EXTRACTOR_LANGUAGE_DEFAULT", "CLAIMS_LOCAL_NER_MODEL_MAP",
                         "CLAIMS_PROMPT_VALIDATION_MODE", "CLAIMS_PROMPT_VALIDATION_STRICT",

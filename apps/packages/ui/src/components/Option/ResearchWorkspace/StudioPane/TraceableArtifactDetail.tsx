@@ -271,6 +271,39 @@ export const TraceableArtifactDetail: React.FC<
     artifact.version !== undefined ? `v${artifact.version}` : undefined
   const sourceLineage = artifact.sourceLineage || []
   const exportRefs = artifact.exportRefs || []
+  const claimsVerificationProvider =
+    typeof producer?.claimsVerificationProvider === "string"
+      ? producer.claimsVerificationProvider
+      : undefined
+  const claimsVerificationModel =
+    typeof producer?.claimsVerificationModel === "string"
+      ? producer.claimsVerificationModel
+      : undefined
+  const claimsVerifier =
+    claimsVerificationProvider || claimsVerificationModel
+      ? [claimsVerificationProvider, claimsVerificationModel].filter(Boolean).join(" / ")
+      : undefined
+  const claimsVerificationUsesDefault =
+    typeof producer?.claimsVerificationUsesDefault === "boolean"
+      ? producer.claimsVerificationUsesDefault
+      : undefined
+  const claimsVerificationDiffersFromGeneration =
+    typeof producer?.claimsVerificationDiffersFromGeneration === "boolean"
+      ? producer.claimsVerificationDiffersFromGeneration
+      : undefined
+  const claimsVerifierMode = claimsVerifier
+    ? claimsVerificationDiffersFromGeneration === true
+      ? t(
+          "playground:studio.traceableArtifact.claimsVerifierModeOverride",
+          "Override verifier"
+        )
+      : claimsVerificationUsesDefault === true
+        ? t(
+            "playground:studio.traceableArtifact.claimsVerifierModeDefault",
+            "Generation model default"
+          )
+        : undefined
+    : undefined
 
   return (
     <div className="space-y-3 text-sm text-text">
@@ -355,6 +388,20 @@ export const TraceableArtifactDetail: React.FC<
               <TraceValue
                 label={t("playground:studio.traceableArtifact.provider", "Provider")}
                 value={producer.provider}
+              />
+              <TraceValue
+                label={t(
+                  "playground:studio.traceableArtifact.claimsVerifier",
+                  "Claims verifier"
+                )}
+                value={claimsVerifier}
+              />
+              <TraceValue
+                label={t(
+                  "playground:studio.traceableArtifact.claimsVerifierMode",
+                  "Claims verifier mode"
+                )}
+                value={claimsVerifierMode}
               />
             </dl>
             {sessionId && (

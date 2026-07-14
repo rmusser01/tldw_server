@@ -8,7 +8,6 @@
  *
  * Run: npx playwright test e2e/workflows/tier-5-specialized/skills.spec.ts
  */
-import type { Page, Route } from "@playwright/test"
 import {
   test,
   expect,
@@ -16,176 +15,62 @@ import {
   assertNoCriticalErrors,
 } from "../../utils/fixtures"
 import { seedAuth, TEST_CONFIG } from "../../utils/helpers"
-
-const seededSkillSummary = {
-  name: "summarize",
-  description: "Summarize source material",
-  argument_hint: "[text]",
-  user_invocable: true,
-  disable_model_invocation: false,
-  context: "inline",
-}
-
-const seededSkillResponse = {
-  ...seededSkillSummary,
-  id: "skill-summarize",
-  allowed_tools: null,
-  model: null,
-  content:
-    "---\ndescription: Summarize source material\nargument-hint: \"[text]\"\ncontext: inline\n---\n\nSummarize this source: $ARGUMENTS",
-  raw_content: null,
-  supporting_files: null,
-  directory_path: "/mock/skills/summarize",
-  created_at: "2026-06-01T00:00:00Z",
-  last_modified: "2026-06-01T00:00:00Z",
-  version: 1,
-}
-
-type TldwConnectionStore = {
-  getState: () => { state: Record<string, unknown> }
-  setState: (value: { state: Record<string, unknown> }) => void
-}
-
-type TldwConnectionStoreWindow = Window & {
-  __tldw_useConnectionStore?: TldwConnectionStore
-}
-
-const fulfillJson = async (route: Route, payload: unknown, status = 200) => {
-  await route.fulfill({
-    status,
-    contentType: "application/json",
-    body: JSON.stringify(payload),
-  })
-}
-
-async function mockSkillsBeginnerApi(
-  page: Page,
-  options: { seeded?: boolean } = {}
-) {
-  let seeded = Boolean(options.seeded)
-
-  await page.route(/\/api\/v1\/health(?:\?.*)?$/, async (route) => {
-    await fulfillJson(route, { status: "healthy" })
-  })
-
-  await page.route(/\/openapi\.json(?:\?.*)?$/, async (route) => {
-    await fulfillJson(route, {
-      openapi: "3.0.0",
-      info: { title: "Mock tldw API", version: "test" },
-      paths: {
-        "/api/v1/skills": { get: {}, post: {} },
-        "/api/v1/skills/context": { get: {} },
-        "/api/v1/skills/seed": { post: {} },
-        "/api/v1/skills/{name}": { get: {}, put: {}, delete: {} },
-        "/api/v1/skills/{name}/execute": { post: {} },
-      },
-    })
-  })
-
-  await page.route(/\/api\/v1\/skills(?:\/)?(?:\?.*)?$/, async (route) => {
-    if (route.request().method() !== "GET") {
-      await fulfillJson(route, {}, 405)
-      return
-    }
-    const url = new URL(route.request().url())
-    const query = (url.searchParams.get("q") ?? "").trim().toLowerCase()
-    const skills = seeded
-      && (!query
-        || seededSkillSummary.name.toLowerCase().includes(query)
-        || seededSkillSummary.description.toLowerCase().includes(query))
-      ? [seededSkillSummary]
-      : []
-    await fulfillJson(route, {
-      skills,
-      count: skills.length,
-      total: skills.length,
-      limit: 10,
-      offset: 0,
-    })
-  })
-
-  await page.route(/\/api\/v1\/skills\/context(?:\/)?(?:\?.*)?$/, async (route) => {
-    await fulfillJson(route, {
-      available_skills: seeded ? [seededSkillSummary] : [],
-      context_text: seeded ? "/skill summarize [text]" : "",
-    })
-  })
-
-  await page.route(/\/api\/v1\/skills\/seed(?:\/)?(?:\?.*)?$/, async (route) => {
-    if (route.request().method() !== "POST") {
-      await fulfillJson(route, {}, 405)
-      return
-    }
-    seeded = true
-    await fulfillJson(route, { seeded: ["summarize"], count: 1 })
-  })
-
-  await page.route(/\/api\/v1\/skills\/summarize(?:\/)?(?:\?.*)?$/, async (route) => {
-    await fulfillJson(route, seededSkillResponse)
-  })
-
-  await page.route(
-    /\/api\/v1\/skills\/summarize\/execute(?:\/)?(?:\?.*)?$/,
-    async (route) => {
-      if (route.request().method() !== "POST") {
-        await fulfillJson(route, {}, 405)
-        return
-      }
-      const body = route.request().postDataJSON() as { args?: string; dry_run?: boolean }
-      const args = body.args ?? "A long article about Skills UX"
-      await fulfillJson(route, {
-        skill_name: "summarize",
-        rendered_prompt: `Summarize this source: ${args}`,
-        allowed_tools: null,
-        model_override: null,
-        execution_mode: "inline",
-        fork_output: null,
-        dry_run: Boolean(body.dry_run),
-      })
-    }
-  )
-}
-
-async function forceSkillsConnectionState(page: Page) {
-  await page.waitForFunction(
-    () =>
-      typeof (window as TldwConnectionStoreWindow).__tldw_useConnectionStore
-        ?.getState === "function",
-    null,
-    { timeout: 15_000 }
-  )
-  await page.evaluate(() => {
-    const store = (window as TldwConnectionStoreWindow).__tldw_useConnectionStore
-    if (!store) throw new Error("Connection store is unavailable")
-    const prev = store.getState().state
-    const now = Date.now()
-    store.setState({
-      state: {
-        ...prev,
-        phase: "connected",
-        isConnected: true,
-        isChecking: false,
-        offlineBypass: true,
-        errorKind: "none",
-        lastError: null,
-        lastStatusCode: null,
-        lastCheckedAt: now,
-        knowledgeStatus: "ready",
-        knowledgeLastCheckedAt: now,
-        knowledgeError: null,
-        configStep: "health",
-        hasCompletedFirstRun: true,
-      },
-    })
-  })
-}
+import {
+  forceSkillsConnectionState,
+  mockSkillsBeginnerApi,
+  mockPowerUserSkillsLibrary,
+  mockSkillsExecutionFailure,
+  mockSkillsImportValidationFailure,
+  mockSkillsSlowList,
+  mockSkillsStaleVersionConflict,
+} from "../../utils/skills-fixtures"
 
 test.describe("Skills beginner journey (mocked)", () => {
+  test("fixture defaults a missing execute payload", async ({ page }) => {
+    await mockSkillsBeginnerApi(page, { seeded: true })
+    await seedAuth(page, {
+      serverUrl: TEST_CONFIG.serverUrl,
+      allowOffline: true,
+    })
+
+    await page.goto("/skills", { waitUntil: "domcontentloaded" })
+    await forceSkillsConnectionState(page)
+
+    const result = await page.evaluate(async () => {
+      const response = await fetch("/api/v1/skills/summarize/execute", {
+        method: "POST",
+      })
+      return {
+        status: response.status,
+        body: await response.json(),
+      }
+    })
+
+    expect(result).toEqual({
+      status: 200,
+      body: expect.objectContaining({
+        rendered_prompt: "Summarize this source: A long article about Skills UX",
+        dry_run: false,
+      }),
+    })
+  })
+
   test("seeds built-ins, opens test run, and persists after refresh", async ({
     page,
     diagnostics,
   }) => {
     await mockSkillsBeginnerApi(page)
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: {
+          writeText: async (value: string) => {
+            const win = window as Window & { __skillsCopiedText?: string }
+            win.__skillsCopiedText = value
+          },
+        },
+      })
+    })
     await seedAuth(page, {
       serverUrl: TEST_CONFIG.serverUrl,
       allowOffline: true,
@@ -207,6 +92,16 @@ test.describe("Skills beginner journey (mocked)", () => {
     await expect(successActions.getByRole("button", { name: "Test summarize" }))
       .toBeVisible()
     await expect(page.getByText("Summarize source material")).toBeVisible()
+
+    await successActions.getByRole("button", { name: "Copy /skill summarize" }).click()
+    await expect(page.getByText("Skill invocation copied")).toBeVisible()
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          (window as Window & { __skillsCopiedText?: string }).__skillsCopiedText
+        )
+      )
+      .toBe("/skill summarize")
 
     await successActions.getByRole("button", { name: "Test summarize" }).click()
     const previewDialog = page.getByRole("dialog", { name: "Test run" })
@@ -251,7 +146,7 @@ test.describe("Skills beginner journey (mocked)", () => {
     const testRunButton = page.getByRole("button", { name: "Test run summarize" })
     await expect(testRunButton).toBeVisible()
     await testRunButton.focus()
-    await page.keyboard.press("Enter")
+    await testRunButton.press("Enter")
 
     const previewDialog = page.getByRole("dialog", { name: "Test run" })
     await expect(previewDialog).toBeVisible()
@@ -275,12 +170,194 @@ test.describe("Skills beginner journey (mocked)", () => {
     expect(newSkillBox!.x + newSkillBox!.width).toBeLessThanOrEqual(390)
 
     await newSkillButton.focus()
-    await page.keyboard.press("Enter")
+    await newSkillButton.press("Enter")
     const drawer = page.getByRole("dialog", { name: "New Skill" })
     await expect(drawer).toBeVisible()
     await drawer.getByRole("button", { name: "Cancel" }).focus()
     await page.keyboard.press("Enter")
     await expect(newSkillButton).toBeFocused()
+
+    await assertNoCriticalErrors(diagnostics)
+  })
+})
+
+test.describe("Skills power-user journey (mocked)", () => {
+  test("fixture accepts body-less skill deletes with trailing slashes", async ({ page }) => {
+    const api = await mockPowerUserSkillsLibrary(page)
+    await seedAuth(page, {
+      serverUrl: TEST_CONFIG.serverUrl,
+      allowOffline: true,
+    })
+
+    await page.goto("/skills", { waitUntil: "domcontentloaded" })
+    await forceSkillsConnectionState(page)
+
+    const statuses = await page.evaluate(async () => {
+      const paths = [
+        "/api/v1/skills/target-research-formatter",
+        "/api/v1/skills/target-research-formatter/",
+      ]
+      const results: number[] = []
+      for (const path of paths) {
+        const response = await fetch(path, { method: "DELETE" })
+        results.push(response.status)
+      }
+      return results
+    })
+
+    expect(statuses).toEqual([200, 200])
+    expect(api.deleteRequests).toEqual([
+      { name: "target-research-formatter" },
+      { name: "target-research-formatter" },
+    ])
+  })
+
+  test("finds a skill outside page one and opens bulk delete confirmation", async ({
+    page,
+    diagnostics,
+  }) => {
+    const api = await mockPowerUserSkillsLibrary(page)
+    await seedAuth(page, {
+      serverUrl: TEST_CONFIG.serverUrl,
+      allowOffline: true,
+    })
+
+    await page.goto("/skills", { waitUntil: "domcontentloaded" })
+    await forceSkillsConnectionState(page)
+
+    const searchInput = page.getByPlaceholder("Search skills...")
+    await searchInput.pressSequentially("target-research-formatter")
+    await expect
+      .poll(() => api.lastListUrl()?.searchParams.get("q"))
+      .toBe("target-research-formatter")
+    await expect(page.getByText("Target research formatter")).toBeVisible()
+
+    await searchInput.clear()
+    await page.getByRole("button", { name: "Fork" }).click()
+    await page.getByRole("button", { name: "Has tools" }).click()
+    await expect(page.getByText("Batch cleanup helper")).toBeVisible()
+    await expect(page.getByText("Target research formatter")).toBeVisible()
+    await expect
+      .poll(() => api.lastListUrl()?.searchParams.get("context"))
+      .toBe("fork")
+    await expect
+      .poll(() => api.lastListUrl()?.searchParams.get("has_tools"))
+      .toBe("true")
+
+    await page.getByRole("columnheader", { name: "Name" }).click()
+    await expect
+      .poll(() => api.lastListUrl()?.searchParams.get("sort"))
+      .toBe("name")
+
+    await page.getByLabel("Select target-research-formatter").check()
+    await page.getByLabel("Select batch-cleanup-helper").check()
+    await expect(page.getByText("2 selected")).toBeVisible()
+
+    await page.getByRole("button", { name: "Delete selected" }).click()
+    await expect(
+      page.getByRole("dialog", { name: "Delete selected skills?" })
+    ).toBeVisible()
+    expect(api.deleteRequests).toHaveLength(0)
+
+    await assertNoCriticalErrors(diagnostics)
+  })
+})
+
+test.describe("Skills failure states (mocked)", () => {
+  test("shows invalid import feedback without importing", async ({
+    page,
+    diagnostics,
+  }) => {
+    const api = await mockSkillsImportValidationFailure(page)
+    await seedAuth(page, {
+      serverUrl: TEST_CONFIG.serverUrl,
+      allowOffline: true,
+    })
+
+    await page.goto("/skills", { waitUntil: "domcontentloaded" })
+    await forceSkillsConnectionState(page)
+
+    await page.getByRole("button", { name: "Import", exact: true }).click()
+    await page.getByRole("menuitem", { name: "Import Text" }).click()
+    const dialog = page.getByRole("dialog", { name: "Import Skill from Text" })
+    await expect(dialog).toBeVisible()
+    await dialog.getByLabel("SKILL.md Content").fill("not a valid skill")
+    await dialog.getByRole("button", { name: "Review import" }).click()
+
+    await expect(dialog.getByText("Fix these issues before importing.")).toBeVisible()
+    await expect(dialog.getByText("Missing skill description")).toBeVisible()
+    expect(api.importRequests).toHaveLength(0)
+
+    await assertNoCriticalErrors(diagnostics)
+  })
+
+  test("shows execution failure details from a test run", async ({
+    page,
+    diagnostics,
+  }) => {
+    await mockSkillsExecutionFailure(page)
+    await seedAuth(page, {
+      serverUrl: TEST_CONFIG.serverUrl,
+      allowOffline: true,
+    })
+
+    await page.goto("/skills", { waitUntil: "domcontentloaded" })
+    await forceSkillsConnectionState(page)
+
+    await page.getByRole("button", { name: "Test run summarize" }).click()
+    const previewDialog = page.getByRole("dialog", { name: "Test run" })
+    await previewDialog.getByPlaceholder("Enter test arguments...").fill("failure test")
+    await previewDialog.getByRole("button", { name: "Run test" }).click()
+
+    await expect(previewDialog.getByRole("alert")).toContainText("Model unavailable")
+
+    await assertNoCriticalErrors(diagnostics)
+  })
+
+  test("tells users to reload before retrying a stale delete", async ({
+    page,
+    diagnostics,
+  }) => {
+    await mockSkillsStaleVersionConflict(page)
+    await seedAuth(page, {
+      serverUrl: TEST_CONFIG.serverUrl,
+      allowOffline: true,
+    })
+
+    await page.goto("/skills", { waitUntil: "domcontentloaded" })
+    await forceSkillsConnectionState(page)
+
+    await page.getByRole("button", { name: "Delete summarize" }).click()
+    const confirmDialog = page.getByRole("dialog", { name: "Delete skill?" })
+    await expect(confirmDialog).toBeVisible()
+    await confirmDialog.getByRole("button", { name: "Delete" }).click()
+
+    await expect(page.getByText("Skill changed elsewhere")).toBeVisible()
+    await expect(page.getByText("Reload skills before deleting this version.")).toBeVisible()
+
+    await assertNoCriticalErrors(diagnostics)
+  })
+
+  test("announces slow list loading until the response resolves", async ({
+    page,
+    diagnostics,
+  }) => {
+    const api = await mockSkillsSlowList(page)
+    await seedAuth(page, {
+      serverUrl: TEST_CONFIG.serverUrl,
+      allowOffline: true,
+    })
+
+    await page.goto("/skills", { waitUntil: "domcontentloaded" })
+    await forceSkillsConnectionState(page)
+
+    await expect.poll(() => api.listRequests()).toBeGreaterThan(0)
+    await expect(
+      page.locator('div[role="status"]').filter({ hasText: "Loading skills" })
+    ).toHaveText("Loading skills")
+
+    api.resolveList()
+    await expect(page.getByText("Summarize source material")).toBeVisible()
 
     await assertNoCriticalErrors(diagnostics)
   })

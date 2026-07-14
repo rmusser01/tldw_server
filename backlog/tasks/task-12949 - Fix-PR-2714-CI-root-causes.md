@@ -38,13 +38,13 @@ Completed from IMPLEMENTATION_PLAN_pr2714_ci_root_causes.md; temporary plan file
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Implemented canonical role assignment in post-migration AuthNZ/MCP/resource-governance fixtures without restoring users.role authorization fallback. Updated canonical principal expectations, made in-process E2E auth-mode selection honor explicit AUTH_MODE, contained Chatbook fixture environment/AuthNZ singleton state, corrected the plural characters verification contract, moved DatabasePaths imports out of wizard dry-run, and refreshed the OpenAPI fingerprint after generating frontend types.
+Implemented canonical role assignment in post-migration AuthNZ/MCP/resource-governance fixtures without restoring the users.role authorization fallback. Updated canonical principal expectations, made in-process E2E auth-mode selection honor explicit AUTH_MODE, contained Chatbook fixture environment/AuthNZ singleton state, corrected the plural characters verification contract, moved DatabasePaths imports out of wizard dry-run, and refreshed the OpenAPI fingerprint after generating frontend types. After the first push GitHub reported a dev merge conflict that prevented workflow dispatch; merge-tree isolated it to the generated OpenAPI fingerprint. Merged current dev normally (no force-push), regenerated the fingerprint and frontend types, and reran all affected and CI-equivalent gates.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Resolved the five PR-scoped CI root causes for PR #2714. Verification: 96 passed/1 skipped across all affected files; exact in-process critical E2E lane 15 passed/278 skipped; OpenAPI drift check passed; frontend API type generation completed; Bandit reported 0 findings; production/helper Ruff scope and git diff checks passed. The whole-file Ruff scan still reports pre-existing lint debt in legacy test modules; no new production/helper lint finding was introduced.
+Resolved the PR-scoped CI root causes for PR #2714 and merged current dev to clear GitHub's generated-fingerprint conflict. Post-merge verification: 96 passed/1 skipped across every affected test file; exact in-process critical E2E lane 15 passed/278 skipped; OpenAPI drift check passed; frontend API type generation completed; Bandit reported 0 findings; production/helper Ruff scope and git diff checks passed. The whole-file Ruff scan still reports pre-existing lint debt in legacy test modules; no new production/helper lint finding was introduced.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

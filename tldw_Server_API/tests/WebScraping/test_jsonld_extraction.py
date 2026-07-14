@@ -1,9 +1,145 @@
+import pytest
+
+from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as extractor_lib
 from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import (
     extract_article_with_pipeline,
     extract_jsonld_entities,
 )
 
+DESCRIPTION_ONLY_JSONLD = """
+<html>
+  <head>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Article",
+        "headline": "Structured title",
+        "description": "Structured summary"
+      }
+    </script>
+  </head>
+  <body></body>
+</html>
+"""
 
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_legacy_scrape_preserves_structured_summary_when_summarization_disabled(monkeypatch):
+    async def fake_scrape_article(
+        _url: str,
+        custom_cookies=None,
+        *,
+        allow_llm_extraction: bool = True,
+    ):
+        _ = allow_llm_extraction
+        return {
+            "url": "https://example.com",
+            "title": "Structured title",
+            "content": "Fallback body",
+            "summary": "Structured summary",
+            "extraction_successful": True,
+        }
+
+    monkeypatch.setattr(extractor_lib, "scrape_article", fake_scrape_article)
+    monkeypatch.setattr(extractor_lib, "RateLimiter", lambda: None)
+
+    result = await extractor_lib.scrape_and_summarize_multiple(
+        urls="https://example.com",
+        custom_prompt_arg=None,
+        api_name="",
+        api_key=None,
+        keywords="",
+        custom_article_titles=None,
+        summarize_checkbox=False,
+    )
+
+    assert result[0]["summary"] == "Structured summary"
+
+
+@pytest.mark.unit
+def test_jsonld_description_only_is_not_successful():
+    result = extract_jsonld_entities(DESCRIPTION_ONLY_JSONLD, "https://example.com")
+
+    assert result["extraction_successful"] is False
+    assert result["content"] == ""
+    assert result["summary"] == "Structured summary"
+
+
+@pytest.mark.unit
+def test_pipeline_retains_jsonld_summary_after_fallback():
+    def fallback_extractor(_html: str, url: str) -> dict[str, str | bool]:
+        return {
+            "url": url,
+            "title": "Fallback title",
+            "author": "N/A",
+            "date": "N/A",
+            "content": "Fallback body",
+            "summary": "   ",
+            "extraction_successful": True,
+        }
+
+    result = extract_article_with_pipeline(
+        DESCRIPTION_ONLY_JSONLD,
+        "https://example.com",
+        strategy_order=["jsonld", "trafilatura"],
+        fallback_extractor=fallback_extractor,
+    )
+
+    assert result["content"] == "Fallback body"
+    assert result["extraction_strategy"] == "trafilatura"
+    assert result["summary"] == "Structured summary"
+
+
+@pytest.mark.unit
+def test_pipeline_keeps_fallback_summary_over_jsonld_summary():
+    def fallback_extractor(_html: str, url: str) -> dict[str, str | bool]:
+        return {
+            "url": url,
+            "title": "Fallback title",
+            "author": "N/A",
+            "date": "N/A",
+            "content": "Fallback body",
+            "summary": "Fallback summary",
+            "extraction_successful": True,
+        }
+
+    result = extract_article_with_pipeline(
+        DESCRIPTION_ONLY_JSONLD,
+        "https://example.com",
+        strategy_order=["jsonld", "trafilatura"],
+        fallback_extractor=fallback_extractor,
+    )
+
+    assert result["content"] == "Fallback body"
+    assert result["extraction_strategy"] == "trafilatura"
+    assert result["summary"] == "Fallback summary"
+
+
+@pytest.mark.unit
+def test_pipeline_does_not_carry_jsonld_summary_when_fallback_fails():
+    def fallback_extractor(_html: str, url: str) -> dict[str, str | bool]:
+        return {
+            "url": url,
+            "title": "Fallback title",
+            "author": "N/A",
+            "date": "N/A",
+            "content": "",
+            "extraction_successful": False,
+        }
+
+    result = extract_article_with_pipeline(
+        DESCRIPTION_ONLY_JSONLD,
+        "https://example.com",
+        strategy_order=["jsonld", "trafilatura"],
+        fallback_extractor=fallback_extractor,
+    )
+
+    assert result["extraction_successful"] is False
+    assert result.get("summary") is None
+
+
+@pytest.mark.unit
 def test_jsonld_extraction_basic():
     html = """
     <html>
@@ -31,6 +167,7 @@ def test_jsonld_extraction_basic():
     assert "JSON-LD body text." in result["content"]
 
 
+@pytest.mark.unit
 def test_jsonld_extraction_multiple_blocks_prefers_article():
     html = """
     <html>
@@ -52,6 +189,7 @@ def test_jsonld_extraction_multiple_blocks_prefers_article():
     assert result["content"] == "Article body"
 
 
+@pytest.mark.unit
 def test_jsonld_extraction_invalid_json():
     html = """
     <html>
@@ -69,6 +207,7 @@ def test_jsonld_extraction_invalid_json():
     assert result.get("jsonld_error")
 
 
+@pytest.mark.unit
 def test_jsonld_pipeline_short_circuits():
     html = """
     <html>
@@ -87,6 +226,7 @@ def test_jsonld_pipeline_short_circuits():
     assert result["content"] == "Pipe body"
 
 
+@pytest.mark.unit
 def test_microdata_extraction_basic():
     html = """
     <html>

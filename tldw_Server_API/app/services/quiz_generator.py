@@ -13,11 +13,17 @@ from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
 from tldw_Server_API.app.core.Chat.chat_service import resolve_provider_api_key
+from tldw_Server_API.app.core.Claims_Extraction.artifact_verification import (
+    ArtifactVerificationResult,
+    ArtifactVerificationUnit,
+    verify_generated_artifact_against_sources,
+)
 from tldw_Server_API.app.core.config import load_and_log_configs
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.exceptions import BadRequestError
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
+from tldw_Server_API.app.core.RAG.rag_service.types import Document
 from tldw_Server_API.app.core.testing import is_test_mode
 from tldw_Server_API.app.services.quiz_source_resolver import resolve_quiz_sources
 
@@ -134,6 +140,14 @@ _PROFILE_BY_ID = {profile["id"]: profile for profile in _QUIZ_GENERATION_PROFILE
 
 class QuizProvenanceValidationError(ValueError):
     """Raised when generated quiz questions fail strict source provenance validation."""
+
+
+class QuizClaimVerificationError(ValueError):
+    """Raised when generated quiz questions fail ClaimsEngine verification."""
+
+    def __init__(self, claim_verification: dict[str, Any]):
+        super().__init__("Quiz claim verification failed")
+        self.claim_verification = claim_verification
 
 
 QUIZ_GENERATION_PROMPT = """You are a quiz generator. Based on the following content, generate {num_questions} quiz questions.
@@ -1485,6 +1499,141 @@ def _resolve_generated_quiz_metadata(
     )
 
 
+def _answer_text_for_question(question: dict[str, Any]) -> str:
+    question_type = str(question.get("question_type") or "").strip()
+    answer = question.get("correct_answer")
+    if question_type == "multiple_choice":
+        options = question.get("options") if isinstance(question.get("options"), list) else []
+        if isinstance(answer, int) and 0 <= answer < len(options):
+            return str(options[answer]).strip()
+    return str(answer or "").strip()
+
+
+def _strip_true_false_prefix(question_text: str) -> str:
+    normalized = question_text.strip()
+    prefix = "true or false:"
+    if normalized.lower().startswith(prefix):
+        return normalized[len(prefix):].strip()
+    return normalized
+
+
+def _build_quiz_verification_units(questions: Sequence[dict[str, Any]]) -> list[ArtifactVerificationUnit]:
+    units: list[ArtifactVerificationUnit] = []
+    for index, question in enumerate(questions, start=1):
+        question_text = str(question.get("question_text") or "").strip()
+        question_type = str(question.get("question_type") or "").strip()
+        explanation = str(question.get("explanation") or "").strip()
+        answer_text = _answer_text_for_question(question)
+
+        claims: list[str] = []
+        if question_type == "multiple_choice" and question_text and answer_text:
+            claims.append(f"For the question '{question_text}', the correct answer is '{answer_text}'.")
+        elif question_type == "true_false" and question_text:
+            statement = _strip_true_false_prefix(question_text)
+            if _normalize_tf_answer(question.get("correct_answer")) == "true":
+                claims.append(statement)
+            elif explanation:
+                claims.append(explanation)
+        elif question_type == "fill_blank" and question_text and answer_text:
+            claims.append(question_text.replace("___", answer_text))
+
+        if explanation and explanation not in claims:
+            claims.append(explanation)
+
+        text_parts = [part for part in [question_text, f"Correct answer: {answer_text}" if answer_text else "", explanation] if part]
+        text = " ".join(text_parts).strip()
+        if not text:
+            continue
+
+        units.append(
+            ArtifactVerificationUnit(
+                unit_id=f"quiz-question:{index}",
+                text=text,
+                claims=claims or [text],
+                metadata={
+                    "question_index": index,
+                    "question_type": question_type,
+                    "source_citations": question.get("source_citations") or [],
+                },
+            )
+        )
+    return units
+
+
+def _build_quiz_source_documents(evidence_items: Sequence[dict[str, Any]]) -> list[Document]:
+    documents: list[Document] = []
+    seen_ids: set[str] = set()
+    for index, item in enumerate(evidence_items, start=1):
+        text = str(item.get("text") or "").strip()
+        if not text:
+            continue
+        source_type = str(item.get("source_type") or "source").strip() or "source"
+        source_id = str(item.get("source_id") or index).strip() or str(index)
+        chunk_id = str(item.get("chunk_id") or "").strip()
+        document_id = f"{source_type}:{source_id}"
+        if chunk_id:
+            document_id = f"{document_id}:{chunk_id}"
+        if document_id in seen_ids:
+            document_id = f"{document_id}:{index}"
+        seen_ids.add(document_id)
+        documents.append(
+            Document(
+                id=document_id,
+                content=text,
+                metadata={
+                    "source_type": source_type,
+                    "source_id": source_id,
+                    "chunk_id": chunk_id or None,
+                    "label": str(item.get("label") or "").strip() or None,
+                },
+            )
+        )
+    return documents
+
+
+async def _verify_quiz_questions_against_sources(
+    *,
+    questions: list[dict[str, Any]],
+    evidence: Sequence[dict[str, Any]],
+    generation_provider: str | None,
+    generation_model: str | None,
+    verification_provider: str | None = None,
+    verification_model: str | None = None,
+) -> ArtifactVerificationResult:
+    if is_test_mode():
+        provider = verification_provider or generation_provider
+        model = verification_model or generation_model
+        differs_from_generation = provider != generation_provider or model != generation_model
+        return ArtifactVerificationResult(
+            verdict="grounded",
+            report={"total_claims": len(questions), "claims": []},
+            unit_results=[],
+            metadata={
+                "artifact_type": "quiz",
+                "generation_provider": generation_provider,
+                "generation_model": generation_model,
+                "verification_provider": provider,
+                "verification_model": model,
+                "verification_provider_configured": verification_provider is not None,
+                "verification_model_configured": verification_model is not None,
+                "verification_llm_is_default": not differs_from_generation,
+                "verification_llm_differs_from_generation": differs_from_generation,
+                "test_mode": True,
+            },
+        )
+
+    return await verify_generated_artifact_against_sources(
+        artifact_type="quiz",
+        units=_build_quiz_verification_units(questions),
+        source_documents=_build_quiz_source_documents(evidence),
+        generation_provider=generation_provider,
+        generation_model=generation_model,
+        verification_provider=verification_provider,
+        verification_model=verification_model,
+        generation_context={"query": "generated quiz questions"},
+    )
+
+
 def _persist_generated_quiz(
     *,
     db: CharactersRAGDB,
@@ -1545,6 +1694,8 @@ async def generate_quiz_from_sources(
     question_plan: Sequence[Any] | None = None,
     model: str | None = None,
     api_provider: str | None = None,
+    claims_verification_provider: str | None = None,
+    claims_verification_model: str | None = None,
     workspace_id: str | None = None,
     workspace_tag: str | None = None,
 ) -> dict[str, Any]:
@@ -1597,7 +1748,18 @@ async def generate_quiz_from_sources(
         _validate_strict_provenance(questions, normalized_sources)
         if normalized_profile == ASSERTION_REASONING_TAG:
             _validate_assertion_reasoning_questions(questions)
-        return await asyncio.to_thread(
+        claim_verification = await _verify_quiz_questions_against_sources(
+            questions=questions,
+            evidence=evidence,
+            generation_provider=api_provider or DEFAULT_LLM_PROVIDER,
+            generation_model=model,
+            verification_provider=claims_verification_provider,
+            verification_model=claims_verification_model,
+        )
+        claim_verification_payload = claim_verification.to_dict()
+        if claim_verification.verdict != "grounded":
+            raise QuizClaimVerificationError(claim_verification_payload)
+        result = await asyncio.to_thread(
             _persist_generated_quiz,
             db=db,
             normalized_sources=normalized_sources,
@@ -1608,6 +1770,8 @@ async def generate_quiz_from_sources(
             workspace_id=workspace_id,
             workspace_tag=workspace_tag,
         )
+        result["claim_verification"] = claim_verification_payload
+        return result
 
     content = _build_content_from_evidence(evidence)
 
@@ -1665,7 +1829,19 @@ async def generate_quiz_from_sources(
     if normalized_profile == ASSERTION_REASONING_TAG:
         _validate_assertion_reasoning_questions(questions)
 
-    return await asyncio.to_thread(
+    claim_verification = await _verify_quiz_questions_against_sources(
+        questions=questions,
+        evidence=evidence,
+        generation_provider=api_provider or DEFAULT_LLM_PROVIDER,
+        generation_model=model,
+        verification_provider=claims_verification_provider,
+        verification_model=claims_verification_model,
+    )
+    claim_verification_payload = claim_verification.to_dict()
+    if claim_verification.verdict != "grounded":
+        raise QuizClaimVerificationError(claim_verification_payload)
+
+    result = await asyncio.to_thread(
         _persist_generated_quiz,
         db=db,
         normalized_sources=normalized_sources,
@@ -1676,6 +1852,8 @@ async def generate_quiz_from_sources(
         workspace_id=workspace_id,
         workspace_tag=workspace_tag,
     )
+    result["claim_verification"] = claim_verification_payload
+    return result
 
 
 async def generate_quiz_from_media(
@@ -1690,6 +1868,8 @@ async def generate_quiz_from_media(
     focus_topics: list[str] | None = None,
     model: str | None = None,
     api_provider: str | None = None,
+    claims_verification_provider: str | None = None,
+    claims_verification_model: str | None = None,
     workspace_id: str | None = None,
     workspace_tag: str | None = None,
 ) -> dict[str, Any]:
@@ -1705,6 +1885,8 @@ async def generate_quiz_from_media(
         focus_topics=focus_topics,
         model=model,
         api_provider=api_provider,
+        claims_verification_provider=claims_verification_provider,
+        claims_verification_model=claims_verification_model,
         workspace_id=workspace_id,
         workspace_tag=workspace_tag,
     )

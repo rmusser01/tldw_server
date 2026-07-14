@@ -626,6 +626,9 @@ CLAIMS_EMBED_MODEL_ID = ""
 CLAIMS_LLM_PROVIDER = ollama
 CLAIMS_LLM_TEMPERATURE = 0.1
 CLAIMS_LLM_MODEL =
+# Optional default verifier for generated artifacts. Blank means use the generation LLM unless the request chooses a verifier.
+CLAIMS_VERIFICATION_PROVIDER =
+CLAIMS_VERIFICATION_MODEL =
 CLAIMS_JOB_BUDGET_ENABLED = false
 CLAIMS_JOB_MAX_COST_USD =
 CLAIMS_JOB_MAX_TOKENS =

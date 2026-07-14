@@ -231,6 +231,22 @@ describe("TakeQuizTab list controls and default passing policy", () => {
     })
   }, 15000)
 
+  it("forwards forced workspace visibility to the quiz list hook", () => {
+    render(
+      <MemoryRouter>
+        <TakeQuizTab
+          onNavigateToGenerate={() => {}}
+          onNavigateToCreate={() => {}}
+          forceShowWorkspaceItems
+        />
+      </MemoryRouter>
+    )
+
+    expect(vi.mocked(useQuizzesQuery)).toHaveBeenCalledWith(
+      expect.objectContaining({ include_workspace_items: true })
+    )
+  })
+
   it("shows explicit default passing score policy when quiz has no passing score", async () => {
     render(
       <MemoryRouter>

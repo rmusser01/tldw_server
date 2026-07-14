@@ -60,14 +60,37 @@ const prepareExtension = (
   return destination
 }
 
+const getExtensionServiceWorker = async (context: BrowserContext) =>
+  context.serviceWorkers()[0] ||
+  (await context.waitForEvent("serviceworker", { timeout: 15_000 }))
+
 const resolveExtensionId = async (context: BrowserContext): Promise<string> => {
-  let target = context.serviceWorkers()[0]
-  if (!target) {
-    target = await context.waitForEvent("serviceworker", { timeout: 15_000 })
-  }
+  const target = await getExtensionServiceWorker(context)
   const match = target.url().match(/^chrome-extension:\/\/([a-p]{32})\//)
   if (!match) throw new Error(`Could not derive extension id from ${target.url()}`)
   return match[1]
+}
+
+const setExtensionStorage = async (
+  context: BrowserContext,
+  area: "local" | "sync",
+  values: Record<string, unknown>
+): Promise<void> => {
+  const worker = await getExtensionServiceWorker(context)
+  await worker.evaluate(
+    ({ storageArea, storageValues }) =>
+      new Promise<void>((resolve, reject) => {
+        chrome.storage[storageArea].set(storageValues, () => {
+          const error = chrome.runtime.lastError
+          if (error) {
+            reject(new Error(error.message))
+            return
+          }
+          resolve()
+        })
+      }),
+    { storageArea: area, storageValues: values }
+  )
 }
 
 const launchExtension = async (
@@ -92,25 +115,26 @@ const launchExtension = async (
       "--crash-dumps-dir=/tmp"
     ]
   })
-  const extensionId = await resolveExtensionId(context)
-  const worker = context.serviceWorkers()[0]
-  if (worker) {
-    await worker.evaluate(
-      () =>
-        new Promise<void>((resolve) => {
-          chrome.storage.local.set(
-            {
-              __e2eSeeded: true,
-              __tldw_first_run_complete: true,
-              tldw_skip_landing_hub: true
-            },
-            () => resolve()
-          )
-        })
-    )
+  try {
+    const extensionId = await resolveExtensionId(context)
+    await setExtensionStorage(context, "local", {
+      __e2eSeeded: true,
+      __tldw_first_run_complete: true,
+      tldw_skip_landing_hub: true
+    })
+    const page = context.pages()[0] || (await context.newPage())
+    return { context, page, extensionId }
+  } catch (startupError) {
+    try {
+      await context.close()
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [startupError, cleanupError],
+        "Extension startup and cleanup both failed"
+      )
+    }
+    throw startupError
   }
-  const page = context.pages()[0] || (await context.newPage())
-  return { context, page, extensionId }
 }
 
 const openSettings = async (page: Page, extensionId: string): Promise<void> => {
@@ -178,7 +202,7 @@ const saveManualConnection = async (
 
 const extensionStorageValue = async (
   page: Page,
-  area: "local" | "session",
+  area: "local" | "session" | "sync",
   key: string
 ): Promise<unknown> =>
   page.evaluate(
@@ -190,6 +214,36 @@ const extensionStorageValue = async (
       }),
     { storageArea: area, storageKey: key }
   )
+
+const normalizeExtensionStorageValue = (value: unknown): unknown =>
+  typeof value === "string" ? JSON.parse(value) : value
+
+const seedLegacyDeviceConfig = async (
+  context: BrowserContext,
+  serverUrl: string
+): Promise<void> => {
+  await setExtensionStorage(context, "sync", {
+    tldwConfig: JSON.stringify({
+      authMode: "single-user",
+      serverUrl,
+      apiKey: MANUAL_API_KEY
+    })
+  })
+}
+
+const hasAuthenticatedMediaListRequest = (
+  fixture: ManualApiKeyFixture,
+  offset: number
+): boolean =>
+  fixture
+    .requests()
+    .slice(offset)
+    .some(
+      (request) =>
+        request.method === "GET" &&
+        request.path === "/api/v1/media" &&
+        request.authenticated === true
+    )
 
 const expectProductionRagRequest = async (
   page: Page,
@@ -234,14 +288,9 @@ const expectProductionRagRequest = async (
     return
   }
 
-  await expect
-    .poll(() =>
-      fixture
-        .requests()
-        .slice(requestOffset)
-        .some((request) => !request.authenticated)
-    )
-    .toBe(true)
+  await expect(
+    page.getByText("RAG: needs attention", { exact: true })
+  ).toBeVisible()
   expect(
     fixture
       .requests()
@@ -312,6 +361,79 @@ test.describe.serial("manual extension API-key persistence", () => {
       } finally {
         await context.close()
       }
+    }
+  })
+
+  test("legacy device key authenticates media after extension reload", async ({
+    browserName: _browserName
+  }, testInfo) => {
+    const extensionPath = prepareExtension(
+      resolveBuiltExtension(),
+      testInfo.outputPath("extension-legacy-media"),
+      fixture.url
+    )
+    const profile = testInfo.outputPath("legacy-media-profile")
+    const expectedConfig = {
+      authMode: "single-user",
+      authSource: "manual",
+      serverUrl: fixture.url,
+      apiKey: MANUAL_API_KEY,
+      credentialSource: "manual",
+      apiKeyPersistence: "device",
+      apiKeyServerOrigin: fixture.url
+    }
+    const { context, page, extensionId } = await launchExtension(
+      profile,
+      extensionPath
+    )
+
+    try {
+      await seedLegacyDeviceConfig(context, fixture.url)
+      await page.addInitScript(() => {
+        localStorage.setItem("assistant_setup_dismissed", "true")
+      })
+
+      const initialRequestOffset = fixture.requests().length
+      await page.goto(`chrome-extension://${extensionId}/options.html#/media`, {
+        waitUntil: "domcontentloaded"
+      })
+      await expect
+        .poll(() =>
+          hasAuthenticatedMediaListRequest(fixture, initialRequestOffset)
+        )
+        .toBe(true)
+      await expect(
+        page.getByText("Add your credentials to use Media", { exact: true })
+      ).toHaveCount(0)
+      expect(
+        normalizeExtensionStorageValue(
+          await extensionStorageValue(page, "local", "tldwConfig")
+        )
+      ).toEqual(expectedConfig)
+      expect(
+        await extensionStorageValue(page, "sync", "tldwConfig")
+      ).toBeUndefined()
+
+      const reloadRequestOffset = fixture.requests().length
+      await page.reload({ waitUntil: "domcontentloaded" })
+      await expect
+        .poll(() =>
+          hasAuthenticatedMediaListRequest(fixture, reloadRequestOffset)
+        )
+        .toBe(true)
+      await expect(
+        page.getByText("Add your credentials to use Media", { exact: true })
+      ).toHaveCount(0)
+      expect(
+        normalizeExtensionStorageValue(
+          await extensionStorageValue(page, "local", "tldwConfig")
+        )
+      ).toEqual(expectedConfig)
+      expect(
+        await extensionStorageValue(page, "sync", "tldwConfig")
+      ).toBeUndefined()
+    } finally {
+      await context.close()
     }
   })
 
