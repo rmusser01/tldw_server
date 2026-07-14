@@ -297,7 +297,8 @@ export const chatRagMethods = {
       headers: { 'Content-Type': 'application/json' },
       body: { query: normalizedQuery, ...rest },
       abortSignal: signal,
-      streamIdleTimeoutMs: timeoutMs
+      streamIdleTimeoutMs: timeoutMs,
+      sanitizeRagProviderStreamError: true
     })) {
       yield parseRagStreamLine(line)
     }

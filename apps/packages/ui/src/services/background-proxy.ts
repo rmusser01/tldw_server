@@ -49,6 +49,7 @@ const STREAM_QUEUE_DRAIN_BATCH_LIMIT = 32
 const STREAM_QUEUE_DRAIN_SLICE_MS = 12
 const SAFE_RUNTIME_MESSAGE_TIMEOUT_MS = 3_000
 const UNSAFE_RUNTIME_MESSAGE_TIMEOUT_FLOOR_MS = 5_000
+const RAG_STREAM_ABORT_MESSAGE = "RAG stream request was aborted."
 // The MV3 worker only replies to an unsafe (write) request once the whole
 // server operation finishes, so this messaging-ack timeout must cover the
 // longest normal generation/ingest (non-stream chat, media kickoff, export)
@@ -1048,6 +1049,7 @@ export interface BgStreamInit<
   streamIdleTimeoutMs?: number
   abortSignal?: AbortSignal
   onOpen?: () => void
+  sanitizeRagProviderStreamError?: boolean
 }
 
 const deriveStreamIdleTimeout = (cfg: any, path: string, override?: number) => {
@@ -1085,6 +1087,37 @@ const parseStreamError = async (resp: Response): Promise<StreamErrorInfo> => {
   return { message: resp.statusText }
 }
 
+type SanitizedRagStreamError = Error & {
+  status?: number
+  code?: string
+  details?: unknown
+}
+
+const buildSanitizedRagStreamError = (
+  error: unknown
+): SanitizedRagStreamError => {
+  const sanitized = sanitizeRagProviderFailure(error)
+  const streamError = new Error(sanitized.message) as SanitizedRagStreamError
+  if (typeof sanitized.status === "number") {
+    streamError.status = sanitized.status
+  }
+  if (sanitized.code) {
+    streamError.code = sanitized.code
+  }
+  if (sanitized.details) {
+    streamError.details = sanitized.details
+  }
+  return streamError
+}
+
+const createSanitizedRagStreamAbortError = (): RequestAbortError =>
+  createAbortError(RAG_STREAM_ABORT_MESSAGE)
+
+const isRequestAbort = (error: unknown, signal?: AbortSignal): boolean =>
+  Boolean(signal?.aborted) ||
+  (error as { name?: unknown } | null)?.name === "AbortError" ||
+  (error as { code?: unknown } | null)?.code === "REQUEST_ABORTED"
+
 const yieldToBrowser = async (): Promise<void> => {
   if (typeof requestAnimationFrame === "function") {
     await new Promise<void>((resolve) => {
@@ -1098,7 +1131,7 @@ const yieldToBrowser = async (): Promise<void> => {
 /**
  * Direct streaming fallback used before handoff, or for safe/idempotent replay.
  */
-async function* bgStreamDirect<
+async function* bgStreamDirectUnsafe<
   P extends AllowedPath = AllowedPath,
   M extends AllowedMethodFor<P> = AllowedMethodFor<P>
 >(
@@ -1372,11 +1405,28 @@ async function* bgStreamDirect<
   }
 }
 
+async function* bgStreamDirect<
+  P extends AllowedPath = AllowedPath,
+  M extends AllowedMethodFor<P> = AllowedMethodFor<P>
+>(init: BgStreamInit<P, M>): AsyncGenerator<string> {
+  try {
+    yield* bgStreamDirectUnsafe(init)
+  } catch (error) {
+    if (!init.sanitizeRagProviderStreamError) {
+      throw error
+    }
+    if (isRequestAbort(error, init.abortSignal)) {
+      throw createSanitizedRagStreamAbortError()
+    }
+    throw buildSanitizedRagStreamError(error)
+  }
+}
+
 export async function* bgStream<
   P extends AllowedPath = AllowedPath,
   M extends AllowedMethodFor<P> = AllowedMethodFor<P>
 >(
-  { path, method = 'POST' as UpperLower<M>, headers = {}, body, streamIdleTimeoutMs, abortSignal, onOpen }: BgStreamInit<P, M>
+  { path, method = 'POST' as UpperLower<M>, headers = {}, body, streamIdleTimeoutMs, abortSignal, onOpen, sanitizeRagProviderStreamError = false }: BgStreamInit<P, M>
 ): AsyncGenerator<string> {
   const hasHttpStatus = (value: unknown): boolean =>
     extractHttpStatus(value) !== null
@@ -1423,7 +1473,16 @@ export async function* bgStream<
 
   const hasRuntimePort = await canUseRuntimePortTransport()
   if (!hasRuntimePort) {
-    yield* bgStreamDirect({ path, method, headers, body, streamIdleTimeoutMs, abortSignal, onOpen: notifyOpen })
+    yield* bgStreamDirect({
+      path,
+      method,
+      headers,
+      body,
+      streamIdleTimeoutMs,
+      abortSignal,
+      onOpen: notifyOpen,
+      sanitizeRagProviderStreamError
+    })
     return
   }
   const mayReplayAfterHandoff =
@@ -1450,8 +1509,20 @@ export async function* bgStream<
     port = browser.runtime.connect({ name: 'tldw:stream' })
   } catch (connectError) {
     if (!abortSignal?.aborted) {
-      yield* bgStreamDirect({ path, method, headers, body, streamIdleTimeoutMs, abortSignal, onOpen: notifyOpen })
+      yield* bgStreamDirect({
+        path,
+        method,
+        headers,
+        body,
+        streamIdleTimeoutMs,
+        abortSignal,
+        onOpen: notifyOpen,
+        sanitizeRagProviderStreamError
+      })
       return
+    }
+    if (sanitizeRagProviderStreamError) {
+      throw createSanitizedRagStreamAbortError()
     }
     throw connectError
   }
@@ -1492,22 +1563,42 @@ export async function* bgStream<
     } else if (msg?.event === 'done') {
       done = true
     } else if (msg?.event === 'error') {
-      const streamError = new Error(msg.message || 'Stream error') as Error & {
-        status?: number
-        details?: unknown
-        retryAfter?: number
-      }
-      if (typeof msg.status === "number" && Number.isFinite(msg.status)) {
-        streamError.status = Math.trunc(msg.status)
-      }
-      if (typeof msg.details !== "undefined" && msg.details !== null) {
-        streamError.details = sanitizeResponseData(msg.details)
-      }
-      const retryAfterMs = parseRetryAfter(
-        typeof msg.retryAfter === "string" ? msg.retryAfter : null
-      )
-      if (typeof retryAfterMs === "number" && retryAfterMs > 0) {
-        streamError.retryAfter = retryAfterMs / 1_000
+      const streamError = sanitizeRagProviderStreamError
+        ? buildSanitizedRagStreamError({
+            status: msg.status,
+            error: msg.message,
+            data:
+              msg.details ??
+              (msg.code
+                ? {
+                    detail: {
+                      error_code: msg.code,
+                      message: msg.message
+                    }
+                  }
+                : undefined)
+          })
+        : (new Error(msg.message || 'Stream error') as Error & {
+            status?: number
+            details?: unknown
+            retryAfter?: number
+          })
+      if (!sanitizeRagProviderStreamError) {
+        if (typeof msg.status === "number" && Number.isFinite(msg.status)) {
+          streamError.status = Math.trunc(msg.status)
+        }
+        if (typeof msg.details !== "undefined" && msg.details !== null) {
+          streamError.details = sanitizeResponseData(msg.details)
+        }
+        const retryAfterMs = parseRetryAfter(
+          typeof msg.retryAfter === "string" ? msg.retryAfter : null
+        )
+        if (typeof retryAfterMs === "number" && retryAfterMs > 0) {
+          const retryableError = streamError as Error & {
+            retryAfter?: number
+          }
+          retryableError.retryAfter = retryAfterMs / 1_000
+        }
       }
       error = streamError
       done = true
@@ -1537,7 +1628,17 @@ export async function* bgStream<
       // postMessage may throw after delivery. Once attempted, dispatch is
       // unknown and therefore conservatively treated as having occurred.
       handoffAttempted = true
-      port.postMessage({ path, method, headers, body, streamIdleTimeoutMs })
+      const portPayload: Record<string, unknown> = {
+        path,
+        method,
+        headers,
+        body,
+        streamIdleTimeoutMs
+      }
+      if (sanitizeRagProviderStreamError) {
+        portPayload.sanitizeRagProviderStreamError = true
+      }
+      port.postMessage(portPayload)
     } catch (e) {
       clearTimeout(connectionTimer)
       if (!error) error = e
@@ -1567,14 +1668,29 @@ export async function* bgStream<
         sliceStartedAt = Date.now()
       }
     }
+    if (sanitizeRagProviderStreamError && abortSignal?.aborted) {
+      throw createSanitizedRagStreamAbortError()
+    }
     // Resolve a response-acquisition timeout without replaying ambiguous dispatch.
     if (connectionTimedOut) {
       if (!handoffAttempted || mayReplayAfterHandoff) {
-        yield* bgStreamDirect({ path, method, headers, body, streamIdleTimeoutMs, abortSignal, onOpen: notifyOpen })
+        yield* bgStreamDirect({
+          path,
+          method,
+          headers,
+          body,
+          streamIdleTimeoutMs,
+          abortSignal,
+          onOpen: notifyOpen,
+          sanitizeRagProviderStreamError
+        })
         return
       }
+      const timeoutMessage = `Stream connection timed out after ${connectionTimeoutMs}ms before response acquisition`
       throw createStreamInterruptedError(
-        `Stream connection timed out after ${connectionTimeoutMs}ms before response acquisition`
+        sanitizeRagProviderStreamError
+          ? sanitizeRagProviderFailure(new Error(timeoutMessage)).message
+          : timeoutMessage
       )
     }
     const shouldFallbackAfterEarlyError =
@@ -1584,13 +1700,26 @@ export async function* bgStream<
       (isExtensionTransportFailure(error) || !hasHttpStatus(error))
     if (shouldFallbackAfterEarlyError) {
       if (!handoffAttempted || mayReplayAfterHandoff) {
-        yield* bgStreamDirect({ path, method, headers, body, streamIdleTimeoutMs, abortSignal, onOpen: notifyOpen })
+        yield* bgStreamDirect({
+          path,
+          method,
+          headers,
+          body,
+          streamIdleTimeoutMs,
+          abortSignal,
+          onOpen: notifyOpen,
+          sanitizeRagProviderStreamError
+        })
         return
       }
-      throw createStreamInterruptedError(
+      const interruptionMessage =
         error instanceof Error
           ? error.message
           : String(error || "Stream transport interrupted")
+      throw createStreamInterruptedError(
+        sanitizeRagProviderStreamError
+          ? sanitizeRagProviderFailure(error).message
+          : interruptionMessage
       )
     }
     const shouldGracefullyEndAfterPartialStreamError =
@@ -1601,13 +1730,28 @@ export async function* bgStream<
     if (shouldGracefullyEndAfterPartialStreamError) {
       // We already delivered data to the caller; avoid replaying non-idempotent
       // streamed requests after transport loss and let caller finalize partial output.
-      const interruptionDetail =
-        error instanceof Error ? error.message : String(error || "Stream transport interrupted")
-      yield JSON.stringify({
+      const rawInterruptionDetail =
+        error instanceof Error
+          ? error.message
+          : String(error || "Stream transport interrupted")
+      const sanitizedInterruption = sanitizeRagProviderStreamError
+        ? sanitizeRagProviderFailure(error)
+        : null
+      const interruption: Record<string, unknown> = {
         event: "stream_transport_interrupted",
-        detail: interruptionDetail,
+        detail: sanitizedInterruption?.message ?? rawInterruptionDetail,
         partial_response_saved: true
-      })
+      }
+      if (sanitizedInterruption?.status) {
+        interruption.status = sanitizedInterruption.status
+      }
+      if (sanitizedInterruption?.code) {
+        interruption.code = sanitizedInterruption.code
+      }
+      if (sanitizedInterruption?.details) {
+        interruption.details = sanitizedInterruption.details
+      }
+      yield JSON.stringify(interruption)
       return
     }
     if (error) throw error

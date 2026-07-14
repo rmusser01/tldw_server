@@ -1,6 +1,7 @@
 import { browser } from "wxt/browser";
 import { createSafeStorage } from "@/utils/safe-storage";
 import { formatErrorMessage } from "@/utils/format-error-message";
+import { sanitizeRagProviderFailure } from "@/services/rag/provider-error-contract";
 import { tldwClient } from "@/services/tldw/TldwApiClient";
 import { tldwAuth } from "@/services/tldw/TldwAuth";
 import { tldwModels } from "@/services/tldw";
@@ -3836,6 +3837,49 @@ export default defineBackground({
           }
         };
         const onMsg = async (msg: any) => {
+          const sanitizeRagProviderStreamError =
+            msg?.sanitizeRagProviderStreamError === true;
+          const postStreamError = (payload: {
+            event: "error";
+            message: unknown;
+            status?: unknown;
+            code?: unknown;
+            details?: unknown;
+            retryAfter?: unknown;
+          }) => {
+            if (!sanitizeRagProviderStreamError) {
+              safePost(payload);
+              return;
+            }
+            const sanitized = sanitizeRagProviderFailure({
+              status: payload.status,
+              error: formatErrorMessage(payload.message, "Stream error"),
+              data:
+                payload.details ??
+                (payload.code
+                  ? {
+                      detail: {
+                        error_code: payload.code,
+                        message: payload.message,
+                      },
+                    }
+                  : undefined),
+            });
+            const safePayload: Record<string, unknown> = {
+              event: "error",
+              message: sanitized.message,
+            };
+            if (typeof sanitized.status === "number") {
+              safePayload.status = sanitized.status;
+            }
+            if (sanitized.code) {
+              safePayload.code = sanitized.code;
+            }
+            if (sanitized.details) {
+              safePayload.details = sanitized.details;
+            }
+            safePost(safePayload);
+          };
           try {
             const cfg = await getEffectiveConfig();
             if (!cfg?.serverUrl) throw new Error("tldw server not configured");
@@ -3845,7 +3889,10 @@ export default defineBackground({
             // Mirror the request-path guard: refuse cross-origin absolute URLs
             // that are not explicitly allowlisted before opening the stream.
             if (streamAccess.blocked) {
-              safePost({ event: "error", message: ABSOLUTE_URL_BLOCK_ERROR });
+              postStreamError({
+                event: "error",
+                message: ABSOLUTE_URL_BLOCK_ERROR,
+              });
               return;
             }
             const url = streamAccess.isAbsolute
@@ -3863,7 +3910,7 @@ export default defineBackground({
               if (cfg.authMode === "single-user") {
                 const key = (cfg.apiKey || "").trim();
                 if (!key) {
-                  safePost({
+                  postStreamError({
                     event: "error",
                     message:
                       "Add or update your API key in Settings → tldw server, then try again.",
@@ -3875,7 +3922,7 @@ export default defineBackground({
                 const token = (cfg.accessToken || "").trim();
                 if (token) headers["Authorization"] = `Bearer ${token}`;
                 else {
-                  safePost({
+                  postStreamError({
                     event: "error",
                     message:
                       "Not authenticated. Please login under Settings > tldw.",
@@ -3902,7 +3949,7 @@ export default defineBackground({
                   } catch (error) {
                     logBackgroundError("stream abort", error);
                   }
-                  safePost({
+                  postStreamError({
                     event: "error",
                     message: "Stream timeout: no updates received",
                   });
@@ -3971,7 +4018,7 @@ export default defineBackground({
                 const t = await resp.text().catch(() => null);
                 if (t) errMsg = t;
               }
-              safePost({
+              postStreamError({
                 event: "error",
                 status: resp.status,
                 message: formatErrorMessage(errMsg, `HTTP ${resp.status}`),
@@ -4051,7 +4098,7 @@ export default defineBackground({
             safePost({ event: "done" });
           } catch (e: any) {
             if (idleTimer) clearTimeout(idleTimer);
-            safePost({
+            postStreamError({
               event: "error",
               message: formatErrorMessage(e, "Stream error"),
             });
