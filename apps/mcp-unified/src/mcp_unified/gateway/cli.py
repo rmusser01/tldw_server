@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, NoReturn, TextIO
 
 from mcp_unified.package_metadata import package_metadata_summary
+from mcp_unified.policy_grants import APPROVAL_SUBJECT_TYPES
 from mcp_unified.profiles.presets import (
     ProfilePreset,
     duplicate_builtin_preset,
@@ -50,16 +51,16 @@ from .external_registry import (
     GatewayExternalRegistryManagementError,
     GatewayExternalRegistryManager,
 )
-from .policy_grants import (
-    APPROVAL_GRANT_DEFAULT_TTL_SECONDS,
-    GatewayPolicyGrantManagementError,
-    GatewayPolicyGrantManager,
-)
 from .policy_explain import (
     GatewayPolicyExplainError,
     GatewayPolicyExplainService,
     PolicyExplainRequest,
     ProfileToolPreviewRequest,
+)
+from .policy_grants import (
+    APPROVAL_GRANT_DEFAULT_TTL_SECONDS,
+    GatewayPolicyGrantManagementError,
+    GatewayPolicyGrantManager,
 )
 from .policy_simulation import simulate_tool_call_policy
 from .profiles import GatewayProfileManagementError, GatewayProfileManager
@@ -424,7 +425,7 @@ def _build_parser() -> _JsonArgumentParser:
     create_approval_grant.add_argument(
         "--subject-type",
         required=True,
-        choices=("tool", "path", "domain", "command", "mcp"),
+        choices=tuple(sorted(APPROVAL_SUBJECT_TYPES)),
         help="Permission subject family the lease approves.",
     )
     create_approval_grant.add_argument(

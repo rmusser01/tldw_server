@@ -667,13 +667,17 @@ class SkillsService:
     def _metadata_from_row(self, row: dict[str, Any]) -> SkillMetadata:
         created_at = row.get("created_at")
         last_modified = row.get("last_modified")
+        disable_model_invocation = row.get("disable_model_invocation")
+        user_invocable = row.get("user_invocable")
         return SkillMetadata(
             id=row.get("uuid") or row.get("id"),
             name=row.get("name") or "",
             description=row.get("description"),
             argument_hint=row.get("argument_hint"),
-            disable_model_invocation=bool(row.get("disable_model_invocation", False)),
-            user_invocable=bool(row.get("user_invocable", True)),
+            disable_model_invocation=(
+                False if disable_model_invocation is None else bool(disable_model_invocation)
+            ),
+            user_invocable=True if user_invocable is None else bool(user_invocable),
             allowed_tools=row.get("allowed_tools"),
             model=row.get("model"),
             context=row.get("context", "inline"),
@@ -891,21 +895,79 @@ class SkillsService:
         )
         return [self._metadata_from_row(row) for row in rows]
 
-    async def get_skill(self, name: str, *, enforce_integrity: bool = True) -> dict[str, Any]:
-        """
-        Get full skill content.
+    def _is_model_visible_registry_row(self, row: dict[str, Any]) -> bool:
+        """Return whether a registry row is eligible for model-facing discovery."""
+        name = str(row.get("name") or "")
+        user_invocable = row.get("user_invocable")
+        disable_model_invocation = row.get("disable_model_invocation")
+        return (
+            (True if user_invocable is None else bool(user_invocable))
+            and not (False if disable_model_invocation is None else bool(disable_model_invocation))
+            and bool(name)
+            and self._is_skill_allowed(name, purpose="skill_discovery")
+        )
 
-        Args:
-            name: The skill name
+    def _list_model_visible_skills_page_sync(
+        self,
+        q: str | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[SkillMetadata], int]:
+        """Return a filtered model-visible page and total from one registry query."""
+        rows = self._get_db().list_skill_registry(
+            include_hidden=True,
+            include_deleted=False,
+            q=q,
+            sort="name",
+            order="asc",
+            limit=None,
+            offset=0,
+        )
+        page: list[SkillMetadata] = []
+        total = 0
+        page_end = offset + limit
+        for row in rows:
+            if not self._is_model_visible_registry_row(row):
+                continue
+            if offset <= total < page_end:
+                page.append(self._metadata_from_row(row))
+            total += 1
+        return page, total
 
-        Returns:
-            Full skill data including content
-
-        Raises:
-            SkillNotFoundError: If skill doesn't exist
-        """
-        name = name.strip().lower()
+    async def list_model_visible_skills_page(
+        self,
+        *,
+        q: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[SkillMetadata], int]:
+        """Return a model-visible Skill metadata page with its filtered total."""
         await self._sync_registry_async()
+        return await asyncio.to_thread(
+            self._list_model_visible_skills_page_sync,
+            q,
+            limit,
+            offset,
+        )
+
+    def _get_model_visible_skill_metadata_sync(self, name: str) -> SkillMetadata:
+        """Return metadata for one model-visible Skill or hide it as not found."""
+        row = self._get_db().get_skill_registry(name, include_deleted=False)
+        if not row or not self._is_model_visible_registry_row(row):
+            raise SkillNotFoundError(name)
+        return self._metadata_from_row(row)
+
+    async def get_model_visible_skill_metadata(self, name: str) -> SkillMetadata:
+        """Return metadata for an exact model-visible Skill lookup."""
+        normalized = self._normalize_and_validate_skill_name(name)
+        await self._sync_registry_async()
+        return await asyncio.to_thread(
+            self._get_model_visible_skill_metadata_sync,
+            normalized,
+        )
+
+    def _get_skill_sync(self, name: str, *, enforce_integrity: bool) -> dict[str, Any]:
+        """Load and verify a Skill after its asynchronous registry synchronization."""
         db = self._get_db()
 
         row = db.get_skill_registry(name, include_deleted=False)
@@ -947,6 +1009,27 @@ class SkillsService:
             "last_modified": metadata.last_modified,
             "version": metadata.version,
         }
+
+    async def get_skill(self, name: str, *, enforce_integrity: bool = True) -> dict[str, Any]:
+        """
+        Get full skill content.
+
+        Args:
+            name: The skill name
+
+        Returns:
+            Full skill data including content
+
+        Raises:
+            SkillNotFoundError: If skill doesn't exist
+        """
+        name = name.strip().lower()
+        await self._sync_registry_async()
+        return await asyncio.to_thread(
+            self._get_skill_sync,
+            name,
+            enforce_integrity=enforce_integrity,
+        )
 
     async def create_skill(
         self,

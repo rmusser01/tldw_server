@@ -890,6 +890,22 @@ class WritingAnnotationReviewJobError(RuntimeError):
         self.failure_code = failure_code
 
 
+class SkillsMCPNotFoundError(ValueError):
+    """Bounded public not-found response from the Skills MCP module."""
+
+
+class SkillsMCPRenderedTooLargeError(ValueError):
+    """Bounded public rendered-output rejection from the Skills MCP module."""
+
+
+class SkillsMCPContextIntegrityError(PermissionError):
+    """Bounded public render-time integrity rejection from the Skills MCP module."""
+
+
+class SkillsMCPDatabaseCloseError(Exception):
+    """Internal marker for a logged Skills MCP database close failure."""
+
+
 class WorkflowAdapterError(Exception):
     """Base exception for workflow adapter errors."""
 

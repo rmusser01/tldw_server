@@ -2816,6 +2816,64 @@ def test_gateway_cli_approval_grant_lifecycle(
     assert json.loads(capsys.readouterr().out)["grants"] == []
 
 
+def test_gateway_cli_skill_approval_grant_lifecycle_canonicalizes_value(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Create, list, and revoke a canonicalized Skill approval grant through the CLI."""
+
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "store": {"kind": "memory"},
+                "policy_grants": {
+                    "kind": "sqlite",
+                    "sqlite_path": str(tmp_path / "grants.db"),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = gateway_cli.main(
+        [
+            "create-approval-grant",
+            "--config",
+            str(config_path),
+            "--profile",
+            "researcher",
+            "--subject-type",
+            "skill",
+            "--value",
+            "Review-Paper",
+            "--ttl-seconds",
+            "900",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    created = json.loads(captured.out)
+    grant = created["grant"]
+    assert grant["subject_type"] == "skill"
+    assert grant["value"] == "review-paper"
+
+    exit_code = gateway_cli.main(
+        ["list-approval-grants", "--config", str(config_path)]
+    )
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    listed = json.loads(captured.out)
+    assert listed["grants"] == [grant]
+
+    exit_code = gateway_cli.main(
+        ["revoke-approval-grant", grant["grant_id"], "--config", str(config_path)]
+    )
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert json.loads(captured.out)["grant"] == grant
+
+
 def test_gateway_cli_approval_grant_requires_configured_store(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 MODULE_RISK_TIERS: dict[str, tuple[str, str]] = {
     "media": ("read_only", "Search and retrieve existing media records."),
     "knowledge": ("read_only", "Search and retrieve knowledge records."),
@@ -13,6 +12,7 @@ MODULE_RISK_TIERS: dict[str, tuple[str, str]] = {
     "chats": ("read_only", "Read chat/session context."),
     "prompts": ("read_only", "Read prompt library entries."),
     "prompts_catalog": ("read_only", "Expose configured prompt catalogs."),
+    "skills": ("read_only", "Discover and safely render user-owned Skills without execution."),
     "mcp_discovery": ("read_only", "Inspect MCP capabilities."),
     "governance": ("write", "Manage or inspect policy/governance state."),
     "notes": ("write", "Create or modify note data."),

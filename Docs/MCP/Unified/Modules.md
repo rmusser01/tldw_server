@@ -14,7 +14,7 @@ Use these tiers to explain what an enabled module can do before connecting an MC
 
 | Tier | Meaning | Common modules |
 |---|---|---|
-| `read_only` | Reads or searches existing TLDW data without writing by default. | `media`, `knowledge`, `chats`, `prompts`, `prompts_catalog`, `mcp_discovery` |
+| `read_only` | Reads or searches existing TLDW data without writing by default. | `media`, `knowledge`, `chats`, `prompts`, `prompts_catalog`, `skills`, `mcp_discovery` |
 | `write` | Creates, updates, exports, or manages TLDW data or generated artifacts. | `notes`, `template`, `quizzes`, `flashcards`, `kanban`, `slides`, `characters`, `persona_visuals`, `governance` |
 | `local_files` | Reads, writes, indexes, or scopes local files/workspaces. | `filesystem`, `codegraph` |
 | `external_network` | Connects to external MCP servers or networked tool providers. | `external_federation` |
@@ -98,6 +98,34 @@ relevant entries from
 selected `mcp_modules.yaml`, review the risk comments, set `enabled: true`,
 restart TLDW Server, then verify the module moved from
 `surface.disabled_available` to `surface.tiers`.
+
+## Skills Module
+
+- Module id: `skills`; the default configuration enables it in the `knowledge`
+  department with a concurrency limit of 10.
+- `skills.list` discovers metadata for model-visible Skills, and `skills.get`
+  returns the same metadata for one model-visible Skill. Both operations omit
+  instructions, supporting files, paths, hashes, and other raw Skill content.
+- `skills.render` renders one authorized model-visible Skill with bounded
+  arguments but does not call a model, execute a tool, or run a workflow.
+- Rendering evaluates the existing `Skill(name)` policy subject after normal
+  tool authorization: `deny` is rejected, `ask` requires an active approval
+  lease, and `allow` continues through the normal MCP gateway path.
+- Render arguments are limited to 10,000 characters. Rendered output has a
+  100,000-character hard ceiling and is rejected rather than truncated when it
+  exceeds that limit.
+- `declared_tools` is declaration metadata only; it does not grant effective
+  authorization or assert that a declared tool is available. Every later tool
+  call remains subject to MCP catalog, RBAC, policy, hook, and argument checks.
+- `supporting_files_omitted: true` means the rendered body may not be
+  self-contained. It exposes no supporting-file names, paths, hashes, or
+  content.
+- Discovery and render may synchronize the existing Skills registry, updating
+  derived index rows to match files on disk. This is registry maintenance, not
+  caller-authored Skill mutation.
+- Render uses exact shape, type, and size validation instead of the generic
+  SQL-token sanitizer so bounded, non-executing prompt text such as `--help`
+  and `/* example */` is preserved verbatim.
 
 ## External Federation Module
 

@@ -86,25 +86,24 @@ def test_policy_grant_manager_clamps_ttl_to_bounds() -> None:
     assert undersized["grant"]["ttl_seconds"] == APPROVAL_GRANT_MIN_TTL_SECONDS
 
 
-def test_policy_grant_manager_rejects_invalid_requests() -> None:
+def test_policy_grant_manager_accepts_canonical_skill_approval() -> None:
     from mcp_unified.gateway.policy_grants import (
-        GatewayPolicyGrantManagementError,
         GatewayPolicyGrantManager,
     )
     from mcp_unified.policy_grants import InMemoryPolicyGrantStore
 
     manager = GatewayPolicyGrantManager(policy_grant_store=InMemoryPolicyGrantStore())
 
-    with pytest.raises(GatewayPolicyGrantManagementError) as excinfo:
-        asyncio.run(
-            manager.grant_approval(
-                profile_id="researcher",
-                subject_type="skill",
-                value="anything",
-            )
+    created = asyncio.run(
+        manager.grant_approval(
+            profile_id="researcher",
+            subject_type="skill",
+            value="Review-Paper",
         )
-    assert excinfo.value.reason_code == "invalid_policy_grant"
-    assert excinfo.value.to_payload()["ok"] is False
+    )
+
+    assert created["grant"]["subject_type"] == "skill"
+    assert created["grant"]["value"] == "review-paper"
 
 
 def test_policy_grant_manager_revoke_missing_grant_raises_not_found() -> None:
