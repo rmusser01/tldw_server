@@ -170,13 +170,13 @@ Header count means physical field/continuation lines across informational and fi
 
 ## Stage 4: Prove isolation, concurrency, and integration; finalize
 
-**Goal:** Demonstrate that the primitive's security claims hold under real local HTTP/TLS I/O and concurrent failure paths, then complete TASK-12971.
+**Goal:** Demonstrate that the primitive's security claims hold under real local HTTP I/O, deterministic TLS transport tests, and concurrent failure paths, then complete TASK-12971.
 
 **Success criteria:** One local HTTP smoke test plus deterministic HTTP/HTTPS transport tests prove direct validated-address dialing, Host/SNI, peer verification, and no redirect follow; ambient proxy/netrc/cookie/auth/client-cert state has no effect; concurrent calls do not share requests, streams, counters, or credentials; cancellation and failures release resources; focused and compatibility suites, lint/format/compile, dependency checks, Bandit, and adversarial review pass.
 
 **Tests:** One raw `asyncio.start_server()` HTTP smoke server bound to `127.0.0.1:0` with test-only public-address classification; deterministic fake TLS streams for SNI/context checks; one combined temporary HOME/netrc plus ambient proxy/auth/cookie/CA/client-cert/keylog-variable isolation test; concurrent event barriers/counters; cancellation and cleanup assertions. IPv6 transition/mapped/NAT64 cases remain pure unit tests so CI does not require IPv6 sockets.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### TDD and verification tasks
 
@@ -245,15 +245,15 @@ Header count means physical field/continuation lines across informational and fi
 
 ## Final review checklist
 
-- [ ] One call resolves once and sends at most one physical HTTP request.
-- [ ] Every resolved address is canonical and globally routable; mixed sets fail closed.
-- [ ] The delegate receives only a validated IP; Host and TLS SNI retain the route hostname.
-- [ ] Missing/mismatched connected-peer metadata fails closed and closes the stream.
-- [ ] Redirects and retryable statuses are returned without an internal second hop.
-- [ ] No ambient proxy, netrc, cookie, authorization, client certificate, cached client, or SDK state exists in the call path.
-- [ ] Response header, encoded entity, decompressed body, parser input, operation, and total-time bounds are all tested.
-- [ ] Oversized/compressed-bomb bodies stop before full materialization.
-- [ ] Errors are typed, generic, bounded, and secret/query/body/path free.
-- [ ] Existing HTTP-client callers and MCP docs-fetcher behavior remain unchanged.
-- [ ] Ruff, Black, compileall, focused tests, compatibility tests, `git diff --check`, and Bandit pass.
-- [ ] TASK-12968.2's blocked plan names the delivered import/test paths and requires later gateway consumption instead of `afetch_json`; the actual integration proof remains in TASK-12968.2 after this prerequisite completes.
+- [x] One call resolves once and sends at most one physical HTTP request.
+- [x] Every resolved address is canonical and globally routable; mixed sets fail closed.
+- [x] The delegate receives only a validated IP; Host and TLS SNI retain the route hostname.
+- [x] Missing/mismatched connected-peer metadata fails closed and closes the stream.
+- [x] Redirects and retryable statuses are returned without an internal second hop.
+- [x] No ambient proxy, netrc, cookie, authorization, client certificate, cached client, or SDK state exists in the call path.
+- [x] Response header, encoded entity, decompressed body, parser input, operation, and total-time bounds are all tested.
+- [x] Oversized/compressed-bomb bodies stop before full materialization.
+- [x] Errors are typed, generic, bounded, and secret/query/body/path free.
+- [x] Existing HTTP-client callers and MCP docs-fetcher behavior remain unchanged.
+- [x] Ruff, Black, compileall, focused tests, compatibility tests, `git diff --check`, and Bandit pass.
+- [x] TASK-12968.2's blocked plan names the delivered import/test paths and requires later gateway consumption instead of `afetch_json`; the actual integration proof remains in TASK-12968.2 after this prerequisite completes.

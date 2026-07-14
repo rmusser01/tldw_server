@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import logging
 import math
 import re
 import ssl
@@ -1160,6 +1161,11 @@ async def request_http_hop(
     request: NormalizedHTTPHopRequest,
 ) -> HTTPHopResponse:
     """Perform one bounded request using only production resolver/transport inputs."""
+    # HTTPcore DEBUG traces can expose response headers and hostile wire bytes.
+    for logger_name in ("httpcore", "httpcore.http11"):
+        httpcore_logger = logging.getLogger(logger_name)
+        if httpcore_logger.getEffectiveLevel() < logging.INFO:
+            httpcore_logger.setLevel(logging.INFO)
     return await _request_http_hop(
         request,
         resolver=_default_resolver,

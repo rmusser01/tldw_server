@@ -2,7 +2,7 @@
 
 ## 2026-07-14 — Plan and architecture review
 
-- Active task: TASK-12971, blocking TASK-12968.2.
+- Completed prerequisite: TASK-12971; TASK-12968.2 remains blocked on TASK-12968.7.
 - Worktree: `.worktrees/research-source-catalog-deep-research` on `codex/research-source-catalog-deep-research-design`.
 - Approved design: `Docs/Design/2026-07-13-research-source-coverage-shared-discovery-design.md`.
 - Implementation plan: `Docs/superpowers/plans/2026-07-14-connected-peer-verified-http-hop-implementation-plan.md`.
@@ -32,7 +32,7 @@
 | 1. Contracts/dependency/DNS | Complete | Import/collection failure: missing `Security.http_hop` | 115 focused/adjacent tests passed; static checks passed | Two review/fix rounds; final clean verdict |
 | 2. Validated peer transport | Complete | 32/32 failed: missing `_execute_http_hop` | 127 contract/transport tests and 71 compatibility tests passed; static checks passed | Two review/fix rounds; final clean verdicts |
 | 3. Bounded response streaming | Complete | Initial suite: 27 failed, 10 passed | 179 contract/transport/streaming and 259 focused/compatibility tests passed; static/security checks passed | Security/spec/simplification reviews clean after fixes |
-| 4. Isolation/concurrency/finalization | Not Started | Pending | Pending | Pending |
+| 4. Isolation/concurrency/finalization | Complete | Standalone logging regression failed with `httpcore` at `NOTSET`; strengthened child-logger/strict-level case also failed the first guard | 263 focused/compatibility tests passed; static/security checks passed | Initial test review fixed four findings; final security and simplification re-reviews clean |
 
 ## 2026-07-14 — Stage 2 validated-peer transport
 
@@ -56,3 +56,13 @@
 - Raised HTTPcore's central logging floor to INFO because its DEBUG paths emit complete response headers and raw protocol exception bytes; regression coverage proves successful `Set-Cookie` values and malformed-body secrets are not traced.
 - Review-driven fixes covered unsafe `Decompress.flush()` assumptions, `Transfer-Encoding` plus `Content-Length`, out-of-range statuses, `204`/`205` framing, HTTP/1.0 transfer encoding, HTTPcore wire-log leakage, `HEAD` precedence and coalesced trailing bytes for chunked `205` responses, deterministic decoder fixtures, actual stream-close assertions, and an optimized-Python-safe TLS invariant.
 - Full-file Ruff on legacy `app/main.py` still reports 10 unrelated baseline findings; the six-line logger-floor change is regression-tested and compile-checked, and the focused Stage 3 files are Ruff-clean.
+
+## 2026-07-14 — Stage 4 isolation, concurrency, and integration
+
+- Added a real loopback `asyncio.start_server()` smoke test through the one-argument public API. It resolves the approved DNS hostname to the test-only loopback address, proves the actual dial, Host header, explicit Authorization, connected-peer evidence, and returned `302`, and observes exactly one request with no redirect follow.
+- Added one combined hostile-environment HTTPS test covering proxy variables, `NO_PROXY`, temporary HOME/`.netrc`, ambient auth/cookie values, CA/keylog/client-certificate variables, certifi trust roots, explicit route Authorization, direct validated-IP dialing, and preserved route SNI.
+- Added a barrier-coordinated concurrent success/failure test. An oversized second response closes with typed `response_too_large` while the first request retains its own stream, credential, three-byte wire counter, result, and cleanup.
+- The three isolation/smoke cases initially passed against the completed Stage 1-3 architecture. A separate standalone logging regression failed red because the public primitive depended on `app.main` to raise HTTPcore's logging floor. The first one-line guard then failed a strengthened regression because it lowered a stricter operator level and did not override an explicitly DEBUG `httpcore.http11` child logger. The final guard raises only insecure effective levels and leaves WARNING/ERROR policies intact.
+- GREEN: the complete focused and legacy compatibility suite collected 263 tests and passed all 263. Ruff, Black, compileall, Python 3.10 grammar parsing, Python 3.12 AST parsing, Bandit (zero findings across 1,513 production LOC), and `git diff --check` passed.
+- Runtime matrix limits: no `python3.10` executable is installed locally. Python 3.12.11 is installed, but its environment lacks pytest/httpcore, so the focused suite ran only under the project Python 3.11.13 virtual environment. No dependencies were installed solely for this compatibility check.
+- Final adversarial reviews found no remaining security, correctness, handoff, or simplification issues after the logger-level, SNI, concurrent-failure, task-cleanup, test-marker, and OpenAlex prerequisite corrections.

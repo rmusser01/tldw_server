@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - Work only in the isolated feature worktree; never use the dirty root worktree.
-- TASK-12968.1 must be complete before runtime edits begin. TASK-12971 must be complete before Stage 3 begins.
+- TASK-12968.1, TASK-12971, and TASK-12968.7 must be complete before runtime edits begin.
 - Do not wrap `afetch_json`; it does not satisfy connected-peer or streaming-limit requirements.
 - Do not modify V1 `DiscoveryResult.result_id`, canonical fingerprint behavior, legacy evidence IDs, absent-field selection semantics, current endpoint envelopes, or active Deep Research runs.
 - Do not enable V2 in production, shadow real user traffic, or double-fetch a production query. V2 execution is frozen-fixture, synthetic, or explicitly opted-in only.
@@ -25,7 +25,7 @@
 
 ## Execution Preflight
 
-- [ ] Read the official Backlog task-execution workflow, confirm TASK-12968.1 and TASK-12971 are complete, move TASK-12968.2 to In Progress, and link this plan before the first runtime edit.
+- [ ] Read the official Backlog task-execution workflow, confirm TASK-12968.1, TASK-12971, and TASK-12968.7 are complete, move TASK-12968.2 to In Progress, and link this plan before the first runtime edit.
 - [ ] Verify the worktree is isolated and clean apart from the approved task/plan changes.
 - [ ] Re-read the TASK-12971 public transport contract and exact focused-test paths; update only the Stage 3 import/test path if its delivered public name differs.
 
@@ -167,13 +167,13 @@ git diff --check
 
 **Tests:** Unit, security, cancellation, revocation, and streaming-boundary tests with an injected fake one-hop primitive; focused integration tests against TASK-12971's local test server only.
 
-**Status:** Blocked on TASK-12971
+**Status:** Not Started (TASK-12971 prerequisite delivered; TASK-12968.2 remains blocked on TASK-12968.7)
 
 ### Files
 
 - Add `tldw_Server_API/app/core/Research/discovery/gateway.py`.
 - Add `tldw_Server_API/tests/Research/test_research_discovery_gateway.py`.
-- Consume the public primitive delivered by TASK-12971; do not copy its transport code into Research.
+- Import `HTTPHopLimits`, `NormalizedHTTPHopRequest`, `HTTPHopResponse`, `HTTPHopError`, and `request_http_hop` from `tldw_Server_API.app.core.Security.http_hop`; do not copy its transport code into Research or import its private resolver/backend seams.
 - Do not call `tldw_Server_API/app/core/Security/egress.py:evaluate_url_policy`: it resolves DNS and reads ambient egress configuration. Reuse only side-effect-free normalization helpers whose inputs are explicit. TASK-12971 exclusively owns DNS-answer and connected-peer enforcement.
 - Do not reuse Web Scraping `FetchRequest` defaults that permit cookies, proxies, or redirects. The discovery request contract is explicit and narrower.
 
@@ -192,7 +192,9 @@ git diff --check
 source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
 python -m pytest -q \
   tldw_Server_API/tests/Research/test_research_discovery_gateway.py \
-  <TASK-12971-focused-test-paths> \
+  tldw_Server_API/tests/Security/test_http_hop_contract.py \
+  tldw_Server_API/tests/Security/test_http_hop_transport.py \
+  tldw_Server_API/tests/Security/test_http_hop_streaming.py \
   tldw_Server_API/tests/Research/test_research_discovery_contracts.py \
   tldw_Server_API/tests/Research/test_research_discovery_planner.py \
   tldw_Server_API/tests/Research/test_research_discovery_registry_reconciliation.py \
@@ -208,8 +210,6 @@ black --check \
   tldw_Server_API/tests/Research/test_research_discovery_gateway.py
 git diff --check
 ```
-
-Replace the placeholder only with the exact checked-in TASK-12971 test paths; do not guess or silently skip them.
 
 ### Commit
 

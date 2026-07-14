@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import logging
 import ssl
 from collections.abc import Iterable, Sequence
+from pathlib import Path
 from typing import Any
 
 import httpcore
@@ -147,16 +149,20 @@ class RecordingBackend(httpcore.AsyncNetworkBackend):
 class BlockingReadStream(RecordingStream):
     """Stream that exposes a deterministic cancellation point during read."""
 
-    def __init__(self, *, server_addr: object) -> None:
-        super().__init__(server_addr=server_addr)
+    def __init__(
+        self,
+        *,
+        server_addr: object,
+        response: Sequence[bytes] = (),
+    ) -> None:
+        super().__init__(server_addr=server_addr, response=response)
         self.read_started = asyncio.Event()
         self.read_release = asyncio.Event()
 
     async def read(self, max_bytes: int, timeout: float | None = None) -> bytes:
-        del max_bytes, timeout
         self.read_started.set()
         await self.read_release.wait()
-        return b""
+        return await super().read(max_bytes, timeout=timeout)
 
 
 class BlockingTLSStream(RecordingStream):
@@ -677,3 +683,225 @@ async def test_tls_failure_closes_connected_stream() -> None:
     assert len(tcp_stream.tls_calls) == 1
     assert tcp_stream.writes == []
     assert tcp_stream.closed is True
+
+
+async def test_public_http_hop_uses_real_socket_without_following_redirect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requests: list[bytes] = []
+    served = asyncio.Event()
+
+    async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            requests.append(await reader.readuntil(b"\r\n\r\n"))
+            writer.write(
+                b"HTTP/1.1 302 Found\r\n"
+                + f"Location: http://api.example.com:{port}/not-followed\r\n".encode("ascii")
+                + b"Content-Length: 0\r\nConnection: close\r\n\r\n"
+            )
+            await writer.drain()
+        finally:
+            writer.close()
+            await writer.wait_closed()
+            served.set()
+
+    resolver_calls: list[tuple[str, int, float]] = []
+
+    async def loopback_resolver(host: str, port: int, timeout_seconds: float) -> Sequence[str]:
+        resolver_calls.append((host, port, timeout_seconds))
+        return ("127.0.0.1",)
+
+    server = await asyncio.start_server(handle, "127.0.0.1", 0)
+    assert server.sockets
+    port = int(server.sockets[0].getsockname()[1])
+    original_classifier = http_hop._is_allowed_public_address
+    monkeypatch.setattr(
+        http_hop,
+        "_is_allowed_public_address",
+        lambda address: address.is_loopback or original_classifier(address),
+    )
+    monkeypatch.setattr(http_hop, "_default_resolver", loopback_resolver)
+
+    async with server:
+        response = await http_hop.request_http_hop(
+            _request(
+                port=port,
+                target="/smoke",
+                headers=(("authorization", "Bearer explicit-loopback"),),
+            )
+        )
+        await asyncio.wait_for(served.wait(), timeout=1.0)
+
+    assert response.status_code == 302
+    assert ("location", f"http://api.example.com:{port}/not-followed") in response.headers
+    assert response.resolved_ips == ("127.0.0.1",)
+    assert response.connected_ip == "127.0.0.1"
+    assert resolver_calls == [("api.example.com", port, 2.0)]
+    assert len(requests) == 1
+    assert requests[0].startswith(b"GET /smoke HTTP/1.1\r\n")
+    assert _header_values(requests[0], b"host") == [f"api.example.com:{port}".encode("ascii")]
+    assert _header_values(requests[0], b"authorization") == [b"Bearer explicit-loopback"]
+
+
+async def test_ambient_http_client_state_is_ignored(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    netrc_path = tmp_path / ".netrc"
+    netrc_path.write_text(
+        "machine api.example.com login ambient-user password ambient-netrc-secret\n",
+        encoding="utf-8",
+    )
+    netrc_path.chmod(0o600)
+    hostile_path = tmp_path / "must-not-be-read"
+    ambient = {
+        "HOME": str(tmp_path),
+        "NETRC": str(netrc_path),
+        "HTTP_PROXY": "http://ambient-user:ambient-proxy-secret@127.0.0.1:1",
+        "HTTPS_PROXY": "http://ambient-user:ambient-proxy-secret@127.0.0.1:1",
+        "ALL_PROXY": "http://ambient-user:ambient-proxy-secret@127.0.0.1:1",
+        "NO_PROXY": "unrelated.invalid",
+        "HTTP_COOKIE": "session=ambient-cookie-secret",
+        "HTTP_AUTHORIZATION": "Bearer ambient-auth-secret",
+        "SSL_CERT_FILE": str(hostile_path),
+        "SSL_CERT_DIR": str(hostile_path),
+        "SSLKEYLOGFILE": str(hostile_path),
+        "SSL_CLIENT_CERT": str(hostile_path),
+        "SSL_CLIENT_KEY": str(hostile_path),
+        "REQUESTS_CLIENT_CERT": str(hostile_path),
+    }
+    for name, value in ambient.items():
+        monkeypatch.setenv(name, value)
+
+    tls_stream = RecordingStream(server_addr=("8.8.8.8", 443), response=_OK_RESPONSE)
+    tcp_stream = RecordingStream(
+        server_addr=("8.8.8.8", 443),
+        tls_stream=tls_stream,
+    )
+    backend = RecordingBackend(tcp_stream)
+
+    response = await _execute(
+        _request(
+            scheme="https",
+            port=443,
+            headers=(("authorization", "Bearer explicit-route-secret"),),
+        ),
+        ("8.8.8.8",),
+        backend,
+    )
+
+    request_bytes = b"".join(tls_stream.writes)
+    context = tcp_stream.tls_calls[0][0]
+    assert response.body == b"ok"
+    assert backend.connect_calls[0][:2] == ("8.8.8.8", 443)
+    assert tcp_stream.tls_calls[0][1] == "api.example.com"
+    assert _header_values(request_bytes, b"authorization") == [b"Bearer explicit-route-secret"]
+    assert _header_values(request_bytes, b"cookie") == []
+    assert _header_values(request_bytes, b"proxy-authorization") == []
+    assert b"ambient-" not in request_bytes
+    assert context.check_hostname is True
+    assert context.verify_mode == ssl.CERT_REQUIRED
+    assert context.keylog_filename is None
+    assert context.get_ca_certs()
+    assert not hostile_path.exists()
+
+
+async def test_concurrent_failure_does_not_share_streams_counters_or_credentials() -> None:
+    first_stream = BlockingReadStream(
+        server_addr=("8.8.8.8", 80),
+        response=(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\none",),
+    )
+    second_stream = BlockingReadStream(
+        server_addr=("8.8.8.8", 80),
+        response=(b"HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\nsecond",),
+    )
+    first_backend = RecordingBackend(first_stream)
+    second_backend = RecordingBackend(second_stream)
+    first = asyncio.create_task(
+        _execute(
+            _request(
+                target="/first",
+                headers=(("authorization", "Bearer first-secret"),),
+                limits=http_hop.HTTPHopLimits(max_wire_bytes=3),
+            ),
+            ("8.8.8.8",),
+            first_backend,
+        )
+    )
+    second = asyncio.create_task(
+        _execute(
+            _request(
+                target="/second",
+                headers=(("authorization", "Bearer second-secret"),),
+                limits=http_hop.HTTPHopLimits(max_wire_bytes=5),
+            ),
+            ("8.8.8.8",),
+            second_backend,
+        )
+    )
+
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(first_stream.read_started.wait(), second_stream.read_started.wait()),
+            timeout=1.0,
+        )
+    except BaseException:
+        first.cancel()
+        second.cancel()
+        first_stream.read_release.set()
+        second_stream.read_release.set()
+        await asyncio.gather(first, second, return_exceptions=True)
+        raise
+    first_stream.read_release.set()
+    second_stream.read_release.set()
+    first_response, second_result = await asyncio.gather(first, second, return_exceptions=True)
+
+    assert isinstance(first_response, http_hop.HTTPHopResponse)
+    assert first_response.body == b"one"
+    assert first_response.wire_bytes == 3
+    assert isinstance(second_result, http_hop.HTTPHopError)
+    assert second_result.code == "response_too_large"
+    assert len(first_backend.connect_calls) == len(second_backend.connect_calls) == 1
+    assert first_stream is not second_stream
+    assert first_stream.closed is second_stream.closed is True
+    first_request = b"".join(first_stream.writes)
+    second_request = b"".join(second_stream.writes)
+    assert _header_values(first_request, b"authorization") == [b"Bearer first-secret"]
+    assert _header_values(second_request, b"authorization") == [b"Bearer second-secret"]
+    assert b"second-secret" not in first_request
+    assert b"first-secret" not in second_request
+
+
+async def test_public_http_hop_enforces_wire_log_floor_independently_of_app_startup(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    secret = "STANDALONE-SECRET"
+    stream = RecordingStream(
+        server_addr=("8.8.8.8", 80),
+        response=(
+            b"HTTP/1.1 200 OK\r\n"
+            + f"Set-Cookie: token={secret}\r\n".encode("ascii")
+            + b"Content-Length: 0\r\nConnection: close\r\n\r\n",
+        ),
+    )
+    backend = RecordingBackend(stream)
+
+    async def resolver(_host: str, _port: int, _timeout_seconds: float) -> Sequence[str]:
+        return ("8.8.8.8",)
+
+    monkeypatch.setattr(http_hop, "_default_resolver", resolver)
+    monkeypatch.setattr(http_hop.httpcore, "AnyIOBackend", lambda: backend)
+    root_logger = logging.getLogger()
+    httpcore_logger = logging.getLogger("httpcore")
+    http11_logger = logging.getLogger("httpcore.http11")
+    caplog.set_level(logging.DEBUG, logger=root_logger.name)
+    caplog.set_level(logging.WARNING, logger=httpcore_logger.name)
+    caplog.set_level(logging.DEBUG, logger=http11_logger.name)
+    caplog.clear()
+
+    response = await http_hop.request_http_hop(_request())
+
+    assert response.status_code == 200
+    assert (httpcore_logger.level, http11_logger.level) == (logging.WARNING, logging.INFO)
+    assert secret not in caplog.text

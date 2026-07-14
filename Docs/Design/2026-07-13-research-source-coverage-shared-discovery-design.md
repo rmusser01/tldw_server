@@ -2,13 +2,13 @@
 
 Date: 2026-07-13
 
-Status: Approved architecture; the 235-row inventory contract is triaged and TASK-12968.1 remains in progress only for final verification and handoff
+Status: Approved architecture; the 235-row inventory contract and TASK-12971 secure-hop prerequisite are delivered
 
 Program: TASK-12968
 
 Design task: TASK-12968.1
 
-Related work: TASK-12964, TASK-2336, TASK-2338, TASK-12968.5, TASK-12968.6, TASK-12970, TASK-12971
+Related work: TASK-12964, TASK-2336, TASK-2338, TASK-12968.5, TASK-12968.6, TASK-12968.7, TASK-12970, TASK-12971
 
 Security follow-up: TASK-12969
 
@@ -430,7 +430,9 @@ The gateway:
 - bounds headers, redirects, retries, time, concurrency, response depth, decoded characters, and parser work
 - emits sanitized, bounded errors and redacted telemetry
 
-The existing `afetch_json` helper is not accepted as this gateway merely by wrapping it: it currently lacks connected-peer verification/connect-to-validated-address behavior and applies its body limit after materializing response content. TASK-12971 owns the reusable secure one-hop primitive that closes those gaps. TASK-12968.2 is blocked on it and consumes it when building the discovery gateway and executor; it does not reimplement the primitive.
+The existing `afetch_json` helper is not accepted as this gateway merely by wrapping it: it currently lacks connected-peer verification/connect-to-validated-address behavior and applies its body limit after materializing response content. TASK-12971 owns the reusable secure one-hop primitive that closes those gaps. TASK-12968.2 consumes it when building the discovery gateway and executor; it does not reimplement the primitive.
+
+TASK-12971 delivers that boundary as `tldw_Server_API.app.core.Security.http_hop.request_http_hop`, accepting one `NormalizedHTTPHopRequest` with explicit `HTTPHopLimits` and returning one bounded `HTTPHopResponse` or a sanitized `HTTPHopError`. Its focused contract is checked by `tldw_Server_API/tests/Security/test_http_hop_contract.py`, `tldw_Server_API/tests/Security/test_http_hop_transport.py`, and `tldw_Server_API/tests/Security/test_http_hop_streaming.py`. TASK-12968.2 must import this public boundary rather than the private deterministic test seams or any legacy client.
 
 Static dependency-boundary enforcement rejects direct networking imports, socket use, client construction, and SDK default transports anywhere in adapters enabled by the V2 route registry. Legacy production adapters remain an explicitly characterized compatibility path until TASK-12968.3 cuts standalone Search over; they are not falsely claimed as gateway-backed by TASK-12968.2. The gateway implementation and any exceptional compatibility shim are the only V2 allowlisted locations. Each exception requires a named security reviewer, a narrow documented reason, and a test proving the same gateway policy is still applied. Runtime recording tests complement this static gate by exercising every V2-enabled adapter and denying ambient networking.
 
@@ -569,11 +571,11 @@ Each route declares its certification validity window. Expired or missing eviden
    - Check in the ledger schema, initial reconciled ledger, and executable validator contract.
    - Substantively triage every row; all-unreviewed or generic-deferred ledgers fail the contract gate.
    - Freeze the exact legacy truth table and golden compatibility fixtures.
-   - Keep TASK-12968.1 in progress and do not begin runtime work until these artifacts pass review.
+   - TASK-12968.1 is complete; runtime work remains gated on downstream task prerequisites.
 
 2. **Gateway and execution foundation for the existing catalog**
    - Characterize current behavior before changes.
-   - Complete TASK-12971's reusable connected-peer-verified streaming one-hop primitive first.
+   - TASK-12971 is delivered; consume its public `request_http_hop` boundary.
    - Add the shared egress gateway and injected adapter boundary.
    - Introduce source, route, backend, attempt, budget, and provenance contracts.
    - Exercise the V2 executor against frozen fixtures and synthetic or explicitly opted-in queries only; do not production-double-fetch legacy queries before consumer cutover.
@@ -625,10 +627,11 @@ No task or pull request both adds a provider family and migrates a consumer cont
 - **TASK-12968.4**: new-session Deep Research bridge
 - **TASK-12968.5**: bioRxiv/medRxiv route-family foundation after the shared gateway
 - **TASK-12968.6**: ClinicalTrials.gov/PubMed Central route-family foundation after the shared gateway
+- **TASK-12968.7**: verify and harden the already API-key-gated OpenAlex inventory evidence before TASK-12968.2
 - Future child tasks: vertical route-family batches created from the frozen ledger
 - **TASK-12969**: independent global plaintext cookie remediation
 - **TASK-12970**: blocking cooperative Jobs cancellation and partial-result finalization for TASK-12968.4
-- **TASK-12971**: blocking reusable connected-peer-verified streaming one-hop HTTP primitive for TASK-12968.2
+- **TASK-12971**: delivered reusable connected-peer-verified streaming one-hop HTTP prerequisite for TASK-12968.2
 - **TASK-12964**: unchanged HTML Media handoff design outside this program's completion denominator
 
 The parent owns cross-surface UAT and closure. Implementation, tests, documentation, and certification for a route family stay in one child rather than being split into paperwork-only tasks.
@@ -676,8 +679,8 @@ TASK-12968 may close only when:
 
 ## Immediate Next Steps
 
-1. Regenerate the deterministic freeze report from the reviewed 235-row ledger and rerun the contract gate with the explicit trusted-reviewer input.
-2. Finalize TASK-12968.1 after focused schema, semantic, compatibility, and security verification.
-3. Execute the reviewed TASK-12968.2 implementation plan only after TASK-12968.1 is complete and TASK-12971 has delivered its reusable secure-hop prerequisite.
+1. Complete TASK-12968.7's OpenAlex evidence verification.
+2. Execute TASK-12968.2 only after TASK-12971 and TASK-12968.7 are Done, importing the public `request_http_hop` boundary.
+3. Keep V2 offline until the dedicated consumer cutovers.
 
-No runtime implementation begins until TASK-12968.1 is complete.
+No TASK-12968.2 runtime implementation begins until all of its declared prerequisites are complete.
