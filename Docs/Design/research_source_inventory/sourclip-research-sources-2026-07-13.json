@@ -1,0 +1,2570 @@
+{
+  "schema_version": "research-source-seed-manifest.v1",
+  "manifest_id": "sourclip-research-sources-2026-07-13",
+  "source": {
+    "page_url": "https://www.sourclip.com/resources/research-sources",
+    "final_url": "https://www.sourclip.com/resources/research-sources",
+    "captured_on": "2026-07-13",
+    "captured_at_utc": "2026-07-14T05:18:04Z",
+    "page_sha256": "170f16c7bbb34a41d3a1f5ed33e3e411d38288dbc9b9cd636b31d005c1fb0221",
+    "extraction": {
+      "id": "sourclip-jsonld-and-sections",
+      "version": 1,
+      "primary_record_path": "CollectionPage.mainEntity.ItemList"
+    },
+    "page_content_stored": false
+  },
+  "expected_item_count": 235,
+  "expected_category_count": 12,
+  "expected_category_placement_count": 418,
+  "category_labels": [
+    "Science & Medicine",
+    "Environment & Earth Science",
+    "AI & Technology",
+    "Business & Finance",
+    "History & Humanities",
+    "Law & Government",
+    "Psychology & Social Science",
+    "Education & Learning",
+    "Data & Statistics",
+    "News & Current Events",
+    "Creative & Media",
+    "General"
+  ],
+  "items_sha256": "cef8c83a2f6cf0640d88e6300f54205363654d800927263c2d918060e6a28339",
+  "items": [
+    {
+      "inventory_id": "sourclip-2026-07-13-0001",
+      "position": 1,
+      "label": "Google Scholar",
+      "url": "https://scholar.google.com",
+      "seed_categories": [
+        "General"
+      ],
+      "row_sha256": "6deabae7b09c008cf9c9877b4a2f6d76ede7479a8db087d01135f94d52f11cbc"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0002",
+      "position": 2,
+      "label": "arXiv",
+      "url": "https://arxiv.org",
+      "seed_categories": [
+        "Science & Medicine",
+        "AI & Technology"
+      ],
+      "row_sha256": "ec71a4af095dc42cd738a63f97ae42e8d9f6ab66cd2048850c94cf4f21156db8"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0003",
+      "position": 3,
+      "label": "PubMed",
+      "url": "https://pubmed.ncbi.nlm.nih.gov",
+      "seed_categories": [
+        "Science & Medicine"
+      ],
+      "row_sha256": "642e04f1f1af045bfdfc6c4fb0bff7992e62c27e63fd6d0d0dda45c30feb0f7c"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0004",
+      "position": 4,
+      "label": "JSTOR",
+      "url": "https://www.jstor.org",
+      "seed_categories": [
+        "History & Humanities",
+        "Psychology & Social Science"
+      ],
+      "row_sha256": "127fdfcbec66741bf1e4fd45e3245a6657abb420a43a7d4eda4483b90f8e01fe"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0005",
+      "position": 5,
+      "label": "Internet Archive",
+      "url": "https://archive.org",
+      "seed_categories": [
+        "History & Humanities",
+        "General"
+      ],
+      "row_sha256": "4c58d60b894208e3d54904ca6af2e2e01266da113026e0c0805dc3829584342c"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0006",
+      "position": 6,
+      "label": "Semantic Scholar",
+      "url": "https://www.semanticscholar.org",
+      "seed_categories": [
+        "Science & Medicine",
+        "AI & Technology",
+        "General"
+      ],
+      "row_sha256": "92c9dad851742dda629447d774d63da0dd729cb6d33673d3c3f0efb1e52a4f51"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0007",
+      "position": 7,
+      "label": "SSRN",
+      "url": "https://www.ssrn.com",
+      "seed_categories": [
+        "Business & Finance",
+        "Law & Government",
+        "Psychology & Social Science"
+      ],
+      "row_sha256": "6ff037768963b0cbe227d3e11a265091138303139f5c2fe788b184f24f986498"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0008",
+      "position": 8,
+      "label": "Project Gutenberg",
+      "url": "https://www.gutenberg.org",
+      "seed_categories": [
+        "History & Humanities"
+      ],
+      "row_sha256": "5493df65201013f6cd8fe5e0241d8aa33ffc047bef05f3cb49849d3d7cabdd76"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0009",
+      "position": 9,
+      "label": "Wikipedia",
+      "url": "https://www.wikipedia.org",
+      "seed_categories": [
+        "General"
+      ],
+      "row_sha256": "e7192a101b1c90ad0d8f2ba68b37173c3f082820043fc9e59d8fa86dbf310dd9"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0010",
+      "position": 10,
+      "label": "Connected Papers",
+      "url": "https://www.connectedpapers.com",
+      "seed_categories": [
+        "Science & Medicine",
+        "AI & Technology",
+        "General"
+      ],
+      "row_sha256": "76fa1c0f1bd3604343ea1e132538714d0438259d1a0efe0b5ae91ca208e8d321"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0011",
+      "position": 11,
+      "label": "Papers With Code",
+      "url": "https://paperswithcode.com",
+      "seed_categories": [
+        "AI & Technology"
+      ],
+      "row_sha256": "80673537da28d0ea60e8eb41643b036e3af3842eaef012bc01f135e81848412b"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0012",
+      "position": 12,
+      "label": "Hugging Face Papers",
+      "url": "https://huggingface.co/papers",
+      "seed_categories": [
+        "AI & Technology"
+      ],
+      "row_sha256": "522a8c17297ae9180f035cf09a3047f444973db2b38bfb50f7881cd721be5627"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0013",
+      "position": 13,
+      "label": "AI Alignment Forum",
+      "url": "https://www.alignmentforum.org",
+      "seed_categories": [
+        "AI & Technology"
+      ],
+      "row_sha256": "1cee00a5046d0847221443501751576a280c99f09e647230c67aacc150a6b225"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0014",
+      "position": 14,
+      "label": "Distill",
+      "url": "https://distill.pub",
+      "seed_categories": [
+        "AI & Technology"
+      ],
+      "row_sha256": "f6fb9f31ed25907db6bc56159d8bc6fb6640420c7d1f06c67b44f3babe077b84"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0015",
+      "position": 15,
+      "label": "IEEE Xplore",
+      "url": "https://ieeexplore.ieee.org",
+      "seed_categories": [
+        "Science & Medicine",
+        "AI & Technology"
+      ],
+      "row_sha256": "2cc4c535b679e73f394dc8e3cff65fc8d51e5a53421a385a4349aaf568d97400"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0016",
+      "position": 16,
+      "label": "ACM Digital Library",
+      "url": "https://dl.acm.org",
+      "seed_categories": [
+        "AI & Technology"
+      ],
+      "row_sha256": "5ad5870662b589cc07636f735ad21dacf96b8852edd6f09f1eaf6c7b301d61ae"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0017",
+      "position": 17,
+      "label": "The Gradient",
+      "url": "https://thegradient.pub",
+      "seed_categories": [
+        "AI & Technology"
+      ],
+      "row_sha256": "2e431d293bfff7118d892501236b8e7384f8f3cb8999046cf406708c607e2d4f"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0018",
+      "position": 18,
+      "label": "Google DeepMind Research",
+      "url": "https://deepmind.google/research/",
+      "seed_categories": [
+        "AI & Technology"
+      ],
+      "row_sha256": "bd196c554897ecd92926ca217028495c001acc8ec421e439a72f8c3a39e7a453"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0019",
+      "position": 19,
+      "label": "Nature",
+      "url": "https://www.nature.com",
+      "seed_categories": [
+        "Science & Medicine"
+      ],
+      "row_sha256": "dd44ec436f05840ec5b4b64855f1cdda90eec5f7b4d2d4b1ea18baab9d451251"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0020",
+      "position": 20,
+      "label": "PLOS ONE",
+      "url": "https://journals.plos.org/plosone",
+      "seed_categories": [
+        "Science & Medicine"
+      ],
+      "row_sha256": "53b13ef4de31fd1827668b84a6bdad252b188ed5e14924957e2183b0687fc883"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0021",
+      "position": 21,
+      "label": "bioRxiv",
+      "url": "https://www.biorxiv.org",
+      "seed_categories": [
+        "Science & Medicine"
+      ],
+      "row_sha256": "630e58ca761d761473f4b375d3a742cfbaf0b46235e64ab5bbe30f99d40c4e5a"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0022",
+      "position": 22,
+      "label": "medRxiv",
+      "url": "https://www.medrxiv.org",
+      "seed_categories": [
+        "Science & Medicine"
+      ],
+      "row_sha256": "f57249cb946752205a95d9e339e55fa5fec5f53e6f8ccd540b4d2779f9e3e05a"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0023",
+      "position": 23,
+      "label": "CDC Data & Statistics",
+      "url": "https://data.cdc.gov",
+      "seed_categories": [
+        "Science & Medicine",
+        "Data & Statistics"
+      ],
+      "row_sha256": "11651b8cfaf79b3fefdd2bf84979ed579c87fcb0b6aa88a451d881dc2a03e466"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0024",
+      "position": 24,
+      "label": "NIH National Library of Medicine",
+      "url": "https://www.nlm.nih.gov",
+      "seed_categories": [
+        "Science & Medicine"
+      ],
+      "row_sha256": "7f52952cebddfef051ac777503a34aaf1dd79b8815b29c6822126ed7606a6ace"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0025",
+      "position": 25,
+      "label": "Cochrane Library",
+      "url": "https://www.cochranelibrary.com",
+      "seed_categories": [
+        "Science & Medicine"
+      ],
+      "row_sha256": "350af3a8758ecbdb98ac8eed0d2a4939e1960090ac3e174e565c87b3c287a7c9"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0026",
+      "position": 26,
+      "label": "ClinicalTrials.gov",
+      "url": "https://clinicaltrials.gov",
+      "seed_categories": [
+        "Science & Medicine"
+      ],
+      "row_sha256": "cbc4a8445252460ef4502924edf409c7fc8098eb6987745b83cc426bd2fc8e73"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0027",
+      "position": 27,
+      "label": "PubMed Central",
+      "url": "https://www.ncbi.nlm.nih.gov/pmc",
+      "seed_categories": [
+        "Science & Medicine"
+      ],
+      "row_sha256": "34d7fc36d4b64b2dca99c0472ad3d804c7ed9ff5a96574a8146947133913b32b"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0028",
+      "position": 28,
+      "label": "SEC EDGAR",
+      "url": "https://www.sec.gov/edgar",
+      "seed_categories": [
+        "Business & Finance"
+      ],
+      "row_sha256": "3c6399762cf9d52d88d3548576536891f59129bc1707bb116acb25de26c55318"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0029",
+      "position": 29,
+      "label": "Crunchbase",
+      "url": "https://www.crunchbase.com",
+      "seed_categories": [
+        "Business & Finance"
+      ],
+      "row_sha256": "75451153679c22b4921561791ce722101cb148424b0035c5f2ff5aa49893a161"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0030",
+      "position": 30,
+      "label": "Statista",
+      "url": "https://www.statista.com",
+      "seed_categories": [
+        "Business & Finance",
+        "Data & Statistics"
+      ],
+      "row_sha256": "7f6ae1b05bf13c89dfad60164faa243bbe5ed52b4bd49024c02ef7dee43621f3"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0031",
+      "position": 31,
+      "label": "World Bank Open Data",
+      "url": "https://data.worldbank.org",
+      "seed_categories": [
+        "Business & Finance",
+        "Data & Statistics"
+      ],
+      "row_sha256": "8efbdadc6f01e25e5b8e97f278e449ff30fb605a38440699882c45b0c2c39643"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0032",
+      "position": 32,
+      "label": "IMF Data",
+      "url": "https://www.imf.org/en/Data",
+      "seed_categories": [
+        "Business & Finance",
+        "Data & Statistics"
+      ],
+      "row_sha256": "57335c0a9cec47b21503203af0fdde68a724d42fd1c605a3f2eecc9dd9b304a0"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0033",
+      "position": 33,
+      "label": "Our World in Data",
+      "url": "https://ourworldindata.org",
+      "seed_categories": [
+        "Science & Medicine",
+        "Business & Finance",
+        "Data & Statistics"
+      ],
+      "row_sha256": "7c595b64a6ea509c86da18679c01b071708576a587bacb1da797d93d3d6f2ac2"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0034",
+      "position": 34,
+      "label": "Harvard Business Review",
+      "url": "https://hbr.org",
+      "seed_categories": [
+        "Business & Finance"
+      ],
+      "row_sha256": "b566f848db4df8c8e8b8ffe01dd514872d9fcfaf21bcfbb154b664e1b1184397"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0035",
+      "position": 35,
+      "label": "McKinsey Global Institute",
+      "url": "https://www.mckinsey.com/mgi",
+      "seed_categories": [
+        "Business & Finance"
+      ],
+      "row_sha256": "013c83a111a09edb895d492a9bb3de4d0297d4089bd43ebce07d131cea9bed01"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0036",
+      "position": 36,
+      "label": "FRED Economic Data",
+      "url": "https://fred.stlouisfed.org",
+      "seed_categories": [
+        "Business & Finance",
+        "Data & Statistics"
+      ],
+      "row_sha256": "5036fae420d2ae0226388fdc9e943dbf80a65163eff7637cc8ff0df44c0fc467"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0037",
+      "position": 37,
+      "label": "Project MUSE",
+      "url": "https://muse.jhu.edu",
+      "seed_categories": [
+        "History & Humanities",
+        "Psychology & Social Science"
+      ],
+      "row_sha256": "45c4b6648f265098199c22713db3f6c58b96f94a4d39b5337c66f783e95ea3f3"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0038",
+      "position": 38,
+      "label": "HathiTrust Digital Library",
+      "url": "https://www.hathitrust.org",
+      "seed_categories": [
+        "History & Humanities"
+      ],
+      "row_sha256": "d0ccfd18a12e1ff58470ab7986764f1e93118d23f5c8d22e37a752f90342729e"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0039",
+      "position": 39,
+      "label": "Europeana",
+      "url": "https://www.europeana.eu",
+      "seed_categories": [
+        "History & Humanities",
+        "Creative & Media"
+      ],
+      "row_sha256": "444bc7825b99b549a9a37517565b8732fcb448189f9fe90d1f495056593b7170"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0040",
+      "position": 40,
+      "label": "Digital Public Library of America",
+      "url": "https://dp.la",
+      "seed_categories": [
+        "History & Humanities"
+      ],
+      "row_sha256": "7df2e7aba10fd0d45f5c3805eb0bccdcf7545b3c83d195d1c22cf653d667ff2a"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0041",
+      "position": 41,
+      "label": "Perseus Digital Library",
+      "url": "https://www.perseus.tufts.edu",
+      "seed_categories": [
+        "History & Humanities"
+      ],
+      "row_sha256": "386de05c36c625d764b65a9b5a64eb13dd943fcd5b389caea0d92e5c2430f232"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0042",
+      "position": 42,
+      "label": "Library of Congress",
+      "url": "https://loc.gov",
+      "seed_categories": [
+        "History & Humanities",
+        "Law & Government"
+      ],
+      "row_sha256": "8fd93ba6d52e03cadf08e7a8836d6937eee740fef382a4167839883dd466fb93"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0043",
+      "position": 43,
+      "label": "British Library",
+      "url": "https://www.bl.uk",
+      "seed_categories": [
+        "History & Humanities"
+      ],
+      "row_sha256": "2410a60c77f1ff7cb33a485c2dab8e9deb77daf92050b03f0431c8cecedc09ca"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0044",
+      "position": 44,
+      "label": "Wikisource",
+      "url": "https://wikisource.org",
+      "seed_categories": [
+        "History & Humanities"
+      ],
+      "row_sha256": "ed87976c8c2ad3effe78fc6b1eec14bc0d7a80d684786878232e3f6c34061c10"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0045",
+      "position": 45,
+      "label": "Congress.gov",
+      "url": "https://www.congress.gov",
+      "seed_categories": [
+        "Law & Government"
+      ],
+      "row_sha256": "af081adacbf50da12c24549da910ba7c784307c39916d920f0d43237e53144c0"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0046",
+      "position": 46,
+      "label": "GovInfo",
+      "url": "https://www.govinfo.gov",
+      "seed_categories": [
+        "Law & Government"
+      ],
+      "row_sha256": "4dc762962266b843d628f2d0c77900c7e9095799a4ef3bc7449d944b9a9f3cac"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0047",
+      "position": 47,
+      "label": "Supreme Court Opinions",
+      "url": "https://www.supremecourt.gov/opinions/opinions.aspx",
+      "seed_categories": [
+        "Law & Government"
+      ],
+      "row_sha256": "f6382eda81cddec432097461022ae0a5a48c32df07ab3efa899e6829aeef9931"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0048",
+      "position": 48,
+      "label": "data.europa.eu",
+      "url": "https://data.europa.eu",
+      "seed_categories": [
+        "Law & Government",
+        "Data & Statistics"
+      ],
+      "row_sha256": "4b884e39bb246b6da8b7ef1646393d94219c5936701934f5ab83cae2171548a6"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0049",
+      "position": 49,
+      "label": "Justia",
+      "url": "https://www.justia.com",
+      "seed_categories": [
+        "Law & Government"
+      ],
+      "row_sha256": "3c3c23ae0b93a56785de37791bafa6496cd26066efaebdf197ebc61870f9e9cb"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0050",
+      "position": 50,
+      "label": "HeinOnline",
+      "url": "https://heinonline.org",
+      "seed_categories": [
+        "Law & Government"
+      ],
+      "row_sha256": "728bf745b2e303af85eeac46260c11cf76b1301b52332dd0d6c761ae5ee7d1e8"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0051",
+      "position": 51,
+      "label": "APA PsycNet",
+      "url": "https://psycnet.apa.org",
+      "seed_categories": [
+        "Psychology & Social Science"
+      ],
+      "row_sha256": "b1933b99352b8a62948ebc3bf2c9c98ff2655c0e151f15987fbbaa63c4e0be75"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0052",
+      "position": 52,
+      "label": "Pew Research Center",
+      "url": "https://www.pewresearch.org",
+      "seed_categories": [
+        "Psychology & Social Science"
+      ],
+      "row_sha256": "2782f376e1d1a1128affe447a691b5e21290ca65a7061233551c66bb132a50a4"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0053",
+      "position": 53,
+      "label": "Gallup",
+      "url": "https://www.gallup.com",
+      "seed_categories": [
+        "Business & Finance",
+        "Psychology & Social Science"
+      ],
+      "row_sha256": "03ba530ec3b2c713a2141babad09d23c1210a7627a90663f5e5f5051a070322f"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0054",
+      "position": 54,
+      "label": "Journal of Open Psychology Data",
+      "url": "https://openpsychologydata.metajnl.com",
+      "seed_categories": [
+        "Psychology & Social Science"
+      ],
+      "row_sha256": "a8772360941ddaaf56699b105c21523a516491b6e94ca0a0b186aaf0be499cb9"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0055",
+      "position": 55,
+      "label": "IZA World of Labor",
+      "url": "https://wol.iza.org",
+      "seed_categories": [
+        "Business & Finance",
+        "Psychology & Social Science"
+      ],
+      "row_sha256": "46935d56c07fa990dfda28365166345745d7726603fce1da0bfa66059fc6c51d"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0056",
+      "position": 56,
+      "label": "Khan Academy",
+      "url": "https://www.khanacademy.org",
+      "seed_categories": [
+        "Education & Learning"
+      ],
+      "row_sha256": "19f47a7b40f0b292e0b6f42630f453341d14be140fc6805868cb700ec1c13d97"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0057",
+      "position": 57,
+      "label": "MIT OpenCourseWare",
+      "url": "https://ocw.mit.edu",
+      "seed_categories": [
+        "Science & Medicine",
+        "AI & Technology",
+        "Education & Learning"
+      ],
+      "row_sha256": "71fc2443021e0b19989f25ac1e37e3be1bb82cd20fa30630777df900f3198399"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0058",
+      "position": 58,
+      "label": "Coursera",
+      "url": "https://www.coursera.org",
+      "seed_categories": [
+        "AI & Technology",
+        "Business & Finance",
+        "Education & Learning"
+      ],
+      "row_sha256": "c360213a9357d19d1a1d0e45a01f7116c1c842433a43c8d2fdc08048c9cbc4c7"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0059",
+      "position": 59,
+      "label": "edX",
+      "url": "https://www.edx.org",
+      "seed_categories": [
+        "Science & Medicine",
+        "AI & Technology",
+        "Education & Learning"
+      ],
+      "row_sha256": "df6494dc08bc4256973d84690347bf32bc7d16d24ccd33927fb510edc36470cd"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0060",
+      "position": 60,
+      "label": "ERIC",
+      "url": "https://eric.ed.gov",
+      "seed_categories": [
+        "Education & Learning"
+      ],
+      "row_sha256": "7d7e61b53f4b09c2c7ac303f21ee71fc7c8890507271393563ff9829784c2a36"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0061",
+      "position": 61,
+      "label": "TED Talks",
+      "url": "https://www.ted.com/talks",
+      "seed_categories": [
+        "Education & Learning",
+        "Creative & Media"
+      ],
+      "row_sha256": "69f2113ef0a7209639fdb0db6f6a2ced4d96b4597d9c69ded26d6580ced88f67"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0062",
+      "position": 62,
+      "label": "Yale Open Courses",
+      "url": "https://oyc.yale.edu",
+      "seed_categories": [
+        "History & Humanities",
+        "Education & Learning"
+      ],
+      "row_sha256": "ac031e65bbe80f96dd312e94b73e47ccc49f7c783d18954708eeebbe1eee1f5d"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0063",
+      "position": 63,
+      "label": "Stanford Encyclopedia of Philosophy",
+      "url": "https://plato.stanford.edu",
+      "seed_categories": [
+        "History & Humanities",
+        "Education & Learning"
+      ],
+      "row_sha256": "9e1dc3ea1be3c8a93ec301f4ef5fd9f593d6d2ddf50d88a73429c589618427f5"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0064",
+      "position": 64,
+      "label": "Open Library",
+      "url": "https://openlibrary.org",
+      "seed_categories": [
+        "Education & Learning",
+        "General"
+      ],
+      "row_sha256": "c1359b8bd5d897fda591967b80adfc3c5e398340545aa9799ee5e02ea767a84d"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0065",
+      "position": 65,
+      "label": "Kaggle Datasets",
+      "url": "https://www.kaggle.com/datasets",
+      "seed_categories": [
+        "AI & Technology",
+        "Data & Statistics"
+      ],
+      "row_sha256": "4dd6fa3401d059d18b377173419eab54ffa97e398813cd46b01d11a30c2b95cd"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0066",
+      "position": 66,
+      "label": "Data.gov",
+      "url": "https://data.gov",
+      "seed_categories": [
+        "Law & Government",
+        "Data & Statistics"
+      ],
+      "row_sha256": "56a4773039d63508ce06d8e6e5134b72480294815ac76160678da253f54321e6"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0067",
+      "position": 67,
+      "label": "Google Dataset Search",
+      "url": "https://datasetsearch.research.google.com",
+      "seed_categories": [
+        "Data & Statistics",
+        "General"
+      ],
+      "row_sha256": "ddfa818aed9c0b2a23ea515813e4d4894263339ea50974b8929bf9472bd4589b"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0068",
+      "position": 68,
+      "label": "UCI ML Repository",
+      "url": "https://archive.ics.uci.edu",
+      "seed_categories": [
+        "AI & Technology",
+        "Data & Statistics"
+      ],
+      "row_sha256": "be8546d6328ab7703eb04f3ea71083652d97c858bfefeb00dfc9de2713e59055"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0069",
+      "position": 69,
+      "label": "UN Data",
+      "url": "https://data.un.org",
+      "seed_categories": [
+        "Business & Finance",
+        "Data & Statistics"
+      ],
+      "row_sha256": "971ff976b1f29b1e252717562c60e2966a8f10073702b03dc3fb0bd2b70aaa44"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0070",
+      "position": 70,
+      "label": "OECD Data",
+      "url": "https://data.oecd.org",
+      "seed_categories": [
+        "Business & Finance",
+        "Data & Statistics"
+      ],
+      "row_sha256": "0e79197a560531b5a97c232ddbe04a15d34b02592e950e4d2ab356d28d9eb1ab"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0071",
+      "position": 71,
+      "label": "Zenodo",
+      "url": "https://zenodo.org",
+      "seed_categories": [
+        "Data & Statistics",
+        "General"
+      ],
+      "row_sha256": "6073313d946d577f6cc080c94be715f2345b546a995bcdafe109af5abbe2aa07"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0072",
+      "position": 72,
+      "label": "Nasdaq Data Link",
+      "url": "https://data.nasdaq.com",
+      "seed_categories": [
+        "Business & Finance",
+        "Data & Statistics"
+      ],
+      "row_sha256": "77687b365c99178a35098268934f7eab4c96da472cece252b22345cc22f4a075"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0073",
+      "position": 73,
+      "label": "Reuters",
+      "url": "https://www.reuters.com",
+      "seed_categories": [
+        "News & Current Events"
+      ],
+      "row_sha256": "8ff53f0edde7d4cb3605a21699ea53159e02eec79573d686d90b990446459cf1"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0074",
+      "position": 74,
+      "label": "AP News",
+      "url": "https://apnews.com",
+      "seed_categories": [
+        "News & Current Events"
+      ],
+      "row_sha256": "47510fe474b49c771ea2b39394bc2f24c374b695d7244572887f234a46340d9a"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0075",
+      "position": 75,
+      "label": "BBC News",
+      "url": "https://www.bbc.com/news",
+      "seed_categories": [
+        "News & Current Events"
+      ],
+      "row_sha256": "b73591233339482415b7517b88606a97e6e27c0622e9ade8ef6b8a116115d656"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0076",
+      "position": 76,
+      "label": "The Guardian",
+      "url": "https://www.theguardian.com",
+      "seed_categories": [
+        "News & Current Events"
+      ],
+      "row_sha256": "2037c16e6dc4072b4c94bea9315fd85e3dfdadba5f29c535816867494e978aaa"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0077",
+      "position": 77,
+      "label": "ProPublica",
+      "url": "https://www.propublica.org",
+      "seed_categories": [
+        "Law & Government",
+        "News & Current Events"
+      ],
+      "row_sha256": "28847d628dab2de78d764760e5ffc150d7bdabe39276f681df54e6baca817fac"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0078",
+      "position": 78,
+      "label": "Ground News",
+      "url": "https://ground.news",
+      "seed_categories": [
+        "News & Current Events"
+      ],
+      "row_sha256": "6aa955d0b9084d33f3df3949d97d8f6a14500a187b5bcef7ff9090e66e795320"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0079",
+      "position": 79,
+      "label": "AllSides",
+      "url": "https://www.allsides.com",
+      "seed_categories": [
+        "News & Current Events"
+      ],
+      "row_sha256": "a57cc449e33df950d2204246e309e8ddded7c0cb229ae836d326144e9416e67f"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0080",
+      "position": 80,
+      "label": "YouTube",
+      "url": "https://www.youtube.com",
+      "seed_categories": [
+        "Education & Learning",
+        "Creative & Media"
+      ],
+      "row_sha256": "a42474c0dfdd8f9e8f59085e5fb20f90eb923fb81466e03a509a95ba8eeee914"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0081",
+      "position": 81,
+      "label": "Spotify Podcasts",
+      "url": "https://open.spotify.com",
+      "seed_categories": [
+        "Creative & Media"
+      ],
+      "row_sha256": "8d78a223a633a333ddf8e5858a217f4afe68bf564346ea93d7dffafbec304861"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0082",
+      "position": 82,
+      "label": "Substack",
+      "url": "https://substack.com",
+      "seed_categories": [
+        "Creative & Media",
+        "General"
+      ],
+      "row_sha256": "6856a8b4429fc05c1b1459c247a3f84fd39f82fe2973b297cd74306e969c9bb3"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0083",
+      "position": 83,
+      "label": "Vimeo",
+      "url": "https://vimeo.com/watch",
+      "seed_categories": [
+        "Education & Learning",
+        "Creative & Media"
+      ],
+      "row_sha256": "022ff12d994767f60d784c08fd5b886ab81941f5f4e225ba8b1553f450c859ec"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0084",
+      "position": 84,
+      "label": "Pocket Casts",
+      "url": "https://pocketcasts.com",
+      "seed_categories": [
+        "Creative & Media"
+      ],
+      "row_sha256": "acaea44c5f0f40e516247697daddaac4a2f0e68dde4ea8f0ec7cc4d96ef828e7"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0085",
+      "position": 85,
+      "label": "BASE",
+      "url": "https://www.base-search.net",
+      "seed_categories": [
+        "General"
+      ],
+      "row_sha256": "201655080458fd581e514099518c20d960475b4d0fd6b34b4a202daf96b9620a"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0086",
+      "position": 86,
+      "label": "CORE",
+      "url": "https://core.ac.uk",
+      "seed_categories": [
+        "General"
+      ],
+      "row_sha256": "77e873d9df52fa4ea90597fbe41ed6ed3f44e959e963ae4ed64339ed733bc438"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0087",
+      "position": 87,
+      "label": "Directory of Open Access Journals",
+      "url": "https://doaj.org",
+      "seed_categories": [
+        "General"
+      ],
+      "row_sha256": "f0e0ec01957c99b8a9dc62976bd9715db1048a8e2b505221b8dcdef6fd350d39"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0088",
+      "position": 88,
+      "label": "OpenAlex",
+      "url": "https://openalex.org",
+      "seed_categories": [
+        "General"
+      ],
+      "row_sha256": "a67f3e4c3b811f56948a323bba2cf776b95cfb4bad8f7b1c0fa47f7b80f57227"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0089",
+      "position": 89,
+      "label": "ResearchGate",
+      "url": "https://www.researchgate.net",
+      "seed_categories": [
+        "General"
+      ],
+      "row_sha256": "14d564d38416db8e0b8c398ee3bcde4b1ac7af78412bbfe244da8c094e01d8cb"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0090",
+      "position": 90,
+      "label": "Academia.edu",
+      "url": "https://www.academia.edu",
+      "seed_categories": [
+        "General"
+      ],
+      "row_sha256": "f49b2c5d02708965a6cced34d230e20d0becef57ee6c3fae10c604c6b395d7a2"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0091",
+      "position": 91,
+      "label": "Elicit",
+      "url": "https://elicit.com",
+      "seed_categories": [
+        "Science & Medicine",
+        "AI & Technology",
+        "General"
+      ],
+      "row_sha256": "5084be626006fe71e72874fb7355c6196becf39bda390afb2f37d5d28d1edbcb"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0092",
+      "position": 92,
+      "label": "Consensus",
+      "url": "https://consensus.app",
+      "seed_categories": [
+        "Science & Medicine",
+        "General"
+      ],
+      "row_sha256": "5c9c7ed36fd0c3b502943fd1b75921480509d15192ce11a72a91b27a9ea2ee31"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0093",
+      "position": 93,
+      "label": "Perplexity",
+      "url": "https://www.perplexity.ai",
+      "seed_categories": [
+        "General"
+      ],
+      "row_sha256": "b7731bcd4d7bc49a6e9110afb7f0a6cbe6c2bcfffc142cca39558f2d6f008aae"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0094",
+      "position": 94,
+      "label": "Wolfram Alpha",
+      "url": "https://www.wolframalpha.com",
+      "seed_categories": [
+        "Science & Medicine",
+        "Data & Statistics"
+      ],
+      "row_sha256": "a60831380fa4352e0d35907089d4e3aa694ed07e524ab81f7eb81a99da448d2d"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0095",
+      "position": 95,
+      "label": "RefSeek",
+      "url": "https://www.refseek.com",
+      "seed_categories": [
+        "General"
+      ],
+      "row_sha256": "db39319671036c3ef1c367f63c9e536cfa302160d5eaa4eb08915fc223cb9367"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0096",
+      "position": 96,
+      "label": "Openverse",
+      "url": "https://openverse.org",
+      "seed_categories": [
+        "Creative & Media"
+      ],
+      "row_sha256": "7f4f57c93e683fe42c15cecd4e055657d7c1a14341c86455e92616ed8f129a98"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0097",
+      "position": 97,
+      "label": "GitHub",
+      "url": "https://github.com",
+      "seed_categories": [
+        "AI & Technology",
+        "Data & Statistics"
+      ],
+      "row_sha256": "8b26d8f9aab259c3c2dd5c6ec579347a83863b2379a8df6ee9d1d9f8d666193a"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0098",
+      "position": 98,
+      "label": "Stack Exchange",
+      "url": "https://stackexchange.com",
+      "seed_categories": [
+        "Science & Medicine",
+        "AI & Technology",
+        "Education & Learning"
+      ],
+      "row_sha256": "aa7e2df79986ebf788c9cc656c4cdb0525d36bfa8acb2958b4ca441dd7eb4c4d"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0099",
+      "position": 99,
+      "label": "Web of Science",
+      "url": "https://clarivate.com/webofsciencegroup/solutions/web-of-science/",
+      "seed_categories": [
+        "Science & Medicine",
+        "General"
+      ],
+      "row_sha256": "da49c4b22bb048eeb90256abb70ac33e4f527af682364c6f656be0648f27cacd"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0100",
+      "position": 100,
+      "label": "Scopus",
+      "url": "https://www.scopus.com",
+      "seed_categories": [
+        "Science & Medicine",
+        "General"
+      ],
+      "row_sha256": "4363e7301684938bde76d0b045a4d3887958acfbcf321cdd711cb45562de6f81"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0101",
+      "position": 101,
+      "label": "RePEc",
+      "url": "https://repec.org",
+      "seed_categories": [
+        "Business & Finance",
+        "General"
+      ],
+      "row_sha256": "ed4568ad15b5e3045fa28ffaae201f371c066957ceac3a65454d6a3c24ca2ca0"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0102",
+      "position": 102,
+      "label": "ICPSR",
+      "url": "https://www.icpsr.umich.edu",
+      "seed_categories": [
+        "Psychology & Social Science",
+        "Data & Statistics"
+      ],
+      "row_sha256": "f6112187c6d79875d11e1e1a123e47e007f6feceef00dc96e1412c99da31e87e"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0103",
+      "position": 103,
+      "label": "PhilPapers",
+      "url": "https://philpapers.org",
+      "seed_categories": [
+        "History & Humanities",
+        "Education & Learning"
+      ],
+      "row_sha256": "922c1bccdfaccb2f660f026ee57fba94161caabb347cb95558aec1d0def6c5bd"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0104",
+      "position": 104,
+      "label": "Mendeley Data",
+      "url": "https://data.mendeley.com",
+      "seed_categories": [
+        "Data & Statistics",
+        "General"
+      ],
+      "row_sha256": "8434192fd5ef9cc5d2116989a302d6f46f07ebcb33ada75ca80ad5f4934441b2"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0105",
+      "position": 105,
+      "label": "LexisNexis",
+      "url": "https://www.lexisnexis.com",
+      "seed_categories": [
+        "Business & Finance",
+        "Law & Government"
+      ],
+      "row_sha256": "8809e0cc23c404efdc533c534ec82273d8d137150638b3839ae3c168b0083db3"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0106",
+      "position": 106,
+      "label": "Directory of Open Access Books (DOAB)",
+      "url": "https://www.doabooks.org",
+      "seed_categories": [
+        "General"
+      ],
+      "row_sha256": "f13d888364e340f266e5550481750d64d12e441a6024e08c940dc993e9c95c3a"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0107",
+      "position": 107,
+      "label": "Dryad",
+      "url": "https://datadryad.org",
+      "seed_categories": [
+        "Science & Medicine",
+        "Data & Statistics"
+      ],
+      "row_sha256": "47d62a3272a702b265c19a58f970eb0b19836cfe6ecc301e43fd8121ff0241ca"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0108",
+      "position": 108,
+      "label": "Unpaywall",
+      "url": "https://unpaywall.org",
+      "seed_categories": [
+        "General"
+      ],
+      "row_sha256": "5ece773cb37ca1b397fef6b4df4ebdbbe85f3a139cfb649343a8c46270581e46"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0109",
+      "position": 109,
+      "label": "SciELO",
+      "url": "https://scielo.org",
+      "seed_categories": [
+        "Science & Medicine",
+        "General"
+      ],
+      "row_sha256": "37294fb80c131477ea081a107894bf6f18012b37ddbd57444e2db33bb9cf8e01"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0110",
+      "position": 110,
+      "label": "National Bureau of Economic Research",
+      "url": "https://www.nber.org",
+      "seed_categories": [
+        "Business & Finance"
+      ],
+      "row_sha256": "4c94b3870386a9f4d9096e09dc957ed27c9b132c8133d47cfde980de7cfa4b7e"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0111",
+      "position": 111,
+      "label": "NOAA NCEI",
+      "url": "https://www.ncei.noaa.gov",
+      "seed_categories": [
+        "Environment & Earth Science",
+        "Data & Statistics"
+      ],
+      "row_sha256": "82c0e9d47f209e906d39809c2d1ee52a146fc6168336b63e27e0c2b99ab14caf"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0112",
+      "position": 112,
+      "label": "Copernicus Climate Data Store",
+      "url": "https://cds.climate.copernicus.eu",
+      "seed_categories": [
+        "Environment & Earth Science",
+        "Data & Statistics"
+      ],
+      "row_sha256": "3d69fbaa73bfe8a0862336a4213155cd867acd1ffbb5b20702f6ad3c161f9ce7"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0113",
+      "position": 113,
+      "label": "WorldClim",
+      "url": "https://www.worldclim.org",
+      "seed_categories": [
+        "Environment & Earth Science",
+        "Data & Statistics"
+      ],
+      "row_sha256": "008755adad43b4ac126003b2d75acc0eda3332889689a179807fbacb291c3be2"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0114",
+      "position": 114,
+      "label": "USGS EarthExplorer",
+      "url": "https://earthexplorer.usgs.gov",
+      "seed_categories": [
+        "Environment & Earth Science",
+        "Data & Statistics"
+      ],
+      "row_sha256": "890915962495ff70f5d319520b7161a56c0a2da28086e3a86f6b9bb4faf2c179"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0115",
+      "position": 115,
+      "label": "USGS The National Map",
+      "url": "https://www.usgs.gov/programs/national-geospatial-program/national-map",
+      "seed_categories": [
+        "Environment & Earth Science",
+        "Data & Statistics"
+      ],
+      "row_sha256": "7db08239e0b1eb4a4c2fbb657473bbda4d4aa6f6e45a6d419bfbd6cd4d6d8d60"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0116",
+      "position": 116,
+      "label": "NASA Earthdata",
+      "url": "https://www.earthdata.nasa.gov",
+      "seed_categories": [
+        "Environment & Earth Science",
+        "Data & Statistics"
+      ],
+      "row_sha256": "90a9f7bcf8926a5bc529b7b0e97d11b9008609c9e547bf2e197a374de3086d73"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0117",
+      "position": 117,
+      "label": "PubChem",
+      "url": "https://pubchem.ncbi.nlm.nih.gov",
+      "seed_categories": [
+        "Science & Medicine",
+        "Data & Statistics"
+      ],
+      "row_sha256": "21e9129416292ed6a9e463f9283247b86589c70d45c883ca34caa6c92c84b291"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0118",
+      "position": 118,
+      "label": "RCSB Protein Data Bank",
+      "url": "https://www.rcsb.org",
+      "seed_categories": [
+        "Science & Medicine",
+        "Data & Statistics"
+      ],
+      "row_sha256": "19fe59c92bb1f32269f402dcba47f80e3314e84373a59996d62e917cf31441bc"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0119",
+      "position": 119,
+      "label": "GenBank",
+      "url": "https://www.ncbi.nlm.nih.gov/genbank",
+      "seed_categories": [
+        "Science & Medicine",
+        "Data & Statistics"
+      ],
+      "row_sha256": "ffb946f311efec4b443688cb36e9c75e85f1114ea361476345f581a7df334d86"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0120",
+      "position": 120,
+      "label": "UniProt",
+      "url": "https://www.uniprot.org",
+      "seed_categories": [
+        "Science & Medicine",
+        "Data & Statistics"
+      ],
+      "row_sha256": "2cb9c1e49bb6131510140e1708aebcf3857a42e1932e18ab6bc0c6531de3ca51"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0121",
+      "position": 121,
+      "label": "GBIF",
+      "url": "https://www.gbif.org",
+      "seed_categories": [
+        "Science & Medicine",
+        "Environment & Earth Science",
+        "Data & Statistics"
+      ],
+      "row_sha256": "b6520381a9f69c31950b34b875640bd643ac4f02c71252af18be8cf6e3b353e0"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0122",
+      "position": 122,
+      "label": "NASA Astrophysics Data System",
+      "url": "https://ui.adsabs.harvard.edu",
+      "seed_categories": [
+        "Science & Medicine"
+      ],
+      "row_sha256": "a73356b5706fb191a46c136f3665e146a92e66ead70266696cab2a7dba92f70f"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0123",
+      "position": 123,
+      "label": "World Values Survey",
+      "url": "https://www.worldvaluessurvey.org",
+      "seed_categories": [
+        "Psychology & Social Science",
+        "Data & Statistics"
+      ],
+      "row_sha256": "1bd6e0b9f3ad392e582f5ff4273b206c03a5c43bf35b8bf055c89b168692f18f"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0124",
+      "position": 124,
+      "label": "Eurostat",
+      "url": "https://ec.europa.eu/eurostat",
+      "seed_categories": [
+        "Business & Finance",
+        "Law & Government",
+        "Data & Statistics"
+      ],
+      "row_sha256": "685063025e1cf8689708cfcf71a94a8f09324f90cc91838e18490bf3da817898"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0125",
+      "position": 125,
+      "label": "U.S. Bureau of Labor Statistics",
+      "url": "https://www.bls.gov",
+      "seed_categories": [
+        "Business & Finance",
+        "Law & Government",
+        "Data & Statistics"
+      ],
+      "row_sha256": "9bcba6f81e61d1186e371f1acf550b14f7cd9cc51463d2b5a1398d2c8fc6b889"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0126",
+      "position": 126,
+      "label": "UN Comtrade",
+      "url": "https://comtrade.un.org",
+      "seed_categories": [
+        "Business & Finance",
+        "Data & Statistics"
+      ],
+      "row_sha256": "f7aad36aa073f9eab1a028f08c1782184b2b73d1d0536d310853d6510ff5f802"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0127",
+      "position": 127,
+      "label": "FAOSTAT",
+      "url": "https://www.fao.org/faostat/en",
+      "seed_categories": [
+        "Environment & Earth Science",
+        "Business & Finance",
+        "Data & Statistics"
+      ],
+      "row_sha256": "b37426d5e98a4c4689b1d17b4fc9188c8ec9f8c45c2122e68bef214bdae5b5fe"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0128",
+      "position": 128,
+      "label": "U.S. Energy Information Administration",
+      "url": "https://www.eia.gov",
+      "seed_categories": [
+        "Environment & Earth Science",
+        "Business & Finance",
+        "Data & Statistics"
+      ],
+      "row_sha256": "327d574da37244f8bb6d54e3358099286b85a328d5d97bb433ea33c791dc4589"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0129",
+      "position": 129,
+      "label": "International Energy Agency Data",
+      "url": "https://www.iea.org/data-and-statistics",
+      "seed_categories": [
+        "Environment & Earth Science",
+        "Business & Finance",
+        "Data & Statistics"
+      ],
+      "row_sha256": "f3548b87c9be9862b5831e1680ffbf3a50294a928e8a31f7bd5210795444eea6"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0130",
+      "position": 130,
+      "label": "Hugging Face Datasets",
+      "url": "https://huggingface.co/datasets",
+      "seed_categories": [
+        "AI & Technology",
+        "Data & Statistics"
+      ],
+      "row_sha256": "68db01dd5d831deee5613031c7d0cbfde77c0d3bce77e6e5f3e089c7553d2d94"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0131",
+      "position": 131,
+      "label": "OpenML",
+      "url": "https://www.openml.org",
+      "seed_categories": [
+        "AI & Technology",
+        "Data & Statistics"
+      ],
+      "row_sha256": "87892df442955e59f40c4ee431a6124492ba7b0eed66eb2701185e98f9c8b5cf"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0132",
+      "position": 132,
+      "label": "Open Science Framework",
+      "url": "https://osf.io",
+      "seed_categories": [
+        "Science & Medicine",
+        "Psychology & Social Science",
+        "General"
+      ],
+      "row_sha256": "81254fc2b41170565a7bffe3c0a13d98bd84027a08586dabdad162c60f6ad13a"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0133",
+      "position": 133,
+      "label": "WIPO PATENTSCOPE",
+      "url": "https://patentscope.wipo.int",
+      "seed_categories": [
+        "AI & Technology",
+        "Business & Finance",
+        "Law & Government"
+      ],
+      "row_sha256": "ec74f6cf7787b34b71e78d72a5cde661c39f87f2ef043506534d82b6c2753976"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0134",
+      "position": 134,
+      "label": "Espacenet",
+      "url": "https://worldwide.espacenet.com",
+      "seed_categories": [
+        "AI & Technology",
+        "Business & Finance",
+        "Law & Government"
+      ],
+      "row_sha256": "1d30219049097aa74266509e57bc10b89cc3090d5257ed8b3385731813819b7f"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0135",
+      "position": 135,
+      "label": "USPTO Patent Public Search",
+      "url": "https://ppubs.uspto.gov",
+      "seed_categories": [
+        "AI & Technology",
+        "Business & Finance",
+        "Law & Government"
+      ],
+      "row_sha256": "7c0c3a1bc352addf2aa69907005b50100f876a0d8d727e11e3326d1505227ccf"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0136",
+      "position": 136,
+      "label": "ISO Online Browsing Platform",
+      "url": "https://www.iso.org/obp",
+      "seed_categories": [
+        "Business & Finance",
+        "Law & Government"
+      ],
+      "row_sha256": "80b5adfb6a7b2314f18993d1ac83f3edce80e82564b89d47db0cb54e120959c3"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0137",
+      "position": 137,
+      "label": "GADM",
+      "url": "https://gadm.org",
+      "seed_categories": [
+        "Environment & Earth Science",
+        "Law & Government",
+        "Data & Statistics"
+      ],
+      "row_sha256": "7b9cd7fcb38c93d07f9ee4a31a04c04cb403fc9fcb314266345e0467453f975e"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0138",
+      "position": 138,
+      "label": "IPUMS International",
+      "url": "https://international.ipums.org/international",
+      "seed_categories": [
+        "Psychology & Social Science",
+        "Data & Statistics"
+      ],
+      "row_sha256": "775dfe8ab703631385ac0c0e10c761e30e29e8c666263e5584f9ff13c0b6786a"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0139",
+      "position": 139,
+      "label": "U.S. Census Bureau",
+      "url": "https://data.census.gov",
+      "seed_categories": [
+        "Business & Finance",
+        "Psychology & Social Science",
+        "Data & Statistics"
+      ],
+      "row_sha256": "0713a4ab26a635481525e39be5703a39cdb5b1a18cf55139883f79693c4a0846"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0140",
+      "position": 140,
+      "label": "ILOSTAT",
+      "url": "https://ilostat.ilo.org",
+      "seed_categories": [
+        "Business & Finance",
+        "Data & Statistics"
+      ],
+      "row_sha256": "a246489a0a0244989cd15b55e28830ff373d4dcb9f5c8070c6dc0fdc93f377d9"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0141",
+      "position": 141,
+      "label": "UNIDO Industrial Statistics",
+      "url": "https://stat.unido.org",
+      "seed_categories": [
+        "Business & Finance",
+        "Data & Statistics"
+      ],
+      "row_sha256": "2a5925b7a87e1ba67b43f8705c93e7ff2fecedf9f9331133b3a0798d027c4ada"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0142",
+      "position": 142,
+      "label": "Bureau of Transportation Statistics",
+      "url": "https://www.bts.gov",
+      "seed_categories": [
+        "Environment & Earth Science",
+        "Business & Finance",
+        "Data & Statistics"
+      ],
+      "row_sha256": "e1b811a0b4390de387dcb7071618c489268b9bf0ed0bea2405e35de0b68976b0"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0143",
+      "position": 143,
+      "label": "UNECE Transport Statistics",
+      "url": "https://w3.unece.org/PXWeb/en",
+      "seed_categories": [
+        "Environment & Earth Science",
+        "Business & Finance",
+        "Data & Statistics"
+      ],
+      "row_sha256": "5c3e29bbb394eb8e7b04c2aa949c6cb72a7b2bb887dae2f17700a34e2cc53522"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0144",
+      "position": 144,
+      "label": "UNESCO Institute for Statistics",
+      "url": "https://uis.unesco.org",
+      "seed_categories": [
+        "Education & Learning",
+        "Data & Statistics"
+      ],
+      "row_sha256": "beb82ad63e84f48268781742b4376e975797b215fc86f35e1bc8503338b26acd"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0145",
+      "position": 145,
+      "label": "World Bank Climate Change Knowledge Portal",
+      "url": "https://climateknowledgeportal.worldbank.org",
+      "seed_categories": [
+        "Environment & Earth Science",
+        "Business & Finance",
+        "Data & Statistics"
+      ],
+      "row_sha256": "1427d4a31af2a0bb4ae4b5fe33512b5b5c08b3978a2088700119023b9ec830e6"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0146",
+      "position": 146,
+      "label": "NCAA Statistics",
+      "url": "https://stats.ncaa.org",
+      "seed_categories": [
+        "Data & Statistics",
+        "General"
+      ],
+      "row_sha256": "ea02a58cfb948a62fc602ec4fabd4ece3be81d4be45ff44a421bbd848bb10182"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0147",
+      "position": 147,
+      "label": "Baseball Savant",
+      "url": "https://baseballsavant.mlb.com",
+      "seed_categories": [
+        "Data & Statistics",
+        "General"
+      ],
+      "row_sha256": "6e19ec2b0b89cf135e116c049595db58ea8f0e34ed218a20d9eac59afd8f57d8"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0148",
+      "position": 148,
+      "label": "USGS Earthquake Catalog",
+      "url": "https://earthquake.usgs.gov/earthquakes/search",
+      "seed_categories": [
+        "Environment & Earth Science",
+        "Data & Statistics"
+      ],
+      "row_sha256": "bb32337ba25b3367a0dda532daca0eeb6ddd0490d171f46f6d24bd17108d6b39"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0149",
+      "position": 149,
+      "label": "Global Human Settlement Layer",
+      "url": "https://ghsl.jrc.ec.europa.eu",
+      "seed_categories": [
+        "Environment & Earth Science",
+        "Psychology & Social Science",
+        "Data & Statistics"
+      ],
+      "row_sha256": "2307e45e6849579657cc0af0d43ba2960e2023ad2ee305723edeb8dd5acfdbd2"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0150",
+      "position": 150,
+      "label": "European Social Survey",
+      "url": "https://www.europeansocialsurvey.org",
+      "seed_categories": [
+        "Psychology & Social Science",
+        "Data & Statistics"
+      ],
+      "row_sha256": "6cd7e813a92f251619829a163b747d7e7eef866201b973be68c50ce9b9f57627"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0151",
+      "position": 151,
+      "label": "OECD PISA Databases",
+      "url": "https://www.oecd.org/pisa/data",
+      "seed_categories": [
+        "Education & Learning",
+        "Data & Statistics"
+      ],
+      "row_sha256": "68146fb9b68e5e81b7f56f9812b538cc7d33a6c5123ea8d4b6c391d8ab5a6f54"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0152",
+      "position": 152,
+      "label": "WHO Global Health Observatory",
+      "url": "https://www.who.int/data/gho",
+      "seed_categories": [
+        "Science & Medicine",
+        "Data & Statistics"
+      ],
+      "row_sha256": "c7abce4fbd2d98483b03e1ea88b746f5173aa829ce612a23c3b99834ce5969ff"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0153",
+      "position": 153,
+      "label": "Global Health Data Exchange",
+      "url": "https://ghdx.healthdata.org",
+      "seed_categories": [
+        "Science & Medicine",
+        "Psychology & Social Science",
+        "Data & Statistics"
+      ],
+      "row_sha256": "7766e46a1a366cfbe15f5151ab6550bddcb5058bd57f847f4e197dffa9e9abb4"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0154",
+      "position": 154,
+      "label": "World Ocean Atlas",
+      "url": "https://www.ncei.noaa.gov/products/world-ocean-atlas",
+      "seed_categories": [
+        "Environment & Earth Science",
+        "Data & Statistics"
+      ],
+      "row_sha256": "fc71daa70bfec631ed10fb972f1f18f2a04f50076b1861caee583fb5a62a336d"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0155",
+      "position": 155,
+      "label": "National Weather Service",
+      "url": "https://www.weather.gov",
+      "seed_categories": [
+        "Environment & Earth Science",
+        "Data & Statistics"
+      ],
+      "row_sha256": "a56e5a1d0d91f455f162347f9d6d195be93e4022edcd8f7d216b85d65ad6cf8c"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0156",
+      "position": 156,
+      "label": "Linguistic Data Consortium",
+      "url": "https://www.ldc.upenn.edu",
+      "seed_categories": [
+        "AI & Technology",
+        "History & Humanities",
+        "Data & Statistics"
+      ],
+      "row_sha256": "b10b25a73b3153ed1b3a9de5a73c53ca17fad0b321dacb2bf5e2fbac4cf08ee0"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0157",
+      "position": 157,
+      "label": "CLARIN Virtual Language Observatory",
+      "url": "https://vlo.clarin.eu",
+      "seed_categories": [
+        "AI & Technology",
+        "History & Humanities"
+      ],
+      "row_sha256": "875ea6c8f6c1d041e8f4203973508c7f5337d739cb544d4e894d646aa90896b5"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0158",
+      "position": 158,
+      "label": "PANGAEA",
+      "url": "https://www.pangaea.de",
+      "seed_categories": [
+        "Environment & Earth Science",
+        "Data & Statistics"
+      ],
+      "row_sha256": "276373913f72ce2dab4852d51ef6fdb9c80475c62b183b01cebb0488dc2c114c"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0159",
+      "position": 159,
+      "label": "Varieties of Democracy (V-Dem) Dataset",
+      "url": "https://www.v-dem.net",
+      "seed_categories": [
+        "Law & Government",
+        "Psychology & Social Science",
+        "Data & Statistics"
+      ],
+      "row_sha256": "a14cb6018e4289ae1cf54c8f78d4b730edac0f1c6f7f7e8e5dbeb6fb5ada299f"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0160",
+      "position": 160,
+      "label": "Ensembl Genome Browser",
+      "url": "https://www.ensembl.org",
+      "seed_categories": [
+        "Science & Medicine"
+      ],
+      "row_sha256": "6ec16df4a33302842a2acb0bd8095bf558ead66f44456ccbea219bd8b89c6ffb"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0161",
+      "position": 161,
+      "label": "UCSC Genome Browser",
+      "url": "https://genome.ucsc.edu",
+      "seed_categories": [
+        "Science & Medicine"
+      ],
+      "row_sha256": "5ba863eaad42ec62c6e75c16194e43858ad54a67962450bd2c3a7ace55f57cfb"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0162",
+      "position": 162,
+      "label": "Figshare",
+      "url": "https://figshare.com",
+      "seed_categories": [
+        "General"
+      ],
+      "row_sha256": "0beebf3d0cabf26b52396a170f0b41b7ae7717044cafe3b0977b31360ba18396"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0163",
+      "position": 163,
+      "label": "Allen Brain Atlas",
+      "url": "https://portal.brain-map.org",
+      "seed_categories": [
+        "Science & Medicine",
+        "Data & Statistics"
+      ],
+      "row_sha256": "c7fa5666fb12d1eea49199f9931016ad32611151b79270cf64f21197116cf034"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0164",
+      "position": 164,
+      "label": "OpenNeuro",
+      "url": "https://openneuro.org",
+      "seed_categories": [
+        "Science & Medicine",
+        "Data & Statistics"
+      ],
+      "row_sha256": "d680535b5a99e166ffbbf3d77a2794962a824add2ce84cf071ab1522d440324d"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0165",
+      "position": 165,
+      "label": "Penn World Table (PWT)",
+      "url": "https://www.rug.nl/ggdc/productivity/pwt",
+      "seed_categories": [
+        "Business & Finance",
+        "Data & Statistics"
+      ],
+      "row_sha256": "ac9a192ade4841f2956815c0e0940d31508bbe1aba508fcb18696c123af7e97d"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0166",
+      "position": 166,
+      "label": "World Income Inequality Database (WIID)",
+      "url": "https://www.wider.unu.edu/database/world-income-inequality-database-wiid",
+      "seed_categories": [
+        "Business & Finance",
+        "Psychology & Social Science",
+        "Data & Statistics"
+      ],
+      "row_sha256": "6cb1973738cee113399f5611ea56c583d33b8115ba8db60ad546dd26defbf16e"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0167",
+      "position": 167,
+      "label": "Maddison Project Database",
+      "url": "https://www.rug.nl/ggdc/historicaldevelopment/maddison",
+      "seed_categories": [
+        "Business & Finance",
+        "History & Humanities",
+        "Data & Statistics"
+      ],
+      "row_sha256": "eb64ceb620fdb1ce461b2ec5a06a2a45f5e35fe33192be6f7faabdfa85776f95"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0168",
+      "position": 168,
+      "label": "CORINE Land Cover",
+      "url": "https://land.copernicus.eu/en/products/corine-land-cover",
+      "seed_categories": [
+        "Environment & Earth Science",
+        "Data & Statistics"
+      ],
+      "row_sha256": "7ee53ef340ef62e77564f4b29207796c3c9a8b993c57ec502b2fcc0ece357b30"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0169",
+      "position": 169,
+      "label": "Afrobarometer",
+      "url": "https://www.afrobarometer.org",
+      "seed_categories": [
+        "Psychology & Social Science",
+        "Data & Statistics"
+      ],
+      "row_sha256": "d86b782d671416de8b7e5fc93fe57e9270ab5ebffa745bf0c06837e14ca166b9"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0170",
+      "position": 170,
+      "label": "Latinobarómetro",
+      "url": "https://www.latinobarometro.org",
+      "seed_categories": [
+        "Psychology & Social Science",
+        "Data & Statistics"
+      ],
+      "row_sha256": "cffe706a0f2a5cd69a29b9d4d6ea638d85bc75af13e55e17605419719edf2ccc"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0171",
+      "position": 171,
+      "label": "CHILDES (Child Language Data Exchange System)",
+      "url": "https://childes.talkbank.org",
+      "seed_categories": [
+        "Psychology & Social Science",
+        "Education & Learning",
+        "Data & Statistics"
+      ],
+      "row_sha256": "f4546ab7904b70aa74dd8affe70f1ec723bb4c89b1f80e8e33981cbb7f2852d7"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0172",
+      "position": 172,
+      "label": "IPCC Data Distribution Centre",
+      "url": "https://www.ipcc-data.org",
+      "seed_categories": [
+        "Environment & Earth Science",
+        "Data & Statistics"
+      ],
+      "row_sha256": "4d725f683d0292e462b8173288cd2052a0d3be4f3055ff9ce4865fc705b4611f"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0173",
+      "position": 173,
+      "label": "Embase",
+      "url": "https://www.embase.com",
+      "seed_categories": [
+        "Science & Medicine"
+      ],
+      "row_sha256": "30fefb9ab1f74c0c498220f1d1523357935f7f69e67dec15ca176431dd517fcc"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0174",
+      "position": 174,
+      "label": "CINAHL (Cumulative Index to Nursing and Allied Health Literature)",
+      "url": "https://www.ebsco.com/products/research-databases/cinahl-complete",
+      "seed_categories": [
+        "Science & Medicine"
+      ],
+      "row_sha256": "9f157d0ca8d56cedffae5ce5164c630a94b45336218affc8aae7e256fcc99276"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0175",
+      "position": 175,
+      "label": "Global Index Medicus (WHO)",
+      "url": "https://www.globalindexmedicus.net",
+      "seed_categories": [
+        "Science & Medicine"
+      ],
+      "row_sha256": "1d973b7bbfc51bf08c8f881e1d574add6401195365d75b9066802dc65a0f6800"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0176",
+      "position": 176,
+      "label": "Global Cancer Observatory (GCO / GLOBOCAN)",
+      "url": "https://gco.iarc.fr",
+      "seed_categories": [
+        "Science & Medicine",
+        "Data & Statistics"
+      ],
+      "row_sha256": "f5f161c72578c8a7248eb4986dff0e69365b1105e4aacb312e1dcab981ffcf21"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0177",
+      "position": 177,
+      "label": "SEER (Surveillance, Epidemiology, and End Results) Program",
+      "url": "https://seer.cancer.gov",
+      "seed_categories": [
+        "Science & Medicine",
+        "Data & Statistics"
+      ],
+      "row_sha256": "49546134309e0021cf53296652296f019dd1821301c4fdad645e42bdbe8e3992"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0178",
+      "position": 178,
+      "label": "MLA International Bibliography",
+      "url": "https://www.mla.org/Publications/MLA-International-Bibliography",
+      "seed_categories": [
+        "History & Humanities"
+      ],
+      "row_sha256": "aa6e705befe4f5754f6e7f66ab3e89490e8bddb3019ade66bfdbce20fc19602c"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0179",
+      "position": 179,
+      "label": "ProQuest Dissertations & Theses Global (PQDT)",
+      "url": "https://www.proquest.com/products-services/dissertations",
+      "seed_categories": [
+        "General"
+      ],
+      "row_sha256": "da3994e01f9e5cf18ca602e3d060791478badd821c94bda2e63524c84259e55c"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0180",
+      "position": 180,
+      "label": "Gale Primary Sources",
+      "url": "https://www.gale.com/primary-sources",
+      "seed_categories": [
+        "History & Humanities"
+      ],
+      "row_sha256": "a50681baca949c8fc9630df005f9beaed000f38f072ae78061f152c18f4cd0bc"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0181",
+      "position": 181,
+      "label": "Loeb Classical Library (Digital)",
+      "url": "https://www.loebclassics.com",
+      "seed_categories": [
+        "History & Humanities"
+      ],
+      "row_sha256": "393ee56a09f77397265a22ca86f1e9a51f87e7dc9a0711fc44a8175d87dd4bce"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0182",
+      "position": 182,
+      "label": "Oxford Bibliographies Online",
+      "url": "https://www.oxfordbibliographies.com",
+      "seed_categories": [
+        "General"
+      ],
+      "row_sha256": "5861353da664dcdd1c756ca2e17f7794e6187f2bd26f04faf315a2d9132ec806"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0183",
+      "position": 183,
+      "label": "YouTube Culture & Trends",
+      "url": "https://www.youtube.com/trends",
+      "seed_categories": [
+        "Data & Statistics",
+        "Creative & Media"
+      ],
+      "row_sha256": "33a17f95e0484ff151f82536ce86fdd306b23f98dd6494de785986879b84dfe8"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0184",
+      "position": 184,
+      "label": "Think with Google – Search & Video Research",
+      "url": "https://www.thinkwithgoogle.com",
+      "seed_categories": [
+        "Business & Finance",
+        "Creative & Media"
+      ],
+      "row_sha256": "0d4c4a6d3df7251baf3b954d70b490c002d0713251edfc66cb05f42498e09317"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0185",
+      "position": 185,
+      "label": "Instagram Trend Talk",
+      "url": "https://about.instagram.com/blog",
+      "seed_categories": [
+        "Creative & Media"
+      ],
+      "row_sha256": "bb6e09ec4b1f61bf60391f0a4a6f9808da8e711764db2b642264ad1f4df084e2"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0186",
+      "position": 186,
+      "label": "TikTok Creative Center – Trends & Insights",
+      "url": "https://www.tiktok.com/business/creativecenter",
+      "seed_categories": [
+        "Data & Statistics",
+        "Creative & Media"
+      ],
+      "row_sha256": "9b2d53eea46ea64c1ae5ba519cf946596458e58db878bc24cd09a4e873eafa41"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0187",
+      "position": 187,
+      "label": "Nielsen Streaming Measurement",
+      "url": "https://www.nielsen.com/solutions/audience-measurement/streaming-measurement",
+      "seed_categories": [
+        "Business & Finance",
+        "Data & Statistics",
+        "Creative & Media"
+      ],
+      "row_sha256": "34cba2ca9a9c87cd139087ad7633acef5e9d87004d1e42d168dfaf4766d7d0b7"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0188",
+      "position": 188,
+      "label": "Reuters Institute Digital News Report",
+      "url": "https://reutersinstitute.politics.ox.ac.uk/digital-news-report",
+      "seed_categories": [
+        "News & Current Events",
+        "Creative & Media"
+      ],
+      "row_sha256": "1ef3fb170a98b80260c26de164b7a6371783caad43278b321d73f28df8e7216b"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0189",
+      "position": 189,
+      "label": "Ofcom – Online Nation",
+      "url": "https://www.ofcom.org.uk/research-and-data/media-literacy-research/online-nation",
+      "seed_categories": [
+        "Law & Government",
+        "Data & Statistics",
+        "Creative & Media"
+      ],
+      "row_sha256": "2c7e167090cdac0d017384ae6cf6d905407e350975fdab62670204faaa458a38"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0190",
+      "position": 190,
+      "label": "GWI (GlobalWebIndex)",
+      "url": "https://www.gwi.com",
+      "seed_categories": [
+        "Business & Finance",
+        "Data & Statistics",
+        "Creative & Media"
+      ],
+      "row_sha256": "f9485feaf7f795f1df87beb01d1a7335e11f30ea070c26aa90a443628c0069f3"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0191",
+      "position": 191,
+      "label": "YouGov Profiles",
+      "url": "https://business.yougov.com/products/profiles",
+      "seed_categories": [
+        "Business & Finance",
+        "Data & Statistics",
+        "Creative & Media"
+      ],
+      "row_sha256": "b3a5ea04ac691cfc31dfc3d90b111bfea518433363e31dfbad67e4c661882396"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0192",
+      "position": 192,
+      "label": "Metricool Instagram & Social Platform Studies",
+      "url": "https://metricool.com/studies/",
+      "seed_categories": [
+        "Data & Statistics",
+        "Creative & Media"
+      ],
+      "row_sha256": "d88c43488e3c4f479f78d90b31a48c73e90c8f19258fa719141ef1f21437951b"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0193",
+      "position": 193,
+      "label": "Journal of Machine Learning Research (JMLR)",
+      "url": "https://www.jmlr.org",
+      "seed_categories": [
+        "AI & Technology"
+      ],
+      "row_sha256": "2a7ef06f3549b67bfe4d79706924b37607fb9ff598d2de93b6ad75b3873a0e56"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0194",
+      "position": 194,
+      "label": "Transactions on Machine Learning Research (TMLR)",
+      "url": "https://jmlr.org/tmlr",
+      "seed_categories": [
+        "AI & Technology"
+      ],
+      "row_sha256": "8001bcd4fdfd42194eace1adca9674499b968221759c6c142d6133a734b90128"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0195",
+      "position": 195,
+      "label": "Proceedings of Machine Learning Research (PMLR)",
+      "url": "https://proceedings.mlr.press",
+      "seed_categories": [
+        "AI & Technology"
+      ],
+      "row_sha256": "a87165e9a64e547ae98ed2ca59b6f8466044ae0b36a8b8a62ff2c95f234af7b7"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0196",
+      "position": 196,
+      "label": "NeurIPS Proceedings",
+      "url": "https://proceedings.neurips.cc",
+      "seed_categories": [
+        "AI & Technology"
+      ],
+      "row_sha256": "6ba636ab4d8489d99ff61afcd485c4a10278ab0e2ef5dfe11f00f33f480f9a73"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0197",
+      "position": 197,
+      "label": "ICLR (OpenReview)",
+      "url": "https://openreview.net/group?id=ICLR.cc",
+      "seed_categories": [
+        "AI & Technology"
+      ],
+      "row_sha256": "a7ba6ec468a24f8c385511fbfd4a4e0677bc706f39c6539563ff1f85ceaf67b5"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0198",
+      "position": 198,
+      "label": "OpenReview.net",
+      "url": "https://openreview.net",
+      "seed_categories": [
+        "AI & Technology"
+      ],
+      "row_sha256": "d110201a3615aa8579f24a041a439f18d9a3840e4eb6f110754717549f16b82a"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0199",
+      "position": 199,
+      "label": "Nature Machine Intelligence",
+      "url": "https://www.nature.com/natmachintell",
+      "seed_categories": [
+        "AI & Technology"
+      ],
+      "row_sha256": "e49f078a5e751edb5df1430e3626af0830846457894e079f57a9972bbfb4679e"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0200",
+      "position": 200,
+      "label": "MLCommons / MLPerf Benchmarks",
+      "url": "https://mlcommons.org",
+      "seed_categories": [
+        "AI & Technology",
+        "Data & Statistics"
+      ],
+      "row_sha256": "c147b4992f1da0db830d308a0729190c66b175f0bd615d7048e188654b1c8853"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0201",
+      "position": 201,
+      "label": "AAAI Conference on Artificial Intelligence",
+      "url": "https://aaai.org/conference/aaai",
+      "seed_categories": [
+        "AI & Technology"
+      ],
+      "row_sha256": "f0d22584f45fbe670a62f7c5f0d7a91e5a2a4645a556d6e22b3c303f3e3ca2e4"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0202",
+      "position": 202,
+      "label": "Crossref Metadata Search",
+      "url": "https://search.crossref.org",
+      "seed_categories": [
+        "Data & Statistics",
+        "General"
+      ],
+      "row_sha256": "0ae5f3d918b355f9cf815f07777c16d18a59f4fb27a18c1a396a3222175b33c1"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0203",
+      "position": 203,
+      "label": "Dimensions",
+      "url": "https://www.dimensions.ai",
+      "seed_categories": [
+        "Data & Statistics",
+        "General"
+      ],
+      "row_sha256": "e741da5a383bffdd999b48c9087ca7bb34aa502b27312beae2867cf3c237b957"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0204",
+      "position": 204,
+      "label": "The Lens – Scholarly Works",
+      "url": "https://www.lens.org",
+      "seed_categories": [
+        "AI & Technology",
+        "Business & Finance",
+        "General"
+      ],
+      "row_sha256": "0d9b7fa3c4b81825dd46205f6dd9ce7860148bfef171047df097b66f81902e2e"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0205",
+      "position": 205,
+      "label": "Open Research Library",
+      "url": "https://openresearchlibrary.org",
+      "seed_categories": [
+        "History & Humanities",
+        "Psychology & Social Science",
+        "General"
+      ],
+      "row_sha256": "a5dc86f59519311deb6588fe28e87827ec5687c1882740fe4fea8bbdf818a103"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0206",
+      "position": 206,
+      "label": "OAPEN Library",
+      "url": "https://library.oapen.org",
+      "seed_categories": [
+        "History & Humanities",
+        "Psychology & Social Science"
+      ],
+      "row_sha256": "f450cb70d2d325ea3ab4d03a6daf45b29cf797ea8a755ac95e8e970550844eb8"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0207",
+      "position": 207,
+      "label": "NDLTD",
+      "url": "https://www.ndltd.org",
+      "seed_categories": [
+        "General"
+      ],
+      "row_sha256": "1ce816f19f6d84e1f94859b87fe2e9e2f26739975076d63319694de0f39fbb47"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0208",
+      "position": 208,
+      "label": "EBSCO Open Dissertations",
+      "url": "https://opendissertations.org",
+      "seed_categories": [
+        "General"
+      ],
+      "row_sha256": "4dc8638d215188aaa921433e44096f87369e9a589c07bd2297a9fe5339ebf5ea"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0209",
+      "position": 209,
+      "label": "SPORTDiscus",
+      "url": "https://www.ebsco.com/products/research-databases/sportdiscus",
+      "seed_categories": [
+        "Science & Medicine",
+        "Education & Learning"
+      ],
+      "row_sha256": "37b03b0abf2396a5d617e52089aae99d75b6944d59483a3df0d8603d16a04142"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0210",
+      "position": 210,
+      "label": "Olympic Studies Centre & Olympic World Library",
+      "url": "https://www.olympics.com/ioc/olympic-studies-centre",
+      "seed_categories": [
+        "History & Humanities",
+        "Psychology & Social Science",
+        "Education & Learning"
+      ],
+      "row_sha256": "d40494603477d4fce5553b430ba82bf2321acf02d4753ed8267ae6121e5d76cd"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0211",
+      "position": 211,
+      "label": "FIFA Research Programme",
+      "url": "https://inside.fifa.com/innovation/fifa-research-programme",
+      "seed_categories": [
+        "Science & Medicine",
+        "Data & Statistics"
+      ],
+      "row_sha256": "a770545a11ede66e1913b1822f57de9868cb4c5fcbaec8d47ee30918d195385b"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0212",
+      "position": 212,
+      "label": "UEFA Intelligence Centre & Landscape Reports",
+      "url": "https://www.uefa.com/intelligencecentre",
+      "seed_categories": [
+        "Business & Finance",
+        "Data & Statistics"
+      ],
+      "row_sha256": "0c93f165c33949b89a25f1833b67b505b9dfbf190fb607ac64cb9bcee30110ef"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0213",
+      "position": 213,
+      "label": "Baseball-Reference",
+      "url": "https://www.baseball-reference.com",
+      "seed_categories": [
+        "History & Humanities",
+        "Data & Statistics"
+      ],
+      "row_sha256": "f41df1e35e243c318d5792a4b171c73698bc18e62292054775d74c774139ac47"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0214",
+      "position": 214,
+      "label": "Basketball-Reference",
+      "url": "https://www.basketball-reference.com",
+      "seed_categories": [
+        "History & Humanities",
+        "Data & Statistics"
+      ],
+      "row_sha256": "04e2a09a065885930762f4fc2dd537dac1bb9eb00baeb004416416d795547f72"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0215",
+      "position": 215,
+      "label": "FBref",
+      "url": "https://fbref.com",
+      "seed_categories": [
+        "History & Humanities",
+        "Data & Statistics"
+      ],
+      "row_sha256": "e6fdc791f1e4872af3d7bc8b3397d31d71c7d0104da86ce5ab0a61006f824b23"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0216",
+      "position": 216,
+      "label": "FiveThirtyEight Sports Data",
+      "url": "https://github.com/fivethirtyeight",
+      "seed_categories": [
+        "Data & Statistics"
+      ],
+      "row_sha256": "5b4185f33945bec9b5b9a29e2b38c4c9fe98550884206efe829db39076ce2f29"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0217",
+      "position": 217,
+      "label": "International Journal of Sports Physiology and Performance",
+      "url": "https://journals.humankinetics.com/view/journals/ijspp/ijspp-overview.xml",
+      "seed_categories": [
+        "Science & Medicine"
+      ],
+      "row_sha256": "e47f28aac48ead58dc66c3796fa12789dd424da2e24c1e67391d862f4bb3c01a"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0218",
+      "position": 218,
+      "label": "Journal of Sports Sciences",
+      "url": "https://www.tandfonline.com/journals/rjsp20",
+      "seed_categories": [
+        "Science & Medicine",
+        "Data & Statistics"
+      ],
+      "row_sha256": "3299819943435bb4ccb9f6f134708cc56a3322c08c2d58c9f458084aa5e880b2"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0219",
+      "position": 219,
+      "label": "USGS National Geologic Map Database (NGMDB)",
+      "url": "https://ngmdb.usgs.gov",
+      "seed_categories": [
+        "Environment & Earth Science",
+        "Data & Statistics"
+      ],
+      "row_sha256": "40b407cc6808f549f6c842b662f7496d64ea562fb1522dd0eb2b62eb7267995c"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0220",
+      "position": 220,
+      "label": "OneGeology Portal",
+      "url": "https://portal.onegeology.org",
+      "seed_categories": [
+        "Environment & Earth Science",
+        "Data & Statistics"
+      ],
+      "row_sha256": "ce024e6a023d7fe49d6a1283762f30522f461fed1e7a3463037da1c5c15ac363"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0221",
+      "position": 221,
+      "label": "EarthChem Data Services",
+      "url": "https://earthchem.org",
+      "seed_categories": [
+        "Environment & Earth Science",
+        "Data & Statistics"
+      ],
+      "row_sha256": "26de0316fa31646e414512212b850b208aa931298078029c4581a6d515c87a1e"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0222",
+      "position": 222,
+      "label": "GEBCO – General Bathymetric Chart of the Oceans",
+      "url": "https://www.gebco.net",
+      "seed_categories": [
+        "Environment & Earth Science",
+        "Data & Statistics"
+      ],
+      "row_sha256": "d5102e163f93c5c41812dc9f4bc4e0de3bedca78ccc83062958a3ebac7b0782b"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0223",
+      "position": 223,
+      "label": "EMODnet Digital Bathymetry",
+      "url": "https://emodnet.ec.europa.eu/en/bathymetry",
+      "seed_categories": [
+        "Environment & Earth Science",
+        "Data & Statistics"
+      ],
+      "row_sha256": "6d0ccdb38aa54831c506b861a1cfd278aedae1b9e6f708710b945f0f5bdcde3a"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0224",
+      "position": 224,
+      "label": "Ocean Biodiversity Information System (OBIS)",
+      "url": "https://obis.org",
+      "seed_categories": [
+        "Science & Medicine",
+        "Environment & Earth Science",
+        "Data & Statistics"
+      ],
+      "row_sha256": "4f7cf8e803288247bb00e778427d9e0203b14fb73e23f8f74a4ba99686b11d78"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0225",
+      "position": 225,
+      "label": "International Ocean Discovery Program (IODP) Data",
+      "url": "https://www.iodp.org/iodp/resources",
+      "seed_categories": [
+        "Environment & Earth Science",
+        "Data & Statistics"
+      ],
+      "row_sha256": "a126933543851c3c439690fc48067b9c1b488d9bcd1a401fbdf28089bce64f17"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0226",
+      "position": 226,
+      "label": "IRIS / EarthScope Data Services",
+      "url": "https://ds.iris.edu",
+      "seed_categories": [
+        "Environment & Earth Science",
+        "Data & Statistics"
+      ],
+      "row_sha256": "a041312763035b0d8992b8fd7116d584fea14d10529032242fe089b73b36911a"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0227",
+      "position": 227,
+      "label": "ISC Bulletin",
+      "url": "https://www.isc.ac.uk/iscbulletin",
+      "seed_categories": [
+        "Environment & Earth Science",
+        "Data & Statistics"
+      ],
+      "row_sha256": "5ff339864b1c75f52d2e5c42ee2c17bc719c027c15a38a79e0e9ded34e38f5c6"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0228",
+      "position": 228,
+      "label": "PitchBook",
+      "url": "https://pitchbook.com",
+      "seed_categories": [
+        "Business & Finance"
+      ],
+      "row_sha256": "ae9aefa3c08b3b92b5924bfcd04f173a06588021d08b09f09189793ff28dc425"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0229",
+      "position": 229,
+      "label": "CB Insights",
+      "url": "https://www.cbinsights.com",
+      "seed_categories": [
+        "Business & Finance"
+      ],
+      "row_sha256": "f4fbc34acabce5e6963b5864678d096e50f037a7c0efa30f5390aee154ab1b63"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0230",
+      "position": 230,
+      "label": "S&P Capital IQ",
+      "url": "https://www.spglobal.com/marketintelligence/en/solutions/sp-capital-iq-platform",
+      "seed_categories": [
+        "Business & Finance"
+      ],
+      "row_sha256": "048217319f8f8083775404f78f47c26e3bfcc09b64fef02690cc28ae27fd4726"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0231",
+      "position": 231,
+      "label": "Bloomberg Terminal / Bloomberg Intelligence",
+      "url": "https://www.bloomberg.com/professional/solution/bloomberg-terminal",
+      "seed_categories": [
+        "Business & Finance"
+      ],
+      "row_sha256": "0a99dc93afc9988e45c22d1989fa3887480eb42bce2a10e69e35dcf233aff391"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0232",
+      "position": 232,
+      "label": "FactSet",
+      "url": "https://www.factset.com",
+      "seed_categories": [
+        "Business & Finance"
+      ],
+      "row_sha256": "3acc6b8d2b7769f8b2bf73e0808ff12ecf22a77e7b862e7b5d001a1fc5498e79"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0233",
+      "position": 233,
+      "label": "Mergent Online",
+      "url": "https://www.mergentonline.com",
+      "seed_categories": [
+        "Business & Finance"
+      ],
+      "row_sha256": "e7aa4366c1cc0195a75342aea39bf59a3b17983067c214ec070b9cd1dbe4a055"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0234",
+      "position": 234,
+      "label": "IBISWorld",
+      "url": "https://www.ibisworld.com",
+      "seed_categories": [
+        "Business & Finance"
+      ],
+      "row_sha256": "51a90ebdd9bd78360175c3cf4f4d1ddc57aecf6e098d4af21f46d34c01c5fbcc"
+    },
+    {
+      "inventory_id": "sourclip-2026-07-13-0235",
+      "position": 235,
+      "label": "PrivCo",
+      "url": "https://www.privco.com",
+      "seed_categories": [
+        "Business & Finance"
+      ],
+      "row_sha256": "ca3306ebf77d1dd95adf3ae6cc9fda1e1433f5216037ba38cdca671e9326e245"
+    }
+  ]
+}

@@ -1,0 +1,86 @@
+{
+  "errors": [],
+  "schema_validated": true,
+  "as_of": "2026-07-13",
+  "trusted_reviewer_ids": [
+    "codex-task-12968.1-source-triage"
+  ],
+  "trusted_approval_references": [],
+  "counts": {
+    "manifest": 235,
+    "ledger": 235,
+    "unreviewed": 0,
+    "triaged": 235,
+    "terminal": 0,
+    "non_terminal": 235,
+    "resolution": {
+      "unreviewed": 0,
+      "mapped": 191,
+      "duplicate": 0,
+      "not_applicable": 1,
+      "credentialed_out_of_scope": 35,
+      "policy_blocked": 7,
+      "technically_infeasible": 1
+    },
+    "implementation": {
+      "planned": 235,
+      "implemented": 0
+    },
+    "fixture": {
+      "not_run": 235,
+      "passed": 0,
+      "failed": 0
+    },
+    "live": {
+      "not_run": 235,
+      "current": 0,
+      "expired": 0,
+      "failed": 0
+    }
+  },
+  "blockers": [],
+  "required_sources": {
+    "sourclip-2026-07-13-0021": {
+      "canonical_target": "biorxiv",
+      "required_general_route_id": "biorxiv_site_search",
+      "required_bounded_route_id": "biorxiv_details_api",
+      "captured_label": "bioRxiv",
+      "resolution": "mapped",
+      "canonical_targets": [
+        "biorxiv"
+      ],
+      "declared_surfaces": [
+        "standalone_search",
+        "deep_research"
+      ],
+      "mapping_satisfied": true
+    },
+    "sourclip-2026-07-13-0022": {
+      "canonical_target": "medrxiv",
+      "required_general_route_id": "medrxiv_site_search",
+      "required_bounded_route_id": "medrxiv_details_api",
+      "captured_label": "medRxiv",
+      "resolution": "mapped",
+      "canonical_targets": [
+        "medrxiv"
+      ],
+      "declared_surfaces": [
+        "standalone_search",
+        "deep_research"
+      ],
+      "mapping_satisfied": true
+    }
+  },
+  "required_source_blockers": [],
+  "digests": {
+    "manifest": "6715db5a499abb13a3095c5153566323afd037db5ce0ff77ade7b629d5137c1e",
+    "ledger": "cbcb560ef7706372a6e0d199be8e3166ad4b8407e0d3e3c0265282563d6c5fd3",
+    "ledger_rows": "bf1aaed001ec8f480e088dc50a7281ac2048d4a9ae5b2220966b07bf055daf39",
+    "schema": "ac85c7889ce84d25b8ddf9473c8fa1a8db43da848c683f1dbc1dce91a3375f29",
+    "validator": "ca2d1abc6dede0f152c2b57488dcf09afb1ade7a31509795fc482e75b0aade75",
+    "schema_validator": "d07f65f3b4dd5c3a07454798c85e32c08f009f9d7c1d78487dcc9c414b504792"
+  },
+  "structurally_valid": true,
+  "contract_freeze_ready": true,
+  "inventory_delivery_ready": false
+}
