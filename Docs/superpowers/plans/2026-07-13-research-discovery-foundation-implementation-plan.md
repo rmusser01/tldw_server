@@ -57,9 +57,9 @@ Before every stage commit, run all tests introduced in that stage and every earl
 - [x] Cover omitted, empty, explicit-source, category-only, and source/category-union selection through the real V1 service boundary.
 - [x] Preserve the observed V1 semantics: omitted or empty selection defaults to the three `open_research_graph` sources, result aggregation follows source priority rather than adapter completion order, and any malformed item makes that source `internal_error`.
 - [x] Pin source priority, result ordering, provider call arguments/counts, source status ordering, warning ordering, partial failure, all failure, valid-empty, malformed provider payload, and a documented stable serialization projection.
-- [x] Freeze the injected clock or omit volatile `SourceStatus.elapsed_ms`, `DiscoveryMetrics.elapsed_ms`, request IDs, and generated timestamps from the golden projection. Assert their types/ranges separately.
-- [x] Serialize through `ResearchDiscoverySearchResponse.model_validate(...).model_dump(mode="json")`, then freeze only the stable projection.
-- [x] Add fixed-input hard-coded Research broker goldens through `collect_focus_area`: local `src_7aef3f6cf7e9` / `note_9c1e03fe5b64`, academic `src_72b0a1007cc7` / `note_3fd24e3f8693`, and web `src_47fc41c2bc20` / `note_817ae2d4c1e1`. Do not freeze `retrieved_at`.
+- [x] Omit only volatile `SourceStatus.elapsed_ms`, `DiscoveryMetrics.elapsed_ms`, and the generated discovery ID from the golden projection. Assert exact ID shape, snapshot-ID equality, elapsed types/ranges, and timezone-aware snapshot timestamp ordering/retention separately.
+- [x] Serialize through `ResearchDiscoverySearchResponse.model_validate(...).model_dump(mode="json")`, freeze every remaining public field, and assert the same projection from the persisted snapshot together with its persisted request and effective configuration.
+- [x] Add fixed-input hard-coded Research broker goldens through `collect_focus_area`: local `src_7aef3f6cf7e9` / `note_9c1e03fe5b64`, academic `src_72b0a1007cc7` / `note_3fd24e3f8693`, and web `src_47fc41c2bc20` / `note_817ae2d4c1e1`. Do not freeze `retrieved_at`; parse it as timezone-aware and bound it to the collection interval.
 - [x] Generate the golden JSON mechanically from reviewed stable expected values, then compare canonical sorted-key JSON with one trailing newline.
 - [x] Run the existing discovery catalog/router/service/selection/identity suites to prove the fixture describes current behavior rather than changing it.
 
@@ -91,6 +91,8 @@ git diff --check
 ### Commit
 
 `test(research): freeze legacy discovery execution contract`
+
+Independent-review hardening: `test(research): harden legacy execution golden`
 
 ## Task 2 / Stage 2: Add Pure V2 Contracts, Registry, and Planner
 

@@ -5,6 +5,9 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+import re
+from contextlib import suppress
+from datetime import UTC, datetime, timedelta
 from itertools import count
 from pathlib import Path
 from typing import Any
@@ -46,6 +49,7 @@ GOLDEN_REQUEST = {
     "filters": {"language": "en", "year_from": 2020},
 }
 _DB_COUNTER = count()
+ASYNC_GUARD_SECONDS = 10.0
 
 
 class _DefaultResolverTripwire:
@@ -170,7 +174,7 @@ def _build_service(
     router = ResearchSourceRouter(
         catalog=catalog,
         adapters=adapters,
-        per_source_timeout_seconds=1.0,
+        per_source_timeout_seconds=ASYNC_GUARD_SECONDS,
         max_concurrency=4,
     )
     resolver = _NoIOOAResolver()
@@ -191,53 +195,29 @@ def _build_service(
     return catalog, adapters, resolver, db, db_factory_calls, service
 
 
-def _stable_response_projection(response: object) -> dict[str, Any]:
-    """Serialize the public schema and select stable execution-facing fields."""
+def _stable_response_projection(
+    response: object,
+    *,
+    discovery_id: str | None = None,
+) -> dict[str, Any]:
+    """Serialize every public field except explicitly volatile values."""
+    if isinstance(response, dict) and "discovery_id" not in response:
+        assert discovery_id is not None
+        response = {"discovery_id": discovery_id, **response}
     payload = ResearchDiscoverySearchResponse.model_validate(response).model_dump(mode="json")
-    return {
-        "catalog_version": payload["catalog_version"],
-        "effective_config": payload["effective_config"],
-        "metrics": {key: value for key, value in payload["metrics"].items() if key != "elapsed_ms"},
-        "query": payload["query"],
-        "results": [
-            {
-                "adapter_version": result["adapter_version"],
-                "canonical_url": result["canonical_url"],
-                "catalog_version": result["catalog_version"],
-                "discovery_mode": result["discovery_mode"],
-                "doi": result["doi"],
-                "fingerprint": result["fingerprint"],
-                "merged_provenance": [
-                    {
-                        "adapter_version": provenance["adapter_version"],
-                        "discovery_mode": provenance["discovery_mode"],
-                        "provider": provenance["provider"],
-                        "provider_ids": provenance["provider_ids"],
-                        "source_id": provenance["source_id"],
-                        "source_rank": provenance["source_rank"],
-                        "status": provenance["status"],
-                        "url": provenance["url"],
-                        "warnings": provenance["warnings"],
-                    }
-                    for provenance in result["merged_provenance"]
-                ],
-                "primary_provider": result["primary_provider"],
-                "primary_source_id": result["primary_source_id"],
-                "provider_ids": result["provider_ids"],
-                "ranking_signals": result["ranking_signals"],
-                "result_id": result["result_id"],
-                "source_category": result["source_category"],
-                "title": result["title"],
-                "warnings": result["warnings"],
-            }
-            for result in payload["results"]
-        ],
-        "source_statuses": [
-            {key: value for key, value in status.items() if key != "elapsed_ms"}
-            for status in payload["source_statuses"]
-        ],
-        "warnings": payload["warnings"],
-    }
+    payload.pop("discovery_id")
+    payload["metrics"].pop("elapsed_ms")
+    for status in payload["source_statuses"]:
+        status.pop("elapsed_ms")
+    return payload
+
+
+def _parse_aware_datetime(value: str) -> datetime:
+    """Parse a generated timestamp and require an explicit UTC offset."""
+    parsed = datetime.fromisoformat(value)
+    assert parsed.tzinfo is not None
+    assert parsed.utcoffset() is not None
+    return parsed
 
 
 def _canonical_json(value: object) -> str:
@@ -279,10 +259,16 @@ async def test_all_eight_sources_match_frozen_execution_contract(
     """The real V1 service stack retains its stable all-source projection."""
     catalog, adapters, resolver, db, db_factory_calls, service = _build_service(tmp_path, monkeypatch)
 
+    search_started_at = datetime.now(UTC)
     response = await service.search(**GOLDEN_REQUEST)
+    search_finished_at = datetime.now(UTC)
+    snapshot = db.get_discovery_snapshot(response.discovery_id, owner_user_id="legacy-owner")
+    assert snapshot is not None
 
     actual_contract = {
         "all_sources_success": {
+            "persisted_effective_config": snapshot.effective_config_json,
+            "persisted_request": snapshot.request_json,
             "provider_calls": _provider_calls(adapters),
             "request": GOLDEN_REQUEST,
             "stable_response": _stable_response_projection(response),
@@ -293,15 +279,26 @@ async def test_all_eight_sources_match_frozen_execution_contract(
             {"priority": source.priority, "source_id": source.source_id} for source in catalog.list_sources()
         ],
     }
-    snapshot = db.get_discovery_snapshot(response.discovery_id, owner_user_id="legacy-owner")
+    snapshot_projection = _stable_response_projection(
+        snapshot.response_json,
+        discovery_id=response.discovery_id,
+    )
+    snapshot_created_at = _parse_aware_datetime(snapshot.created_at)
+    snapshot_expires_at = _parse_aware_datetime(snapshot.expires_at)
 
     assert actual_contract == _contract()
-    assert response.discovery_id.startswith("rd_")
+    assert re.fullmatch(r"rd_[0-9a-f]{12}", response.discovery_id)
+    assert snapshot.id == response.discovery_id
     assert isinstance(response.metrics.elapsed_ms, float) and response.metrics.elapsed_ms >= 0
     assert all(isinstance(status.elapsed_ms, float) and status.elapsed_ms >= 0 for status in response.source_statuses)
     assert db_factory_calls == ["legacy-owner"]
-    assert snapshot is not None
-    assert snapshot.response_json["query"] == GOLDEN_REQUEST["query"]
+    assert search_started_at <= snapshot_created_at <= search_finished_at
+    assert snapshot_created_at < snapshot_expires_at
+    assert snapshot_expires_at - snapshot_created_at == timedelta(hours=24)
+    assert snapshot_projection == actual_contract["all_sources_success"]["stable_response"]
+    assert snapshot.request_json == actual_contract["all_sources_success"]["persisted_request"]
+    assert snapshot.effective_config_json == actual_contract["all_sources_success"]["persisted_effective_config"]
+    assert snapshot.effective_config_json == response.effective_config
     assert len(resolver.calls) == len(SOURCE_IDS)
     assert {call["source_id"] for call in resolver.calls} == set(SOURCE_IDS)
     _assert_selected_calls(catalog=catalog, adapters=adapters, selected_source_ids=list(SOURCE_IDS))
@@ -369,12 +366,24 @@ async def test_result_and_status_order_follow_priority_not_completion(
         completion_control=completion_control,
     )
     search_task = asyncio.create_task(service.search(owner_user_id="ordering-owner", query="ordering contract"))
-    await asyncio.wait_for(completion_control.all_started.wait(), timeout=1.0)
-    for source_id in reversed(selected_source_ids):
-        completion_control.release[source_id].set()
-        await asyncio.wait_for(completion_control.completed[source_id].wait(), timeout=1.0)
-
-    response = await search_task
+    try:
+        await asyncio.wait_for(completion_control.all_started.wait(), timeout=ASYNC_GUARD_SECONDS)
+        for source_id in reversed(selected_source_ids):
+            completion_control.release[source_id].set()
+            await asyncio.wait_for(
+                completion_control.completed[source_id].wait(),
+                timeout=ASYNC_GUARD_SECONDS,
+            )
+        response = await asyncio.wait_for(
+            asyncio.shield(search_task),
+            timeout=ASYNC_GUARD_SECONDS,
+        )
+    except Exception:
+        if not search_task.done():
+            search_task.cancel()
+        with suppress(asyncio.CancelledError, Exception):
+            await search_task
+        raise
 
     assert completion_control.completion_order == list(reversed(selected_source_ids))
     assert [result.primary_source_id for result in response.results] == list(selected_source_ids)
