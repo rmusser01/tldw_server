@@ -77,6 +77,7 @@ class HuggingFaceAdapter(ChatProvider):
         cfg = (request.get("app_config") or {}).get("huggingface_api", {})
         override_base = request.get("base_url")
         api_base = cfg.get("api_base_url")  # may be None
+        runtime_base_override = cfg.get("_runtime_base_url_override") is True
         use_router = str(
             cfg.get("use_router_url_format", cfg.get("huggingface_use_router_url_format", "false"))
         ).lower() == "true"
@@ -92,7 +93,8 @@ class HuggingFaceAdapter(ChatProvider):
             model = "unspecified"
         if use_router:
             base = override_base or (
-                cfg.get("router_base_url")
+                (api_base if runtime_base_override else None)
+                or cfg.get("router_base_url")
                 or cfg.get("huggingface_router_base_url")
                 or "https://router.huggingface.co/hf-inference"
             )

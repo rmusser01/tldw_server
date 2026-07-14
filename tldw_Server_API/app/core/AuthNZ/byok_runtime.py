@@ -569,6 +569,17 @@ def _build_app_config(
         except _BYOK_RUNTIME_NONCRITICAL_EXCEPTIONS:
             scrubbed_cfg = {}
     merged = merge_app_config_overrides(scrubbed_cfg or None, provider, credential_fields)
+    credential_base_url = credential_fields.get("base_url")
+    if (
+        provider_norm == "huggingface"
+        and isinstance(credential_base_url, str)
+        and credential_base_url.strip()
+        and section
+    ):
+        selected = merged.get(section)
+        selected_config = dict(selected) if isinstance(selected, dict) else {}
+        selected_config["_runtime_base_url_override"] = True
+        merged[section] = selected_config
     if auth_source is not None and section:
         selected = merged.get(section)
         selected_config = dict(selected) if isinstance(selected, dict) else {}
