@@ -188,7 +188,7 @@ git diff --check
 
 **Tests:** Unit, security, cancellation, revocation, and streaming-boundary tests with an injected fake one-hop primitive; focused integration tests against TASK-12971's local test server only.
 
-**Status:** Not Started (all prerequisites delivered)
+**Status:** Complete
 
 ### Files
 
@@ -200,12 +200,12 @@ git diff --check
 
 ### Test-first steps
 
-- [ ] Stop if TASK-12971 is not complete or its focused security tests are not green; record the blocker instead of implementing an alternate client.
-- [ ] Write failing tests for exact scheme/host/port/method/path/query enforcement, canonical policy-digest recomputation and binding, revocation before dispatch, query minimization, and independence from environment/config-file allowlists.
-- [ ] Define `dispatch_once(...)` so one call can perform one physical hop only. Redirect responses and retryable failures return typed data to the executor; they are not followed internally.
-- [ ] Prove no ambient proxy, `.netrc`, cookie, authorization, client certificate, or credential state enters the primitive request.
-- [ ] Preserve TASK-12971's exposed resolved-address, connected-peer, header-byte, and wire-byte evidence. Derive requested Host/SNI and configured ceilings from the validated request, decoded bytes from bounded `len(body)`, and elapsed time around the public call; do not import private TASK-12971 seams or claim fields the public response does not expose.
-- [ ] Return bounded typed errors without query text, response bodies, local paths, secrets, or unsafe provider detail.
+- [x] Stop if TASK-12971 is not complete or its focused security tests are not green; record the blocker instead of implementing an alternate client.
+- [x] Write failing tests for exact scheme/host/port/method/path/query enforcement, canonical policy-digest recomputation and binding, revocation before dispatch, query minimization, and independence from environment/config-file allowlists.
+- [x] Define `dispatch_once(...)` so one call can perform one physical hop only. Redirect responses and retryable failures return typed data to the executor; they are not followed internally.
+- [x] Prove no ambient proxy, `.netrc`, cookie, authorization, client certificate, or credential state enters the primitive request.
+- [x] Preserve TASK-12971's exposed resolved-address, connected-peer, header-byte, and wire-byte evidence. Derive requested Host/SNI and configured ceilings from the validated request, decoded bytes from bounded `len(body)`, and elapsed time around the public call; do not import private TASK-12971 seams or claim fields the public response does not expose.
+- [x] Return bounded typed errors without query text, response bodies, local paths, secrets, or unsafe provider detail.
 
 ### Verify
 
