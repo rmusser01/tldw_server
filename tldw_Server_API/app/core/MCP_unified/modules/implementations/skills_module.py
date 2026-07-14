@@ -22,7 +22,6 @@ from ....Skills.exceptions import SkillNotFoundError
 from ....Skills.runtime_metadata import build_skill_runtime_metadata
 from ....Skills.skill_executor import SkillExecutor
 from ....Skills.skills_service import SKILL_NAME_PATTERN, SkillMetadata, SkillsService
-from ...protocol import MCPProtocol
 from ..base import BaseModule, create_tool_definition
 
 DEFAULT_LIST_PAGE_SIZE = 50
@@ -387,12 +386,14 @@ class SkillsModule(BaseModule):
         if not valid_declarations:
             return []
         try:
+            from ...server import get_mcp_server
+
             timeout_seconds = min(
                 float(self.config.timeout_seconds),
                 CATALOG_LOOKUP_TIMEOUT_CAP_SECONDS,
             )
             listing_task = asyncio.create_task(
-                MCPProtocol()._handle_tools_list({}, context)
+                get_mcp_server().protocol._handle_tools_list({}, context)
             )
             try:
                 listing = await asyncio.wait_for(

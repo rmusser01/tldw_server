@@ -38,13 +38,15 @@ pytestmark = pytest.mark.unit
 def catalog_protocol_stub(
     monkeypatch: pytest.MonkeyPatch,
 ) -> tuple[Mock, AsyncMock]:
+    from tldw_Server_API.app.core.MCP_unified import server as mcp_server
+
     list_tools = AsyncMock(
         return_value={"tools": [{"name": "rag.search", "canExecute": True}]}
     )
     protocol = SimpleNamespace(_handle_tools_list=list_tools)
-    factory = Mock(return_value=protocol)
-    monkeypatch.setattr(skills_module, "MCPProtocol", factory, raising=False)
-    return factory, list_tools
+    get_server = Mock(return_value=SimpleNamespace(protocol=protocol))
+    monkeypatch.setattr(mcp_server, "get_mcp_server", get_server)
+    return get_server, list_tools
 
 
 @dataclass
@@ -531,6 +533,32 @@ async def test_render_is_forced_dry_and_preserves_arguments(
 
 
 @pytest.mark.asyncio
+async def test_render_reuses_active_protocol_for_catalog_matching(
+    user_catalogs: dict[int, UserCatalog],
+    catalog_protocol_stub: tuple[Mock, AsyncMock],
+) -> None:
+    await _seed_review_skill(user_catalogs[1].service)
+    _get_server, list_tools = catalog_protocol_stub
+    used_active_protocol = asyncio.Event()
+
+    async def active_listing(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        used_active_protocol.set()
+        return {"tools": [{"name": "rag.search", "canExecute": True}]}
+
+    list_tools.side_effect = active_listing
+    module = await _module()
+
+    result = await module.execute_tool(
+        "skills.render",
+        {"skill_name": "review-paper"},
+        context=user_catalogs[1].context,
+    )
+
+    assert used_active_protocol.is_set()
+    assert result["catalog_matches"] == ["rag.search"]
+
+
+@pytest.mark.asyncio
 async def test_render_matches_exact_catalog_and_preserves_declaration_order(
     user_catalogs: dict[int, UserCatalog],
     monkeypatch: pytest.MonkeyPatch,
@@ -582,7 +610,7 @@ async def test_render_matches_exact_catalog_and_preserves_declaration_order(
     list_tools.assert_awaited_once_with({}, user_catalogs[1].context)
 
 
-@pytest.mark.parametrize("failure_point", ["construction", "listing"])
+@pytest.mark.parametrize("failure_point", ["resolution", "listing"])
 @pytest.mark.asyncio
 async def test_catalog_matching_failure_preserves_successful_render(
     user_catalogs: dict[int, UserCatalog],
@@ -592,7 +620,7 @@ async def test_catalog_matching_failure_preserves_successful_render(
 ) -> None:
     await _seed_review_skill(user_catalogs[1].service)
     factory, list_tools = catalog_protocol_stub
-    if failure_point == "construction":
+    if failure_point == "resolution":
         factory.side_effect = RuntimeError("SENTINEL_PRIVATE_DETAIL")
     else:
         list_tools.side_effect = RuntimeError("SENTINEL_PRIVATE_DETAIL")

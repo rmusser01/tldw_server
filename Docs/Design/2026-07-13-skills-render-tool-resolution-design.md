@@ -155,9 +155,10 @@ Malformed descriptors are ignored. A malformed top-level response or non-list
    the existing response fields, and applies the rendered-output limit.
 4. The request-scoped service lifecycle closes the Skills database.
 5. No valid declaration strings returns `catalog_matches: []` immediately.
-6. Otherwise, instantiate the existing protocol and call
+6. Otherwise, reuse the active server protocol and call
    `_handle_tools_list({}, context)` once with the same `RequestContext`,
-   bounded by the smaller of the Skills module timeout and two seconds.
+   bounded by the smaller of the Skills module timeout and two seconds. Do not
+   construct a protocol per render.
 7. Validate the top-level result, match eligible descriptors, and append
    `catalog_matches`.
 8. A whole-lookup exception returns `catalog_matches: null` without changing
