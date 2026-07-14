@@ -45,7 +45,7 @@
 
 **Tests**: `test_skills_module.py` render tests.
 
-**Status**: Not Started
+**Status**: Complete
 
 ### Task 1.1: Lock equivalence and replace the executor call
 
@@ -57,7 +57,7 @@
 - Consumes: `SkillExecutor.substitute_arguments(content: str, arguments: str) -> str`.
 - Produces: the existing eight-field render dictionary with normalized `declared_tools`.
 
-- [ ] **Step 1: Write failing direct-render tests**
+- [x] **Step 1: Write failing direct-render tests**
 
 Import `Mock`, remove the now-unused `SkillExecutionResult` import, and change the existing render test to install:
 
@@ -109,7 +109,7 @@ async def test_render_ignores_non_string_and_blank_parsed_declarations(
     assert result["declared_tools"] == ["rag.search"]
 ```
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 ```bash
 source ../../.venv/bin/activate
@@ -118,7 +118,7 @@ python -m pytest -q tldw_Server_API/app/core/MCP_unified/tests/test_skills_modul
 
 Expected: the first test reaches `execute()`; the second raises on non-string `.strip()`.
 
-- [ ] **Step 3: Implement direct rendering**
+- [x] **Step 3: Implement direct rendering**
 
 Replace the executor block in `_render_skill()` with:
 
@@ -156,7 +156,7 @@ Replace the executor block in `_render_skill()` with:
 
 Update `test_render_rechecks_visibility_after_verified_load` to patch and assert against `substitute_arguments` rather than obsolete `execute()` behavior.
 
-- [ ] **Step 4: Verify green and commit**
+- [x] **Step 4: Verify green and commit**
 
 ```bash
 source ../../.venv/bin/activate
@@ -177,7 +177,7 @@ Expected: the complete module suite passes with the old response shape.
 
 **Tests**: `test_skills_module.py` matching tests.
 
-**Status**: Not Started
+**Status**: In Progress
 
 ### Task 2.1: Add the field and happy-path resolver
 
