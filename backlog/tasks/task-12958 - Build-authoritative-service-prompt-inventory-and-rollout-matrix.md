@@ -4,7 +4,7 @@ title: Build authoritative service prompt inventory and rollout matrix
 status: Done
 assignee: []
 created_date: '2026-07-14 00:15'
-updated_date: '2026-07-14 00:22'
+updated_date: '2026-07-14 00:26'
 labels:
   - prompts
   - inventory
@@ -41,6 +41,8 @@ Execute Docs/superpowers/plans/2026-07-12-service-prompts-01-inventory.md and th
 Recreated with a collision-free current-dev task ID. Final review found no Critical, Important, or Minor issues. Full pytest and frontend shards were intentionally skipped for this planning-only work at requester direction; Bandit is not applicable because no Python changed.
 
 Fresh current-dev verification: Node regression tests 5/5; validator and test syntax pass; inventory validator reports 232 rows, 73 eligible IDs/contracts, exact 73/75/84 decisions, exact six protected Jobs IDs, 636 source spans, 880 line components, exact 16/32/2/21/2 rollout coverage, zero unresolved references, and no errors; all imported task references use the current collision-free IDs; git diff --check passes.
+
+Draft PR: https://github.com/rmusser01/tldw_server/pull/2726. The PR remains draft until the requester supplies the required human-written Change summary.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
