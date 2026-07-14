@@ -587,6 +587,7 @@ async def test_catalog_matching_failure_preserves_successful_render(
     user_catalogs: dict[int, UserCatalog],
     catalog_protocol_stub: tuple[Mock, AsyncMock],
     failure_point: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     await _seed_review_skill(user_catalogs[1].service)
     factory, list_tools = catalog_protocol_stub
@@ -595,18 +596,14 @@ async def test_catalog_matching_failure_preserves_successful_render(
     else:
         list_tools.side_effect = RuntimeError("SENTINEL_PRIVATE_DETAIL")
     warning = Mock()
-    original_logger = skills_module.logger
-    skills_module.logger = SimpleNamespace(warning=warning)
+    monkeypatch.setattr(skills_module, "logger", SimpleNamespace(warning=warning))
     module = await _module()
 
-    try:
-        result = await module.execute_tool(
-            "skills.render",
-            {"skill_name": "review-paper", "arguments": "issue 42"},
-            context=user_catalogs[1].context,
-        )
-    finally:
-        skills_module.logger = original_logger
+    result = await module.execute_tool(
+        "skills.render",
+        {"skill_name": "review-paper", "arguments": "issue 42"},
+        context=user_catalogs[1].context,
+    )
 
     assert result["rendered_prompt"] == "Review issue 42"
     assert result["catalog_matches"] is None
