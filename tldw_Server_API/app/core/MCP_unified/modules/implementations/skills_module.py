@@ -289,23 +289,33 @@ class SkillsModule(BaseModule):
         ):
             raise SkillsMCPNotFoundError("skill_not_found")
 
-        result = await self._executor.execute(
-            skill_data,
-            args.get("arguments", ""),
-            context=None,
-            dry_run=True,
+        raw_declared_tools = skill_data.get("allowed_tools")
+        declared_tools = (
+            [
+                item.strip()
+                for item in raw_declared_tools
+                if isinstance(item, str) and item.strip()
+            ]
+            if isinstance(raw_declared_tools, list)
+            else []
         )
-        if len(result.rendered_prompt) > self._max_rendered_skill_chars:
+        rendered_prompt = self._executor.substitute_arguments(
+            skill_data.get("content", ""),
+            args.get("arguments", ""),
+        )
+        if len(rendered_prompt) > self._max_rendered_skill_chars:
             raise SkillsMCPRenderedTooLargeError(
                 f"rendered_skill_too_large: limit={self._max_rendered_skill_chars}"
             )
 
         return {
-            "skill_name": result.skill_name,
-            "rendered_prompt": result.rendered_prompt,
-            "declared_tools": list(result.allowed_tools),
-            "model_override": result.model_override,
-            "execution_mode": result.execution_mode,
+            "skill_name": skill_data.get("name", "unknown"),
+            "rendered_prompt": rendered_prompt,
+            "declared_tools": declared_tools,
+            "model_override": skill_data.get("model"),
+            "execution_mode": "fork"
+            if skill_data.get("context", "inline") == "fork"
+            else "inline",
             "supporting_files_omitted": bool(skill_data.get("supporting_files")),
             "dry_run": True,
             "version": skill_data.get("version"),

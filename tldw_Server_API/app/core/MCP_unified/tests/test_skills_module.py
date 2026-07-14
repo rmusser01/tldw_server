@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from loguru import logger
@@ -24,7 +24,7 @@ from tldw_Server_API.app.core.MCP_unified.modules.implementations.skills_module 
 )
 from tldw_Server_API.app.core.MCP_unified.protocol_types import RequestContext
 from tldw_Server_API.app.core.Skills.exceptions import SkillNotFoundError
-from tldw_Server_API.app.core.Skills.skill_executor import SkillExecutionResult, SkillExecutor
+from tldw_Server_API.app.core.Skills.skill_executor import SkillExecutor
 from tldw_Server_API.app.core.Skills.skills_service import (
     SKILL_NAME_PATTERN,
     SkillMetadata,
@@ -487,17 +487,10 @@ async def test_render_is_forced_dry_and_preserves_arguments(
 ) -> None:
     await _seed_review_skill(user_catalogs[1].service)
     module = await _module()
-    execute = AsyncMock(
-        return_value=SkillExecutionResult(
-            skill_name="review-paper",
-            rendered_prompt="Review --formal /* literal */\nnext",
-            allowed_tools=["rag.search"],
-            model_override=None,
-            execution_mode="inline",
-            dry_run=True,
-        )
-    )
+    execute = AsyncMock(side_effect=AssertionError("render must not call execute"))
+    substitute = Mock(wraps=module._executor.substitute_arguments)
     monkeypatch.setattr(module._executor, "execute", execute)
+    monkeypatch.setattr(module._executor, "substitute_arguments", substitute)
 
     result = await module.execute_tool(
         "skills.render",
@@ -515,10 +508,39 @@ async def test_render_is_forced_dry_and_preserves_arguments(
         "dry_run": True,
         "version": 1,
     }
-    execute.assert_awaited_once()
-    call = execute.await_args
-    assert call.args[1] == "--formal /* literal */\nnext"
-    assert call.kwargs == {"context": None, "dry_run": True}
+    substitute.assert_called_once_with(
+        "Review $ARGUMENTS",
+        "--formal /* literal */\nnext",
+    )
+    execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_render_ignores_non_string_and_blank_parsed_declarations(
+    user_catalogs: dict[int, UserCatalog],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _seed_review_skill(user_catalogs[1].service)
+    original_get_skill = SkillsService.get_skill
+
+    async def legacy_get_skill(
+        self: SkillsService,
+        name: str,
+        *,
+        enforce_integrity: bool = True,
+    ) -> dict[str, Any]:
+        skill = await original_get_skill(self, name, enforce_integrity=enforce_integrity)
+        skill["allowed_tools"] = [" rag.search ", 7, None, " "]
+        return skill
+
+    monkeypatch.setattr(SkillsService, "get_skill", legacy_get_skill)
+    module = await _module()
+    result = await module.execute_tool(
+        "skills.render",
+        {"skill_name": "review-paper"},
+        context=user_catalogs[1].context,
+    )
+    assert result["declared_tools"] == ["rag.search"]
 
 
 @pytest.mark.asyncio
@@ -688,7 +710,8 @@ async def test_render_rechecks_visibility_after_verified_load(
 
     monkeypatch.setattr(SkillsService, "get_skill", raced_get_skill)
     module = await _module()
-    monkeypatch.setattr(module._executor, "execute", AsyncMock())
+    substitute = Mock(wraps=module._executor.substitute_arguments)
+    monkeypatch.setattr(module._executor, "substitute_arguments", substitute)
 
     with pytest.raises(ValueError, match="^skill_not_found$"):
         await module.execute_tool(
@@ -696,7 +719,7 @@ async def test_render_rechecks_visibility_after_verified_load(
             {"skill_name": "review-paper"},
             context=user_catalogs[1].context,
         )
-    module._executor.execute.assert_not_awaited()
+    substitute.assert_not_called()
 
 
 @pytest.mark.asyncio
