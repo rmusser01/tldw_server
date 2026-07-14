@@ -587,7 +587,7 @@ git commit -m "chore: close TASK-2294.1 verification"
 
 **Tests**: Focused nullable-flag regressions, complete Skills service/module suites, lint, Bandit, and PR check review.
 
-**Status**: In Progress
+**Status**: Complete
 
 ## Plan Self-Review Checklist
 
