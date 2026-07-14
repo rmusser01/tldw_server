@@ -23,7 +23,7 @@
 
 ### Task 1: Canonical identity, strict active scope, OAuth CAS, and bounded cleanup
 
-**Status:** In Progress
+**Status:** Complete
 
 **Goal:** Make credential identity, precedence, revocation, and cleanup deterministic under aliases and concurrency.
 
@@ -61,56 +61,56 @@
 - `AuthnzUserProviderSecretsRepo.update_secret_if_active_and_unchanged(..., expected_encrypted_blob: str) -> bool` updates only the exact still-active row.
 - Runtime usage persistence receives a bounded, monkeypatchable drain deadline and releases runtime cache references even when the database task does not cooperate.
 
-- [ ] **Step 1: Write alias and strict-scope regressions**
+- [x] **Step 1: Write alias and strict-scope regressions**
 
   Add tests proving `oai`/`openai` and `openai-compatible`/`custom-openai-api` share one runtime resolution; canonical storage wins; one legacy alias row is readable; multiple conflicting alias rows fail closed; and a singleton team without `active_team_id` is not selected ahead of an active organization. Add Chat/RAG parity assertions for malformed and non-member active IDs.
 
-- [ ] **Step 2: Run the identity/scope tests and verify RED**
+- [x] **Step 2: Run the identity/scope tests and verify RED**
 
   Run:
   `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest -q tldw_Server_API/tests/AuthNZ_Unit/test_byok_helpers.py tldw_Server_API/tests/AuthNZ_Unit/test_provider_credential_runtime.py tldw_Server_API/tests/RAG_NEW/unit/test_rag_provider_credentials.py`
 
   Expected: the new registered-alias and singleton-inactive-team assertions fail against the current trim/lower and membership-list behavior.
 
-- [ ] **Step 3: Implement canonical identity and one shared trusted-scope derivation**
+- [x] **Step 3: Implement canonical identity and one shared trusted-scope derivation**
 
   Move the registry alias constants into the dependency-light identity module. Use canonical names for runtime cache, allowlist, fallback, and new writes. Query canonical storage first and legacy aliases only when canonical is absent; reject multiple legacy matches. Replace the duplicated Chat/RAG `_trusted_credential_runtime_scope` implementations with the shared strict helper.
 
-- [ ] **Step 4: Write OAuth refresh/revoke concurrency regressions**
+- [x] **Step 4: Write OAuth refresh/revoke concurrency regressions**
 
   Use `asyncio.Event` barriers to pause the token HTTP response after the active row reload, revoke/disconnect through the repository, release the response, and assert both runtime refresh and the explicit refresh endpoint discard the issued token without clearing `revoked_at`.
 
-- [ ] **Step 5: Run the OAuth tests and verify RED**
+- [x] **Step 5: Run the OAuth tests and verify RED**
 
   Run:
   `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest -q tldw_Server_API/tests/AuthNZ_Unit/test_byok_runtime.py -k 'oauth and (revok or disconnect or cas)'`
 
   Expected: the post-network revocation case reactivates the row through `upsert_secret` before the CAS implementation.
 
-- [ ] **Step 6: Implement repository compare-and-swap persistence**
+- [x] **Step 6: Implement repository compare-and-swap persistence**
 
   Add PostgreSQL and SQLite conditional updates matching `user_id`, canonical provider, `revoked_at IS NULL`, and the previously read `encrypted_blob`. Do not compare `updated_at`, because `touch_last_used` changes it. Runtime CAS loss raises bounded `invalid_provider_credentials`; the explicit endpoint returns its existing bounded conflict/not-found contract.
 
-- [ ] **Step 7: Write bounded usage-task cancellation regressions**
+- [x] **Step 7: Write bounded usage-task cancellation regressions**
 
   Add deterministic event-driven tests for a touch completing within the grace period, a non-cooperative touch exceeding it during repeated caller cancellation, and `close()` cancelling/abandoning the task while clearing `_usage_tasks` and credential cache references.
 
-- [ ] **Step 8: Run cancellation tests and verify RED**
+- [x] **Step 8: Run cancellation tests and verify RED**
 
   Run:
   `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest -q tldw_Server_API/tests/AuthNZ_Unit/test_provider_credential_runtime.py -k 'usage or mark_used or close'`
 
   Expected: the bounded tests time out because current code shields/gathers usage tasks indefinitely.
 
-- [ ] **Step 9: Implement bounded best-effort usage persistence and run Task 1 GREEN**
+- [x] **Step 9: Implement bounded best-effort usage persistence and run Task 1 GREEN**
 
   Use one drain helper from caller cancellation and runtime close. Permit normal completion inside the grace period; after the deadline cancel the usage task, stop awaiting it, clear runtime-owned references, and preserve caller cancellation. Run all Task 1 tests plus `git diff --check`.
 
-- [ ] **Step 9a: Close independent-review gaps for shared aliases, revocation, and listing**
+- [x] **Step 9a: Close independent-review gaps for shared aliases, revocation, and listing**
 
   Add RED regressions proving active team/org alias rows resolve canonically at the runtime boundary, revoked selected shared rows block every lower-precedence source, canonical rows win over one legacy row, multiple legacy rows fail closed, and legacy rows remain touchable/revocable. Add `/users/keys` response tests that fold canonical/legacy rows with runtime-equivalent conflict and revocation authority. Preserve unknown provider identifiers such as `foo_bar` unchanged. Implement the shared repository/endpoint fixes, then rerun Task 1's full fixed-seed union and both `concurrent` seeds.
 
-- [ ] **Step 10: Commit Task 1**
+- [x] **Step 10: Commit Task 1**
 
   Commit message: `fix(auth): harden provider identity and credential lifetime`
 
@@ -118,7 +118,7 @@
 
 ### Task 2: Preserve server fallback and adapter authentication/configuration contracts
 
-**Status:** Not Started
+**Status:** In Progress
 
 **Goal:** Ensure the runtime passes the exact server-selected credential, endpoint, auth mode, and safe provider configuration to real adapters.
 
