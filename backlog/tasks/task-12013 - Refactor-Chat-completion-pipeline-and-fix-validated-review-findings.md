@@ -44,7 +44,7 @@ modified_files:
 - tldw_Server_API/tests/Chat/integration/test_chat_endpoint_auto_routing.py
 - tldw_Server_API/tests/Chat_NEW/integration/test_chat_command_audit.py
 - tldw_Server_API/tests/Chat_NEW/unit/test_command_router.py
-updated_date: 2026-07-14 07:06
+updated_date: 2026-07-14 15:39
 ---
 
 ## Description
@@ -100,6 +100,7 @@ Task 13 verification update 2026-06-24: Wide Chat regression rerun after fixing 
 2026-07-09 latest-dev and PR review follow-up: rebased the three PR commits onto origin/dev at 20d96055e8. Resolved upstream overlap in chat_service.py by retaining current provider/model normalization and applying safe exception summaries; retained the current async skill-tool endpoint test behavior; combined upstream structured SSE parsing with the branch's multi-choice streaming guards. Re-queried PR #2516 and found no review or issue comments newer than the prior 2026-06-26 responses. Fresh verification on the rebased tree: primary PR regression slice 88 passed; streaming/provider conflict-sensitive slice 75 passed, 1 skipped; compileall over changed Chat/API production files passed; Bandit over changed Chat/API production files reported 0 findings in /tmp/bandit_chat_completion_pipeline_latest_dev.json.
 2026-07-09 independent completion-review follow-up: review found that the original refactor commit had replaced current-dev bulk_generate behavior with an older implementation and reduced its regression test to a no-op. Restored the current-dev bulk generation contract, including provider/model/API-key/app-config fallback and overrides, DocumentType normalization, asyncio.to_thread execution, and llm_config initialization. TDD evidence: restored regression test failed before the fix with a missing api_key TypeError, then passed after the fix. Verification after remediation: single regression 1 passed; full document generator file 23 passed; primary PR regression slice 88 passed; compileall passed; Bandit on document_generator.py reported 0 findings in /tmp/bandit_chat_document_generator_followup.json.
 2026-07-14 final latest-dev refresh: origin/dev advanced to 38bc70fd02 with no intervening Chat changes. Rebased all five PR commits cleanly onto that base. Fresh combined verification on the final rebased tree: 163 passed, 1 skipped across the primary PR, streaming, and provider/model conflict-sensitive tests; compileall over changed Chat/API production files passed; Bandit over changed Chat/API production files reported 0 findings in /tmp/bandit_chat_completion_pipeline_final_rebase.json.
+2026-07-14 final base correction and refresh: the prior rebase note named ancestor 38bc70fd02, while the rebase reflog confirms the actual checkout tip was its descendant 83428eff33. origin/dev subsequently advanced to f05fe296db with no new Chat changes, and all six PR commits were replayed cleanly onto f05fe296db. Fresh final verification: 163 passed, 1 skipped across the combined PR/conflict-sensitive slice; compileall passed; Bandit over changed Chat/API production files reported 0 findings in /tmp/bandit_chat_completion_pipeline_f05_rebase.json.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
