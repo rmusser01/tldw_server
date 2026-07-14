@@ -104,10 +104,10 @@ architecture.
 
 ## Follow-Up Issues
 
-- [#2605](https://github.com/rmusser01/tldw_server/issues/2605): certify the
-  repeatable final Research Workspace UAT runner or accepted full fallback. The
-  latest run has no product failures but remains environment-blocked on the
-  Sandbox run API capability.
+- [#2605](https://github.com/rmusser01/tldw_server/issues/2605): completed the
+  repeatable final Research Workspace UAT runner evidence. The latest run has no
+  product failures, and the remaining Sandbox run API capability is documented
+  as an explicit backend-profile prerequisite.
 - [#2606](https://github.com/rmusser01/tldw_server/issues/2606): complete
   beginner/no-key UAT certification.
 - [#2607](https://github.com/rmusser01/tldw_server/issues/2607): complete
@@ -115,8 +115,8 @@ architecture.
 - [#2608](https://github.com/rmusser01/tldw_server/issues/2608): live recheck
   destructive and recovery actions.
 
-All four follow-up issues remain open. Their issue records and the linked UAT
-matrix are authoritative for current completion state.
+#2605 is complete. #2606, #2607, and #2608 remain open; their issue records and
+the linked UAT matrix are authoritative for current completion state.
 
 ## Guardrails
 
