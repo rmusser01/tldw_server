@@ -4,7 +4,7 @@ title: Implement shared WebUI and extension per-video playlist ingestion
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-14 06:27'
+updated_date: '2026-07-14 06:29'
 labels:
   - webui
   - browser-extension
@@ -86,6 +86,8 @@ Task 5 second formal-review remediation completed test-first; Step 5 and final a
 Task 5 bounded-transport remediation completed test-first; both final re-reviews remain pending. The 500-item unknown-cursor RED observed 1002 authoritative REST requests instead of the expected two because every retained occurrence event reloaded the complete run. Reattachment now returns the complete authoritative poll snapshot whenever no trustworthy event high-water mark exists and does not open SSE in that state; the stale-terminal control confirms retained events cannot weaken authoritative state. Final focused five-file gate: 142/142. Expanded nine-file gate: 248/248. Repository-pinned scoped ESLint --quiet exits 0 with only the existing Next pages-directory informational output. Full TypeScript remains skipped under the Task 1 three-attempt baseline cap; Bandit N/A for TypeScript-only changes. No files staged or committed.
 
 Task 5 final formal specification/code-quality re-reviews approved with no actionable findings. Reviewers independently confirmed restored-create fail-closed recovery, bounded dedicated submission occurrence tracking, authoritative unsent-only cleanup with retryable cancellation failure, bounded unknown-cursor polling, stale-replay safety, and cursor-backed SSE correctness. One reviewer verified focused 142/142 and expanded 248/248; the other independently ran nine-file verification at 254/254. Both reported scoped ESLint --quiet and git diff --check clean. Step 5 remains open for the root-owned commit; no files staged or committed by this task agent.
+
+Task 5 root commit: 7de35d73c8 (feat: submit quick ingest through shared runs). Root verification before commit: expanded nine-file Vitest 248/248, repository-pinned ESLint --quiet across every changed TypeScript file exit 0, git diff --check and cached diff check clean. Both formal reviewers approved with no actionable findings. Task 6 remains next; TASK-12113 stays In Progress.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
