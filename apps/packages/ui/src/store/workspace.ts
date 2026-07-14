@@ -1260,6 +1260,25 @@ const parsePersistedWorkspaceEnvelope = (
   return { state: candidateState, version }
 }
 
+const shouldSuppressInitialEmptyWorkspaceWrite = (
+  name: string,
+  serializedValue: string
+): boolean => {
+  if (
+    name !== WORKSPACE_STORAGE_KEY ||
+    localStorage.getItem(name) !== null
+  ) {
+    return false
+  }
+
+  const envelope = parsePersistedWorkspaceEnvelope(serializedValue)
+  if (!envelope) return false
+
+  return !hasPersistableWorkspaceIndexState(
+    migratePersistedWorkspaceState(envelope.state)
+  )
+}
+
 const isWorkspaceSplitIndexEnvelope = (
   candidate: unknown
 ): candidate is WorkspaceSplitIndexEnvelope => {
@@ -1883,11 +1902,13 @@ export const createWorkspaceStorage = (
     },
     setItem: async (name: string, value: string): Promise<void> => {
       try {
-        const handledBySplitStorage = splitStorageEnabled
-          ? await writeSplitWorkspacePersistence(name, value, indexedDbAdapter)
-          : false
-        if (!handledBySplitStorage) {
-          localStorage.setItem(name, value)
+        if (!shouldSuppressInitialEmptyWorkspaceWrite(name, value)) {
+          const handledBySplitStorage = splitStorageEnabled
+            ? await writeSplitWorkspacePersistence(name, value, indexedDbAdapter)
+            : false
+          if (!handledBySplitStorage) {
+            localStorage.setItem(name, value)
+          }
         }
         broadcastWorkspaceStorageUpdate(name)
       } catch (error) {
@@ -2179,7 +2200,7 @@ export interface WorkspaceSourceTransferExecutionResult
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface WorkspaceIdentityActions {
-  initializeWorkspace: (name?: string) => void
+  initializeWorkspace: (name?: string) => string
   setWorkspaceName: (name: string) => void
   loadWorkspace: (config: WorkspaceConfig) => void
 }

@@ -639,6 +639,16 @@ describe('WebLayout /chat scroll contract', () => {
     expect(await screen.findByTestId('tutorial-runner')).toBeInTheDocument();
   });
 
+  it('keeps the shared tutorial runner mounted when global chrome is hidden', async () => {
+    render(
+      <OptionLayout hideHeader hideSidebar>
+        <div data-testid="route-content">No-key research workspace route</div>
+      </OptionLayout>
+    );
+
+    expect(await screen.findByTestId('tutorial-runner')).toBeInTheDocument();
+  });
+
   it('preserves non-overridden media query exports in the test mock', async () => {
     const mediaQueryModule = await import('@/hooks/useMediaQuery');
 

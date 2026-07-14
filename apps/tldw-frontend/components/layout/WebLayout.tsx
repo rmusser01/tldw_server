@@ -595,11 +595,9 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
           {!hideHeader && <CommandPalette {...commandPaletteProps} />}
 
           {/* Shared walkthrough runner for route-level tour controls */}
-          {!hideHeader && (
-            <Suspense fallback={null}>
-              <TutorialRunner />
-            </Suspense>
-          )}
+          <Suspense fallback={null}>
+            <TutorialRunner />
+          </Suspense>
 
           {/* Keyboard Shortcuts Help Modal - triggered by ? */}
           {!hideHeader && (

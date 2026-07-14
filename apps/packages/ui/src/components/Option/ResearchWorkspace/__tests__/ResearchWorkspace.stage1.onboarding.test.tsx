@@ -6,11 +6,17 @@ import { ResearchWorkspace } from "../index"
 const ONBOARDING_KEY = "tldw:research-workspace:onboarding-dismissed:v1"
 const {
   onboardingStorageState,
+  mockMessageApi,
   mockWorkspaceStorageGetItem,
   mockWorkspaceStorageSetItem,
 } = vi.hoisted(() => ({
   onboardingStorageState: {
     value: undefined as string | undefined,
+  },
+  mockMessageApi: {
+    info: vi.fn(),
+    success: vi.fn(),
+    destroy: vi.fn(),
   },
   mockWorkspaceStorageGetItem: vi.fn(async (_key: string) => null as string | null),
   mockWorkspaceStorageSetItem: vi.fn(async (_key: string, _value: string) => undefined),
@@ -74,6 +80,17 @@ vi.mock("react-i18next", () => ({
     },
   }),
 }))
+
+vi.mock("antd", async () => {
+  const actual = await vi.importActual<typeof import("antd")>("antd")
+  return {
+    ...actual,
+    message: {
+      ...actual.message,
+      useMessage: () => [mockMessageApi, null] as const,
+    },
+  }
+})
 
 vi.mock("@/hooks/useMediaQuery", () => ({
   useMobile: () => testState.isMobile,
@@ -188,7 +205,7 @@ describe("ResearchWorkspace stage 1 onboarding walkthrough", () => {
     expect(mockStartTutorial).not.toHaveBeenCalled()
   })
 
-  it("starts the tour, shows visible feedback, and persists dismissal when user clicks Start tour", async () => {
+  it("starts the tour with transient feedback and persists dismissal", async () => {
     const user = userEvent.setup()
     render(<ResearchWorkspace />)
 
@@ -201,9 +218,12 @@ describe("ResearchWorkspace stage 1 onboarding walkthrough", () => {
     })
     expect(onboardingStorageState.value).toBe("1")
     expect(screen.queryByText("Start tour")).not.toBeInTheDocument()
+    expect(mockMessageApi.info).toHaveBeenCalledWith(
+      "Tour started. Follow the highlighted steps."
+    )
     expect(
-      screen.getByText("Tour started. Follow the highlighted steps.")
-    ).toBeInTheDocument()
+      screen.queryByText("Tour started. Follow the highlighted steps.")
+    ).not.toBeInTheDocument()
   })
 
   it("persists dismissal without starting tour when user clicks Dismiss", async () => {

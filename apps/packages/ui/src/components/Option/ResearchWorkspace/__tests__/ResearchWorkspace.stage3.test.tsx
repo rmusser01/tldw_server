@@ -401,6 +401,9 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     ensureLocalStorage()
+    delete (window as Window & {
+      __tldwResearchWorkspaceFreshInitialization?: Set<string>
+    }).__tldwResearchWorkspaceFreshInitialization
     ;(tldwClient as unknown as { getWorkspaceContext?: unknown }).getWorkspaceContext =
       undefined
     mockRunResearchWorkspaceMigration.mockResolvedValue({
@@ -520,6 +523,85 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
         name: "Review migration recovery details"
       })
     ).not.toBeInTheDocument()
+  })
+
+  it("does not migrate current persistence created by first-run initialization", async () => {
+    testState.workspaceId = ""
+    testState.workspaceName = ""
+    testState.initializeWorkspace.mockReturnValueOnce("workspace-1")
+
+    const { unmount } = render(<ResearchWorkspace />)
+
+    await waitFor(() => {
+      expect(testState.initializeWorkspace).toHaveBeenCalledTimes(1)
+    })
+    unmount()
+
+    window.localStorage.setItem(
+      "tldw-workspace",
+      JSON.stringify({
+        schema: "workspace_split_v1",
+        state: { workspaceId: "workspace-1", workspaceIds: ["workspace-1"] }
+      })
+    )
+    testState.workspaceId = "workspace-1"
+    testState.workspaceName = "New Research"
+    render(<ResearchWorkspace />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId("workspace-status-bar")).toBeInTheDocument()
+    })
+    expect(mockRunResearchWorkspaceMigration).not.toHaveBeenCalled()
+    expect(
+      screen.queryByText("Migration failed before local deletion")
+    ).not.toBeInTheDocument()
+  })
+
+  it("still migrates a different workspace discovered after fresh initialization", async () => {
+    testState.workspaceId = ""
+    testState.workspaceName = ""
+    testState.initializeWorkspace.mockReturnValueOnce("workspace-fresh")
+
+    const { unmount } = render(<ResearchWorkspace />)
+
+    await waitFor(() => {
+      expect(testState.initializeWorkspace).toHaveBeenCalledTimes(1)
+    })
+    unmount()
+
+    window.localStorage.setItem(
+      "tldw-workspace",
+      JSON.stringify({
+        schema: "workspace_split_v1",
+        state: {
+          workspaceId: "workspace-imported",
+          workspaceIds: ["workspace-imported"]
+        }
+      })
+    )
+    testState.workspaceId = "workspace-imported"
+    testState.workspaceName = "Imported Research"
+    render(<ResearchWorkspace />)
+
+    await waitFor(() => {
+      expect(mockRunResearchWorkspaceMigration).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  it("initializes a missing workspace once when StrictMode replays effects", async () => {
+    testState.workspaceId = ""
+    testState.workspaceName = ""
+
+    render(
+      <React.StrictMode>
+        <ResearchWorkspace />
+      </React.StrictMode>
+    )
+
+    await waitFor(() => {
+      expect(testState.initializeWorkspace).toHaveBeenCalled()
+    })
+    expect(testState.initializeWorkspace).toHaveBeenCalledTimes(1)
   })
 
   it("runs legacy workspace migration once and shows a compact recovery status when local data is retained", async () => {
