@@ -14,6 +14,7 @@ references:
 - TASK-12020.13
 - TASK-12020.28
 - Docs/Reviews/RESEARCH_WORKSPACE_LIVE_UAT_MATRIX_2026_05_25.md
+- https://github.com/rmusser01/tldw_server/pull/2731
 documentation:
 - Docs/Reviews/RESEARCH_WORKSPACE_LIVE_UAT_MATRIX_2026_05_25.md
 - Docs/Reviews/assets/2026-07-14-research-workspace-beginner-no-key-uat/README.md
