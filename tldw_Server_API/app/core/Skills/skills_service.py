@@ -667,13 +667,17 @@ class SkillsService:
     def _metadata_from_row(self, row: dict[str, Any]) -> SkillMetadata:
         created_at = row.get("created_at")
         last_modified = row.get("last_modified")
+        disable_model_invocation = row.get("disable_model_invocation")
+        user_invocable = row.get("user_invocable")
         return SkillMetadata(
             id=row.get("uuid") or row.get("id"),
             name=row.get("name") or "",
             description=row.get("description"),
             argument_hint=row.get("argument_hint"),
-            disable_model_invocation=bool(row.get("disable_model_invocation", False)),
-            user_invocable=bool(row.get("user_invocable", True)),
+            disable_model_invocation=(
+                False if disable_model_invocation is None else bool(disable_model_invocation)
+            ),
+            user_invocable=True if user_invocable is None else bool(user_invocable),
             allowed_tools=row.get("allowed_tools"),
             model=row.get("model"),
             context=row.get("context", "inline"),
@@ -894,9 +898,11 @@ class SkillsService:
     def _is_model_visible_registry_row(self, row: dict[str, Any]) -> bool:
         """Return whether a registry row is eligible for model-facing discovery."""
         name = str(row.get("name") or "")
+        user_invocable = row.get("user_invocable")
+        disable_model_invocation = row.get("disable_model_invocation")
         return (
-            bool(row.get("user_invocable", True))
-            and not bool(row.get("disable_model_invocation", False))
+            (True if user_invocable is None else bool(user_invocable))
+            and not (False if disable_model_invocation is None else bool(disable_model_invocation))
             and bool(name)
             and self._is_skill_allowed(name, purpose="skill_discovery")
         )
@@ -917,9 +923,16 @@ class SkillsService:
             limit=None,
             offset=0,
         )
-        visible_rows = [row for row in rows if self._is_model_visible_registry_row(row)]
-        total = len(visible_rows)
-        return [self._metadata_from_row(row) for row in visible_rows[offset : offset + limit]], total
+        page: list[SkillMetadata] = []
+        total = 0
+        page_end = offset + limit
+        for row in rows:
+            if not self._is_model_visible_registry_row(row):
+                continue
+            if offset <= total < page_end:
+                page.append(self._metadata_from_row(row))
+            total += 1
+        return page, total
 
     async def list_model_visible_skills_page(
         self,

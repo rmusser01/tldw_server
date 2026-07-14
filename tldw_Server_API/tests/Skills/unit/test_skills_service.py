@@ -215,6 +215,36 @@ Skill content here.
         assert integrity_calls == ["visible"]
 
     @pytest.mark.asyncio
+    async def test_model_visible_page_applies_schema_defaults_to_null_flags(
+        self,
+        service,
+        monkeypatch,
+    ):
+        """Legacy nullable registry flags retain their documented visibility defaults."""
+        monkeypatch.setattr(service, "_sync_registry_async", AsyncMock())
+        monkeypatch.setattr(
+            service._get_db(),
+            "list_skill_registry",
+            lambda **_kwargs: [
+                {
+                    "uuid": "legacy-null-flags",
+                    "name": "legacy-visible",
+                    "user_invocable": None,
+                    "disable_model_invocation": None,
+                    "version": 1,
+                }
+            ],
+        )
+        monkeypatch.setattr(service, "_is_skill_allowed", lambda *_args, **_kwargs: True)
+
+        items, total = await service.list_model_visible_skills_page()
+
+        assert total == 1
+        assert [item.name for item in items] == ["legacy-visible"]
+        assert items[0].user_invocable is True
+        assert items[0].disable_model_invocation is False
+
+    @pytest.mark.asyncio
     async def test_get_model_visible_skill_metadata_hides_non_model_skills(self, service):
         """Model-disabled skills are indistinguishable from missing catalog entries."""
         await service.create_skill(

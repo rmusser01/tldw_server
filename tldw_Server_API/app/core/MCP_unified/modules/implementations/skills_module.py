@@ -12,6 +12,12 @@ from loguru import logger
 
 from ....Context_Integrity.resolver import ContextIntegrityBlocked
 from ....DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from ....exceptions import (
+    SkillsMCPContextIntegrityError,
+    SkillsMCPDatabaseCloseError,
+    SkillsMCPNotFoundError,
+    SkillsMCPRenderedTooLargeError,
+)
 from ....Skills.exceptions import SkillNotFoundError
 from ....Skills.runtime_metadata import build_skill_runtime_metadata
 from ....Skills.skill_executor import SkillExecutor
@@ -27,22 +33,6 @@ HARD_MAX_RENDERED_SKILL_CHARS = 100_000
 
 T = TypeVar("T")
 ServiceOperation = Callable[[SkillsService], Awaitable[T]]
-
-
-class _SkillNotFound(ValueError):
-    """Bounded public not-found response."""
-
-
-class _RenderedSkillTooLarge(ValueError):
-    """Bounded public rendered-output rejection."""
-
-
-class _ContextIntegrityBlocked(PermissionError):
-    """Bounded public render-time integrity rejection."""
-
-
-class _DatabaseCloseFailed(Exception):
-    """Internal marker for a logged request-scoped database close failure."""
 
 
 def _clamped_integer(value: Any, *, default: int, minimum: int, maximum: int) -> int:
@@ -278,7 +268,7 @@ class SkillsModule(BaseModule):
         try:
             metadata = await service.get_model_visible_skill_metadata(args["name"])
         except ContextIntegrityBlocked:
-            raise _SkillNotFound("skill_not_found") from None
+            raise SkillsMCPNotFoundError("skill_not_found") from None
         return self._format_metadata(metadata)
 
     async def _render_skill(
@@ -290,12 +280,14 @@ class SkillsModule(BaseModule):
         try:
             await service.get_model_visible_skill_metadata(skill_name)
         except ContextIntegrityBlocked:
-            raise _SkillNotFound("skill_not_found") from None
+            raise SkillsMCPNotFoundError("skill_not_found") from None
         skill_data = await service.get_skill(skill_name)
-        if not bool(skill_data.get("user_invocable", True)) or bool(
-            skill_data.get("disable_model_invocation", False)
+        user_invocable = skill_data.get("user_invocable")
+        disable_model_invocation = skill_data.get("disable_model_invocation")
+        if (user_invocable is not None and not bool(user_invocable)) or (
+            disable_model_invocation is not None and bool(disable_model_invocation)
         ):
-            raise _SkillNotFound("skill_not_found")
+            raise SkillsMCPNotFoundError("skill_not_found")
 
         result = await self._executor.execute(
             skill_data,
@@ -304,7 +296,7 @@ class SkillsModule(BaseModule):
             dry_run=True,
         )
         if len(result.rendered_prompt) > self._max_rendered_skill_chars:
-            raise _RenderedSkillTooLarge(
+            raise SkillsMCPRenderedTooLargeError(
                 f"rendered_skill_too_large: limit={self._max_rendered_skill_chars}"
             )
 
@@ -361,17 +353,17 @@ class SkillsModule(BaseModule):
             )
         except asyncio.CancelledError:
             raise
-        except _SkillNotFound:
+        except SkillsMCPNotFoundError:
             raise
-        except _RenderedSkillTooLarge:
+        except SkillsMCPRenderedTooLargeError:
             raise
-        except _ContextIntegrityBlocked:
+        except SkillsMCPContextIntegrityError:
             raise
         except SkillNotFoundError:
-            raise _SkillNotFound("skill_not_found") from None
+            raise SkillsMCPNotFoundError("skill_not_found") from None
         except ContextIntegrityBlocked:
-            raise _ContextIntegrityBlocked("context_integrity_blocked") from None
-        except _DatabaseCloseFailed:
+            raise SkillsMCPContextIntegrityError("context_integrity_blocked") from None
+        except SkillsMCPDatabaseCloseError:
             raise RuntimeError("skills_unavailable") from None
         except Exception as exc:  # noqa: BLE001 - public boundary sanitizes every unexpected failure
             self._log_failure(operation_name, user_id, exc)
@@ -406,7 +398,7 @@ class SkillsModule(BaseModule):
                 except Exception as exc:  # noqa: BLE001 - cleanup failures stay bounded
                     self._log_failure(operation_name, user_id, exc)
                     if operation_succeeded:
-                        raise _DatabaseCloseFailed from None
+                        raise SkillsMCPDatabaseCloseError from None
 
     @staticmethod
     def _trusted_user_context(context: Any) -> tuple[int, Path]:

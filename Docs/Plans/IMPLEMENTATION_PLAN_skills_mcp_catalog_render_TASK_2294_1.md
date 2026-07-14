@@ -29,6 +29,7 @@
 ## File Map
 
 - Modify `tldw_Server_API/app/core/Skills/skills_service.py`: one-pass model-visible page, metadata lookup, and offloaded verified load.
+- Modify `tldw_Server_API/app/core/exceptions.py`: centralize bounded Skills MCP boundary exceptions.
 - Modify `tldw_Server_API/tests/Skills/unit/test_skills_service.py`: service visibility, pagination, integrity, and thread-offload coverage.
 - Modify `apps/mcp-unified/src/mcp_unified/profiles/subjects.py`: extract bounded `skill_name` subjects.
 - Modify `apps/mcp-unified/src/mcp_unified/profiles/permission_rules.py`: lowercase Skill patterns and subjects consistently.
@@ -577,6 +578,16 @@ git commit -m "chore: close TASK-2294.1 verification"
 ```
 
 - [x] Use `superpowers:requesting-code-review` for a final correctness and scope review before pushing or opening a PR against `dev`.
+
+## Stage 6: Pull Request Review Follow-up
+
+**Goal**: Resolve verified review findings after rebasing onto the latest `dev`.
+
+**Success Criteria**: Nullable registry flags use schema defaults, page collection avoids a second full-list allocation, Skills MCP exceptions are centralized, the module test suite is marked as unit, and all review threads are resolved.
+
+**Tests**: Focused nullable-flag regressions, complete Skills service/module suites, lint, Bandit, and PR check review.
+
+**Status**: In Progress
 
 ## Plan Self-Review Checklist
 

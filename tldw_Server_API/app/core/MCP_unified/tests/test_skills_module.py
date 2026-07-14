@@ -31,6 +31,8 @@ from tldw_Server_API.app.core.Skills.skills_service import (
     SkillsService,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @dataclass
 class UserCatalog:
@@ -557,6 +559,37 @@ async def test_render_calls_visibility_gate_and_verified_load_once(
 
     assert metadata_calls == 1
     assert skill_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_render_applies_schema_defaults_to_null_visibility_flags(
+    user_catalogs: dict[int, UserCatalog],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _seed_review_skill(user_catalogs[1].service)
+    original_get_skill = SkillsService.get_skill
+
+    async def legacy_get_skill(
+        self: SkillsService,
+        name: str,
+        *,
+        enforce_integrity: bool = True,
+    ) -> dict[str, Any]:
+        skill = await original_get_skill(self, name, enforce_integrity=enforce_integrity)
+        skill["user_invocable"] = None
+        skill["disable_model_invocation"] = None
+        return skill
+
+    monkeypatch.setattr(SkillsService, "get_skill", legacy_get_skill)
+    module = await _module()
+
+    result = await module.execute_tool(
+        "skills.render",
+        {"skill_name": "review-paper", "arguments": "issue 42"},
+        context=user_catalogs[1].context,
+    )
+
+    assert result["rendered_prompt"] == "Review issue 42"
 
 
 @pytest.mark.asyncio
