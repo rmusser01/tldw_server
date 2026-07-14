@@ -102,7 +102,7 @@ Independent-review hardening: `test(research): harden legacy execution golden`
 
 **Tests:** Unit and property tests for construction, referential integrity, determinism, coalescing, fallback order, and physical-request budgets.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Files
 
@@ -115,19 +115,19 @@ Independent-review hardening: `test(research): harden legacy execution golden`
 
 ### Test-first steps
 
-- [ ] Start with failing constructor tests for frozen, slots-based dataclasses and validated catalog IDs, route references, policy digests, exact origins, query modes, typed source predicates, credential requirements, immutable readiness overlays, and explicit `offline_fixture` or `synthetic` execution modes. There is no production-default execution mode.
-- [ ] Define a frozen `DispatchIntent` containing route ID, policy digest, operation kind, method, path, typed query pairs, and limits. It describes work but cannot dispatch or debit work itself.
-- [ ] Add an additive route-independent V2 document identity; assert existing `build_fingerprint`, `stable_result_id`, serialized V1 result IDs, and Deep Research evidence IDs remain byte-for-byte unchanged.
-- [ ] Build a V2 registry for the eight existing targets without mutating `default_source_catalog()`. Record exact routes/backends and make legacy `site_hosts` descriptive only.
-- [ ] Mark OpenAlex's V2 API route credentialed and typed unavailable/skipped, carry no secret material or secret-reference interface in the foundation registry, and never inherit the stale V1 `requires_credentials=False` claim. Leave V1 unchanged.
-- [ ] Start with an OpenAlex V2 selection regression: the planner returns a typed unavailable/skipped outcome and emits zero executable attempts and zero dispatch allowance. The zero-gateway-call tripwire belongs to Stage 4E, after the gateway boundary exists. Do not add a positive credentialed branch; authenticated enablement is deferred to a separately authorized future program.
-- [ ] Reconcile all eight existing targets (arXiv, PubMed, Semantic Scholar, Zenodo, OpenAlex, OSF, Figshare, and Crossref) against the frozen ledger's target, route, backend, credential, query-mode, and source-predicate declarations. The Crossref Metadata Search seed row resolves to the existing stable `crossref` product ID; do not create a parallel `crossref_metadata_search` runtime identity.
-- [ ] Compile explicit V2 selections plus an immutable readiness overlay into stable ordered attempts with selection reasons, route fallback order, policy/catalog versions, and declared dispatch allowances. Mark the seven credentialless routes fixture-executable and OpenAlex unavailable.
-- [ ] Coalesce only requests whose backend, normalized query, filters, policy, and source predicates are actually compatible. Preserve requested-target attribution separately from backend identity.
-- [ ] Count PubMed ESearch plus conditional ESummary as a deterministic allowance of at most two physical dispatches. An empty ESearch leaves unused allowance; it does not create or release an `AttemptJournal` reservation.
-- [ ] Model and report separate ceilings for route attempts, physical dispatches, per-route pages, redirects, retries, aggregate wall time, and returned results.
-- [ ] Add a synthetic two-target shared-backend aggregator to tests so coalescing plus matching, nonmatching, and ambiguous source predicates are exercised even though the eight production foundation routes are direct/native.
-- [ ] Add Hypothesis invariants where available: deterministic plan bytes, no negative allowance, coalescing never increases physical requests, and no planned dimension exceeds its declared ceiling. Runtime journal accounting invariants belong to Stage 4A.
+- [x] Start with failing constructor tests for frozen, slots-based dataclasses and validated catalog IDs, route references, policy digests, exact origins, query modes, typed source predicates, credential requirements, immutable readiness overlays, and explicit `offline_fixture` or `synthetic` execution modes. There is no production-default execution mode.
+- [x] Define a frozen `DispatchIntent` containing route ID, policy digest, operation kind, method, path, typed query pairs, and limits. It describes work but cannot dispatch or debit work itself.
+- [x] Add an additive route-independent V2 document identity; assert existing `build_fingerprint`, `stable_result_id`, serialized V1 result IDs, and Deep Research evidence IDs remain byte-for-byte unchanged.
+- [x] Build a V2 registry for the eight existing targets without mutating `default_source_catalog()`. Record exact routes/backends and make legacy `site_hosts` descriptive only.
+- [x] Mark OpenAlex's V2 API route credentialed and typed unavailable/skipped, carry no secret material or secret-reference interface in the foundation registry, and never inherit the stale V1 `requires_credentials=False` claim. Leave V1 unchanged.
+- [x] Start with an OpenAlex V2 selection regression: the planner returns a typed unavailable/skipped outcome and emits zero executable attempts and zero dispatch allowance. The zero-gateway-call tripwire belongs to Stage 4E, after the gateway boundary exists. Do not add a positive credentialed branch; authenticated enablement is deferred to a separately authorized future program.
+- [x] Reconcile all eight existing targets (arXiv, PubMed, Semantic Scholar, Zenodo, OpenAlex, OSF, Figshare, and Crossref) against the frozen ledger's target, route, backend, credential, query-mode, and source-predicate declarations. The Crossref Metadata Search seed row resolves to the existing stable `crossref` product ID; do not create a parallel `crossref_metadata_search` runtime identity.
+- [x] Compile explicit V2 selections plus an immutable readiness overlay into stable ordered attempts with selection reasons, route fallback order, policy/catalog versions, and declared dispatch allowances. Mark the seven credentialless routes fixture-executable and OpenAlex unavailable.
+- [x] Coalesce only requests whose backend, normalized query, filters, policy, and source predicates are actually compatible. Preserve requested-target attribution separately from backend identity.
+- [x] Count PubMed ESearch plus conditional ESummary as a deterministic allowance of at most two physical dispatches. An empty ESearch leaves unused allowance; it does not create or release an `AttemptJournal` reservation.
+- [x] Model and report separate ceilings for route attempts, physical dispatches, per-route pages, redirects, retries, aggregate wall time, and returned results.
+- [x] Add a synthetic two-target shared-backend aggregator to tests so coalescing plus matching, nonmatching, and ambiguous source predicates are exercised even though the eight production foundation routes are direct/native.
+- [x] Add Hypothesis invariants where available: deterministic plan bytes, no negative allowance, coalescing never increases physical requests, and no planned dimension exceeds its declared ceiling. Runtime journal accounting invariants belong to Stage 4A.
 
 ### Verify
 
@@ -167,6 +167,13 @@ git diff --check
 ### Commit
 
 `feat(research): add pure discovery v2 planning contracts`
+
+### Completion evidence
+
+- RED: the initial focused suite failed during collection because the V2 contract modules did not exist. Review regressions then failed for attribution-only coalescing, nested type safety, complete physical-dispatch accounting, zero-work result allowances, import side effects, legacy lazy-submodule compatibility, and zero-page attempt accounting.
+- GREEN: 57 focused Task 2 tests, 97 exact plan tests, 107 impacted package/import tests, and the complete 574-test Research suite passed. The complete Research suite preceded the final lazy-submodule edge hardening; the subsequent focused, exact, and impacted suites cover those final changes.
+- Quality gates: compileall, Ruff, Black, Python 3.10 AST parsing, and `git diff --check` passed. Bandit reported zero findings and zero errors across 1,487 production lines.
+- Independent review: five Important findings and two final compatibility/accounting edge cases were fixed RED-first; the same reviewer returned a final CLEAN verdict.
 
 ## Task 3 / Stage 3: Consume TASK-12971 Through a One-Hop Discovery Gateway
 
