@@ -768,6 +768,7 @@ async def test_catalog_matching_does_not_require_python_311_task_api(
     catalog_protocol_stub: tuple[Mock, AsyncMock],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    await _seed_review_skill(user_catalogs[1].service)
     module = await _module()
 
     with monkeypatch.context() as compatibility:
@@ -776,12 +777,13 @@ async def test_catalog_matching_does_not_require_python_311_task_api(
             "current_task",
             Mock(return_value=SimpleNamespace()),
         )
-        matches = await module._resolve_catalog_matches(
-            ["rag.search"],
-            user_catalogs[1].context,
+        result = await module.execute_tool(
+            "skills.render",
+            {"skill_name": "review-paper"},
+            context=user_catalogs[1].context,
         )
 
-    assert matches == ["rag.search"]
+    assert result["catalog_matches"] == ["rag.search"]
 
 
 @pytest.mark.asyncio
