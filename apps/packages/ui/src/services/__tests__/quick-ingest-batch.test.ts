@@ -68,6 +68,1107 @@ describe("submitQuickIngestBatch", () => {
     ).toBe("Choose an analysis provider before running ingest analysis.")
   })
 
+  it("delegates a pending version-2 run request to authoritative run chunks", async () => {
+    const onTrackingMetadata = vi.fn()
+    mocks.bgRequest.mockResolvedValue({
+      contract_version: 2,
+      run_id: "run-v2-1",
+      status: "staged",
+      version: 1,
+      status_url: "/api/v1/media/ingest/runs/run-v2-1",
+      items_url: "/api/v1/media/ingest/runs/run-v2-1/items",
+      events_url: "/api/v1/media/ingest/runs/run-v2-1/events/stream",
+      processing_occurrences: [
+        {
+          occurrence_id: "occ-v2-1",
+          ordinal: 1,
+          input_kind: "materialized_playlist_item",
+          source_url: "https://www.youtube.com/watch?v=server-authority",
+          source_kind: "youtube_video",
+          display_metadata: { title: "Server title" },
+          state: "staged",
+          outcome: null,
+          job_id: null,
+          batch_id: null,
+          attempt: 1,
+          planned_collection_item_id: null,
+        },
+      ],
+    })
+    mocks.bgUpload.mockResolvedValue({
+      batch_id: "batch-v2-1",
+      jobs: [{ id: 501 }],
+      errors: [],
+      submissions: [
+        {
+          occurrence_id: "occ-v2-1",
+          status: "accepted",
+          accepted: true,
+          job_id: 501,
+          batch_id: "batch-v2-1",
+          error_code: null,
+          message: null,
+          retryable: false,
+          attempt: 1,
+        },
+      ],
+    })
+
+    const result = await submitQuickIngestBatch({
+      entries: [
+        {
+          id: "occ-v2-1",
+          url: "https://cached.invalid/never-submit",
+          type: "video",
+        },
+      ],
+      files: [],
+      storeRemote: true,
+      processOnly: false,
+      common: {
+        perform_analysis: true,
+        perform_chunking: false,
+        overwrite_existing: false,
+      },
+      conferenceBatchMetadata: {
+        collectionName: "Conference archive",
+        sharedTags: ["conference", "research"],
+        sourcePlaylistUrl: "https://youtube.com/playlist?list=PL-conf",
+      },
+      conferenceItemMetadata: {
+        "occ-v2-1": {
+          playlist: {
+            playlistId: "PL-conf",
+            ordinal: 1,
+            title: "Server title",
+            normalizedSourceId: "youtube:video:server-authority",
+          },
+          conferenceOverride: {
+            speaker: "Grace Hopper",
+            tags: [" keynote ", "keynote"],
+            selected: true,
+          },
+        },
+      },
+      pendingRunRequest: {
+        inputs: [
+          {
+            inputKind: "materialized_playlist_item",
+            occurrenceId: "occ-v2-1",
+            materializationId: "materialization-v2-1",
+          },
+        ],
+      },
+      onTrackingMetadata,
+    } as any)
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/media/ingest/runs",
+        method: "POST",
+        body: expect.objectContaining({
+          processing_options: expect.objectContaining({
+            perform_analysis: true,
+            overwrite_existing: false,
+          }),
+          new_collection: {
+            name: "Conference archive",
+            source_url: "https://youtube.com/playlist?list=PL-conf",
+            default_tags: ["conference", "research"],
+          },
+          playlist_summaries: [
+            expect.objectContaining({
+              occurrence_id: "occ-v2-1",
+              playlist: expect.objectContaining({
+                playlist_id: "PL-conf",
+                normalized_source_id: "youtube:video:server-authority",
+              }),
+              conference_override: expect.objectContaining({
+                speaker: "Grace Hopper",
+                tags: ["keynote"],
+                selected: true,
+              }),
+            }),
+          ],
+        }),
+      }),
+    )
+    expect(mocks.bgUpload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/media/ingest/jobs",
+        fields: expect.objectContaining({
+          run_id: "run-v2-1",
+          occurrence_ids: ["occ-v2-1"],
+          attempts: [1],
+          urls: ["https://www.youtube.com/watch?v=server-authority"],
+        }),
+      }),
+    )
+    expect(JSON.stringify(mocks.bgUpload.mock.calls)).not.toContain(
+      "cached.invalid",
+    )
+    expect(JSON.stringify(mocks.bgRequest.mock.calls)).not.toContain(
+      "cached.invalid",
+    )
+    expect(onTrackingMetadata).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: "run-v2-1",
+        submittedItemIds: ["occ-v2-1"],
+      }),
+    )
+    expect(mocks.bgRequest).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/media/ingest/jobs/501",
+      }),
+    )
+    expect(result).toMatchObject({
+      ok: true,
+      accepted: true,
+      runId: "run-v2-1",
+    })
+    expect(result.results).toBeUndefined()
+  })
+
+  it("persists submission intent before create and run identity before upload", async () => {
+    let resolveCreate!: (value: unknown) => void
+    let resolveUpload!: (value: unknown) => void
+    const createPromise = new Promise((resolve) => {
+      resolveCreate = resolve
+    })
+    const uploadPromise = new Promise((resolve) => {
+      resolveUpload = resolve
+    })
+    const events: string[] = []
+    mocks.bgRequest.mockImplementation(() => {
+      events.push("create")
+      return createPromise
+    })
+    mocks.bgUpload.mockImplementation(() => {
+      events.push("upload")
+      return uploadPromise
+    })
+    const onTrackingMetadata = vi.fn((tracking: any) => {
+      events.push(`track:${tracking.submissionState}`)
+    })
+
+    const submitted = submitQuickIngestBatch({
+      entries: [
+        {
+          id: "occ-durable-order",
+          url: "https://cached.invalid/never-submit",
+          type: "video",
+        },
+      ],
+      files: [],
+      storeRemote: true,
+      processOnly: false,
+      __quickIngestSessionId: "qi-direct-durable-order",
+      pendingRunRequest: {
+        inputs: [
+          {
+            inputKind: "direct_url",
+            occurrenceId: "occ-durable-order",
+            url: "https://client.example/durable-order",
+          },
+        ],
+      },
+      onTrackingMetadata,
+    } as any)
+
+    await vi.waitFor(() => {
+      expect(events.slice(0, 2)).toEqual(["track:creating_run", "create"])
+    })
+    expect(onTrackingMetadata).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        submissionState: "creating_run",
+        submissionOccurrenceIds: ["occ-durable-order"],
+      })
+    )
+    expect(onTrackingMetadata.mock.calls[0]?.[0].runId).toBeUndefined()
+    expect(onTrackingMetadata.mock.calls[0]?.[0].submittedItemIds).toBeUndefined()
+    resolveCreate({
+      contract_version: 2,
+      run_id: "run-durable-order",
+      status: "staged",
+      version: 1,
+      status_url: "/api/v1/media/ingest/runs/run-durable-order",
+      items_url: "/api/v1/media/ingest/runs/run-durable-order/items",
+      events_url: "/api/v1/media/ingest/runs/run-durable-order/events/stream",
+      processing_occurrences: [
+        {
+          occurrence_id: "occ-durable-order",
+          ordinal: 1,
+          input_kind: "direct_url",
+          source_url: "https://server.example/durable-order",
+          source_kind: "video",
+          display_metadata: {},
+          state: "staged",
+          outcome: null,
+          job_id: null,
+          batch_id: null,
+          attempt: 1,
+          planned_collection_item_id: null,
+        },
+      ],
+    })
+    await vi.waitFor(() => {
+      expect(events).toContain("upload")
+      expect(events.indexOf("track:run_created")).toBeLessThan(
+        events.indexOf("upload")
+      )
+    })
+    resolveUpload({
+      batch_id: "batch-durable-order",
+      jobs: [{ id: 701 }],
+      errors: [],
+      submissions: [
+        {
+          occurrence_id: "occ-durable-order",
+          status: "accepted",
+          accepted: true,
+          job_id: 701,
+          batch_id: "batch-durable-order",
+          error_code: null,
+          message: null,
+          retryable: false,
+          attempt: 1,
+        },
+      ],
+    })
+
+    await expect(submitted).resolves.toMatchObject({
+      ok: true,
+      runId: "run-durable-order",
+    })
+    expect(onTrackingMetadata).toHaveBeenCalledWith(
+      expect.objectContaining({
+        submissionState: "submitting",
+        runId: "run-durable-order",
+        batchIds: ["batch-durable-order"],
+        jobIds: [701],
+      })
+    )
+    expect(events.at(-1)).toBe("track:acknowledged")
+  })
+
+  it("tracks a run whose create response has only terminal occurrences", async () => {
+    const onTrackingMetadata = vi.fn()
+    mocks.bgRequest.mockResolvedValue({
+      contract_version: 2,
+      run_id: "run-v2-terminal",
+      status: "completed",
+      version: 1,
+      status_url: "/api/v1/media/ingest/runs/run-v2-terminal",
+      items_url: "/api/v1/media/ingest/runs/run-v2-terminal/items",
+      events_url: "/api/v1/media/ingest/runs/run-v2-terminal/events/stream",
+      processing_occurrences: [],
+    })
+
+    const result = await submitQuickIngestBatch({
+      entries: [],
+      files: [],
+      storeRemote: true,
+      processOnly: false,
+      pendingRunRequest: {
+        inputs: [
+          {
+            inputKind: "materialized_playlist_item",
+            occurrenceId: "occ-terminal-skip",
+            materializationId: "materialization-terminal",
+          },
+        ],
+      },
+      onTrackingMetadata,
+    } as any)
+
+    expect(mocks.bgUpload).not.toHaveBeenCalled()
+    expect(onTrackingMetadata).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: "run-v2-terminal",
+        submittedItemIds: ["occ-terminal-skip"],
+        jobIds: [],
+      }),
+    )
+    expect(result).toEqual({
+      ok: true,
+      accepted: true,
+      runId: "run-v2-terminal",
+    })
+  })
+
+  it("separates mixed run occurrences by effective processing fields", async () => {
+    mocks.bgRequest.mockResolvedValue({
+      contract_version: 2,
+      run_id: "run-v2-mixed",
+      status: "staged",
+      version: 1,
+      status_url: "/api/v1/media/ingest/runs/run-v2-mixed",
+      items_url: "/api/v1/media/ingest/runs/run-v2-mixed/items",
+      events_url: "/api/v1/media/ingest/runs/run-v2-mixed/events/stream",
+      processing_occurrences: [
+        {
+          occurrence_id: "occ-audio",
+          ordinal: 1,
+          input_kind: "direct_url",
+          source_url: "https://server.example/audio.mp3",
+          source_kind: "audio",
+          display_metadata: {},
+          state: "staged",
+          outcome: null,
+          job_id: null,
+          batch_id: null,
+          attempt: 1,
+          planned_collection_item_id: null,
+        },
+        {
+          occurrence_id: "occ-video",
+          ordinal: 2,
+          input_kind: "direct_url",
+          source_url: "https://server.example/video.mp4",
+          source_kind: "video",
+          display_metadata: {},
+          state: "staged",
+          outcome: null,
+          job_id: null,
+          batch_id: null,
+          attempt: 1,
+          planned_collection_item_id: null,
+        },
+      ],
+    })
+    mocks.bgUpload
+      .mockResolvedValueOnce({
+        batch_id: "batch-audio",
+        jobs: [{ id: 601 }],
+        errors: [],
+        submissions: [
+          {
+            occurrence_id: "occ-audio",
+            status: "accepted",
+            accepted: true,
+            job_id: 601,
+            batch_id: "batch-audio",
+            error_code: null,
+            message: null,
+            retryable: false,
+            attempt: 1,
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        batch_id: "batch-video",
+        jobs: [{ id: 602 }],
+        errors: [],
+        submissions: [
+          {
+            occurrence_id: "occ-video",
+            status: "accepted",
+            accepted: true,
+            job_id: 602,
+            batch_id: "batch-video",
+            error_code: null,
+            message: null,
+            retryable: false,
+            attempt: 1,
+          },
+        ],
+      })
+
+    await submitQuickIngestBatch({
+      entries: [
+        { id: "occ-audio", url: "cached-audio", type: "audio" },
+        { id: "occ-video", url: "cached-video", type: "video" },
+      ],
+      files: [],
+      storeRemote: true,
+      processOnly: false,
+      pendingRunRequest: {
+        inputs: [
+          {
+            inputKind: "direct_url",
+            occurrenceId: "occ-audio",
+            url: "https://client.example/ignored-audio.mp3",
+          },
+          {
+            inputKind: "direct_url",
+            occurrenceId: "occ-video",
+            url: "https://client.example/ignored-video.mp4",
+          },
+        ],
+      },
+    } as any)
+
+    expect(mocks.bgUpload).toHaveBeenCalledTimes(2)
+    expect(mocks.bgUpload.mock.calls.map(([request]) => request.fields)).toEqual([
+      expect.objectContaining({
+        media_type: "audio",
+        urls: ["https://server.example/audio.mp3"],
+        occurrence_ids: ["occ-audio"],
+      }),
+      expect.objectContaining({
+        media_type: "video",
+        urls: ["https://server.example/video.mp4"],
+        occurrence_ids: ["occ-video"],
+      }),
+    ])
+  })
+
+  it("surfaces a run submission rate limit without treating the run as accepted", async () => {
+    const occurrences = Array.from({ length: 51 }, (_, index) => ({
+      occurrence_id: `occ-rate-${index + 1}`,
+      ordinal: index + 1,
+      input_kind: "direct_url",
+      source_url: `https://server.example/video-${index + 1}.mp4`,
+      source_kind: "video",
+      display_metadata: {},
+      state: "staged",
+      outcome: null,
+      job_id: null,
+      batch_id: null,
+      attempt: 1,
+      planned_collection_item_id: null,
+    }))
+    mocks.bgRequest.mockResolvedValue({
+      contract_version: 2,
+      run_id: "run-v2-rate-limited",
+      status: "staged",
+      version: 1,
+      status_url: "/api/v1/media/ingest/runs/run-v2-rate-limited",
+      items_url: "/api/v1/media/ingest/runs/run-v2-rate-limited/items",
+      events_url: "/api/v1/media/ingest/runs/run-v2-rate-limited/events/stream",
+      processing_occurrences: occurrences,
+    })
+    mocks.bgUpload.mockRejectedValue(
+      Object.assign(new Error("rate limited"), {
+        status: 429,
+        retryAfterMs: 3_000,
+      }),
+    )
+
+    const result = await submitQuickIngestBatch({
+      entries: occurrences.map((occurrence) => ({
+        id: occurrence.occurrence_id,
+        url: "https://cached.invalid/ignored",
+        type: "video",
+      })),
+      files: [],
+      storeRemote: true,
+      processOnly: false,
+      pendingRunRequest: {
+        inputs: occurrences.map((occurrence) => ({
+          inputKind: "direct_url",
+          occurrenceId: occurrence.occurrence_id,
+          url: "https://client.invalid/ignored",
+        })),
+      },
+    } as any)
+
+    expect(mocks.bgUpload).toHaveBeenCalledTimes(1)
+    expect(result).toMatchObject({
+      ok: false,
+      accepted: false,
+      runId: "run-v2-rate-limited",
+      retryAfterMs: 3_000,
+      unsentOccurrenceIds: expect.arrayContaining([
+        "occ-rate-1",
+        "occ-rate-51",
+      ]),
+    })
+    expect(result.error).toMatch(/try again in 3 seconds/i)
+    expect(result.results).toBeUndefined()
+  })
+
+  it("keeps earlier accepted chunks attached while cancelling unsent occurrences", async () => {
+    const occurrences = Array.from({ length: 101 }, (_, index) => ({
+      occurrence_id: `occ-partial-${index + 1}`,
+      ordinal: index + 1,
+      input_kind: "direct_url",
+      source_url: `https://server.example/video-${index + 1}.mp4`,
+      source_kind: "video",
+      display_metadata: {},
+      state: "staged",
+      outcome: null,
+      job_id: null,
+      batch_id: null,
+      attempt: 1,
+      planned_collection_item_id: null,
+    }))
+    mocks.bgRequest
+      .mockResolvedValueOnce({
+        contract_version: 2,
+        run_id: "run-v2-partial",
+        status: "staged",
+        version: 1,
+        status_url: "/api/v1/media/ingest/runs/run-v2-partial",
+        items_url: "/api/v1/media/ingest/runs/run-v2-partial/items",
+        events_url: "/api/v1/media/ingest/runs/run-v2-partial/events/stream",
+        processing_occurrences: occurrences,
+      })
+      .mockResolvedValueOnce({
+        contract_version: 2,
+        run_id: "run-v2-partial",
+        status: "running",
+        counts: { total: 101, running: 50, cancelled: 51 },
+        version: 2,
+        collection_id: null,
+        batch_ids: ["batch-partial-1"],
+        created_at: "2026-07-13T00:00:00Z",
+        updated_at: "2026-07-13T00:00:01Z",
+        expires_at: "2026-07-20T00:00:00Z",
+      })
+    mocks.bgUpload
+      .mockResolvedValueOnce({
+        batch_id: "batch-partial-1",
+        jobs: Array.from({ length: 50 }, (_, index) => ({ id: index + 1 })),
+        errors: [],
+        submissions: Array.from({ length: 50 }, (_, index) => ({
+          occurrence_id: `occ-partial-${index + 1}`,
+          status: "accepted",
+          accepted: true,
+          job_id: index + 1,
+          batch_id: "batch-partial-1",
+          error_code: null,
+          message: null,
+          retryable: false,
+          attempt: 1,
+        })),
+      })
+      .mockRejectedValueOnce(
+        Object.assign(new Error("rate limited"), {
+          status: 429,
+          retryAfterMs: 2_000,
+        }),
+      )
+
+    const onTrackingMetadata = vi.fn()
+    const result = await submitQuickIngestBatch({
+      entries: occurrences.map((occurrence) => ({
+        id: occurrence.occurrence_id,
+        url: "https://cached.invalid/ignored",
+        type: "video",
+      })),
+      files: [],
+      storeRemote: true,
+      processOnly: false,
+      pendingRunRequest: {
+        inputs: occurrences.map((occurrence) => ({
+          inputKind: "direct_url",
+          occurrenceId: occurrence.occurrence_id,
+          url: "https://client.invalid/ignored",
+        })),
+      },
+      onTrackingMetadata,
+    } as any)
+
+    expect(mocks.bgUpload).toHaveBeenCalledTimes(2)
+    expect(result).toMatchObject({
+      ok: false,
+      accepted: true,
+      submissionBlocked: true,
+      runId: "run-v2-partial",
+      retryAfterMs: 2_000,
+      unsentOccurrenceIds: expect.arrayContaining([
+        "occ-partial-51",
+        "occ-partial-101",
+      ]),
+    })
+    expect(onTrackingMetadata).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: "run-v2-partial",
+        jobIds: expect.arrayContaining([1, 50]),
+      }),
+    )
+    expect(mocks.bgRequest).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/media/ingest/runs/run-v2-partial/cancel",
+        body: expect.objectContaining({
+          occurrence_ids: expect.arrayContaining([
+            "occ-partial-51",
+            "occ-partial-101",
+          ]),
+          reason: "submission_stopped",
+        }),
+      }),
+    )
+  })
+
+  it("surfaces unsent occurrence cleanup failure after an earlier chunk was accepted", async () => {
+    const occurrences = Array.from({ length: 51 }, (_, index) => ({
+      occurrence_id: `occ-cleanup-${index + 1}`,
+      ordinal: index + 1,
+      input_kind: "direct_url",
+      source_url: `https://server.example/cleanup-${index + 1}.mp4`,
+      source_kind: "video",
+      display_metadata: {},
+      state: "staged",
+      outcome: null,
+      job_id: null,
+      batch_id: null,
+      attempt: 1,
+      planned_collection_item_id: null,
+    }))
+    mocks.bgRequest
+      .mockResolvedValueOnce({
+        contract_version: 2,
+        run_id: "run-v2-cleanup-failure",
+        status: "staged",
+        version: 1,
+        status_url: "/api/v1/media/ingest/runs/run-v2-cleanup-failure",
+        items_url: "/api/v1/media/ingest/runs/run-v2-cleanup-failure/items",
+        events_url: "/api/v1/media/ingest/runs/run-v2-cleanup-failure/events/stream",
+        processing_occurrences: occurrences,
+      })
+      .mockRejectedValueOnce(
+        Object.assign(new Error("cleanup unavailable"), { status: 503 }),
+      )
+    mocks.bgUpload
+      .mockResolvedValueOnce({
+        batch_id: "batch-cleanup-1",
+        jobs: Array.from({ length: 50 }, (_, index) => ({ id: index + 1 })),
+        errors: [],
+        submissions: Array.from({ length: 50 }, (_, index) => ({
+          occurrence_id: `occ-cleanup-${index + 1}`,
+          status: "accepted",
+          accepted: true,
+          job_id: index + 1,
+          batch_id: "batch-cleanup-1",
+          error_code: null,
+          message: null,
+          retryable: false,
+          attempt: 1,
+        })),
+      })
+      .mockRejectedValueOnce(
+        Object.assign(new Error("rate limited"), {
+          status: 429,
+          retryAfterMs: 2_000,
+        }),
+      )
+
+    const result = await submitQuickIngestBatch({
+      entries: occurrences.map((occurrence) => ({
+        id: occurrence.occurrence_id,
+        url: "https://cached.invalid/ignored",
+        type: "video",
+      })),
+      files: [],
+      storeRemote: true,
+      processOnly: false,
+      pendingRunRequest: {
+        inputs: occurrences.map((occurrence) => ({
+          inputKind: "direct_url",
+          occurrenceId: occurrence.occurrence_id,
+          url: "https://client.invalid/ignored",
+        })),
+      },
+    } as any)
+
+    expect(result).toMatchObject({
+      ok: false,
+      accepted: true,
+      submissionBlocked: true,
+      submissionCleanupFailed: true,
+      runId: "run-v2-cleanup-failure",
+      unsentOccurrenceIds: ["occ-cleanup-51"],
+    })
+    expect(result.error).toMatch(/could not cancel the unsent/i)
+  })
+
+  it("surfaces cleanup failure even when the first chunk accepted nothing", async () => {
+    mocks.bgRequest
+      .mockResolvedValueOnce({
+        contract_version: 2,
+        run_id: "run-v2-first-cleanup-failure",
+        status: "staged",
+        version: 1,
+        status_url: "/api/v1/media/ingest/runs/run-v2-first-cleanup-failure",
+        items_url: "/api/v1/media/ingest/runs/run-v2-first-cleanup-failure/items",
+        events_url: "/api/v1/media/ingest/runs/run-v2-first-cleanup-failure/events/stream",
+        processing_occurrences: [
+          {
+            occurrence_id: "occ-first-cleanup-failure",
+            ordinal: 1,
+            input_kind: "direct_url",
+            source_url: "https://server.example/first-cleanup-failure",
+            source_kind: "video",
+            display_metadata: {},
+            state: "staged",
+            outcome: null,
+            job_id: null,
+            batch_id: null,
+            attempt: 1,
+            planned_collection_item_id: null,
+          },
+        ],
+      })
+      .mockRejectedValueOnce(
+        Object.assign(new Error("cleanup unavailable"), { status: 503 })
+      )
+    mocks.bgUpload.mockRejectedValue(
+      Object.assign(new Error("rate limited"), {
+        status: 429,
+        retryAfterMs: 2_000,
+      })
+    )
+
+    const result = await submitQuickIngestBatch({
+      entries: [
+        {
+          id: "occ-first-cleanup-failure",
+          url: "https://cached.invalid/ignored",
+          type: "video",
+        },
+      ],
+      files: [],
+      storeRemote: true,
+      processOnly: false,
+      pendingRunRequest: {
+        inputs: [
+          {
+            inputKind: "direct_url",
+            occurrenceId: "occ-first-cleanup-failure",
+            url: "https://client.invalid/ignored",
+          },
+        ],
+      },
+    } as any)
+
+    expect(result).toMatchObject({
+      ok: false,
+      accepted: false,
+      submissionBlocked: true,
+      submissionCleanupFailed: true,
+      runId: "run-v2-first-cleanup-failure",
+      unsentOccurrenceIds: ["occ-first-cleanup-failure"],
+    })
+  })
+
+  it("cancels an omitted file occurrence while preserving an accepted URL", async () => {
+    mocks.bgRequest
+      .mockResolvedValueOnce({
+        contract_version: 2,
+        run_id: "run-v2-omitted-file",
+        status: "staged",
+        version: 1,
+        status_url: "/api/v1/media/ingest/runs/run-v2-omitted-file",
+        items_url: "/api/v1/media/ingest/runs/run-v2-omitted-file/items",
+        events_url: "/api/v1/media/ingest/runs/run-v2-omitted-file/events/stream",
+        processing_occurrences: [
+          {
+            occurrence_id: "occ-url-accepted",
+            ordinal: 1,
+            input_kind: "direct_url",
+            source_url: "https://server.example/accepted",
+            source_kind: "video",
+            display_metadata: {},
+            state: "staged",
+            outcome: null,
+            job_id: null,
+            batch_id: null,
+            attempt: 1,
+            planned_collection_item_id: null,
+          },
+          {
+            occurrence_id: "occ-file-omitted",
+            ordinal: 2,
+            input_kind: "file_stub",
+            source_url: null,
+            source_kind: "file",
+            display_metadata: {},
+            state: "awaiting_upload",
+            outcome: null,
+            job_id: null,
+            batch_id: null,
+            attempt: 1,
+            planned_collection_item_id: null,
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        contract_version: 2,
+        run_id: "run-v2-omitted-file",
+        status: "running",
+        counts: { total: 2, running: 1, cancelled: 1 },
+        version: 2,
+        collection_id: null,
+        batch_ids: ["batch-url-accepted"],
+        created_at: "2026-07-13T00:00:00Z",
+        updated_at: "2026-07-13T00:00:01Z",
+        expires_at: "2026-07-20T00:00:00Z",
+      })
+    mocks.bgUpload.mockResolvedValue({
+      batch_id: "batch-url-accepted",
+      jobs: [{ id: 801 }],
+      errors: [],
+      submissions: [
+        {
+          occurrence_id: "occ-url-accepted",
+          status: "accepted",
+          accepted: true,
+          job_id: 801,
+          batch_id: "batch-url-accepted",
+          error_code: null,
+          message: null,
+          retryable: false,
+          attempt: 1,
+        },
+      ],
+    })
+
+    const result = await submitQuickIngestBatch({
+      entries: [
+        {
+          id: "occ-url-accepted",
+          url: "https://cached.invalid/ignored",
+          type: "video",
+        },
+      ],
+      files: [],
+      storeRemote: true,
+      processOnly: false,
+      pendingRunRequest: {
+        inputs: [
+          {
+            inputKind: "direct_url",
+            occurrenceId: "occ-url-accepted",
+            url: "https://client.invalid/ignored",
+          },
+          {
+            inputKind: "file_stub",
+            occurrenceId: "occ-file-omitted",
+            name: "missing.mp4",
+            contentType: "video/mp4",
+            sizeBytes: 1,
+          },
+        ],
+      },
+    } as any)
+
+    expect(result).toMatchObject({
+      ok: false,
+      accepted: true,
+      submissionBlocked: true,
+      unsentOccurrenceIds: ["occ-file-omitted"],
+    })
+    expect(mocks.bgRequest).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/media/ingest/runs/run-v2-omitted-file/cancel",
+        body: {
+          occurrence_ids: ["occ-file-omitted"],
+          reason: "submission_stopped",
+        },
+      })
+    )
+  })
+
+  it("cancels a newly created run when the user cancels before create resolves", async () => {
+    let resolveCreate!: (value: unknown) => void
+    const createPromise = new Promise((resolve) => {
+      resolveCreate = resolve
+    })
+    mocks.bgRequest
+      .mockReturnValueOnce(createPromise)
+      .mockResolvedValueOnce({
+        contract_version: 2,
+        run_id: "run-cancel-during-create",
+        status: "cancelled",
+        counts: { total: 1, cancelled: 1 },
+        version: 2,
+        collection_id: null,
+        batch_ids: [],
+        created_at: "2026-07-13T00:00:00Z",
+        updated_at: "2026-07-13T00:00:01Z",
+        expires_at: "2026-07-20T00:00:00Z",
+      })
+    mocks.bgUpload.mockResolvedValue({
+      batch_id: "batch-must-not-submit",
+      jobs: [{ id: 901 }],
+      errors: [],
+      submissions: [
+        {
+          occurrence_id: "occ-cancel-during-create",
+          status: "accepted",
+          accepted: true,
+          job_id: 901,
+          batch_id: "batch-must-not-submit",
+          error_code: null,
+          message: null,
+          retryable: false,
+          attempt: 1,
+        },
+      ],
+    })
+
+    const submitted = submitQuickIngestBatch({
+      entries: [
+        {
+          id: "occ-cancel-during-create",
+          url: "https://cached.invalid/ignored",
+          type: "video",
+        },
+      ],
+      files: [],
+      storeRemote: true,
+      processOnly: false,
+      __quickIngestSessionId: "qi-direct-cancel-during-create",
+      pendingRunRequest: {
+        inputs: [
+          {
+            inputKind: "direct_url",
+            occurrenceId: "occ-cancel-during-create",
+            url: "https://client.invalid/ignored",
+          },
+        ],
+      },
+    } as any)
+    await vi.waitFor(() => expect(mocks.bgRequest).toHaveBeenCalledTimes(1))
+
+    await cancelQuickIngestSession({
+      sessionId: "qi-direct-cancel-during-create",
+      reason: "user_cancelled",
+    })
+    resolveCreate({
+      contract_version: 2,
+      run_id: "run-cancel-during-create",
+      status: "staged",
+      version: 1,
+      status_url: "/api/v1/media/ingest/runs/run-cancel-during-create",
+      items_url: "/api/v1/media/ingest/runs/run-cancel-during-create/items",
+      events_url: "/api/v1/media/ingest/runs/run-cancel-during-create/events/stream",
+      processing_occurrences: [
+        {
+          occurrence_id: "occ-cancel-during-create",
+          ordinal: 1,
+          input_kind: "direct_url",
+          source_url: "https://server.example/cancel-during-create",
+          source_kind: "video",
+          display_metadata: {},
+          state: "staged",
+          outcome: null,
+          job_id: null,
+          batch_id: null,
+          attempt: 1,
+          planned_collection_item_id: null,
+        },
+      ],
+    })
+
+    await expect(submitted).resolves.toMatchObject({
+      ok: false,
+      accepted: false,
+      submissionBlocked: true,
+      runId: "run-cancel-during-create",
+    })
+    expect(mocks.bgUpload).not.toHaveBeenCalled()
+    expect(mocks.bgRequest).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/media/ingest/runs/run-cancel-during-create/cancel",
+        body: { reason: "user_cancelled" },
+      })
+    )
+  })
+
+  it("stops later chunks and cancels the run when cancellation arrives between chunks", async () => {
+    const occurrences = Array.from({ length: 51 }, (_, index) => ({
+      occurrence_id: `occ-cancel-chunk-${index + 1}`,
+      ordinal: index + 1,
+      input_kind: "direct_url",
+      source_url: `https://server.example/cancel-chunk-${index + 1}`,
+      source_kind: "video",
+      display_metadata: {},
+      state: "staged",
+      outcome: null,
+      job_id: null,
+      batch_id: null,
+      attempt: 1,
+      planned_collection_item_id: null,
+    }))
+    mocks.bgRequest
+      .mockResolvedValueOnce({
+        contract_version: 2,
+        run_id: "run-cancel-between-chunks",
+        status: "staged",
+        version: 1,
+        status_url: "/api/v1/media/ingest/runs/run-cancel-between-chunks",
+        items_url: "/api/v1/media/ingest/runs/run-cancel-between-chunks/items",
+        events_url: "/api/v1/media/ingest/runs/run-cancel-between-chunks/events/stream",
+        processing_occurrences: occurrences,
+      })
+      .mockResolvedValue({
+        contract_version: 2,
+        run_id: "run-cancel-between-chunks",
+        status: "cancelled",
+        counts: { total: 51, cancelled: 51 },
+        version: 2,
+        collection_id: null,
+        batch_ids: ["batch-cancel-first"],
+        created_at: "2026-07-13T00:00:00Z",
+        updated_at: "2026-07-13T00:00:01Z",
+        expires_at: "2026-07-20T00:00:00Z",
+      })
+    mocks.bgUpload.mockImplementation(async () => {
+      await cancelQuickIngestSession({
+        sessionId: "qi-direct-cancel-between-chunks",
+        reason: "user_cancelled",
+        tracking: {
+          mode: "webui-direct",
+          runId: "run-cancel-between-chunks",
+        },
+      })
+      return {
+        batch_id: "batch-cancel-first",
+        jobs: Array.from({ length: 50 }, (_, index) => ({ id: index + 1 })),
+        errors: [],
+        submissions: Array.from({ length: 50 }, (_, index) => ({
+          occurrence_id: `occ-cancel-chunk-${index + 1}`,
+          status: "accepted",
+          accepted: true,
+          job_id: index + 1,
+          batch_id: "batch-cancel-first",
+          error_code: null,
+          message: null,
+          retryable: false,
+          attempt: 1,
+        })),
+      }
+    })
+
+    const result = await submitQuickIngestBatch({
+      entries: occurrences.map((occurrence) => ({
+        id: occurrence.occurrence_id,
+        url: "https://cached.invalid/ignored",
+        type: "video",
+      })),
+      files: [],
+      storeRemote: true,
+      processOnly: false,
+      __quickIngestSessionId: "qi-direct-cancel-between-chunks",
+      pendingRunRequest: {
+        inputs: occurrences.map((occurrence) => ({
+          inputKind: "direct_url",
+          occurrenceId: occurrence.occurrence_id,
+          url: "https://client.invalid/ignored",
+        })),
+      },
+    } as any)
+
+    expect(mocks.bgUpload).toHaveBeenCalledTimes(1)
+    expect(result).toMatchObject({
+      ok: false,
+      accepted: true,
+      submissionBlocked: true,
+      runId: "run-cancel-between-chunks",
+      unsentOccurrenceIds: ["occ-cancel-chunk-51"],
+    })
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/media/ingest/runs/run-cancel-between-chunks/cancel",
+        body: { reason: "user_cancelled" },
+      })
+    )
+  })
+
   it("uses direct upload path when extension runtime id is unavailable", async () => {
     mocks.bgUpload.mockResolvedValue({
       batch_id: "batch-1",
@@ -2076,6 +3177,84 @@ describe("submitQuickIngestBatch", () => {
       })
     )
     expect(response).toEqual({ ok: true })
+  })
+
+  it("cancels a tracked version-2 run before considering legacy batches", async () => {
+    mocks.bgRequest.mockResolvedValue({
+      contract_version: 2,
+      run_id: "run-cancel-1",
+      status: "cancelled",
+      counts: { total: 1, cancelled: 1 },
+      version: 2,
+      collection_id: null,
+      batch_ids: ["batch-should-not-run"],
+      created_at: "2026-07-13T00:00:00Z",
+      updated_at: "2026-07-13T00:00:01Z",
+      expires_at: "2026-07-20T00:00:00Z",
+    })
+
+    const response = await cancelQuickIngestSession({
+      sessionId: "qi-direct-run-cancel",
+      reason: "user_cancelled",
+      tracking: {
+        mode: "webui-direct",
+        runId: "run-cancel-1",
+        batchIds: ["batch-should-not-run"],
+      },
+    } as any)
+
+    expect(response).toEqual({ ok: true })
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(1)
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/media/ingest/runs/run-cancel-1/cancel",
+        body: { reason: "user_cancelled" },
+      }),
+    )
+  })
+
+  it("reports a live run cancellation failure instead of claiming success", async () => {
+    mocks.bgRequest.mockRejectedValue(
+      Object.assign(new Error("service unavailable"), { status: 503 }),
+    )
+
+    const response = await cancelQuickIngestSession({
+      sessionId: "qi-direct-run-failure",
+      tracking: {
+        mode: "webui-direct",
+        runId: "run-cancel-failure",
+        batchIds: ["batch-must-not-mask-failure"],
+      },
+    } as any)
+
+    expect(response).toMatchObject({ ok: false })
+    expect(response.error).toMatch(/could not (?:connect|be reached)|unavailable/i)
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(1)
+  })
+
+  it("falls back to tracked batches only when run cancellation is unsupported", async () => {
+    mocks.bgRequest
+      .mockRejectedValueOnce(
+        Object.assign(new Error("not found"), { status: 404 }),
+      )
+      .mockResolvedValueOnce({ ok: true })
+
+    const response = await cancelQuickIngestSession({
+      sessionId: "qi-direct-run-legacy",
+      tracking: {
+        mode: "webui-direct",
+        runId: "run-cancel-legacy",
+        batchIds: ["batch-legacy-1"],
+      },
+    } as any)
+
+    expect(response).toEqual({ ok: true })
+    expect(mocks.bgRequest).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        path: expect.stringContaining("batch_id=batch-legacy-1"),
+      }),
+    )
   })
 
   it("sends explicit cancel message with session id", async () => {

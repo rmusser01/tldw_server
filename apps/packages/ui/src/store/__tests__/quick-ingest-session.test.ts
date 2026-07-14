@@ -158,6 +158,76 @@ describe("quick ingest session store", () => {
     expect(store.getState().session?.tracking).toBeUndefined()
   })
 
+  it("bounds persisted run identity to the backend identifier limit", () => {
+    const store = createQuickIngestSessionStore()
+    const oversizedRunId = "r".repeat(256)
+
+    store.getState().markProcessingTracking({
+      mode: "webui-direct",
+      sessionId: "qi-direct-bounded-run",
+      runId: oversizedRunId,
+    })
+
+    expect(store.getState().session?.tracking?.runId).toBeUndefined()
+    expect(sessionStorage.getItem(STORAGE_KEY)).not.toContain(oversizedRunId)
+
+    const maximumRunId = ` ${"r".repeat(255)} `
+    store.getState().markProcessingTracking({
+      mode: "webui-direct",
+      sessionId: "qi-direct-bounded-run",
+      runId: maximumRunId,
+    })
+
+    expect(store.getState().session?.tracking?.runId).toBe("r".repeat(255))
+  })
+
+  it("persists version-2 submission state before a run id exists", () => {
+    const store = createQuickIngestSessionStore()
+
+    store.getState().markProcessingTracking({
+      mode: "webui-direct",
+      sessionId: "qi-direct-submission-intent",
+      submissionState: "creating_run",
+      submissionOccurrenceIds: ["occ-submission-intent"],
+      startedAt: 1700000000000,
+    } as any)
+
+    expect(store.getState().session?.tracking).toMatchObject({
+      sessionId: "qi-direct-submission-intent",
+      submissionState: "creating_run",
+      submissionOccurrenceIds: ["occ-submission-intent"],
+    })
+    expect(sessionStorage.getItem(STORAGE_KEY)).toContain(
+      '"submissionState":"creating_run"'
+    )
+
+    const rehydrated = createQuickIngestSessionStore().getState().session
+    expect(rehydrated?.tracking).toMatchObject({
+      submissionState: "creating_run",
+      runId: undefined,
+    })
+  })
+
+  it("bounds dedicated submission occurrence recovery identities", () => {
+    const store = createQuickIngestSessionStore()
+
+    store.getState().markProcessingTracking({
+      mode: "webui-direct",
+      sessionId: "qi-direct-bounded-submission-occurrences",
+      submissionState: "creating_run",
+      submissionOccurrenceIds: [
+        ...Array.from({ length: 501 }, (_, index) => `occ-${index + 1}`),
+        "x".repeat(256),
+      ],
+    } as any)
+
+    const occurrenceIds = store.getState().session?.tracking
+      ?.submissionOccurrenceIds
+    expect(occurrenceIds).toHaveLength(500)
+    expect(occurrenceIds?.at(-1)).toBe("occ-500")
+    expect(sessionStorage.getItem(STORAGE_KEY)).not.toContain("x".repeat(256))
+  })
+
   it("reconstructs bounded playlist records and fails closed on mismatched authority", () => {
     const store = createQuickIngestSessionStore()
 

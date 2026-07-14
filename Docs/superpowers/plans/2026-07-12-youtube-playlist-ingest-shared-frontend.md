@@ -232,11 +232,11 @@ Verification before commit: Task 4 was implemented through focused RED/GREEN cyc
 
 **Tests:** Run client tests, ambiguous retry, dynamic events, extension runtime tests.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 5: Implement the shared run client and bounded submission
 
-- [ ] **Step 1: Write failing run-client tests**
+- [x] **Step 1: Write failing run-client tests**
 
 Test run creation, Review-required response, processing-only chunk selection, structured partial acceptance, global stop with `Retry-After`, URL/file aligned arrays, server-returned authoritative URLs overriding cached queue display URLs, same-attempt ambiguous retry, and polling/SSE snapshots merged by occurrence ID.
 
@@ -244,26 +244,26 @@ Test run creation, Review-required response, processing-only chunk selection, st
 expect(submitCalls[0].fields).toMatchObject({
   run_id: "run-1",
   occurrence_ids: ["occ-1", "occ-2"],
-  attempts: [0, 0],
+  attempts: [1, 1],
   urls: [video1, video2],
 })
 ```
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 Run: `cd apps/tldw-frontend && bunx vitest run ../packages/ui/src/services/tldw/__tests__/playlist-ingest.test.ts ../packages/ui/src/services/__tests__/quick-ingest-batch.test.ts --maxWorkers=1 --no-file-parallelism --testNamePattern="run|occurrence|chunk|ambiguous"`
 
 Expected: FAIL because Quick Ingest submits/waits through legacy item logic.
 
-- [ ] **Step 3: Implement one run client**
+- [x] **Step 3: Implement one run client**
 
 In `playlist-ingest.ts`, add `createRun`, `submitPendingChunks`, `getRun`, `listRunItems`, `streamRunEvents`, `cancelRun`, and `retryRunItems`. Use a conservative exported chunk-size constant. Build URL submission fields only from the authoritative processing occurrences returned by run creation/items, never from cached queue URLs. A run item is merged only by `occurrenceId`; state and terminal outcome are separate. Treat `resync_required` as a full summary/items reload.
 
-- [ ] **Step 4: Delegate legacy services without duplicating logic**
+- [x] **Step 4: Delegate legacy services without duplicating logic**
 
 In `quick-ingest-batch.ts`, detect version-2 run payloads and call the shared run client; retain the current legacy branch for non-playlist old-server sessions only. In `quick-ingest-session-reattach.ts`, prefer `runId` snapshots over job-ID fan-out. WebUI prefers SSE with polling fallback; extension supplies a polling preference.
 
-- [ ] **Step 5: Run tests and commit**
+- [x] **Step 5: Run tests and commit**
 
 Run: `cd apps/tldw-frontend && bunx vitest run ../packages/ui/src/services/tldw/__tests__/playlist-ingest.test.ts ../packages/ui/src/services/__tests__/quick-ingest-batch.test.ts ../packages/ui/src/services/__tests__/quick-ingest-session-reattach.test.ts --maxWorkers=1 --no-file-parallelism`
 
@@ -273,6 +273,16 @@ Expected: PASS.
 git add apps/packages/ui/src/services/tldw/playlist-ingest.ts apps/packages/ui/src/services/tldw/quick-ingest-batch.ts apps/packages/ui/src/services/tldw/quick-ingest-session-reattach.ts apps/packages/ui/src/services/__tests__ apps/packages/ui/src/services/tldw/__tests__
 git commit -m "feat: submit quick ingest through shared runs (TASK-12113)"
 ```
+
+Task 5 verification before review/commit: the new delegate RED timed out in legacy per-job polling, while run-ID reattachment returned `interrupted`; the shared-client cases initially lacked the high-level run operations. Review remediation moved normalized processing options, conference collection creation, and per-occurrence conference metadata into the authoritative run-create body without cached materialized URLs; preserved monitoring after a later chunk is rate-limited while cancelling only unsent occurrences; made run cancellation fail explicitly except for genuine old-server fallback; and made SSE reload version-advanced items and ignore its unchanged initial snapshot. A final cleanup-failure RED proved that an occurrence-cancel failure could otherwise reattach forever; the service now returns an explicit cleanup-failed state and the Modal preserves tracking/accepted work in an interrupted recovery state without starting that loop. The Modal gates run-ID reattachment on explicit submit acknowledgement rather than timing, and the regression keeps submission pending after publishing tracking to prove the race is closed; the ordinary accepted-run control proves acknowledgement enables reattachment. The final expanded Vitest gate passed 224/224 across nine suites, including the three required run/delegate suites, both WizardModal suites, bounded persisted run identity/runtime, background upload Retry-After propagation, terminal no-job outcomes, partial chunk acceptance, cleanup failure, and refreshed run cancellation. Repository-pinned focused ESLint exited 0 with zero errors, and `git diff --check` passed. Final code re-review approved the remediated diff. Full TypeScript was not rerun after the Task 1 three-attempt repository-baseline cap. Bandit is not applicable to this TypeScript-only task. A blanket Prettier write was not used because the shared package still reports conflicting/baseline formatting across every touched file. Step 5 remains open only for the root-agent commit.
+
+Task 5 formal blocker remediation completed test-first, with Step 5 and final approval still open pending both requested re-reviews. The durable tracking contract now persists `creating_run` before create, publishes `run_created` before upload, and merges accepted batch/job mappings after each chunk; reload reconstructs materialized authority and reattaches post-create/partial runs without cached-URL fallback. Missing file/unusable processing occurrences stop submission and are cancelled while accepted work remains attached. Run paging fails closed above 500 occurrences or a 4096-character cursor, retained SSE events cannot regress authoritative lifecycle/progress, and reattachment falls back to legacy jobs only for explicit 404/405/501 compatibility while 429/503 remain retryable and 401/403 surface authorization recovery. Cleanup failure interrupts even when the first chunk accepted nothing. Direct cancellation is observed while create is pending and between chunks, preventing later uploads and cancelling the server run. Formal RED gate: 17 failed / 118 passed across five files. GREEN gate: 135/135. Expanded Task 5 gate: 241/241 across nine files. Repository-pinned scoped ESLint `--quiet` and `git diff --check` exit 0 (only the existing Next pages-directory informational output). Full TypeScript remains skipped under the Task 1 three-attempt repository-baseline cap; Bandit is not applicable to TypeScript-only changes. No files were staged or committed.
+
+Task 5 second formal-review remediation completed test-first, with Step 5 and final approval still open pending both final re-reviews. A restored `creating_run` marker now fails closed as interrupted and cannot reconstruct or restart a request, including after materialization expiry. A dedicated, sanitized `submissionOccurrenceIds` field preserves at most 500 occurrence identities without overloading collection planning metadata. Reload of `run_created` or `submitting` tracking cancels only server-authoritative unsent states (`staged`, `awaiting_upload`, `submit_pending`) and repolls; accepted/running work is preserved, and cleanup 503 remains retryable without false terminalization. SSE streams without a trustworthy event boundary reload authoritative summary/items for occurrence events, preventing same- or higher-state retained replay from regressing metadata. Second formal RED gate: 8 failed / 132 passed across five files; the additional persisted-bound control brought the final focused gate to 141/141. Expanded Task 5 gate: 247/247 across nine files. Repository-pinned scoped ESLint `--quiet` and `git diff --check` exit 0 (only the existing Next pages-directory informational output). Full TypeScript remains skipped under the Task 1 three-attempt repository-baseline cap; Bandit is not applicable to TypeScript-only changes. No files were staged or committed.
+
+Task 5 bounded-transport remediation completed test-first, with both final re-reviews still pending. The 500-item unknown-cursor RED proved that replaying retained occurrence events caused 1002 authoritative REST requests instead of the expected two. Reattachment now returns the complete authoritative poll snapshot whenever no trustworthy event high-water mark exists and does not open SSE in that state; the existing stale-terminal control confirms retained events cannot weaken authoritative state. The focused five-file gate passes 142/142 and the expanded nine-file gate passes 248/248. Repository-pinned scoped ESLint `--quiet` exits 0 with only the existing Next pages-directory informational output. Full TypeScript remains skipped under the Task 1 three-attempt baseline cap; Bandit is not applicable to TypeScript-only changes. No files were staged or committed.
+
+Task 5 final formal specification/code-quality re-reviews: approved with no actionable findings. The reviewers independently confirmed fail-closed restored-create recovery, bounded dedicated submission occurrence tracking, authoritative unsent-only cleanup with retryable cancellation failure, bounded unknown-cursor polling, and cursor-backed SSE correctness. One reviewer reran the requested focused and expanded gates at 142/142 and 248/248; the other independently expanded the nine-file verification to 254/254. Both reported scoped ESLint `--quiet` and `git diff --check` clean. The root agent independently reran the expanded nine-file gate at 248/248, linted every changed TypeScript file with the repository-pinned ESLint configuration, and confirmed `git diff --check` clean before commit.
 
 ### Task 6: Make the extension runtime a thin transport adapter
 

@@ -5,7 +5,7 @@ import { tldwClient } from "@/services/tldw/TldwApiClient";
 import { tldwAuth } from "@/services/tldw/TldwAuth";
 import { tldwModels } from "@/services/tldw";
 import { apiSend } from "@/services/api-send";
-import { tldwRequest } from "@/services/tldw/request-core";
+import { parseRetryAfter, tldwRequest } from "@/services/tldw/request-core";
 import { resolveEffectiveTldwConfig } from "@/services/tldw/single-user-credential";
 import {
   getProcessPathForType,
@@ -134,6 +134,26 @@ const waitFor = (delayMs: number): Promise<void> =>
   new Promise((resolve) => {
     setTimeout(resolve, delayMs);
   });
+
+export const buildUploadRuntimeResponse = (
+  resp: Pick<Response, "ok" | "status" | "headers">,
+  data: unknown,
+  error?: string,
+) => {
+  const retryAfter = resp.headers.get("retry-after")?.trim() || null;
+  return {
+    ok: resp.ok,
+    status: resp.status,
+    data,
+    error,
+    ...(retryAfter
+      ? {
+          headers: { "retry-after": retryAfter },
+          retryAfterMs: parseRetryAfter(retryAfter),
+        }
+      : {}),
+  };
+};
 
 const sendBackgroundRuntimeMessage = async (
   message: {
@@ -1372,7 +1392,7 @@ export default defineBackground({
         const error = resp.ok
           ? undefined
           : formatErrorMessage(data, `Upload failed: ${resp.status}`);
-        return { ok: resp.ok, status: resp.status, data, error };
+        return buildUploadRuntimeResponse(resp, data, error);
       } catch (e: any) {
         const raw = String(e?.message || "");
         const isAbort = raw.toLowerCase().includes("abort");

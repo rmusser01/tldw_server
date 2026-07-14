@@ -128,7 +128,10 @@ vi.mock("~/components/Layouts/Layout", () => ({
 import { RouteShell } from "@/routes/app-route"
 import { buildClipDraft } from "@/services/web-clipper/draft-builder"
 import { CLIPPER_CAPTURE_MESSAGE_TYPE } from "@/services/web-clipper/pending-draft"
-import { launchWebClipperFromContextMenu } from "@/entries/background"
+import {
+  buildUploadRuntimeResponse,
+  launchWebClipperFromContextMenu,
+} from "@/entries/background"
 import type { RouteDefinition } from "@/routes/route-registry"
 
 const ROUTES: Record<"options" | "sidepanel", RouteDefinition[]> = {
@@ -179,6 +182,30 @@ const renderRouteShell = (kind: "options" | "sidepanel", path: string) =>
       )
     )
   )
+
+describe("background upload response metadata", () => {
+  it("forwards only sanitized Retry-After timing to upload callers", () => {
+    const response = buildUploadRuntimeResponse(
+      new Response(null, {
+        status: 429,
+        headers: {
+          "Retry-After": "3",
+          "Set-Cookie": "secret=must-not-forward",
+        },
+      }),
+      { detail: "rate limited" },
+      "rate limited",
+    )
+
+    expect(response).toMatchObject({
+      ok: false,
+      status: 429,
+      headers: { "retry-after": "3" },
+      retryAfterMs: 3_000,
+    })
+    expect(response.headers).not.toHaveProperty("set-cookie")
+  })
+})
 
 describe("web clipper background launcher", () => {
   beforeEach(() => {

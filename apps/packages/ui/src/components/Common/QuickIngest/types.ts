@@ -141,7 +141,15 @@ export type QuickIngestSessionLifecycle =
 
 export type PersistedQuickIngestTracking = {
   mode: "webui-direct" | "extension-runtime" | "unknown"
+  submissionState?:
+    | "creating_run"
+    | "run_created"
+    | "submitting"
+    | "cleanup_required"
+    | "acknowledged"
+  submissionOccurrenceIds?: string[]
   sessionId?: string
+  runId?: string
   batchId?: string
   batchIds?: string[]
   collectionId?: string
@@ -157,7 +165,7 @@ export type PersistedQuickIngestTracking = {
 }
 
 export type ReattachedQuickIngestJob = {
-  jobId: number
+  jobId: number | null
   status: string
   result?: unknown
   error?: string

@@ -1,9 +1,18 @@
 import { bgRequest } from "@/services/background-proxy"
+import { mediaMethods } from "@/services/tldw/domains/media"
 import {
   completedIngestJobIndicatesFailure,
   extractCompletedIngestJobError,
   extractCompletedIngestJobTerminalData,
 } from "@/services/tldw/ingest-job-results"
+import {
+  PlaylistIngestPublicError,
+  cancelRun,
+  pollRunSnapshot,
+  streamRunEvents,
+  type PlaylistIngestRunItem,
+  type PlaylistIngestRunSnapshot,
+} from "@/services/tldw/playlist-ingest"
 import type {
   PersistedQuickIngestTracking,
   ReattachedQuickIngestJob,
@@ -175,9 +184,224 @@ const deriveLifecycle = (
   return "interrupted"
 }
 
-export const reattachQuickIngestSession = async (
-  tracking: PersistedQuickIngestTracking
+type QuickIngestReattachOptions = {
+  transportPreference?: "sse" | "poll"
+}
+
+const successfulRunOutcomes = new Set([
+  "completed",
+  "included_existing",
+  "metadata_updated",
+  "skipped_existing",
+])
+
+const failedRunOutcomes = new Set([
+  "submit_failed",
+  "processing_failed",
+  "metadata_update_failed",
+])
+
+const runItemStatus = (item: PlaylistIngestRunItem): string => {
+  if (item.state !== "terminal") {
+    if (item.state === "awaiting_upload") return "uploading"
+    if (
+      item.state === "staged" ||
+      item.state === "preparing" ||
+      item.state === "submit_pending"
+    ) {
+      return "queued"
+    }
+    if (
+      item.state === "cancellation_requested" ||
+      item.state === "status_unavailable"
+    ) {
+      return "processing"
+    }
+    return item.state
+  }
+  if (item.outcome === "cancelled") return "cancelled"
+  if (item.outcome && failedRunOutcomes.has(item.outcome)) return "failed"
+  if (item.outcome && successfulRunOutcomes.has(item.outcome)) return "completed"
+  return "processing"
+}
+
+const deriveRunLifecycle = (
+  items: PlaylistIngestRunItem[],
+): ReattachedQuickIngestSnapshot["lifecycle"] => {
+  if (
+    items.some(
+      (item) => item.state !== "terminal" || item.outcome === null,
+    )
+  ) {
+    return "processing"
+  }
+  const completedCount = items.filter(
+    (item) => item.outcome && successfulRunOutcomes.has(item.outcome),
+  ).length
+  const cancelledCount = items.filter(
+    (item) => item.outcome === "cancelled",
+  ).length
+  const failedCount = items.filter(
+    (item) => item.outcome && failedRunOutcomes.has(item.outcome),
+  ).length
+  if (items.length > 0 && completedCount === items.length) return "completed"
+  if (items.length > 0 && cancelledCount === items.length) return "cancelled"
+  if (completedCount > 0 || cancelledCount > 0 || failedCount > 0) {
+    return "partial_failure"
+  }
+  return "interrupted"
+}
+
+const snapshotFromRun = (
+  snapshot: PlaylistIngestRunSnapshot,
+): ReattachedQuickIngestSnapshot => ({
+  lifecycle: deriveRunLifecycle(snapshot.items),
+  jobs: snapshot.items.map((item) => ({
+    jobId: item.jobId,
+    status: runItemStatus(item),
+    result: {
+      media_id: item.mediaId,
+      outcome: item.outcome,
+      title: item.displayMetadata.title,
+    },
+    error:
+      item.outcome && failedRunOutcomes.has(item.outcome)
+        ? item.progressMessage || `Ingest ${item.outcome}`
+        : undefined,
+    sourceItemId: item.occurrenceId,
+  })),
+  errorMessage: null,
+})
+
+const runSnapshotSignature = (snapshot: PlaylistIngestRunSnapshot): string =>
+  JSON.stringify({
+    status: snapshot.summary.status,
+    version: snapshot.summary.version,
+    items: snapshot.items.map((item) => [
+      item.occurrenceId,
+      item.state,
+      item.outcome,
+      item.progressPercent,
+      item.progressMessage,
+      item.jobId,
+      item.batchId,
+      item.mediaId,
+    ]),
+  })
+
+const reattachRun = async (
+  runId: string,
+  options: QuickIngestReattachOptions,
+  submissionState?: PersistedQuickIngestTracking["submissionState"],
 ): Promise<ReattachedQuickIngestSnapshot> => {
+  let polled = await pollRunSnapshot(mediaMethods, runId)
+  if (submissionState === "run_created" || submissionState === "submitting") {
+    const unsentOccurrenceIds = polled.items.flatMap((item) =>
+      item.state === "staged" ||
+      item.state === "awaiting_upload" ||
+      item.state === "submit_pending"
+        ? [item.occurrenceId]
+        : []
+    )
+    if (unsentOccurrenceIds.length > 0) {
+      await cancelRun(mediaMethods, runId, {
+        occurrenceIds: unsentOccurrenceIds,
+        reason: "submission_interrupted",
+      })
+      polled = await pollRunSnapshot(mediaMethods, runId)
+    }
+  }
+  const hasSafeEventBoundary = polled.lastEventId !== null
+  if (
+    options.transportPreference === "poll" ||
+    !hasSafeEventBoundary ||
+    deriveRunLifecycle(polled.items) !== "processing"
+  ) {
+    return snapshotFromRun(polled)
+  }
+
+  try {
+    const initialSignature = runSnapshotSignature(polled)
+    for await (const streamed of streamRunEvents(mediaMethods, polled, {
+      streamIdleTimeoutMs: 10_000,
+    })) {
+      if (runSnapshotSignature(streamed) === initialSignature) continue
+      return snapshotFromRun(streamed)
+    }
+  } catch {
+    // A complete polling snapshot remains authoritative when SSE is unavailable.
+  }
+  return snapshotFromRun(polled)
+}
+
+export const reattachQuickIngestSession = async (
+  tracking: PersistedQuickIngestTracking,
+  options: QuickIngestReattachOptions = {},
+): Promise<ReattachedQuickIngestSnapshot> => {
+  if (tracking.runId) {
+    try {
+      return await reattachRun(tracking.runId, {
+        transportPreference:
+          options.transportPreference ??
+          (tracking.mode === "extension-runtime" ? "poll" : "sse"),
+      }, tracking.submissionState)
+    } catch (error) {
+      const status =
+        error instanceof PlaylistIngestPublicError
+          ? error.status
+          : typeof (error as { status?: unknown } | null)?.status === "number"
+            ? (error as { status: number }).status
+            : null
+      const compatibilityFallback =
+        status === 404 || status === 405 || status === 501
+      if (!compatibilityFallback) {
+        if (status === 401 || status === 403) {
+          return interruptedSnapshot(
+            "Quick ingest could not reconnect because authorization is required. Sign in or update your API key."
+          )
+        }
+        const retryable =
+          error instanceof PlaylistIngestPublicError
+            ? error.retryable
+            : status === 0 ||
+              status === 408 ||
+              status === 429 ||
+              status === 503 ||
+              status === 504 ||
+              (status === null &&
+                /timeout|timed out|network|fetch|connect|unavailable/i.test(
+                  error instanceof Error ? `${error.name} ${error.message}` : ""
+                ))
+        if (retryable) {
+          const jobIds = normalizeJobIds(tracking.jobIds)
+          const submittedItemIds = resolveSubmittedItemIds(tracking)
+          const jobIdToItemId = normalizeJobIdToItemId(tracking.jobIdToItemId)
+          const jobs =
+            jobIds.length > 0
+              ? jobIds.map((jobId, index) => ({
+                  jobId,
+                  status: "processing",
+                  sourceItemId:
+                    jobIdToItemId[String(jobId)] || submittedItemIds[index],
+                }))
+              : submittedItemIds.map((sourceItemId) => ({
+                  jobId: null,
+                  status: "processing",
+                  sourceItemId,
+                }))
+          return {
+            lifecycle: "processing",
+            jobs,
+            errorMessage:
+              "Run status is temporarily unavailable. Quick ingest will retry.",
+          }
+        }
+        return interruptedSnapshot()
+      }
+      // Older servers may not expose run status; preserve legacy job reattachment.
+    }
+  }
+
   const jobIds = normalizeJobIds(tracking.jobIds)
   if (tracking.mode !== "webui-direct" || jobIds.length === 0) {
     return interruptedSnapshot()

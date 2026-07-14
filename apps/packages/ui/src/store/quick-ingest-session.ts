@@ -35,7 +35,15 @@ export type QuickIngestSessionLifecycle =
 
 export type PersistedQuickIngestTracking = {
   mode: "webui-direct" | "extension-runtime" | "unknown"
+  submissionState?:
+    | "creating_run"
+    | "run_created"
+    | "submitting"
+    | "cleanup_required"
+    | "acknowledged"
+  submissionOccurrenceIds?: string[]
   sessionId?: string
+  runId?: string
   batchId?: string
   batchIds?: string[]
   collectionId?: string
@@ -229,6 +237,16 @@ const normalizeStringIds = (values?: unknown[]): string[] =>
     )
   )
 
+const MAX_PERSISTED_RUN_ID_LENGTH = 255
+const MAX_PERSISTED_SUBMISSION_OCCURRENCES = 500
+
+const sanitizeRunId = (value?: string): string | undefined => {
+  const runId = value?.trim() || ""
+  return runId.length > 0 && runId.length <= MAX_PERSISTED_RUN_ID_LENGTH
+    ? runId
+    : undefined
+}
+
 const sanitizeTracking = (
   tracking?: PersistedQuickIngestTracking
 ): PersistedQuickIngestTracking | undefined => {
@@ -252,6 +270,15 @@ const sanitizeTracking = (
   const plannedItemIds = normalizeStringIds(
     Array.isArray(tracking.plannedItemIds) ? tracking.plannedItemIds : []
   )
+  const submissionOccurrenceIds = normalizeStringIds(
+    Array.isArray(tracking.submissionOccurrenceIds)
+      ? tracking.submissionOccurrenceIds
+      : []
+  )
+    .filter(
+      (occurrenceId) => occurrenceId.length <= MAX_PERSISTED_RUN_ID_LENGTH
+    )
+    .slice(0, MAX_PERSISTED_SUBMISSION_OCCURRENCES)
   const jobIdToItemIdEntries = Object.entries(tracking.jobIdToItemId || {})
     .map(([jobId, itemId]) => [String(jobId || "").trim(), String(itemId || "").trim()] as const)
     .filter(([jobId, itemId]) => jobId && itemId)
@@ -269,7 +296,18 @@ const sanitizeTracking = (
 
   return {
     mode: normalizedMode,
+    submissionState:
+      tracking.submissionState === "creating_run" ||
+      tracking.submissionState === "run_created" ||
+      tracking.submissionState === "submitting" ||
+      tracking.submissionState === "cleanup_required" ||
+      tracking.submissionState === "acknowledged"
+        ? tracking.submissionState
+        : undefined,
+    submissionOccurrenceIds:
+      submissionOccurrenceIds.length > 0 ? submissionOccurrenceIds : undefined,
     sessionId: tracking.sessionId?.trim() || undefined,
+    runId: sanitizeRunId(tracking.runId),
     batchId:
       tracking.batchId?.trim() ||
       (batchIds.length > 0 ? batchIds[batchIds.length - 1] : undefined),
@@ -317,7 +355,13 @@ const mergeTracking = (
 
   return sanitizeTracking({
     mode: next.mode !== "unknown" ? next.mode : base.mode,
+    submissionState: next.submissionState || base.submissionState,
+    submissionOccurrenceIds: [
+      ...(base.submissionOccurrenceIds || []),
+      ...(next.submissionOccurrenceIds || []),
+    ],
     sessionId: next.sessionId || base.sessionId,
+    runId: next.runId || base.runId,
     batchId: next.batchId || base.batchId,
     batchIds: [...(base.batchIds || []), ...(next.batchIds || [])],
     collectionId: next.collectionId || base.collectionId,

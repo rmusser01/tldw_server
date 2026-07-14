@@ -1519,3 +1519,677 @@ export const buildPlaylistIngestPageQuery = (
   const encoded = query.toString();
   return encoded ? `?${encoded}` : "";
 };
+
+// Keep run-bound submissions comfortably below the backend's 500-item ceiling.
+export const PLAYLIST_INGEST_SUBMIT_CHUNK_SIZE = 50;
+
+export type PlaylistIngestRunApi = {
+  createPlaylistIngestRun: (
+    payload: PlaylistIngestRunCreateRequest,
+    options?: PlaylistIngestRequestOptions,
+  ) => Promise<PlaylistIngestRunCreateResult>;
+  getPlaylistIngestRun: (
+    runId: string,
+    options?: PlaylistIngestRequestOptions,
+  ) => Promise<PlaylistIngestRunSummary>;
+  listPlaylistIngestRunItems: (
+    runId: string,
+    params?: PlaylistIngestPageParams,
+    options?: PlaylistIngestRequestOptions,
+  ) => Promise<PlaylistIngestRunItemsPage>;
+  streamPlaylistIngestRunEvents: (
+    runId: string,
+    options?: PlaylistIngestStreamOptions,
+  ) => AsyncGenerator<PlaylistIngestRunStreamEvent>;
+  cancelPlaylistIngestRun: (
+    runId: string,
+    payload?: PlaylistIngestRunCancelRequest,
+    options?: PlaylistIngestRequestOptions,
+  ) => Promise<PlaylistIngestRunSummary>;
+  retryPlaylistIngestRunItems: (
+    runId: string,
+    occurrenceIds: string[],
+    options?: PlaylistIngestRequestOptions,
+  ) => Promise<PlaylistIngestRunRetryResult>;
+};
+
+export type PlaylistIngestRunItemsSnapshot = {
+  contractVersion: PlaylistIngestContractVersion;
+  runId: string;
+  version: number;
+  items: PlaylistIngestRunItem[];
+};
+
+export const createRun = (
+  api: PlaylistIngestRunApi,
+  payload: PlaylistIngestRunCreateRequest,
+  options?: PlaylistIngestRequestOptions,
+): Promise<PlaylistIngestRunCreateResult> =>
+  options === undefined
+    ? api.createPlaylistIngestRun(payload)
+    : api.createPlaylistIngestRun(payload, options);
+
+export const getRun = (
+  api: PlaylistIngestRunApi,
+  runId: string,
+  options?: PlaylistIngestRequestOptions,
+): Promise<PlaylistIngestRunSummary> =>
+  options === undefined
+    ? api.getPlaylistIngestRun(runId)
+    : api.getPlaylistIngestRun(runId, options);
+
+type ListRunItemsOptions = PlaylistIngestRequestOptions & {
+  pageSize?: number;
+  maxVersionRestarts?: number;
+};
+
+const MAX_PLAYLIST_RUN_ITEMS = 500;
+const MAX_PLAYLIST_RUN_CURSOR_LENGTH = 4096;
+
+export const listRunItems = async (
+  api: PlaylistIngestRunApi,
+  runId: string,
+  options: ListRunItemsOptions = {},
+): Promise<PlaylistIngestRunItemsSnapshot> => {
+  const pageSize =
+    typeof options.pageSize === "number" &&
+    Number.isSafeInteger(options.pageSize) &&
+    options.pageSize > 0
+      ? Math.min(options.pageSize, 500)
+      : 100;
+  const maxRestarts =
+    typeof options.maxVersionRestarts === "number" &&
+    Number.isSafeInteger(options.maxVersionRestarts) &&
+    options.maxVersionRestarts >= 0
+      ? options.maxVersionRestarts
+      : 2;
+
+  for (let restart = 0; restart <= maxRestarts; restart += 1) {
+    const items: PlaylistIngestRunItem[] = [];
+    const occurrenceIds = new Set<string>();
+    const completedCursors = new Set<string>();
+    let cursor: string | null = null;
+    let version: number | null = null;
+    let coherent = true;
+
+    while (true) {
+      const params: PlaylistIngestPageParams = {
+        ...(cursor === null ? {} : { cursor }),
+        limit: pageSize,
+      };
+      const requestOptions =
+        options.signal === undefined && options.timeoutMs === undefined
+          ? undefined
+          : {
+              ...(options.signal === undefined ? {} : { signal: options.signal }),
+              ...(options.timeoutMs === undefined
+                ? {}
+                : { timeoutMs: options.timeoutMs }),
+            };
+      const page =
+        requestOptions === undefined
+          ? await api.listPlaylistIngestRunItems(runId, params)
+          : await api.listPlaylistIngestRunItems(runId, params, requestOptions);
+      if (
+        page.contractVersion !== 2 ||
+        page.runId !== runId ||
+        (version !== null && page.version !== version)
+      ) {
+        coherent = false;
+        break;
+      }
+      version = page.version;
+      for (const item of page.items) {
+        if (
+          items.length >= MAX_PLAYLIST_RUN_ITEMS ||
+          !item.occurrenceId ||
+          occurrenceIds.has(item.occurrenceId)
+        ) {
+          throw new PlaylistIngestPublicError("run_status_unavailable");
+        }
+        occurrenceIds.add(item.occurrenceId);
+        items.push(item);
+      }
+      if (page.nextCursor === null) break;
+      if (
+        page.items.length === 0 ||
+        typeof page.nextCursor !== "string" ||
+        page.nextCursor.length === 0 ||
+        page.nextCursor.length > MAX_PLAYLIST_RUN_CURSOR_LENGTH ||
+        items.length >= MAX_PLAYLIST_RUN_ITEMS ||
+        completedCursors.has(page.nextCursor)
+      ) {
+        throw new PlaylistIngestPublicError("run_status_unavailable");
+      }
+      completedCursors.add(page.nextCursor);
+      cursor = page.nextCursor;
+    }
+
+    if (coherent && version !== null) {
+      return { contractVersion: 2, runId, version, items };
+    }
+  }
+  throw new PlaylistIngestPublicError("run_status_unavailable");
+};
+
+export const cancelRun = (
+  api: PlaylistIngestRunApi,
+  runId: string,
+  payload?: PlaylistIngestRunCancelRequest,
+  options?: PlaylistIngestRequestOptions,
+): Promise<PlaylistIngestRunSummary> =>
+  options === undefined
+    ? api.cancelPlaylistIngestRun(runId, payload)
+    : api.cancelPlaylistIngestRun(runId, payload, options);
+
+export const retryRunItems = (
+  api: PlaylistIngestRunApi,
+  runId: string,
+  occurrenceIds: string[],
+  options?: PlaylistIngestRequestOptions,
+): Promise<PlaylistIngestRunRetryResult> =>
+  options === undefined
+    ? api.retryPlaylistIngestRunItems(runId, occurrenceIds)
+    : api.retryPlaylistIngestRunItems(runId, occurrenceIds, options);
+
+export type PlaylistIngestRunSnapshot = {
+  summary: PlaylistIngestRunSummary;
+  items: PlaylistIngestRunItem[];
+  lastEventId: number | null;
+};
+
+type RunSnapshotOptions = PlaylistIngestRequestOptions & {
+  pageSize?: number;
+  maxVersionRestarts?: number;
+};
+
+const loadRunSnapshot = async (
+  api: PlaylistIngestRunApi,
+  runId: string,
+  options: RunSnapshotOptions = {},
+): Promise<PlaylistIngestRunSnapshot> => {
+  const maxRestarts = options.maxVersionRestarts ?? 2;
+  for (let restart = 0; restart <= maxRestarts; restart += 1) {
+    const requestOptions =
+      options.signal === undefined && options.timeoutMs === undefined
+        ? undefined
+        : {
+            ...(options.signal === undefined ? {} : { signal: options.signal }),
+            ...(options.timeoutMs === undefined
+              ? {}
+              : { timeoutMs: options.timeoutMs }),
+          };
+    const summary = await getRun(api, runId, requestOptions);
+    const items = await listRunItems(api, runId, options);
+    if (summary.version === items.version) {
+      return { summary, items: items.items, lastEventId: null };
+    }
+  }
+  throw new PlaylistIngestPublicError("run_status_unavailable");
+};
+
+const mergeRunSnapshotsByOccurrenceId = (
+  current: PlaylistIngestRunSnapshot,
+  authoritative: PlaylistIngestRunSnapshot,
+): PlaylistIngestRunSnapshot => {
+  const byOccurrenceId = new Map(
+    authoritative.items.map((item) => [item.occurrenceId, item] as const),
+  );
+  const items = current.items.flatMap((item) => {
+    const replacement = byOccurrenceId.get(item.occurrenceId);
+    if (!replacement) return [item];
+    byOccurrenceId.delete(item.occurrenceId);
+    return [{ ...item, ...replacement }];
+  });
+  items.push(...byOccurrenceId.values());
+  return {
+    summary: authoritative.summary,
+    items,
+    lastEventId: authoritative.lastEventId,
+  };
+};
+
+export const pollRunSnapshot = async (
+  api: PlaylistIngestRunApi,
+  runId: string,
+  current?: PlaylistIngestRunSnapshot,
+  options: RunSnapshotOptions = {},
+): Promise<PlaylistIngestRunSnapshot> => {
+  const authoritative = await loadRunSnapshot(api, runId, options);
+  return current
+    ? mergeRunSnapshotsByOccurrenceId(current, authoritative)
+    : authoritative;
+};
+
+const applyOccurrenceEvent = (
+  snapshot: PlaylistIngestRunSnapshot,
+  event: PlaylistIngestRunEvent,
+): PlaylistIngestRunSnapshot | null => {
+  if (event.runId !== snapshot.summary.runId || event.occurrenceId === null) {
+    return null;
+  }
+  let matched = false;
+  const items = snapshot.items.map((item) => {
+    if (item.occurrenceId !== event.occurrenceId) return item;
+    matched = true;
+    return {
+      ...item,
+      ...(event.state === null ? {} : { state: event.state }),
+      outcome: event.outcome,
+      progressPercent: event.progressPercent,
+      progressMessage: event.progressMessage,
+      ...(event.jobId === null ? {} : { jobId: event.jobId }),
+      ...(event.batchId === null ? {} : { batchId: event.batchId }),
+    };
+  });
+  return matched
+    ? { ...snapshot, items, lastEventId: event.eventId }
+    : null;
+};
+
+export const streamRunEvents = async function* (
+  api: PlaylistIngestRunApi,
+  initial: PlaylistIngestRunSnapshot,
+  options: PlaylistIngestStreamOptions & RunSnapshotOptions = {},
+): AsyncGenerator<PlaylistIngestRunSnapshot> {
+  const runId = initial.summary.runId;
+  let snapshot = initial;
+  const lacksSafeEventBoundary =
+    options.afterId === undefined && initial.lastEventId === null;
+  const streamOptions: PlaylistIngestStreamOptions = {
+    ...(options.afterId === undefined && initial.lastEventId !== null
+      ? { afterId: initial.lastEventId }
+      : options.afterId === undefined
+        ? {}
+        : { afterId: options.afterId }),
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+    ...(options.streamIdleTimeoutMs === undefined
+      ? {}
+      : { streamIdleTimeoutMs: options.streamIdleTimeoutMs }),
+  };
+
+  for await (const streamed of api.streamPlaylistIngestRunEvents(
+    runId,
+    streamOptions,
+  )) {
+    if (streamed.kind === "snapshot") {
+      if (streamed.summary.runId !== runId) continue;
+      if (streamed.summary.version !== snapshot.summary.version) {
+        const lastEventId = snapshot.lastEventId;
+        snapshot = await loadRunSnapshot(api, runId, options);
+        snapshot.lastEventId = lastEventId;
+      } else {
+        snapshot = { ...snapshot, summary: streamed.summary };
+      }
+      yield snapshot;
+      continue;
+    }
+    if (streamed.kind === "occurrence") {
+      if (lacksSafeEventBoundary) {
+        snapshot = await loadRunSnapshot(api, runId, options);
+        snapshot.lastEventId = streamed.event.eventId;
+        yield snapshot;
+        continue;
+      }
+      if (
+        snapshot.lastEventId !== null &&
+        streamed.event.eventId <= snapshot.lastEventId
+      ) {
+        continue;
+      }
+      const updated = applyOccurrenceEvent(snapshot, streamed.event);
+      if (updated) {
+        snapshot = updated;
+      } else {
+        snapshot = await loadRunSnapshot(api, runId, options);
+        snapshot.lastEventId = streamed.event.eventId;
+      }
+      yield snapshot;
+      continue;
+    }
+    if (streamed.kind === "run") {
+      if (streamed.event.runId !== runId) continue;
+      snapshot = { ...snapshot, lastEventId: streamed.event.eventId };
+      yield snapshot;
+      continue;
+    }
+    if (streamed.kind === "resyncRequired") {
+      if (streamed.runId !== runId) continue;
+      snapshot = await loadRunSnapshot(api, runId, options);
+      snapshot.lastEventId = streamed.latestEventId;
+      yield snapshot;
+      continue;
+    }
+    if (streamed.runId !== runId) continue;
+    snapshot = {
+      ...snapshot,
+      items: snapshot.items.map((item) =>
+        item.state === "terminal"
+          ? item
+          : { ...item, state: "status_unavailable" },
+      ),
+    };
+    yield snapshot;
+  }
+};
+
+export type PlaylistIngestSubmissionFile = {
+  fieldName?: "files";
+  name?: string;
+  type?: string;
+  data: ArrayBuffer | Uint8Array | number[];
+};
+
+export type PlaylistIngestSubmissionFields = Record<string, unknown> & {
+  run_id: string;
+  urls?: string[];
+  occurrence_ids?: string[];
+  attempts?: number[];
+  planned_item_ids?: number[];
+  file_occurrence_ids?: string[];
+  file_attempts?: number[];
+  file_planned_item_ids?: number[];
+};
+
+export type PlaylistIngestSubmissionRequest = {
+  path: "/api/v1/media/ingest/jobs";
+  method: "POST";
+  fields: PlaylistIngestSubmissionFields;
+  files?: PlaylistIngestSubmissionFile[];
+};
+
+export type ApiPlaylistIngestOccurrenceSubmission = {
+  occurrence_id: string;
+  status: string;
+  accepted: boolean;
+  job_id: number | null;
+  batch_id: string;
+  error_code: string | null;
+  message: string | null;
+  retryable: boolean;
+  attempt: number;
+};
+
+export type ApiPlaylistIngestSubmissionResponse = {
+  batch_id: string;
+  jobs: unknown[];
+  errors: string[];
+  submissions: ApiPlaylistIngestOccurrenceSubmission[];
+};
+
+export type PlaylistIngestOccurrenceSubmission = {
+  occurrenceId: string;
+  status: string;
+  accepted: boolean;
+  jobId: number | null;
+  batchId: string;
+  errorCode: string | null;
+  message: string | null;
+  retryable: boolean;
+  attempt: number;
+};
+
+export type PlaylistIngestSubmitPendingResult = {
+  submissions: PlaylistIngestOccurrenceSubmission[];
+  batchIds: string[];
+  stopped: boolean;
+  retryAfterMs: number | null;
+  unsentOccurrenceIds: string[];
+  error: unknown | null;
+};
+
+type SubmitPendingChunksOptions = {
+  run: PlaylistIngestRunCreateResult;
+  baseFields: Record<string, unknown>;
+  baseFieldsByOccurrenceId?: Record<string, Record<string, unknown>>;
+  filesByOccurrenceId?: Record<string, PlaylistIngestSubmissionFile>;
+  /** Display-only cache accepted for caller convenience and intentionally ignored. */
+  cachedSourceUrls?: Record<string, string>;
+  chunkSize?: number;
+  submitChunk: (
+    request: PlaylistIngestSubmissionRequest,
+  ) => Promise<ApiPlaylistIngestSubmissionResponse>;
+  shouldStop?: () => boolean;
+  onProgress?: (result: PlaylistIngestSubmitPendingResult) => void;
+};
+
+const normalizeOccurrenceSubmission = (
+  value: ApiPlaylistIngestOccurrenceSubmission,
+): PlaylistIngestOccurrenceSubmission => ({
+  occurrenceId: value.occurrence_id,
+  status: value.status,
+  accepted: value.accepted,
+  jobId: value.job_id,
+  batchId: value.batch_id,
+  errorCode: value.error_code,
+  message: value.message,
+  retryable: value.retryable,
+  attempt: value.attempt,
+});
+
+const playlistRetryAfterMs = (error: unknown): number | null => {
+  if (!isRecord(error)) return null;
+  if (
+    typeof error.retryAfterMs === "number" &&
+    Number.isFinite(error.retryAfterMs) &&
+    error.retryAfterMs >= 0
+  ) {
+    return error.retryAfterMs;
+  }
+  const headers = isRecord(error.headers) ? error.headers : null;
+  const raw = headers?.["retry-after"] ?? headers?.["Retry-After"];
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+  const retryAt = Date.parse(raw);
+  return Number.isFinite(retryAt) ? Math.max(0, retryAt - Date.now()) : null;
+};
+
+const isAmbiguousSubmissionFailure = (error: unknown): boolean => {
+  if ((error as { name?: unknown } | null)?.name === "AbortError") return false;
+  if (!isRecord(error)) return true;
+  return (
+    error.status === undefined ||
+    error.status === null ||
+    error.status === 0
+  );
+};
+
+const boundedPlaylistChunkSize = (value: number | undefined): number =>
+  typeof value === "number" && Number.isSafeInteger(value) && value > 0
+    ? Math.min(value, 499)
+    : PLAYLIST_INGEST_SUBMIT_CHUNK_SIZE;
+
+/**
+ * Submit only the server-returned processing occurrences. Cached queue URLs are
+ * never consulted because the run response is the source authority.
+ */
+export const submitPendingChunks = async ({
+  run,
+  baseFields,
+  baseFieldsByOccurrenceId = {},
+  filesByOccurrenceId = {},
+  chunkSize,
+  submitChunk,
+  shouldStop,
+  onProgress,
+}: SubmitPendingChunksOptions): Promise<PlaylistIngestSubmitPendingResult> => {
+  const pending = run.processingOccurrences.filter((occurrence) =>
+    occurrence.inputKind === "file_stub"
+      ? occurrence.state === "awaiting_upload" &&
+        filesByOccurrenceId[occurrence.occurrenceId] !== undefined
+      : occurrence.state === "staged" && isNonEmptyString(occurrence.sourceUrl),
+  );
+  const omittedOccurrenceIds = run.processingOccurrences
+    .filter((occurrence) => !pending.includes(occurrence))
+    .map((occurrence) => occurrence.occurrenceId);
+  const submissions: PlaylistIngestOccurrenceSubmission[] = [];
+  const batchIds = new Set<string>();
+  const size = boundedPlaylistChunkSize(chunkSize);
+  const groupedPending = new Map<
+    string,
+    { fields: Record<string, unknown>; occurrences: PlaylistProcessingOccurrence[] }
+  >();
+  for (const occurrence of pending) {
+    const fields = baseFieldsByOccurrenceId[occurrence.occurrenceId] ?? baseFields;
+    const key = JSON.stringify(fields);
+    const group = groupedPending.get(key);
+    if (group) {
+      group.occurrences.push(occurrence);
+    } else {
+      groupedPending.set(key, { fields, occurrences: [occurrence] });
+    }
+  }
+  const chunks = [...groupedPending.values()].flatMap((group) => {
+    const groupedChunks: Array<{
+      fields: Record<string, unknown>;
+      occurrences: PlaylistProcessingOccurrence[];
+    }> = [];
+    for (let offset = 0; offset < group.occurrences.length; offset += size) {
+      groupedChunks.push({
+        fields: group.fields,
+        occurrences: group.occurrences.slice(offset, offset + size),
+      });
+    }
+    return groupedChunks;
+  });
+
+  const remainingOccurrenceIds = (chunkIndex: number): string[] => [
+    ...chunks
+      .slice(chunkIndex)
+      .flatMap((remaining) =>
+        remaining.occurrences.map((occurrence) => occurrence.occurrenceId),
+      ),
+    ...omittedOccurrenceIds,
+  ];
+
+  for (const [chunkIndex, groupedChunk] of chunks.entries()) {
+    if (shouldStop?.()) {
+      return {
+        submissions,
+        batchIds: [...batchIds],
+        stopped: true,
+        retryAfterMs: null,
+        unsentOccurrenceIds: remainingOccurrenceIds(chunkIndex),
+        error: new DOMException("Aborted", "AbortError"),
+      };
+    }
+    const chunk = groupedChunk.occurrences;
+    const urls = chunk.filter(
+      (occurrence) => occurrence.inputKind !== "file_stub",
+    );
+    const fileOccurrences = chunk.filter(
+      (occurrence) => occurrence.inputKind === "file_stub",
+    );
+    const fields: PlaylistIngestSubmissionFields = {
+      ...groupedChunk.fields,
+      run_id: run.runId,
+    };
+    if (urls.length > 0) {
+      fields.urls = urls.map((occurrence) => occurrence.sourceUrl as string);
+      fields.occurrence_ids = urls.map((occurrence) => occurrence.occurrenceId);
+      fields.attempts = urls.map((occurrence) => occurrence.attempt);
+      if (
+        urls.every((occurrence) => occurrence.plannedCollectionItemId !== null)
+      ) {
+        fields.planned_item_ids = urls.map(
+          (occurrence) => occurrence.plannedCollectionItemId as number,
+        );
+      }
+    }
+
+    let files: PlaylistIngestSubmissionFile[] | undefined;
+    if (fileOccurrences.length > 0) {
+      fields.file_occurrence_ids = fileOccurrences.map(
+        (occurrence) => occurrence.occurrenceId,
+      );
+      fields.file_attempts = fileOccurrences.map(
+        (occurrence) => occurrence.attempt,
+      );
+      if (
+        fileOccurrences.every(
+          (occurrence) => occurrence.plannedCollectionItemId !== null,
+        )
+      ) {
+        fields.file_planned_item_ids = fileOccurrences.map(
+          (occurrence) => occurrence.plannedCollectionItemId as number,
+        );
+      }
+      files = fileOccurrences.map((occurrence) => ({
+        ...filesByOccurrenceId[occurrence.occurrenceId],
+        fieldName: "files",
+      }));
+    }
+
+    const request: PlaylistIngestSubmissionRequest = {
+      path: "/api/v1/media/ingest/jobs",
+      method: "POST",
+      fields,
+      ...(files ? { files } : {}),
+    };
+    try {
+      let response: ApiPlaylistIngestSubmissionResponse;
+      try {
+        response = await submitChunk(request);
+      } catch (error) {
+        if (!isAmbiguousSubmissionFailure(error)) throw error;
+        response = await submitChunk(request);
+      }
+      if (isNonEmptyString(response.batch_id)) batchIds.add(response.batch_id);
+      for (const value of response.submissions) {
+        const submission = normalizeOccurrenceSubmission(value);
+        submissions.push(submission);
+        if (isNonEmptyString(submission.batchId)) {
+          batchIds.add(submission.batchId);
+        }
+      }
+      onProgress?.({
+        submissions: [...submissions],
+        batchIds: [...batchIds],
+        stopped: false,
+        retryAfterMs: null,
+        unsentOccurrenceIds: remainingOccurrenceIds(chunkIndex + 1),
+        error: null,
+      });
+      if (shouldStop?.()) {
+        return {
+          submissions,
+          batchIds: [...batchIds],
+          stopped: true,
+          retryAfterMs: null,
+          unsentOccurrenceIds: remainingOccurrenceIds(chunkIndex + 1),
+          error: new DOMException("Aborted", "AbortError"),
+        };
+      }
+    } catch (error) {
+      return {
+        submissions,
+        batchIds: [...batchIds],
+        stopped: true,
+        retryAfterMs: playlistRetryAfterMs(error),
+        unsentOccurrenceIds: [
+          ...chunk.map((occurrence) => occurrence.occurrenceId),
+          ...chunks
+            .slice(chunkIndex + 1)
+            .flatMap((remaining) =>
+              remaining.occurrences.map((occurrence) => occurrence.occurrenceId),
+            ),
+          ...omittedOccurrenceIds,
+        ],
+        error,
+      };
+    }
+  }
+
+  return {
+    submissions,
+    batchIds: [...batchIds],
+    stopped: omittedOccurrenceIds.length > 0,
+    retryAfterMs: null,
+    unsentOccurrenceIds: omittedOccurrenceIds,
+    error:
+      omittedOccurrenceIds.length > 0
+        ? new Error("One or more processing occurrences could not be submitted.")
+        : null,
+  };
+};

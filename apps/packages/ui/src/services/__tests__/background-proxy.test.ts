@@ -713,6 +713,32 @@ describe("background proxy fallback safety", () => {
     expect(mocks.tldwRequest).not.toHaveBeenCalled()
   })
 
+  it("preserves Retry-After metadata from extension upload failures", async () => {
+    mocks.sendMessage.mockResolvedValue({
+      ok: false,
+      status: 429,
+      error: "rate limited",
+      data: { detail: "rate limited" },
+      headers: { "retry-after": "3" },
+      retryAfterMs: 3_000,
+    })
+
+    const { bgUpload } = await importProxy()
+
+    await expect(
+      bgUpload({
+        path: "/api/v1/media/ingest/jobs",
+        method: "POST",
+        fields: { run_id: "run-rate-limited" },
+      })
+    ).rejects.toMatchObject({
+      status: 429,
+      headers: { "retry-after": "3" },
+      retryAfterMs: 3_000,
+    })
+    expect(mocks.tldwRequest).not.toHaveBeenCalled()
+  })
+
   it("bypasses extension messaging for direct-preferred uploads", async () => {
     mocks.sendMessage.mockResolvedValue({
       ok: true,

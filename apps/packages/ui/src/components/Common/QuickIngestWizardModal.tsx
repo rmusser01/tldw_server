@@ -109,6 +109,14 @@ type QuickIngestRequestPayload = {
   advancedValues: Record<string, unknown>
   fileDefaults: TypeDefaults
   conferenceBatchMetadata?: ConferenceBatchMetadata | null
+  conferenceItemMetadata?: Record<
+    string,
+    {
+      playlist?: PlaylistQueueMetadata
+      conferenceOverride?: ConferenceItemMetadataOverride
+    }
+  >
+  pendingRunRequest: IngestWizardState["pendingRunRequest"]
   __quickIngestSessionId?: string
 }
 
@@ -122,6 +130,9 @@ type QuickIngestRuntimeMessage = {
     reason?: string
   }
 }
+
+const AMBIGUOUS_RUN_CREATE_RECOVERY_MESSAGE =
+  "Quick ingest may have created a server run before this page reloaded. Reconnect from a confirmed run instead of starting it again."
 
 const RESULT_SUCCESS_STATUS_TOKENS = [
   "ok",
@@ -395,10 +406,12 @@ const resolveQueueItemForReattachedJob = (
   items: WizardQueueItem[],
   tracking: PersistedQuickIngestTracking | undefined,
   sourceItemId: string | undefined,
-  jobId: number,
+  jobId: number | null,
   index: number
 ): WizardQueueItem | undefined => {
-  const mappedItemId = String(sourceItemId || "").trim() || tracking?.jobIdToItemId?.[String(jobId)]
+  const mappedItemId =
+    String(sourceItemId || "").trim() ||
+    (jobId === null ? undefined : tracking?.jobIdToItemId?.[String(jobId)])
   if (mappedItemId) {
     return items.find((item) => item.id === mappedItemId)
   }
@@ -423,6 +436,7 @@ const buildPersistedReattachSignature = (
 
   const mode = String(tracking.mode || "unknown").trim() || "unknown"
   const sessionId = String(tracking.sessionId || "").trim()
+  const runId = String(tracking.runId || "").trim()
   const batchIds = resolveTrackingBatchIds(tracking)
   const jobIds = normalizeTrackedJobIds(tracking)
   const itemIds = normalizeTrackedItemIds(tracking)
@@ -436,6 +450,7 @@ const buildPersistedReattachSignature = (
   return [
     mode,
     sessionId,
+    runId,
     batchIds.join(","),
     jobIds.join(","),
     itemIds.join(","),
@@ -504,8 +519,9 @@ const hydrateQueueItems = (
 
 const deriveLifecycleFromWizardState = (
   state: IngestWizardState,
-  existingLifecycle?: QuickIngestSessionLifecycle
+  existingSession: Pick<QuickIngestSessionRecord, "lifecycle" | "tracking">
 ): QuickIngestSessionLifecycle => {
+  const existingLifecycle = existingSession.lifecycle
   if (state.currentStep < 4 && state.processingState.status === "idle") {
     return "draft"
   }
@@ -519,7 +535,19 @@ const deriveLifecycleFromWizardState = (
   }
 
   if (state.processingState.status === "error") {
+    if (existingSession.tracking?.submissionState === "creating_run") {
+      return "interrupted"
+    }
     if (existingLifecycle === "interrupted") {
+      return "interrupted"
+    }
+    const trackedItemIds = normalizeTrackedItemIds(existingSession.tracking)
+    const resultItemIds = new Set(state.results.map((result) => result.id))
+    if (
+      existingSession.tracking?.runId &&
+      (trackedItemIds.length === 0 ||
+        trackedItemIds.some((itemId) => !resultItemIds.has(itemId)))
+    ) {
       return "interrupted"
     }
     return "partial_failure"
@@ -595,24 +623,33 @@ const buildResultSummaryFromState = (
 
 const buildInitialWizardState = (
   session: QuickIngestSessionRecord
-): IngestWizardState => ({
-  currentStep: session.currentStep,
-  highestStep: Math.max(session.currentStep, 1) as IngestWizardState["highestStep"],
-  queueItems: hydrateQueueItems(session.queueItems),
-  selectedPreset: session.selectedPreset,
-  customBasePreset: session.customBasePreset,
-  presetConfig: session.presetConfig,
-  customOptions: session.customOptions,
-  playlistPreflightSeed: isQuickIngestPlaylistPreflightDetail(session.openDetail)
-    ? session.openDetail
-    : null,
-  firstSourceAddMode: session.firstSourceAddMode ?? null,
-  processingState: session.processingState,
-  results: session.results,
-  conferenceBatchMetadata: session.conferenceBatchMetadata ?? null,
-  isMinimized:
-    session.visibility === "hidden" && session.lifecycle === "processing",
-})
+): IngestWizardState => {
+  const queueItems = hydrateQueueItems(session.queueItems)
+  const pendingRunRequest =
+    session.tracking?.submissionState &&
+    session.tracking.submissionState !== "creating_run"
+      ? buildPlaylistIngestRunRequest(queueItems).request
+      : null
+  return {
+    currentStep: session.currentStep,
+    highestStep: Math.max(session.currentStep, 1) as IngestWizardState["highestStep"],
+    queueItems,
+    selectedPreset: session.selectedPreset,
+    customBasePreset: session.customBasePreset,
+    presetConfig: session.presetConfig,
+    customOptions: session.customOptions,
+    playlistPreflightSeed: isQuickIngestPlaylistPreflightDetail(session.openDetail)
+      ? session.openDetail
+      : null,
+    firstSourceAddMode: session.firstSourceAddMode ?? null,
+    processingState: session.processingState,
+    results: session.results,
+    conferenceBatchMetadata: session.conferenceBatchMetadata ?? null,
+    pendingRunRequest,
+    isMinimized:
+      session.visibility === "hidden" && session.lifecycle === "processing",
+  }
+}
 
 const buildOpenDetailPatch = (
   state: IngestWizardState,
@@ -631,7 +668,7 @@ const buildSessionPatchFromWizardState = (
   state: IngestWizardState,
   session: QuickIngestSessionRecord
 ): Partial<QuickIngestSessionRecord> => {
-  const lifecycle = deriveLifecycleFromWizardState(state, session.lifecycle)
+  const lifecycle = deriveLifecycleFromWizardState(state, session)
   const queueItems = buildPersistedQueueItems(state.queueItems)
   return {
     currentStep: state.currentStep,
@@ -733,7 +770,7 @@ const mapReattachedJobStatusToProgress = (
 const buildResultsFromReattachedJobs = (
   items: WizardQueueItem[],
   jobs: Array<{
-    jobId: number
+    jobId: number | null
     status: string
     result?: unknown
     error?: string
@@ -754,11 +791,16 @@ const buildResultsFromReattachedJobs = (
       jobStatus === "completed" && completedIngestJobIndicatesFailure(job.result)
     const resultStatus =
       jobStatus === "completed" && !logicalFailure ? "ok" : "error"
-    const isDuplicate = resultStatus === "ok" && completedIngestJobIndicatesSkipped(job.result)
     const resultRecord =
       job.result !== null && typeof job.result === "object"
         ? (job.result as Record<string, unknown>)
         : null
+    const runOutcome = String(resultRecord?.outcome || "").trim().toLowerCase()
+    const isDuplicate =
+      resultStatus === "ok" &&
+      (completedIngestJobIndicatesSkipped(job.result) ||
+        runOutcome === "included_existing" ||
+        runOutcome === "skipped_existing")
     const resultTitle = resultRecord?.title
     return {
       id: item?.id || `reattached-${job.jobId}`,
@@ -832,6 +874,7 @@ const buildProgressFromReattachedJobs = (
 const buildQuickIngestPayload = async (
   items: WizardQueueItem[],
   conferenceBatchMetadata: ConferenceBatchMetadata | null,
+  pendingRunRequest: IngestWizardState["pendingRunRequest"],
   options: QuickIngestRequestPayload["common"] & {
     storeRemote: boolean
     reviewBeforeStorage: boolean
@@ -843,7 +886,14 @@ const buildQuickIngestPayload = async (
     (item) => item.validation.valid && item.conferenceOverride?.selected !== false
   )
   const entries = validItems
-    .filter((item): item is WizardQueueItem & { url: string } => Boolean(item.url))
+    .filter(
+      (item): item is WizardQueueItem & { url: string } =>
+        Boolean(item.url) &&
+        !(
+          pendingRunRequest &&
+          item.sourceRef?.kind === "materialized_playlist_item"
+        )
+    )
     .map((item) => ({
       id: item.id,
       url: item.url,
@@ -865,6 +915,21 @@ const buildQuickIngestPayload = async (
         conferenceOverride: item.conferenceOverride,
       }))
   )
+  const conferenceItemMetadata = Object.fromEntries(
+    validItems.flatMap((item) =>
+      item.conferenceOverride
+        ? [
+            [
+              item.id,
+              {
+                playlist: item.playlist,
+                conferenceOverride: item.conferenceOverride,
+              },
+            ],
+          ]
+        : []
+    )
+  )
 
   return {
     entries,
@@ -882,6 +947,11 @@ const buildQuickIngestPayload = async (
     advancedValues: options.advancedValues ?? {},
     fileDefaults: options.typeDefaults,
     conferenceBatchMetadata,
+    conferenceItemMetadata:
+      Object.keys(conferenceItemMetadata).length > 0
+        ? conferenceItemMetadata
+        : undefined,
+    pendingRunRequest,
   }
 }
 
@@ -922,6 +992,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     updateProcessingState,
     setResults,
     goToStep,
+    applyPlaylistReviewRequired,
     goNext,
   } = useIngestWizard()
   const { currentStep, queueItems, processingState, presetConfig, results } = state
@@ -951,8 +1022,13 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   const initialCurrentStepRef = useRef(currentStep)
   const initialElapsedRef = useRef(state.processingState.elapsed)
   const persistedTrackingRef = useRef(session.tracking)
+  const restoredCreatingRunRef = useRef(
+    session.lifecycle === "processing" &&
+      session.tracking?.submissionState === "creating_run"
+  )
   const persistedReattachTimerRef = useRef<number | null>(null)
   const activeReattachSignatureRef = useRef("")
+  const [runSubmissionInFlight, setRunSubmissionInFlight] = useState(false)
   const persistedReattachSignature = useMemo(
     () =>
       shouldAttemptPersistedReattach
@@ -973,6 +1049,16 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       connectionState.isConnected &&
       connectionState.phase === ConnectionPhase.CONNECTED
     )
+
+  useEffect(() => {
+    if (!restoredCreatingRunRef.current) return
+    hasStartedRunRef.current = true
+    updateProcessingState({
+      status: "error",
+      estimatedRemaining: 0,
+    })
+    markInterrupted(AMBIGUOUS_RUN_CREATE_RECOVERY_MESSAGE)
+  }, [markInterrupted, updateProcessingState])
   const isCheckingConnection =
     connectionState.isChecking ||
     connectionState.phase === ConnectionPhase.SEARCHING
@@ -1207,6 +1293,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     const persistedTracking = persistedTrackingRef.current
     const reattachQueueItems = initialTrackedQueueItemsRef.current
     if (!persistedReattachSignature || !persistedTracking) return
+    if (runSubmissionInFlight && persistedTracking.runId) return
     if (activeReattachSignatureRef.current === persistedReattachSignature) return
     activeReattachSignatureRef.current = persistedReattachSignature
 
@@ -1300,6 +1387,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     goNext,
     markInterrupted,
     persistedReattachSignature,
+    runSubmissionInFlight,
     setResults,
     updateProcessingState,
   ])
@@ -1477,7 +1565,13 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   }, [handleRuntimeMessage])
 
   const startRun = useCallback(async () => {
-    if (hasStartedRunRef.current || validQueueItems.length === 0) return
+    if (
+      restoredCreatingRunRef.current ||
+      hasStartedRunRef.current ||
+      validQueueItems.length === 0
+    ) {
+      return
+    }
     hasStartedRunRef.current = true
 
     try {
@@ -1491,6 +1585,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       const requestPayload = await buildQuickIngestPayload(
         validQueueItems,
         state.conferenceBatchMetadata,
+        state.pendingRunRequest,
         {
           ...presetConfig.common,
           storeRemote: presetConfig.storeRemote,
@@ -1554,16 +1649,19 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       const sessionId = String(startAck.sessionId).trim()
       activeSessionIdRef.current = sessionId
       cancelledSessionIdsRef.current.delete(sessionId)
-      markProcessingTracking({
-        mode: sessionId.startsWith("qi-direct-") ? "webui-direct" : "extension-runtime",
-        sessionId,
-        startedAt: runStartedAtRef.current || Date.now(),
-      })
+      if (!requestPayload.pendingRunRequest) {
+        markProcessingTracking({
+          mode: sessionId.startsWith("qi-direct-") ? "webui-direct" : "extension-runtime",
+          sessionId,
+          startedAt: runStartedAtRef.current || Date.now(),
+        })
+      }
 
       if (!sessionId.startsWith("qi-direct-")) {
         return
       }
 
+      setRunSubmissionInFlight(Boolean(requestPayload.pendingRunRequest))
       const response = await submitQuickIngestBatch({
         ...requestPayload,
         __quickIngestSessionId: sessionId,
@@ -1576,11 +1674,61 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
           })
         },
       })
+      if (!response?.submissionCleanupFailed) {
+        setRunSubmissionInFlight(false)
+      }
 
       if (
         cancelledSessionIdsRef.current.has(sessionId) ||
         sessionId !== String(activeSessionIdRef.current || "").trim()
       ) {
+        return
+      }
+
+      if (response?.reviewRequired?.length) {
+        applyPlaylistReviewRequired(response.reviewRequired)
+        hasStartedRunRef.current = false
+        activeSessionIdRef.current = null
+        return
+      }
+
+      if (response?.submissionCleanupFailed) {
+        if (response.accepted) {
+          const unsentOccurrenceIds = new Set(response.unsentOccurrenceIds || [])
+          applyResults(
+            buildFailureResults(
+              validQueueItems.filter((item) => unsentOccurrenceIds.has(item.id)),
+              response.error || "Playlist ingest submission stopped. Try again.",
+              "failed"
+            )
+          )
+        }
+        const cleanupError =
+          response.error ||
+          "The server could not cancel unsent items. Retry cancellation before reconnecting."
+        updateProcessingState({
+          status: "error",
+          estimatedRemaining: 0,
+        })
+        hasStartedRunRef.current = false
+        activeSessionIdRef.current = null
+        markInterrupted(cleanupError)
+        return
+      }
+
+      if (response?.submissionBlocked && response?.accepted) {
+        const unsentOccurrenceIds = new Set(response.unsentOccurrenceIds || [])
+        applyResults(
+          buildFailureResults(
+            validQueueItems.filter((item) => unsentOccurrenceIds.has(item.id)),
+            response.error || "Playlist ingest submission stopped. Try again.",
+            "failed"
+          )
+        )
+        return
+      }
+
+      if (response?.runId && response?.accepted) {
         return
       }
 
@@ -1604,6 +1752,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
 
       finalizeRun("complete", normalizedResults)
     } catch (error) {
+      setRunSubmissionInFlight(false)
       if (cancelRequestedRef.current) return
       finalizeFailure(
         error instanceof Error ? error.message : "Quick ingest failed.",
@@ -1611,15 +1760,19 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       )
     }
   }, [
+    applyPlaylistReviewRequired,
+    applyResults,
     finalizeFailure,
     finalizeRun,
     markRunActive,
+    markInterrupted,
     presetConfig.advancedValues,
     presetConfig.common,
     presetConfig.reviewBeforeStorage,
     presetConfig.storeRemote,
     presetConfig.typeDefaults,
     state.conferenceBatchMetadata,
+    state.pendingRunRequest,
     goToStep,
     restore,
     showSession,
@@ -1634,7 +1787,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     if (session.lifecycle === "processing" && session.tracking) {
       const canReattachDirectJobs =
         session.tracking.mode === "webui-direct" &&
-        Boolean(session.tracking.jobIds?.length)
+        Boolean(session.tracking.jobIds?.length || session.tracking.runId)
       if (session.tracking.mode !== "webui-direct" || canReattachDirectJobs) {
         return
       }
@@ -1999,7 +2152,7 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
         shouldAttemptPersistedReattach={
           session.lifecycle === "processing" &&
           session.tracking?.mode === "webui-direct" &&
-          Boolean(session.tracking?.jobIds?.length)
+          Boolean(session.tracking?.jobIds?.length || session.tracking?.runId)
         }
       />
     </IngestWizardProvider>

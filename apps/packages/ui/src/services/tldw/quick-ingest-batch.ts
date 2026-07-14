@@ -48,6 +48,16 @@ import {
   type ApiMediaCollectionItem,
   type MediaCollectionItemStatus,
 } from "@/services/tldw/conference-collections";
+import { mediaMethods } from "@/services/tldw/domains/media";
+import {
+  PlaylistIngestPublicError,
+  cancelRun,
+  createRun,
+  submitPendingChunks,
+  type PlaylistIngestRunCreateRequest,
+  type PlaylistIngestRunCreateResult,
+  type PlaylistReviewRequiredRecoveryItem,
+} from "@/services/tldw/playlist-ingest";
 
 type TypeDefaults = {
   audio?: { language?: string; diarize?: boolean };
@@ -93,8 +103,16 @@ type QuickIngestBatchInput = {
   advancedValues?: Record<string, any>;
   fileDefaults?: TypeDefaults;
   conferenceBatchMetadata?: ConferenceBatchMetadata | null;
+  conferenceItemMetadata?: Record<
+    string,
+    {
+      playlist?: PlaylistQueueMetadata;
+      conferenceOverride?: ConferenceItemMetadataOverride;
+    }
+  >;
   chunkingTemplateName?: string;
   autoApplyTemplate?: boolean;
+  pendingRunRequest?: PlaylistIngestRunCreateRequest | null;
   __quickIngestSessionId?: string;
   onTrackingMetadata?: (tracking: PersistedQuickIngestTracking) => void;
 };
@@ -118,8 +136,15 @@ type QuickIngestBatchResult = {
 
 type QuickIngestBatchResponse = {
   ok: boolean;
+  accepted?: boolean;
+  submissionBlocked?: boolean;
+  submissionCleanupFailed?: boolean;
+  runId?: string;
+  retryAfterMs?: number | null;
+  unsentOccurrenceIds?: string[];
   error?: string;
   results?: QuickIngestBatchResult[];
+  reviewRequired?: PlaylistReviewRequiredRecoveryItem[];
 };
 
 export const QUICK_INGEST_ANALYSIS_PROVIDER_WARNING =
@@ -523,6 +548,351 @@ const buildFields = ({
   return fields;
 };
 
+const mediaTypeForProcessingSource = (sourceKind: string | null): string => {
+  const normalized = String(sourceKind || "").toLowerCase();
+  if (normalized.includes("audio")) return "audio";
+  if (normalized.includes("pdf")) return "pdf";
+  if (normalized.includes("document") || normalized.includes("web")) {
+    return "document";
+  }
+  return "video";
+};
+
+const compactRunMetadata = (
+  value: Record<string, unknown>,
+): Record<string, unknown> =>
+  Object.fromEntries(
+    Object.entries(value).filter(([, entry]) => {
+      if (entry === undefined || entry === null || entry === "") return false;
+      return !Array.isArray(entry) || entry.length > 0;
+    }),
+  );
+
+const buildVersion2RunRequest = (
+  input: QuickIngestBatchInput,
+  pendingRunRequest: PlaylistIngestRunCreateRequest,
+): PlaylistIngestRunCreateRequest => {
+  const normalizedProcessingOptions = buildFields({
+    rawType: "auto",
+    common: input.common,
+    advancedValues: input.advancedValues,
+    chunkingTemplateName: input.chunkingTemplateName,
+    autoApplyTemplate: input.autoApplyTemplate,
+    persist: input.storeRemote && !input.processOnly,
+  });
+  delete normalizedProcessingOptions.media_type;
+  delete normalizedProcessingOptions.keep_original_file;
+
+  const pendingOccurrenceIds = new Set(
+    pendingRunRequest.inputs.map((runInput) => runInput.occurrenceId),
+  );
+  const conferenceSummaries = Object.entries(
+    input.conferenceItemMetadata || {},
+  ).flatMap(([occurrenceId, metadata]) => {
+    if (!pendingOccurrenceIds.has(occurrenceId)) return [];
+    const playlist = metadata.playlist;
+    const override = metadata.conferenceOverride;
+    if (!playlist && !override) return [];
+    return [
+      compactRunMetadata({
+        occurrence_id: occurrenceId,
+        playlist: playlist
+          ? compactRunMetadata({
+              playlist_id: playlist.playlistId,
+              playlist_title: playlist.playlistTitle,
+              ordinal: playlist.ordinal,
+              title: playlist.title,
+              channel_or_uploader: playlist.channelOrUploader,
+              duration_seconds: playlist.durationSeconds,
+              normalized_source_id: playlist.normalizedSourceId,
+              duplicate_status: playlist.duplicateStatus,
+            })
+          : undefined,
+        conference_override: override
+          ? compactRunMetadata({
+              title: override.title,
+              speaker: override.speaker,
+              talk_date: override.talkDate,
+              track: override.track,
+              tags: Array.from(
+                new Set(
+                  (override.tags || [])
+                    .map((tag) => String(tag).trim())
+                    .filter(Boolean),
+                ),
+              ),
+              duplicate_policy: override.duplicatePolicy,
+              selected: override.selected,
+            })
+          : undefined,
+      }),
+    ];
+  });
+
+  const collection = input.conferenceBatchMetadata
+    ? buildConferenceCollectionCreatePayload(input.conferenceBatchMetadata)
+    : null;
+  const processingOptions = {
+    ...(pendingRunRequest.processingOptions || {}),
+    ...normalizedProcessingOptions,
+  };
+  const playlistSummaries = [
+    ...(pendingRunRequest.playlistSummaries || []),
+    ...conferenceSummaries,
+  ];
+
+  return {
+    ...pendingRunRequest,
+    ...(Object.keys(processingOptions).length > 0 ? { processingOptions } : {}),
+    ...(playlistSummaries.length > 0 ? { playlistSummaries } : {}),
+    ...(collection
+      ? {
+          newCollection: {
+            name: collection.name,
+            ...(collection.source_url
+              ? { sourceUrl: collection.source_url }
+              : {}),
+            defaultTags: collection.default_tags,
+          },
+        }
+      : {}),
+  };
+};
+
+const runVersion2QuickIngestBatch = async (
+  input: QuickIngestBatchInput,
+): Promise<QuickIngestBatchResponse> => {
+  const pendingRunRequest = input.pendingRunRequest;
+  if (!pendingRunRequest) {
+    return { ok: false, error: "Missing playlist ingest run request." };
+  }
+
+  const sessionId = String(input.__quickIngestSessionId || "").trim();
+  const submittedItemIds = pendingRunRequest.inputs.map(
+    (runInput) => runInput.occurrenceId,
+  );
+  const startedAt = Date.now();
+  const publishTracking = (
+    submissionState: NonNullable<
+      PersistedQuickIngestTracking["submissionState"]
+    >,
+    patch: Partial<PersistedQuickIngestTracking> = {},
+  ): void => {
+    input.onTrackingMetadata?.({
+      mode: "webui-direct",
+      submissionState,
+      sessionId: sessionId || undefined,
+      submissionOccurrenceIds: submittedItemIds,
+      ...(submissionState === "creating_run"
+        ? {}
+        : { submittedItemIds, itemIds: submittedItemIds }),
+      startedAt,
+      ...patch,
+    });
+  };
+
+  publishTracking("creating_run");
+
+  let run: PlaylistIngestRunCreateResult;
+  try {
+    run = await createRun(
+      mediaMethods,
+      buildVersion2RunRequest(input, pendingRunRequest),
+    );
+  } catch (error) {
+    if (
+      error instanceof PlaylistIngestPublicError &&
+      error.recovery?.kind === "reviewRequired"
+    ) {
+      return {
+        ok: false,
+        error: error.message,
+        reviewRequired: error.recovery.items,
+      };
+    }
+    throw error;
+  }
+
+  publishTracking("run_created", { runId: run.runId });
+
+  if (isDirectSessionCancelled(sessionId)) {
+    let cleanupFailed = false;
+    try {
+      await cancelRun(mediaMethods, run.runId, { reason: "user_cancelled" });
+    } catch {
+      cleanupFailed = true;
+    }
+    publishTracking(cleanupFailed ? "cleanup_required" : "acknowledged", {
+      runId: run.runId,
+    });
+    clearDirectSessionTracking(sessionId);
+    return {
+      ok: false,
+      accepted: false,
+      submissionBlocked: true,
+      ...(cleanupFailed ? { submissionCleanupFailed: true } : {}),
+      runId: run.runId,
+      retryAfterMs: null,
+      unsentOccurrenceIds: run.processingOccurrences.map(
+        (occurrence) => occurrence.occurrenceId,
+      ),
+      error: cleanupFailed
+        ? "Cancellation was requested, but the server did not confirm run cancellation."
+        : "Cancelled by user.",
+    };
+  }
+
+  const entriesByOccurrenceId = new Map(
+    input.entries.map((entry) => [entry.id, entry] as const),
+  );
+  const filePayloadsByOccurrenceId = new Map(
+    input.files.flatMap((file) => {
+      const occurrenceId = String(file.id || "").trim();
+      return occurrenceId ? [[occurrenceId, file] as const] : [];
+    }),
+  );
+  const filesByOccurrenceId = Object.fromEntries(
+    input.files.flatMap((file) => {
+      const occurrenceId = String(file.id || "").trim();
+      if (!occurrenceId) return [];
+      return [
+        [
+          occurrenceId,
+          {
+            name: String(file.name || "upload"),
+            type: String(file.type || "application/octet-stream"),
+            data: file.data || [],
+          },
+        ] as const,
+      ];
+    }),
+  );
+  const baseFieldsByOccurrenceId = Object.fromEntries(
+    run.processingOccurrences.map((occurrence) => {
+      const entry = entriesByOccurrenceId.get(occurrence.occurrenceId);
+      const file = filePayloadsByOccurrenceId.get(occurrence.occurrenceId);
+      const rawType = entry?.type
+        ? entry.type
+        : file
+          ? inferUploadMediaTypeFromFile(file.name, file.type)
+          : mediaTypeForProcessingSource(occurrence.sourceKind);
+      return [
+        occurrence.occurrenceId,
+        buildFields({
+          rawType,
+          entry,
+          defaults:
+            entry?.defaults ||
+            (file?.defaults && typeof file.defaults === "object"
+              ? file.defaults
+              : input.fileDefaults),
+          common: input.common,
+          advancedValues: input.advancedValues,
+          chunkingTemplateName: input.chunkingTemplateName,
+          autoApplyTemplate: input.autoApplyTemplate,
+          persist: input.storeRemote && !input.processOnly,
+        }),
+      ] as const;
+    }),
+  );
+  const publishSubmittedTracking = (
+    submitted: Awaited<ReturnType<typeof submitPendingChunks>>,
+    submissionState: NonNullable<
+      PersistedQuickIngestTracking["submissionState"]
+    >,
+  ): void => {
+    const accepted = submitted.submissions.filter(
+      (submission) => submission.accepted,
+    );
+    const jobIds = accepted.flatMap((submission) =>
+      submission.jobId === null ? [] : [submission.jobId],
+    );
+    publishTracking(submissionState, {
+      runId: run.runId,
+      batchId: submitted.batchIds.at(-1),
+      batchIds: submitted.batchIds,
+      jobIds,
+      jobIdToItemId: Object.fromEntries(
+        accepted.flatMap((submission) =>
+          submission.jobId === null
+            ? []
+            : [[String(submission.jobId), submission.occurrenceId]],
+        ),
+      ),
+    });
+  };
+
+  const submitted = await submitPendingChunks({
+    run,
+    baseFields: {},
+    baseFieldsByOccurrenceId,
+    filesByOccurrenceId,
+    shouldStop: () => isDirectSessionCancelled(sessionId),
+    onProgress: (progress) =>
+      publishSubmittedTracking(progress, "submitting"),
+    submitChunk: (request) =>
+      bgUpload({
+        ...request,
+        timeoutMs: DIRECT_INGEST_TIMEOUT_MS,
+        ...DIRECT_QUICK_INGEST_TRANSPORT,
+      }),
+  });
+
+  const accepted = submitted.submissions.filter(
+    (submission) => submission.accepted,
+  );
+
+  let submissionCleanupError: string | null = null;
+  if (submitted.stopped && submitted.unsentOccurrenceIds.length > 0) {
+    try {
+      const userCancelled = isDirectSessionCancelled(sessionId);
+      await cancelRun(
+        mediaMethods,
+        run.runId,
+        userCancelled
+          ? { reason: "user_cancelled" }
+          : {
+              occurrenceIds: submitted.unsentOccurrenceIds,
+              reason: "submission_stopped",
+            },
+      );
+    } catch (error) {
+      submissionCleanupError =
+        error instanceof Error
+          ? error.message
+          : "The server did not confirm occurrence cancellation.";
+    }
+  }
+
+  publishSubmittedTracking(
+    submitted,
+    submissionCleanupError ? "cleanup_required" : "acknowledged",
+  );
+  clearDirectSessionTracking(sessionId);
+
+  return {
+    ok: !submitted.stopped,
+    accepted: !submitted.stopped || accepted.length > 0,
+    runId: run.runId,
+    ...(submitted.stopped
+      ? {
+          submissionBlocked: true,
+          ...(submissionCleanupError
+            ? { submissionCleanupFailed: true }
+            : {}),
+          error:
+            submissionCleanupError !== null
+              ? `Submission stopped, but the server could not cancel the unsent occurrences. ${submissionCleanupError} Retry cancellation before reconnecting.`
+              : submitted.retryAfterMs === null
+              ? "Playlist ingest submission stopped before every item was accepted. Try again."
+              : `Playlist ingest submission was rate limited. Try again in ${Math.ceil(submitted.retryAfterMs / 1000)} seconds.`,
+          retryAfterMs: submitted.retryAfterMs,
+          unsentOccurrenceIds: submitted.unsentOccurrenceIds,
+        }
+      : {}),
+  };
+};
+
 const processWebScrape = async ({
   url,
   entry,
@@ -748,8 +1118,7 @@ const runDirectQuickIngestBatch = async (
     input.fileDefaults && typeof input.fileDefaults === "object"
       ? input.fileDefaults
       : {};
-  const shouldStoreRemote =
-    Boolean(input.storeRemote) && !Boolean(input.processOnly);
+  const shouldStoreRemote = input.storeRemote && !input.processOnly;
   const directSessionId =
     String(input.__quickIngestSessionId || "").trim() || undefined;
 
@@ -1224,6 +1593,9 @@ const runDirectQuickIngestBatch = async (
 export const submitQuickIngestBatch = async (
   input: QuickIngestBatchInput,
 ): Promise<QuickIngestBatchResponse> => {
+  if (input?.pendingRunRequest) {
+    return await runVersion2QuickIngestBatch(input);
+  }
   if (
     !isDirectQuickIngestSessionId(input?.__quickIngestSessionId) &&
     (await canUseExtensionMessagingRuntime())
@@ -1272,8 +1644,35 @@ export const cancelQuickIngestSession = async (
 ): Promise<QuickIngestCancelResponse> => {
   const sessionId = String(input?.sessionId || "").trim();
   const tracking = input?.tracking;
+  const reason = input?.reason || "user_cancelled";
   if (!sessionId) {
     return { ok: false, error: "Missing session id." };
+  }
+
+  if (isDirectQuickIngestSessionId(sessionId)) {
+    directQuickIngestCancelledSessions.add(sessionId);
+  }
+
+  if (tracking?.runId) {
+    try {
+      await cancelRun(mediaMethods, tracking.runId, {
+        reason,
+      });
+      return { ok: true };
+    } catch (error) {
+      const status =
+        error instanceof PlaylistIngestPublicError ? error.status : null;
+      if (status !== 404 && status !== 405 && status !== 501) {
+        return {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "The ingest run could not be cancelled.",
+        };
+      }
+      // Older servers may not support run cancellation; try tracked batches.
+    }
   }
 
   if (
@@ -1295,28 +1694,44 @@ export const cancelQuickIngestSession = async (
   }
 
   directQuickIngestCancelledSessions.add(sessionId);
-  await cancelDirectSessionBatches(
-    sessionId,
-    input?.reason || "user_cancelled",
-  );
-  for (const batchId of normalizeBatchIds([
+  await cancelDirectSessionBatches(sessionId, reason);
+  const batchIds = normalizeBatchIds([
     ...(input?.batchIds || []),
     tracking?.batchId || "",
     ...(tracking?.batchIds || []),
-  ])) {
+  ]);
+  let cancelledBatchCount = 0;
+  let lastBatchError: unknown = null;
+  for (const batchId of batchIds) {
     try {
       await bgRequest<any>({
         path: `/api/v1/media/ingest/jobs/cancel?batch_id=${encodeURIComponent(
           batchId,
-        )}&reason=${encodeURIComponent(input?.reason || "user_cancelled")}`,
+        )}&reason=${encodeURIComponent(reason)}`,
         method: "POST",
         timeoutMs: 10_000,
         returnResponse: true,
         ...DIRECT_QUICK_INGEST_TRANSPORT,
       });
-    } catch {
-      // best effort cancellation for resumed sessions without in-memory trackers
+      cancelledBatchCount += 1;
+    } catch (error) {
+      lastBatchError = error;
     }
+  }
+  if (batchIds.length > 0 && cancelledBatchCount === 0) {
+    return {
+      ok: false,
+      error:
+        lastBatchError instanceof Error
+          ? lastBatchError.message
+          : "The tracked ingest batches could not be cancelled.",
+    };
+  }
+  if (tracking?.runId && batchIds.length === 0) {
+    return {
+      ok: false,
+      error: "This server does not support run cancellation, and no tracked batches were available.",
+    };
   }
   return { ok: true };
 };

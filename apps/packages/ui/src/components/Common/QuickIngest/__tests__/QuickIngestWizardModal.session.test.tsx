@@ -219,6 +219,43 @@ vi.mock("@/components/Common/QuickIngest/AddContentStep", async () => {
           </button>
           <button
             onClick={() => {
+              setQueueItems([
+                {
+                  id: "queued-partial-accepted",
+                  kind: "url",
+                  url: "https://example.com/accepted",
+                  sourceRef: {
+                    kind: "direct_url",
+                    occurrenceId: "queued-partial-accepted",
+                    url: "https://example.com/accepted",
+                  },
+                  detectedType: "web",
+                  icon: "Globe",
+                  fileSize: 0,
+                  validation: { valid: true },
+                },
+                {
+                  id: "queued-partial-unsent",
+                  kind: "url",
+                  url: "https://example.com/unsent",
+                  sourceRef: {
+                    kind: "direct_url",
+                    occurrenceId: "queued-partial-unsent",
+                    url: "https://example.com/unsent",
+                  },
+                  detectedType: "web",
+                  icon: "Globe",
+                  fileSize: 0,
+                  validation: { valid: true },
+                },
+              ])
+              onQuickProcess?.()
+            }}
+          >
+            Queue Partial Submission And Process
+          </button>
+          <button
+            onClick={() => {
               context.setConferenceBatchMetadata({
                 collectionName: "Strange Loop 2012",
                 conferenceName: "Strange Loop",
@@ -784,6 +821,16 @@ describe("QuickIngestWizardModal session runtime", () => {
     expect(mocks.submitQuickIngestBatch).toHaveBeenCalledWith(
       expect.objectContaining({
         __quickIngestSessionId: "qi-direct-test",
+        pendingRunRequest: {
+          inputs: [
+            {
+              inputKind: "direct_url",
+              occurrenceId: "queued-url-1",
+              url: "https://example.com/article",
+              displayMetadata: { title: null },
+            },
+          ],
+        },
         common: expect.objectContaining({
           perform_chunking: true,
           chunking_mode: "auto",
@@ -1265,9 +1312,25 @@ describe("QuickIngestWizardModal session runtime", () => {
     await waitFor(() => {
       expect(mocks.submitQuickIngestBatch).toHaveBeenCalledTimes(1)
     })
+    const pendingRunRequest = {
+      inputs: [
+        {
+          inputKind: "materialized_playlist_item",
+          occurrenceId: "conference-talk-1",
+          materializationId: "conference-materialization",
+        },
+      ],
+    }
+    expect(mocks.startQuickIngestSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entries: [],
+        pendingRunRequest,
+      })
+    )
     expect(mocks.submitQuickIngestBatch).toHaveBeenCalledWith(
       expect.objectContaining({
         __quickIngestSessionId: "qi-direct-conference",
+        pendingRunRequest,
         conferenceBatchMetadata: {
           collectionName: "Strange Loop 2012",
           conferenceName: "Strange Loop",
@@ -1275,26 +1338,330 @@ describe("QuickIngestWizardModal session runtime", () => {
           sharedTags: ["conference", "clojure"],
           sourcePlaylistUrl: "https://youtube.com/playlist?list=PL-conf",
         },
-        entries: [
-          expect.objectContaining({
-            id: "conference-talk-1",
-            url: "https://youtube.com/watch?v=talk-1",
-            type: "video",
+        conferenceItemMetadata: {
+          "conference-talk-1": {
             playlist: expect.objectContaining({
               playlistId: "PL-conf",
-              ordinal: 1,
               normalizedSourceId: "youtube:video:talk-1",
             }),
-            conferenceOverride: expect.objectContaining({
+            conferenceOverride: {
               selected: true,
               title: "Simplicity Matters",
               speaker: "Rich Hickey",
               tags: ["keynote"],
-            }),
-          }),
-        ],
+            },
+          },
+        },
+        entries: [],
       })
     )
+    expect(JSON.stringify(mocks.submitQuickIngestBatch.mock.calls)).not.toContain(
+      "https://youtube.com/watch?v=talk-1"
+    )
+  })
+
+  it("keeps an accepted version-2 run processing until run status is terminal", async () => {
+    const user = userEvent.setup()
+    useQuickIngestSessionStore.getState().createDraftSession()
+    mocks.startQuickIngestSession.mockResolvedValue({
+      ok: true,
+      sessionId: "qi-direct-run-accepted",
+    })
+    mocks.submitQuickIngestBatch.mockImplementation(async (payload: any) => {
+      payload.onTrackingMetadata({
+        mode: "webui-direct",
+        runId: "run-accepted",
+        jobIds: [801],
+        submittedItemIds: ["conference-talk-1"],
+        startedAt: Date.now(),
+      })
+      return { ok: true, accepted: true, runId: "run-accepted" }
+    })
+    mocks.reattachQuickIngestSession.mockResolvedValue({
+      lifecycle: "processing",
+      jobs: [
+        {
+          jobId: 801,
+          status: "running",
+          sourceItemId: "conference-talk-1",
+        },
+      ],
+      errorMessage: null,
+    })
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    await user.click(screen.getByRole("button", { name: "Queue Conference And Process" }))
+
+    await waitFor(() => {
+      expect(mocks.reattachQuickIngestSession).toHaveBeenCalledWith(
+        expect.objectContaining({ runId: "run-accepted" })
+      )
+    })
+    expect(screen.queryByTestId("wizard-results")).not.toBeInTheDocument()
+    expect(useQuickIngestSessionStore.getState().session).toMatchObject({
+      lifecycle: "processing",
+      tracking: { runId: "run-accepted" },
+    })
+  })
+
+  it("returns a version-2 review-required response to Review without tracking a run", async () => {
+    const user = userEvent.setup()
+    useQuickIngestSessionStore.getState().createDraftSession()
+    mocks.startQuickIngestSession.mockResolvedValue({
+      ok: true,
+      sessionId: "qi-direct-review-required",
+    })
+    mocks.submitQuickIngestBatch.mockResolvedValue({
+      ok: false,
+      error: "Review the updated duplicate choices before continuing.",
+      reviewRequired: [
+        {
+          occurrenceId: "conference-talk-1",
+          reason: "duplicate_action_required",
+          evidence: {
+            kind: "library",
+            existingMediaId: 42,
+            duplicateOfOccurrenceId: null,
+          },
+          allowedActions: ["skip", "include_existing", "overwrite"],
+        },
+      ],
+    })
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    await user.click(screen.getByRole("button", { name: "Queue Conference And Process" }))
+
+    expect(await screen.findByTestId("wizard-review")).toHaveAttribute(
+      "data-processing-block",
+      "review_required"
+    )
+    expect(useQuickIngestSessionStore.getState().session?.tracking).toBeUndefined()
+    expect(screen.queryByTestId("wizard-results")).not.toBeInTheDocument()
+  })
+
+  it("surfaces a stopped version-2 submission instead of leaving it accepted", async () => {
+    const user = userEvent.setup()
+    useQuickIngestSessionStore.getState().createDraftSession()
+    mocks.startQuickIngestSession.mockResolvedValue({
+      ok: true,
+      sessionId: "qi-direct-rate-limited",
+    })
+    mocks.submitQuickIngestBatch.mockResolvedValue({
+      ok: false,
+      accepted: false,
+      runId: "run-rate-limited",
+      retryAfterMs: 3_000,
+      unsentOccurrenceIds: ["conference-talk-1"],
+      error: "Playlist ingest submission was rate limited. Try again in 3 seconds.",
+    })
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    await user.click(screen.getByRole("button", { name: "Queue Conference And Process" }))
+
+    expect(await screen.findByTestId("wizard-results")).toHaveTextContent("error:1")
+    expect(useQuickIngestSessionStore.getState().session?.results).toEqual([
+      expect.objectContaining({
+        id: "conference-talk-1",
+        status: "error",
+        error: expect.stringMatching(/try again in 3 seconds/i),
+      }),
+    ])
+  })
+
+  it("keeps accepted chunks processing while marking only unsent occurrences failed", async () => {
+    const user = userEvent.setup()
+    useQuickIngestSessionStore.getState().createDraftSession()
+    mocks.startQuickIngestSession.mockResolvedValue({
+      ok: true,
+      sessionId: "qi-direct-partial-submission",
+    })
+    mocks.submitQuickIngestBatch.mockImplementation(async (payload: any) => {
+      payload.onTrackingMetadata({
+        mode: "webui-direct",
+        runId: "run-partial-submission",
+        batchIds: ["batch-partial-submission"],
+        jobIds: [801],
+        submittedItemIds: [
+          "queued-partial-accepted",
+          "queued-partial-unsent",
+        ],
+        jobIdToItemId: { "801": "queued-partial-accepted" },
+        startedAt: Date.now(),
+      })
+      return {
+        ok: false,
+        accepted: true,
+        submissionBlocked: true,
+        runId: "run-partial-submission",
+        retryAfterMs: 3_000,
+        unsentOccurrenceIds: ["queued-partial-unsent"],
+        error: "Playlist ingest submission was rate limited. Try again in 3 seconds.",
+      }
+    })
+    mocks.reattachQuickIngestSession.mockResolvedValue({
+      lifecycle: "processing",
+      jobs: [
+        {
+          jobId: 801,
+          status: "running",
+          sourceItemId: "queued-partial-accepted",
+        },
+        {
+          jobId: null,
+          status: "cancelled",
+          sourceItemId: "queued-partial-unsent",
+        },
+      ],
+      errorMessage: null,
+    })
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    await user.click(
+      screen.getByRole("button", { name: "Queue Partial Submission And Process" })
+    )
+
+    await waitFor(() => {
+      expect(mocks.reattachQuickIngestSession).toHaveBeenCalledWith(
+        expect.objectContaining({ runId: "run-partial-submission" })
+      )
+    })
+    expect(screen.getByTestId("wizard-processing")).toBeInTheDocument()
+    expect(screen.queryByTestId("wizard-results")).not.toBeInTheDocument()
+    expect(useQuickIngestSessionStore.getState().session).toMatchObject({
+      lifecycle: "processing",
+      tracking: { runId: "run-partial-submission" },
+      results: [
+        expect.objectContaining({
+          id: "queued-partial-unsent",
+          status: "error",
+          error: expect.stringMatching(/try again in 3 seconds/i),
+        }),
+      ],
+    })
+  })
+
+  it("interrupts instead of reattaching forever when unsent cleanup fails", async () => {
+    const user = userEvent.setup()
+    let resolveCleanupFailure: ((value: any) => void) | null = null
+    useQuickIngestSessionStore.getState().createDraftSession()
+    mocks.startQuickIngestSession.mockResolvedValue({
+      ok: true,
+      sessionId: "qi-direct-cleanup-failure",
+    })
+    mocks.submitQuickIngestBatch.mockImplementation((payload: any) => {
+      payload.onTrackingMetadata({
+        mode: "webui-direct",
+        runId: "run-cleanup-failure",
+        batchIds: ["batch-cleanup-failure"],
+        jobIds: [901],
+        submittedItemIds: [
+          "queued-partial-accepted",
+          "queued-partial-unsent",
+        ],
+        jobIdToItemId: { "901": "queued-partial-accepted" },
+        startedAt: Date.now(),
+      })
+      return new Promise((resolve) => {
+        resolveCleanupFailure = resolve
+      })
+    })
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    await user.click(
+      screen.getByRole("button", { name: "Queue Partial Submission And Process" })
+    )
+
+    await waitFor(() => {
+      expect(useQuickIngestSessionStore.getState().session?.tracking).toMatchObject({
+        runId: "run-cleanup-failure",
+      })
+    })
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 10))
+    })
+    expect(mocks.reattachQuickIngestSession).not.toHaveBeenCalled()
+    expect(screen.getByTestId("wizard-processing")).toHaveTextContent("running:2")
+
+    await act(async () => {
+      resolveCleanupFailure?.({
+        ok: false,
+        accepted: true,
+        submissionBlocked: true,
+        submissionCleanupFailed: true,
+        runId: "run-cleanup-failure",
+        unsentOccurrenceIds: ["queued-partial-unsent"],
+        error:
+          "Submission stopped, but the server could not cancel the unsent occurrences. Retry cancellation before reconnecting.",
+      })
+      await Promise.resolve()
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId("wizard-processing")).toHaveTextContent("error:2")
+    })
+    expect(mocks.reattachQuickIngestSession).not.toHaveBeenCalled()
+    expect(screen.queryByTestId("wizard-results")).not.toBeInTheDocument()
+    expect(useQuickIngestSessionStore.getState().session).toMatchObject({
+      lifecycle: "interrupted",
+      tracking: { runId: "run-cleanup-failure" },
+      results: [
+        expect.objectContaining({
+          id: "queued-partial-unsent",
+          status: "error",
+        }),
+      ],
+    })
+    expect(
+      useQuickIngestSessionStore.getState().session?.results.some(
+        (result) => result.id === "queued-partial-accepted"
+      )
+    ).toBe(false)
+  })
+
+  it("interrupts an unresolved run when first-chunk submission and cleanup both fail", async () => {
+    const user = userEvent.setup()
+    useQuickIngestSessionStore.getState().createDraftSession()
+    mocks.startQuickIngestSession.mockResolvedValue({
+      ok: true,
+      sessionId: "qi-direct-first-cleanup-failure",
+    })
+    mocks.submitQuickIngestBatch.mockImplementation(async (payload: any) => {
+      payload.onTrackingMetadata({
+        mode: "webui-direct",
+        submissionState: "cleanup_required",
+        runId: "run-first-cleanup-failure",
+        submittedItemIds: ["queued-url-1"],
+        startedAt: Date.now(),
+      })
+      return {
+        ok: false,
+        accepted: false,
+        submissionBlocked: true,
+        submissionCleanupFailed: true,
+        runId: "run-first-cleanup-failure",
+        unsentOccurrenceIds: ["queued-url-1"],
+        error:
+          "Submission stopped, but the server could not cancel the unsent occurrence.",
+      }
+    })
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    await user.click(screen.getByRole("button", { name: "Queue And Process" }))
+
+    await waitFor(() => {
+      expect(useQuickIngestSessionStore.getState().session).toMatchObject({
+        lifecycle: "interrupted",
+        currentStep: 4,
+        tracking: {
+          submissionState: "cleanup_required",
+          runId: "run-first-cleanup-failure",
+        },
+        results: [],
+      })
+    })
+    expect(screen.getByTestId("wizard-processing")).toHaveTextContent("error:1")
+    expect(screen.queryByTestId("wizard-results")).not.toBeInTheDocument()
+    expect(mocks.reattachQuickIngestSession).not.toHaveBeenCalled()
   })
 
   it("does not pre-seed direct tracking item identities before backend submissions are acknowledged", async () => {
@@ -2024,6 +2391,172 @@ describe("QuickIngestWizardModal session runtime", () => {
     expect(materialized).toHaveAttribute("data-file-name", "")
   })
 
+  it("interrupts an ambiguous persisted pre-create marker without creating another run", async () => {
+    useQuickIngestSessionStore.getState().upsertSession({
+      ...createEmptyQuickIngestSession(),
+      lifecycle: "processing",
+      currentStep: 4,
+      queueItems: [
+        {
+          id: "occ-restored-pre-create",
+          kind: "url",
+          url: "https://cached.example.invalid/must-not-submit",
+          sourceRef: {
+            kind: "materialized_playlist_item",
+            materializationId: "materialization-restored-pre-create",
+            occurrenceId: "occ-restored-pre-create",
+          },
+          detectedType: "video",
+          icon: "Film",
+          fileSize: 0,
+          validation: { valid: true },
+          playlist: {
+            materializationExpiresAt: "2099-01-01T00:00:00Z",
+          },
+        } as any,
+      ],
+      processingState: {
+        status: "running",
+        perItemProgress: [],
+        elapsed: 1,
+        estimatedRemaining: 0,
+      },
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "qi-direct-restored-pre-create",
+        submissionState: "creating_run",
+        submissionOccurrenceIds: ["occ-restored-pre-create"],
+        startedAt: Date.now(),
+      } as any,
+    })
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+
+    await waitFor(() => {
+      expect(useQuickIngestSessionStore.getState().session).toMatchObject({
+        lifecycle: "interrupted",
+        currentStep: 4,
+        tracking: {
+          submissionState: "creating_run",
+          submissionOccurrenceIds: ["occ-restored-pre-create"],
+        },
+      })
+    })
+    expect(mocks.startQuickIngestSession).not.toHaveBeenCalled()
+    expect(mocks.submitQuickIngestBatch).not.toHaveBeenCalled()
+    expect(screen.getByTestId("wizard-processing")).toHaveTextContent("error")
+  })
+
+  it("never falls an expired restored pre-create marker back to its cached URL", async () => {
+    useQuickIngestSessionStore.getState().upsertSession({
+      ...createEmptyQuickIngestSession(),
+      lifecycle: "processing",
+      currentStep: 4,
+      queueItems: [
+        {
+          id: "occ-expired-pre-create",
+          kind: "url",
+          url: "https://cached.example.invalid/expired-must-not-submit",
+          sourceRef: {
+            kind: "materialized_playlist_item",
+            materializationId: "materialization-expired-pre-create",
+            occurrenceId: "occ-expired-pre-create",
+          },
+          detectedType: "video",
+          icon: "Film",
+          fileSize: 0,
+          validation: { valid: true },
+          playlist: {
+            materializationExpiresAt: "2020-01-01T00:00:00Z",
+          },
+        } as any,
+      ],
+      processingState: {
+        status: "running",
+        perItemProgress: [],
+        elapsed: 1,
+        estimatedRemaining: 0,
+      },
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "qi-direct-expired-pre-create",
+        submissionState: "creating_run",
+        submissionOccurrenceIds: ["occ-expired-pre-create"],
+        startedAt: Date.now(),
+      } as any,
+    })
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+
+    await waitFor(() => {
+      expect(useQuickIngestSessionStore.getState().session?.lifecycle).toBe(
+        "interrupted"
+      )
+    })
+    expect(mocks.startQuickIngestSession).not.toHaveBeenCalled()
+    expect(mocks.submitQuickIngestBatch).not.toHaveBeenCalled()
+    expect(JSON.stringify(mocks.submitQuickIngestBatch.mock.calls)).not.toContain(
+      "cached.example.invalid"
+    )
+  })
+
+  it("reattaches a post-create run marker without restarting submission", async () => {
+    mocks.reattachQuickIngestSession.mockResolvedValue({
+      lifecycle: "processing",
+      jobs: [
+        {
+          jobId: null,
+          status: "queued",
+          sourceItemId: "occ-restored-run-created",
+        },
+      ],
+      errorMessage: null,
+    })
+    useQuickIngestSessionStore.getState().upsertSession({
+      ...createEmptyQuickIngestSession(),
+      lifecycle: "processing",
+      currentStep: 4,
+      queueItems: [
+        {
+          id: "occ-restored-run-created",
+          kind: "url",
+          url: "https://cached.example.invalid/must-not-restart",
+          detectedType: "video",
+          icon: "Film",
+          fileSize: 0,
+          validation: { valid: true },
+        } as any,
+      ],
+      processingState: {
+        status: "running",
+        perItemProgress: [],
+        elapsed: 2,
+        estimatedRemaining: 0,
+      },
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "qi-direct-restored-run-created",
+        submissionState: "run_created",
+        runId: "run-restored-created",
+        submittedItemIds: ["occ-restored-run-created"],
+        startedAt: Date.now(),
+      } as any,
+    })
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+
+    await waitFor(() => {
+      expect(mocks.reattachQuickIngestSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          submissionState: "run_created",
+          runId: "run-restored-created",
+        })
+      )
+    })
+    expect(mocks.startQuickIngestSession).not.toHaveBeenCalled()
+    expect(mocks.submitQuickIngestBatch).not.toHaveBeenCalled()
+  })
+
   it("reattaches persisted direct-ingest jobs after refresh", async () => {
     mocks.reattachQuickIngestSession.mockResolvedValue({
       lifecycle: "completed",
@@ -2071,6 +2604,8 @@ describe("QuickIngestWizardModal session runtime", () => {
       },
       tracking: {
         mode: "webui-direct",
+        submissionState: "submitting",
+        runId: "run-partial-refresh",
         batchId: "batch-77",
         jobIds: [77],
         startedAt: Date.now(),
@@ -2083,11 +2618,16 @@ describe("QuickIngestWizardModal session runtime", () => {
       expect(mocks.reattachQuickIngestSession).toHaveBeenCalledWith(
         expect.objectContaining({
           mode: "webui-direct",
+          submissionState: "submitting",
+          runId: "run-partial-refresh",
           batchId: "batch-77",
           jobIds: [77],
         })
       )
     })
+
+    expect(mocks.startQuickIngestSession).not.toHaveBeenCalled()
+    expect(mocks.submitQuickIngestBatch).not.toHaveBeenCalled()
 
     await waitFor(() => {
       expect(screen.getByTestId("wizard-results")).toHaveTextContent("complete:1")
@@ -2308,6 +2848,7 @@ describe("QuickIngestWizardModal session runtime", () => {
       tracking: {
         mode: "webui-direct",
         sessionId: "qi-direct-refresh",
+        runId: "run-refresh-77",
         batchId: "batch-77",
         batchIds: ["batch-77"],
         jobIds: [77],
@@ -2331,6 +2872,11 @@ describe("QuickIngestWizardModal session runtime", () => {
           sessionId: "qi-direct-refresh",
           batchIds: ["batch-77"],
           reason: "user_cancelled",
+          tracking: expect.objectContaining({
+            sessionId: "qi-direct-refresh",
+            runId: "run-refresh-77",
+            batchIds: ["batch-77"],
+          }),
         })
       )
     })
