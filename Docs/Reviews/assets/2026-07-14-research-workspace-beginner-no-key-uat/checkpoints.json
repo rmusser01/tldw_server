@@ -1,0 +1,568 @@
+{
+  "outcome": "pass",
+  "failure": null,
+  "checkpoints": [
+    {
+      "name": "desktop-direct-entry",
+      "status": "pass",
+      "screenshot": "/private/tmp/task12968-research-workspace-uat/desktop-02-settled-workspace.png",
+      "safety": {
+        "url": "http://127.0.0.1:18161/research-workspace",
+        "globalBackendDialogCount": 0,
+        "globalBackendCopyVisible": false,
+        "nextPortalHostCount": 1,
+        "runtimeOverlayCount": 0,
+        "portalDetails": [
+          {
+            "hostVisible": false,
+            "hostTextLength": 0,
+            "shadowTextLength": 68689,
+            "hasDialogOverlay": false,
+            "hasRuntimeCopy": false
+          }
+        ]
+      },
+      "readinessGateVisible": true,
+      "readinessObservations": {
+        "readiness": [
+          {
+            "atMs": 3589,
+            "text": "LoadingChecking server readinessThe WebUI is checking the API health endpoint before opening the app.Waiting"
+          }
+        ],
+        "published": [
+          {
+            "atMs": 4585,
+            "state": "ready",
+            "degradedChecks": [],
+            "healthUrl": "http://127.0.0.1:18160/api/v1/health",
+            "httpStatus": 200,
+            "healthStatus": "ok",
+            "checkedAt": "2026-07-14T20:32:43.473Z"
+          }
+        ]
+      },
+      "readinessScreenshot": "/private/tmp/task12968-research-workspace-uat/desktop-01-readiness-gate.png",
+      "routeReadyMs": 26851,
+      "credentials": {
+        "cookieCount": 0,
+        "localCredentialKeys": [],
+        "sessionCredentialKeys": [],
+        "configHasApiKey": false,
+        "serviceWorkerScopes": [],
+        "extensionRuntimeIdPresent": false
+      },
+      "freshWorkspaceState": {
+        "storageSchema": "workspace_split_v1",
+        "activeWorkspaceId": "e3c6e337-b7e7-4df4-b696-a3fe5c015487",
+        "workspaceIds": [
+          "e3c6e337-b7e7-4df4-b696-a3fe5c015487"
+        ],
+        "savedWorkspaceIds": [
+          "e3c6e337-b7e7-4df4-b696-a3fe5c015487"
+        ],
+        "migrationStatusMessages": [],
+        "workspaceCount": 1,
+        "savedWorkspaceCount": 1,
+        "migrationApiRequestCount": 0
+      }
+    },
+    {
+      "name": "desktop-sources-empty-state",
+      "status": "pass",
+      "screenshot": "/private/tmp/task12968-research-workspace-uat/desktop-03-sources-empty-full.png",
+      "safety": {
+        "url": "http://127.0.0.1:18161/research-workspace",
+        "globalBackendDialogCount": 0,
+        "globalBackendCopyVisible": false,
+        "nextPortalHostCount": 1,
+        "runtimeOverlayCount": 0,
+        "portalDetails": [
+          {
+            "hostVisible": false,
+            "hostTextLength": 0,
+            "shadowTextLength": 68689,
+            "hasDialogOverlay": false,
+            "hasRuntimeCopy": false
+          }
+        ]
+      },
+      "paneScreenshot": "/private/tmp/task12968-research-workspace-uat/desktop-03-sources-empty.png"
+    },
+    {
+      "name": "desktop-chat-empty-state",
+      "status": "pass",
+      "screenshot": "/private/tmp/task12968-research-workspace-uat/desktop-04-chat-empty-full.png",
+      "safety": {
+        "url": "http://127.0.0.1:18161/research-workspace",
+        "globalBackendDialogCount": 0,
+        "globalBackendCopyVisible": false,
+        "nextPortalHostCount": 1,
+        "runtimeOverlayCount": 0,
+        "portalDetails": [
+          {
+            "hostVisible": false,
+            "hostTextLength": 0,
+            "shadowTextLength": 68689,
+            "hasDialogOverlay": false,
+            "hasRuntimeCopy": false
+          }
+        ]
+      },
+      "paneScreenshot": "/private/tmp/task12968-research-workspace-uat/desktop-04-chat-empty.png"
+    },
+    {
+      "name": "desktop-studio-empty-state",
+      "status": "pass",
+      "screenshot": "/private/tmp/task12968-research-workspace-uat/desktop-05-studio-empty-full.png",
+      "safety": {
+        "url": "http://127.0.0.1:18161/research-workspace",
+        "globalBackendDialogCount": 0,
+        "globalBackendCopyVisible": false,
+        "nextPortalHostCount": 1,
+        "runtimeOverlayCount": 0,
+        "portalDetails": [
+          {
+            "hostVisible": false,
+            "hostTextLength": 0,
+            "shadowTextLength": 68689,
+            "hasDialogOverlay": false,
+            "hasRuntimeCopy": false
+          }
+        ]
+      },
+      "paneScreenshot": "/private/tmp/task12968-research-workspace-uat/desktop-05-studio-empty.png"
+    },
+    {
+      "name": "desktop-first-run-tour",
+      "status": "pass",
+      "screenshot": "/private/tmp/task12968-research-workspace-uat/desktop-06-first-run-tour.png",
+      "safety": {
+        "url": "http://127.0.0.1:18161/research-workspace",
+        "globalBackendDialogCount": 0,
+        "globalBackendCopyVisible": false,
+        "nextPortalHostCount": 1,
+        "runtimeOverlayCount": 0,
+        "portalDetails": [
+          {
+            "hostVisible": false,
+            "hostTextLength": 0,
+            "shadowTextLength": 68689,
+            "hasDialogOverlay": false,
+            "hasRuntimeCopy": false
+          }
+        ]
+      },
+      "stepTitle": "Workspace Header",
+      "totalSteps": 5
+    },
+    {
+      "name": "desktop-completed-tour",
+      "status": "pass",
+      "screenshot": "/private/tmp/task12968-research-workspace-uat/desktop-07-tour-complete.png",
+      "safety": {
+        "url": "http://127.0.0.1:18161/research-workspace",
+        "globalBackendDialogCount": 0,
+        "globalBackendCopyVisible": false,
+        "nextPortalHostCount": 1,
+        "runtimeOverlayCount": 0,
+        "portalDetails": [
+          {
+            "hostVisible": false,
+            "hostTextLength": 0,
+            "shadowTextLength": 68689,
+            "hasDialogOverlay": false,
+            "hasRuntimeCopy": false
+          }
+        ]
+      },
+      "completedSteps": [
+        "Workspace Header",
+        "Sources Pane",
+        "Chat Workspace",
+        "Studio Outputs",
+        "Workspace Switcher"
+      ]
+    },
+    {
+      "name": "desktop-replay-tour",
+      "status": "pass",
+      "screenshot": "/private/tmp/task12968-research-workspace-uat/desktop-08-replay-tour.png",
+      "safety": {
+        "url": "http://127.0.0.1:18161/research-workspace",
+        "globalBackendDialogCount": 0,
+        "globalBackendCopyVisible": false,
+        "nextPortalHostCount": 1,
+        "runtimeOverlayCount": 0,
+        "portalDetails": [
+          {
+            "hostVisible": false,
+            "hostTextLength": 0,
+            "shadowTextLength": 68689,
+            "hasDialogOverlay": false,
+            "hasRuntimeCopy": false
+          }
+        ]
+      },
+      "replayStepTitle": "Workspace Header"
+    },
+    {
+      "name": "desktop-visible-search",
+      "status": "pass",
+      "screenshot": "/private/tmp/task12968-research-workspace-uat/desktop-09-visible-search.png",
+      "safety": {
+        "url": "http://127.0.0.1:18161/research-workspace",
+        "globalBackendDialogCount": 0,
+        "globalBackendCopyVisible": false,
+        "nextPortalHostCount": 1,
+        "runtimeOverlayCount": 0,
+        "portalDetails": [
+          {
+            "hostVisible": false,
+            "hostTextLength": 0,
+            "shadowTextLength": 68689,
+            "hasDialogOverlay": false,
+            "hasRuntimeCopy": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "desktop-shortcut-search",
+      "status": "pass",
+      "screenshot": "/private/tmp/task12968-research-workspace-uat/desktop-10-shortcut-search.png",
+      "safety": {
+        "url": "http://127.0.0.1:18161/research-workspace",
+        "globalBackendDialogCount": 0,
+        "globalBackendCopyVisible": false,
+        "nextPortalHostCount": 1,
+        "runtimeOverlayCount": 0,
+        "portalDetails": [
+          {
+            "hostVisible": false,
+            "hostTextLength": 0,
+            "shadowTextLength": 68689,
+            "hasDialogOverlay": false,
+            "hasRuntimeCopy": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "desktop-add-url-no-key-recovery",
+      "status": "pass",
+      "screenshot": "/private/tmp/task12968-research-workspace-uat/desktop-11-add-url-auth-recovery.png",
+      "safety": {
+        "url": "http://127.0.0.1:18161/research-workspace",
+        "globalBackendDialogCount": 0,
+        "globalBackendCopyVisible": false,
+        "nextPortalHostCount": 1,
+        "runtimeOverlayCount": 0,
+        "portalDetails": [
+          {
+            "hostVisible": false,
+            "hostTextLength": 0,
+            "shadowTextLength": 68689,
+            "hasDialogOverlay": false,
+            "hasRuntimeCopy": false
+          }
+        ]
+      },
+      "retainedUrl": "https://example.com/research-workspace-task12968",
+      "requestDisposition": "client_auth_guard",
+      "sanitizedRequests": []
+    },
+    {
+      "name": "desktop-final-no-global-modal-or-runtime-overlay",
+      "status": "pass",
+      "screenshot": "/private/tmp/task12968-research-workspace-uat/desktop-12-final.png",
+      "safety": {
+        "url": "http://127.0.0.1:18161/research-workspace",
+        "globalBackendDialogCount": 0,
+        "globalBackendCopyVisible": false,
+        "nextPortalHostCount": 1,
+        "runtimeOverlayCount": 0,
+        "portalDetails": [
+          {
+            "hostVisible": false,
+            "hostTextLength": 0,
+            "shadowTextLength": 68689,
+            "hasDialogOverlay": false,
+            "hasRuntimeCopy": false
+          }
+        ]
+      },
+      "apiRequestCount": 2,
+      "credentialBearingRequestCount": 0,
+      "freshWorkspaceState": {
+        "storageSchema": "workspace_split_v1",
+        "activeWorkspaceId": "e3c6e337-b7e7-4df4-b696-a3fe5c015487",
+        "workspaceIds": [
+          "e3c6e337-b7e7-4df4-b696-a3fe5c015487"
+        ],
+        "savedWorkspaceIds": [
+          "e3c6e337-b7e7-4df4-b696-a3fe5c015487"
+        ],
+        "migrationStatusMessages": [],
+        "workspaceCount": 1,
+        "savedWorkspaceCount": 1,
+        "migrationApiRequestCount": 0
+      }
+    },
+    {
+      "name": "mobile-direct-entry",
+      "status": "pass",
+      "screenshot": "/private/tmp/task12968-research-workspace-uat/mobile-01-direct-entry.png",
+      "safety": {
+        "url": "http://127.0.0.1:18161/research-workspace",
+        "globalBackendDialogCount": 0,
+        "globalBackendCopyVisible": false,
+        "nextPortalHostCount": 1,
+        "runtimeOverlayCount": 0,
+        "portalDetails": [
+          {
+            "hostVisible": false,
+            "hostTextLength": 0,
+            "shadowTextLength": 68689,
+            "hasDialogOverlay": false,
+            "hasRuntimeCopy": false
+          }
+        ]
+      },
+      "routeReadyMs": 8212,
+      "credentials": {
+        "cookieCount": 0,
+        "localCredentialKeys": [],
+        "sessionCredentialKeys": [],
+        "configHasApiKey": false,
+        "serviceWorkerScopes": [],
+        "extensionRuntimeIdPresent": false
+      },
+      "headerLayout": {
+        "viewportWidth": 390,
+        "documentWidth": 390,
+        "header": {
+          "x": 0,
+          "y": 0,
+          "right": 390,
+          "bottom": 145,
+          "width": 390,
+          "height": 145
+        },
+        "contextIndicator": {
+          "x": 16,
+          "y": 58,
+          "right": 374,
+          "bottom": 88,
+          "width": 358,
+          "height": 30
+        },
+        "actions": {
+          "x": 16,
+          "y": 96,
+          "right": 374,
+          "bottom": 130,
+          "width": 358,
+          "height": 34
+        },
+        "actionButtons": [
+          {
+            "label": "Search workspace (Cmd+K)",
+            "box": {
+              "x": 36.578125,
+              "y": 97,
+              "right": 118.609375,
+              "bottom": 129,
+              "width": 82.03125,
+              "height": 32
+            }
+          },
+          {
+            "label": "Workspaces",
+            "box": {
+              "x": 126.609375,
+              "y": 96,
+              "right": 258,
+              "bottom": 130,
+              "width": 131.390625,
+              "height": 34
+            }
+          },
+          {
+            "label": "Share workspace",
+            "box": {
+              "x": 266,
+              "y": 98,
+              "right": 296,
+              "bottom": 128,
+              "width": 30,
+              "height": 30
+            }
+          },
+          {
+            "label": "Take a tour of the workspace",
+            "box": {
+              "x": 304,
+              "y": 97,
+              "right": 336,
+              "bottom": 129,
+              "width": 32,
+              "height": 32
+            }
+          },
+          {
+            "label": "Workspace settings",
+            "box": {
+              "x": 344,
+              "y": 98,
+              "right": 374,
+              "bottom": 128,
+              "width": 30,
+              "height": 30
+            }
+          }
+        ],
+        "actionOverlaps": [],
+        "allActionsInsideViewport": true
+      },
+      "freshWorkspaceState": {
+        "storageSchema": "workspace_split_v1",
+        "activeWorkspaceId": "d3a2932d-7af9-48a6-a489-9ff245150cc6",
+        "workspaceIds": [
+          "d3a2932d-7af9-48a6-a489-9ff245150cc6"
+        ],
+        "savedWorkspaceIds": [
+          "d3a2932d-7af9-48a6-a489-9ff245150cc6"
+        ],
+        "migrationStatusMessages": [],
+        "workspaceCount": 1,
+        "savedWorkspaceCount": 1,
+        "migrationApiRequestCount": 0
+      },
+      "evidenceScope": "viewport"
+    },
+    {
+      "name": "mobile-sources-tab",
+      "status": "pass",
+      "screenshot": "/private/tmp/task12968-research-workspace-uat/mobile-02-sources-tab.png",
+      "safety": {
+        "url": "http://127.0.0.1:18161/research-workspace",
+        "globalBackendDialogCount": 0,
+        "globalBackendCopyVisible": false,
+        "nextPortalHostCount": 1,
+        "runtimeOverlayCount": 0,
+        "portalDetails": [
+          {
+            "hostVisible": false,
+            "hostTextLength": 0,
+            "shadowTextLength": 68689,
+            "hasDialogOverlay": false,
+            "hasRuntimeCopy": false
+          }
+        ]
+      },
+      "layout": {
+        "clientWidth": 390,
+        "scrollWidth": 390
+      },
+      "evidenceScope": "active_tabpanel"
+    },
+    {
+      "name": "mobile-chat-tab",
+      "status": "pass",
+      "screenshot": "/private/tmp/task12968-research-workspace-uat/mobile-03-chat-tab.png",
+      "safety": {
+        "url": "http://127.0.0.1:18161/research-workspace",
+        "globalBackendDialogCount": 0,
+        "globalBackendCopyVisible": false,
+        "nextPortalHostCount": 1,
+        "runtimeOverlayCount": 0,
+        "portalDetails": [
+          {
+            "hostVisible": false,
+            "hostTextLength": 0,
+            "shadowTextLength": 68689,
+            "hasDialogOverlay": false,
+            "hasRuntimeCopy": false
+          }
+        ]
+      },
+      "layout": {
+        "clientWidth": 390,
+        "scrollWidth": 390
+      },
+      "evidenceScope": "active_tabpanel"
+    },
+    {
+      "name": "mobile-studio-tab",
+      "status": "pass",
+      "screenshot": "/private/tmp/task12968-research-workspace-uat/mobile-04-studio-tab.png",
+      "safety": {
+        "url": "http://127.0.0.1:18161/research-workspace",
+        "globalBackendDialogCount": 0,
+        "globalBackendCopyVisible": false,
+        "nextPortalHostCount": 1,
+        "runtimeOverlayCount": 0,
+        "portalDetails": [
+          {
+            "hostVisible": false,
+            "hostTextLength": 0,
+            "shadowTextLength": 68689,
+            "hasDialogOverlay": false,
+            "hasRuntimeCopy": false
+          }
+        ]
+      },
+      "layout": {
+        "clientWidth": 390,
+        "scrollWidth": 390
+      },
+      "evidenceScope": "active_tabpanel"
+    },
+    {
+      "name": "mobile-search",
+      "status": "pass",
+      "screenshot": "/private/tmp/task12968-research-workspace-uat/mobile-05-search.png",
+      "safety": {
+        "url": "http://127.0.0.1:18161/research-workspace",
+        "globalBackendDialogCount": 0,
+        "globalBackendCopyVisible": false,
+        "nextPortalHostCount": 1,
+        "runtimeOverlayCount": 0,
+        "portalDetails": [
+          {
+            "hostVisible": false,
+            "hostTextLength": 0,
+            "shadowTextLength": 68689,
+            "hasDialogOverlay": false,
+            "hasRuntimeCopy": false
+          }
+        ]
+      },
+      "evidenceScope": "search_dialog"
+    },
+    {
+      "name": "mobile-final-no-global-modal-or-runtime-overlay",
+      "status": "pass",
+      "screenshot": "/private/tmp/task12968-research-workspace-uat/mobile-06-final.png",
+      "safety": {
+        "url": "http://127.0.0.1:18161/research-workspace",
+        "globalBackendDialogCount": 0,
+        "globalBackendCopyVisible": false,
+        "nextPortalHostCount": 1,
+        "runtimeOverlayCount": 0,
+        "portalDetails": [
+          {
+            "hostVisible": false,
+            "hostTextLength": 0,
+            "shadowTextLength": 68689,
+            "hasDialogOverlay": false,
+            "hasRuntimeCopy": false
+          }
+        ]
+      },
+      "credentialBearingRequestCount": 0,
+      "evidenceScope": "active_tabpanel"
+    }
+  ]
+}
