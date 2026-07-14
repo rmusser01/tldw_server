@@ -32,6 +32,18 @@ export const SkillsWorkspace: React.FC = () => {
         "Update tldw_server to a build that advertises the Skills API, then refresh capabilities."
     })
   })
+  const pageHeader = (
+    <section className="mb-4 flex flex-col gap-1" aria-labelledby="skills-workspace-title">
+      <h1 id="skills-workspace-title" className="m-0 text-xl font-semibold text-text">
+        {t("option:skills.title", { defaultValue: "Skills" })}
+      </h1>
+      <p className="m-0 max-w-2xl text-sm text-text-muted">
+        {t("option:skills.description", {
+          defaultValue: "Discover, test, create, import, and manage reusable instructions."
+        })}
+      </p>
+    </section>
+  )
 
   return (
     <WorkspaceConnectionGate
@@ -46,9 +58,11 @@ export const SkillsWorkspace: React.FC = () => {
         defaultValue:
           "To use Skills, reconnect to your tldw server so skill definitions can be stored and executed."
       })}
+      pageHeader={pageHeader}
     >
       {capsLoading ? (
         <PageShell>
+          {pageHeader}
           <StatePanel
             state="loading"
             title={t("option:skillsEmpty.loadingTitle", {
@@ -65,6 +79,7 @@ export const SkillsWorkspace: React.FC = () => {
         </PageShell>
       ) : !hasSkills ? (
         <PageShell>
+          {pageHeader}
           <RecoveryCallout
             state={unsupportedState.state}
             title={unsupportedState.title}

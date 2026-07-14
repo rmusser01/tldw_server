@@ -352,6 +352,7 @@ route_map:
     prompt-studio: prompt_studio.default
     prompts: prompt_studio.default
     notes: core.default
+    skills: core.default
     writing: core.default
     notes-graph: core.default
     personalization: core.default
@@ -453,6 +454,7 @@ route_map:
     "/api/v1/tools*": core.default
     "/api/v1/claims*": core.default
     "/api/v1/notes*": core.default
+    "/api/v1/skills*": core.default
     "/api/v1/personalization*": core.default
     "/api/v1/persona*": character_chat.default
     "/api/v1/reading*": core.default

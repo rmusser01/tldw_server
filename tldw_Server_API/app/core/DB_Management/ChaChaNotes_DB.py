@@ -16987,6 +16987,22 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             logger.error(f"Database error fetching skill '{name}': {exc}")
             raise
 
+    def get_skill_registry_by_uuid(self, skill_uuid: str) -> dict[str, Any] | None:
+        """Fetch an active or deleted skill registry entry by immutable UUID."""
+        self._ensure_skill_registry_table()
+        normalized_uuid = str(skill_uuid or "").strip()
+        if not normalized_uuid:
+            return None
+        try:
+            cursor = self.execute_query(
+                "SELECT * FROM skill_registry WHERE uuid = ?",
+                (normalized_uuid,),
+            )
+            return self._skill_row_to_dict(cursor.fetchone())
+        except CharactersRAGDBError as exc:
+            logger.error(f"Database error fetching skill UUID '{normalized_uuid}': {exc}")
+            raise
+
     def insert_skill_registry(self, skill_data: dict[str, Any]) -> str:
         """Insert a new skill registry row and return its UUID."""
         self._ensure_skill_registry_table()
@@ -17128,24 +17144,44 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             logger.error(f"Database error updating skill '{name}': {exc}")
             raise
 
-    def mark_skill_registry_deleted(self, name: str, expected_version: int) -> bool:
-        """Soft-delete a skill registry row using optimistic locking."""
+    def mark_skill_registry_deleted(
+        self,
+        name: str,
+        expected_version: int,
+        directory_path: str | None = None,
+    ) -> bool:
+        """Soft-delete a skill registry row and optionally record its archive path."""
         self._ensure_skill_registry_table()
         now = self._get_current_utc_timestamp_iso()
         next_version = expected_version + 1
-
-        query = (
-            "UPDATE skill_registry SET deleted = ?, last_modified = ?, version = ? "
-            "WHERE name = ? AND version = ? AND deleted = ?"
-        )
-        params = (
-            self._skill_bool_value(True),
-            now,
-            next_version,
-            name,
-            expected_version,
-            self._skill_bool_value(False),
-        )
+        if directory_path is None:
+            query = (
+                "UPDATE skill_registry SET deleted = ?, last_modified = ?, version = ? "
+                "WHERE name = ? AND version = ? AND deleted = ?"
+            )
+            params = (
+                self._skill_bool_value(True),
+                now,
+                next_version,
+                name,
+                expected_version,
+                self._skill_bool_value(False),
+            )
+        else:
+            query = (
+                "UPDATE skill_registry SET deleted = ?, directory_path = ?, "
+                "last_modified = ?, version = ? "
+                "WHERE name = ? AND version = ? AND deleted = ?"
+            )
+            params = (
+                self._skill_bool_value(True),
+                directory_path,
+                now,
+                next_version,
+                name,
+                expected_version,
+                self._skill_bool_value(False),
+            )
 
         try:
             with self.transaction() as conn:
@@ -17186,8 +17222,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def bulk_mark_skill_registry_deleted(
         self,
         items: list[tuple[str, int | None]],
+        archive_paths: dict[str, str] | None = None,
     ) -> list[dict[str, Any]]:
-        """Soft-delete multiple skill registry rows in one atomic transaction."""
+        """Soft-delete multiple skill rows and record archive paths atomically."""
         if not items:
             return []
 
@@ -17197,7 +17234,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         active_value = self._skill_bool_value(False)
         select_query = "SELECT * FROM skill_registry WHERE name = ?"
         update_query = (
-            "UPDATE skill_registry SET deleted = ?, last_modified = ?, version = ? "
+            "UPDATE skill_registry SET deleted = ?, directory_path = ?, "
+            "last_modified = ?, version = ? "
             "WHERE name = ? AND version = ? AND deleted = ?"
         )
 
@@ -17228,8 +17266,17 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
                     current_version = int(row["previous_version"])
                     next_version = current_version + 1
+                    directory_path = (archive_paths or {}).get(
+                        str(row["name"]),
+                        row.get("directory_path"),
+                    )
+                    if not isinstance(directory_path, str) or not directory_path.strip():
+                        raise InputError(
+                            f"Skill '{row['name']}' has no valid directory path."
+                        )
                     params = (
                         deleted_value,
+                        directory_path,
                         now,
                         next_version,
                         row["name"],
@@ -17252,6 +17299,87 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise
         except CharactersRAGDBError as exc:
             logger.error(f"Database error bulk deleting skills: {exc}")
+            raise
+
+    def list_deleted_skill_registry(
+        self,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """List soft-deleted skills newest-first for the Trash view."""
+        self._ensure_skill_registry_table()
+        query = (
+            "SELECT * FROM skill_registry WHERE deleted = ? "
+            "ORDER BY last_modified DESC, name ASC LIMIT ? OFFSET ?"
+        )
+        try:
+            cursor = self.execute_query(
+                query,
+                (self._skill_bool_value(True), limit, offset),
+            )
+            return [item for row in cursor.fetchall() if (item := self._skill_row_to_dict(row))]
+        except CharactersRAGDBError as exc:
+            logger.error(f"Database error listing deleted skills: {exc}")
+            raise
+
+    def count_deleted_skill_registry(self) -> int:
+        """Return the number of soft-deleted skills."""
+        self._ensure_skill_registry_table()
+        try:
+            cursor = self.execute_query(
+                "SELECT COUNT(*) AS cnt FROM skill_registry WHERE deleted = ?",
+                (self._skill_bool_value(True),),
+            )
+            row = cursor.fetchone()
+            return int(row["cnt"]) if row else 0
+        except CharactersRAGDBError as exc:
+            logger.error(f"Database error counting deleted skills: {exc}")
+            raise
+
+    def purge_skill_registry(self, name: str, expected_version: int) -> bool:
+        """Permanently remove one soft-deleted skill using optimistic locking."""
+        self._ensure_skill_registry_table()
+        try:
+            with self.transaction() as conn:
+                select_query, select_params = self._prepare_backend_statement(
+                    "SELECT version, deleted FROM skill_registry WHERE name = ?",
+                    (name,),
+                )
+                row = conn.execute(select_query, select_params).fetchone()
+                if not row:
+                    raise InputError(f"Skill not found: {name}")  # noqa: TRY003
+
+                current_version = int(row["version"])
+                if not bool(row["deleted"]):
+                    raise ConflictError(
+                        f"Skill '{name}' must be deleted before it can be purged.",
+                        entity="skill_registry",
+                        entity_id=name,
+                    )
+                if current_version != expected_version:
+                    raise ConflictError(
+                        f"Skill '{name}' version mismatch (db has {current_version}, expected {expected_version}).",
+                        entity="skill_registry",
+                        entity_id=name,
+                    )
+
+                delete_query, delete_params = self._prepare_backend_statement(
+                    "DELETE FROM skill_registry WHERE name = ? AND version = ? AND deleted = ?",
+                    (name, expected_version, self._skill_bool_value(True)),
+                )
+                cursor = conn.execute(delete_query, delete_params)
+                if cursor.rowcount == 0:
+                    raise ConflictError(
+                        f"Skill '{name}' purge affected 0 rows.",
+                        entity="skill_registry",
+                        entity_id=name,
+                    )
+                return True
+        except (ConflictError, InputError):
+            raise
+        except CharactersRAGDBError as exc:
+            logger.error(f"Database error purging skill '{name}': {exc}")
             raise
 
     def restore_skill_registry(

@@ -1,10 +1,14 @@
+from pathlib import Path
+
 import pytest
-pytestmark = pytest.mark.rate_limit
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.app.core.Resource_Governance.middleware_simple import RGSimpleMiddleware
 from tldw_Server_API.app.core.Resource_Governance.governor import RGDecision
+from tldw_Server_API.app.core.Resource_Governance.middleware_simple import RGSimpleMiddleware
+from tldw_Server_API.app.core.Resource_Governance.policy_loader import PolicyLoader, PolicyReloadConfig
+
+pytestmark = pytest.mark.rate_limit
 
 
 class _Snap:
@@ -79,6 +83,22 @@ class _CaptureGov:
         return None
 
 
+class _DenyCaptureGov(_CaptureGov):
+    async def reserve(self, req, op_id=None):
+        self.requests.append(req)
+        policy_id = req.tags.get("policy_id")
+        return RGDecision(
+            allowed=False,
+            retry_after=12,
+            details={
+                "policy_id": policy_id,
+                "categories": {
+                    "requests": {"allowed": False, "retry_after": 12, "limit": 2}
+                },
+            },
+        ), None
+
+
 def _make_app(route_map):
 
 
@@ -123,6 +143,30 @@ async def test_middleware_denies_with_retry_after_by_path():
         assert r.status_code == 429
         assert r.json().get("policy_id") == "deny.emb"
         assert r.headers.get("Retry-After") == "12"
+
+
+@pytest.mark.asyncio
+async def test_skills_requests_use_repo_core_default_policy_and_return_429():
+    policy_path = Path(__file__).resolve().parents[2] / "Config_Files" / "resource_governor_policies.yaml"
+    loader = PolicyLoader(str(policy_path), PolicyReloadConfig(enabled=False, interval_sec=999))
+    await loader.load_once()
+    governor = _DenyCaptureGov()
+    app = FastAPI()
+    app.add_middleware(RGSimpleMiddleware)
+
+    @app.get("/api/v1/skills/trash", tags=["skills"])
+    async def skills_route():  # pragma: no cover - middleware denies before routing
+        return {"ok": True}
+
+    app.state.rg_policy_loader = loader
+    app.state.rg_governor = governor
+
+    with TestClient(app) as client:
+        response = client.get("/api/v1/skills/trash")
+
+    assert response.status_code == 429
+    assert response.json()["policy_id"] == "core.default"
+    assert governor.requests[0].tags["policy_id"] == "core.default"
 
 
 @pytest.mark.asyncio

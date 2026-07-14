@@ -71,6 +71,26 @@ export interface SkillsListResponse {
   offset: number
 }
 
+export interface SkillsTrashListParams {
+  limit?: number
+  offset?: number
+  abortSignal?: AbortSignal
+}
+
+export interface SkillTrashItem extends SkillSummary {
+  deleted_at: string
+  restorable: boolean
+  restore_unavailable_reason: string | null
+}
+
+export interface SkillsTrashListResponse {
+  skills: SkillTrashItem[]
+  count: number
+  total: number
+  limit: number
+  offset: number
+}
+
 export interface SkillBulkDeleteItem {
   name: string
   version?: number
@@ -112,6 +132,7 @@ export interface SkillImportRequest {
   content: string
   supporting_files?: Record<string, string> | null
   overwrite?: boolean
+  expected_version?: number
 }
 
 export interface SkillImportPreviewResponse {

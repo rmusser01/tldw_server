@@ -63,10 +63,14 @@ async function mockSkillsCapabilityRoutes(page: Page) {
       info: { title: "Mock tldw API", version: "test" },
       paths: {
         "/api/v1/skills": { get: {}, post: {} },
+        "/api/v1/skills/trash": { get: {} },
+        "/api/v1/skills/bulk-delete": { post: {} },
         "/api/v1/skills/context": { get: {} },
         "/api/v1/skills/seed": { post: {} },
         "/api/v1/skills/{name}": { get: {}, put: {}, delete: {} },
         "/api/v1/skills/{name}/execute": { post: {} },
+        "/api/v1/skills/{name}/restore": { post: {} },
+        "/api/v1/skills/{name}/purge": { delete: {} },
         "/api/v1/skills/import": { post: {} },
         "/api/v1/skills/import/file": { post: {} },
       },
@@ -79,6 +83,7 @@ export async function mockSkillsBeginnerApi(
   options: { seeded?: boolean } = {}
 ) {
   let seeded = Boolean(options.seeded)
+  const executeRequests: Array<{ args?: string; dry_run?: boolean }> = []
 
   await mockSkillsCapabilityRoutes(page)
 
@@ -135,6 +140,7 @@ export async function mockSkillsBeginnerApi(
         args?: string
         dry_run?: boolean
       }
+      executeRequests.push(body)
       const args = body.args ?? "A long article about Skills UX"
       await fulfillJson(route, {
         skill_name: "summarize",
@@ -147,6 +153,135 @@ export async function mockSkillsBeginnerApi(
       })
     }
   )
+
+  return { executeRequests }
+}
+
+export async function mockSkillsTrashWorkflow(page: Page) {
+  let state: "active" | "trash" | "purged" = "active"
+  let version = 1
+  const operations: string[] = []
+
+  await mockSkillsCapabilityRoutes(page)
+
+  await page.route(/\/api\/v1\/skills(?:\/)?(?:\?.*)?$/, async (route) => {
+    const skills = state === "active"
+      ? [{ ...seededSkillSummary, version }]
+      : []
+    await fulfillJson(route, {
+      skills,
+      count: skills.length,
+      total: skills.length,
+      limit: 10,
+      offset: 0,
+    })
+  })
+
+  await page.route(/\/api\/v1\/skills\/trash(?:\/)?(?:\?.*)?$/, async (route) => {
+    if (route.request().method() !== "GET") {
+      await fulfillJson(route, {}, 405)
+      return
+    }
+    const skills = state === "trash"
+      ? [{
+          ...seededSkillSummary,
+          allowed_tools: null,
+          model: null,
+          deleted_at: "2026-07-14T12:00:00Z",
+          version,
+          restorable: true,
+          restore_unavailable_reason: null,
+        }]
+      : []
+    await fulfillJson(route, {
+      skills,
+      count: skills.length,
+      total: skills.length,
+      limit: 10,
+      offset: 0,
+    })
+  })
+
+  await page.route(/\/api\/v1\/skills\/context(?:\/)?(?:\?.*)?$/, async (route) => {
+    const availableSkills = state === "active"
+      ? [{ ...seededSkillSummary, version }]
+      : []
+    await fulfillJson(route, {
+      available_skills: availableSkills,
+      context_text: availableSkills.length ? "/skill summarize [text]" : "",
+    })
+  })
+
+  await page.route(
+    /\/api\/v1\/skills\/summarize\/restore(?:\/)?(?:\?.*)?$/,
+    async (route) => {
+      if (route.request().method() !== "POST") {
+        await fulfillJson(route, {}, 405)
+        return
+      }
+      if (state !== "trash") {
+        await fulfillJson(
+          route,
+          { detail: "Skill is not in Trash" },
+          state === "active" ? 409 : 404,
+        )
+        return
+      }
+      operations.push("restore")
+      state = "active"
+      version += 1
+      await fulfillJson(route, { ...seededSkillResponse, version })
+    }
+  )
+
+  await page.route(
+    /\/api\/v1\/skills\/summarize\/purge(?:\/)?(?:\?.*)?$/,
+    async (route) => {
+      if (route.request().method() !== "DELETE") {
+        await fulfillJson(route, {}, 405)
+        return
+      }
+      if (state !== "trash") {
+        await fulfillJson(
+          route,
+          { detail: "Skill must be moved to Trash first" },
+          state === "active" ? 409 : 404,
+        )
+        return
+      }
+      operations.push("purge")
+      state = "purged"
+      await fulfillJson(route, { deleted: true })
+    }
+  )
+
+  await page.route(/\/api\/v1\/skills\/summarize(?:\/)?(?:\?.*)?$/, async (route) => {
+    if (route.request().method() === "DELETE") {
+      if (state !== "active") {
+        await fulfillJson(route, { detail: "Skill not found" }, 404)
+        return
+      }
+      operations.push("delete")
+      state = "trash"
+      version += 1
+      await fulfillJson(route, { deleted: true })
+      return
+    }
+    if (route.request().method() !== "GET") {
+      await fulfillJson(route, {}, 405)
+      return
+    }
+    if (state !== "active") {
+      await fulfillJson(route, { detail: "Skill not found" }, 404)
+      return
+    }
+    await fulfillJson(route, { ...seededSkillResponse, version })
+  })
+
+  return {
+    operations,
+    state: () => state,
+  }
 }
 
 const largeLibrarySkills: SkillFixtureSummary[] = [

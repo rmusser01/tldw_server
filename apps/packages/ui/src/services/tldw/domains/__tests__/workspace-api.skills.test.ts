@@ -27,19 +27,72 @@ describe("workspace API skill methods", () => {
       fillPathParams: vi.fn().mockReturnValue("/api/v1/skills/summarize/execute")
     }
 
+    const controller = new AbortController()
     await workspaceApiMethods.executeSkill.call(
       clientCore as any,
       "summarize",
       "chapter 1",
-      { dryRun: true }
+      { dryRun: true, signal: controller.signal }
     )
 
     expect(bgRequest).toHaveBeenCalledWith({
       path: "/api/v1/skills/summarize/execute",
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: { args: "chapter 1", dry_run: true }
+      body: { args: "chapter 1", dry_run: true },
+      abortSignal: controller.signal
     })
+  })
+
+  it("forwards cancellation when previewing a text skill import", async () => {
+    vi.mocked(bgRequest).mockResolvedValueOnce({ valid: true })
+    const clientCore = {
+      resolveApiPath: vi.fn().mockResolvedValue("/api/v1/skills/import/preview")
+    }
+    const controller = new AbortController()
+    const payload = { name: "preview-skill", content: "Body" }
+
+    await workspaceApiMethods.previewSkillImport.call(
+      clientCore as any,
+      payload,
+      { signal: controller.signal }
+    )
+
+    expect(bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/skills/import/preview",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload,
+      abortSignal: controller.signal
+    })
+  })
+
+  it("sends the expected version when importing a reviewed file", async () => {
+    const upload = vi.fn().mockResolvedValue({ name: "reviewed-skill" })
+    const clientCore = { upload }
+    const controller = new AbortController()
+    const file = {
+      name: "reviewed-skill.md",
+      type: "text/markdown",
+      arrayBuffer: vi.fn().mockResolvedValue(new TextEncoder().encode("Replacement").buffer)
+    } as unknown as File
+
+    await workspaceApiMethods.importSkillFile.call(
+      clientCore as any,
+      file,
+      { overwrite: true, expectedVersion: 7, signal: controller.signal }
+    )
+
+    expect(upload).toHaveBeenCalledWith(expect.objectContaining({
+      path: "/api/v1/skills/import/file?overwrite=true&expected_version=7",
+      method: "POST",
+      abortSignal: controller.signal,
+      fileFieldName: "file",
+      file: expect.objectContaining({
+        name: "reviewed-skill.md",
+        type: "text/markdown"
+      })
+    }))
   })
 
   it("sends If-Match when deleting a skill with a valid version", async () => {
@@ -48,13 +101,20 @@ describe("workspace API skill methods", () => {
       resolveApiPath: vi.fn().mockResolvedValue("/api/v1/skills/{name}"),
       fillPathParams: vi.fn().mockReturnValue("/api/v1/skills/summarize")
     }
+    const controller = new AbortController()
 
-    await workspaceApiMethods.deleteSkill.call(clientCore as any, "summarize", 3)
+    await workspaceApiMethods.deleteSkill.call(
+      clientCore as any,
+      "summarize",
+      3,
+      { signal: controller.signal }
+    )
 
     expect(bgRequest).toHaveBeenCalledWith({
       path: "/api/v1/skills/summarize",
       method: "DELETE",
-      headers: { "If-Match": "3" }
+      headers: { "If-Match": "3" },
+      abortSignal: controller.signal
     })
   })
 
@@ -142,6 +202,52 @@ describe("workspace API skill methods", () => {
           { name: "invalid-version" }
         ]
       }
+    })
+  })
+
+  it("lists Skills Trash with pagination", async () => {
+    vi.mocked(bgRequest).mockResolvedValueOnce({
+      skills: [], count: 0, total: 0, limit: 20, offset: 20
+    })
+    const clientCore = {
+      resolveApiPath: vi.fn().mockResolvedValue("/api/v1/skills/trash")
+    }
+
+    await workspaceApiMethods.listSkillTrash.call(clientCore as any, {
+      limit: 20,
+      offset: 20
+    })
+
+    expect(bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/skills/trash?limit=20&offset=20",
+      method: "GET",
+      abortSignal: undefined
+    })
+  })
+
+  it("sends If-Match when restoring and permanently deleting Trash items", async () => {
+    vi.mocked(bgRequest).mockResolvedValue(undefined)
+    const clientCore = {
+      resolveApiPath: vi.fn()
+        .mockResolvedValueOnce("/api/v1/skills/{name}/restore")
+        .mockResolvedValueOnce("/api/v1/skills/{name}/purge"),
+      fillPathParams: vi.fn()
+        .mockReturnValueOnce("/api/v1/skills/summarize/restore")
+        .mockReturnValueOnce("/api/v1/skills/summarize/purge")
+    }
+
+    await workspaceApiMethods.restoreSkill.call(clientCore as any, "summarize", 4)
+    await workspaceApiMethods.purgeSkill.call(clientCore as any, "summarize", 4)
+
+    expect(bgRequest).toHaveBeenNthCalledWith(1, {
+      path: "/api/v1/skills/summarize/restore",
+      method: "POST",
+      headers: { "If-Match": "4" }
+    })
+    expect(bgRequest).toHaveBeenNthCalledWith(2, {
+      path: "/api/v1/skills/summarize/purge",
+      method: "DELETE",
+      headers: { "If-Match": "4" }
     })
   })
 

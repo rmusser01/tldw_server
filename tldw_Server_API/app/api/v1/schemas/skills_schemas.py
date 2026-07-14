@@ -197,6 +197,7 @@ class SkillResponse(SkillBase):
     """Schema for skill responses."""
     id: str = Field(..., description="UUID of the skill")
     content: str = Field(..., description="SKILL.md content (markdown body without frontmatter)")
+    raw_content: str = Field(..., description="Complete SKILL.md source including frontmatter")
     supporting_files: dict[str, str] | None = Field(None, description="Additional files in the skill directory")
     directory_path: str = Field(..., description="Path to skill directory")
     created_at: datetime = Field(..., description="Timestamp of creation")
@@ -223,6 +224,32 @@ class SkillSummary(BaseModel):
     version: int = Field(..., description="Version for optimistic locking")
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class SkillTrashItem(SkillSummary):
+    """A soft-deleted skill with truthful restore availability."""
+    deleted_at: datetime = Field(..., description="When the skill was moved to Trash")
+    restorable: bool = Field(..., description="Whether the archived bundle can be restored")
+    restore_unavailable_reason: str | None = Field(
+        None,
+        description="User-safe reason restore is unavailable",
+    )
+
+
+class SkillTrashListResponse(BaseModel):
+    """Paginated Skills Trash response."""
+    skills: list[SkillTrashItem] = Field(..., description="Deleted skills")
+    count: int = Field(..., ge=0, description="Number of skills in this response")
+    total: int = Field(..., ge=0, description="Total number of deleted skills")
+    limit: int = Field(..., ge=1, description="Pagination limit")
+    offset: int = Field(..., ge=0, description="Pagination offset")
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta = Field(..., description="Canonical pagination metadata")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self) -> SkillTrashListResponse:
+        return _default_offset_pagination_aliases(self)
 
 
 class SkillBulkDeleteItem(BaseModel):
@@ -307,6 +334,11 @@ class SkillImportRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=500000, description="SKILL.md content")
     supporting_files: dict[str, str] | None = Field(None, description="Additional files")
     overwrite: bool = Field(False, description="If true, overwrite existing skill with same name")
+    expected_version: int | None = Field(
+        None,
+        ge=1,
+        description="Existing version confirmed by import preview",
+    )
 
     @field_validator("name")
     @classmethod

@@ -1,6 +1,31 @@
 import type { SkillResponse } from "@/types/skill"
+import { DEFAULT_SCHEMA, load as parseYaml, Type } from "js-yaml"
 
 const SUPPORTING_FILE_NAME_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$/
+export const SKILL_NAME_REGEX = /^[a-z][a-z0-9-]{0,63}$/
+export const MAX_SKILLS_BULK_SELECTION = 100
+
+const PY_YAML_COMPATIBLE_SCHEMA = DEFAULT_SCHEMA.extend({
+  implicit: [
+    new Type("tag:tldw.ai,2026:pyyaml-bool", {
+      kind: "scalar",
+      resolve: (value) =>
+        typeof value === "string" && /^(?:yes|no|on|off)$/i.test(value),
+      construct: (value) => /^(?:yes|on)$/i.test(String(value))
+    })
+  ]
+})
+
+export const limitSkillSelection = (requestedNames: string[]): {
+  names: string[]
+  limited: boolean
+} => {
+  const uniqueNames = Array.from(new Set(requestedNames))
+  return {
+    names: uniqueNames.slice(0, MAX_SKILLS_BULK_SELECTION),
+    limited: uniqueNames.length > MAX_SKILLS_BULK_SELECTION
+  }
+}
 
 export interface SupportingFileFormEntry {
   filename?: string
@@ -19,6 +44,18 @@ export interface SkillTemplateOption {
   defaultName: string
   argumentHint: string
   body: string
+}
+
+export interface SkillGuidedDraft {
+  name: string
+  description: string
+  argumentHint: string
+  instructions: string
+  context: "inline" | "fork"
+  userInvocable: boolean
+  allowModelInvocation: boolean
+  model: string
+  allowedTools: string
 }
 
 const quoteYamlString = (value: string): string => JSON.stringify(value)
@@ -61,6 +98,34 @@ export const buildInitialSkillContent = (skill: SkillResponse): string => {
   const frontmatter = serializeSkillFrontmatter(skill)
   const body = skill.content || ""
   return `---\n${frontmatter}\n---\n\n${body}`
+}
+
+export const buildDuplicateSkillContent = (
+  skill: SkillResponse,
+  duplicateName: string
+): string => {
+  const content = buildInitialSkillContent(skill)
+  const newline = content.includes("\r\n") ? "\r\n" : "\n"
+  const lines = content.split(/\r?\n/)
+
+  if (lines[0]?.trim() !== "---") return content
+
+  const closingIndex = lines.findIndex(
+    (line, index) => index > 0 && line.trim() === "---"
+  )
+  if (closingIndex < 0) return content
+
+  const nameIndex = lines.findIndex(
+    (line, index) =>
+      index > 0
+      && index < closingIndex
+      && /^(?:name|'name'|"name")\s*:/.test(line)
+  )
+  const nameLine = `name: ${quoteYamlString(duplicateName)}`
+  if (nameIndex >= 0) lines[nameIndex] = nameLine
+  else lines.splice(1, 0, nameLine)
+
+  return lines.join(newline)
 }
 
 export const SKILL_TEMPLATE_OPTIONS: SkillTemplateOption[] = [
@@ -146,20 +211,135 @@ const normalizeSkillTemplateName = (name: string, fallback: string): string => {
   return validStart.slice(0, 64).replace(/-+$/g, "") || fallback
 }
 
+export const buildGuidedDraftFromTemplate = (
+  templateId: SkillTemplateId,
+  name: string
+): SkillGuidedDraft => {
+  const template = getSkillTemplateOption(templateId)
+  return {
+    name: normalizeSkillTemplateName(name, template.defaultName),
+    description: template.description,
+    argumentHint: template.argumentHint,
+    instructions: template.body,
+    context: "inline",
+    userInvocable: true,
+    allowModelInvocation: true,
+    model: "",
+    allowedTools: ""
+  }
+}
+
+export const buildGuidedDraftFromSkill = (skill: SkillResponse): SkillGuidedDraft => ({
+  name: skill.name,
+  description: skill.description ?? "",
+  argumentHint: skill.argument_hint ?? "",
+  instructions: skill.content ?? "",
+  context: skill.context === "fork" ? "fork" : "inline",
+  userInvocable: skill.user_invocable,
+  allowModelInvocation: !skill.disable_model_invocation,
+  model: skill.model ?? "",
+  allowedTools: (skill.allowed_tools ?? []).join(", ")
+})
+
+export const parseAllowedTools = (value: string): string[] => {
+  const seen = new Set<string>()
+  const tools: string[] = []
+
+  for (const candidate of value.split(/[\n,]/)) {
+    const tool = candidate.trim()
+    if (!tool || seen.has(tool)) continue
+    seen.add(tool)
+    tools.push(tool)
+  }
+
+  return tools
+}
+
+export const serializeGuidedSkillContent = (draft: SkillGuidedDraft): string => {
+  const lines = [`name: ${quoteYamlString(draft.name.trim())}`]
+
+  pushYamlLine(lines, "description", draft.description)
+  pushYamlLine(lines, "argument-hint", draft.argumentHint)
+  if (!draft.allowModelInvocation) lines.push("disable-model-invocation: true")
+  if (!draft.userInvocable) lines.push("user-invocable: false")
+
+  const allowedTools = parseAllowedTools(draft.allowedTools)
+  if (allowedTools.length > 0) {
+    lines.push(`allowed-tools: ${quoteYamlString(allowedTools.join(", "))}`)
+  }
+  pushYamlLine(lines, "model", draft.model)
+  lines.push(`context: ${draft.context === "fork" ? "fork" : "inline"}`)
+
+  return `---\n${lines.join("\n")}\n---\n\n${draft.instructions.trim()}`
+}
+
+export const validateGuidedSkillDraft = (draft: SkillGuidedDraft): string[] => {
+  const errors: string[] = []
+  if (!SKILL_NAME_REGEX.test(draft.name.trim())) {
+    errors.push(
+      "Name must start with a lowercase letter and use only lowercase letters, numbers, and hyphens (max 64 characters)."
+    )
+  }
+  if (!draft.description.trim()) errors.push("Description is required.")
+  if (!draft.instructions.trim()) errors.push("Instructions are required.")
+  return errors
+}
+
+export const validateRawSkillContent = (
+  content: string,
+  canonicalName?: string
+): string[] => {
+  const normalized = content.replace(/\r\n/g, "\n")
+  if (!normalized.trim()) return ["Skill content is required."]
+
+  const lines = normalized.split("\n")
+  if (lines[0].trim() !== "---") return []
+
+  const closingIndex = lines.findIndex(
+    (line, index) => index > 0 && line.trim() === "---"
+  )
+  if (closingIndex < 0) {
+    return ["Frontmatter starts with --- but has no closing --- delimiter."]
+  }
+  if (!lines.slice(closingIndex + 1).join("\n").trim()) {
+    return ["Skill instructions are required after frontmatter."]
+  }
+  let parsedFrontmatter: unknown
+  try {
+    parsedFrontmatter = parseYaml(
+      lines.slice(1, closingIndex).join("\n"),
+      { schema: PY_YAML_COMPATIBLE_SCHEMA }
+    )
+  } catch {
+    return ["Frontmatter must be valid YAML."]
+  }
+  if (canonicalName) {
+    const frontmatter = parsedFrontmatter
+      && typeof parsedFrontmatter === "object"
+      && !Array.isArray(parsedFrontmatter)
+      ? parsedFrontmatter as Record<string, unknown>
+      : null
+    const parsedName = frontmatter?.name
+    if (parsedName !== undefined && typeof parsedName !== "string") {
+      return ["Frontmatter name must be a string."]
+    }
+    if (
+      typeof parsedName === "string"
+      && parsedName.trim().toLowerCase() !== canonicalName.trim().toLowerCase()
+    ) {
+      return [
+        `Frontmatter name "${parsedName}" must match canonical name "${canonicalName}".`
+      ]
+    }
+  }
+  return []
+}
+
 export const buildSkillTemplateContent = (
   templateId: SkillTemplateId,
   name: string
 ): string => {
-  const template = getSkillTemplateOption(templateId)
-  const skillName = normalizeSkillTemplateName(name, template.defaultName)
-  const frontmatter = [
-    `name: ${quoteYamlString(skillName)}`,
-    `description: ${quoteYamlString(template.description)}`,
-    `argument-hint: ${quoteYamlString(template.argumentHint)}`,
-    "context: inline"
-  ].join("\n")
-
-  return `---\n${frontmatter}\n---\n\n${template.body}`
+  return serializeGuidedSkillContent(buildGuidedDraftFromTemplate(templateId, name))
 }
 
 const validateSupportingFilename = (filename: string): void => {

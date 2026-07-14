@@ -36,6 +36,7 @@ from loguru import logger
 
 from tldw_Server_API.app.core.Skills.exceptions import SkillParseError
 
+
 @dataclass
 class SkillFrontmatter:
     """Parsed frontmatter from a SKILL.md file."""
@@ -232,6 +233,31 @@ class SkillParser:
                 result = result[:497] + "..."
             return result
         return None
+
+    def rewrite_frontmatter_name(self, content: str, name: str) -> str:
+        """Rewrite a declared frontmatter name while preserving all YAML fields."""
+        frontmatter_parts = _split_frontmatter(content)
+        if frontmatter_parts is None:
+            return content
+
+        frontmatter_yaml, markdown_content = frontmatter_parts
+        try:
+            parsed_yaml = yaml.safe_load(frontmatter_yaml) or {}
+        except yaml.YAMLError as e:
+            raise SkillParseError(f"Invalid YAML frontmatter: {e}", detail=str(e)) from e
+        if not isinstance(parsed_yaml, dict):
+            raise SkillParseError("YAML frontmatter must be a mapping")
+        if parsed_yaml.get("name") == name:
+            return content
+
+        parsed_yaml["name"] = name
+        rewritten_yaml = yaml.safe_dump(
+            parsed_yaml,
+            default_flow_style=False,
+            allow_unicode=True,
+            sort_keys=False,
+        ).rstrip("\n")
+        return f"---\n{rewritten_yaml}\n---\n{markdown_content}"
 
     def serialize_skill(
         self,
