@@ -562,7 +562,8 @@ class AgenticToolbox:
                             f"{self.embedding_provider}|{self.embedding_model_id}|"
                             f"{endpoint_identity}|prov"
                         )
-                        cached = _INTRA_DOC_VEC_CACHE.get(key)
+                        cache_allowed = self.embedding_call_kwargs.get("credentials_resolved") is not True
+                        cached = _INTRA_DOC_VEC_CACHE.get(key) if cache_allowed else None
                         if cached is not None:
                             self._query_vecs[doc.id] = cached[0]
                             self._para_vecs[doc.id] = cached[1:]
@@ -591,7 +592,8 @@ class AgenticToolbox:
                                     vecs_np[idx] = vector / norm
                             self._query_vecs[doc.id] = vecs_np[0]
                             self._para_vecs[doc.id] = vecs_np[1:]
-                            _INTRA_DOC_VEC_CACHE[key] = vecs_np
+                            if cache_allowed:
+                                _INTRA_DOC_VEC_CACHE[key] = vecs_np
                             self.provider_embedding_used = True
                             continue
                     except (ImportError, AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError, TimeoutError) as exc:

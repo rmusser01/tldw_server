@@ -1,3 +1,5 @@
+import asyncio
+import threading
 from types import SimpleNamespace
 from typing import Any
 
@@ -19,11 +21,16 @@ pytestmark = pytest.mark.unit
 
 
 class _CredentialRuntime:
-    def __init__(self, provider: str, base_url: str = "https://agentic-embeddings.example/v1"):
+    def __init__(
+        self,
+        provider: str,
+        base_url: str = "https://agentic-embeddings.example/v1",
+        api_key: str = "runtime-agentic-key",
+    ):
         section = "openai_api" if provider == "openai" else "huggingface_api"
         self.handle = SimpleNamespace(
             provider=provider,
-            api_key="runtime-agentic-key",
+            api_key=api_key,
             app_config={section: {"base_url": base_url}},
             credentials_resolved=True,
         )
@@ -36,6 +43,64 @@ class _CredentialRuntime:
 
     async def mark_used(self, handle: Any) -> None:
         self.marked.append(handle)
+
+
+def _configure_agentic_provider_embedding_test(
+    monkeypatch: pytest.MonkeyPatch,
+    create_embeddings_batch: Any,
+) -> tuple[Document, AgenticConfig]:
+    from tldw_Server_API.app.core import config as core_config
+    from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create
+
+    embedding_settings = {
+        "default_model_id": "openai:text-embedding-3-small",
+        "models": {
+            "openai:text-embedding-3-small": SimpleNamespace(provider="openai"),
+        },
+    }
+    monkeypatch.setattr(
+        core_config,
+        "load_comprehensive_config",
+        lambda: {"EMBEDDING_CONFIG": embedding_settings},
+    )
+    monkeypatch.setattr(Embeddings_Create, "create_embeddings_batch", create_embeddings_batch)
+    agentic_execution._INTRA_DOC_VEC_CACHE.clear()
+    return (
+        Document(
+            id="credential-isolation-doc",
+            content="alpha paragraph\n\nbeta paragraph",
+            source=DataSource.MEDIA_DB,
+            metadata={},
+        ),
+        AgenticConfig(
+            top_k_docs=1,
+            max_tool_calls=1,
+            enable_metrics=False,
+            agentic_use_provider_embeddings_within=True,
+            agentic_provider_embedding_model_id="openai:text-embedding-3-small",
+        ),
+    )
+
+
+def _capture_agentic_query_vectors(
+    monkeypatch: pytest.MonkeyPatch,
+    document_id: str,
+) -> dict[str, list[list[float]]]:
+    original_registry_factory = agentic_execution.make_default_registry
+    captured: dict[str, list[list[float]]] = {}
+
+    def capture(toolbox: AgenticToolbox):
+        api_key = str(toolbox.embedding_call_kwargs.get("api_key_override") or "legacy")
+        captured.setdefault(api_key, []).append(toolbox._query_vecs[document_id].tolist())
+        return original_registry_factory(toolbox)
+
+    monkeypatch.setattr(agentic_execution, "make_default_registry", capture)
+    return captured
+
+
+def _credential_specific_vectors(api_key: str | None) -> list[list[float]]:
+    query_vector = [0.0, 1.0] if api_key == "runtime-b-key" else [1.0, 0.0]
+    return [query_vector, [1.0, 0.0], [0.0, 1.0]]
 
 
 def test_build_agentic_derived_evidence_tracks_actual_lineage_only():
@@ -204,6 +269,157 @@ async def test_tool_loop_uses_runtime_credentials_for_hosted_provider_embeddings
         "base_url_override": "https://agentic-embeddings.example/v1",
         "credentials_resolved": True,
     }
+
+
+@pytest.mark.asyncio
+async def test_explicit_agentic_embeddings_isolate_identical_requests_by_credential_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dispatches: list[str] = []
+
+    def fake_create(texts, _app_config, _model_id_override=None, **kwargs):
+        assert texts == ["same query", "alpha paragraph", "beta paragraph"]
+        api_key = kwargs["api_key_override"]
+        dispatches.append(api_key)
+        return _credential_specific_vectors(api_key)
+
+    doc, cfg = _configure_agentic_provider_embedding_test(monkeypatch, fake_create)
+    captured_vectors = _capture_agentic_query_vectors(monkeypatch, doc.id)
+    runtime_a = _CredentialRuntime("openai", api_key="runtime-a-key")
+    runtime_b = _CredentialRuntime("openai", api_key="runtime-b-key")
+
+    await agentic_execution.tool_loop([doc], "same query", cfg, credential_runtime=runtime_a)
+    await agentic_execution.tool_loop([doc], "same query", cfg, credential_runtime=runtime_b)
+
+    assert dispatches == ["runtime-a-key", "runtime-b-key"]
+    assert runtime_a.marked == [runtime_a.handle]
+    assert runtime_b.marked == [runtime_b.handle]
+    assert captured_vectors == {
+        "runtime-a-key": [[1.0, 0.0]],
+        "runtime-b-key": [[0.0, 1.0]],
+    }
+    assert agentic_execution._INTRA_DOC_VEC_CACHE == {}
+
+
+@pytest.mark.asyncio
+async def test_repeated_explicit_agentic_embedding_calls_always_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dispatches: list[str] = []
+
+    def fake_create(_texts, _app_config, _model_id_override=None, **kwargs):
+        api_key = kwargs["api_key_override"]
+        dispatches.append(api_key)
+        return _credential_specific_vectors(api_key)
+
+    doc, cfg = _configure_agentic_provider_embedding_test(monkeypatch, fake_create)
+    runtime = _CredentialRuntime("openai", api_key="runtime-a-key")
+
+    await agentic_execution.tool_loop([doc], "same query", cfg, credential_runtime=runtime)
+    await agentic_execution.tool_loop([doc], "same query", cfg, credential_runtime=runtime)
+
+    assert dispatches == ["runtime-a-key", "runtime-a-key"]
+    assert runtime.marked == [runtime.handle, runtime.handle]
+    assert agentic_execution._INTRA_DOC_VEC_CACHE == {}
+
+
+@pytest.mark.asyncio
+async def test_legacy_agentic_embedding_calls_still_use_vector_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dispatches = 0
+
+    def fake_create(_texts, _app_config, _model_id_override=None, **kwargs):
+        nonlocal dispatches
+        assert kwargs == {}
+        dispatches += 1
+        return _credential_specific_vectors(None)
+
+    doc, cfg = _configure_agentic_provider_embedding_test(monkeypatch, fake_create)
+
+    await agentic_execution.tool_loop([doc], "same query", cfg)
+    await agentic_execution.tool_loop([doc], "same query", cfg)
+
+    assert dispatches == 1
+    assert len(agentic_execution._INTRA_DOC_VEC_CACHE) == 1
+
+
+@pytest.mark.concurrent
+@pytest.mark.asyncio
+async def test_concurrent_explicit_agentic_embedding_calls_do_not_share_vectors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_mark_started = threading.Event()
+    release_first_mark = threading.Event()
+    dispatches: list[str] = []
+
+    class BlockingMarkRuntime(_CredentialRuntime):
+        async def mark_used(self, handle: Any) -> None:
+            await super().mark_used(handle)
+            first_mark_started.set()
+            if not release_first_mark.wait(timeout=5):
+                raise AssertionError("timed out waiting to release the first runtime")
+
+    def fake_create(_texts, _app_config, _model_id_override=None, **kwargs):
+        api_key = kwargs["api_key_override"]
+        dispatches.append(api_key)
+        return _credential_specific_vectors(api_key)
+
+    doc, cfg = _configure_agentic_provider_embedding_test(monkeypatch, fake_create)
+    captured_vectors = _capture_agentic_query_vectors(monkeypatch, doc.id)
+    runtime_a = BlockingMarkRuntime("openai", api_key="runtime-a-key")
+    runtime_b = _CredentialRuntime("openai", api_key="runtime-b-key")
+
+    def run(runtime: _CredentialRuntime):
+        return asyncio.run(agentic_execution.tool_loop([doc], "same query", cfg, credential_runtime=runtime))
+
+    first_task = asyncio.create_task(asyncio.to_thread(run, runtime_a))
+    try:
+        assert await asyncio.to_thread(first_mark_started.wait, 5)
+        await asyncio.to_thread(run, runtime_b)
+    finally:
+        release_first_mark.set()
+        await first_task
+
+    assert dispatches == ["runtime-a-key", "runtime-b-key"]
+    assert runtime_a.marked == [runtime_a.handle]
+    assert runtime_b.marked == [runtime_b.handle]
+    assert captured_vectors == {
+        "runtime-a-key": [[1.0, 0.0]],
+        "runtime-b-key": [[0.0, 1.0]],
+    }
+    assert agentic_execution._INTRA_DOC_VEC_CACHE == {}
+
+
+@pytest.mark.asyncio
+async def test_failed_explicit_agentic_runtime_cannot_poison_another_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dispatches: list[str] = []
+
+    class FailingMarkRuntime(_CredentialRuntime):
+        async def mark_used(self, handle: Any) -> None:
+            await super().mark_used(handle)
+            raise RuntimeError("usage mark failed")
+
+    def fake_create(_texts, _app_config, _model_id_override=None, **kwargs):
+        api_key = kwargs["api_key_override"]
+        dispatches.append(api_key)
+        return _credential_specific_vectors(api_key)
+
+    doc, cfg = _configure_agentic_provider_embedding_test(monkeypatch, fake_create)
+    captured_vectors = _capture_agentic_query_vectors(monkeypatch, doc.id)
+    runtime_a = FailingMarkRuntime("openai", api_key="runtime-a-key")
+    runtime_b = _CredentialRuntime("openai", api_key="runtime-b-key")
+
+    with pytest.raises(RuntimeError, match="usage mark failed"):
+        await agentic_execution.tool_loop([doc], "same query", cfg, credential_runtime=runtime_a)
+    await agentic_execution.tool_loop([doc], "same query", cfg, credential_runtime=runtime_b)
+
+    assert dispatches == ["runtime-a-key", "runtime-b-key"]
+    assert runtime_b.marked == [runtime_b.handle]
+    assert captured_vectors["runtime-b-key"] == [[0.0, 1.0]]
+    assert agentic_execution._INTRA_DOC_VEC_CACHE == {}
 
 
 @pytest.mark.asyncio
