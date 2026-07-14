@@ -4,6 +4,7 @@ import type { WizardQueueItem } from "./types";
 import { normalizeUrlForDedupe } from "@/entries/shared/ingest-payloads";
 import { tldwClient } from "@/services/tldw/TldwApiClient";
 import {
+  loadCompletePlaylistPreflightItems,
   toPlaylistIngestPublicError,
   type PlaylistIngestErrorInfo,
   type PlaylistPreflightItem,
@@ -37,6 +38,14 @@ export type PlaylistInspectionCandidate = {
   items: PlaylistPreflightItem[];
   nextCursor: string | null;
   error: PlaylistIngestErrorInfo | null;
+  selectedOccurrenceIds: ReadonlySet<string>;
+  sessionDuplicateOccurrenceIds: ReadonlySet<string>;
+  selectionWarning: "changed" | "ambiguous" | null;
+};
+
+export type PlaylistSelectionUpdate = {
+  occurrenceId: string;
+  selected: boolean;
 };
 
 export type PlaylistSessionDuplicateReference = {
@@ -73,6 +82,122 @@ const queueAliases = (item: WizardQueueItem): string[] => {
   }
   if (item.url) aliases.push(normalizeUrlForDedupe(item.url));
   return [...new Set(aliases.filter(Boolean))];
+};
+
+const isEligiblePlaylistItem = (item: PlaylistPreflightItem): boolean =>
+  Boolean(item.sourceUrl) &&
+  (item.availability === null || item.availability === "available");
+
+type SelectionOverrides = Map<string, Map<string, boolean>>;
+
+const applyPlaylistSelectionDefaults = (
+  queueItems: WizardQueueItem[],
+  candidates: Map<string, PlaylistInspectionCandidate>,
+  overrides: SelectionOverrides,
+): Map<string, PlaylistInspectionCandidate> => {
+  const seenAliases = new Set<string>();
+  for (const queueItem of queueItems) {
+    for (const alias of queueAliases(queueItem)) seenAliases.add(alias);
+  }
+
+  const next = new Map(candidates);
+  for (const [key, candidate] of next) {
+    const selected = new Set<string>();
+    const sessionDuplicates = new Set<string>();
+    const explicit = overrides.get(key);
+    const orderedItems = [...candidate.items].sort(
+      (left, right) => left.ordinal - right.ordinal,
+    );
+    for (const item of orderedItems) {
+      const aliases = candidateAliases(item);
+      const eligible = isEligiblePlaylistItem(item);
+      const isLaterSessionOccurrence = aliases.some((alias) =>
+        seenAliases.has(alias),
+      );
+      if (isLaterSessionOccurrence) {
+        sessionDuplicates.add(item.occurrenceId);
+      }
+      const explicitSelection = explicit?.get(item.occurrenceId);
+      const isSelected =
+        eligible &&
+        (explicitSelection ??
+          (item.selectedByDefault === true && !isLaterSessionOccurrence));
+      if (isSelected) selected.add(item.occurrenceId);
+      if (eligible) {
+        for (const alias of aliases) seenAliases.add(alias);
+      }
+    }
+    next.set(key, {
+      ...candidate,
+      selectedOccurrenceIds: selected,
+      sessionDuplicateOccurrenceIds: sessionDuplicates,
+    });
+  }
+  return next;
+};
+
+const playlistReconciliationKeys = (
+  items: PlaylistPreflightItem[],
+): Array<string | null> => {
+  const repeatIndexes = new Map<string, number>();
+  return items.map((item) => {
+    if (!item.normalizedSourceId) return null;
+    const fallbackIndex = (repeatIndexes.get(item.normalizedSourceId) ?? 0) + 1;
+    repeatIndexes.set(item.normalizedSourceId, fallbackIndex);
+    const occurrenceIndex =
+      item.occurrenceIndexForSource !== null &&
+      Number.isSafeInteger(item.occurrenceIndexForSource) &&
+      item.occurrenceIndexForSource > 0
+        ? item.occurrenceIndexForSource
+        : fallbackIndex;
+    return `${item.normalizedSourceId}\u0000${occurrenceIndex}`;
+  });
+};
+
+const reconcilePlaylistSelection = (
+  previousItems: PlaylistPreflightItem[],
+  previousSelected: ReadonlySet<string>,
+  nextItems: PlaylistPreflightItem[],
+): {
+  overrides: Map<string, boolean>;
+  warning: PlaylistInspectionCandidate["selectionWarning"];
+} => {
+  const previousKeys = playlistReconciliationKeys(previousItems);
+  const nextKeys = playlistReconciliationKeys(nextItems);
+  const previousByKey = new Map<string, number[]>();
+  const nextByKey = new Map<string, number[]>();
+  const add = (target: Map<string, number[]>, key: string, index: number) =>
+    target.set(key, [...(target.get(key) ?? []), index]);
+  previousKeys.forEach((key, index) => {
+    if (key !== null) add(previousByKey, key, index);
+  });
+  nextKeys.forEach((key, index) => {
+    if (key !== null) add(nextByKey, key, index);
+  });
+
+  const overrides = new Map<string, boolean>();
+  let ambiguous = previousKeys.includes(null) || nextKeys.includes(null);
+  for (const [key, previousIndexes] of previousByKey) {
+    const nextIndexes = nextByKey.get(key) ?? [];
+    if (previousIndexes.length !== 1 || nextIndexes.length !== 1) {
+      ambiguous = true;
+      continue;
+    }
+    const previousItem = previousItems[previousIndexes[0]];
+    const nextItem = nextItems[nextIndexes[0]];
+    overrides.set(
+      nextItem.occurrenceId,
+      previousSelected.has(previousItem.occurrenceId),
+    );
+  }
+
+  const changed =
+    previousKeys.length !== nextKeys.length ||
+    previousKeys.some((key, index) => key !== nextKeys[index]);
+  return {
+    overrides,
+    warning: ambiguous ? "ambiguous" : changed ? "changed" : null,
+  };
 };
 
 export const buildPlaylistSessionDuplicateIndex = (
@@ -122,8 +247,20 @@ export const usePlaylistInspection = ({
     Map<string, PlaylistInspectionCandidate>
   >(new Map());
   const candidatesRef = useRef(candidateMap);
+  const queueItemsRef = useRef(queueItems);
+  queueItemsRef.current = queueItems;
   const controllersRef = useRef(new Map<string, AbortController>());
   const cleanupRef = useRef(new Map<string, Promise<void>>());
+  const selectionOverridesRef = useRef<SelectionOverrides>(new Map());
+  const refreshBaselinesRef = useRef(
+    new Map<
+      string,
+      {
+        items: PlaylistPreflightItem[];
+        selectedOccurrenceIds: ReadonlySet<string>;
+      }
+    >(),
+  );
   const timersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const pendingRef = useRef<string[]>([]);
   const activeRef = useRef(new Set<string>());
@@ -153,6 +290,35 @@ export const usePlaylistInspection = ({
       publish(next);
     },
     [publish],
+  );
+
+  const publishSelectionDefaults = useCallback(
+    (next: Map<string, PlaylistInspectionCandidate>) => {
+      publish(
+        applyPlaylistSelectionDefaults(
+          queueItemsRef.current,
+          next,
+          selectionOverridesRef.current,
+        ),
+      );
+    },
+    [publish],
+  );
+
+  const updateCandidateSelectionDefaults = useCallback(
+    (
+      key: string,
+      update: (
+        current: PlaylistInspectionCandidate,
+      ) => PlaylistInspectionCandidate,
+    ) => {
+      const current = candidatesRef.current.get(key);
+      if (!current) return;
+      const next = new Map(candidatesRef.current);
+      next.set(key, update(current));
+      publishSelectionDefaults(next);
+    },
+    [publishSelectionDefaults],
   );
 
   const clearTimer = useCallback((key: string) => {
@@ -248,20 +414,62 @@ export const usePlaylistInspection = ({
           }
 
           if (status.status === "ready") {
-            const firstPage = await tldwClient.listPlaylistPreflightItems(
-              accepted.preflightId,
-              { limit: FIRST_ITEMS_PAGE_LIMIT },
-              { signal: controller.signal },
-            );
-            if (!canCommit()) return;
             updateCandidate(key, (current) => ({
+              ...current,
+              status: "inspecting",
+              summary: status,
+              error: status.error,
+            }));
+            const items = await loadCompletePlaylistPreflightItems({
+              preflightId: accepted.preflightId,
+              summary: status,
+              signal: controller.signal,
+              pageSize: FIRST_ITEMS_PAGE_LIMIT,
+              loadPage: (preflightId, params, options) =>
+                tldwClient.listPlaylistPreflightItems(
+                  preflightId,
+                  params,
+                  options,
+                ),
+            });
+            if (!canCommit()) return;
+            const baseline = refreshBaselinesRef.current.get(key);
+            if (baseline) {
+              const reconciliation = reconcilePlaylistSelection(
+                baseline.items,
+                baseline.selectedOccurrenceIds,
+                items,
+              );
+              selectionOverridesRef.current.set(key, reconciliation.overrides);
+              refreshBaselinesRef.current.delete(key);
+              const next = new Map(candidatesRef.current);
+              const current = next.get(key);
+              if (!current) return;
+              next.set(key, {
+                ...current,
+                status: "ready",
+                summary: status,
+                items,
+                nextCursor: null,
+                error: status.error,
+                selectionWarning: reconciliation.warning,
+              });
+              publishSelectionDefaults(next);
+              return;
+            }
+            const next = new Map(candidatesRef.current);
+            const current = next.get(key);
+            if (!current) return;
+            next.set(key, {
               ...current,
               status: "ready",
               summary: status,
-              items: firstPage.items,
-              nextCursor: firstPage.nextCursor,
+              items,
+              nextCursor: null,
               error: status.error,
-            }));
+              selectionWarning: null,
+            });
+            publishSelectionDefaults(next);
             return;
           }
 
@@ -283,9 +491,13 @@ export const usePlaylistInspection = ({
           return;
         }
         const publicError = toPlaylistIngestPublicError(error);
-        updateCandidate(key, (current) => ({
+        updateCandidateSelectionDefaults(key, (current) => ({
           ...current,
           status: "failed",
+          items: [],
+          nextCursor: null,
+          selectedOccurrenceIds: new Set(),
+          sessionDuplicateOccurrenceIds: new Set(),
           error: {
             code: publicError.code,
             message: publicError.message,
@@ -296,7 +508,14 @@ export const usePlaylistInspection = ({
         clearTimer(key);
       }
     },
-    [clearTimer, scheduleCleanup, updateCandidate, waitForNextPoll],
+    [
+      clearTimer,
+      publishSelectionDefaults,
+      scheduleCleanup,
+      updateCandidate,
+      updateCandidateSelectionDefaults,
+      waitForNextPoll,
+    ],
   );
 
   const pump = useCallback(() => {
@@ -351,6 +570,9 @@ export const usePlaylistInspection = ({
           items: [],
           nextCursor: null,
           error: null,
+          selectedOccurrenceIds: new Set(),
+          sessionDuplicateOccurrenceIds: new Set(),
+          selectionWarning: null,
         });
         if (enabled !== false) pendingRef.current.push(key);
         changed = true;
@@ -368,17 +590,24 @@ export const usePlaylistInspection = ({
       clearTimer(key);
       controllersRef.current.get(key)?.abort();
       const preflightId = candidatesRef.current.get(key)?.preflightId;
-      updateCandidate(key, (current) => ({
+      refreshBaselinesRef.current.delete(key);
+      selectionOverridesRef.current.delete(key);
+      updateCandidateSelectionDefaults(key, (current) => ({
         ...current,
         status: "cancelled",
         preflightId: null,
+        items: [],
+        nextCursor: null,
         error: null,
+        selectedOccurrenceIds: new Set(),
+        sessionDuplicateOccurrenceIds: new Set(),
+        selectionWarning: null,
       }));
       if (preflightId) {
         void scheduleCleanup(key, preflightId);
       }
     },
-    [clearTimer, scheduleCleanup, updateCandidate],
+    [clearTimer, scheduleCleanup, updateCandidateSelectionDefaults],
   );
 
   const removeCandidate = useCallback(
@@ -387,14 +616,16 @@ export const usePlaylistInspection = ({
       clearTimer(key);
       controllersRef.current.get(key)?.abort();
       const preflightId = candidatesRef.current.get(key)?.preflightId;
+      refreshBaselinesRef.current.delete(key);
+      selectionOverridesRef.current.delete(key);
       const next = new Map(candidatesRef.current);
       next.delete(key);
-      publish(next);
+      publishSelectionDefaults(next);
       if (preflightId) {
         void scheduleCleanup(key, preflightId);
       }
     },
-    [clearTimer, publish, scheduleCleanup],
+    [clearTimer, publishSelectionDefaults, scheduleCleanup],
   );
 
   const retryCandidate = useCallback(
@@ -406,7 +637,10 @@ export const usePlaylistInspection = ({
       if (preflightId) {
         void scheduleCleanup(key, preflightId);
       }
-      updateCandidate(key, (current) => ({
+      if (!refreshBaselinesRef.current.has(key)) {
+        selectionOverridesRef.current.delete(key);
+      }
+      updateCandidateSelectionDefaults(key, (current) => ({
         ...current,
         status: enabled === false ? "unavailable" : "queued",
         preflightId: null,
@@ -414,14 +648,117 @@ export const usePlaylistInspection = ({
         items: [],
         nextCursor: null,
         error: null,
+        selectedOccurrenceIds: new Set(),
+        sessionDuplicateOccurrenceIds: new Set(),
+        selectionWarning: null,
       }));
       if (enabled !== false) {
         pendingRef.current.push(key);
         queueMicrotask(() => pumpRef.current());
       }
     },
-    [clearTimer, enabled, scheduleCleanup, updateCandidate],
+    [clearTimer, enabled, scheduleCleanup, updateCandidateSelectionDefaults],
   );
+
+  const refreshCandidate = useCallback(
+    (key: string) => {
+      const candidate = candidatesRef.current.get(key);
+      if (!candidate) return;
+      pendingRef.current = pendingRef.current.filter((value) => value !== key);
+      clearTimer(key);
+      controllersRef.current.get(key)?.abort();
+      if (candidate.preflightId) {
+        void scheduleCleanup(key, candidate.preflightId);
+      }
+      if (candidate.items.length > 0) {
+        refreshBaselinesRef.current.set(key, {
+          items: candidate.items,
+          selectedOccurrenceIds: candidate.selectedOccurrenceIds,
+        });
+      } else {
+        refreshBaselinesRef.current.delete(key);
+      }
+      selectionOverridesRef.current.delete(key);
+      updateCandidateSelectionDefaults(key, (current) => ({
+        ...current,
+        status: enabled === false ? "unavailable" : "queued",
+        preflightId: null,
+        summary: null,
+        items: [],
+        nextCursor: null,
+        error: null,
+        selectedOccurrenceIds: new Set(),
+        sessionDuplicateOccurrenceIds: new Set(),
+        selectionWarning: null,
+      }));
+      if (enabled !== false) {
+        pendingRef.current.push(key);
+        queueMicrotask(() => pumpRef.current());
+      }
+    },
+    [clearTimer, enabled, scheduleCleanup, updateCandidateSelectionDefaults],
+  );
+
+  const setCandidateSelection = useCallback(
+    (key: string, occurrenceId: string, selected: boolean) => {
+      const candidate = candidatesRef.current.get(key);
+      const item = candidate?.items.find(
+        (entry) => entry.occurrenceId === occurrenceId,
+      );
+      if (!candidate || !item || !isEligiblePlaylistItem(item)) return;
+      const explicit = new Map(selectionOverridesRef.current.get(key) ?? []);
+      explicit.set(occurrenceId, selected);
+      selectionOverridesRef.current.set(key, explicit);
+      updateCandidate(key, (current) => {
+        const selectedOccurrenceIds = new Set(current.selectedOccurrenceIds);
+        if (selected) selectedOccurrenceIds.add(occurrenceId);
+        else selectedOccurrenceIds.delete(occurrenceId);
+        return { ...current, selectedOccurrenceIds };
+      });
+    },
+    [updateCandidate],
+  );
+
+  const setCandidateSelections = useCallback(
+    (key: string, updates: readonly PlaylistSelectionUpdate[]) => {
+      const candidate = candidatesRef.current.get(key);
+      if (!candidate || updates.length === 0) return;
+      const requested = new Map(
+        updates.map(({ occurrenceId, selected }) => [occurrenceId, selected]),
+      );
+      const eligibleUpdates = candidate.items.flatMap((item) =>
+        requested.has(item.occurrenceId) && isEligiblePlaylistItem(item)
+          ? [
+              {
+                occurrenceId: item.occurrenceId,
+                selected: requested.get(item.occurrenceId) as boolean,
+              },
+            ]
+          : [],
+      );
+      if (eligibleUpdates.length === 0) return;
+
+      const explicit = new Map(selectionOverridesRef.current.get(key) ?? []);
+      for (const { occurrenceId, selected } of eligibleUpdates) {
+        explicit.set(occurrenceId, selected);
+      }
+      selectionOverridesRef.current.set(key, explicit);
+      updateCandidate(key, (current) => {
+        const selectedOccurrenceIds = new Set(current.selectedOccurrenceIds);
+        for (const { occurrenceId, selected } of eligibleUpdates) {
+          if (selected) selectedOccurrenceIds.add(occurrenceId);
+          else selectedOccurrenceIds.delete(occurrenceId);
+        }
+        return { ...current, selectedOccurrenceIds };
+      });
+    },
+    [updateCandidate],
+  );
+
+  useEffect(() => {
+    if (candidatesRef.current.size === 0) return;
+    publishSelectionDefaults(candidatesRef.current);
+  }, [publishSelectionDefaults, queueItems]);
 
   useEffect(() => {
     if (!isQuickIngestPlaylistPreflightDetail(seed)) {
@@ -519,6 +856,9 @@ export const usePlaylistInspection = ({
     cancelCandidate,
     removeCandidate,
     retryCandidate,
+    refreshCandidate,
+    setCandidateSelection,
+    setCandidateSelections,
     hasUnresolvedCandidates: candidates.length > 0,
     hasTruncatedCandidates: candidates.some(
       (candidate) => candidate.nextCursor !== null,

@@ -6,6 +6,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -87,6 +88,27 @@ vi.mock("antd", () => ({
   },
 }));
 
+vi.mock("@tanstack/react-virtual", () => ({
+  useVirtualizer: ({
+    count,
+    getItemKey,
+  }: {
+    count: number;
+    getItemKey?: (index: number) => React.Key;
+  }) => ({
+    getTotalSize: () => count * 76,
+    getVirtualItems: () =>
+      Array.from({ length: count }, (_, index) => ({
+        index,
+        start: index * 76,
+        size: 76,
+        key: getItemKey?.(index) ?? index,
+      })),
+    measureElement: vi.fn(),
+    scrollToIndex: vi.fn(),
+  }),
+}));
+
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: apiMocks,
 }));
@@ -147,12 +169,12 @@ const summary = (
     status === "ready"
       ? {
           playlistTitle: `Playlist ${preflightId}`,
-          totalCount: 3,
-          loadedCount: 3,
-          ingestibleCount: 3,
+          totalCount: 0,
+          loadedCount: 0,
+          ingestibleCount: 0,
           unavailableCount: 0,
           duplicateCount: 0,
-          selectedCount: 3,
+          selectedCount: 0,
           warnings: [],
         }
       : null,
@@ -179,6 +201,41 @@ const item = (
   selectedByDefault: true,
   displayMetadata: { title: occurrenceId },
 });
+
+const itemWith = (
+  occurrenceId: string,
+  ordinal: number,
+  normalizedSourceId: string,
+  overrides: Partial<PlaylistPreflightItem> = {},
+): PlaylistPreflightItem => ({
+  ...item(
+    occurrenceId,
+    `https://www.youtube.com/watch?v=${occurrenceId}`,
+    normalizedSourceId,
+  ),
+  ordinal,
+  occurrenceIndexForSource: 1,
+  displayMetadata: { title: occurrenceId },
+  ...overrides,
+});
+
+const readySummary = (
+  preflightId: string,
+  loadedCount: number,
+  totalCount: number | null = loadedCount,
+): PlaylistPreflightSummary => {
+  const result = summary(preflightId);
+  return {
+    ...result,
+    summary: {
+      ...result.summary!,
+      loadedCount,
+      totalCount,
+      ingestibleCount: loadedCount,
+      selectedCount: loadedCount,
+    },
+  };
+};
 
 const page = (
   preflightId: string,
@@ -824,10 +881,691 @@ describe("AddContentStep playlist inspection controller", () => {
     expect(currentState?.queueItems).toEqual([]);
   });
 
-  it("derives session duplicates from queued direct URLs and loaded items across candidates", async () => {
+  it("stays inspecting until every opaque-cursor page is loaded atomically", async () => {
+    const secondPage = deferred<PlaylistPreflightItemsPage>();
+    apiMocks.getPlaylistPreflight.mockResolvedValue(
+      readySummary("PL-alpha", 2),
+    );
+    apiMocks.listPlaylistPreflightItems
+      .mockResolvedValueOnce(
+        page(
+          "PL-alpha",
+          [itemWith("occ-first", 1, "youtube:video:first")],
+          "opaque:+/next==",
+        ),
+      )
+      .mockReturnValueOnce(secondPage.promise);
+    render(<Harness />);
+
+    await addLines(PLAYLIST_A);
+
+    await waitFor(() => {
+      expect(apiMocks.listPlaylistPreflightItems).toHaveBeenCalledTimes(2);
+    });
+    expect(screen.getByText("Inspecting playlist")).toBeInTheDocument();
+    expect(screen.queryByText("Inspection ready")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("checkbox", {
+        name: "Select playlist item 1: occ-first",
+      }),
+    ).not.toBeInTheDocument();
+    const firstCall = apiMocks.listPlaylistPreflightItems.mock.calls[0];
+    const secondCall = apiMocks.listPlaylistPreflightItems.mock.calls[1];
+    expect(firstCall?.[1]).toEqual({ limit: 100 });
+    expect(secondCall?.[1]).toEqual({ cursor: "opaque:+/next==", limit: 100 });
+    expect(secondCall?.[2].signal).toBe(firstCall?.[2].signal);
+
+    secondPage.resolve(
+      page("PL-alpha", [itemWith("occ-second", 2, "youtube:video:second")]),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Inspection ready")).toBeInTheDocument();
+    });
+    expect(
+      screen.getByRole("checkbox", {
+        name: "Select playlist item 1: occ-first",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("checkbox", {
+        name: "Select playlist item 2: occ-second",
+      }),
+    ).toBeInTheDocument();
+    expectProceedBlocked();
+  });
+
+  it("uses the latest queued URLs when atomic paging publishes defaults", async () => {
+    const directUrl = "https://youtu.be/mixed-shared?t=5";
+    const secondPage = deferred<PlaylistPreflightItemsPage>();
+    apiMocks.getPlaylistPreflight.mockResolvedValue(
+      readySummary("PL-alpha", 2),
+    );
+    apiMocks.listPlaylistPreflightItems
+      .mockResolvedValueOnce(
+        page(
+          "PL-alpha",
+          [itemWith("occ-first", 1, "youtube:video:first")],
+          "next-page",
+        ),
+      )
+      .mockReturnValueOnce(secondPage.promise);
+    render(<Harness />);
+
+    await addLines(PLAYLIST_A);
+    await waitFor(() => {
+      expect(apiMocks.listPlaylistPreflightItems).toHaveBeenCalledTimes(2);
+    });
+
+    await addLines(directUrl);
+    expect(currentState?.queueItems.map((row) => row.url)).toContain(directUrl);
+
+    secondPage.resolve(
+      page("PL-alpha", [
+        itemWith("occ-matching-queue", 2, "youtube:video:mixed-shared", {
+          sourceUrl: directUrl,
+        }),
+      ]),
+    );
+
+    const matching = await screen.findByRole("checkbox", {
+      name: "Select playlist item 2: occ-matching-queue",
+    });
+    expect(matching).not.toBeChecked();
+  });
+
+  it("recomputes ready defaults from queue changes while explicit selection wins", async () => {
+    const directUrl = "https://youtu.be/explicit-shared?t=5";
+    apiMocks.getPlaylistPreflight.mockResolvedValue(
+      readySummary("PL-alpha", 1),
+    );
+    apiMocks.listPlaylistPreflightItems.mockResolvedValue(
+      page("PL-alpha", [
+        itemWith("occ-explicit", 1, "youtube:video:explicit-shared", {
+          sourceUrl: directUrl,
+          selectedByDefault: false,
+        }),
+      ]),
+    );
+    render(<Harness />);
+
+    await addLines(PLAYLIST_A);
+    const checkbox = await screen.findByRole("checkbox", {
+      name: "Select playlist item 1: occ-explicit",
+    });
+    expect(checkbox).not.toBeChecked();
+    await userEvent.click(checkbox);
+    expect(checkbox).toBeChecked();
+
+    await addLines(directUrl);
+
+    await waitFor(() => expect(checkbox).toBeChecked());
+    expect(currentState?.queueItems.map((row) => row.url)).toContain(directUrl);
+  });
+
+  it("cancels the shared paging signal without exposing a partial snapshot", async () => {
+    let pagingSignal: AbortSignal | null = null;
+    apiMocks.getPlaylistPreflight.mockResolvedValue(
+      readySummary("PL-alpha", 2),
+    );
+    apiMocks.listPlaylistPreflightItems
+      .mockResolvedValueOnce(
+        page(
+          "PL-alpha",
+          [itemWith("occ-first", 1, "youtube:video:first")],
+          "next",
+        ),
+      )
+      .mockImplementationOnce(
+        async (
+          _preflightId: string,
+          _params: unknown,
+          options: { signal: AbortSignal },
+        ) => {
+          pagingSignal = options.signal;
+          return new Promise<PlaylistPreflightItemsPage>((_resolve, reject) => {
+            options.signal.addEventListener(
+              "abort",
+              () => reject(new DOMException("Aborted", "AbortError")),
+              { once: true },
+            );
+          });
+        },
+      );
+    render(<Harness />);
+
+    await addLines(PLAYLIST_A);
+    await waitFor(() => expect(pagingSignal).not.toBeNull());
+
+    await userEvent.click(
+      screen.getByRole("button", {
+        name: `Cancel playlist inspection for ${PLAYLIST_A}`,
+      }),
+    );
+
+    expect((pagingSignal as unknown as AbortSignal).aborted).toBe(true);
+    expect(
+      screen.getByText("Playlist inspection was cancelled."),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("checkbox", {
+        name: "Select playlist item 1: occ-first",
+      }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("surfaces incomplete paging safely and never publishes partial rows", async () => {
+    apiMocks.getPlaylistPreflight.mockResolvedValue(
+      readySummary("PL-alpha", 2),
+    );
+    apiMocks.listPlaylistPreflightItems
+      .mockResolvedValueOnce(
+        page(
+          "PL-alpha",
+          [itemWith("occ-first", 1, "youtube:video:first")],
+          "repeat",
+        ),
+      )
+      .mockResolvedValueOnce(
+        page(
+          "PL-alpha",
+          [itemWith("occ-second", 2, "youtube:video:second")],
+          "repeat",
+        ),
+      );
+    render(<Harness />);
+
+    await addLines(PLAYLIST_A);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Playlist inspection is incomplete. Try again."),
+      ).toBeInTheDocument();
+    });
+    expect(
+      screen.getByRole("button", { name: /Retry playlist inspection/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("checkbox", {
+        name: "Select playlist item 1: occ-first",
+      }),
+    ).not.toBeInTheDocument();
+    expect(apiMocks.listPlaylistPreflightItems).toHaveBeenCalledTimes(2);
+  });
+
+  it("drives row duplicate semantics in queue-first then candidate and ordinal order", async () => {
+    apiMocks.getPlaylistPreflight.mockImplementation(
+      async (preflightId: string) => readySummary(preflightId, 2),
+    );
     apiMocks.listPlaylistPreflightItems.mockImplementation(
       async (preflightId: string) => {
         if (preflightId === "PL-alpha") {
+          return page(preflightId, [
+            itemWith("alpha-queued-repeat", 1, "youtube:video:queued", {
+              sourceUrl: "https://youtu.be/queued-repeat?t=20",
+            }),
+            itemWith("alpha-session-first", 2, "youtube:video:session-repeat"),
+          ]);
+        }
+        return page(preflightId, [
+          itemWith("beta-queued-repeat", 1, "youtube:video:queued", {
+            sourceUrl: "https://youtu.be/queued-repeat?t=40",
+          }),
+          itemWith("beta-session-later", 2, "youtube:video:session-repeat"),
+        ]);
+      },
+    );
+    render(
+      <Harness
+        initialState={{
+          queueItems: [
+            {
+              id: "queued-repeat",
+              url: "https://youtu.be/queued-repeat?t=5",
+              detectedType: "video",
+              icon: "Film",
+              fileSize: 0,
+              validation: { valid: true },
+            },
+          ],
+        }}
+      />,
+    );
+
+    await addLines(`${PLAYLIST_A}\n${PLAYLIST_B}`);
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("checkbox", {
+          name: "Select playlist item 2: beta-session-later",
+        }),
+      ).toBeInTheDocument();
+    });
+    expect(
+      screen.getByRole("checkbox", {
+        name: "Select playlist item 1: alpha-queued-repeat",
+      }),
+    ).not.toBeChecked();
+    expect(
+      screen.getByRole("checkbox", {
+        name: "Select playlist item 1: beta-queued-repeat",
+      }),
+    ).not.toBeChecked();
+    expect(
+      screen.getByRole("checkbox", {
+        name: "Select playlist item 2: alpha-session-first",
+      }),
+    ).toBeChecked();
+    expect(
+      screen.getByRole("checkbox", {
+        name: "Select playlist item 2: beta-session-later",
+      }),
+    ).not.toBeChecked();
+
+    expect(screen.getByText("1 duplicates")).toBeInTheDocument();
+    expect(screen.getByText("2 duplicates")).toBeInTheDocument();
+
+    for (const button of screen.getAllByRole("button", {
+      name: "Select new",
+    })) {
+      await userEvent.click(button);
+    }
+    expect(
+      screen.getByRole("checkbox", {
+        name: "Select playlist item 1: alpha-queued-repeat",
+      }),
+    ).not.toBeChecked();
+    expect(
+      screen.getByRole("checkbox", {
+        name: "Select playlist item 2: alpha-session-first",
+      }),
+    ).toBeChecked();
+    expect(
+      screen.getByRole("checkbox", {
+        name: "Select playlist item 1: beta-queued-repeat",
+      }),
+    ).not.toBeChecked();
+    expect(
+      screen.getByRole("checkbox", {
+        name: "Select playlist item 2: beta-session-later",
+      }),
+    ).not.toBeChecked();
+
+    const filters = screen.getAllByRole("combobox", {
+      name: "Filter playlist items",
+    });
+    const lists = screen.getAllByRole("list", { name: "Playlist videos" });
+    fireEvent.change(filters[0], { target: { value: "duplicates" } });
+    fireEvent.change(filters[1], { target: { value: "duplicates" } });
+    expect(
+      within(lists[0])
+        .getAllByRole("listitem")
+        .map((row) => row.getAttribute("data-occurrence-id")),
+    ).toEqual(["alpha-queued-repeat"]);
+    expect(
+      within(lists[1])
+        .getAllByRole("listitem")
+        .map((row) => row.getAttribute("data-occurrence-id")),
+    ).toEqual(["beta-queued-repeat", "beta-session-later"]);
+  });
+
+  it("does not let an unavailable occurrence suppress the first eligible repeat", async () => {
+    apiMocks.getPlaylistPreflight.mockResolvedValue(
+      readySummary("PL-alpha", 2),
+    );
+    apiMocks.listPlaylistPreflightItems.mockResolvedValue(
+      page("PL-alpha", [
+        itemWith("unavailable-repeat", 1, "youtube:video:repeat", {
+          availability: "needs_auth",
+          selectedByDefault: false,
+        }),
+        itemWith("eligible-repeat", 2, "youtube:video:repeat"),
+      ]),
+    );
+    render(<Harness />);
+
+    await addLines(PLAYLIST_A);
+
+    expect(
+      await screen.findByRole("checkbox", {
+        name: "Select playlist item 1: unavailable-repeat",
+      }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("checkbox", {
+        name: "Select playlist item 2: eligible-repeat",
+      }),
+    ).toBeChecked();
+    expect(screen.queryByText("1 duplicates")).not.toBeInTheDocument();
+
+    fireEvent.change(
+      screen.getByRole("combobox", { name: "Filter playlist items" }),
+      { target: { value: "new" } },
+    );
+    expect(
+      within(screen.getByRole("list", { name: "Playlist videos" }))
+        .getAllByRole("listitem")
+        .map((row) => row.getAttribute("data-occurrence-id")),
+    ).toEqual(["eligible-repeat"]);
+  });
+
+  it("promotes a later repeated item when the earlier candidate is removed", async () => {
+    apiMocks.getPlaylistPreflight.mockImplementation(
+      async (preflightId: string) => readySummary(preflightId, 1),
+    );
+    apiMocks.listPlaylistPreflightItems.mockImplementation(
+      async (preflightId: string) =>
+        page(preflightId, [
+          itemWith(
+            preflightId === "PL-alpha" ? "alpha-shared" : "beta-shared",
+            1,
+            "youtube:video:shared",
+          ),
+        ]),
+    );
+    render(<Harness />);
+
+    await addLines(`${PLAYLIST_A}\n${PLAYLIST_B}`);
+
+    const beta = await screen.findByRole("checkbox", {
+      name: "Select playlist item 1: beta-shared",
+    });
+    expect(beta).not.toBeChecked();
+    expect(screen.getByText("1 duplicates")).toBeInTheDocument();
+
+    await userEvent.click(
+      screen.getByRole("button", {
+        name: `Remove playlist inspection for ${PLAYLIST_A}`,
+      }),
+    );
+
+    await waitFor(() => expect(beta).toBeChecked());
+    expect(screen.queryByText("1 duplicates")).not.toBeInTheDocument();
+  });
+
+  it("promotes a later repeated item when refreshing the earlier candidate fails", async () => {
+    apiMocks.createPlaylistPreflight
+      .mockResolvedValueOnce(accepted("PL-alpha"))
+      .mockResolvedValueOnce(accepted("PL-beta"))
+      .mockRejectedValueOnce(new Error("refresh failed"));
+    apiMocks.getPlaylistPreflight.mockImplementation(
+      async (preflightId: string) => readySummary(preflightId, 1),
+    );
+    apiMocks.listPlaylistPreflightItems.mockImplementation(
+      async (preflightId: string) =>
+        page(preflightId, [
+          itemWith(
+            preflightId === "PL-alpha" ? "alpha-shared" : "beta-shared",
+            1,
+            "youtube:video:shared",
+          ),
+        ]),
+    );
+    render(<Harness />);
+
+    await addLines(`${PLAYLIST_A}\n${PLAYLIST_B}`);
+    const beta = await screen.findByRole("checkbox", {
+      name: "Select playlist item 1: beta-shared",
+    });
+    expect(beta).not.toBeChecked();
+
+    await userEvent.click(
+      screen.getAllByRole("button", {
+        name: "Refresh playlist inspection",
+      })[0],
+    );
+
+    await screen.findByText("Playlist ingestion is unavailable. Try again.");
+    await waitFor(() => expect(beta).toBeChecked());
+    expect(screen.queryByText("1 duplicates")).not.toBeInTheDocument();
+  });
+
+  it("recomputes repeats across cancel and retry while preserving an explicit choice", async () => {
+    const refreshAttempt = deferred<PlaylistPreflightAccepted>();
+    apiMocks.createPlaylistPreflight
+      .mockResolvedValueOnce(accepted("PL-alpha"))
+      .mockResolvedValueOnce(accepted("PL-beta"))
+      .mockReturnValueOnce(refreshAttempt.promise)
+      .mockResolvedValueOnce(accepted("PL-alpha-return"));
+    apiMocks.getPlaylistPreflight.mockImplementation(
+      async (preflightId: string) => readySummary(preflightId, 1),
+    );
+    apiMocks.listPlaylistPreflightItems.mockImplementation(
+      async (preflightId: string) =>
+        page(preflightId, [
+          itemWith(
+            preflightId === "PL-beta" ? "beta-shared" : "alpha-shared",
+            1,
+            "youtube:video:shared",
+          ),
+        ]),
+    );
+    render(<Harness />);
+
+    await addLines(`${PLAYLIST_A}\n${PLAYLIST_B}`);
+    const beta = await screen.findByRole("checkbox", {
+      name: "Select playlist item 1: beta-shared",
+    });
+    expect(beta).not.toBeChecked();
+    await userEvent.click(beta);
+
+    await userEvent.click(
+      screen.getAllByRole("button", {
+        name: "Refresh playlist inspection",
+      })[0],
+    );
+    await waitFor(() => {
+      expect(apiMocks.createPlaylistPreflight).toHaveBeenCalledTimes(3);
+    });
+    expect(beta).toBeChecked();
+    expect(screen.queryByText("1 duplicates")).not.toBeInTheDocument();
+
+    await userEvent.click(
+      screen.getByRole("button", {
+        name: `Cancel playlist inspection for ${PLAYLIST_A}`,
+      }),
+    );
+    refreshAttempt.reject(
+      Object.assign(new Error("aborted"), { name: "AbortError" }),
+    );
+    await screen.findByText("Playlist inspection was cancelled.");
+
+    await userEvent.click(
+      screen.getByRole("button", {
+        name: `Retry playlist inspection for ${PLAYLIST_A}`,
+      }),
+    );
+
+    const alpha = await screen.findByRole("checkbox", {
+      name: "Select playlist item 1: alpha-shared",
+    });
+    expect(alpha).toBeChecked();
+    expect(beta).toBeChecked();
+    expect(screen.getByText("1 duplicates")).toBeInTheDocument();
+    const lists = screen.getAllByRole("list", { name: "Playlist videos" });
+    const filters = screen.getAllByRole("combobox", {
+      name: "Filter playlist items",
+    });
+    fireEvent.change(filters[1], { target: { value: "duplicates" } });
+    expect(
+      within(lists[1])
+        .getAllByRole("listitem")
+        .map((row) => row.getAttribute("data-occurrence-id")),
+    ).toEqual(["beta-shared"]);
+  });
+
+  it("refreshes through a new preflight and reconciles explicit repeated-source choices", async () => {
+    apiMocks.createPlaylistPreflight
+      .mockResolvedValueOnce(accepted("preflight-old"))
+      .mockResolvedValueOnce(accepted("preflight-new"));
+    apiMocks.getPlaylistPreflight.mockImplementation(
+      async (preflightId: string) => readySummary(preflightId, 2),
+    );
+    apiMocks.listPlaylistPreflightItems.mockImplementation(
+      async (preflightId: string) =>
+        preflightId === "preflight-old"
+          ? page(preflightId, [
+              itemWith("old-repeat-1", 1, "youtube:video:repeat", {
+                occurrenceIndexForSource: null,
+              }),
+              itemWith("old-repeat-2", 2, "youtube:video:repeat", {
+                occurrenceIndexForSource: null,
+              }),
+            ])
+          : page(preflightId, [
+              itemWith("new-repeat-1", 1, "youtube:video:repeat", {
+                occurrenceIndexForSource: null,
+              }),
+              itemWith("new-repeat-2", 2, "youtube:video:repeat", {
+                occurrenceIndexForSource: null,
+              }),
+            ]),
+    );
+    render(<Harness />);
+
+    await addLines(PLAYLIST_A);
+    const oldSecond = await screen.findByRole("checkbox", {
+      name: "Select playlist item 2: old-repeat-2",
+    });
+    expect(oldSecond).not.toBeChecked();
+    await userEvent.click(oldSecond);
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Refresh playlist inspection" }),
+    );
+
+    const newSecond = await screen.findByRole("checkbox", {
+      name: "Select playlist item 2: new-repeat-2",
+    });
+    expect(newSecond).toBeChecked();
+    expect(apiMocks.createPlaylistPreflight).toHaveBeenCalledTimes(2);
+    expect(apiMocks.cancelPlaylistPreflight).toHaveBeenCalledWith(
+      "preflight-old",
+    );
+    expect(
+      screen.queryByText(/added, removed, reordered/i),
+    ).not.toBeInTheDocument();
+    expect(currentState?.queueItems).toEqual([]);
+  });
+
+  it("preserves refresh reconciliation through a transient failure and retry", async () => {
+    apiMocks.createPlaylistPreflight
+      .mockResolvedValueOnce(accepted("preflight-old"))
+      .mockRejectedValueOnce(new Error("transient refresh failure"))
+      .mockResolvedValueOnce(accepted("preflight-new"));
+    apiMocks.getPlaylistPreflight.mockImplementation(
+      async (preflightId: string) => readySummary(preflightId, 2),
+    );
+    apiMocks.listPlaylistPreflightItems.mockImplementation(
+      async (preflightId: string) =>
+        preflightId === "preflight-old"
+          ? page(preflightId, [
+              itemWith("old-repeat-1", 1, "youtube:video:repeat", {
+                occurrenceIndexForSource: null,
+              }),
+              itemWith("old-repeat-2", 2, "youtube:video:repeat", {
+                occurrenceIndexForSource: null,
+              }),
+            ])
+          : page(preflightId, [
+              itemWith("new-repeat-1", 1, "youtube:video:repeat", {
+                occurrenceIndexForSource: null,
+              }),
+              itemWith("new-repeat-2", 2, "youtube:video:repeat", {
+                occurrenceIndexForSource: null,
+              }),
+            ]),
+    );
+    render(<Harness />);
+
+    await addLines(PLAYLIST_A);
+    const oldSecond = await screen.findByRole("checkbox", {
+      name: "Select playlist item 2: old-repeat-2",
+    });
+    await userEvent.click(oldSecond);
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Refresh playlist inspection" }),
+    );
+    await screen.findByText("Playlist ingestion is unavailable. Try again.");
+    await userEvent.click(
+      screen.getByRole("button", {
+        name: `Retry playlist inspection for ${PLAYLIST_A}`,
+      }),
+    );
+
+    const newSecond = await screen.findByRole("checkbox", {
+      name: "Select playlist item 2: new-repeat-2",
+    });
+    expect(newSecond).toBeChecked();
+    expect(
+      screen.queryByText(/added, removed, reordered/i),
+    ).not.toBeInTheDocument();
+    expect(apiMocks.createPlaylistPreflight).toHaveBeenCalledTimes(3);
+  });
+
+  it("warns after refresh when occurrences are reordered, added, or removed", async () => {
+    apiMocks.createPlaylistPreflight
+      .mockResolvedValueOnce(accepted("preflight-old"))
+      .mockResolvedValueOnce(accepted("preflight-new"));
+    apiMocks.getPlaylistPreflight.mockImplementation(
+      async (preflightId: string) =>
+        readySummary(preflightId, preflightId === "preflight-old" ? 2 : 3),
+    );
+    apiMocks.listPlaylistPreflightItems.mockImplementation(
+      async (preflightId: string) =>
+        preflightId === "preflight-old"
+          ? page(preflightId, [
+              itemWith("old-a", 1, "youtube:video:a"),
+              itemWith("old-b", 2, "youtube:video:b"),
+            ])
+          : page(preflightId, [
+              itemWith("new-b", 1, "youtube:video:b"),
+              itemWith("new-a", 2, "youtube:video:a"),
+              itemWith("new-c", 3, "youtube:video:c"),
+            ]),
+    );
+    render(<Harness />);
+
+    await addLines(PLAYLIST_A);
+    await screen.findByRole("checkbox", {
+      name: "Select playlist item 2: old-b",
+    });
+    await userEvent.click(
+      screen.getByRole("button", { name: "Refresh playlist inspection" }),
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/added, removed, reordered, or could not be matched/i),
+      ).toBeInTheDocument();
+    });
+    expect(
+      screen.getByRole("checkbox", { name: "Select playlist item 2: new-a" }),
+    ).toBeChecked();
+    expect(
+      screen.getByRole("checkbox", { name: "Select playlist item 1: new-b" }),
+    ).toBeChecked();
+    expect(currentState?.queueItems).toEqual([]);
+  });
+
+  it("derives session duplicates from queued direct URLs and loaded items across candidates", async () => {
+    apiMocks.getPlaylistPreflight.mockImplementation(
+      async (preflightId: string) =>
+        readySummary(preflightId, preflightId === "PL-alpha" ? 2 : 1),
+    );
+    apiMocks.listPlaylistPreflightItems.mockImplementation(
+      async (preflightId: string, params: { cursor?: string }) => {
+        if (preflightId === "PL-alpha") {
+          if (params.cursor) {
+            return page(preflightId, [
+              item(
+                "occ-a-only",
+                "https://www.youtube.com/watch?v=only-a",
+                "youtube:video:only-a",
+              ),
+            ]);
+          }
           return page(
             preflightId,
             [
@@ -835,11 +1573,6 @@ describe("AddContentStep playlist inspection controller", () => {
                 "occ-a-shared",
                 "https://www.youtube.com/watch?v=shared",
                 "youtube:video:shared",
-              ),
-              item(
-                "occ-a-only",
-                "https://www.youtube.com/watch?v=only-a",
-                "youtube:video:only-a",
               ),
             ],
             "more-items",
@@ -881,8 +1614,8 @@ describe("AddContentStep playlist inspection controller", () => {
       ).toBeInTheDocument();
     });
     expect(
-      screen.getByText("More playlist items are not loaded yet."),
-    ).toBeInTheDocument();
+      screen.queryByText("More playlist items are not loaded yet."),
+    ).not.toBeInTheDocument();
     expect(currentState?.queueItems).toHaveLength(1);
     expect(
       currentState?.queueItems.some((row) => detectPlaylistUrl(row.url)),

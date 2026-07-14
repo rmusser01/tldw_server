@@ -920,6 +920,100 @@ export class PlaylistIngestPublicError extends Error {
   }
 }
 
+type LoadCompletePlaylistPreflightItemsOptions = {
+  preflightId: string;
+  summary: PlaylistPreflightSummary;
+  signal: AbortSignal;
+  loadPage: (
+    preflightId: string,
+    params: PlaylistIngestPageParams,
+    options: PlaylistIngestRequestOptions,
+  ) => Promise<PlaylistPreflightItemsPage>;
+  pageSize?: number;
+};
+
+const throwIfPlaylistPagingAborted = (signal: AbortSignal): void => {
+  if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+};
+
+export const loadCompletePlaylistPreflightItems = async ({
+  preflightId,
+  summary,
+  signal,
+  loadPage,
+  pageSize = 100,
+}: LoadCompletePlaylistPreflightItemsOptions): Promise<
+  PlaylistPreflightItem[]
+> => {
+  const counts = summary.summary;
+  if (
+    summary.contractVersion !== 2 ||
+    summary.status !== "ready" ||
+    summary.preflightId !== preflightId ||
+    !counts ||
+    !Number.isSafeInteger(counts.loadedCount) ||
+    counts.loadedCount < 0
+  ) {
+    throw new PlaylistIngestPublicError("preflight_incomplete");
+  }
+
+  const items: PlaylistPreflightItem[] = [];
+  const occurrenceIds = new Set<string>();
+  const completedCursors = new Set<string>();
+  let cursor: string | null = null;
+
+  while (true) {
+    throwIfPlaylistPagingAborted(signal);
+    if (cursor !== null) {
+      if (completedCursors.has(cursor)) {
+        throw new PlaylistIngestPublicError("preflight_incomplete");
+      }
+      completedCursors.add(cursor);
+    }
+    const page = await loadPage(
+      preflightId,
+      {
+        ...(cursor !== null ? { cursor } : {}),
+        limit: pageSize,
+      },
+      { signal },
+    );
+    throwIfPlaylistPagingAborted(signal);
+    if (page.contractVersion !== 2 || page.preflightId !== preflightId) {
+      throw new PlaylistIngestPublicError("preflight_incomplete");
+    }
+    for (const item of page.items) {
+      if (!item.occurrenceId || occurrenceIds.has(item.occurrenceId)) {
+        throw new PlaylistIngestPublicError("preflight_incomplete");
+      }
+      occurrenceIds.add(item.occurrenceId);
+      items.push(item);
+      if (items.length > counts.loadedCount) {
+        throw new PlaylistIngestPublicError("preflight_incomplete");
+      }
+    }
+    if (page.nextCursor === null) break;
+    if (page.items.length === 0 || items.length >= counts.loadedCount) {
+      throw new PlaylistIngestPublicError("preflight_incomplete");
+    }
+    cursor = page.nextCursor;
+  }
+
+  const trustworthyTotal =
+    counts.totalCount !== null &&
+    Number.isSafeInteger(counts.totalCount) &&
+    counts.totalCount >= 0
+      ? counts.totalCount
+      : null;
+  if (
+    items.length !== counts.loadedCount ||
+    (trustworthyTotal !== null && items.length !== trustworthyTotal)
+  ) {
+    throw new PlaylistIngestPublicError("preflight_incomplete");
+  }
+  return items;
+};
+
 export const toPlaylistIngestPublicError = (
   error: unknown,
   fallbackCode: PlaylistIngestPublicErrorCode = "playlist_ingest_failed",
@@ -1043,7 +1137,7 @@ export const normalizePlaylistPreflightSummary = (
     ? {
         playlistTitle: nullableString(value.summary.playlist_title),
         totalCount: nullableNumber(value.summary.total_count),
-        loadedCount: finiteNumber(value.summary.loaded_count),
+        loadedCount: finiteNumber(value.summary.loaded_count, Number.NaN),
         ingestibleCount: finiteNumber(value.summary.ingestible_count),
         unavailableCount: finiteNumber(value.summary.unavailable_count),
         duplicateCount: finiteNumber(value.summary.duplicate_count),

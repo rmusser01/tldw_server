@@ -4,7 +4,7 @@ title: Implement shared WebUI and extension per-video playlist ingestion
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-13 23:37'
+updated_date: '2026-07-14 01:04'
 labels:
   - webui
   - browser-extension
@@ -54,6 +54,8 @@ Backend dependency TASK-12112 is complete at commit bc20c306d2. Frontend executi
 Task 1 contract client and capability gate completed test-first. Initial RED: 11 failed / 49 passed; quality-remediation RED: 8 failed / 68 passed. Final focused Vitest: 76/76 passed. ESLint: exit 0 with zero errors; Prettier and git diff --check passed. Full TypeScript remains blocked by unrelated repository baseline after the three-attempt audit. Final specification re-review: compliant. Final code-quality re-review: approved. Touched scope: playlist-ingest client, media-domain methods, strict OpenAPI/capability gate, and focused tests. Bandit is not applicable to this TypeScript-only task.
 
 Task 2 mandatory inspection controller completed test-first. It removes the direct playlist queue bypass, shares Add/Enter/extension-seed handling, keeps ordinary URLs staged while blocking proceed actions, limits concurrent v2 inspections, preserves first-page truncation and session duplicate evidence, serializes DELETE-before-replacement cleanup, uses the established 1200 ms polling cadence, retains only sanitized typed errors, and announces localized async status changes accessibly. Behavior RED: 13 failed / 7 passed; Strict Mode seed review RED: 1 failed / 25 passed; quality-remediation RED: 7 failed / 24 passed. Final focused Vitest: 31/31 passed. ESLint: exit 0 with zero errors; new-file frontend Prettier check and git diff --check passed. Final specification re-review: compliant. Final code-quality re-review: approved. Full TypeScript was not rerun after the Task 1 three-attempt baseline cap. Bandit is not applicable to this TypeScript-only task.
+
+Task 3 complete: full immutable preflight snapshots now page sequentially by opaque cursor and publish atomically; malformed version/count/cursor responses fail closed; the 500-item panel is virtualized with stable occurrence identity, native-scroll focus recovery, position-aware accessible names, localized availability, safe duplicate/unknown evidence, batched selection, latest-queue session dedupe, and refresh reconciliation. RED cycles covered pager/panel behavior, hardening, spec findings, and quality findings. Final focused Vitest: 66/66. Repository-pinned ESLint: exit 0 except existing Next pages-directory informational output. Scoped Prettier and git diff --check: pass. Final spec review: compliant. Final quality review: approved. Full TypeScript not rerun after Task 1 baseline three-attempt cap. Bandit N/A (TypeScript only). Task 4 materialization/queue mutation remains intentionally absent.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

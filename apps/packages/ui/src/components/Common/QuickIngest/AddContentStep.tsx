@@ -23,10 +23,8 @@ import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { Alert as DesignSystemAlert, Badge } from "@/components/ui/primitives"
 import { FileDropZone } from "./QueueTab/FileDropZone"
 import { BatchMetadataPanel } from "./BatchMetadataPanel"
-import {
-  usePlaylistInspection,
-  type PlaylistInspectionCandidate,
-} from "./usePlaylistInspection"
+import { usePlaylistInspection } from "./usePlaylistInspection"
+import { PlaylistPreflightPanel } from "./PlaylistPreflightPanel"
 import {
   QUICK_INGEST_MAX_FILE_SIZE_LABEL,
   QUICK_INGEST_MAX_FILE_SIZE,
@@ -220,85 +218,6 @@ const PASSIVE_ALERT_PROPS = {
   role: "status",
   "aria-live": "polite",
 } as const
-
-type QuickIngestText = (
-  key: string,
-  defaultValue: string,
-  options?: Record<string, unknown>
-) => string
-
-const playlistInspectionCopy = (
-  candidate: PlaylistInspectionCandidate,
-  qi: QuickIngestText
-): { label: string; message: string } => {
-  switch (candidate.status) {
-    case "ready":
-      return {
-        label: qi("playlistInspection.readyLabel", "Inspection ready"),
-        message: qi(
-          "playlistInspection.readyMessage",
-          "{{count}} playlist items loaded for review.",
-          { count: candidate.items.length }
-        ),
-      }
-    case "unavailable":
-      return {
-        label: qi("playlistInspection.unavailableLabel", "Inspection unavailable"),
-        message: qi(
-          "playlistInspection.unavailableMessage",
-          "Playlist inspection is unavailable on this server. Update the server or remove this playlist."
-        ),
-      }
-    case "failed":
-      return {
-        label: qi("playlistInspection.failedLabel", "Inspection failed"),
-        message:
-          candidate.error?.message ??
-          qi("playlistInspection.failedMessage", "Playlist inspection failed. Try again."),
-      }
-    case "blocked":
-      return {
-        label: qi("playlistInspection.blockedLabel", "Inspection blocked"),
-        message:
-          candidate.error?.message ??
-          qi(
-            "playlistInspection.blockedMessage",
-            "Playlist inspection was blocked. Remove it or try again."
-          ),
-      }
-    case "expired":
-      return {
-        label: qi("playlistInspection.expiredLabel", "Inspection expired"),
-        message:
-          candidate.error?.message ??
-          qi("playlistInspection.expiredMessage", "Playlist inspection expired. Try again."),
-      }
-    case "cancelled":
-      return {
-        label: qi("playlistInspection.cancelledLabel", "Inspection cancelled"),
-        message:
-          candidate.error?.message ??
-          qi("playlistInspection.cancelledMessage", "Playlist inspection was cancelled."),
-      }
-    default:
-      return {
-        label: qi("playlistInspection.inspectingLabel", "Inspecting playlist"),
-        message: qi(
-          "playlistInspection.inspectingMessage",
-          "Loading playlist details from the server."
-        ),
-      }
-  }
-}
-
-const playlistInspectionBadge = (
-  status: PlaylistInspectionCandidate["status"]
-): "info" | "success" | "warning" | "danger" => {
-  if (status === "ready") return "success"
-  if (status === "queued" || status === "inspecting") return "info"
-  if (status === "failed" || status === "blocked") return "danger"
-  return "warning"
-}
 
 type AddContentStepProps = {
   isOnlineForIngest?: boolean
@@ -594,82 +513,27 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
             <Typography.Text className="text-xs font-medium text-text-muted">
               {qi("playlistInspection.title", "PLAYLIST INSPECTION")}
             </Typography.Text>
-            {playlistInspection.candidates.map((candidate) => {
-              const copy = playlistInspectionCopy(candidate, qi)
-              const isActive = candidate.status === "queued" || candidate.status === "inspecting"
-              const canRetry =
-                ((candidate.status === "failed" || candidate.status === "blocked") &&
-                  candidate.error?.retryable === true) ||
-                candidate.status === "expired" ||
-                candidate.status === "cancelled"
-              return (
-                <div
-                  key={candidate.key}
-                  className="rounded-md border border-border bg-surface2/40 px-3 py-2"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium">{candidate.url}</div>
-                      <div
-                        className="mt-1 flex flex-wrap items-center gap-2"
-                        role="status"
-                        aria-live="polite"
-                        aria-atomic="true"
-                      >
-                        <Badge variant={playlistInspectionBadge(candidate.status)} size="sm">
-                          {copy.label}
-                        </Badge>
-                        <Typography.Text className="text-xs text-text-muted">
-                          {copy.message}
-                        </Typography.Text>
-                      </div>
-                    </div>
-                    <div className="flex flex-shrink-0 items-center gap-1">
-                      {isActive && (
-                        <Button
-                          size="small"
-                          onClick={() => playlistInspection.cancelCandidate(candidate.key)}
-                          aria-label={qi(
-                            "playlistInspection.cancelAria",
-                            "Cancel playlist inspection for {{url}}",
-                            { url: candidate.url }
-                          )}
-                        >
-                          {qi("playlistInspection.cancel", "Cancel")}
-                        </Button>
-                      )}
-                      {canRetry && (
-                        <Button
-                          size="small"
-                          onClick={() => playlistInspection.retryCandidate(candidate.key)}
-                          aria-label={qi(
-                            "playlistInspection.retryAria",
-                            "Retry playlist inspection for {{url}}",
-                            { url: candidate.url }
-                          )}
-                        >
-                          {qi("playlistInspection.retry", "Retry")}
-                        </Button>
-                      )}
-                      {!isActive && (
-                        <Button
-                          size="small"
-                          type="text"
-                          onClick={() => playlistInspection.removeCandidate(candidate.key)}
-                          aria-label={qi(
-                            "playlistInspection.removeAria",
-                            "Remove playlist inspection for {{url}}",
-                            { url: candidate.url }
-                          )}
-                        >
-                          {qi("playlistInspection.remove", "Remove")}
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )
-            })}
+            {playlistInspection.candidates.map((candidate) => (
+              <PlaylistPreflightPanel
+                key={candidate.key}
+                candidate={candidate}
+                qi={qi}
+                onCancel={() => playlistInspection.cancelCandidate(candidate.key)}
+                onRetry={() => playlistInspection.retryCandidate(candidate.key)}
+                onRemove={() => playlistInspection.removeCandidate(candidate.key)}
+                onRefresh={() => playlistInspection.refreshCandidate(candidate.key)}
+                onSelectionChange={(occurrenceId, selected) =>
+                  playlistInspection.setCandidateSelection(
+                    candidate.key,
+                    occurrenceId,
+                    selected
+                  )
+                }
+                onSelectionBatchChange={(updates) =>
+                  playlistInspection.setCandidateSelections(candidate.key, updates)
+                }
+              />
+            ))}
             {playlistInspection.hasTruncatedCandidates && (
               <Typography.Text className="block text-xs text-text-muted">
                 {qi("playlistInspection.moreNotLoaded", "More playlist items are not loaded yet.")}

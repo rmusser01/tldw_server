@@ -151,25 +151,25 @@ Verification before commit: behavior RED was 13 failed / 7 passed; Strict Mode s
 
 **Tests:** Paging normalizer tests, virtual list tests, selection reconciliation, queue serialization tests.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 3: Paginate and virtualize the preflight panel
 
-- [ ] **Step 1: Write failing paging and virtualization tests**
+- [x] **Step 1: Write failing paging and virtualization tests**
 
 Use a 500-item fixture. Assert cursors are followed until null, item order/occurrence IDs are stable, unavailable rows remain visible/disabled, Select all/none/new works, mounted rows remain bounded, keyboard focus survives scroll, and `aria-setsize`/`aria-posinset` are correct. With two playlists and a queued direct URL containing repeated videos, assert the first occurrence remains selected, later occurrences use session-level duplicate evidence, and explicit refresh reconciles selection by normalized source ID plus occurrence index among repeats.
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 Run: `cd apps/tldw-frontend && bunx vitest run ../packages/ui/src/services/tldw/__tests__/playlist-ingest.test.ts ../packages/ui/src/components/Common/QuickIngest/__tests__/PlaylistPreflightPanel.virtualization.test.tsx --maxWorkers=1 --no-file-parallelism`
 
 Expected: FAIL because the panel eagerly renders the compatibility response.
 
-- [ ] **Step 3: Implement bounded page loading and TanStack Virtual rows**
+- [x] **Step 3: Implement bounded page loading and TanStack Virtual rows**
 
 Poll summary until `ready`/blocked terminal state, then request pages sequentially by opaque cursor with an `AbortController`. Merge only by server `occurrenceId`; reject duplicates or count mismatch as `preflight_incomplete`. Reconcile the complete snapshot against the session duplicate index using normalized source ID plus repeat index, retaining unambiguous selections and surfacing reorder/add/remove ambiguity after explicit refresh. Use `useVirtualizer` with stable occurrence keys and overscan. Render ordinal/title first and channel/duration/availability/duplicate second; keep URL in details and do not load thumbnails by default.
 
-- [ ] **Step 4: Run tests and commit**
+- [x] **Step 4: Run tests and commit**
 
 Run the command from Step 2.
 
@@ -179,6 +179,8 @@ Expected: PASS with a bounded mounted-row assertion.
 git add apps/packages/ui/src/services/tldw/playlist-ingest.ts apps/packages/ui/src/components/Common/QuickIngest/PlaylistPreflightPanel.tsx apps/packages/ui/src/components/Common/QuickIngest/__tests__ apps/packages/ui/src/services/tldw/__tests__
 git commit -m "feat: show complete virtualized playlist previews (TASK-12113)"
 ```
+
+Verification before commit: the initial Task 3 paging/panel RED was 13/13 failures, hardening RED was 10 failed / 13 passed, specification-remediation RED was 3 failed / 30 passed plus 1 failed / 9 passed, and quality-remediation RED was 6 failed / 45 passed. Final focused Vitest passed 66/66 across the paging service, controller integration, virtualized panel, and legacy panel suites. Repository-pinned ESLint exited 0 (apart from the existing Next.js pages-directory informational message), scoped Prettier and `git diff --check` passed, and the final specification and code-quality re-reviews approved the diff. Full TypeScript was not rerun after the Task 1 three-attempt repository-baseline cap. Bandit is not applicable to this TypeScript-only task. Task 4 remains intentionally unimplemented: playlist rows are not materialized or added to the queue yet.
 
 ### Task 4: Materialize occurrences and carry Review-time overrides
 
