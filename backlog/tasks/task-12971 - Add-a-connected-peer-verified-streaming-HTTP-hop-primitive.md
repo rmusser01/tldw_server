@@ -4,7 +4,7 @@ title: Add a connected-peer-verified streaming HTTP hop primitive
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-14 14:57'
+updated_date: '2026-07-14 15:26'
 labels:
   - security
   - http-client
@@ -55,14 +55,16 @@ Docs/superpowers/plans/2026-07-14-connected-peer-verified-http-hop-implementatio
 
 Adversarial plan review found that HTTPcore's internal h11 limit is per incomplete event and does not bound repeated informational responses. The reviewed plan now adds an independent raw-stream aggregate 1xx/final-header and body-wire gate before HTTPcore parsing, offloaded DNS under a whole-hop deadline, environment-independent certifi TLS context construction, explicit request framing/size gates, peer-port verification, and bounded decompressor finalization. Simplicity review removed redundant counters/rechecks and excess integration harnesses. AC #6 was clarified to remove a dependency cycle: TASK-12971 publishes stable import/test paths, and dependent TASK-12968.2 later proves consumption. TDD production edits have not started yet.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+2026-07-14 Stage 1 complete: added immutable normalized request/limit/error contracts, strict canonical host/target/header validation, complete-set DNS/IP denial (including mapped, NAT64, 6to4, Teredo, site-local, scoped, private, reserved, and malformed answers), an off-event-loop bounded resolver adapter with legacy compatibility, and direct HTTPcore/certifi dependency floors. Verification: 115 focused and adjacent tests passed; Ruff, Black, compileall, and git diff --check passed. Two adversarial review rounds were resolved and the final re-review reported no actionable findings. Stage 2 validated-peer transport remains in progress.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
+
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->

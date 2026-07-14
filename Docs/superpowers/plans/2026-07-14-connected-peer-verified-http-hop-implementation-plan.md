@@ -78,11 +78,11 @@ The public function accepts exactly one pre-parsed request object rather than a 
 
 **Goal:** Make invalid requests and unsafe DNS sets fail before a socket can be opened.
 
-**Success criteria:** The public dataclasses/error codes are immutable and Python 3.10-compatible; HTTPcore 1.x and the explicit CA bundle are direct supported dependencies; DNS is offloaded from the event loop, resolves once, retains the complete A/AAAA answer set, and rejects the entire set when any address is private, reserved, transition/translated, malformed, or otherwise non-global. One total deadline covers DNS through response finalization.
+**Success criteria:** The public dataclasses/error codes are immutable and Python 3.10-compatible; HTTPcore 1.x and the explicit CA bundle are direct supported dependencies; DNS is offloaded from the event loop, resolves once, retains the complete A/AAAA answer set, and rejects the entire set when any address is private, reserved, transition/translated, malformed, or otherwise non-global.
 
 **Tests:** Constructor/limit validation, legacy numeric and malformed IP forms, canonical public IPv4/IPv6, empty/private/mixed/malformed resolver answers, deduplication, one resolver call, DNS timeout/saturation compatibility, and the dependency floor.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### TDD tasks
 
@@ -102,7 +102,7 @@ The public function accepts exactly one pre-parsed request object rather than a 
 
 4. Add both direct dependencies in `pyproject.toml` beside `httpx`.
 5. Add a public, side-effect-free raw-address resolver wrapper in `tldw_Server_API/app/core/Security/egress.py` that reuses the existing bounded resolver slots without reading egress allowlists/profiles. Preserve `_resolve_host_ips()` compatibility and add its focused regression to `tldw_Server_API/tests/Security/test_egress.py`.
-6. Offload that blocking resolver wrapper with `asyncio.to_thread()` in the default hop resolver. Wrap the entire internal hop—DNS, connect, TLS, headers, body, decompression, and close—in one total `asyncio.wait_for()` deadline. Add an event-loop heartbeat test plus DNS timeout/wall-clock coverage; document that an OS resolver worker may finish after caller cancellation while the existing resolver-slot cap remains held until worker completion.
+6. Offload that blocking resolver wrapper with `asyncio.to_thread()` in the default hop resolver. Add an event-loop heartbeat test plus DNS timeout/wall-clock coverage; document that an OS resolver worker may finish after caller cancellation while the existing resolver-slot cap remains held until worker completion.
 7. Implement only the request/limit/error contracts, raw DNS adapter, canonical IP-set validation, and the module-private injected resolver seam in `http_hop.py` until the Stage 1 tests pass. Keep the public `request_http_hop(request)` signature transport-free.
 8. Run GREEN plus Ruff, Black, compileall, and `git diff --check` on the touched Stage 1 files.
 
@@ -144,7 +144,7 @@ The public function accepts exactly one pre-parsed request object rather than a 
 
 **Goal:** Enforce all response ceilings during streaming and expose only bounded typed failures.
 
-**Success criteria:** The network wrapper independently bounds the aggregate bytes/count of all informational and final response headers before HTTPcore/h11 parsing; `Content-Length` can reject an oversized encoded entity before body iteration; raw wire counters remain authoritative when length is absent or false; identity, gzip, and zlib-wrapped deflate are decoded incrementally with bounded `decompress()` and `flush()` calls; stacked/unknown/truncated/concatenated encodings fail closed; parser input is never larger than its explicit ceiling; transport exceptions and timeouts become stable sanitized errors.
+**Success criteria:** The network wrapper independently bounds the aggregate bytes/count of all informational and final response headers before HTTPcore/h11 parsing; `Content-Length` can reject an oversized encoded entity before body iteration; raw wire counters remain authoritative when length is absent or false; identity, gzip, and zlib-wrapped deflate are decoded incrementally with bounded `decompress()` and `flush()` calls; stacked/unknown/truncated/concatenated encodings fail closed; parser input is never larger than its explicit ceiling; transport exceptions and timeouts become stable sanitized errors. One total deadline covers DNS through response finalization and close.
 
 **Tests:** Repeated `100`/`103` headers plus a final response, aggregate header byte/count overflow, status-line/reason accounting, underreported/malformed/duplicate length, chunked/no-length streaming, raw wire oversize, decompressed oversize, parser oversize, gzip bomb, invalid/truncated/concatenated gzip, zlib-wrapped deflate, raw-deflate rejection, adversarial chunk boundaries, output produced during final flush, unsupported/stacked encodings, malformed protocol, first-byte/idle/total timeout, bounded error strings, and cancellation cleanup.
 
@@ -159,7 +159,7 @@ The public function accepts exactly one pre-parsed request object rather than a 
 5. Iterate `response.aiter_stream()` once for content decoding; do not use that post-transfer stream as the raw wire counter.
 6. Implement bounded identity/gzip/zlib-deflate decoders with `zlib.decompressobj(...).decompress(..., max_length=remaining + 1)`, bounded `flush(remaining + 1)`, `unconsumed_tail` handling, explicit EOF/unused/trailing-data checks, and no unbounded `zlib.decompress` call.
 7. Enforce `max_decompressed_bytes` and `max_parser_input_bytes` before extending the returned buffer. Return only bounded bytes after the entire accepted stream finishes.
-8. Map HTTPcore, DNS, TLS, protocol, decompression, and timeout failures to a small stable `HTTPHopErrorCode` vocabulary. Preserve `CancelledError`; never include URL query, headers, body, filesystem paths, credentials, or upstream exception text.
+8. Wrap the entire internal hop—DNS, connect, TLS, headers, body, decompression, and close—in one total `asyncio.wait_for()` deadline. Map HTTPcore, DNS, TLS, protocol, decompression, and timeout failures to a small stable `HTTPHopErrorCode` vocabulary. Preserve `CancelledError`; never include URL query, headers, body, filesystem paths, credentials, or upstream exception text.
 9. Run GREEN and static checks for all Stage 1-3 files.
 
 ### Commit

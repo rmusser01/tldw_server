@@ -87,9 +87,9 @@ _DNS_RESOLVER_SLOTS = threading.BoundedSemaphore(_DNS_RESOLVER_MAX_OUTSTANDING)
 
 
 PRIVATE_RANGES = [
-    ipaddress.ip_network("0.0.0.0/8"),       # "this" network
+    ipaddress.ip_network("0.0.0.0/8"),  # "this" network
     ipaddress.ip_network("10.0.0.0/8"),
-    ipaddress.ip_network("100.64.0.0/10"),   # carrier-grade NAT
+    ipaddress.ip_network("100.64.0.0/10"),  # carrier-grade NAT
     ipaddress.ip_network("127.0.0.0/8"),
     ipaddress.ip_network("169.254.0.0/16"),
     ipaddress.ip_network("172.16.0.0/12"),
@@ -99,13 +99,13 @@ PRIVATE_RANGES = [
     ipaddress.ip_network("198.18.0.0/15"),
     ipaddress.ip_network("198.51.100.0/24"),
     ipaddress.ip_network("203.0.113.0/24"),
-    ipaddress.ip_network("224.0.0.0/4"),     # multicast
-    ipaddress.ip_network("240.0.0.0/4"),     # reserved
+    ipaddress.ip_network("224.0.0.0/4"),  # multicast
+    ipaddress.ip_network("240.0.0.0/4"),  # reserved
     ipaddress.ip_network("255.255.255.255/32"),
-    ipaddress.ip_network("::/128"),          # unspecified
+    ipaddress.ip_network("::/128"),  # unspecified
     ipaddress.ip_network("::1/128"),
-    ipaddress.ip_network("::ffff:0:0/96"),   # IPv4-mapped IPv6
-    ipaddress.ip_network("64:ff9b::/96"),    # IPv4/IPv6 translation
+    ipaddress.ip_network("::ffff:0:0/96"),  # IPv4-mapped IPv6
+    ipaddress.ip_network("64:ff9b::/96"),  # IPv4/IPv6 translation
     ipaddress.ip_network("fc00::/7"),
     ipaddress.ip_network("fe80::/10"),
     ipaddress.ip_network("ff00::/8"),
@@ -365,7 +365,9 @@ def _getaddrinfo_with_timeout(host: str, timeout_s: float = 2.0) -> list[tuple]:
             host=host,
             exception_type=type(exc).__name__,
             event="dns_resolver_worker_start_failed",
-        ).opt(exception=exc).warning("DNS resolver worker could not start; failing closed")
+        ).opt(
+            exception=exc
+        ).warning("DNS resolver worker could not start; failing closed")
         return []
 
     remaining_s = _remaining_dns_budget(start_time, timeout_s)
@@ -397,34 +399,41 @@ def _getaddrinfo_with_timeout(host: str, timeout_s: float = 2.0) -> list[tuple]:
     return result[0] if result else []
 
 
-def _resolve_host_ips(host: str) -> list[str]:
-    """Resolve the host to all A/AAAA addresses with a short timeout.
+def resolve_host_ips(host: str, timeout_s: float = 2.0) -> tuple[str, ...]:
+    """Resolve a host to every A/AAAA address within a bounded timeout.
 
-    Returns a de-duplicated list of IP strings. Any resolution error results
-    in an empty list which callers must treat as unsafe.
+    The wrapper deliberately does not read egress profiles or allowlists. It
+    returns addresses in resolver order with duplicates removed. Any resolver
+    or result-shape error fails closed as an empty tuple.
     """
     try:
-        infos = _getaddrinfo_with_timeout(host)
+        infos = _getaddrinfo_with_timeout(host, timeout_s=timeout_s)
         if not infos:
-            return []
+            return ()
 
         addrs: list[str] = []
         for _family, _stype, _proto, _canon, sockaddr in infos:
             try:
                 # sockaddr[0] is the IP for both AF_INET and AF_INET6
                 ip = sockaddr[0]
-                addrs.append(ip)
+                if isinstance(ip, str):
+                    addrs.append(ip)
             except (IndexError, TypeError):
                 continue
         # Preserve order but deduplicate
-        return list(dict.fromkeys(addrs))
+        return tuple(dict.fromkeys(addrs))
     except (OSError, TypeError, ValueError) as exc:
         logger.debug(
             "Host resolution failed for {} with {}; treating as unsafe",
             host,
             type(exc).__name__,
         )
-        return []
+        return ()
+
+
+def _resolve_host_ips(host: str) -> list[str]:
+    """Compatibility wrapper for callers expecting a mutable address list."""
+    return list(resolve_host_ips(host))
 
 
 def _is_private_ip(ip: str) -> bool:
@@ -451,9 +460,7 @@ def _normalize_resolved_ips(ips: Sequence[str] | None) -> tuple[str, ...]:
 
 
 def _same_resolved_ip_set(left: Sequence[str], right: Sequence[str]) -> bool:
-    return {str(ip).strip() for ip in left if str(ip).strip()} == {
-        str(ip).strip() for ip in right if str(ip).strip()
-    }
+    return {str(ip).strip() for ip in left if str(ip).strip()} == {str(ip).strip() for ip in right if str(ip).strip()}
 
 
 def _resolve_and_check_private(host: str) -> tuple[bool, list[str]]:
@@ -742,6 +749,7 @@ def is_webhook_url_allowed_for_tenant(url: str, tenant_id: str) -> bool:
       - WORKFLOWS_EGRESS_BLOCK_PRIVATE (applies to webhooks too)
     """
     import os
+
     t_key = (tenant_id or "default").upper().replace("-", "_")
     allow = _parse_list_env(os.getenv(f"{WEBHOOK_ALLOWLIST_ENV}_{t_key}") or os.getenv(WEBHOOK_ALLOWLIST_ENV))
     deny = _parse_list_env(os.getenv(f"{WEBHOOK_DENYLIST_ENV}_{t_key}") or os.getenv(WEBHOOK_DENYLIST_ENV))
