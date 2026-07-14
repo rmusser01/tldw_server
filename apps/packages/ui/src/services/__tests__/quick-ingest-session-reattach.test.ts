@@ -648,6 +648,62 @@ describe("reattachQuickIngestSession", () => {
     })
   })
 
+  it("retries authoritative unsent cleanup from a persisted cleanup-required phase", async () => {
+    mocks.bgRequest
+      .mockResolvedValueOnce(runSummaryResponse("running", 1))
+      .mockResolvedValueOnce({
+        contract_version: 2,
+        run_id: "run-reload-submission",
+        version: 1,
+        items: [runItemResponse("occ-cleanup-retry", "submit_pending")],
+        next_cursor: null,
+      })
+      .mockResolvedValueOnce(runSummaryResponse("cancelled", 2))
+      .mockResolvedValueOnce(runSummaryResponse("cancelled", 2))
+      .mockResolvedValueOnce({
+        contract_version: 2,
+        run_id: "run-reload-submission",
+        version: 2,
+        items: [
+          runItemResponse("occ-cleanup-retry", "terminal", {
+            outcome: "cancelled",
+            progress_percent: 100,
+          }),
+        ],
+        next_cursor: null,
+      })
+
+    const snapshot = await reattachQuickIngestSession(
+      {
+        mode: "extension-runtime",
+        submissionState: "cleanup_required",
+        runId: "run-reload-submission",
+        submissionOccurrenceIds: ["occ-cleanup-retry"],
+      } as any,
+      { transportPreference: "poll" }
+    )
+
+    expect(mocks.bgRequest).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        path: "/api/v1/media/ingest/runs/run-reload-submission/cancel",
+        body: {
+          occurrence_ids: ["occ-cleanup-retry"],
+          reason: "submission_interrupted",
+        },
+      })
+    )
+    expect(snapshot).toMatchObject({
+      lifecycle: "cancelled",
+      jobs: [
+        expect.objectContaining({
+          sourceItemId: "occ-cleanup-retry",
+          status: "cancelled",
+        }),
+      ],
+    })
+  })
+
   it("cancels only unsent staged occurrences while accepted jobs keep running", async () => {
     mocks.bgRequest
       .mockResolvedValueOnce(runSummaryResponse("running", 2))

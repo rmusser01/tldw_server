@@ -35,6 +35,7 @@ import {
   submitQuickIngestBatch
 } from "@/services/tldw/quick-ingest-batch"
 import { DUPLICATE_SKIP_MESSAGE } from "@/components/Common/QuickIngest/constants"
+import { createQuickIngestSessionRuntime } from "@/entries/shared/quick-ingest-session-runtime"
 
 describe("submitQuickIngestBatch", () => {
   beforeEach(() => {
@@ -3044,8 +3045,15 @@ describe("submitQuickIngestBatch", () => {
     )
   })
 
-  it("returns a direct session ack for mv3 extension pages", async () => {
+  it("routes mv3 extension sessions through the durable background runtime", async () => {
     mocks.runtimeId = "ext-1"
+    mocks.sendMessage.mockImplementation(async (message: any) => {
+      if (message.type === "tldw:ping") return { ok: true, pong: true }
+      if (message.type === "tldw:quick-ingest/start") {
+        return { ok: true, sessionId: message.sessionId }
+      }
+      return { ok: false }
+    })
 
     const ack = await startQuickIngestSession({
       entries: [
@@ -3056,6 +3064,15 @@ describe("submitQuickIngestBatch", () => {
         }
       ],
       files: [],
+      pendingRunRequest: {
+        inputs: [
+          {
+            inputKind: "direct_url",
+            occurrenceId: "entry-1",
+            url: "https://example.com/article"
+          }
+        ]
+      },
       storeRemote: true,
       processOnly: false,
       common: {
@@ -3066,9 +3083,347 @@ describe("submitQuickIngestBatch", () => {
       advancedValues: {}
     })
 
-    expect(mocks.sendMessage).not.toHaveBeenCalled()
-    expect(ack.ok).toBe(true)
-    expect(ack.sessionId).toMatch(/^qi-direct-/)
+    expect(mocks.sendMessage).toHaveBeenNthCalledWith(1, { type: "tldw:ping" })
+    expect(mocks.sendMessage).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        type: "tldw:quick-ingest/start",
+        sessionId: expect.stringMatching(/^qi-/),
+        attemptToken: expect.stringMatching(/^qia-/),
+        payload: expect.objectContaining({
+          entries: [expect.objectContaining({ id: "entry-1" })],
+          pendingRunRequest: expect.objectContaining({
+            inputs: [expect.objectContaining({ occurrenceId: "entry-1" })]
+          })
+        })
+      })
+    )
+    expect(ack).toEqual({
+      ok: true,
+      sessionId: mocks.sendMessage.mock.calls[1]?.[0]?.sessionId,
+    })
+  })
+
+  it("recovers an accepted start-message timeout by querying the same identity without direct fallback", async () => {
+    vi.useFakeTimers()
+    mocks.runtimeId = "ext-1"
+    let releaseRun!: () => void
+    const runGate = new Promise<void>((resolve) => {
+      releaseRun = resolve
+    })
+    const run = vi.fn(async (_payload: any, context: any) => {
+      await context.setRunTracking({
+        mode: "extension-runtime",
+        runId: "run-timeout-accepted",
+        submissionState: "run_created",
+        submissionOccurrenceIds: ["occ-timeout-accepted"],
+      })
+      await runGate
+      return { results: [] }
+    })
+    const worker = createQuickIngestSessionRuntime({
+      run,
+      emit: vi.fn(),
+      saveRunSession: vi.fn(),
+    } as any)
+    mocks.sendMessage.mockImplementation((message: any) => {
+      if (message.type === "tldw:ping") {
+        return Promise.resolve({ ok: true, pong: true })
+      }
+      if (message.type === "tldw:quick-ingest/start") {
+        void worker.start(message.payload, {
+          sessionId: message.sessionId,
+          attemptToken: message.attemptToken,
+        } as any)
+        return new Promise(() => undefined)
+      }
+      if (message.type === "tldw:quick-ingest/replay") {
+        return worker.replay(message.payload.sessionId)
+      }
+      return Promise.resolve({ ok: false })
+    })
+
+    const ackPromise = startQuickIngestSession({
+      entries: [
+        {
+          id: "occ-timeout-accepted",
+          url: "https://example.com/timeout-accepted",
+          type: "video",
+        },
+      ],
+      files: [],
+      pendingRunRequest: {
+        inputs: [
+          {
+            inputKind: "direct_url",
+            occurrenceId: "occ-timeout-accepted",
+            url: "https://example.com/timeout-accepted",
+          },
+        ],
+      },
+      storeRemote: true,
+      processOnly: false,
+    } as any)
+
+    await vi.advanceTimersByTimeAsync(10_001)
+    const ack = await ackPromise
+
+    expect(ack).toMatchObject({
+      ok: true,
+      sessionId: expect.stringMatching(/^qi-(?!direct-)/),
+    })
+    const startMessage = mocks.sendMessage.mock.calls.find(
+      ([message]) => message.type === "tldw:quick-ingest/start"
+    )?.[0]
+    const replayMessage = mocks.sendMessage.mock.calls.find(
+      ([message]) => message.type === "tldw:quick-ingest/replay"
+    )?.[0]
+    expect(replayMessage?.payload?.sessionId).toBe(startMessage?.sessionId)
+    expect(ack.sessionId).toBe(startMessage?.sessionId)
+    expect(run).toHaveBeenCalledTimes(1)
+    expect(mocks.bgRequest).not.toHaveBeenCalled()
+    expect(mocks.bgUpload).not.toHaveBeenCalled()
+
+    releaseRun()
+  })
+
+  it("returns the stable indeterminate extension identity when accepted start and replay responses both time out", async () => {
+    vi.useFakeTimers()
+    mocks.runtimeId = "ext-1"
+    const run = vi.fn().mockResolvedValue({ results: [] })
+    const worker = createQuickIngestSessionRuntime({
+      run,
+      emit: vi.fn(),
+      saveRunSession: vi.fn().mockResolvedValue(true),
+    } as any)
+    let acceptedSessionId = ""
+    let acceptedAttemptToken = ""
+    mocks.sendMessage.mockImplementation((message: any) => {
+      if (message.type === "tldw:ping") {
+        return Promise.resolve({ ok: true, pong: true })
+      }
+      if (message.type === "tldw:quick-ingest/start") {
+        acceptedSessionId = message.sessionId
+        acceptedAttemptToken = message.attemptToken
+        void worker.start(message.payload, {
+          sessionId: message.sessionId,
+          attemptToken: message.attemptToken,
+        } as any)
+        return new Promise(() => undefined)
+      }
+      if (message.type === "tldw:quick-ingest/replay") {
+        return new Promise(() => undefined)
+      }
+      return Promise.resolve({ ok: false })
+    })
+
+    const ackPromise = startQuickIngestSession({
+      entries: [
+        {
+          id: "occ-double-timeout",
+          url: "https://example.com/double-timeout",
+          type: "video",
+        },
+      ],
+      files: [],
+      pendingRunRequest: {
+        inputs: [
+          {
+            inputKind: "direct_url",
+            occurrenceId: "occ-double-timeout",
+            url: "https://example.com/double-timeout",
+          },
+        ],
+      },
+      storeRemote: true,
+      processOnly: false,
+    } as any)
+
+    await vi.advanceTimersByTimeAsync(20_002)
+
+    await expect(ackPromise).resolves.toMatchObject({
+      ok: false,
+      indeterminate: true,
+      sessionId: acceptedSessionId,
+      error: expect.stringMatching(/interrupted|delivery|response|replay|timed out/i),
+    })
+    expect(acceptedSessionId).toMatch(/^qi-(?!direct-)/)
+    expect(acceptedAttemptToken).toMatch(/^qia-/)
+    expect(run).toHaveBeenCalledTimes(1)
+    expect(mocks.bgRequest).not.toHaveBeenCalled()
+    expect(mocks.bgUpload).not.toHaveBeenCalled()
+  })
+
+  it("surfaces a never-delivered start timeout without submitting or hanging", async () => {
+    vi.useFakeTimers()
+    mocks.runtimeId = "ext-1"
+    mocks.sendMessage.mockImplementation((message: any) => {
+      if (message.type === "tldw:ping") {
+        return Promise.resolve({ ok: true, pong: true })
+      }
+      if (message.type === "tldw:quick-ingest/start") {
+        return new Promise(() => undefined)
+      }
+      if (message.type === "tldw:quick-ingest/replay") {
+        return Promise.resolve({ ok: false, error: "Session not found." })
+      }
+      return Promise.resolve({ ok: false })
+    })
+
+    const ackPromise = startQuickIngestSession({
+      entries: [
+        {
+          id: "occ-timeout-never-delivered",
+          url: "https://example.com/timeout-never-delivered",
+          type: "video",
+        },
+      ],
+      files: [],
+      pendingRunRequest: {
+        inputs: [
+          {
+            inputKind: "direct_url",
+            occurrenceId: "occ-timeout-never-delivered",
+            url: "https://example.com/timeout-never-delivered",
+          },
+        ],
+      },
+      storeRemote: true,
+      processOnly: false,
+    } as any)
+
+    await vi.advanceTimersByTimeAsync(10_001)
+    await expect(ackPromise).resolves.toMatchObject({
+      ok: false,
+      sessionId: expect.stringMatching(/^qi-(?!direct-)/),
+      error: expect.stringMatching(/not found|interrupted|delivery|start/i),
+    })
+    expect(mocks.bgRequest).not.toHaveBeenCalled()
+    expect(mocks.bgUpload).not.toHaveBeenCalled()
+  })
+
+  it("fails closed when extension cancellation times out instead of reporting direct success", async () => {
+    vi.useFakeTimers()
+    mocks.runtimeId = "ext-1"
+    mocks.sendMessage.mockImplementation((message: any) => {
+      if (message.type === "tldw:ping") {
+        return Promise.resolve({ ok: true, pong: true })
+      }
+      if (message.type === "tldw:quick-ingest/cancel") {
+        return new Promise(() => undefined)
+      }
+      return Promise.resolve({ ok: false })
+    })
+
+    const cancelPromise = cancelQuickIngestSession({
+      sessionId: "qi-extension-cancel-timeout",
+      reason: "user_cancelled",
+      tracking: {
+        mode: "extension-runtime",
+        sessionId: "qi-extension-cancel-timeout",
+      },
+    } as any)
+
+    await vi.advanceTimersByTimeAsync(10_001)
+
+    await expect(cancelPromise).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/extension|cancel|timeout|respond/i),
+    })
+    expect(mocks.bgRequest).not.toHaveBeenCalled()
+  })
+
+  it("restores a pending mv3 run after the background worker is recreated", async () => {
+    mocks.runtimeId = "ext-1"
+    let storedRecords: unknown[] = []
+    const saveRunSession = vi.fn(async (record: any) => {
+      storedRecords = record ? [record] : []
+    })
+    const firstWorker = createQuickIngestSessionRuntime({
+      run: vi.fn(async (payload: any, context: any) => {
+        expect(payload.pendingRunRequest).toMatchObject({
+          inputs: [expect.objectContaining({ occurrenceId: "occ-mv3-restore" })]
+        })
+        await context.setRunTracking({
+          mode: "extension-runtime",
+          runId: "run-mv3-restore",
+          submissionState: "submitting",
+          submissionOccurrenceIds: ["occ-mv3-restore"]
+        })
+        return { results: [] }
+      }),
+      emit: vi.fn(),
+      saveRunSession,
+      createSessionId: () => "qi-worker-mv3-restore"
+    } as any)
+    mocks.sendMessage.mockImplementation(async (message: any) => {
+      if (message.type === "tldw:ping") return { ok: true, pong: true }
+      if (message.type === "tldw:quick-ingest/start") {
+        return firstWorker.start(message.payload, {
+          sessionId: message.sessionId,
+        })
+      }
+      return { ok: false }
+    })
+
+    const ack = await startQuickIngestSession({
+      entries: [
+        {
+          id: "occ-mv3-restore",
+          url: "https://example.com/mv3-restore",
+          type: "video"
+        }
+      ],
+      files: [],
+      pendingRunRequest: {
+        inputs: [
+          {
+            inputKind: "direct_url",
+            occurrenceId: "occ-mv3-restore",
+            url: "https://example.com/mv3-restore"
+          }
+        ]
+      },
+      storeRemote: true,
+      processOnly: false,
+      common: {
+        perform_analysis: true,
+        perform_chunking: false,
+        overwrite_existing: false
+      },
+      advancedValues: {}
+    })
+
+    expect(ack).toEqual({
+      ok: true,
+      sessionId: expect.stringMatching(/^qi-(?!direct-)/),
+    })
+    await vi.waitFor(() => expect(saveRunSession).toHaveBeenCalledTimes(2))
+
+    const reattachRun = vi.fn().mockResolvedValue({
+      lifecycle: "processing",
+      jobs: [],
+      errorMessage: null
+    })
+    const recreatedWorker = createQuickIngestSessionRuntime({
+      run: vi.fn(),
+      emit: vi.fn(),
+      loadRunSessions: vi.fn(async () => storedRecords),
+      saveRunSession,
+      reattachRun
+    } as any)
+
+    await recreatedWorker.restore()
+
+    expect(reattachRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: "run-mv3-restore",
+        sessionId: ack.sessionId,
+        submissionState: "submitting",
+        submissionOccurrenceIds: ["occ-mv3-restore"]
+      }),
+      { transportPreference: "poll" }
+    )
   })
 
   it("returns a direct session ack when runtime ping preflight times out", async () => {

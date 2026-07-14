@@ -51,8 +51,15 @@ import {
 } from "@/entries/shared/ingest-payloads";
 import {
   createQuickIngestSessionRuntime,
+  parseQuickIngestCompactRunSession,
+  type QuickIngestCompactRunSession,
   type QuickIngestSessionRunContext,
+  type QuickIngestSessionRunResult,
 } from "@/entries/shared/quick-ingest-session-runtime";
+import { submitQuickIngestBatch } from "@/services/tldw/quick-ingest-batch";
+import { reattachQuickIngestSession } from "@/services/tldw/quick-ingest-session-reattach";
+import { mediaMethods } from "@/services/tldw/domains/media";
+import { cancelRun } from "@/services/tldw/playlist-ingest";
 import {
   createIngestJobsTracker,
   pollTrackedIngestJobs,
@@ -128,6 +135,290 @@ const backgroundDiagnostics: BackgroundDiagnostics = {
 
 const logBackgroundError = (label: string, error: unknown) => {
   console.debug(`[tldw] background ${label} failed`, error);
+};
+
+type PendingQuickIngestRunSubmit = (
+  payload: Record<string, any>,
+) => Promise<{
+  ok: boolean;
+  accepted?: boolean;
+  error?: string;
+  results?: unknown[];
+  reviewRequired?: unknown[];
+}>;
+
+const submitPendingQuickIngestRun: PendingQuickIngestRunSubmit = (payload) =>
+  submitQuickIngestBatch(
+    payload as Parameters<typeof submitQuickIngestBatch>[0],
+  );
+
+export const delegatePendingQuickIngestRun = async (
+  payload: Record<string, any>,
+  context: QuickIngestSessionRunContext,
+  submit: PendingQuickIngestRunSubmit = submitPendingQuickIngestRun,
+): Promise<{
+  ok: boolean;
+  results: Array<Record<string, unknown>>;
+  reviewRequired?: Array<Record<string, unknown>>;
+}> => {
+  const response = await submit({
+    ...payload,
+    __quickIngestSessionId: context.sessionId,
+    __quickIngestShouldStop: context.isCancelled,
+    onTrackingMetadata: context.setRunTracking,
+  });
+  const reviewRequired = Array.isArray(response.reviewRequired)
+    ? response.reviewRequired.filter(
+        (item): item is Record<string, unknown> =>
+          Boolean(item && typeof item === "object" && !Array.isArray(item)),
+      )
+    : [];
+  if (reviewRequired.length > 0) {
+    return { ok: false, results: [], reviewRequired };
+  }
+  if (!response.accepted) {
+    throw new Error(
+      String(response.error || "Playlist ingest run was not accepted."),
+    );
+  }
+  return {
+    ok: response.ok,
+    results: Array.isArray(response.results)
+      ? response.results.filter(
+          (item): item is Record<string, unknown> =>
+            Boolean(item && typeof item === "object" && !Array.isArray(item)),
+        )
+      : [],
+  };
+};
+
+export const adaptQuickIngestBatchResultForRuntime = (
+  result: Pick<QuickIngestSessionRunResult, "results" | "reviewRequired">,
+): QuickIngestSessionRunResult => ({
+  results: result.results,
+  ...(result.reviewRequired?.length
+    ? { reviewRequired: result.reviewRequired }
+    : {}),
+});
+
+const MAX_QUICK_INGEST_RUN_SESSIONS = 64;
+const MAX_QUICK_INGEST_TERMINAL_BYTES = 2 * 1_024 * 1_024;
+
+const quickIngestRecordSessionId = (record: unknown): string =>
+  record && typeof record === "object" && !Array.isArray(record)
+    ? String((record as Record<string, unknown>).sessionId || "").trim()
+    : "";
+
+const isQuickIngestReplayRecord = (record: unknown): boolean =>
+  Boolean(
+    record &&
+      typeof record === "object" &&
+      !Array.isArray(record) &&
+      ((record as Record<string, unknown>).kind === "terminal" ||
+        (record as Record<string, unknown>).kind === "review"),
+  );
+
+const quickIngestRecordTimestamp = (record: unknown): number => {
+  if (!record || typeof record !== "object" || Array.isArray(record)) return 0;
+  const candidate = record as Record<string, unknown>;
+  const value =
+    isQuickIngestReplayRecord(record) ? candidate.expiresAt : candidate.startedAt;
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+};
+
+const quickIngestRecordBytes = (record: unknown): number =>
+  new TextEncoder().encode(JSON.stringify(record)).byteLength;
+
+const dedupeQuickIngestRunSessions = (records: unknown[]): unknown[] => {
+  const bySession = new Map<string, unknown>();
+  const passthrough: unknown[] = [];
+  for (const record of records) {
+    const sessionId = quickIngestRecordSessionId(record);
+    if (!sessionId) {
+      passthrough.push(record);
+      continue;
+    }
+    const current = bySession.get(sessionId);
+    if (!current) {
+      bySession.set(sessionId, record);
+      continue;
+    }
+    const currentActive = !isQuickIngestReplayRecord(current);
+    const candidateActive = !isQuickIngestReplayRecord(record);
+    if (
+      (candidateActive && !currentActive) ||
+      (candidateActive === currentActive &&
+        quickIngestRecordTimestamp(record) >= quickIngestRecordTimestamp(current))
+    ) {
+      bySession.set(sessionId, record);
+    }
+  }
+  return [...passthrough, ...bySession.values()];
+};
+
+const boundQuickIngestRunSessions = (records: unknown[]): unknown[] | null => {
+  const next = dedupeQuickIngestRunSessions(records);
+  const oldestTerminalIndex = (): number => {
+    const candidates = next
+      .map((record, index) => ({ record, index }))
+      .filter(({ record }) => isQuickIngestReplayRecord(record))
+      .sort((left, right) => {
+        const timestampDelta =
+          quickIngestRecordTimestamp(left.record) -
+          quickIngestRecordTimestamp(right.record);
+        if (timestampDelta !== 0) return timestampDelta;
+        return quickIngestRecordSessionId(left.record).localeCompare(
+          quickIngestRecordSessionId(right.record),
+        );
+      });
+    return candidates[0]?.index ?? -1;
+  };
+  const terminalBytes = (): number =>
+    next
+      .filter(isQuickIngestReplayRecord)
+      .reduce((total, record) => total + quickIngestRecordBytes(record), 0);
+
+  while (
+    next.length > MAX_QUICK_INGEST_RUN_SESSIONS ||
+    terminalBytes() > MAX_QUICK_INGEST_TERMINAL_BYTES
+  ) {
+    const index = oldestTerminalIndex();
+    if (index < 0) return null;
+    next.splice(index, 1);
+  }
+  return next;
+};
+
+const mutateQuickIngestRunSessions = (
+  records: unknown[],
+  record: QuickIngestCompactRunSession | null,
+  sessionId?: string,
+  expectedRunId?: string,
+  expectedGeneration?: string,
+): { records: unknown[]; applied: boolean } => {
+  const id = String(record?.sessionId || sessionId || "").trim();
+  if (!id) return { records: [...records], applied: false };
+  const matching = records.filter(
+    (item) => quickIngestRecordSessionId(item) === id,
+  ) as Array<Record<string, unknown>>;
+  const hasExpectation = Boolean(expectedRunId || expectedGeneration);
+  const expectedMatch =
+    matching.length > 0 &&
+    matching.every((stored) => {
+      if (expectedGeneration && stored.generation !== expectedGeneration) {
+        return false;
+      }
+      if (
+        record?.kind === "terminal" &&
+        stored.kind !== "start" &&
+        stored.kind !== "run"
+      ) {
+        return false;
+      }
+      if (
+        expectedRunId &&
+        stored.kind !== "start" &&
+        stored.runId !== expectedRunId
+      ) {
+        return false;
+      }
+      return true;
+    });
+  if ((hasExpectation && !expectedMatch) || (!hasExpectation && matching.length > 0)) {
+    return { records: [...records], applied: false };
+  }
+
+  const replaced = records.filter(
+    (item) => quickIngestRecordSessionId(item) !== id,
+  );
+  if (record) replaced.push(record);
+  const bounded = boundQuickIngestRunSessions(replaced);
+  if (!bounded) return { records: [...records], applied: false };
+  if (record && !bounded.some((item) => item === record)) {
+    return { records: [...records], applied: false };
+  }
+  return { records: bounded, applied: true };
+};
+
+export const updateQuickIngestRunSessions = (
+  records: unknown[],
+  record: QuickIngestCompactRunSession | null,
+  sessionId?: string,
+  expectedRunId?: string,
+  expectedGeneration?: string,
+): unknown[] => {
+  return mutateQuickIngestRunSessions(
+    records,
+    record,
+    sessionId,
+    expectedRunId,
+    expectedGeneration,
+  ).records;
+};
+
+export const createQuickIngestRunSessionSaver = (
+  load: () => Promise<unknown[]>,
+  persist: (records: unknown[]) => Promise<void>,
+) => {
+  let pendingMutation: Promise<unknown> = Promise.resolve();
+  return (
+    record: QuickIngestCompactRunSession | null,
+    sessionId?: string,
+    expectedRunId?: string,
+    expectedGeneration?: string,
+  ): Promise<boolean> => {
+    const mutation = pendingMutation.then(async () => {
+      const records = await load();
+      const result = mutateQuickIngestRunSessions(
+        records,
+        record,
+        sessionId,
+        expectedRunId,
+        expectedGeneration,
+      );
+      if (!result.applied) return false;
+      await persist(result.records);
+      return true;
+    });
+    pendingMutation = mutation.catch(() => undefined);
+    return mutation;
+  };
+};
+
+export const pollQuickIngestRunInBackground = (
+  tracking: Parameters<typeof reattachQuickIngestSession>[0],
+  options: { transportPreference: "poll" },
+  reattach: typeof reattachQuickIngestSession = reattachQuickIngestSession,
+): ReturnType<typeof reattachQuickIngestSession> =>
+  reattach(tracking, {
+    ...options,
+    requestOptions: { preferDirect: true },
+  });
+
+export const cancelQuickIngestRunInBackground = async (
+  tracking: Parameters<typeof reattachQuickIngestSession>[0],
+  reason: string,
+  cancel: typeof cancelRun = cancelRun,
+): Promise<{ ok: boolean; error?: string }> => {
+  const runId = String(tracking.runId || "").trim();
+  if (!runId) return { ok: false, error: "Missing run id." };
+  try {
+    await cancel(
+      mediaMethods,
+      runId,
+      { reason },
+      { preferDirect: true },
+    );
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "The ingest run could not be cancelled.",
+    };
+  }
 };
 
 const waitFor = (delayMs: number): Promise<void> =>
@@ -609,6 +900,7 @@ export default defineBackground({
     };
 
     const INGEST_FUNNEL_METRICS_KEY = "tldw:ingestFunnelMetrics";
+    const QUICK_INGEST_RUN_SESSIONS_KEY = "tldw:quickIngestRunSessions";
     const INGEST_FUNNEL_METRICS_LIMIT = 200;
     const METADATA_DEDUPE_FIELDS = [
       "url",
@@ -630,6 +922,35 @@ export default defineBackground({
 
     const createQuickIngestSessionId = (): string =>
       `qi-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+
+    const loadQuickIngestRunSessions = async (): Promise<unknown[]> => {
+      const records = await storage.get<unknown>(
+        QUICK_INGEST_RUN_SESSIONS_KEY,
+      );
+      if (records === undefined || records === null) return [];
+      if (!Array.isArray(records)) {
+        throw new Error("Stored quick ingest run sessions are invalid.");
+      }
+      const parsed = records.flatMap((record) => {
+        const parsed = parseQuickIngestCompactRunSession(record);
+        return parsed ? [parsed] : [];
+      });
+      const bounded = boundQuickIngestRunSessions(parsed);
+      if (!bounded) {
+        throw new Error(
+          "Quick ingest recovery storage exceeds the active-session safety limit.",
+        );
+      }
+      if (JSON.stringify(bounded) !== JSON.stringify(parsed)) {
+        await storage.set(QUICK_INGEST_RUN_SESSIONS_KEY, bounded);
+      }
+      return bounded;
+    };
+
+    const saveQuickIngestRunSession = createQuickIngestRunSessionSaver(
+      loadQuickIngestRunSessions,
+      (records) => storage.set(QUICK_INGEST_RUN_SESSIONS_KEY, records),
+    );
 
     const getQuickIngestModalSession = (
       sessionId: string | null | undefined,
@@ -2421,7 +2742,20 @@ export default defineBackground({
     const runQuickIngestBatch = async (
       payload: any,
       runtimeContext?: QuickIngestSessionRunContext,
-    ): Promise<{ ok: boolean; results: any[] }> => {
+    ): Promise<{
+      ok: boolean;
+      results: any[];
+      reviewRequired?: Array<Record<string, unknown>>;
+    }> => {
+      if (payload?.pendingRunRequest) {
+        if (!runtimeContext) {
+          throw new Error(
+            "Playlist ingest run tracking requires a background session.",
+          );
+        }
+        return await delegatePendingQuickIngestRun(payload, runtimeContext);
+      }
+
       const entries = Array.isArray(payload?.entries)
         ? payload.entries.filter(
             (entry: any) => entry?.conferenceOverride?.selected !== false,
@@ -3145,9 +3479,7 @@ export default defineBackground({
     const quickIngestSessionRuntime = createQuickIngestSessionRuntime({
       run: async (payload, context) => {
         const result = await runQuickIngestBatch(payload, context);
-        return {
-          results: result.results,
-        };
+        return adaptQuickIngestBatchResultForRuntime(result);
       },
       emit: async (type, payload) => {
         await emitBackgroundMessage(undefined, type, payload);
@@ -3163,7 +3495,17 @@ export default defineBackground({
           }
         }
       },
+      saveRunSession: saveQuickIngestRunSession,
+      loadRunSessions: loadQuickIngestRunSessions,
+      reattachRun: (tracking, options) =>
+        pollQuickIngestRunInBackground(tracking, options),
+      cancelRun: cancelQuickIngestRunInBackground,
       createSessionId: createQuickIngestSessionId,
+    });
+
+    const quickIngestRestorePromise = quickIngestSessionRuntime.restore();
+    void quickIngestRestorePromise.catch((error) => {
+      logBackgroundError("restore quick ingest runs", error);
     });
 
     handleRuntimeMessageRef = async (message: any, sender: any) => {
@@ -3192,8 +3534,25 @@ export default defineBackground({
         return { ok: tabId != null, tabId };
       }
       if (message.type === "tldw:quick-ingest/start") {
-        const startAck = quickIngestSessionRuntime.start(
+        try {
+          await quickIngestSessionRuntime.restore();
+        } catch (error) {
+          return {
+            ok: false,
+            sessionId: String(message?.sessionId || ""),
+            error:
+              error instanceof Error
+                ? error.message
+                : "Quick ingest recovery storage is unavailable.",
+          };
+        }
+        const attemptToken = String(message?.attemptToken || "").trim();
+        const startAck = await quickIngestSessionRuntime.start(
           (message.payload || {}) as Record<string, unknown>,
+          {
+            sessionId: String(message?.sessionId || ""),
+            ...(attemptToken ? { attemptToken } : {}),
+          },
         );
         if (startAck?.ok && startAck.sessionId) {
           quickIngestModalSessions.set(startAck.sessionId, {
@@ -3204,6 +3563,18 @@ export default defineBackground({
           void persistSessionState();
         }
         return startAck;
+      }
+      if (message.type === "tldw:quick-ingest/replay") {
+        return await quickIngestSessionRuntime.replay(
+          String(message?.payload?.sessionId || ""),
+        );
+      }
+      if (message.type === "tldw:quick-ingest/replay-ack") {
+        return await quickIngestSessionRuntime.acknowledgeReplay(
+          String(message?.payload?.sessionId || ""),
+          String(message?.payload?.runId || ""),
+          String(message?.payload?.generation || ""),
+        );
       }
       if (message.type === "tldw:quick-ingest/cancel") {
         const sessionId = String(message?.payload?.sessionId || "").trim();
@@ -3226,11 +3597,12 @@ export default defineBackground({
           session.abortControllers.clear();
         }
 
-        const runtimeCancel = quickIngestSessionRuntime.cancel(
+        const runtimeCancel = await quickIngestSessionRuntime.cancel(
           sessionId,
           reason,
         );
-        if (!runtimeCancel.ok && !session) {
+        if (!runtimeCancel.ok) {
+          if (session) session.cancelled = false;
           return runtimeCancel;
         }
         return { ok: true };

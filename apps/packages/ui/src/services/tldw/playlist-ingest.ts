@@ -561,6 +561,7 @@ export type PlaylistIngestPageParams = {
 export type PlaylistIngestRequestOptions = {
   timeoutMs?: number;
   signal?: AbortSignal;
+  preferDirect?: boolean;
 };
 
 export type PlaylistIngestStreamOptions = {
@@ -1586,6 +1587,23 @@ type ListRunItemsOptions = PlaylistIngestRequestOptions & {
 const MAX_PLAYLIST_RUN_ITEMS = 500;
 const MAX_PLAYLIST_RUN_CURSOR_LENGTH = 4096;
 
+const runRequestOptions = (
+  options: PlaylistIngestRequestOptions,
+): PlaylistIngestRequestOptions | undefined =>
+  options.signal === undefined &&
+  options.timeoutMs === undefined &&
+  options.preferDirect === undefined
+    ? undefined
+    : {
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
+        ...(options.timeoutMs === undefined
+          ? {}
+          : { timeoutMs: options.timeoutMs }),
+        ...(options.preferDirect === undefined
+          ? {}
+          : { preferDirect: options.preferDirect }),
+      };
+
 export const listRunItems = async (
   api: PlaylistIngestRunApi,
   runId: string,
@@ -1617,15 +1635,7 @@ export const listRunItems = async (
         ...(cursor === null ? {} : { cursor }),
         limit: pageSize,
       };
-      const requestOptions =
-        options.signal === undefined && options.timeoutMs === undefined
-          ? undefined
-          : {
-              ...(options.signal === undefined ? {} : { signal: options.signal }),
-              ...(options.timeoutMs === undefined
-                ? {}
-                : { timeoutMs: options.timeoutMs }),
-            };
+      const requestOptions = runRequestOptions(options);
       const page =
         requestOptions === undefined
           ? await api.listPlaylistIngestRunItems(runId, params)
@@ -1710,15 +1720,7 @@ const loadRunSnapshot = async (
 ): Promise<PlaylistIngestRunSnapshot> => {
   const maxRestarts = options.maxVersionRestarts ?? 2;
   for (let restart = 0; restart <= maxRestarts; restart += 1) {
-    const requestOptions =
-      options.signal === undefined && options.timeoutMs === undefined
-        ? undefined
-        : {
-            ...(options.signal === undefined ? {} : { signal: options.signal }),
-            ...(options.timeoutMs === undefined
-              ? {}
-              : { timeoutMs: options.timeoutMs }),
-          };
+    const requestOptions = runRequestOptions(options);
     const summary = await getRun(api, runId, requestOptions);
     const items = await listRunItems(api, runId, options);
     if (summary.version === items.version) {
@@ -1950,7 +1952,9 @@ type SubmitPendingChunksOptions = {
     request: PlaylistIngestSubmissionRequest,
   ) => Promise<ApiPlaylistIngestSubmissionResponse>;
   shouldStop?: () => boolean;
-  onProgress?: (result: PlaylistIngestSubmitPendingResult) => void;
+  onProgress?: (
+    result: PlaylistIngestSubmitPendingResult,
+  ) => void | Promise<void>;
 };
 
 const normalizeOccurrenceSubmission = (
@@ -2143,7 +2147,7 @@ export const submitPendingChunks = async ({
           batchIds.add(submission.batchId);
         }
       }
-      onProgress?.({
+      await onProgress?.({
         submissions: [...submissions],
         batchIds: [...batchIds],
         stopped: false,

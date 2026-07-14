@@ -114,7 +114,10 @@ type QuickIngestBatchInput = {
   autoApplyTemplate?: boolean;
   pendingRunRequest?: PlaylistIngestRunCreateRequest | null;
   __quickIngestSessionId?: string;
-  onTrackingMetadata?: (tracking: PersistedQuickIngestTracking) => void;
+  __quickIngestShouldStop?: () => boolean;
+  onTrackingMetadata?: (
+    tracking: PersistedQuickIngestTracking,
+  ) => void | Promise<void>;
 };
 
 type QuickIngestBatchResult = {
@@ -169,6 +172,7 @@ export const getQuickIngestAnalysisProviderWarning = (
 export type QuickIngestStartAck = {
   ok: boolean;
   sessionId?: string;
+  indeterminate?: boolean;
   error?: string;
 };
 
@@ -182,6 +186,26 @@ export type QuickIngestCancelInput = {
 export type QuickIngestCancelResponse = {
   ok: boolean;
   error?: string;
+};
+
+export type QuickIngestSessionReplayResponse = {
+  ok: boolean;
+  active?: boolean;
+  event?: {
+    type: string;
+    payload: Record<string, unknown>;
+  } | null;
+  replayAck?: {
+    runId: string;
+    generation: string;
+  };
+  error?: string;
+};
+
+export type QuickIngestReplayAckInput = {
+  sessionId: string;
+  runId: string;
+  generation: string;
 };
 
 const EXTENSION_TIMEOUT_MS = 10_000;
@@ -227,6 +251,23 @@ const buildDirectSessionSuffix = (): string => {
   }
   return Date.now().toString(36).slice(-8);
 };
+
+const createOpaqueExtensionIdentity = (prefix: "qi" | "qia"): string => {
+  try {
+    if (typeof globalThis.crypto?.randomUUID === "function") {
+      return `${prefix}-${globalThis.crypto.randomUUID()}`;
+    }
+  } catch {
+    // Fall back to the existing bounded local suffix below.
+  }
+  return `${prefix}-${Date.now()}-${buildDirectSessionSuffix()}`;
+};
+
+const createExtensionQuickIngestSessionId = (): string =>
+  createOpaqueExtensionIdentity("qi");
+
+const createExtensionQuickIngestAttemptToken = (): string =>
+  createOpaqueExtensionIdentity("qia");
 
 const normalizeBatchIds = (batchIds?: string[]): string[] =>
   Array.from(
@@ -306,23 +347,6 @@ const cancelDirectSessionBatches = async (
 
 const hasExtensionMessagingRuntime = (): boolean =>
   Boolean(browser?.runtime?.sendMessage && browser?.runtime?.id);
-
-const getRuntimeManifestVersion = (): number | null => {
-  try {
-    const manifest = browser?.runtime?.getManifest?.() as
-      | { manifest_version?: number }
-      | undefined;
-    const manifestVersion = Number(manifest?.manifest_version);
-    return Number.isFinite(manifestVersion) && manifestVersion > 0
-      ? Math.trunc(manifestVersion)
-      : null;
-  } catch {
-    return null;
-  }
-};
-
-const shouldPreferDirectQuickIngestSession = (): boolean =>
-  (getRuntimeManifestVersion() || 0) >= 3;
 
 const isDirectQuickIngestSessionId = (sessionId: string | undefined): boolean =>
   String(sessionId || "").trim().startsWith(DIRECT_QUICK_INGEST_SESSION_PREFIX);
@@ -672,14 +696,20 @@ const runVersion2QuickIngestBatch = async (
     (runInput) => runInput.occurrenceId,
   );
   const startedAt = Date.now();
-  const publishTracking = (
+  const isCancelled = () =>
+    Boolean(
+      input.__quickIngestShouldStop?.() || isDirectSessionCancelled(sessionId),
+    );
+  const publishTracking = async (
     submissionState: NonNullable<
       PersistedQuickIngestTracking["submissionState"]
     >,
     patch: Partial<PersistedQuickIngestTracking> = {},
-  ): void => {
-    input.onTrackingMetadata?.({
-      mode: "webui-direct",
+  ): Promise<void> => {
+    await input.onTrackingMetadata?.({
+      mode: isDirectQuickIngestSessionId(sessionId)
+        ? "webui-direct"
+        : "extension-runtime",
       submissionState,
       sessionId: sessionId || undefined,
       submissionOccurrenceIds: submittedItemIds,
@@ -691,13 +721,14 @@ const runVersion2QuickIngestBatch = async (
     });
   };
 
-  publishTracking("creating_run");
+  await publishTracking("creating_run");
 
   let run: PlaylistIngestRunCreateResult;
   try {
     run = await createRun(
       mediaMethods,
       buildVersion2RunRequest(input, pendingRunRequest),
+      DIRECT_QUICK_INGEST_TRANSPORT,
     );
   } catch (error) {
     if (
@@ -713,16 +744,21 @@ const runVersion2QuickIngestBatch = async (
     throw error;
   }
 
-  publishTracking("run_created", { runId: run.runId });
+  await publishTracking("run_created", { runId: run.runId });
 
-  if (isDirectSessionCancelled(sessionId)) {
+  if (isCancelled()) {
     let cleanupFailed = false;
     try {
-      await cancelRun(mediaMethods, run.runId, { reason: "user_cancelled" });
+      await cancelRun(
+        mediaMethods,
+        run.runId,
+        { reason: "user_cancelled" },
+        DIRECT_QUICK_INGEST_TRANSPORT,
+      );
     } catch {
       cleanupFailed = true;
     }
-    publishTracking(cleanupFailed ? "cleanup_required" : "acknowledged", {
+    await publishTracking(cleanupFailed ? "cleanup_required" : "acknowledged", {
       runId: run.runId,
     });
     clearDirectSessionTracking(sessionId);
@@ -795,19 +831,19 @@ const runVersion2QuickIngestBatch = async (
       ] as const;
     }),
   );
-  const publishSubmittedTracking = (
+  const publishSubmittedTracking = async (
     submitted: Awaited<ReturnType<typeof submitPendingChunks>>,
     submissionState: NonNullable<
       PersistedQuickIngestTracking["submissionState"]
     >,
-  ): void => {
+  ): Promise<void> => {
     const accepted = submitted.submissions.filter(
       (submission) => submission.accepted,
     );
     const jobIds = accepted.flatMap((submission) =>
       submission.jobId === null ? [] : [submission.jobId],
     );
-    publishTracking(submissionState, {
+    await publishTracking(submissionState, {
       runId: run.runId,
       batchId: submitted.batchIds.at(-1),
       batchIds: submitted.batchIds,
@@ -827,9 +863,8 @@ const runVersion2QuickIngestBatch = async (
     baseFields: {},
     baseFieldsByOccurrenceId,
     filesByOccurrenceId,
-    shouldStop: () => isDirectSessionCancelled(sessionId),
-    onProgress: (progress) =>
-      publishSubmittedTracking(progress, "submitting"),
+    shouldStop: isCancelled,
+    onProgress: (progress) => publishSubmittedTracking(progress, "submitting"),
     submitChunk: (request) =>
       bgUpload({
         ...request,
@@ -845,7 +880,7 @@ const runVersion2QuickIngestBatch = async (
   let submissionCleanupError: string | null = null;
   if (submitted.stopped && submitted.unsentOccurrenceIds.length > 0) {
     try {
-      const userCancelled = isDirectSessionCancelled(sessionId);
+      const userCancelled = isCancelled();
       await cancelRun(
         mediaMethods,
         run.runId,
@@ -855,6 +890,7 @@ const runVersion2QuickIngestBatch = async (
               occurrenceIds: submitted.unsentOccurrenceIds,
               reason: "submission_stopped",
             },
+        DIRECT_QUICK_INGEST_TRANSPORT,
       );
     } catch (error) {
       submissionCleanupError =
@@ -864,7 +900,7 @@ const runVersion2QuickIngestBatch = async (
     }
   }
 
-  publishSubmittedTracking(
+  await publishSubmittedTracking(
     submitted,
     submissionCleanupError ? "cleanup_required" : "acknowledged",
   );
@@ -1619,15 +1655,54 @@ export const submitQuickIngestBatch = async (
 export const startQuickIngestSession = async (
   input: QuickIngestBatchInput,
 ): Promise<QuickIngestStartAck> => {
-  if (!shouldPreferDirectQuickIngestSession() && (await canUseExtensionMessagingRuntime())) {
+  if (await canUseExtensionMessagingRuntime()) {
+    const sessionId = createExtensionQuickIngestSessionId();
+    const attemptToken = createExtensionQuickIngestAttemptToken();
     try {
-      return await sendExtensionMessageWithTimeout<QuickIngestStartAck>({
+      const ack = await sendExtensionMessageWithTimeout<QuickIngestStartAck>({
         type: "tldw:quick-ingest/start",
+        sessionId,
+        attemptToken,
         payload: input,
       });
+      if (!ack?.ok || ack.sessionId !== sessionId) {
+        return {
+          ok: false,
+          sessionId,
+          error:
+            ack?.error ||
+            "Extension quick ingest returned a conflicting session identity.",
+        };
+      }
+      return ack;
     } catch {
-      // Fall through to the direct session ack when the runtime exists
-      // but message delivery is unhealthy.
+      try {
+        const replay =
+          await sendExtensionMessageWithTimeout<QuickIngestSessionReplayResponse>(
+            {
+              type: "tldw:quick-ingest/replay",
+              payload: { sessionId },
+            },
+          );
+        if (replay?.ok) return { ok: true, sessionId };
+        return {
+          ok: false,
+          sessionId,
+          error:
+            replay?.error ||
+            "Quick ingest start delivery was interrupted and no retained session was found.",
+        };
+      } catch (error) {
+        return {
+          ok: false,
+          indeterminate: true,
+          sessionId,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Quick ingest start delivery was interrupted.",
+        };
+      }
     }
   }
 
@@ -1637,6 +1712,63 @@ export const startQuickIngestSession = async (
     ok: true,
     sessionId: `${DIRECT_QUICK_INGEST_SESSION_PREFIX}${Date.now()}-${buildDirectSessionSuffix()}`,
   };
+};
+
+const replayQuickIngestSessionMessage = async (
+  sessionId: string,
+): Promise<QuickIngestSessionReplayResponse> =>
+  sendExtensionMessageWithTimeout<QuickIngestSessionReplayResponse>({
+    type: "tldw:quick-ingest/replay",
+    payload: { sessionId },
+  });
+
+export const queryQuickIngestSession = async (
+  sessionId: string,
+): Promise<QuickIngestSessionReplayResponse> => {
+  const normalizedSessionId = String(sessionId || "").trim();
+  if (!normalizedSessionId) return { ok: false, error: "Missing session id." };
+  if (!(await canUseExtensionMessagingRuntime())) {
+    return { ok: false, error: "Extension runtime is unavailable." };
+  }
+  try {
+    return await replayQuickIngestSessionMessage(normalizedSessionId);
+  } catch (error) {
+    return {
+      ok: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Quick ingest session replay failed.",
+    };
+  }
+};
+
+export const acknowledgeQuickIngestSessionReplay = async (
+  input: QuickIngestReplayAckInput,
+): Promise<QuickIngestCancelResponse> => {
+  const sessionId = String(input?.sessionId || "").trim();
+  const runId = String(input?.runId || "").trim();
+  const generation = String(input?.generation || "").trim();
+  if (!sessionId || !runId || !generation) {
+    return { ok: false, error: "Replay acknowledgement is incomplete." };
+  }
+  if (!(await canUseExtensionMessagingRuntime())) {
+    return { ok: false, error: "Extension runtime is unavailable." };
+  }
+  try {
+    return await sendExtensionMessageWithTimeout<QuickIngestCancelResponse>({
+      type: "tldw:quick-ingest/replay-ack",
+      payload: { sessionId, runId, generation },
+    });
+  } catch (error) {
+    return {
+      ok: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Quick ingest replay acknowledgement failed.",
+    };
+  }
 };
 
 export const cancelQuickIngestSession = async (
@@ -1649,7 +1781,12 @@ export const cancelQuickIngestSession = async (
     return { ok: false, error: "Missing session id." };
   }
 
-  if (isDirectQuickIngestSessionId(sessionId)) {
+  const directSession =
+    isDirectQuickIngestSessionId(sessionId) ||
+    tracking?.mode === "webui-direct" ||
+    directQuickIngestSessionTrackers.has(sessionId);
+
+  if (directSession) {
     directQuickIngestCancelledSessions.add(sessionId);
   }
 
@@ -1675,10 +1812,14 @@ export const cancelQuickIngestSession = async (
     }
   }
 
-  if (
-    !isDirectQuickIngestSessionId(sessionId) &&
-    (await canUseExtensionMessagingRuntime())
-  ) {
+  if (!directSession) {
+    if (!(await canUseExtensionMessagingRuntime())) {
+      return {
+        ok: false,
+        error:
+          "The extension runtime is unavailable; cancellation remains unconfirmed and will be reconciled when it reconnects.",
+      };
+    }
     try {
       return await sendExtensionMessageWithTimeout<QuickIngestCancelResponse>({
         type: "tldw:quick-ingest/cancel",
@@ -1687,9 +1828,14 @@ export const cancelQuickIngestSession = async (
           reason: input?.reason,
         },
       });
-    } catch {
-      // Fall through to the direct cancellation path when runtime messaging
-      // stops responding in packaged extension contexts.
+    } catch (error) {
+      return {
+        ok: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "The extension runtime did not confirm cancellation.",
+      };
     }
   }
 

@@ -627,6 +627,24 @@ const createInitialStateFromSeed = (
 const clampStep = (step: number): WizardStep =>
   Math.max(1, Math.min(5, step)) as WizardStep
 
+export const applyPlaylistReviewRequiredState = (
+  state: IngestWizardState,
+  items: PlaylistReviewRequiredRecoveryItem[]
+): IngestWizardState => {
+  const queueItems = mergePlaylistReviewRequired(state.queueItems, items)
+  const { block } = buildPlaylistIngestRunRequest(queueItems)
+  return {
+    ...state,
+    currentStep: 3,
+    highestStep: Math.max(state.highestStep, 3) as WizardStep,
+    queueItems,
+    pendingRunRequest: null,
+    processingBlock: block,
+    processingState: { ...INITIAL_PROCESSING_STATE },
+    results: [],
+  }
+}
+
 const reducer = (
   state: IngestWizardState,
   action: Action,
@@ -829,20 +847,8 @@ const reducer = (
       if (state.results === action.results) return state
       return { ...state, results: action.results }
 
-    case "APPLY_PLAYLIST_REVIEW_REQUIRED": {
-      const queueItems = mergePlaylistReviewRequired(state.queueItems, action.items)
-      const { block } = buildPlaylistIngestRunRequest(queueItems)
-      return {
-        ...state,
-        currentStep: 3,
-        highestStep: Math.max(state.highestStep, 3) as WizardStep,
-        queueItems,
-        pendingRunRequest: null,
-        processingBlock: block,
-        processingState: { ...INITIAL_PROCESSING_STATE },
-        results: [],
-      }
-    }
+    case "APPLY_PLAYLIST_REVIEW_REQUIRED":
+      return applyPlaylistReviewRequiredState(state, action.items)
 
     case "SKIP_TO_PROCESSING": {
       // Quick Mode: skip Steps 2-3, jump directly to Step 4 with default preset
@@ -937,6 +943,7 @@ type IngestWizardProviderProps = {
   initialState?: Partial<IngestWizardState>
   onStateChange?: (state: IngestWizardState) => void
   presetMap?: PresetMap
+  onCancelProcessing?: () => boolean
 }
 
 export const IngestWizardProvider: React.FC<IngestWizardProviderProps> = ({
@@ -944,6 +951,7 @@ export const IngestWizardProvider: React.FC<IngestWizardProviderProps> = ({
   initialState,
   onStateChange,
   presetMap = DEFAULT_PRESETS,
+  onCancelProcessing,
 }) => {
   const reducerWithPresetMap = useCallback(
     (state: IngestWizardState, action: Action) =>
@@ -993,7 +1001,10 @@ export const IngestWizardProvider: React.FC<IngestWizardProviderProps> = ({
   )
   const startProcessing = useCallback(() => dispatch({ type: "START_PROCESSING" }), [])
   const skipToProcessing = useCallback(() => dispatch({ type: "SKIP_TO_PROCESSING" }), [])
-  const cancelProcessing = useCallback(() => dispatch({ type: "CANCEL_PROCESSING" }), [])
+  const cancelProcessing = useCallback(() => {
+    if (onCancelProcessing?.()) return
+    dispatch({ type: "CANCEL_PROCESSING" })
+  }, [onCancelProcessing])
   const cancelItem = useCallback((id: string) => dispatch({ type: "CANCEL_ITEM", id }), [])
   const updateItemProgress = useCallback(
     (progress: ItemProgress) =>

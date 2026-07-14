@@ -70,6 +70,93 @@ describe("quick ingest session store", () => {
     expect(sessionStorage.getItem(STORAGE_KEY)).toBeNull()
   })
 
+  it("keeps the prior replay identity when a Review handoff cannot be confirmed", () => {
+    const store = createQuickIngestSessionStore()
+    store.getState().upsertSession({
+      ...createEmptyQuickIngestSession(),
+      lifecycle: "processing",
+      currentStep: 4,
+      tracking: {
+        mode: "extension-runtime",
+        sessionId: "qi-store-review-write-failure",
+        itemIds: ["occ-store-review-write-failure"],
+        startedAt: Date.now(),
+      },
+    })
+    const before = store.getState().session
+    const durableBefore = sessionStorage.getItem(STORAGE_KEY)
+    const realSessionStorage = window.sessionStorage
+    Object.defineProperty(window, "sessionStorage", {
+      configurable: true,
+      value: {
+        getItem: realSessionStorage.getItem.bind(realSessionStorage),
+        setItem: () => {
+          throw new DOMException("Review persistence unavailable", "QuotaExceededError")
+        },
+        removeItem: realSessionStorage.removeItem.bind(realSessionStorage),
+      },
+    })
+
+    try {
+      expect(
+        store.getState().commitReviewHandoff({
+          lifecycle: "draft",
+          currentStep: 3,
+          processingState: {
+            status: "idle",
+            perItemProgress: [],
+            elapsed: 0,
+            estimatedRemaining: 0,
+          },
+        })
+      ).toBe(false)
+      expect(store.getState().session).toEqual(before)
+      expect(realSessionStorage.getItem(STORAGE_KEY)).toBe(durableBefore)
+    } finally {
+      Object.defineProperty(window, "sessionStorage", {
+        configurable: true,
+        value: realSessionStorage,
+      })
+    }
+  })
+
+  it("writes a Review handoff in the envelope used by normal store rehydration", () => {
+    const store = createQuickIngestSessionStore()
+    store.getState().upsertSession({
+      ...createEmptyQuickIngestSession(),
+      lifecycle: "processing",
+      currentStep: 4,
+      tracking: {
+        mode: "extension-runtime",
+        sessionId: "qi-store-review-envelope",
+        itemIds: ["occ-store-review-envelope"],
+        startedAt: Date.now(),
+      },
+    })
+
+    expect(
+      store.getState().commitReviewHandoff({
+        lifecycle: "draft",
+        currentStep: 3,
+        processingState: {
+          status: "idle",
+          perItemProgress: [],
+          elapsed: 0,
+          estimatedRemaining: 0,
+        },
+      })
+    ).toBe(true)
+
+    const persisted = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || "null")
+    expect(persisted?.version).toBe(0)
+    expect(persisted?.state?.session?.currentStep).toBe(3)
+    expect(persisted?.state?.session?.tracking).toBeUndefined()
+
+    const rehydrated = createQuickIngestSessionStore().getState().session
+    expect(rehydrated?.currentStep).toBe(3)
+    expect(rehydrated?.tracking).toBeUndefined()
+  })
+
   it("stores queue file stubs without raw File instances", () => {
     const file = new File(["sample"], "sample.txt", {
       type: "text/plain",

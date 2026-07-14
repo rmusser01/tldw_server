@@ -150,6 +150,8 @@ type QuickIngestSessionState = QuickIngestSessionPersistedState & {
   showSession: () => void
   hideSession: () => void
   markProcessingTracking: (tracking: PersistedQuickIngestTracking) => void
+  clearProcessingTracking: () => void
+  commitReviewHandoff: (next: Partial<QuickIngestSessionRecord>) => boolean
   markInterrupted: (reason?: string) => void
   clearSession: () => void
   replaceWithNewDraft: (
@@ -966,6 +968,20 @@ const buildPersistedState = (
   session: sanitizeSession(session),
 })
 
+const persistConfirmedSession = (session: QuickIngestSessionRecord): boolean => {
+  if (typeof window === "undefined") return false
+  const serialized = JSON.stringify({
+    state: buildPersistedState(session),
+    version: 0,
+  })
+  try {
+    window.sessionStorage.setItem(STORAGE_KEY, serialized)
+    return window.sessionStorage.getItem(STORAGE_KEY) === serialized
+  } catch {
+    return false
+  }
+}
+
 export const createEmptyQuickIngestSession = (): QuickIngestSessionRecord => {
   const now = Date.now()
   return {
@@ -1095,6 +1111,39 @@ export const createQuickIngestSessionStore = () =>
               updatedAt: Date.now(),
             }
           }),
+        clearProcessingTracking: () =>
+          withSessionUpdate(set, (current) => {
+            if (!current) return current
+            return {
+              ...current,
+              tracking: undefined,
+              updatedAt: Date.now(),
+            }
+          }),
+        commitReviewHandoff: (next) => {
+          const current = get().session
+          if (!current) return false
+          const session = sanitizeSession({
+            ...current,
+            ...next,
+            badge: {
+              ...current.badge,
+              ...(next.badge || {}),
+            },
+            resultSummary: {
+              ...current.resultSummary,
+              ...(next.resultSummary || {}),
+            },
+            tracking: undefined,
+            updatedAt: Date.now(),
+          })
+          if (!session || !persistConfirmedSession(session)) return false
+          set({
+            session,
+            triggerSummary: buildTriggerSummary(session),
+          })
+          return true
+        },
         markInterrupted: (reason) =>
           withSessionUpdate(set, (current) => {
             if (!current) return current

@@ -522,6 +522,65 @@ describe("playlist ingest run client", () => {
     });
   });
 
+  it("keeps direct transport on every summary and paged item request during resync", async () => {
+    const initial: PlaylistIngestRunSnapshot = {
+      summary: runSummary(1),
+      items: [runItem("occ-1")],
+      lastEventId: 10,
+    };
+    const api = {
+      streamPlaylistIngestRunEvents: vi.fn(async function* () {
+        yield {
+          kind: "resyncRequired" as const,
+          runId: "run-1",
+          minEventId: 11,
+          latestEventId: 12,
+        };
+      }),
+      getPlaylistIngestRun: vi.fn().mockResolvedValue(runSummary(2)),
+      listPlaylistIngestRunItems: vi
+        .fn()
+        .mockResolvedValueOnce({
+          contractVersion: 2,
+          runId: "run-1",
+          version: 2,
+          items: [runItem("occ-1")],
+          nextCursor: "page-2",
+        })
+        .mockResolvedValueOnce({
+          contractVersion: 2,
+          runId: "run-1",
+          version: 2,
+          items: [runItem("occ-2")],
+          nextCursor: null,
+        }),
+    } as unknown as PlaylistIngestRunApi;
+
+    const snapshots: PlaylistIngestRunSnapshot[] = [];
+    for await (const snapshot of streamRunEvents(api, initial, {
+      preferDirect: true,
+    })) {
+      snapshots.push(snapshot);
+    }
+
+    expect(snapshots[0]?.items).toHaveLength(2);
+    expect(api.getPlaylistIngestRun).toHaveBeenCalledWith("run-1", {
+      preferDirect: true,
+    });
+    expect(api.listPlaylistIngestRunItems).toHaveBeenNthCalledWith(
+      1,
+      "run-1",
+      { limit: 100 },
+      { preferDirect: true },
+    );
+    expect(api.listPlaylistIngestRunItems).toHaveBeenNthCalledWith(
+      2,
+      "run-1",
+      { limit: 100, cursor: "page-2" },
+      { preferDirect: true },
+    );
+  });
+
   it("reloads authoritatively instead of applying same-state retained replay", async () => {
     const authoritative = runItem("occ-1", {
       state: "running",

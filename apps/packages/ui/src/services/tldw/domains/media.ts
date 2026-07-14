@@ -122,9 +122,12 @@ const withPlaylistIngestError = async <T>(request: () => Promise<T>): Promise<T>
 
 const playlistRequestOptions = (
   options?: PlaylistIngestRequestOptions
-): { timeoutMs?: number; abortSignal?: AbortSignal } => ({
+): { timeoutMs?: number; abortSignal?: AbortSignal; preferDirect?: boolean } => ({
   ...(options?.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
-  ...(options?.signal !== undefined ? { abortSignal: options.signal } : {})
+  ...(options?.signal !== undefined ? { abortSignal: options.signal } : {}),
+  ...(options?.preferDirect !== undefined
+    ? { preferDirect: options.preferDirect }
+    : {})
 })
 
 const normalizeReferenceImageCandidate = (

@@ -10,6 +10,7 @@ import {
   cancelRun,
   pollRunSnapshot,
   streamRunEvents,
+  type PlaylistIngestRequestOptions,
   type PlaylistIngestRunItem,
   type PlaylistIngestRunSnapshot,
 } from "@/services/tldw/playlist-ingest"
@@ -186,6 +187,7 @@ const deriveLifecycle = (
 
 type QuickIngestReattachOptions = {
   transportPreference?: "sse" | "poll"
+  requestOptions?: PlaylistIngestRequestOptions
 }
 
 const successfulRunOutcomes = new Set([
@@ -294,8 +296,17 @@ const reattachRun = async (
   options: QuickIngestReattachOptions,
   submissionState?: PersistedQuickIngestTracking["submissionState"],
 ): Promise<ReattachedQuickIngestSnapshot> => {
-  let polled = await pollRunSnapshot(mediaMethods, runId)
-  if (submissionState === "run_created" || submissionState === "submitting") {
+  let polled = await pollRunSnapshot(
+    mediaMethods,
+    runId,
+    undefined,
+    options.requestOptions
+  )
+  if (
+    submissionState === "run_created" ||
+    submissionState === "submitting" ||
+    submissionState === "cleanup_required"
+  ) {
     const unsentOccurrenceIds = polled.items.flatMap((item) =>
       item.state === "staged" ||
       item.state === "awaiting_upload" ||
@@ -307,8 +318,13 @@ const reattachRun = async (
       await cancelRun(mediaMethods, runId, {
         occurrenceIds: unsentOccurrenceIds,
         reason: "submission_interrupted",
-      })
-      polled = await pollRunSnapshot(mediaMethods, runId)
+      }, options.requestOptions)
+      polled = await pollRunSnapshot(
+        mediaMethods,
+        runId,
+        undefined,
+        options.requestOptions
+      )
     }
   }
   const hasSafeEventBoundary = polled.lastEventId !== null
@@ -344,6 +360,7 @@ export const reattachQuickIngestSession = async (
         transportPreference:
           options.transportPreference ??
           (tracking.mode === "extension-runtime" ? "poll" : "sse"),
+        requestOptions: options.requestOptions,
       }, tracking.submissionState)
     } catch (error) {
       const status =
