@@ -14,6 +14,296 @@ def _b64_key(byte_char: bytes) -> str:
     return base64.b64encode(byte_char * 32).decode("ascii")
 
 
+@pytest.fixture
+async def shared_repo_state(tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ.repos.org_provider_secrets_repo import (
+        AuthnzOrgProviderSecretsRepo,
+    )
+    from tldw_Server_API.tests.AuthNZ_SQLite.test_byok_endpoints_sqlite import (
+        _setup_byok_sqlite,
+    )
+
+    state = await _setup_byok_sqlite(tmp_path, monkeypatch)
+    return state, AuthnzOrgProviderSecretsRepo(state["pool"])
+
+
+async def _insert_shared_row(
+    pool,
+    *,
+    scope_type: str,
+    scope_id: int,
+    provider: str,
+    encrypted_blob: str,
+    revoked_at: str | None = None,
+) -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    await pool.execute(
+        """
+        INSERT INTO org_provider_secrets (
+            scope_type, scope_id, provider, encrypted_blob, key_hint,
+            created_at, updated_at, revoked_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            scope_type,
+            scope_id,
+            provider,
+            encrypted_blob,
+            provider,
+            now,
+            now,
+            revoked_at,
+        ),
+    )
+
+
+def _scope_id(state, scope_type: str) -> int:
+    return int(state[scope_type]["id"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope_type", ["team", "org"])
+async def test_shared_alias_write_uses_canonical_provider(shared_repo_state, scope_type):
+    state, repo = shared_repo_state
+    scope_id = _scope_id(state, scope_type)
+
+    row = await repo.upsert_secret(
+        scope_type=scope_type,
+        scope_id=scope_id,
+        provider="oai",
+        encrypted_blob="canonical-write",
+        key_hint="write",
+        metadata=None,
+        updated_at=datetime.now(timezone.utc),
+    )
+
+    assert row["provider"] == "openai"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope_type", ["team", "org"])
+async def test_shared_fetch_prefers_canonical_over_legacy_alias(shared_repo_state, scope_type):
+    state, repo = shared_repo_state
+    scope_id = _scope_id(state, scope_type)
+    await _insert_shared_row(
+        state["pool"],
+        scope_type=scope_type,
+        scope_id=scope_id,
+        provider="openai",
+        encrypted_blob="canonical",
+    )
+    await _insert_shared_row(
+        state["pool"],
+        scope_type=scope_type,
+        scope_id=scope_id,
+        provider="oai",
+        encrypted_blob="legacy",
+    )
+
+    row = await repo.fetch_secret(scope_type, scope_id, "oai")
+
+    assert row is not None
+    assert row["encrypted_blob"] == "canonical"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope_type", ["team", "org"])
+async def test_shared_fetch_reads_one_legacy_alias(shared_repo_state, scope_type):
+    state, repo = shared_repo_state
+    scope_id = _scope_id(state, scope_type)
+    await _insert_shared_row(
+        state["pool"],
+        scope_type=scope_type,
+        scope_id=scope_id,
+        provider="oai",
+        encrypted_blob="legacy",
+    )
+
+    row = await repo.fetch_secret(scope_type, scope_id, "openai")
+
+    assert row is not None
+    assert row["provider"] == "oai"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope_type", ["team", "org"])
+async def test_shared_fetch_rejects_conflicting_legacy_aliases(shared_repo_state, scope_type):
+    from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
+        ProviderCredentialAliasConflictError,
+    )
+
+    state, repo = shared_repo_state
+    scope_id = _scope_id(state, scope_type)
+    for provider in ("custom-openai", "openai-compatible"):
+        await _insert_shared_row(
+            state["pool"],
+            scope_type=scope_type,
+            scope_id=scope_id,
+            provider=provider,
+            encrypted_blob=provider,
+        )
+
+    with pytest.raises(ProviderCredentialAliasConflictError):
+        await repo.fetch_secret(scope_type, scope_id, "custom-openai-api")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope_type", ["team", "org"])
+async def test_revoked_canonical_shared_row_blocks_active_legacy_alias(shared_repo_state, scope_type):
+    state, repo = shared_repo_state
+    scope_id = _scope_id(state, scope_type)
+    await _insert_shared_row(
+        state["pool"],
+        scope_type=scope_type,
+        scope_id=scope_id,
+        provider="openai",
+        encrypted_blob="revoked-canonical",
+        revoked_at=datetime.now(timezone.utc).isoformat(),
+    )
+    await _insert_shared_row(
+        state["pool"],
+        scope_type=scope_type,
+        scope_id=scope_id,
+        provider="oai",
+        encrypted_blob="active-legacy",
+    )
+
+    assert await repo.fetch_secret(scope_type, scope_id, "oai") is None
+    revoked = await repo.fetch_secret(scope_type, scope_id, "oai", include_revoked=True)
+    assert revoked is not None
+    assert revoked["encrypted_blob"] == "revoked-canonical"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope_type", ["team", "org"])
+async def test_shared_legacy_alias_row_can_be_touched(shared_repo_state, scope_type):
+    state, repo = shared_repo_state
+    scope_id = _scope_id(state, scope_type)
+    await _insert_shared_row(
+        state["pool"],
+        scope_type=scope_type,
+        scope_id=scope_id,
+        provider="oai",
+        encrypted_blob="legacy",
+    )
+    used_at = datetime.now(timezone.utc)
+
+    await repo.touch_last_used(scope_type, scope_id, "openai", used_at)
+
+    row = await state["pool"].fetchone(
+        "SELECT last_used_at FROM org_provider_secrets WHERE scope_type = ? AND scope_id = ? AND provider = ?",
+        (scope_type, scope_id, "oai"),
+    )
+    assert row is not None
+    assert row["last_used_at"] == used_at.isoformat()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope_type", ["team", "org"])
+async def test_shared_legacy_alias_row_can_be_revoked(shared_repo_state, scope_type):
+    state, repo = shared_repo_state
+    scope_id = _scope_id(state, scope_type)
+    await _insert_shared_row(
+        state["pool"],
+        scope_type=scope_type,
+        scope_id=scope_id,
+        provider="oai",
+        encrypted_blob="legacy",
+    )
+
+    assert await repo.delete_secret(scope_type, scope_id, "openai")
+    assert await repo.fetch_secret(scope_type, scope_id, "openai") is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope_type", ["team", "org"])
+async def test_shared_list_folds_canonical_and_single_legacy_rows(shared_repo_state, scope_type):
+    state, repo = shared_repo_state
+    scope_id = _scope_id(state, scope_type)
+    await _insert_shared_row(
+        state["pool"],
+        scope_type=scope_type,
+        scope_id=scope_id,
+        provider="openai",
+        encrypted_blob="canonical",
+    )
+    await _insert_shared_row(
+        state["pool"],
+        scope_type=scope_type,
+        scope_id=scope_id,
+        provider="oai",
+        encrypted_blob="shadowed-legacy",
+    )
+    await _insert_shared_row(
+        state["pool"],
+        scope_type=scope_type,
+        scope_id=scope_id,
+        provider="openai-compatible",
+        encrypted_blob="single-legacy",
+    )
+
+    rows = await repo.list_secrets(scope_type=scope_type, scope_id=scope_id)
+    by_provider = {row["provider"]: row for row in rows}
+
+    assert set(by_provider) == {"openai", "custom-openai-api"}
+    assert by_provider["openai"]["key_hint"] == "openai"
+    assert by_provider["custom-openai-api"]["key_hint"] == "openai-compatible"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope_type", ["team", "org"])
+async def test_shared_list_treats_revoked_canonical_as_authoritative(shared_repo_state, scope_type):
+    state, repo = shared_repo_state
+    scope_id = _scope_id(state, scope_type)
+    await _insert_shared_row(
+        state["pool"],
+        scope_type=scope_type,
+        scope_id=scope_id,
+        provider="openai",
+        encrypted_blob="revoked-canonical",
+        revoked_at=datetime.now(timezone.utc).isoformat(),
+    )
+    await _insert_shared_row(
+        state["pool"],
+        scope_type=scope_type,
+        scope_id=scope_id,
+        provider="oai",
+        encrypted_blob="active-legacy",
+    )
+
+    assert await repo.list_secrets(scope_type=scope_type, scope_id=scope_id) == []
+    rows = await repo.list_secrets(
+        scope_type=scope_type,
+        scope_id=scope_id,
+        include_revoked=True,
+    )
+    assert len(rows) == 1
+    assert rows[0]["provider"] == "openai"
+    assert rows[0]["key_hint"] == "openai"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope_type", ["team", "org"])
+async def test_shared_list_rejects_conflicting_legacy_aliases(shared_repo_state, scope_type):
+    from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
+        ProviderCredentialAliasConflictError,
+    )
+
+    state, repo = shared_repo_state
+    scope_id = _scope_id(state, scope_type)
+    for provider in ("custom-openai", "openai-compatible"):
+        await _insert_shared_row(
+            state["pool"],
+            scope_type=scope_type,
+            scope_id=scope_id,
+            provider=provider,
+            encrypted_blob=provider,
+        )
+
+    with pytest.raises(ProviderCredentialAliasConflictError):
+        await repo.list_secrets(scope_type=scope_type, scope_id=scope_id)
+
+
 @pytest.mark.asyncio
 async def test_org_provider_secrets_repo_sqlite(tmp_path, monkeypatch) -> None:
     from pathlib import Path

@@ -42,8 +42,12 @@ PROVIDER_ALIASES.update(
 )
 
 
+def _normalize_provider_spelling(provider: str) -> str:
+    return str(provider or "").strip().lower()
+
+
 def _normalize_provider_token(provider: str) -> str:
-    return str(provider or "").strip().lower().replace("_", "-")
+    return _normalize_provider_spelling(provider).replace("_", "-")
 
 
 _ALIAS_TO_CANONICAL = {
@@ -53,8 +57,8 @@ _ALIAS_TO_CANONICAL = {
 
 def canonical_provider_name(provider: str) -> str:
     """Return the adapter-owned canonical identity for a provider or alias."""
-    normalized = _normalize_provider_token(provider)
-    return _ALIAS_TO_CANONICAL.get(normalized, normalized)
+    spelling = _normalize_provider_spelling(provider)
+    return _ALIAS_TO_CANONICAL.get(_normalize_provider_token(spelling), spelling)
 
 
 def provider_lookup_names(provider: str) -> tuple[str, ...]:

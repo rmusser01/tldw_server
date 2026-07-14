@@ -6,6 +6,9 @@ from tldw_Server_API.app.api.v1.schemas.user_keys import (
     SharedProviderKeyUpsertRequest,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
+    ProviderCredentialAliasConflictError,
+)
 from tldw_Server_API.app.services import admin_byok_service as service
 
 
@@ -362,3 +365,62 @@ async def test_delete_shared_key_sanitizes_backend_failure_log(monkeypatch):
         expected_log="Failed to delete shared BYOK key",
         raw_marker="shared BYOK delete failed",
     )
+
+
+@pytest.mark.asyncio
+async def test_upsert_shared_key_canonicalizes_registered_alias(monkeypatch):
+    captured: dict = {}
+
+    class CapturingRepo:
+        async def upsert_secret(self, **kwargs):
+            captured.update(kwargs)
+            return {"provider": kwargs["provider"], "key_hint": "test"}
+
+    async def get_shared_repo():
+        return CapturingRepo()
+
+    async def pass_provider_test(**_kwargs):
+        return "gpt-test"
+
+    _allow_byok(monkeypatch)
+    monkeypatch.setattr(service, "get_shared_byok_repo", get_shared_repo)
+    monkeypatch.setattr(service, "normalize_credential_fields", lambda _provider, _fields: {})
+    monkeypatch.setattr(service, "test_provider_credentials", pass_provider_test)
+    monkeypatch.setattr(service, "encrypt_byok_payload", lambda _payload: {"ciphertext": "sealed"})
+    monkeypatch.setattr(service, "dumps_envelope", lambda _envelope: "sealed-envelope")
+
+    response = await service.upsert_shared_key(
+        _principal(),
+        SharedProviderKeyUpsertRequest(
+            scope_type="org",
+            scope_id=42,
+            provider="oai",
+            api_key="sk-test",
+        ),
+    )
+
+    assert captured["provider"] == "openai"
+    assert response.provider == "openai"
+
+
+@pytest.mark.asyncio
+async def test_list_shared_keys_maps_alias_conflict_to_bounded_409(monkeypatch):
+    async def get_repo():
+        return _SharedRepo(
+            list_error=ProviderCredentialAliasConflictError("raw alias details"),
+        )
+
+    _allow_byok(monkeypatch)
+    monkeypatch.setattr(service, "get_shared_byok_repo", get_repo)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await service.list_shared_keys(
+            _principal(),
+            scope_type="org",
+            scope_id=42,
+            provider="custom-openai-api",
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == "Conflicting provider credential aliases"
+    assert "raw alias details" not in exc_info.value.detail

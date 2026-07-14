@@ -530,8 +530,16 @@ async def test_shared_repository_outage_does_not_advance_precedence(
             return None
 
     class _FakeSharedRepo:
-        async def fetch_secret(self, requested_scope: str, scope_id: int, provider: str):
+        async def fetch_secret(
+            self,
+            requested_scope: str,
+            scope_id: int,
+            provider: str,
+            *,
+            include_revoked: bool = False,
+        ):
             assert requested_scope == scope_type
+            assert include_revoked is True
             raise ConnectionError("shared store outage with token=do-not-leak")
 
     async def _fake_get_user_repo():
@@ -1039,8 +1047,16 @@ async def test_present_non_dict_credential_fields_fail_closed(
             return row if scope == "user" else None
 
     class _FakeSharedRepo:
-        async def fetch_secret(self, scope_type: str, scope_id: int, provider: str):
+        async def fetch_secret(
+            self,
+            scope_type: str,
+            scope_id: int,
+            provider: str,
+            *,
+            include_revoked: bool = False,
+        ):
             assert scope_type == scope
+            assert include_revoked is True
             return row
 
     async def _get_user_repo():

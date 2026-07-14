@@ -148,6 +148,74 @@ async def _setup_byok_sqlite(tmp_path, monkeypatch):
     }
 
 
+def _raw_encrypted_blob(api_key: str) -> str:
+    from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
+        build_secret_payload,
+        dumps_envelope,
+        encrypt_byok_payload,
+    )
+
+    return dumps_envelope(encrypt_byok_payload(build_secret_payload(api_key)))
+
+
+async def _insert_raw_user_key(
+    pool,
+    *,
+    user_id: int,
+    provider: str,
+    api_key: str,
+    revoked_at: str | None = None,
+) -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    await pool.execute(
+        """
+        INSERT INTO user_provider_secrets (
+            user_id, provider, encrypted_blob, key_hint,
+            created_at, updated_at, revoked_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            user_id,
+            provider,
+            _raw_encrypted_blob(api_key),
+            api_key[-4:],
+            now,
+            now,
+            revoked_at,
+        ),
+    )
+
+
+async def _insert_raw_shared_key(
+    pool,
+    *,
+    scope_type: str,
+    scope_id: int,
+    provider: str,
+    api_key: str,
+    revoked_at: str | None = None,
+) -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    await pool.execute(
+        """
+        INSERT INTO org_provider_secrets (
+            scope_type, scope_id, provider, encrypted_blob, key_hint,
+            created_at, updated_at, revoked_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            scope_type,
+            scope_id,
+            provider,
+            _raw_encrypted_blob(api_key),
+            api_key[-4:],
+            now,
+            now,
+            revoked_at,
+        ),
+    )
+
+
 @pytest.mark.asyncio
 async def test_byok_endpoints_sqlite(tmp_path, monkeypatch):
     state = await _setup_byok_sqlite(tmp_path, monkeypatch)
@@ -259,6 +327,14 @@ async def test_byok_endpoints_sqlite(tmp_path, monkeypatch):
         assert r.json()["key_hint"] == "4321"
 
         r = client.post(
+            f"/api/v1/orgs/{org_id}/keys/shared",
+            json={"provider": "oai", "api_key": "sk-org-alias-2468"},
+            headers=user_headers,
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["provider"] == "openai"
+
+        r = client.post(
             f"/api/v1/orgs/{org_id}/keys/shared/test",
             json={"provider": "anthropic"},
             headers=user_headers,
@@ -274,10 +350,19 @@ async def test_byok_endpoints_sqlite(tmp_path, monkeypatch):
         assert r.status_code == 200, r.text
         assert r.json()["status"] == "valid"
 
+        r = client.post(
+            f"/api/v1/orgs/{org_id}/keys/shared/test",
+            json={"provider": "oai"},
+            headers=user_headers,
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["provider"] == "openai"
+
         r = client.get(f"/api/v1/orgs/{org_id}/keys/shared", headers=user_headers)
         assert r.status_code == 200
         org_items = {item["provider"]: item for item in r.json()["items"]}
         assert "anthropic" in org_items
+        assert org_items["openai"]["last_used_at"] is not None
 
         r = client.get(f"/api/v1/teams/{team_id}/keys/shared", headers=user_headers)
         assert r.status_code == 200
@@ -347,12 +432,116 @@ async def test_byok_endpoints_sqlite(tmp_path, monkeypatch):
         r = client.delete(f"/api/v1/orgs/{org_id}/keys/shared/anthropic", headers=user_headers)
         assert r.status_code == 204
 
+        r = client.delete(f"/api/v1/orgs/{org_id}/keys/shared/oai", headers=user_headers)
+        assert r.status_code == 204
+
         r = client.delete(f"/api/v1/teams/{team_id}/keys/shared/openrouter", headers=user_headers)
         assert r.status_code == 204
 
         listing = client.get("/api/v1/users/keys", headers=user_headers)
         items = {item["provider"]: item for item in listing.json()["items"]}
         assert items["openai"]["source"] != "user"
+
+
+@pytest.mark.asyncio
+async def test_user_key_listing_folds_aliases_and_honors_shared_tombstones(tmp_path, monkeypatch):
+    state = await _setup_byok_sqlite(tmp_path, monkeypatch)
+    pool = state["pool"]
+    user_id = int(state["user"]["id"])
+    org_id = int(state["org"]["id"])
+    team_id = int(state["team"]["id"])
+    revoked_at = datetime.now(timezone.utc).isoformat()
+
+    await _insert_raw_user_key(
+        pool,
+        user_id=user_id,
+        provider="openai",
+        api_key="sk-user-canonical-1111",
+    )
+    await _insert_raw_user_key(
+        pool,
+        user_id=user_id,
+        provider="oai",
+        api_key="sk-user-legacy-2222",
+    )
+    await _insert_raw_user_key(
+        pool,
+        user_id=user_id,
+        provider="openai-compatible",
+        api_key="sk-user-single-3333",
+    )
+    await _insert_raw_shared_key(
+        pool,
+        scope_type="team",
+        scope_id=team_id,
+        provider="custom-openai-api-2",
+        api_key="sk-team-revoked-4444",
+        revoked_at=revoked_at,
+    )
+    await _insert_raw_shared_key(
+        pool,
+        scope_type="team",
+        scope_id=team_id,
+        provider="openai-compatible-2",
+        api_key="sk-team-legacy-5555",
+    )
+    await _insert_raw_shared_key(
+        pool,
+        scope_type="org",
+        scope_id=org_id,
+        provider="custom-openai-api-2",
+        api_key="sk-org-lower-6666",
+    )
+
+    from tldw_Server_API.app.main import app
+
+    token = await _issue_access_token(
+        state["user"],
+        active_org_id=org_id,
+        active_team_id=team_id,
+    )
+    with TestClient(app) as client:
+        response = client.get("/api/v1/users/keys", headers=_auth_headers(token))
+
+    assert response.status_code == 200, response.text
+    items = response.json()["items"]
+    by_provider = {item["provider"]: item for item in items}
+    assert sum(item["provider"] == "openai" for item in items) == 1
+    assert by_provider["openai"]["source"] == "user"
+    assert by_provider["openai"]["key_hint"] == "1111"
+    assert sum(item["provider"] == "custom-openai-api" for item in items) == 1
+    assert by_provider["custom-openai-api"]["source"] == "user"
+    assert by_provider["custom-openai-api-2"]["source"] == "none"
+    assert by_provider["custom-openai-api-2"]["has_key"] is False
+
+
+@pytest.mark.asyncio
+async def test_user_key_listing_rejects_conflicting_legacy_alias_rows(tmp_path, monkeypatch):
+    state = await _setup_byok_sqlite(tmp_path, monkeypatch)
+    pool = state["pool"]
+    user_id = int(state["user"]["id"])
+    org_id = int(state["org"]["id"])
+    team_id = int(state["team"]["id"])
+    for provider, suffix in (("custom-openai", "7777"), ("openai-compatible", "8888")):
+        await _insert_raw_user_key(
+            pool,
+            user_id=user_id,
+            provider=provider,
+            api_key=f"sk-user-conflict-{suffix}",
+        )
+
+    from tldw_Server_API.app.main import app
+
+    token = await _issue_access_token(
+        state["user"],
+        active_org_id=org_id,
+        active_team_id=team_id,
+    )
+    with TestClient(app) as client:
+        response = client.get("/api/v1/users/keys", headers=_auth_headers(token))
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Conflicting provider credential aliases"
 
 
 @pytest.mark.asyncio

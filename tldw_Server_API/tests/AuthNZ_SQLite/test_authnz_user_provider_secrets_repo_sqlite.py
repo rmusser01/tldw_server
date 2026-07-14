@@ -88,6 +88,21 @@ async def test_user_provider_secrets_repo_sqlite(tmp_path, monkeypatch) -> None:
     assert len(items) == 1
     assert items[0]["provider"] == "openai"
 
+    unknown_row = await repo.upsert_secret(
+        user_id=user_id,
+        provider=" Foo_Bar ",
+        encrypted_blob=encrypted_blob,
+        key_hint=key_hint,
+        metadata=None,
+        updated_at=now,
+        created_by=user_id,
+        updated_by=user_id,
+    )
+    assert unknown_row["provider"] == "foo_bar"
+    unknown = await repo.fetch_secret_for_user(user_id, "foo_bar")
+    assert unknown is not None
+    assert unknown["provider"] == "foo_bar"
+
     await repo.touch_last_used(user_id, "openai", now)
     refreshed = await repo.fetch_secret_for_user(user_id, "openai")
     assert refreshed is not None
@@ -98,5 +113,6 @@ async def test_user_provider_secrets_repo_sqlite(tmp_path, monkeypatch) -> None:
     missing = await repo.fetch_secret_for_user(user_id, "openai")
     assert missing is None
     revoked_rows = await repo.list_secrets_for_user(user_id, include_revoked=True)
-    assert len(revoked_rows) == 1
-    assert revoked_rows[0]["revoked_at"] is not None
+    revoked_by_provider = {row["provider"]: row for row in revoked_rows}
+    assert set(revoked_by_provider) == {"openai", "foo_bar"}
+    assert revoked_by_provider["openai"]["revoked_at"] is not None

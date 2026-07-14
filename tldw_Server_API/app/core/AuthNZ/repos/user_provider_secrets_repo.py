@@ -10,6 +10,7 @@ from loguru import logger
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
     ProviderCredentialAliasConflictError,
+    fold_provider_credential_rows,
 )
 from tldw_Server_API.app.core.LLM_Calls.provider_identity import (
     canonical_provider_name,
@@ -289,7 +290,7 @@ class AuthnzUserProviderSecretsRepo:
         include_revoked: bool = False,
     ) -> list[dict[str, Any]]:
         try:
-            revoked_clause = "" if include_revoked else " AND revoked_at IS NULL"
+            revoked_clause = ""
             if getattr(self.db_pool, "pool", None) is not None:
                 list_user_secrets_sql_template = """
                     SELECT id, user_id, provider, key_hint, metadata, created_at, updated_at, last_used_at,
@@ -316,7 +317,10 @@ class AuthnzUserProviderSecretsRepo:
                     list_user_secrets_sql,
                     (user_id,),
                 )
-            return [self._row_to_dict(row) for row in rows]
+            return fold_provider_credential_rows(
+                [self._row_to_dict(row) for row in rows],
+                include_revoked=include_revoked,
+            )
         except Exception as exc:
             logger.error(f"AuthnzUserProviderSecretsRepo.list_secrets_for_user failed: {exc}")
             raise

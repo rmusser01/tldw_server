@@ -20,10 +20,21 @@ def test_provider_identity_contract_is_canonical_first_and_deterministic():
     )
 
 
+def test_unknown_provider_identity_preserves_underscore_spelling():
+    from tldw_Server_API.app.core.LLM_Calls.provider_identity import (
+        canonical_provider_name,
+        provider_lookup_names,
+    )
+
+    assert canonical_provider_name(" Foo_Bar ") == "foo_bar"
+    assert provider_lookup_names("foo_bar") == ("foo_bar",)
+
+
 def test_legacy_storage_normalizer_remains_noncanonical():
     from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import normalize_provider_name
 
     assert normalize_provider_name(" OAI ") == "oai"
+    assert normalize_provider_name(" Foo_Bar ") == "foo_bar"
 
 
 def test_default_allowlist_accepts_registered_alias(monkeypatch):

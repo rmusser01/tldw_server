@@ -61,6 +61,7 @@ from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import (
 )
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
+    ProviderCredentialAliasConflictError,
     build_secret_payload,
     decrypt_byok_payload,
     dumps_envelope,
@@ -843,14 +844,32 @@ async def list_user_provider_keys(
     user_repo = await _get_user_repo()
     org_repo = await _get_org_repo()
 
-    user_rows = await user_repo.list_secrets_for_user(user_id)
+    try:
+        user_rows = await user_repo.list_secrets_for_user(
+            user_id,
+            include_revoked=True,
+        )
+    except ProviderCredentialAliasConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Conflicting provider credential aliases",
+        ) from exc
     user_keys = {row.get("provider"): row for row in user_rows}
     openai_user_full_row: dict[str, Any] | None = None
-    if _OPENAI_PROVIDER in user_keys:
-        openai_user_full_row = await user_repo.fetch_secret_for_user(
-            user_id,
-            _OPENAI_PROVIDER,
-        )
+    if (
+        _OPENAI_PROVIDER in user_keys
+        and user_keys[_OPENAI_PROVIDER].get("revoked_at") is None
+    ):
+        try:
+            openai_user_full_row = await user_repo.fetch_secret_for_user(
+                user_id,
+                _OPENAI_PROVIDER,
+            )
+        except ProviderCredentialAliasConflictError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Conflicting provider credential aliases",
+            ) from exc
 
     _, team_scope_ids, org_scope_ids, _ = derive_trusted_credential_scope(
         request,
@@ -859,20 +878,34 @@ async def list_user_provider_keys(
 
     shared_keys: dict[str, dict[str, Any]] = {}
     shared_sources: dict[str, str] = {}
-    for team_id in team_scope_ids:
-        rows = await org_repo.list_secrets(scope_type="team", scope_id=int(team_id))
-        for row in rows:
-            provider = row.get("provider")
-            if provider and provider not in shared_keys:
-                shared_keys[provider] = row
-                shared_sources[provider] = "team"
-    for org_id in org_scope_ids:
-        rows = await org_repo.list_secrets(scope_type="org", scope_id=int(org_id))
-        for row in rows:
-            provider = row.get("provider")
-            if provider and provider not in shared_keys:
-                shared_keys[provider] = row
-                shared_sources[provider] = "org"
+    try:
+        for team_id in team_scope_ids:
+            rows = await org_repo.list_secrets(
+                scope_type="team",
+                scope_id=int(team_id),
+                include_revoked=True,
+            )
+            for row in rows:
+                provider = row.get("provider")
+                if provider and provider not in shared_keys:
+                    shared_keys[provider] = row
+                    shared_sources[provider] = "team"
+        for org_id in org_scope_ids:
+            rows = await org_repo.list_secrets(
+                scope_type="org",
+                scope_id=int(org_id),
+                include_revoked=True,
+            )
+            for row in rows:
+                provider = row.get("provider")
+                if provider and provider not in shared_keys:
+                    shared_keys[provider] = row
+                    shared_sources[provider] = "org"
+    except ProviderCredentialAliasConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Conflicting provider credential aliases",
+        ) from exc
 
     providers = sorted(set(allowlist) | set(user_keys.keys()) | set(shared_keys.keys()))
     items: list[UserProviderKeyStatusItem] = []
@@ -881,6 +914,23 @@ async def list_user_provider_keys(
         user_row = user_keys.get(provider)
         shared_row = shared_keys.get(provider)
         auth_source = _user_row_openai_auth_source(openai_user_full_row) if provider == _OPENAI_PROVIDER else None
+        if (
+            (user_row and user_row.get("revoked_at") is not None)
+            or (
+                not user_row
+                and shared_row
+                and shared_row.get("revoked_at") is not None
+            )
+        ):
+            items.append(
+                UserProviderKeyStatusItem(
+                    provider=provider,
+                    has_key=False,
+                    source="none",
+                    last_used_at=(user_row or shared_row or {}).get("last_used_at"),
+                )
+            )
+            continue
         if not allowed and (user_row or shared_row):
             items.append(
                 UserProviderKeyStatusItem(

@@ -29,14 +29,15 @@ from tldw_Server_API.app.core.AuthNZ.repos.org_provider_secrets_repo import (
     AuthnzOrgProviderSecretsRepo,
 )
 from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
+    ProviderCredentialAliasConflictError,
     build_secret_payload,
     decrypt_byok_payload,
     dumps_envelope,
     encrypt_byok_payload,
     key_hint_for_api_key,
     loads_envelope,
-    normalize_provider_name,
 )
+from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
 
 router = APIRouter(prefix="", tags=["org-team-keys"])
@@ -157,7 +158,7 @@ async def upsert_org_shared_key(
     _require_byok_enabled()
     await _require_org_manager(principal, org_id)
 
-    provider_norm = normalize_provider_name(payload.provider)
+    provider_norm = canonical_provider_name(payload.provider)
     if not is_provider_allowlisted(provider_norm):
         raise HTTPException(status_code=403, detail="Provider not allowed for BYOK")
 
@@ -237,7 +238,10 @@ async def list_org_shared_keys(
     _require_byok_enabled()
     await _require_org_manager(principal, org_id)
     repo = await _get_shared_byok_repo()
-    rows = await repo.list_secrets(scope_type="org", scope_id=org_id)
+    try:
+        rows = await repo.list_secrets(scope_type="org", scope_id=org_id)
+    except ProviderCredentialAliasConflictError as exc:
+        raise HTTPException(status_code=409, detail="Conflicting provider credential aliases") from exc
     items = [
         SharedProviderKeyStatusItem(
             scope_type=row.get("scope_type"),
@@ -265,12 +269,15 @@ async def test_org_shared_key(
     _require_byok_enabled()
     await _require_org_manager(principal, org_id)
 
-    provider_norm = normalize_provider_name(payload.provider)
+    provider_norm = canonical_provider_name(payload.provider)
     if not is_provider_allowlisted(provider_norm):
         raise HTTPException(status_code=403, detail="Provider not allowed for BYOK")
 
     repo = await _get_shared_byok_repo()
-    row = await repo.fetch_secret("org", org_id, provider_norm)
+    try:
+        row = await repo.fetch_secret("org", org_id, provider_norm)
+    except ProviderCredentialAliasConflictError as exc:
+        raise HTTPException(status_code=409, detail="Conflicting provider credential aliases") from exc
     if not row:
         raise HTTPException(status_code=404, detail="Key not found")
     encrypted_blob = row.get("encrypted_blob")
@@ -318,13 +325,16 @@ async def test_org_shared_key(
     except Exception as exc:
         raise HTTPException(status_code=502, detail="Provider test call failed") from exc
 
-    await _touch_shared_last_used_if_match(
-        repo,
-        scope_type="org",
-        scope_id=org_id,
-        provider=provider_norm,
-        api_key=api_key,
-    )
+    try:
+        await _touch_shared_last_used_if_match(
+            repo,
+            scope_type="org",
+            scope_id=org_id,
+            provider=provider_norm,
+            api_key=api_key,
+        )
+    except ProviderCredentialAliasConflictError as exc:
+        raise HTTPException(status_code=409, detail="Conflicting provider credential aliases") from exc
     return SharedProviderKeyTestResponse(
         scope_type="org",
         scope_id=org_id,
@@ -348,12 +358,15 @@ async def delete_org_shared_key(
     await _require_org_manager(principal, org_id)
     repo = await _get_shared_byok_repo()
     actor_id = _principal_user_id(principal)
-    deleted = await repo.delete_secret(
-        "org",
-        org_id,
-        normalize_provider_name(provider),
-        revoked_by=actor_id,
-    )
+    try:
+        deleted = await repo.delete_secret(
+            "org",
+            org_id,
+            canonical_provider_name(provider),
+            revoked_by=actor_id,
+        )
+    except ProviderCredentialAliasConflictError as exc:
+        raise HTTPException(status_code=409, detail="Conflicting provider credential aliases") from exc
     if not deleted:
         raise HTTPException(status_code=404, detail="Key not found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -373,7 +386,7 @@ async def upsert_team_shared_key(
     _require_byok_enabled()
     await _require_team_manager(principal, team_id)
 
-    provider_norm = normalize_provider_name(payload.provider)
+    provider_norm = canonical_provider_name(payload.provider)
     if not is_provider_allowlisted(provider_norm):
         raise HTTPException(status_code=403, detail="Provider not allowed for BYOK")
 
@@ -453,7 +466,10 @@ async def list_team_shared_keys(
     _require_byok_enabled()
     await _require_team_manager(principal, team_id)
     repo = await _get_shared_byok_repo()
-    rows = await repo.list_secrets(scope_type="team", scope_id=team_id)
+    try:
+        rows = await repo.list_secrets(scope_type="team", scope_id=team_id)
+    except ProviderCredentialAliasConflictError as exc:
+        raise HTTPException(status_code=409, detail="Conflicting provider credential aliases") from exc
     items = [
         SharedProviderKeyStatusItem(
             scope_type=row.get("scope_type"),
@@ -481,12 +497,15 @@ async def test_team_shared_key(
     _require_byok_enabled()
     await _require_team_manager(principal, team_id)
 
-    provider_norm = normalize_provider_name(payload.provider)
+    provider_norm = canonical_provider_name(payload.provider)
     if not is_provider_allowlisted(provider_norm):
         raise HTTPException(status_code=403, detail="Provider not allowed for BYOK")
 
     repo = await _get_shared_byok_repo()
-    row = await repo.fetch_secret("team", team_id, provider_norm)
+    try:
+        row = await repo.fetch_secret("team", team_id, provider_norm)
+    except ProviderCredentialAliasConflictError as exc:
+        raise HTTPException(status_code=409, detail="Conflicting provider credential aliases") from exc
     if not row:
         raise HTTPException(status_code=404, detail="Key not found")
     encrypted_blob = row.get("encrypted_blob")
@@ -534,13 +553,16 @@ async def test_team_shared_key(
     except Exception as exc:
         raise HTTPException(status_code=502, detail="Provider test call failed") from exc
 
-    await _touch_shared_last_used_if_match(
-        repo,
-        scope_type="team",
-        scope_id=team_id,
-        provider=provider_norm,
-        api_key=api_key,
-    )
+    try:
+        await _touch_shared_last_used_if_match(
+            repo,
+            scope_type="team",
+            scope_id=team_id,
+            provider=provider_norm,
+            api_key=api_key,
+        )
+    except ProviderCredentialAliasConflictError as exc:
+        raise HTTPException(status_code=409, detail="Conflicting provider credential aliases") from exc
     return SharedProviderKeyTestResponse(
         scope_type="team",
         scope_id=team_id,
@@ -564,12 +586,15 @@ async def delete_team_shared_key(
     await _require_team_manager(principal, team_id)
     repo = await _get_shared_byok_repo()
     actor_id = _principal_user_id(principal)
-    deleted = await repo.delete_secret(
-        "team",
-        team_id,
-        normalize_provider_name(provider),
-        revoked_by=actor_id,
-    )
+    try:
+        deleted = await repo.delete_secret(
+            "team",
+            team_id,
+            canonical_provider_name(provider),
+            revoked_by=actor_id,
+        )
+    except ProviderCredentialAliasConflictError as exc:
+        raise HTTPException(status_code=409, detail="Conflicting provider credential aliases") from exc
     if not deleted:
         raise HTTPException(status_code=404, detail="Key not found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)

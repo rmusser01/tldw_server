@@ -95,6 +95,12 @@ async def test_openai_oauth_endpoints_postgres(test_db_pool, monkeypatch):
         create_organization,
         create_team,
     )
+    from tldw_Server_API.app.core.AuthNZ.repos.org_provider_secrets_repo import (
+        AuthnzOrgProviderSecretsRepo,
+    )
+    from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
+        ProviderCredentialAliasConflictError,
+    )
     from tldw_Server_API.app.main import app
     from tldw_Server_API.app.api.v1.endpoints import user_keys as user_keys_endpoints
 
@@ -165,6 +171,96 @@ async def test_openai_oauth_endpoints_postgres(test_db_pool, monkeypatch):
     team = await create_team(org_id=int(org["id"]), name=f"BYOK Team {name_suffix}")
     await add_org_member(org_id=int(org["id"]), user_id=user_id, role="lead")
     await add_team_member(team_id=int(team["id"]), user_id=user_id, role="lead")
+
+    shared_repo = AuthnzOrgProviderSecretsRepo(test_db_pool)
+    await shared_repo.ensure_tables()
+    base_scope_id = 1_000_000 + (uuid.uuid4().int % 1_000_000)
+    now = datetime.now(timezone.utc)
+    written = await shared_repo.upsert_secret(
+        scope_type="team",
+        scope_id=base_scope_id,
+        provider="oai",
+        encrypted_blob="pg-canonical-write",
+        key_hint="write",
+        metadata=None,
+        updated_at=now,
+    )
+    assert written["provider"] == "openai"
+
+    legacy_scope_id = base_scope_id + 1
+    await test_db_pool.execute(
+        """
+        INSERT INTO org_provider_secrets (
+            scope_type, scope_id, provider, encrypted_blob, key_hint, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $6)
+        """,
+        "org",
+        legacy_scope_id,
+        "oai",
+        "pg-legacy",
+        "legacy",
+        now,
+    )
+    legacy = await shared_repo.fetch_secret("org", legacy_scope_id, "openai")
+    assert legacy is not None
+    assert legacy["provider"] == "oai"
+    await shared_repo.touch_last_used("org", legacy_scope_id, "openai", now)
+    assert await shared_repo.delete_secret("org", legacy_scope_id, "openai")
+
+    revoked_scope_id = base_scope_id + 2
+    await test_db_pool.execute(
+        """
+        INSERT INTO org_provider_secrets (
+            scope_type, scope_id, provider, encrypted_blob, key_hint,
+            revoked_at, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $6, $6)
+        """,
+        "team",
+        revoked_scope_id,
+        "openai",
+        "pg-revoked-canonical",
+        "canonical",
+        now,
+    )
+    await test_db_pool.execute(
+        """
+        INSERT INTO org_provider_secrets (
+            scope_type, scope_id, provider, encrypted_blob, key_hint, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $6)
+        """,
+        "team",
+        revoked_scope_id,
+        "oai",
+        "pg-active-alias",
+        "alias",
+        now,
+    )
+    assert await shared_repo.fetch_secret("team", revoked_scope_id, "openai") is None
+    revoked_rows = await shared_repo.list_secrets(
+        scope_type="team",
+        scope_id=revoked_scope_id,
+        include_revoked=True,
+    )
+    assert len(revoked_rows) == 1
+    assert revoked_rows[0]["provider"] == "openai"
+
+    conflict_scope_id = base_scope_id + 3
+    for provider in ("custom-openai", "openai-compatible"):
+        await test_db_pool.execute(
+            """
+            INSERT INTO org_provider_secrets (
+                scope_type, scope_id, provider, encrypted_blob, key_hint, created_at, updated_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $6)
+            """,
+            "org",
+            conflict_scope_id,
+            provider,
+            provider,
+            provider,
+            now,
+        )
+    with pytest.raises(ProviderCredentialAliasConflictError):
+        await shared_repo.list_secrets(scope_type="org", scope_id=conflict_scope_id)
 
     user_token = await _issue_access_token(
         dict(user_row),

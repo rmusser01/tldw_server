@@ -33,14 +33,15 @@ from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import (
     AuthnzUserProviderSecretsRepo,
 )
 from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
+    ProviderCredentialAliasConflictError,
     build_secret_payload,
     decrypt_byok_payload,
     dumps_envelope,
     encrypt_byok_payload,
     key_hint_for_api_key,
     loads_envelope,
-    normalize_provider_name,
 )
+from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
 from tldw_Server_API.app.services import admin_scope_service
 
@@ -92,7 +93,7 @@ def normalize_credential_fields(
     fields: dict[str, Any] | None,
 ) -> dict[str, Any]:
     """Normalize credential fields; base_url is allowlisted per provider and egress-validated."""
-    provider_norm = normalize_provider_name(provider)
+    provider_norm = canonical_provider_name(provider)
     credential_fields = validate_credential_fields(
         provider_norm,
         fields,
@@ -148,6 +149,8 @@ async def list_user_keys(
     repo = await get_user_byok_repo()
     try:
         rows = await repo.list_secrets_for_user(user_id)
+    except ProviderCredentialAliasConflictError as exc:
+        raise HTTPException(status_code=409, detail="Conflicting provider credential aliases") from exc
     except Exception as exc:
         logger.error("Failed to list user BYOK keys")
         raise HTTPException(status_code=500, detail="Failed to list user BYOK keys") from exc
@@ -176,13 +179,15 @@ async def revoke_user_key(
         require_hierarchy=True,
     )
     repo = await get_user_byok_repo()
-    provider_norm = normalize_provider_name(provider)
+    provider_norm = canonical_provider_name(provider)
     try:
         deleted = await repo.delete_secret(
             user_id,
             provider_norm,
             revoked_by=principal.user_id,
         )
+    except ProviderCredentialAliasConflictError as exc:
+        raise HTTPException(status_code=409, detail="Conflicting provider credential aliases") from exc
     except Exception as exc:
         logger.error("Failed to revoke user BYOK key")
         raise HTTPException(status_code=500, detail="Failed to revoke user BYOK key") from exc
@@ -195,7 +200,7 @@ async def upsert_shared_key(
     payload: SharedProviderKeyUpsertRequest,
 ) -> SharedProviderKeyResponse:
     require_byok_enabled()
-    provider_norm = normalize_provider_name(payload.provider)
+    provider_norm = canonical_provider_name(payload.provider)
     if not is_provider_allowlisted(provider_norm):
         raise HTTPException(status_code=403, detail="Provider not allowed for BYOK")
 
@@ -259,12 +264,15 @@ async def test_shared_key(
     payload: SharedProviderKeyTestRequest,
 ) -> SharedProviderKeyTestResponse:
     require_byok_enabled()
-    provider_norm = normalize_provider_name(payload.provider)
+    provider_norm = canonical_provider_name(payload.provider)
     if not is_provider_allowlisted(provider_norm):
         raise HTTPException(status_code=403, detail="Provider not allowed for BYOK")
 
     repo = await get_shared_byok_repo()
-    row = await repo.fetch_secret(payload.scope_type, payload.scope_id, provider_norm)
+    try:
+        row = await repo.fetch_secret(payload.scope_type, payload.scope_id, provider_norm)
+    except ProviderCredentialAliasConflictError as exc:
+        raise HTTPException(status_code=409, detail="Conflicting provider credential aliases") from exc
     if not row:
         raise HTTPException(status_code=404, detail="Key not found")
     encrypted_blob = row.get("encrypted_blob")
@@ -301,13 +309,16 @@ async def test_shared_key(
     except Exception as exc:
         raise HTTPException(status_code=502, detail="Provider test call failed") from exc
 
-    await touch_shared_last_used_if_match(
-        repo,
-        scope_type=payload.scope_type,
-        scope_id=payload.scope_id,
-        provider=provider_norm,
-        api_key=api_key,
-    )
+    try:
+        await touch_shared_last_used_if_match(
+            repo,
+            scope_type=payload.scope_type,
+            scope_id=payload.scope_id,
+            provider=provider_norm,
+            api_key=api_key,
+        )
+    except ProviderCredentialAliasConflictError as exc:
+        raise HTTPException(status_code=409, detail="Conflicting provider credential aliases") from exc
 
     return SharedProviderKeyTestResponse(
         scope_type=payload.scope_type,
@@ -333,6 +344,8 @@ async def list_shared_keys(
             scope_id=scope_id,
             provider=provider,
         )
+    except ProviderCredentialAliasConflictError as exc:
+        raise HTTPException(status_code=409, detail="Conflicting provider credential aliases") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Invalid shared BYOK key query") from exc
     except Exception as exc:
@@ -359,7 +372,7 @@ async def delete_shared_key(
 ) -> None:
     require_byok_enabled()
     repo = await get_shared_byok_repo()
-    provider_norm = normalize_provider_name(provider)
+    provider_norm = canonical_provider_name(provider)
     try:
         deleted = await repo.delete_secret(
             scope_type,
@@ -367,6 +380,8 @@ async def delete_shared_key(
             provider_norm,
             revoked_by=principal.user_id,
         )
+    except ProviderCredentialAliasConflictError as exc:
+        raise HTTPException(status_code=409, detail="Conflicting provider credential aliases") from exc
     except Exception as exc:
         logger.error("Failed to delete shared BYOK key")
         raise HTTPException(status_code=500, detail="Failed to delete shared BYOK key") from exc

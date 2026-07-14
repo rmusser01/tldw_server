@@ -427,6 +427,23 @@ async def _get_org_repo() -> AuthnzOrgProviderSecretsRepo:
     return AuthnzOrgProviderSecretsRepo(pool)
 
 
+async def _fetch_active_shared_secret(
+    repo: AuthnzOrgProviderSecretsRepo,
+    scope_type: str,
+    scope_id: int,
+    provider: str,
+) -> dict[str, Any] | None:
+    row = await repo.fetch_secret(
+        scope_type,
+        scope_id,
+        provider,
+        include_revoked=True,
+    )
+    if row is not None and row.get("revoked_at") is not None:
+        raise ByokResolutionError("invalid_provider_credentials", provider)
+    return row
+
+
 def _fallback_result(
     provider: str,
     *,
@@ -1352,7 +1369,16 @@ async def resolve_byok_credentials(
         # Prefer team scope over org scope, mirroring list_user_provider_keys()
         for team_id in sorted({int(tid) for tid in team_ids if tid is not None}):
             try:
-                row = await shared_repo.fetch_secret("team", int(team_id), provider_norm)
+                row = await _fetch_active_shared_secret(
+                    shared_repo,
+                    "team",
+                    int(team_id),
+                    provider_norm,
+                )
+            except ByokResolutionError:
+                raise
+            except ProviderCredentialAliasConflictError:
+                raise ByokResolutionError("invalid_provider_credentials", provider_norm) from None
             except Exception as exc:
                 if not _is_credential_store_unavailable(exc):
                     raise
@@ -1411,7 +1437,16 @@ async def resolve_byok_credentials(
 
         for org_id in sorted({int(oid) for oid in org_ids if oid is not None}):
             try:
-                row = await shared_repo.fetch_secret("org", int(org_id), provider_norm)
+                row = await _fetch_active_shared_secret(
+                    shared_repo,
+                    "org",
+                    int(org_id),
+                    provider_norm,
+                )
+            except ByokResolutionError:
+                raise
+            except ProviderCredentialAliasConflictError:
+                raise ByokResolutionError("invalid_provider_credentials", provider_norm) from None
             except Exception as exc:
                 if not _is_credential_store_unavailable(exc):
                     raise
