@@ -772,8 +772,8 @@ def test_v2_document_identity_is_route_independent_and_v1_identity_is_unchanged(
     assert "aggregator" not in v2_from_crossref.document_id
 
 
-def test_pure_foundation_modules_have_no_io_or_runtime_service_dependencies() -> None:
-    source_root = Path(__file__).resolve().parents[2] / "app" / "core" / "Research" / "discovery"
+def _pure_module_violations(source: str, filename: str) -> list[str]:
+    forbidden_import_modules = {"tldw_server_api.app.core.security.http_hop"}
     forbidden_import_parts = {
         "aiohttp",
         "config",
@@ -786,6 +786,7 @@ def test_pure_foundation_modules_have_no_io_or_runtime_service_dependencies() ->
         "dotenv",
         "ftplib",
         "http",
+        "http_hop",
         "httpx",
         "requests",
         "settings",
@@ -798,36 +799,65 @@ def test_pure_foundation_modules_have_no_io_or_runtime_service_dependencies() ->
         "workflows",
     }
     forbidden_calls = {"getenv", "open", "read_bytes", "read_text", "urlopen"}
-    forbidden_import_symbols = {*forbidden_calls, "environ"}
+    forbidden_import_symbols = {*forbidden_calls, "environ", "request_http_hop"}
     violations: list[str] = []
 
-    for filename in ("contracts.py", "registry.py", "planner.py"):
-        path = source_root / filename
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=filename)
-        for node in ast.walk(tree):
-            imported: tuple[str, ...] = ()
-            if isinstance(node, ast.Import):
-                imported = tuple(alias.name for alias in node.names)
-            elif isinstance(node, ast.ImportFrom):
-                imported = (
-                    *((node.module,) if node.module else ()),
-                    *(alias.name for alias in node.names),
-                )
-            for module_name in imported:
-                parts = {part.casefold() for part in module_name.split(".")}
-                if parts & forbidden_import_parts or module_name.casefold() in forbidden_import_symbols:
-                    violations.append(f"{filename}:{node.lineno}:import:{module_name}")
-            if isinstance(node, ast.Call):
-                if isinstance(node.func, ast.Name) and node.func.id in forbidden_calls:
-                    violations.append(f"{filename}:{node.lineno}:call:{node.func.id}")
-                elif isinstance(node.func, ast.Attribute) and (
-                    node.func.attr in forbidden_calls or node.func.attr.startswith("read_")
-                ):
-                    violations.append(f"{filename}:{node.lineno}:call:{node.func.attr}")
-            if isinstance(node, ast.Attribute) and node.attr == "environ":
-                violations.append(f"{filename}:{node.lineno}:environment_read")
-            if isinstance(node, ast.Name) and node.id == "environ":
-                violations.append(f"{filename}:{node.lineno}:environment_read")
+    tree = ast.parse(source, filename=filename)
+    for node in ast.walk(tree):
+        imported: tuple[str, ...] = ()
+        if isinstance(node, ast.Import):
+            imported = tuple(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            imported = (
+                *((node.module,) if node.module else ()),
+                *(alias.name for alias in node.names),
+            )
+        for module_name in imported:
+            parts = {part.casefold() for part in module_name.split(".")}
+            normalized_name = module_name.casefold()
+            if (
+                normalized_name in forbidden_import_modules
+                or parts & forbidden_import_parts
+                or normalized_name in forbidden_import_symbols
+            ):
+                violations.append(f"{filename}:{node.lineno}:import:{module_name}")
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name) and node.func.id in forbidden_calls:
+                violations.append(f"{filename}:{node.lineno}:call:{node.func.id}")
+            elif isinstance(node.func, ast.Attribute) and (
+                node.func.attr in forbidden_calls or node.func.attr.startswith("read_")
+            ):
+                violations.append(f"{filename}:{node.lineno}:call:{node.func.attr}")
+        if isinstance(node, ast.Attribute) and node.attr == "environ":
+            violations.append(f"{filename}:{node.lineno}:environment_read")
+        if isinstance(node, ast.Name) and node.id == "environ":
+            violations.append(f"{filename}:{node.lineno}:environment_read")
+
+    return violations
+
+
+@pytest.mark.parametrize(
+    "source",
+    (
+        "import tldw_Server_API.app.core.Security.http_hop",
+        "from tldw_Server_API.app.core.Security import http_hop",
+        "from tldw_Server_API.app.core.Security.http_hop import request_http_hop",
+    ),
+)
+def test_pure_module_scanner_rejects_transport_facade_imports(source: str) -> None:
+    assert _pure_module_violations(source, "synthetic_gateway_import.py")
+
+
+def test_pure_foundation_modules_have_no_io_or_runtime_service_dependencies() -> None:
+    source_root = Path(__file__).resolve().parents[2] / "app" / "core" / "Research" / "discovery"
+    violations = [
+        violation
+        for filename in ("contracts.py", "registry.py", "planner.py")
+        for violation in _pure_module_violations(
+            (source_root / filename).read_text(encoding="utf-8"),
+            filename,
+        )
+    ]
 
     assert violations == []
 
@@ -892,6 +922,7 @@ forbidden_prefixes = (
     "tldw_Server_API.app.core.Research.planner",
     "tldw_Server_API.app.core.Research.providers",
     "tldw_Server_API.app.core.Research.synthesizer",
+    "tldw_Server_API.app.core.Security.http_hop",
     "tldw_Server_API.app.core.AuthNZ",
     "tldw_Server_API.app.core.DB_Management",
     "tldw_Server_API.app.core.config",

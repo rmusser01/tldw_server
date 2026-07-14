@@ -177,6 +177,8 @@ git diff --check
 - External-review fix RED: 2/2 predicate regressions failed before canonicalization, and the consolidated remaining suite stopped on the absent logical-attempt/dispatch-group contract boundary before production edits.
 - External-review fix GREEN: 64/64 focused contract/planner tests, 115/115 exact plan tests, 200/200 impacted package/jobs/endpoint tests, and 594/594 complete Research tests passed on the settled diff.
 - External-review fix gates: compileall, Ruff, Black, Python 3.10 AST parsing, and diff hygiene passed; Bandit reported zero findings and zero errors across 1,161 touched production lines. Task 2 remains In Progress pending external controller re-review.
+- Minor-fix RED/GREEN: three synthetic imports proved the purity scanner permitted the delivered `Security.http_hop` facade before the test-only rule; all three then passed alongside the existing static and subprocess purity guards.
+- Minor-fix gates: 78/78 contracts/planner/registry tests, compileall, Ruff, Black, and diff hygiene passed. Bandit is not applicable because no production Python changed. Task 2 remains In Progress pending controller re-review.
 
 ## Task 3 / Stage 3: Consume TASK-12971 Through a One-Hop Discovery Gateway
 
