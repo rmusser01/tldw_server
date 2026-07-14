@@ -414,6 +414,7 @@ export async function launchWithExtension(
   await page.goto(optionsUrl)
   if (!sw) {
     await seedStorageFromExtensionPage(page, seedConfig)
+    await page.reload({ waitUntil: "domcontentloaded" })
   }
   // Wait until storage has been cleared/seeded (sentinel set)
   await waitForStorageSeed(page)

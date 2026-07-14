@@ -2,9 +2,11 @@ import pytest
 from pydantic import SecretStr, ValidationError
 
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
+    AdminUserCreateRequest,
     AdminPasswordResetRequest,
     AdminPrivilegedActionRequest,
     AdminPasswordResetResponse,
+    RegistrationCodeRequest,
     UserUpdateRequest,
 )
 
@@ -21,6 +23,39 @@ def test_user_update_request_accepts_backend_role_vocabulary() -> None:
 def test_user_update_request_rejects_legacy_member_role() -> None:
     with pytest.raises(ValidationError):
         UserUpdateRequest(role="member")
+
+
+@pytest.mark.parametrize(
+    ("model", "kwargs"),
+    [
+        (UserUpdateRequest, {"role": "service"}),
+        (
+            AdminUserCreateRequest,
+            {
+                "username": "service-user",
+                "email": "service@example.com",
+                "password": "StrongPass123!",
+                "role": "service",
+            },
+        ),
+        (RegistrationCodeRequest, {"role_to_grant": "service"}),
+    ],
+)
+def test_admin_user_contract_rejects_service_principal_as_human_role(model, kwargs) -> None:
+    with pytest.raises(ValidationError):
+        model(**kwargs)
+
+
+@pytest.mark.parametrize("role", ["user", "admin"])
+def test_admin_user_contract_accepts_seeded_system_roles(role: str) -> None:
+    assert UserUpdateRequest(role=role).role == role
+    assert AdminUserCreateRequest(
+        username=f"{role}-account",
+        email=f"{role}@example.com",
+        password="StrongPass123!",
+        role=role,
+    ).role == role
+    assert RegistrationCodeRequest(role_to_grant=role).role_to_grant == role
 
 
 def test_admin_password_reset_response_omits_plaintext_password() -> None:

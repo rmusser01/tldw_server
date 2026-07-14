@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -196,6 +197,24 @@ def test_db_dry_run_skips_writes():
         assert not auth_db.exists()
         assert not base_dir.exists()
         assert not (Path(tmp_dir) / "Databases" / "evaluations.db").exists()
+
+
+def test_db_dry_run_does_not_import_database_paths(monkeypatch):
+    """Dry-run path calculation must avoid import-time database writes."""
+    monkeypatch.setitem(
+        sys.modules,
+        "tldw_Server_API.app.core.DB_Management.db_path_utils",
+        None,
+    )
+
+    with runner.isolated_filesystem():
+        result = runner.invoke(
+            app,
+            ["db", "--json", "--dry-run"],
+            env={"AUTH_MODE": "single_user"},
+        )
+
+    assert result.exit_code == 0, result.output
 
 
 def test_db_multi_user_invalid_database_url_errors():

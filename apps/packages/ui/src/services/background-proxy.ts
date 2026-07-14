@@ -1022,6 +1022,7 @@ export interface BgStreamInit<
   body?: any
   streamIdleTimeoutMs?: number
   abortSignal?: AbortSignal
+  onOpen?: () => void
 }
 
 const deriveStreamIdleTimeout = (cfg: any, path: string, override?: number) => {
@@ -1076,7 +1077,7 @@ async function* bgStreamDirect<
   P extends AllowedPath = AllowedPath,
   M extends AllowedMethodFor<P> = AllowedMethodFor<P>
 >(
-  { path, method = 'POST' as UpperLower<M>, headers = {}, body, streamIdleTimeoutMs, abortSignal }: BgStreamInit<P, M>
+  { path, method = 'POST' as UpperLower<M>, headers = {}, body, streamIdleTimeoutMs, abortSignal, onOpen }: BgStreamInit<P, M>
 ): AsyncGenerator<string> {
   const storage = createSafeStorage({ area: "local" })
   const cfg = (await resolveDirectConfig(storage)) || null
@@ -1272,15 +1273,20 @@ async function* bgStreamDirect<
     const errorInfo = await parseStreamError(resp)
     const error = new Error(
       formatErrorMessage(errorInfo.message, `HTTP ${resp.status}`)
-    ) as Error & { status?: number; details?: unknown }
+    ) as Error & { status?: number; details?: unknown; retryAfter?: number }
     error.status = resp.status
     if (errorInfo.details) error.details = errorInfo.details
+    const retryAfterMs = parseRetryAfter(resp.headers.get("retry-after"))
+    if (typeof retryAfterMs === "number" && retryAfterMs > 0) {
+      error.retryAfter = retryAfterMs / 1_000
+    }
     throw error
   }
   if (!resp.body) {
     throw new Error("No response body")
   }
 
+  onOpen?.()
   const reader = resp.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ""
@@ -1345,10 +1351,16 @@ export async function* bgStream<
   P extends AllowedPath = AllowedPath,
   M extends AllowedMethodFor<P> = AllowedMethodFor<P>
 >(
-  { path, method = 'POST' as UpperLower<M>, headers = {}, body, streamIdleTimeoutMs, abortSignal }: BgStreamInit<P, M>
+  { path, method = 'POST' as UpperLower<M>, headers = {}, body, streamIdleTimeoutMs, abortSignal, onOpen }: BgStreamInit<P, M>
 ): AsyncGenerator<string> {
   const hasHttpStatus = (value: unknown): boolean =>
     extractHttpStatus(value) !== null
+  let openNotified = false
+  const notifyOpen = () => {
+    if (openNotified) return
+    openNotified = true
+    onOpen?.()
+  }
 
   const canUseRuntimePortTransport = async (): Promise<boolean> => {
     const hasRuntimePort = Boolean(browser?.runtime?.connect && browser?.runtime?.id)
@@ -1386,12 +1398,12 @@ export async function* bgStream<
 
   const hasRuntimePort = await canUseRuntimePortTransport()
   if (!hasRuntimePort) {
-    yield* bgStreamDirect({ path, method, headers, body, streamIdleTimeoutMs, abortSignal })
+    yield* bgStreamDirect({ path, method, headers, body, streamIdleTimeoutMs, abortSignal, onOpen: notifyOpen })
     return
   }
 
-  // Derive the connection (time-to-first-token) timeout from config instead of a
-  // hard-coded 5s. Time-to-first-byte over 5s is normal for large prompts, RAG,
+  // Derive the response-acquisition timeout from config instead of a hard-coded
+  // 5s. Time-to-response over 5s is normal for large prompts, RAG,
   // or a cold local model, and a premature disconnect used to replay the whole
   // request. Reuse the stream idle-timeout budget (chat default 45s).
   const streamStorage = createSafeStorage({ area: "local" })
@@ -1414,7 +1426,7 @@ export async function* bgStream<
     port = browser.runtime.connect({ name: 'tldw:stream' })
   } catch (connectError) {
     if (!abortSignal?.aborted) {
-      yield* bgStreamDirect({ path, method, headers, body, streamIdleTimeoutMs, abortSignal })
+      yield* bgStreamDirect({ path, method, headers, body, streamIdleTimeoutMs, abortSignal, onOpen: notifyOpen })
       return
     }
     throw connectError
@@ -1423,12 +1435,13 @@ export async function* bgStream<
   let done = false
   let error: any = null
   let firstDataReceived = false
+  let streamOpened = false
   let connectionTimedOut = false
 
-  // Connection timeout - if no first token arrives within the derived window,
+  // Connection timeout - if no response body is acquired within the derived window,
   // give up on the port. Whether we may then replay depends on idempotency.
   const connectionTimer = setTimeout(() => {
-    if (!firstDataReceived && !done) {
+    if (!streamOpened && !done) {
       connectionTimedOut = true
       done = true
       try { port.disconnect() } catch {}
@@ -1436,7 +1449,16 @@ export async function* bgStream<
   }, connectionTimeoutMs)
 
   const onMessage = (msg: any) => {
-    if (msg?.event === 'data') {
+    if (msg?.event === 'open') {
+      streamOpened = true
+      clearTimeout(connectionTimer)
+      notifyOpen()
+    } else if (msg?.event === 'data') {
+      if (!streamOpened) {
+        streamOpened = true
+        clearTimeout(connectionTimer)
+        notifyOpen()
+      }
       if (!firstDataReceived) {
         firstDataReceived = true
         clearTimeout(connectionTimer)
@@ -1448,12 +1470,19 @@ export async function* bgStream<
       const streamError = new Error(msg.message || 'Stream error') as Error & {
         status?: number
         details?: unknown
+        retryAfter?: number
       }
       if (typeof msg.status === "number" && Number.isFinite(msg.status)) {
         streamError.status = Math.trunc(msg.status)
       }
       if (typeof msg.details !== "undefined" && msg.details !== null) {
         streamError.details = sanitizeResponseData(msg.details)
+      }
+      const retryAfterMs = parseRetryAfter(
+        typeof msg.retryAfter === "string" ? msg.retryAfter : null
+      )
+      if (typeof retryAfterMs === "number" && retryAfterMs > 0) {
+        streamError.retryAfter = retryAfterMs / 1_000
       }
       error = streamError
       done = true
@@ -1510,17 +1539,17 @@ export async function* bgStream<
         sliceStartedAt = Date.now()
       }
     }
-    // If connection timed out before receiving any data, only idempotent
+    // If connection timed out before acquiring a response body, only idempotent
     // requests may be replayed via direct fetch. The worker may already be
     // generating server-side for a non-idempotent POST, so replaying it would
     // double-generate and persist a duplicate message — surface a timeout error.
     if (connectionTimedOut) {
       if (methodAllowsStreamReplay) {
-        yield* bgStreamDirect({ path, method, headers, body, streamIdleTimeoutMs, abortSignal })
+        yield* bgStreamDirect({ path, method, headers, body, streamIdleTimeoutMs, abortSignal, onOpen: notifyOpen })
         return
       }
       throw createStreamInterruptedError(
-        `Stream connection timed out after ${connectionTimeoutMs}ms without a first token`
+        `Stream connection timed out after ${connectionTimeoutMs}ms before response acquisition`
       )
     }
     const shouldFallbackAfterEarlyError =
@@ -1532,7 +1561,7 @@ export async function* bgStream<
       // Same rule for an early transport failure: replay idempotent requests
       // only; never re-send a non-idempotent generation POST.
       if (methodAllowsStreamReplay) {
-        yield* bgStreamDirect({ path, method, headers, body, streamIdleTimeoutMs, abortSignal })
+        yield* bgStreamDirect({ path, method, headers, body, streamIdleTimeoutMs, abortSignal, onOpen: notifyOpen })
         return
       }
       throw createStreamInterruptedError(

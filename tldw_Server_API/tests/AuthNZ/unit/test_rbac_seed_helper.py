@@ -1,3 +1,6 @@
+import sqlite3
+from pathlib import Path
+
 import pytest
 
 
@@ -61,12 +64,14 @@ async def test_ensure_baseline_rbac_seed_sqlite_idempotent() -> None:
             "modules.read",
             "prompts.read",
             "tools.execute:*",
+            "notifications.read",
+            "notifications.control",
         }
         cur = await conn.execute("SELECT name FROM permissions")
         perms = {row[0] for row in await cur.fetchall()}
         assert expected_permissions <= perms
 
-        cur = await conn.execute("SELECT id, name FROM roles WHERE name IN ('admin','user','viewer')")
+        cur = await conn.execute("SELECT id, name FROM roles WHERE name IN ('admin','user','viewer','reviewer')")
         role_id = {row[1]: row[0] for row in await cur.fetchall()}
 
         cur = await conn.execute(
@@ -76,7 +81,7 @@ async def test_ensure_baseline_rbac_seed_sqlite_idempotent() -> None:
             WHERE name IN (
                 'media.read','media.create','media.delete','system.configure',
                 'users.manage_roles','sql.read','sql.target:media_db','modules.read',
-                'prompts.read','tools.execute:*'
+                'prompts.read','tools.execute:*','notifications.read','notifications.control'
             )
             """
         )
@@ -93,6 +98,8 @@ async def test_ensure_baseline_rbac_seed_sqlite_idempotent() -> None:
         assert perm_id["sql.target:media_db"] in user_perm_ids
         assert perm_id["modules.read"] in user_perm_ids
         assert perm_id["prompts.read"] in user_perm_ids
+        assert perm_id["notifications.read"] in user_perm_ids
+        assert perm_id["notifications.control"] in user_perm_ids
 
         cur = await conn.execute(
             "SELECT permission_id FROM role_permissions WHERE role_id = ?",
@@ -100,6 +107,16 @@ async def test_ensure_baseline_rbac_seed_sqlite_idempotent() -> None:
         )
         viewer_perm_ids = {row[0] for row in await cur.fetchall()}
         assert perm_id["media.read"] in viewer_perm_ids
+        assert perm_id["notifications.read"] in viewer_perm_ids
+        assert perm_id["notifications.control"] in viewer_perm_ids
+
+        cur = await conn.execute(
+            "SELECT permission_id FROM role_permissions WHERE role_id = ?",
+            (role_id["reviewer"],),
+        )
+        reviewer_perm_ids = {row[0] for row in await cur.fetchall()}
+        assert perm_id["notifications.read"] in reviewer_perm_ids
+        assert perm_id["notifications.control"] in reviewer_perm_ids
 
         cur = await conn.execute(
             "SELECT permission_id FROM role_permissions WHERE role_id = ?",
@@ -118,7 +135,7 @@ def test_migration_089_seeds_prompts_read_for_existing_admin_and_user_roles() ->
         migration_089_seed_mcp_prompts_read_permission,
     )
 
-    assert get_authnz_migrations()[-1].version == 89
+    assert any(migration.version == 89 for migration in get_authnz_migrations())
 
     conn = sqlite3.connect(":memory:")
     try:
@@ -171,6 +188,233 @@ def test_migration_089_seeds_prompts_read_for_existing_admin_and_user_roles() ->
         assert grant_rows == [("admin", "prompts.read"), ("user", "prompts.read")]
     finally:
         conn.close()
+
+
+def _create_version_089_rbac_database(db_path: Path) -> None:
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
+                username TEXT UNIQUE NOT NULL,
+                role TEXT NOT NULL
+            );
+            CREATE TABLE roles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL,
+                description TEXT,
+                is_system INTEGER DEFAULT 0
+            );
+            CREATE TABLE permissions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL,
+                description TEXT,
+                category TEXT
+            );
+            CREATE TABLE role_permissions (
+                role_id INTEGER NOT NULL,
+                permission_id INTEGER NOT NULL,
+                PRIMARY KEY (role_id, permission_id)
+            );
+            CREATE TABLE user_roles (
+                user_id INTEGER NOT NULL,
+                role_id INTEGER NOT NULL,
+                granted_by INTEGER,
+                expires_at TIMESTAMP,
+                PRIMARY KEY (user_id, role_id)
+            );
+            CREATE TABLE user_permissions (
+                user_id INTEGER NOT NULL,
+                permission_id INTEGER NOT NULL,
+                granted INTEGER NOT NULL DEFAULT 1,
+                expires_at TIMESTAMP,
+                PRIMARY KEY (user_id, permission_id)
+            );
+
+            INSERT INTO roles (name, description, is_system) VALUES
+                ('admin', 'Administrator', 1),
+                ('user', 'Standard User', 1),
+                ('moderator', 'Moderator', 1),
+                ('reviewer', 'Reviewer', 1),
+                ('viewer', 'Viewer', 1),
+                ('custom-auditor', 'Custom Auditor', 0);
+
+            INSERT INTO users (id, username, role) VALUES
+                (1, 'legacy-admin', 'admin'),
+                (2, 'legacy-user', 'user'),
+                (3, 'legacy-moderator', 'moderator'),
+                (4, 'legacy-reviewer', 'reviewer'),
+                (5, 'legacy-viewer', 'viewer'),
+                (6, 'legacy-custom', 'custom-auditor'),
+                (7, 'legacy-missing', 'role-that-does-not-exist');
+
+            INSERT INTO permissions (name, description, category) VALUES
+                ('notifications.control', 'Legacy notification control', 'notifications'),
+                ('custom.audit', 'Custom audit permission', 'custom');
+
+            INSERT INTO role_permissions (role_id, permission_id)
+            SELECT r.id, p.id
+            FROM roles r
+            JOIN permissions p ON p.name = 'custom.audit'
+            WHERE r.name = 'custom-auditor';
+
+            INSERT INTO user_permissions (user_id, permission_id, granted, expires_at)
+            SELECT 2, p.id, 0, '2035-01-02 03:04:05'
+            FROM permissions p
+            WHERE p.name = 'notifications.control';
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _migrate_version_089_database(db_path: Path) -> None:
+    from tldw_Server_API.app.core.AuthNZ.migrations import get_authnz_migrations
+    from tldw_Server_API.app.core.DB_Management.migrations import MigrationManager
+
+    manager = MigrationManager(db_path)
+    migrations = get_authnz_migrations()
+    assert migrations[-1].version == 90
+    for migration in migrations:
+        manager.add_migration(migration)
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
+            (89, "Seed MCP prompts.read permission"),
+        )
+
+    manager.migrate()
+    with sqlite3.connect(db_path) as conn:
+        migrations[-1].apply(conn)
+    manager.migrate()
+
+
+def test_migration_090_seeds_notification_permissions_and_interactive_role_grants(tmp_path: Path) -> None:
+    db_path = tmp_path / "authnz-v089.db"
+    _create_version_089_rbac_database(db_path)
+
+    with sqlite3.connect(db_path) as conn:
+        deny_rows_before = conn.execute(
+            """
+            SELECT up.user_id, p.name, up.granted, up.expires_at
+            FROM user_permissions up
+            JOIN permissions p ON p.id = up.permission_id
+            WHERE p.name = ?
+            """,
+            ("notifications.control",),
+        ).fetchall()
+
+    _migrate_version_089_database(db_path)
+
+    with sqlite3.connect(db_path) as conn:
+        permission_names = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM permissions WHERE category = ?",
+                ("notifications",),
+            ).fetchall()
+        }
+        assert permission_names >= {"notifications.read", "notifications.control"}
+
+        grant_rows = conn.execute(
+            """
+            SELECT r.name, p.name
+            FROM role_permissions rp
+            JOIN roles r ON r.id = rp.role_id
+            JOIN permissions p ON p.id = rp.permission_id
+            WHERE p.name IN (?, ?)
+            """,
+            ("notifications.read", "notifications.control"),
+        ).fetchall()
+        grants_by_role: dict[str, set[str]] = {}
+        for role_name, permission_name in grant_rows:
+            grants_by_role.setdefault(role_name, set()).add(permission_name)
+
+        interactive_roles = {"admin", "user", "moderator", "reviewer", "viewer"}
+        present_roles = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM roles WHERE name IN (?, ?, ?, ?, ?)",
+                tuple(sorted(interactive_roles)),
+            ).fetchall()
+        }
+        for role_name in present_roles:
+            assert grants_by_role[role_name] >= {"notifications.read", "notifications.control"}
+
+        deny_rows_after = conn.execute(
+            """
+            SELECT up.user_id, p.name, up.granted, up.expires_at
+            FROM user_permissions up
+            JOIN permissions p ON p.id = up.permission_id
+            WHERE p.name = ?
+            """,
+            ("notifications.control",),
+        ).fetchall()
+        assert deny_rows_after == deny_rows_before == [
+            (2, "notifications.control", 0, "2035-01-02 03:04:05")
+        ]
+
+
+def test_migration_090_backfills_only_matching_legacy_roles_without_changing_custom_grants(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "authnz-v089-custom-role.db"
+    _create_version_089_rbac_database(db_path)
+
+    with sqlite3.connect(db_path) as conn:
+        custom_grants_before = conn.execute(
+            """
+            SELECT p.name
+            FROM role_permissions rp
+            JOIN roles r ON r.id = rp.role_id
+            JOIN permissions p ON p.id = rp.permission_id
+            WHERE r.name = ?
+            ORDER BY p.name
+            """,
+            ("custom-auditor",),
+        ).fetchall()
+
+    _migrate_version_089_database(db_path)
+
+    with sqlite3.connect(db_path) as conn:
+        user_role_rows = set(
+            conn.execute(
+                """
+                SELECT u.username, r.name
+                FROM user_roles ur
+                JOIN users u ON u.id = ur.user_id
+                JOIN roles r ON r.id = ur.role_id
+                """
+            ).fetchall()
+        )
+        assert user_role_rows == {
+            ("legacy-admin", "admin"),
+            ("legacy-user", "user"),
+            ("legacy-moderator", "moderator"),
+            ("legacy-reviewer", "reviewer"),
+            ("legacy-viewer", "viewer"),
+            ("legacy-custom", "custom-auditor"),
+        }
+        assert conn.execute(
+            "SELECT 1 FROM roles WHERE name = ?",
+            ("role-that-does-not-exist",),
+        ).fetchone() is None
+
+        custom_grants_after = conn.execute(
+            """
+            SELECT p.name
+            FROM role_permissions rp
+            JOIN roles r ON r.id = rp.role_id
+            JOIN permissions p ON p.id = rp.permission_id
+            WHERE r.name = ?
+            ORDER BY p.name
+            """,
+            ("custom-auditor",),
+        ).fetchall()
+        assert custom_grants_after == custom_grants_before == [("custom.audit",)]
 
 
 @pytest.mark.asyncio

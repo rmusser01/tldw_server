@@ -1,4 +1,5 @@
 import { apiClient } from './api';
+import { dispatchAuthCredentialsChanged } from './auth-events';
 import { getRuntimeApiBearer, getRuntimeApiKey } from './authStorage';
 import { clearRequestHistory } from './history';
 
@@ -210,6 +211,7 @@ class AuthService {
     if (typeof window !== 'undefined') {
       localStorage.removeItem('access_token');
       localStorage.removeItem('user');
+      dispatchAuthCredentialsChanged(false);
       // Purge any credentials/tokens that may have been captured in the
       // request-history ring so they cannot survive logout.
       clearRequestHistory();
@@ -226,6 +228,7 @@ class AuthService {
   setToken(token: string): void {
     if (typeof window !== 'undefined') {
       localStorage.setItem('access_token', token);
+      dispatchAuthCredentialsChanged(true);
     }
   }
 

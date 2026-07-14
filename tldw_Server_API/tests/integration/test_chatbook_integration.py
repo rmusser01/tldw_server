@@ -416,8 +416,10 @@ class TestMultiUserScenarios:
     """Test multi-user import/export scenarios."""
 
     @pytest.mark.asyncio
-    async def test_user_isolation_during_export(self, tmp_path):
+    async def test_user_isolation_during_export(self, tmp_path, monkeypatch):
         """Test that users only export their own content."""
+        monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "user_databases"))
+        monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
         # Create services for different users
         db1 = CharactersRAGDB(":memory:", "user1")
         db2 = CharactersRAGDB(":memory:", "user2")
@@ -428,36 +430,40 @@ class TestMultiUserScenarios:
         # User 1 creates content
         dict_service1 = ChatDictionaryService(db1)
         dict1 = dict_service1.create_dictionary("User1 Dict", "Private")
+        service1.dictionaries = dict_service1
 
         # User 2 creates different content
         dict_service2 = ChatDictionaryService(db2)
         dict2 = dict_service2.create_dictionary("User2 Dict", "Also private")
+        service2.dictionaries = dict_service2
 
         # Export for each user
-        with patch.object(
-            service1,
-            '_create_chatbook_archive',
-            return_value=str(tmp_path / "user1.chatbook"),
-        ):
-            result1 = await service1.export_chatbook(
-                name="User1 Export",
-                content_types=["dictionaries"]
-            )
-
-        with patch.object(
-            service2,
-            '_create_chatbook_archive',
-            return_value=str(tmp_path / "user2.chatbook"),
-        ):
-            result2 = await service2.export_chatbook(
-                name="User2 Export",
-                content_types=["dictionaries"]
-            )
+        result1 = await service1.export_chatbook(
+            name="User1 Export",
+            content_types=["dictionaries"]
+        )
+        result2 = await service2.export_chatbook(
+            name="User2 Export",
+            content_types=["dictionaries"]
+        )
 
         # Each user should only see their own content
         assert result1["success"] == True
         assert result2["success"] == True
-        # In real implementation, would verify content isolation
+        assert result1["content_summary"]["dictionaries"] == 1
+        assert result2["content_summary"]["dictionaries"] == 1
+
+        def dictionary_names(archive_path):
+            with zipfile.ZipFile(archive_path) as archive:
+                payloads = [
+                    json.loads(archive.read(name))
+                    for name in archive.namelist()
+                    if name.startswith("content/dictionaries/") and name.endswith(".json")
+                ]
+            return {str(payload.get("name") or "") for payload in payloads}
+
+        assert dictionary_names(result1["file_path"]) == {"User1 Dict"}
+        assert dictionary_names(result2["file_path"]) == {"User2 Dict"}
 
     @pytest.mark.asyncio
     async def test_import_preserves_user_ownership(self, chatbook_service, temp_export_dir):
@@ -541,27 +547,14 @@ class TestErrorScenarios:
 
     @pytest.mark.asyncio
     async def test_export_with_database_error(self, chatbook_service):
-        """Test export when database fails."""
-        # This test would require a way to trigger actual database errors
-        # For now, just verify export handles edge cases gracefully
-
-        # Try to export with invalid content types
+        """Test that an explicit zero-item allowlist fails validation."""
         result = await chatbook_service.export_chatbook(
             name="Edge Case Export",
-            content_types=[]  # Empty content types
+            content_types=["notes"]
         )
 
-        # Should still succeed but with empty content
-        assert result["success"] == True
-        assert result["content_summary"] == {
-            "conversations": 0,
-            "notes": 0,
-            "characters": 0,
-            "world_books": 0,
-            "dictionaries": 0,
-            "documents": 0,
-            "explainer_sessions": 0
-        }
+        assert result["success"] is False
+        assert "allowlist" in result["message"].lower()
 
 
 class TestPerformanceScenarios:

@@ -232,9 +232,6 @@ def _build_principal_from_user(
 
     # Claims on the User model are the canonical source of truth.
     raw_roles = list(getattr(user, "roles", []) or [])
-    raw_role = getattr(user, "role", None)
-    if raw_role:
-        raw_roles.append(raw_role)
     roles: list[str] = []
     _seen_roles: set[str] = set()
     for role in raw_roles:

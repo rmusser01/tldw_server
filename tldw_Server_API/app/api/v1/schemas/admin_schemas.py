@@ -67,7 +67,7 @@ def validate_admin_webhook_url(value: str) -> str:
 class UserUpdateRequest(BaseModel):
     """Request to update user information"""
     email: EmailStr | None = None
-    role: str | None = Field(None, pattern="^(user|admin|service)$")
+    role: str | None = Field(None, pattern="^(user|admin)$")
     is_active: bool | None = None
     is_verified: bool | None = None
     is_locked: bool | None = None
@@ -142,7 +142,7 @@ class AdminUserCreateRequest(BaseModel):
     )
     email: EmailStr
     password: str = Field(..., min_length=10, max_length=128)
-    role: str = Field("user", pattern="^(user|admin|service)$")
+    role: str = Field("user", pattern="^(user|admin)$")
     is_active: bool = True
     is_verified: bool = True
     storage_quota_mb: int | None = Field(None, ge=100)
@@ -307,7 +307,7 @@ class RegistrationCodeRequest(BaseModel):
     """Request to create a registration code"""
     max_uses: int = Field(1, ge=1, le=100)
     expiry_days: int = Field(7, ge=1, le=365)
-    role_to_grant: str = Field("user", pattern="^(user|admin|service)$")
+    role_to_grant: str = Field("user", pattern="^(user|admin)$")
     allowed_email_domain: str | None = Field(
         None,
         pattern=r"^@?[A-Za-z0-9.-]+$",

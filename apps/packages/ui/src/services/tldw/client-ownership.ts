@@ -269,6 +269,7 @@ export const TRANSITIONAL_DOMAIN_OVERLAPS = {
     "ragSimple",
     "removeChatbookExportJob",
     "removeChatbookImportJob",
+    "removeFinishedChatbookJobs",
     "reorderDictionaryEntries",
     "resolveConversationShareLink",
     "restoreChat",

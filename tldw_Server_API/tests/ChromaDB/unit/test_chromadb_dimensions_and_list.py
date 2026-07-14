@@ -1,10 +1,10 @@
+from unittest.mock import MagicMock
+
 import numpy as np
 import pytest
-from unittest.mock import MagicMock
-from chromadb.errors import InternalError
+from chromadb.errors import InternalError, NotFoundError
 
 from tldw_Server_API.app.core.Embeddings.ChromaDB_Library import ChromaDBManager
-from unittest.mock import patch
 
 
 def _make_manager_with_mock(mock_client, tmp_path):
@@ -154,12 +154,22 @@ def test_list_collections_propagates(mock_chroma_client, tmp_path):
      # Reuse fixture mock client from conftest to ensure typical shape
     mgr = _make_manager_with_mock(mock_chroma_client, tmp_path)
     # Simulate two collections
-    c1 = MagicMock(); c1.name = "c1"
-    c2 = MagicMock(); c2.name = "c2"
+    c1 = MagicMock()
+    c1.name = "c1"
+    c2 = MagicMock()
+    c2.name = "c2"
     mock_chroma_client.list_collections.return_value = [c1, c2]
 
     cols = mgr.list_collections()
     assert [c.name for c in cols] == ["c1", "c2"]
+
+
+def test_get_collection_maps_chroma_not_found_to_key_error(mock_chroma_client, tmp_path):
+    mgr = _make_manager_with_mock(mock_chroma_client, tmp_path)
+    mock_chroma_client.get_collection.side_effect = NotFoundError("collection does not exist")
+
+    with pytest.raises(KeyError, match="Collection 'missing' does not exist"):
+        mgr.get_collection("missing")
 
 
 def test_delete_collection_calls_client(mock_chroma_client, tmp_path):

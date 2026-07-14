@@ -90,6 +90,9 @@ def pytest_collection_modifyitems(config, items):
 
 def _detect_auth_mode() -> str:
     """Detect auth mode from running API server."""
+    if _env_truthy("E2E_INPROCESS"):
+        return os.getenv("AUTH_MODE", "single_user").strip().lower().replace("-", "_")
+
     try:
         import httpx
         base_url = os.getenv("E2E_TEST_BASE_URL", "http://localhost:8000")

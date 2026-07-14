@@ -1053,9 +1053,11 @@ def load_settings():
     if config_user_db_base_dir is not None:
         config_user_db_base_dir = str(config_user_db_base_dir).strip() or None
     env_user_db_base_dir = os.getenv("USER_DB_BASE_DIR")
+    if env_user_db_base_dir is not None:
+        env_user_db_base_dir = env_user_db_base_dir.strip() or None
     user_data_base_dir_str = (
-        config_user_db_base_dir
-        or env_user_db_base_dir
+        env_user_db_base_dir
+        or config_user_db_base_dir
         or str(default_user_data_base_dir.resolve())
     )
     user_data_base_dir = Path(user_data_base_dir_str)

@@ -64,6 +64,45 @@ def test_env_overrides_config_file_for_redis_host(tmp_path, monkeypatch):
     assert settings["REDIS_HOST"] == "env-host"  # nosec B101
 
 
+def test_env_overrides_config_file_for_user_db_base_dir(tmp_path, monkeypatch):
+    cfg = tmp_path / "config.txt"
+    cfg.write_text(
+        "[TTS-Settings]\nUSER_DB_BASE_DIR = Databases/user_databases\n",
+        encoding="utf-8",
+    )
+    isolated_user_data = tmp_path / "isolated-user-data"
+    monkeypatch.setenv("TLDW_CONFIG_FILE", str(cfg))
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(isolated_user_data))
+
+    settings = load_settings_for_test()
+
+    assert settings["USER_DB_BASE_DIR"] == isolated_user_data
+
+
+def test_blank_user_db_base_dir_env_falls_back_to_config(tmp_path, monkeypatch):
+    configured_user_data = tmp_path / "configured-user-data"
+    cfg = tmp_path / "config.txt"
+    cfg.write_text(
+        f"[TTS-Settings]\nUSER_DB_BASE_DIR = {configured_user_data}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TLDW_CONFIG_FILE", str(cfg))
+    monkeypatch.setenv("USER_DB_BASE_DIR", "   \t")
+
+    settings = load_settings_for_test()
+
+    assert settings["USER_DB_BASE_DIR"] == configured_user_data
+
+
+def test_user_db_base_dir_env_strips_surrounding_whitespace(tmp_path, monkeypatch):
+    isolated_user_data = tmp_path / "isolated-user-data"
+    monkeypatch.setenv("USER_DB_BASE_DIR", f"  {isolated_user_data}\t")
+
+    settings = load_settings_for_test()
+
+    assert settings["USER_DB_BASE_DIR"] == isolated_user_data
+
+
 def test_env_overrides_custom_openai_endpoint_config_values(monkeypatch):
     class FakeConfig:
         def __init__(self, values):

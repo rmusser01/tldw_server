@@ -100,7 +100,12 @@ def _make_v1_1_chatbook_bytes() -> bytes:
         },
         "metadata": {"tags": [], "categories": [], "language": "en", "license": None},
         "user_info": {"user_id": "test"},
-        "features_used": ["content_envelopes", "file_inventory", "integrity_metadata"],
+        "features_used": [
+            "content_envelopes",
+            "file_inventory",
+            "integrity_metadata",
+            "account_inventory",
+        ],
         "producer": {"name": "tldw_server"},
         "source_instance": {},
         "compatibility": {"min_reader_version": "1.1.0"},
@@ -118,6 +123,30 @@ def _make_v1_1_chatbook_bytes() -> bytes:
                 "content_item_ids": ["doc_1"],
             }
         ],
+        "account_inventory": [
+            {
+                "category": "account_profile",
+                "label": "Account profile",
+                "restore_status": "restorable",
+                "account_payload": {"password_hash": "must-not-reach-preview"},
+            },
+            {
+                "category": "media_stored_artifacts",
+                "label": "Stored media artifacts",
+                "restore_status": "restorable",
+            },
+        ],
+        "account_inventory_summary": {
+            "counts": {
+                "account_profile": 1,
+                "media_stored_artifacts": 1,
+            },
+            "post_write_verification": True,
+            "sensitive_category_count": 1,
+            "warning_count": 0,
+            "warnings": [],
+            "credential": "must-not-reach-preview",
+        },
     }
 
     buf = io.BytesIO()
@@ -146,6 +175,32 @@ def test_preview_v1_1_returns_compatibility_feature_and_integrity_report(monkeyp
     assert body["compatibility"]["manifest_version"] == "1.1.0"
     assert "file_inventory" in body["features"]["supported"]
     assert body["integrity"]["verified_files"] >= 1
+    assert body["manifest"]["account_inventory"] == [
+        {
+            "category": "account_profile",
+            "label": "Account profile",
+            "restore_status": "restorable",
+        },
+        {
+            "category": "media_stored_artifacts",
+            "label": "Stored media artifacts",
+            "restore_status": "restorable",
+        },
+    ]
+    assert body["manifest"]["account_inventory_summary"] == {
+        "counts": {
+            "account_profile": 1,
+            "media_stored_artifacts": 1,
+        },
+        "post_write_verification": True,
+        "sensitive_category_count": 1,
+        "warning_count": 0,
+        "warnings": [],
+        "pointer_only_count": 0,
+        "archive_size_bytes": 0,
+    }
+    assert "account_payload" not in body["manifest"]["account_inventory"][0]
+    assert "credential" not in body["manifest"]["account_inventory_summary"]
 
 
 def test_preview_report_treats_non_string_feature_tokens_as_unsupported(tmp_path):

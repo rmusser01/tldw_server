@@ -1129,8 +1129,6 @@ def db(
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview actions without writing"),
 ):
     """Initialize/validate databases (Stage 3)."""
-    from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-
     env_path = Path.cwd() / ".env"
     notes: list[str] = []
     actions: list[dict[str, Any]] = []
@@ -1190,20 +1188,20 @@ def db(
             else:
                 actions.append({"authnz_db": {"path": str(auth_db_path), "status": "would_create"}})
 
-        user_id = DatabasePaths.get_single_user_id()
+        user_id = int(os.getenv("SINGLE_USER_FIXED_ID", "1"))
         base_dir = _resolve_user_db_base_dir_for_dry_run()
         user_dir = base_dir / str(user_id)
         sqlite_files = [
-            {"name": "media", "path": str(user_dir / DatabasePaths.MEDIA_DB_NAME), "status": "would_create"},
-            {"name": "chacha", "path": str(user_dir / DatabasePaths.CHACHA_DB_NAME), "status": "would_create"},
+            {"name": "media", "path": str(user_dir / "Media_DB_v2.db"), "status": "would_create"},
+            {"name": "chacha", "path": str(user_dir / "ChaChaNotes.db"), "status": "would_create"},
             {
                 "name": "evaluations",
-                "path": str(user_dir / DatabasePaths.EVALUATIONS_SUBDIR / DatabasePaths.EVALUATIONS_DB_NAME),
+                "path": str(user_dir / "evaluations" / "evaluations.db"),
                 "status": "would_create",
             },
             {
                 "name": "evaluations_shared",
-                "path": str((Path.cwd() / "Databases" / DatabasePaths.EVALUATIONS_DB_NAME).resolve()),
+                "path": str((Path.cwd() / "Databases" / "evaluations.db").resolve()),
                 "status": "would_create",
             },
         ]
@@ -1211,6 +1209,8 @@ def db(
         result = {"command": "db", "status": "ok", "actions": actions, "notes": notes, "dry_run": True}
         _emit(result, json_out)
         raise typer.Exit(0)
+
+    from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 
     if scheme in {"postgres", "postgresql"}:
         try:

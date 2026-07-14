@@ -85,6 +85,7 @@ async def _setup_byok_sqlite(tmp_path, monkeypatch):
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
+    from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
     from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB, reset_users_db
     from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
         create_organization,
@@ -126,6 +127,9 @@ async def _setup_byok_sqlite(tmp_path, monkeypatch):
         storage_quota_mb=5120,
         uuid_value=uuid.uuid4(),
     )
+    users_repo = AuthnzUsersRepo(db_pool=pool)
+    await users_repo.assign_role_if_missing(user_id=int(admin["id"]), role_name="admin")
+    await users_repo.assign_role_if_missing(user_id=int(user["id"]), role_name="user")
 
     org = await create_organization(name="BYOK Org", owner_user_id=int(admin["id"]))
     team = await create_team(org_id=int(org["id"]), name="BYOK Team")
@@ -594,6 +598,7 @@ async def test_shared_keys_scoped_requires_manager_sqlite(tmp_path, monkeypatch)
 
     from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
     from tldw_Server_API.app.core.AuthNZ.orgs_teams import add_org_member, add_team_member
+    from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 
     users_db = UsersDB(pool)
     await users_db.initialize()
@@ -610,6 +615,7 @@ async def test_shared_keys_scoped_requires_manager_sqlite(tmp_path, monkeypatch)
         uuid_value=uuid.uuid4(),
     )
     member_id = int(member["id"])
+    await AuthnzUsersRepo(db_pool=pool).assign_role_if_missing(user_id=member_id, role_name="user")
     await add_org_member(org_id=org_id, user_id=member_id, role="member")
     await add_team_member(team_id=team_id, user_id=member_id, role="member")
 

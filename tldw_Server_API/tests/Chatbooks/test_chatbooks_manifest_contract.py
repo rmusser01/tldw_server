@@ -7,6 +7,7 @@ from pathlib import Path
 import jsonschema
 import pytest
 
+from tldw_Server_API.app.core.Chatbooks.chatbook_models import ContentType
 from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
@@ -28,10 +29,13 @@ def manifest_contract_service(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_real_export_manifest_matches_canonical_schema(manifest_contract_service):
+    character_id = manifest_contract_service.db.add_character_card(
+        {"name": "Manifest contract character"}
+    )
     success, _message, archive_path = await manifest_contract_service.create_chatbook(
         name="Schema Contract",
         description="Contract validation export",
-        content_selections={},
+        content_selections={ContentType.CHARACTER: [str(character_id)]},
         async_mode=False,
     )
 

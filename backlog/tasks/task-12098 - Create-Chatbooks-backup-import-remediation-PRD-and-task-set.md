@@ -4,18 +4,22 @@ title: Create Chatbooks backup import remediation PRD and task set
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: 2026-07-09 14:49
+updated_date: '2026-07-12 13:27'
 labels:
-- chatbooks
-- prd
-- ux
-- uat
-- backup
-- import
+  - chatbooks
+  - prd
+  - ux
+  - uat
+  - backup
+  - import
 dependencies: []
 references:
-- Docs/Reviews/CHATBOOKS_BACKUP_IMPORT_UAT_UX_REVIEW_2026_07_09.md
-- Docs/superpowers/plans/2026-07-09-chatbooks-full-account-backup-import-implementation-plan.md
+  - Docs/Reviews/CHATBOOKS_BACKUP_IMPORT_UAT_UX_REVIEW_2026_07_09.md
+  - >-
+    Docs/superpowers/plans/2026-07-09-chatbooks-full-account-backup-import-implementation-plan.md
+  - Docs/Reviews/CHATBOOKS_POST_MERGE_UAT_UX_REVIEW_2026_07_09.md
+  - >-
+    Docs/superpowers/plans/2026-07-09-chatbooks-post-merge-uat-remediation-plan.md
 ---
 
 ## Description
@@ -36,12 +40,17 @@ Create an umbrella PRD/spec and milestone Backlog tasks for addressing all findi
 <!-- SECTION:PLAN:BEGIN -->
 Docs/superpowers/specs/2026-07-09-chatbooks-backup-import-remediation-prd-design.md
 Docs/superpowers/plans/2026-07-09-chatbooks-full-account-backup-import-implementation-plan.md
+Docs/superpowers/plans/2026-07-09-chatbooks-post-merge-uat-remediation-plan.md
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
 Spec review pass recorded after PRD/task package verification. Implementation plan created at Docs/superpowers/plans/2026-07-09-chatbooks-full-account-backup-import-implementation-plan.md.
+
+PR #2714 review remediation started 2026-07-12. Branch is already based on current origin/dev. Scope includes all verified inline and summary-level reviewer findings, focused regression coverage, CI triage, reviewer replies, and thread resolution. Review-fix plan: Docs/superpowers/plans/2026-07-12-pr-2714-review-remediation-plan.md.
+
+2026-07-12 review remediation verification: 144 consolidated backend/UAT tests passed; 199 consolidated WebUI/shared/extension tests passed; 29 post-format backend tests passed; extension TypeScript compile and touched Python compilation passed; Bandit reported zero findings across all touched production Python paths; git diff --check passed. Full WebUI typecheck retains only the documented unchanged QuickIngestWizardModal.tsx:1813 baseline. Broad legacy-file Ruff debt remains unchanged; new touched test import-order findings were fixed. Commit c40ac6528b was rebased against the latest origin/dev and pushed. All 39 inline comments received specific replies, both out-of-diff findings received a PR-level resolution, and GitHub reports zero unresolved review threads. Technically incompatible suggestions were rejected with repository-specific migration, CLI, helper-boundary, and fail-closed RBAC evidence. GitHub Actions remain queued with no reported failures. The task remains non-terminal pending the requester-owned Change summary and queued CI.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

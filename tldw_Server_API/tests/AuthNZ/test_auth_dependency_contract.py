@@ -830,7 +830,7 @@ def test_current_principal_alias_populates_state_for_multi_user_jwt(
     assert payload["kind"] == "user"
     assert payload["user_id"] == 17
     assert payload["api_key_id"] is None
-    assert set(payload["roles"]) == {"editor", "user"}
+    assert set(payload["roles"]) == {"editor"}
     assert payload["permissions"] == ["skills.read"]
     assert payload["principal_id"] == payload["state_principal_id"]
     assert payload["cached_user_id"] == 17
@@ -874,7 +874,7 @@ def test_current_principal_alias_populates_state_for_api_key(
     assert payload["kind"] == "api_key"
     assert payload["user_id"] == 33
     assert payload["api_key_id"] == 123
-    assert set(payload["roles"]) == {"automation", "user"}
+    assert set(payload["roles"]) == {"automation"}
     assert payload["permissions"] == ["skills.read", "skills.write"]
     assert payload["principal_id"] == payload["state_principal_id"]
     assert payload["cached_user_id"] == 33

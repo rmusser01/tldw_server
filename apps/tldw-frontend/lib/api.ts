@@ -1,4 +1,5 @@
 import { addRequestHistory, clearRequestHistory } from '@web/lib/history';
+import { dispatchAuthCredentialsChanged } from '@web/lib/auth-events';
 import { getApiBearer, getApiKey, hasEnvApiAuth } from '@web/lib/authStorage';
 import { buildApiBaseUrl, resolvePublicApiOrigin } from '@web/lib/api-base';
 import { captureSessionIdFromHeaders, getOrCreateSessionId, SESSION_HEADER_NAME } from '@web/lib/session';
@@ -433,13 +434,32 @@ function recordFailure(
   }
 }
 
-function handleUnauthorized(): void {
+function handleUnauthorized(
+  requestHeaders: Headers | undefined,
+  sessionTokenAtStart: string | null
+): void {
   if (typeof window === 'undefined') {
+    return;
+  }
+
+  const authorization = requestHeaders?.get('Authorization')?.trim() || '';
+  const requestToken = authorization.toLowerCase().startsWith('bearer ')
+    ? authorization.slice(7).trim()
+    : null;
+  const currentToken = localStorage.getItem('access_token');
+  if (
+    !requestToken ||
+    !sessionTokenAtStart ||
+    !currentToken ||
+    requestToken !== sessionTokenAtStart ||
+    requestToken !== currentToken
+  ) {
     return;
   }
 
   localStorage.removeItem('access_token');
   localStorage.removeItem('user');
+  dispatchAuthCredentialsChanged(false);
   // Forced logout on 401: also purge captured request-history so any tokens
   // recorded during the session do not persist past the invalidated session.
   clearRequestHistory();
@@ -467,6 +487,8 @@ async function request<T = unknown>(
   const baseURL = config.baseURL ?? api.defaults.baseURL;
   const requestUrl = joinUrl(baseURL, url, config.params);
   const metadata = { start: Date.now() };
+  const sessionTokenAtStart =
+    typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
 
   applyBrowserHeaders(headers, method);
 
@@ -501,7 +523,7 @@ async function request<T = unknown>(
 
   if (!response.ok) {
     if (response.status === 401) {
-      handleUnauthorized();
+      handleUnauthorized(headers, sessionTokenAtStart);
     }
 
     const errorBody = await parseErrorBody(response);

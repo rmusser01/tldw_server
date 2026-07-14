@@ -1,5 +1,7 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 const mocks = vi.hoisted(() => ({
@@ -14,6 +16,20 @@ const mocks = vi.hoisted(() => ({
   snoozeNotification: vi.fn(),
   subscribeNotificationsStream: vi.fn(),
   showToast: vi.fn(),
+  reportMutationError: vi.fn(),
+  reportRequestError: vi.fn(),
+  tryAgain: vi.fn(),
+  refreshPermissions: vi.fn(),
+  lifecycle: {
+    scopeKey: 'notifications:server-a:user-a',
+    lifecycleEpoch: 1,
+    state: 'active',
+    unreadCount: 2,
+    updatedAt: 1,
+    latestEvent: null as { event: string; id?: number; payload?: unknown } | null,
+    eventSequence: 0,
+    events: [] as Array<{ sequence: number; event: { event: string; id?: number; payload?: unknown } }>,
+  },
 }));
 
 vi.mock('next/router', () => ({
@@ -38,11 +54,29 @@ vi.mock('@web/components/ui/ToastProvider', () => ({
   useToast: () => ({ show: mocks.showToast }),
 }));
 
-import NotificationsPage from '@web/pages/notifications';
+vi.mock('@web/components/notifications/NotificationLifecycleProvider', () => ({
+  useNotificationLifecycle: () => ({
+    ...mocks.lifecycle,
+    reportMutationError: mocks.reportMutationError,
+    reportRequestError: mocks.reportRequestError,
+    tryAgain: mocks.tryAgain,
+    refreshPermissions: mocks.refreshPermissions,
+  }),
+}));
+
+import NotificationsPage from '@web/components/notifications/NotificationsRoute';
 
 describe('NotificationsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.lifecycle.state = 'active';
+    mocks.lifecycle.scopeKey = 'notifications:server-a:user-a';
+    mocks.lifecycle.lifecycleEpoch = 1;
+    mocks.lifecycle.unreadCount = 2;
+    mocks.lifecycle.updatedAt = 1;
+    mocks.lifecycle.latestEvent = null;
+    mocks.lifecycle.eventSequence = 0;
+    mocks.lifecycle.events = [];
     mocks.getNotificationPreferences.mockResolvedValue({
       user_id: 'user-1',
       reminder_enabled: true,
@@ -87,6 +121,13 @@ describe('NotificationsPage', () => {
     mocks.subscribeNotificationsStream.mockImplementation(() => () => {});
   });
 
+  it('keeps the Next page as an SSR-disabled thin wrapper', () => {
+    const source = readFileSync(resolve(process.cwd(), 'pages/notifications.tsx'), 'utf8');
+
+    expect(source).toContain("dynamic(() => import('@web/components/notifications/NotificationsRoute'), { ssr: false })");
+    expect(source.trim().split('\n')).toHaveLength(3);
+  });
+
   it('renders unread count and marks notification read', async () => {
     const user = userEvent.setup();
 
@@ -102,18 +143,12 @@ describe('NotificationsPage', () => {
     expect(screen.getByText('Unread: 1')).toBeInTheDocument();
   });
 
-  it('updates the inbox from stream events without showing a duplicate toast', async () => {
-    let onEvent: ((event: { event: string; id?: number; payload?: unknown }) => void) | null = null;
-    mocks.subscribeNotificationsStream.mockImplementation((options: { onEvent: typeof onEvent }) => {
-      onEvent = options.onEvent;
-      return () => {};
-    });
-
-    render(<NotificationsPage />);
+  it('updates the inbox from provider-owned stream events without showing a duplicate toast', async () => {
+    const view = render(<NotificationsPage />);
 
     expect(await screen.findByText('Unread: 2')).toBeInTheDocument();
 
-    onEvent?.({
+    mocks.lifecycle.latestEvent = {
       event: 'notification',
       id: 102,
       payload: {
@@ -124,10 +159,304 @@ describe('NotificationsPage', () => {
         severity: 'info',
         created_at: '2026-03-08T01:00:00Z',
       },
-    });
+    };
+    mocks.lifecycle.unreadCount = 3;
+    mocks.lifecycle.updatedAt = 2;
+    mocks.lifecycle.eventSequence = 1;
+    mocks.lifecycle.events = [{ sequence: 1, event: mocks.lifecycle.latestEvent }];
+    view.rerender(<NotificationsPage />);
 
     expect(await screen.findByText('Open the report in Deep Research.')).toBeInTheDocument();
+    expect(screen.getByText('Unread: 3')).toBeInTheDocument();
     expect(mocks.showToast).not.toHaveBeenCalled();
+  });
+
+  it('does not create an inbox poll or a second notification stream', async () => {
+    vi.useFakeTimers();
+    render(<NotificationsPage />);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(mocks.listNotifications).toHaveBeenCalledTimes(2);
+    expect(mocks.subscribeNotificationsStream).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(mocks.listNotifications).toHaveBeenCalledTimes(2);
+    expect(mocks.subscribeNotificationsStream).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it('refreshes page-specific lists after a provider coalescing event', async () => {
+    const view = render(<NotificationsPage />);
+    await waitFor(() => expect(mocks.listNotifications).toHaveBeenCalledTimes(2));
+
+    mocks.lifecycle.latestEvent = { event: 'notifications_coalesced', id: 102 };
+    mocks.lifecycle.eventSequence = 1;
+    mocks.lifecycle.events = [{ sequence: 1, event: mocks.lifecycle.latestEvent }];
+    view.rerender(<NotificationsPage />);
+
+    await waitFor(() => expect(mocks.listNotifications).toHaveBeenCalledTimes(4));
+  });
+
+  it('renders every provider event delivered in one React batch', async () => {
+    const view = render(<NotificationsPage />);
+    await screen.findByText('Job failed');
+    const first = {
+      event: 'notification', id: 102,
+      payload: { notification_id: 102, title: 'First event', message: 'First body' },
+    };
+    const second = {
+      event: 'notification', id: 103,
+      payload: { notification_id: 103, title: 'Second event', message: 'Second body' },
+    };
+    mocks.lifecycle.eventSequence = 2;
+    mocks.lifecycle.events = [
+      { sequence: 1, event: first },
+      { sequence: 2, event: second },
+    ];
+    mocks.lifecycle.latestEvent = second;
+    view.rerender(<NotificationsPage />);
+
+    expect(await screen.findByText('First body')).toBeInTheDocument();
+    expect(screen.getByText('Second body')).toBeInTheDocument();
+  });
+
+  it('accepts sequence one again after a same-scope lifecycle restart', async () => {
+    const view = render(<NotificationsPage />);
+    await screen.findByText('Job failed');
+    mocks.lifecycle.eventSequence = 1;
+    mocks.lifecycle.events = [{
+      sequence: 1,
+      event: { event: 'notification', id: 102, payload: { notification_id: 102, message: 'Before restart' } },
+    }];
+    view.rerender(<NotificationsPage />);
+    expect(await screen.findByText('Before restart')).toBeInTheDocument();
+
+    mocks.lifecycle.lifecycleEpoch = 2;
+    mocks.lifecycle.eventSequence = 1;
+    mocks.lifecycle.events = [{
+      sequence: 1,
+      event: { event: 'notification', id: 103, payload: { notification_id: 103, message: 'After restart' } },
+    }];
+    view.rerender(<NotificationsPage />);
+
+    expect(await screen.findByText('After restart')).toBeInTheDocument();
+  });
+
+  it('clears old-account items and ignores delayed list responses after scope change', async () => {
+    let resolveOldInbox: ((value: { items: unknown[]; total: number }) => void) | undefined;
+    let resolveOldSnoozed: ((value: { items: unknown[]; total: number }) => void) | undefined;
+    mocks.listNotifications
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveOldInbox = resolve; }))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveOldSnoozed = resolve; }))
+      .mockResolvedValue({
+        items: [{
+          id: 202, kind: 'notification', title: 'New account', message: 'New body',
+          severity: 'info', created_at: '2026-07-11T00:00:00Z', read_at: null, dismissed_at: null,
+        }],
+        total: 1,
+      });
+    const view = render(<NotificationsPage />);
+    await waitFor(() => expect(mocks.listNotifications).toHaveBeenCalledTimes(2));
+
+    mocks.lifecycle.scopeKey = 'notifications:server-a:user-b';
+    mocks.lifecycle.unreadCount = 0;
+    mocks.lifecycle.updatedAt = 2;
+    view.rerender(<NotificationsPage />);
+    expect(screen.queryByText('Job failed')).not.toBeInTheDocument();
+    expect(await screen.findAllByText('New body')).not.toHaveLength(0);
+
+    resolveOldInbox?.({
+      items: [{
+        id: 101, kind: 'notification', title: 'Old account', message: 'Old body',
+        severity: 'info', created_at: '2026-07-10T00:00:00Z', read_at: null, dismissed_at: null,
+      }],
+      total: 1,
+    });
+    resolveOldSnoozed?.({ items: [], total: 0 });
+    await act(async () => Promise.resolve());
+
+    expect(screen.queryByText('Old body')).not.toBeInTheDocument();
+  });
+
+  it('reports list failures to the shared lifecycle', async () => {
+    const failure = Object.assign(new Error('forbidden'), { status: 403 });
+    mocks.listNotifications.mockRejectedValue(failure);
+
+    render(<NotificationsPage />);
+
+    await waitFor(() => expect(mocks.reportRequestError).toHaveBeenCalledWith(failure));
+    expect(mocks.reportRequestError).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries a transient page-list bootstrap with bounded backoff', async () => {
+    vi.useFakeTimers();
+    const transient = Object.assign(new Error('offline'), { status: 503 });
+    mocks.listNotifications
+      .mockRejectedValueOnce(transient)
+      .mockResolvedValue({ items: [], total: 0 });
+    render(<NotificationsPage />);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(mocks.reportRequestError).toHaveBeenCalledWith(transient);
+    expect(mocks.listNotifications).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_199);
+    });
+    expect(mocks.listNotifications).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(mocks.listNotifications).toHaveBeenCalledTimes(4);
+    vi.useRealTimers();
+  });
+
+  it('reports a failed mutation once without replaying it', async () => {
+    const user = userEvent.setup();
+    const failure = Object.assign(new Error('offline'), { status: 503 });
+    mocks.markNotificationsRead.mockRejectedValue(failure);
+    render(<NotificationsPage />);
+
+    await user.click(await screen.findByRole('button', { name: 'Mark read' }));
+
+    await waitFor(() => expect(mocks.reportMutationError).toHaveBeenCalledWith(failure));
+    expect(mocks.markNotificationsRead).toHaveBeenCalledTimes(1);
+    expect(mocks.reportMutationError).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries a transient mutation only after one explicit user action', async () => {
+    const user = userEvent.setup();
+    const failure = Object.assign(new Error('offline'), { status: 503 });
+    mocks.markNotificationsRead
+      .mockRejectedValueOnce(failure)
+      .mockResolvedValueOnce({ updated: 1 });
+    render(<NotificationsPage />);
+
+    await user.click(await screen.findByRole('button', { name: 'Mark read' }));
+    const retryButton = await screen.findByRole('button', { name: 'Retry action' });
+
+    expect(mocks.markNotificationsRead).toHaveBeenCalledTimes(1);
+    await user.click(retryButton);
+
+    await waitFor(() => expect(mocks.markNotificationsRead).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole('button', { name: 'Retry action' })).not.toBeInTheDocument();
+    expect(screen.getByText('Unread: 1')).toBeInTheDocument();
+  });
+
+  it('keeps retry progress visible and blocks duplicate item mutations', async () => {
+    const user = userEvent.setup();
+    const failure = Object.assign(new Error('offline'), { status: 503 });
+    let resolveRetry: ((value: { updated: number }) => void) | undefined;
+    mocks.markNotificationsRead
+      .mockRejectedValueOnce(failure)
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveRetry = resolve; }));
+    render(<NotificationsPage />);
+
+    await user.click(await screen.findByRole('button', { name: 'Mark read' }));
+    await user.click(await screen.findByRole('button', { name: 'Retry action' }));
+
+    expect(screen.getByRole('button', { name: 'Retrying...' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Mark read' })).toBeDisabled();
+    resolveRetry?.({ updated: 1 });
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Retrying...' })).not.toBeInTheDocument());
+  });
+
+  it('hides a failed mutation immediately when notification scope changes', async () => {
+    const user = userEvent.setup();
+    const failure = Object.assign(new Error('offline'), { status: 503 });
+    mocks.markNotificationsRead.mockRejectedValueOnce(failure);
+    const view = render(<NotificationsPage />);
+
+    await user.click(await screen.findByRole('button', { name: 'Mark read' }));
+    expect(await screen.findByRole('button', { name: 'Retry action' })).toBeInTheDocument();
+
+    mocks.lifecycle.scopeKey = 'notifications:server-a:user-b';
+    view.rerender(<NotificationsPage />);
+    expect(screen.queryByRole('button', { name: 'Retry action' })).not.toBeInTheDocument();
+  });
+
+  it('allows a new-scope retry while an old-scope retry is still pending', async () => {
+    const user = userEvent.setup();
+    const oldFailure = Object.assign(new Error('old account offline'), { status: 503 });
+    const newFailure = Object.assign(new Error('new account offline'), { status: 503 });
+    let resolveOldRetry: ((value: { updated: number }) => void) | undefined;
+    mocks.markNotificationsRead
+      .mockRejectedValueOnce(oldFailure)
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveOldRetry = resolve; }))
+      .mockRejectedValueOnce(newFailure)
+      .mockResolvedValueOnce({ updated: 1 });
+    const view = render(<NotificationsPage />);
+
+    await user.click(await screen.findByRole('button', { name: 'Mark read' }));
+    await user.click(await screen.findByRole('button', { name: 'Retry action' }));
+    expect(mocks.markNotificationsRead).toHaveBeenCalledTimes(2);
+
+    mocks.lifecycle.scopeKey = 'notifications:server-a:user-b';
+    view.rerender(<NotificationsPage />);
+    await user.click(await screen.findByRole('button', { name: 'Mark read' }));
+    await user.click(await screen.findByRole('button', { name: 'Retry action' }));
+
+    await waitFor(() => expect(mocks.markNotificationsRead).toHaveBeenCalledTimes(4));
+    resolveOldRetry?.({ updated: 1 });
+  });
+
+  it('suppresses page requests and actions while lifecycle state is terminal', async () => {
+    mocks.lifecycle.state = 'unavailable';
+    render(<NotificationsPage />);
+    await act(async () => Promise.resolve());
+
+    expect(mocks.listNotifications).not.toHaveBeenCalled();
+    expect(mocks.getUnreadCount).not.toHaveBeenCalled();
+    expect(mocks.subscribeNotificationsStream).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Refresh' })).toBeDisabled();
+    expect(screen.queryByText('Loading notifications...')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['connecting', 'Connecting to notifications'],
+    ['degraded', 'Notifications are reconnecting'],
+    ['auth-required', 'Sign in again to view notifications'],
+    ['unavailable', 'Notifications unavailable for this account'],
+  ] as const)('renders the %s recovery state on direct navigation', async (state, copy) => {
+    mocks.lifecycle.state = state;
+    render(<NotificationsPage />);
+    expect(await screen.findByText(copy)).toBeInTheDocument();
+  });
+
+  it('makes exactly one explicit retry from degraded inbox state', async () => {
+    const user = userEvent.setup();
+    mocks.lifecycle.state = 'degraded';
+    render(<NotificationsPage />);
+
+    await user.click(await screen.findByRole('button', { name: 'Try again' }));
+
+    expect(mocks.tryAgain).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens the existing sign-in flow from auth-required state', async () => {
+    const user = userEvent.setup();
+    mocks.lifecycle.state = 'auth-required';
+    render(<NotificationsPage />);
+
+    await user.click(await screen.findByRole('button', { name: 'Open sign in' }));
+
+    expect(mocks.push).toHaveBeenCalledWith('/login');
+    expect(mocks.refreshPermissions).not.toHaveBeenCalled();
+  });
+
+  it('marks a retained unread count as stale while notifications are degraded', async () => {
+    mocks.lifecycle.state = 'degraded';
+    render(<NotificationsPage />);
+
+    expect(await screen.findByText('Unread: 2')).toBeInTheDocument();
+    expect(screen.getByText(/Last updated before the connection was lost/)).toBeInTheDocument();
   });
 
   it('shows snoozed notifications instead of the empty state when only snoozed items remain', async () => {
@@ -253,6 +582,36 @@ describe('NotificationsPage', () => {
       await screen.findByText('Notification preferences are currently unavailable.')
     ).toBeInTheDocument();
     expect(screen.queryByText('Loading preferences...')).not.toBeInTheDocument();
+  });
+
+  it('stops preference retries when the lifecycle becomes terminal', async () => {
+    const user = userEvent.setup();
+    mocks.getNotificationPreferences.mockRejectedValueOnce(new Error('preferences unavailable'));
+    const view = render(<NotificationsPage />);
+
+    await user.click(await screen.findByRole('button', { name: 'Preferences' }));
+    const retryButton = await screen.findByRole('button', { name: 'Retry' });
+    expect(mocks.getNotificationPreferences).toHaveBeenCalledTimes(1);
+
+    mocks.lifecycle.state = 'unavailable';
+    view.rerender(<NotificationsPage />);
+
+    expect(retryButton).toBeDisabled();
+    await user.click(retryButton);
+    expect(mocks.getNotificationPreferences).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves an optimistic unread decrement across lifecycle timestamp changes', async () => {
+    const user = userEvent.setup();
+    const view = render(<NotificationsPage />);
+
+    await user.click(await screen.findByRole('button', { name: 'Mark read' }));
+    expect(screen.getByText('Unread: 1')).toBeInTheDocument();
+
+    mocks.lifecycle.updatedAt = 2;
+    view.rerender(<NotificationsPage />);
+
+    expect(screen.getByText('Unread: 1')).toBeInTheDocument();
   });
 
   it('disables preference toggles while a save is in flight and ignores duplicate clicks', async () => {

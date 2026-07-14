@@ -6435,6 +6435,7 @@ export class TldwApiClientBase {
     media_quality?: string
     include_embeddings?: boolean
     include_generated_content?: boolean
+    format_version?: "1.0.0" | "1.1.0"
     tags?: string[]
     categories?: string[]
     async_mode?: boolean
@@ -6596,6 +6597,13 @@ export class TldwApiClientBase {
     const id = String(job_id)
     return await bgRequest<any>({
       path: `/api/v1/chatbooks/import/jobs/${id}/remove`,
+      method: "DELETE"
+    })
+  }
+
+  async removeFinishedChatbookJobs(): Promise<any> {
+    return await bgRequest<any>({
+      path: "/api/v1/chatbooks/jobs/finished",
       method: "DELETE"
     })
   }

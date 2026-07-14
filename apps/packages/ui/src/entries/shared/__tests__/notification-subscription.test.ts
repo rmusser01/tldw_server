@@ -1,18 +1,27 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import { buildNotificationScopeKey } from "@/services/notification-lifecycle"
 import type { NotificationStreamEvent } from "@/services/notifications"
 
 const subscribeNotificationsStreamMock = vi.fn()
 const getUnreadCountMock = vi.fn()
 const notifyMock = vi.fn()
 
+type StorageChange = { oldValue?: unknown; newValue?: unknown }
+type StorageWatcher = (change: StorageChange) => void
 type MockStorage = {
   get: ReturnType<typeof vi.fn>
   set: ReturnType<typeof vi.fn>
+  watch: ReturnType<typeof vi.fn>
+  unwatch: ReturnType<typeof vi.fn>
 }
 
-let storageState = new Map<string, number | boolean>()
+const ACTIVE_SCOPE_KEY = "tldw:notifications:activeScope"
+
+let storageState = new Map<string, unknown>()
 let storageMock: MockStorage
+let watchers = new Map<string, Set<StorageWatcher>>()
+let operationOrder: string[] = []
 
 vi.mock("@/services/notifications", () => ({
   subscribeNotificationsStream: (...args: unknown[]) => subscribeNotificationsStreamMock(...args),
@@ -27,176 +36,542 @@ vi.mock("@/utils/safe-storage", () => ({
   createSafeStorage: () => storageMock
 }))
 
-import {
-  resetStoredUnreadCount,
-  startNotificationSubscription,
-  stopNotificationSubscription
-} from "@/entries/shared/notification-subscription"
+import * as notificationSubscription from "@/entries/shared/notification-subscription"
+
+const multiUserConfig = (userId: string, token = `token-${userId}`) => ({
+  serverUrl: "https://api.example.test",
+  authMode: "multi-user",
+  orgId: "org-1",
+  userId,
+  accessToken: token
+})
+
+const recordKeyFor = (config: ReturnType<typeof multiUserConfig>) =>
+  `tldw:${buildNotificationScopeKey(config)}`
+
+const flushAsync = async () => {
+  for (let index = 0; index < 12; index += 1) {
+    await Promise.resolve()
+  }
+}
 
 describe("notification subscription", () => {
   beforeEach(() => {
     storageState = new Map()
+    watchers = new Map()
+    operationOrder = []
     storageMock = {
       get: vi.fn(async (key: string) => storageState.get(key)),
-      set: vi.fn(async (key: string, value: number | boolean) => {
-        await Promise.resolve()
+      set: vi.fn(async (key: string, value: unknown) => {
+        operationOrder.push(`set:${key}:${String(value)}`)
+        const oldValue = storageState.get(key)
         storageState.set(key, value)
+        for (const watcher of watchers.get(key) ?? []) {
+          watcher({ oldValue, newValue: value })
+        }
+      }),
+      watch: vi.fn((entries: Record<string, StorageWatcher>) => {
+        for (const [key, watcher] of Object.entries(entries)) {
+          const callbacks = watchers.get(key) ?? new Set<StorageWatcher>()
+          callbacks.add(watcher)
+          watchers.set(key, callbacks)
+        }
+        return () => {
+          for (const [key, watcher] of Object.entries(entries)) {
+            watchers.get(key)?.delete(watcher)
+          }
+        }
+      }),
+      unwatch: vi.fn((entries: Record<string, StorageWatcher>) => {
+        for (const [key, watcher] of Object.entries(entries)) {
+          watchers.get(key)?.delete(watcher)
+        }
       })
     }
 
     subscribeNotificationsStreamMock.mockReset()
     getUnreadCountMock.mockReset()
     notifyMock.mockReset()
-    vi.restoreAllMocks()
+    getUnreadCountMock.mockResolvedValue({ unread_count: 4 })
   })
 
   afterEach(() => {
-    stopNotificationSubscription()
+    notificationSubscription.stopNotificationSubscription()
+    vi.useRealTimers()
+    vi.restoreAllMocks()
   })
 
-  it("increments unread count without losing updates when notifications arrive back-to-back", async () => {
-    let onEvent: ((event: NotificationStreamEvent) => Promise<void> | void) | null = null
-    subscribeNotificationsStreamMock.mockImplementation((options: { onEvent: typeof onEvent }) => {
-      onEvent = options.onEvent
-      return vi.fn()
+  it("persists lifecycle and unread count under a server/principal-scoped key", async () => {
+    let onOpen: (() => void) | undefined
+    subscribeNotificationsStreamMock.mockImplementation((options: { onOpen?: () => void }) => {
+      onOpen = options.onOpen
+      return () => operationOrder.push("unsubscribe")
     })
-    getUnreadCountMock.mockResolvedValue({ unread_count: 0 })
+    const config = multiUserConfig("user-a")
+    const recordKey = recordKeyFor(config)
 
-    await startNotificationSubscription()
+    await notificationSubscription.startNotificationSubscription(config)
 
-    expect(onEvent).toBeTruthy()
+    expect(storageState.get(ACTIVE_SCOPE_KEY)).toBe(recordKey)
+    expect(recordKey).not.toContain(config.accessToken)
+    expect(storageState.get(recordKey)).toEqual({
+      state: "connecting",
+      unreadCount: 4,
+      updatedAt: expect.any(Number)
+    })
+    expect(storageState.has("tldw:notifications:unreadCount")).toBe(false)
 
-    await Promise.all([
-      onEvent?.({
-        event: "notification",
-        payload: { title: "First", message: "One" }
-      }),
-      onEvent?.({
-        event: "notification",
-        payload: { title: "Second", message: "Two" }
-      })
-    ])
+    onOpen?.()
+    await flushAsync()
 
-    expect(storageState.get("tldw:notifications:unreadCount")).toBe(2)
-    expect(notifyMock).toHaveBeenCalledTimes(2)
+    expect(storageState.get(recordKey)).toEqual({
+      state: "active",
+      unreadCount: 4,
+      updatedAt: expect.any(Number)
+    })
   })
 
-  it("swallows unread count storage failures during notification events", async () => {
-    let onEvent: ((event: NotificationStreamEvent) => Promise<void> | void) | null = null
-    const error = new Error("storage unavailable")
-    const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {})
-
-    subscribeNotificationsStreamMock.mockImplementation((options: { onEvent: typeof onEvent }) => {
-      onEvent = options.onEvent
-      return vi.fn()
-    })
-    getUnreadCountMock.mockResolvedValue({ unread_count: 0 })
-    storageMock.get.mockRejectedValue(error)
-
-    await startNotificationSubscription()
-
-    await expect(
-      onEvent?.({
-        event: "notification",
-        payload: { title: "Broken", message: "Write" }
-      })
-    ).resolves.toBeUndefined()
-
-    expect(debugSpy).toHaveBeenCalledWith(
-      "[background] Failed to update unread count from notification event:",
-      error
-    )
-  })
-
-  it("coalesces concurrent startup into a single subscription", async () => {
-    let releaseFetch: (() => void) | null = null
-    const fetchGate = new Promise<void>((resolve) => {
-      releaseFetch = resolve
-    })
-
+  it("prevents a stale initial fetch from writing or subscribing after a scope switch", async () => {
+    let resolveFirstFetch: ((value: { unread_count: number }) => void) | undefined
+    getUnreadCountMock
+      .mockImplementationOnce(
+        () =>
+          new Promise<{ unread_count: number }>((resolve) => {
+            resolveFirstFetch = resolve
+          })
+      )
+      .mockResolvedValueOnce({ unread_count: 9 })
     subscribeNotificationsStreamMock.mockReturnValue(vi.fn())
-    getUnreadCountMock.mockImplementation(async () => {
-      await fetchGate
-      return { unread_count: 0 }
+    const firstConfig = multiUserConfig("user-a")
+    const secondConfig = multiUserConfig("user-b")
+
+    const firstStart = notificationSubscription.startNotificationSubscription(firstConfig)
+    await flushAsync()
+
+    for (const watcher of watchers.get("tldwConfig") ?? []) {
+      watcher({ oldValue: firstConfig, newValue: secondConfig })
+    }
+    await flushAsync()
+
+    resolveFirstFetch?.({ unread_count: 77 })
+    await firstStart
+    await flushAsync()
+
+    expect(storageState.get(ACTIVE_SCOPE_KEY)).toBe(recordKeyFor(secondConfig))
+    expect(storageState.get(recordKeyFor(secondConfig))).toEqual({
+      state: "connecting",
+      unreadCount: 9,
+      updatedAt: expect.any(Number)
     })
-
-    const first = startNotificationSubscription()
-    const second = startNotificationSubscription()
-
-    releaseFetch?.()
-    await Promise.all([first, second])
-
     expect(subscribeNotificationsStreamMock).toHaveBeenCalledTimes(1)
   })
 
-  it("logs debug details when the initial unread count fetch fails", async () => {
-    const error = new Error("offline")
-    const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {})
+  it("prevents a delayed old selector clear from overwriting the new active scope", async () => {
+    let releaseOldClear: (() => void) | undefined
+    let delayFirstSelectorWrite = true
+    storageMock.set.mockImplementation((key: string, value: unknown) => {
+      const applyWrite = () => {
+        const oldValue = storageState.get(key)
+        storageState.set(key, value)
+        for (const watcher of watchers.get(key) ?? []) {
+          watcher({ oldValue, newValue: value })
+        }
+      }
+      if (key === ACTIVE_SCOPE_KEY && delayFirstSelectorWrite) {
+        delayFirstSelectorWrite = false
+        return new Promise<void>((resolve) => {
+          releaseOldClear = () => {
+            applyWrite()
+            resolve()
+          }
+        })
+      }
+      applyWrite()
+      return Promise.resolve()
+    })
     subscribeNotificationsStreamMock.mockReturnValue(vi.fn())
-    getUnreadCountMock.mockRejectedValue(error)
+    const firstConfig = multiUserConfig("user-a")
+    const secondConfig = multiUserConfig("user-b")
 
-    await startNotificationSubscription()
+    const firstStart = notificationSubscription.startNotificationSubscription(firstConfig)
+    await flushAsync()
+    const secondStart = notificationSubscription.startNotificationSubscription(secondConfig)
+    await flushAsync()
 
-    expect(debugSpy).toHaveBeenCalledWith(
-      "[background] Failed to fetch initial unread count:",
-      error
+    releaseOldClear?.()
+    await Promise.all([firstStart, secondStart])
+    await flushAsync()
+
+    expect(storageState.get(ACTIVE_SCOPE_KEY)).toBe(recordKeyFor(secondConfig))
+  })
+
+  it("aborts and clears the rendered selector before starting a switched principal scope", async () => {
+    subscribeNotificationsStreamMock.mockImplementation(() => {
+      operationOrder.push("subscribe")
+      return () => operationOrder.push("unsubscribe")
+    })
+    const firstConfig = multiUserConfig("user-a")
+    const secondConfig = multiUserConfig("user-b")
+
+    await notificationSubscription.startNotificationSubscription(firstConfig)
+    operationOrder = []
+
+    for (const watcher of watchers.get("tldwConfig") ?? []) {
+      watcher({ oldValue: firstConfig, newValue: secondConfig })
+    }
+    await flushAsync()
+
+    const unsubscribeIndex = operationOrder.indexOf("unsubscribe")
+    const clearIndex = operationOrder.findIndex((entry) =>
+      entry.startsWith(`set:${ACTIVE_SCOPE_KEY}:`)
+    )
+    const subscribeIndex = operationOrder.indexOf("subscribe")
+
+    expect(unsubscribeIndex).toBeGreaterThanOrEqual(0)
+    expect(clearIndex).toBeGreaterThan(unsubscribeIndex)
+    expect(subscribeIndex).toBeGreaterThan(clearIndex)
+    expect(storageState.get(ACTIVE_SCOPE_KEY)).toBe(recordKeyFor(secondConfig))
+  })
+
+  it("does not mark the lifecycle active before the stream onOpen callback", async () => {
+    let onOpen: (() => void) | undefined
+    subscribeNotificationsStreamMock.mockImplementation((options: { onOpen?: () => void }) => {
+      onOpen = options.onOpen
+      return vi.fn()
+    })
+    const config = multiUserConfig("user-a")
+    const recordKey = recordKeyFor(config)
+
+    await notificationSubscription.startNotificationSubscription(config)
+
+    expect((storageState.get(recordKey) as { state: string }).state).toBe("connecting")
+    onOpen?.()
+    await flushAsync()
+    expect((storageState.get(recordKey) as { state: string }).state).toBe("active")
+  })
+
+  it("stops on 401 and restarts only after a successful auth config change", async () => {
+    vi.useFakeTimers()
+    let onError: ((error: unknown) => void) | undefined
+    subscribeNotificationsStreamMock.mockImplementation((options: { onError?: (error: unknown) => void }) => {
+      onError = options.onError
+      return () => operationOrder.push("unsubscribe")
+    })
+    const firstConfig = multiUserConfig("user-a", "expired-token")
+    const refreshedConfig = multiUserConfig("user-a", "fresh-token")
+
+    await notificationSubscription.startNotificationSubscription(firstConfig)
+    onError?.({ status: 401 })
+    await flushAsync()
+
+    expect(subscribeNotificationsStreamMock).toHaveBeenCalledTimes(1)
+    expect((storageState.get(recordKeyFor(firstConfig)) as { state: string }).state).toBe(
+      "auth-required"
+    )
+
+    await vi.advanceTimersByTimeAsync(5 * 60_000)
+    expect(subscribeNotificationsStreamMock).toHaveBeenCalledTimes(1)
+
+    for (const watcher of watchers.get("tldwConfig") ?? []) {
+      watcher({ oldValue: firstConfig, newValue: refreshedConfig })
+    }
+    await flushAsync()
+
+    expect(subscribeNotificationsStreamMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("aborts and synchronously clears the active scope on logout without restarting", async () => {
+    subscribeNotificationsStreamMock.mockImplementation(() => {
+      operationOrder.push("subscribe")
+      return () => operationOrder.push("unsubscribe")
+    })
+    const config = multiUserConfig("user-a")
+
+    await notificationSubscription.startNotificationSubscription(config)
+    operationOrder = []
+
+    for (const watcher of watchers.get("tldwConfig") ?? []) {
+      watcher({ oldValue: config, newValue: { ...config, accessToken: "" } })
+    }
+
+    expect(operationOrder[0]).toBe("unsubscribe")
+    expect(operationOrder[1]).toBe(`set:${ACTIVE_SCOPE_KEY}:null`)
+    expect(storageState.get(ACTIVE_SCOPE_KEY)).toBeNull()
+    await flushAsync()
+    expect(subscribeNotificationsStreamMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("clears a persisted selector when startup finds no authenticated config", async () => {
+    storageState.set(ACTIVE_SCOPE_KEY, "tldw:notifications:stale-scope")
+
+    await notificationSubscription.startNotificationSubscription(null)
+
+    expect(storageState.get(ACTIVE_SCOPE_KEY)).toBeNull()
+    expect(subscribeNotificationsStreamMock).not.toHaveBeenCalled()
+  })
+
+  it("stops on 403 until an explicit retry and never passively polls", async () => {
+    vi.useFakeTimers()
+    let onError: ((error: unknown) => void) | undefined
+    subscribeNotificationsStreamMock.mockImplementation((options: { onError?: (error: unknown) => void }) => {
+      onError = options.onError
+      return vi.fn()
+    })
+    const config = multiUserConfig("restricted-user")
+
+    await notificationSubscription.startNotificationSubscription(config)
+    onError?.({ status: 403 })
+    await flushAsync()
+
+    expect((storageState.get(recordKeyFor(config)) as { state: string }).state).toBe(
+      "unavailable"
+    )
+
+    await vi.advanceTimersByTimeAsync(5 * 60_000)
+    expect(getUnreadCountMock).toHaveBeenCalledTimes(1)
+    expect(subscribeNotificationsStreamMock).toHaveBeenCalledTimes(1)
+
+    expect(notificationSubscription.retryNotificationSubscription).toBeTypeOf("function")
+    await notificationSubscription.retryNotificationSubscription()
+
+    expect(getUnreadCountMock).toHaveBeenCalledTimes(2)
+    expect(subscribeNotificationsStreamMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("keeps 403 unavailable stopped across same-principal token rotation", async () => {
+    let onError: ((error: unknown) => void) | undefined
+    subscribeNotificationsStreamMock.mockImplementation(
+      (options: { onError?: (error: unknown) => void }) => {
+        onError = options.onError
+        return vi.fn()
+      }
+    )
+    const restrictedConfig = multiUserConfig("restricted-user", "first-token")
+    const rotatedConfig = multiUserConfig("restricted-user", "rotated-token")
+
+    await notificationSubscription.startNotificationSubscription(restrictedConfig)
+    onError?.({ status: 403 })
+    await flushAsync()
+
+    for (const watcher of watchers.get("tldwConfig") ?? []) {
+      watcher({ oldValue: restrictedConfig, newValue: rotatedConfig })
+    }
+    await flushAsync()
+
+    expect(getUnreadCountMock).toHaveBeenCalledTimes(1)
+    expect(subscribeNotificationsStreamMock).toHaveBeenCalledTimes(1)
+    expect((storageState.get(recordKeyFor(rotatedConfig)) as { state: string }).state).toBe(
+      "unavailable"
+    )
+
+    await notificationSubscription.retryNotificationSubscription()
+    expect(getUnreadCountMock).toHaveBeenCalledTimes(2)
+    expect(subscribeNotificationsStreamMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("classifies a terminal initial count failure without starting or polling the stream", async () => {
+    vi.useFakeTimers()
+    getUnreadCountMock.mockRejectedValue({ status: 401 })
+    const config = multiUserConfig("expired-user")
+
+    await notificationSubscription.startNotificationSubscription(config)
+
+    expect((storageState.get(recordKeyFor(config)) as { state: string }).state).toBe(
+      "auth-required"
+    )
+    expect(subscribeNotificationsStreamMock).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(5 * 60_000)
+    expect(getUnreadCountMock).toHaveBeenCalledTimes(1)
+    expect(subscribeNotificationsStreamMock).not.toHaveBeenCalled()
+  })
+
+  it("aborts a stream that reports a terminal error during subscription startup", async () => {
+    const stop = vi.fn()
+    subscribeNotificationsStreamMock.mockImplementation(
+      (options: { onError?: (error: unknown) => void }) => {
+        options.onError?.({ status: 403 })
+        return stop
+      }
+    )
+    const config = multiUserConfig("restricted-user")
+
+    await notificationSubscription.startNotificationSubscription(config)
+
+    expect(stop).toHaveBeenCalledTimes(1)
+    expect((storageState.get(recordKeyFor(config)) as { state: string }).state).toBe(
+      "unavailable"
     )
   })
 
-  it("logs debug details when a coalesced refresh fails", async () => {
+  it("shows transient stream failures as degraded and recovers only on onOpen", async () => {
+    let onOpen: (() => void) | undefined
+    let onError: ((error: unknown) => void) | undefined
+    subscribeNotificationsStreamMock.mockImplementation(
+      (options: { onOpen?: () => void; onError?: (error: unknown) => void }) => {
+        onOpen = options.onOpen
+        onError = options.onError
+        return vi.fn()
+      }
+    )
+    const config = multiUserConfig("user-a")
+    const recordKey = recordKeyFor(config)
+
+    await notificationSubscription.startNotificationSubscription(config)
+    onOpen?.()
+    await flushAsync()
+    onError?.({ status: 503 })
+    await flushAsync()
+
+    expect((storageState.get(recordKey) as { state: string }).state).toBe("degraded")
+    expect(subscribeNotificationsStreamMock).toHaveBeenCalledTimes(1)
+
+    onOpen?.()
+    await flushAsync()
+    expect((storageState.get(recordKey) as { state: string }).state).toBe("active")
+  })
+
+  it("increments the active scoped unread count without losing concurrent events", async () => {
     let onEvent: ((event: NotificationStreamEvent) => Promise<void> | void) | null = null
-    const error = new Error("refresh failed")
-    const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {})
     subscribeNotificationsStreamMock.mockImplementation((options: { onEvent: typeof onEvent }) => {
       onEvent = options.onEvent
       return vi.fn()
     })
-    getUnreadCountMock
-      .mockResolvedValueOnce({ unread_count: 3 })
-      .mockRejectedValueOnce(error)
-
-    await startNotificationSubscription()
-    await onEvent?.({
-      event: "notifications_coalesced",
-      payload: { count: 2 }
-    })
-
-    expect(debugSpy).toHaveBeenCalledWith(
-      "[background] Failed to refresh unread count after coalesced notifications:",
-      error
-    )
-  })
-
-  it("logs debug details when the subscription cannot start", async () => {
-    const error = new Error("boom")
-    const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {})
     getUnreadCountMock.mockResolvedValue({ unread_count: 0 })
-    subscribeNotificationsStreamMock.mockImplementation(() => {
-      throw error
-    })
+    const config = multiUserConfig("user-a")
 
-    await startNotificationSubscription()
-    await resetStoredUnreadCount()
+    await notificationSubscription.startNotificationSubscription(config)
+    expect(
+      onEvent?.({ event: "notification", payload: { title: "First", message: "One" } })
+    ).toBeUndefined()
+    expect(
+      onEvent?.({ event: "notification", payload: { title: "Second", message: "Two" } })
+    ).toBeUndefined()
+    await flushAsync()
+    await flushAsync()
 
-    expect(debugSpy).toHaveBeenCalledWith(
-      "[background] Failed to start notification subscription:",
-      error
-    )
-    expect(storageState.get("tldw:notifications:subscriptionActive")).toBe(false)
-    expect(storageState.get("tldw:notifications:unreadCount")).toBe(0)
+    expect((storageState.get(recordKeyFor(config)) as { unreadCount: number }).unreadCount).toBe(2)
+    expect(notifyMock).toHaveBeenCalledTimes(2)
   })
 
-  it("clears the active subscription flag when stopping", async () => {
+  it("dispatches stream events synchronously and contains async write failures", async () => {
+    let onEvent: ((event: NotificationStreamEvent) => void) | undefined
+    subscribeNotificationsStreamMock.mockImplementation(
+      (options: { onEvent: (event: NotificationStreamEvent) => void }) => {
+        onEvent = options.onEvent
+        return vi.fn()
+      }
+    )
+    const config = multiUserConfig("user-a")
+    const error = new Error("storage unavailable")
+    const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {})
+
+    await notificationSubscription.startNotificationSubscription(config)
+    storageMock.set.mockRejectedValueOnce(error)
+
+    expect(
+      onEvent?.({ event: "notification", payload: { title: "Queued", message: "Write" } })
+    ).toBeUndefined()
+    await flushAsync()
+
+    expect(debugSpy).toHaveBeenCalledWith(
+      "[background] Failed to handle notification stream event:",
+      error
+    )
+  })
+
+  it("contains async lifecycle writes triggered by stream errors", async () => {
+    let onError: ((error: unknown) => void) | undefined
+    subscribeNotificationsStreamMock.mockImplementation(
+      (options: { onError?: (error: unknown) => void }) => {
+        onError = options.onError
+        return vi.fn()
+      }
+    )
+    const config = multiUserConfig("user-a")
+    const error = new Error("terminal state write failed")
+    const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {})
+
+    await notificationSubscription.startNotificationSubscription(config)
+    storageMock.set.mockRejectedValueOnce(error)
+
+    expect(onError?.({ status: 403 })).toBeUndefined()
+    await flushAsync()
+
+    expect(debugSpy).toHaveBeenCalledWith(
+      "[background] Failed to handle notification stream error:",
+      error
+    )
+  })
+
+  it("contains async lifecycle writes triggered by stream open", async () => {
+    let onOpen: (() => void) | undefined
+    subscribeNotificationsStreamMock.mockImplementation(
+      (options: { onOpen?: () => void }) => {
+        onOpen = options.onOpen
+        return vi.fn()
+      }
+    )
+    const config = multiUserConfig("user-a")
+    const error = new Error("active state write failed")
+    const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {})
+
+    await notificationSubscription.startNotificationSubscription(config)
+    storageMock.set.mockRejectedValueOnce(error)
+
+    expect(onOpen?.()).toBeUndefined()
+    await flushAsync()
+
+    expect(debugSpy).toHaveBeenCalledWith(
+      "[background] Failed to mark notification stream active:",
+      error
+    )
+  })
+
+  it("contains and logs async config watcher failures", async () => {
     subscribeNotificationsStreamMock.mockReturnValue(vi.fn())
-    getUnreadCountMock.mockResolvedValue({ unread_count: 1 })
+    const firstConfig = multiUserConfig("user-a")
+    const secondConfig = multiUserConfig("user-b")
+    const error = new Error("selector write failed")
+    const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {})
 
-    await startNotificationSubscription()
+    await notificationSubscription.startNotificationSubscription(firstConfig)
+    storageMock.set.mockRejectedValueOnce(error)
+    for (const watcher of watchers.get("tldwConfig") ?? []) {
+      watcher({ oldValue: firstConfig, newValue: secondConfig })
+    }
+    await flushAsync()
 
-    expect(storageState.get("tldw:notifications:subscriptionActive")).toBe(true)
+    expect(debugSpy).toHaveBeenCalledWith(
+      "[background] Failed to update notification scope:",
+      error
+    )
+  })
 
-    stopNotificationSubscription()
-    await Promise.resolve()
+  it("tears down and reinstalls exactly one config watcher across stop and restart", async () => {
+    subscribeNotificationsStreamMock.mockReturnValue(vi.fn())
+    const config = multiUserConfig("user-a")
 
-    expect(storageState.get("tldw:notifications:subscriptionActive")).toBe(false)
+    await notificationSubscription.startNotificationSubscription(config)
+    expect(watchers.get("tldwConfig")?.size).toBe(1)
+
+    notificationSubscription.stopNotificationSubscription()
+    expect(watchers.get("tldwConfig")?.size ?? 0).toBe(0)
+
+    await notificationSubscription.startNotificationSubscription(config)
+    expect(watchers.get("tldwConfig")?.size).toBe(1)
+  })
+
+  it("keeps idle internal-only when the active subscription stops", async () => {
+    subscribeNotificationsStreamMock.mockReturnValue(vi.fn())
+    const config = multiUserConfig("user-a")
+    const recordKey = recordKeyFor(config)
+
+    await notificationSubscription.startNotificationSubscription(config)
+    notificationSubscription.stopNotificationSubscription()
+    await flushAsync()
+
+    expect(storageState.get(ACTIVE_SCOPE_KEY)).toBeNull()
+    expect((storageState.get(recordKey) as { state: string }).state).not.toBe("idle")
   })
 })

@@ -34,7 +34,7 @@ from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
     ContentType,
     ConflictResolution,
 )
-from tldw_Server_API.app.core.Chatbooks.exceptions import QuotaExceededError
+from tldw_Server_API.app.core.Chatbooks.exceptions import JobError, QuotaExceededError
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
@@ -689,12 +689,13 @@ class TestChatbookService:
     @pytest.mark.asyncio
     async def test_export_manifest_total_size_bytes_matches_archive(self, service):
         """Exported manifest should report the final archive size."""
-        success, _message, export_path = await service.create_chatbook(
-            name="Size Check",
-            description="Ensure manifest size is accurate",
-            content_selections={},
-            async_mode=False
-        )
+        with patch.object(service, "_collect_conversations"):
+            success, _message, export_path = await service.create_chatbook(
+                name="Size Check",
+                description="Ensure manifest size is accurate",
+                content_selections={ContentType.CONVERSATION: ["size-check"]},
+                async_mode=False
+            )
         assert success is True
         assert export_path is not None
 
@@ -754,12 +755,13 @@ class TestChatbookService:
     async def test_export_filename_truncates_long_names(self, service):
         """Export filenames should stay within filesystem limits for long names."""
         long_name = "a" * 300
-        success, _message, export_path = await service.create_chatbook(
-            name=long_name,
-            description="Long name export",
-            content_selections={},
-            async_mode=False,
-        )
+        with patch.object(service, "_collect_conversations"):
+            success, _message, export_path = await service.create_chatbook(
+                name=long_name,
+                description="Long name export",
+                content_selections={ContentType.CONVERSATION: ["filename-check"]},
+                async_mode=False,
+            )
         assert success is True
         assert export_path is not None
 
@@ -1135,6 +1137,119 @@ class TestChatbookService:
         assert success is True
         assert job_id
         assert saved_jobs[0].metadata["source_format"] == "openwebui_json"
+
+    @pytest.mark.asyncio
+    async def test_async_import_job_stores_safe_source_filename(self, service):
+        """Async jobs retain a user-facing filename without persisting a client path."""
+        sample_path = service.import_dir / "import_0123456789abcdef0123456789abcdef_backup.chatbook"
+        sample_path.write_text("dummy")
+        captured: dict[str, ImportJob] = {}
+
+        class _CoreJobs:
+            def create_job(self, **_kwargs):
+                return {"id": 1}
+
+        service._core_jobs = _CoreJobs()
+
+        def _capture_job(job: ImportJob) -> None:
+            captured["job"] = job
+
+        with patch.object(service, "_save_import_job_with_quota", side_effect=_capture_job):
+            success, _message, _job_id = await service.import_chatbook(
+                file_path=str(sample_path),
+                async_mode=True,
+                source_filename="/Users/tester/backup.chatbook",
+            )
+
+        assert success is True
+        assert captured["job"].metadata["source_filename"] == "backup.chatbook"
+        assert "/Users/" not in captured["job"].metadata["source_filename"]
+
+    def test_delete_finished_jobs_removes_every_batch(self, service):
+        """Bulk history removal is not limited to the first displayed page."""
+        export_jobs = {
+            f"export-{index}": ExportJob(
+                job_id=f"export-{index}",
+                user_id=service.user_id,
+                status=ExportStatus.COMPLETED,
+                chatbook_name=f"Backup {index}",
+            )
+            for index in range(51)
+        }
+        import_jobs = {
+            f"import-{index}": ImportJob(
+                job_id=f"import-{index}",
+                user_id=service.user_id,
+                status=ImportStatus.COMPLETED,
+                chatbook_path=f"backup-{index}.chatbook",
+            )
+            for index in range(51)
+        }
+
+        def _list_exports(status=None, limit=100, offset=0, *, raise_on_error=False):
+            if status != ExportStatus.COMPLETED.value:
+                return []
+            return list(export_jobs.values())[:limit]
+
+        def _list_imports(status=None, limit=100, offset=0, *, raise_on_error=False):
+            if status != ImportStatus.COMPLETED.value:
+                return []
+            return list(import_jobs.values())[:limit]
+
+        def _delete_export(job_id, delete_file=True):
+            return export_jobs.pop(job_id, None) is not None
+
+        def _delete_import(job_id):
+            return import_jobs.pop(job_id, None) is not None
+
+        with (
+            patch.object(service, "list_export_jobs", side_effect=_list_exports),
+            patch.object(service, "list_import_jobs", side_effect=_list_imports),
+            patch.object(service, "delete_export_job", side_effect=_delete_export),
+            patch.object(service, "delete_import_job", side_effect=_delete_import),
+        ):
+            result = service.delete_finished_jobs(batch_size=50)
+
+        assert result == {
+            "export_jobs_removed": 51,
+            "import_jobs_removed": 51,
+        }
+        assert export_jobs == {}
+        assert import_jobs == {}
+
+    def test_delete_finished_jobs_propagates_listing_failures(self, service, mock_db):
+        """Bulk removal must not report success when a database read fails."""
+        mock_db.execute_query.side_effect = OSError("database unavailable")
+
+        with pytest.raises(OSError, match="database unavailable"):
+            service.delete_finished_jobs()
+
+    def test_delete_export_job_preserves_history_when_archive_delete_fails(
+        self,
+        service,
+        mock_db,
+    ):
+        """Archive removal failure keeps the job record available for retry."""
+        archive_path = service.export_dir / "backup.chatbook"
+        archive_path.write_bytes(b"backup")
+        job = ExportJob(
+            job_id="export-delete-failure",
+            user_id=service.user_id,
+            status=ExportStatus.COMPLETED,
+            chatbook_name="Backup",
+            output_path=str(archive_path),
+        )
+        mock_db.reset_mock()
+
+        with (
+            patch.object(service, "_get_export_job", return_value=job),
+            patch.object(Path, "unlink", side_effect=OSError("read-only storage")),
+            pytest.raises(JobError, match="history was preserved"),
+        ):
+            service.delete_export_job(job.job_id)
+
+        assert archive_path.exists()
+        mock_db.execute_query.assert_not_called()
 
     def test_get_statistics(self, service, mock_db):
         """Test getting import/export statistics."""

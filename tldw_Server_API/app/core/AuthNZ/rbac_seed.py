@@ -40,6 +40,8 @@ _BASELINE_PERMISSIONS: Sequence[PermissionDef] = (
     ("moderation.review.decide", "Decide moderation review items", "moderation"),
     ("moderation.review.bulk_decide", "Bulk decide moderation review items", "moderation"),
     ("moderation.audit.read", "Read moderation review audit events", "moderation"),
+    ("notifications.read", "Read personal notifications", "notifications"),
+    ("notifications.control", "Manage personal notifications", "notifications"),
 )
 
 _MCP_PERMISSIONS: Sequence[PermissionDef] = (
@@ -47,6 +49,8 @@ _MCP_PERMISSIONS: Sequence[PermissionDef] = (
     ("prompts.read", "Read MCP prompts", "prompts"),
     ("tools.execute:*", "Execute any MCP tool", "tools"),
 )
+
+_INTERACTIVE_ROLES = ("admin", "user", "moderator", "reviewer", "viewer")
 
 
 def _is_postgres_connection(conn: Any) -> bool:
@@ -81,6 +85,12 @@ def _build_role_grants(permission_names: Iterable[str], *, include_mcp_permissio
         for p in ("modules.read", "prompts.read", "tools.execute:*"):
             if p in base and p not in grants["admin"]:
                 grants["admin"].append(p)
+
+    for role_name in _INTERACTIVE_ROLES:
+        role_grants = grants.setdefault(role_name, [])
+        for permission_name in ("notifications.read", "notifications.control"):
+            if permission_name in base and permission_name not in role_grants:
+                role_grants.append(permission_name)
     return grants
 
 
@@ -127,9 +137,10 @@ async def ensure_baseline_rbac_seed(
                 category,
             )
 
+        role_names = list(dict.fromkeys([*(role[0] for role in _BASELINE_ROLES), *grants]))
         role_rows = await conn.fetch(
             "SELECT id, name FROM roles WHERE name = ANY($1::text[])",
-            [r[0] for r in _BASELINE_ROLES],
+            role_names,
         )
         perm_rows = await conn.fetch(
             "SELECT id, name FROM permissions WHERE name = ANY($1::text[])",
@@ -167,7 +178,7 @@ async def ensure_baseline_rbac_seed(
         )
 
     try:
-        role_names = [r[0] for r in _BASELINE_ROLES]
+        role_names = list(dict.fromkeys([*(role[0] for role in _BASELINE_ROLES), *grants]))
         placeholders = ",".join("?" for _ in role_names)
         role_names_clause = f"({placeholders})"
         role_lookup_sql_template = "SELECT id, name FROM roles WHERE name IN {role_names_clause}"

@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { streamSSE, streamStructuredSSE, type StructuredSSEEvent } from '@web/lib/sse';
 
 const encoder = new TextEncoder();
+const originalApiUrl = process.env.NEXT_PUBLIC_API_URL;
 
 function createSSEStream(chunks: string[]): ReadableStream<Uint8Array> {
   return new ReadableStream<Uint8Array>({
@@ -25,6 +26,48 @@ function createResponse(chunks: string[]): Response {
 describe('streamStructuredSSE', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    process.env.NEXT_PUBLIC_API_URL = 'http://localhost:8000';
+  });
+
+  afterEach(() => {
+    if (originalApiUrl === undefined) {
+      delete process.env.NEXT_PUBLIC_API_URL;
+    } else {
+      process.env.NEXT_PUBLIC_API_URL = originalApiUrl;
+    }
+  });
+
+  it('classifies a missing body on an otherwise successful response as transient', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response(null, { status: 200, statusText: 'OK' }))
+    );
+
+    const error = await streamStructuredSSE('/events', {}, vi.fn()).catch(
+      (caught) => caught as { name?: string; status?: number }
+    );
+
+    expect(error).toMatchObject({ name: 'ApiError' });
+    expect(error.status).toBeUndefined();
+  });
+
+  it('preserves status and retry-after for non-OK responses', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(null, {
+          status: 503,
+          statusText: 'Unavailable',
+          headers: { 'Retry-After': '17' },
+        })
+      )
+    );
+
+    await expect(streamStructuredSSE('/events', {}, vi.fn())).rejects.toMatchObject({
+      name: 'ApiError',
+      status: 503,
+      retryAfter: 17,
+    });
   });
 
   it('surfaces event names, ids, and parsed payloads', async () => {

@@ -243,6 +243,59 @@ describe("runtime-bootstrap chrome shim", () => {
     })
   })
 
+  it("preserves manual multi-user tokens without replacement runtime auth", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
+    process.env.NEXT_PUBLIC_API_URL = "http://127.0.0.1:8000"
+    delete process.env.NEXT_PUBLIC_X_API_KEY
+    delete process.env.NEXT_PUBLIC_API_BEARER
+    localStorage.setItem(
+      "tldwConfig",
+      JSON.stringify({
+        authMode: "multi-user",
+        accessToken: "user-token",
+        refreshToken: "user-refresh",
+        serverUrl: "http://127.0.0.1:8000/"
+      })
+    )
+
+    await importAndAwaitBootstrap()
+
+    expect(readStoredValue("tldwConfig")).toMatchObject({
+      authMode: "multi-user",
+      accessToken: "user-token",
+      refreshToken: "user-refresh",
+      serverUrl: "http://127.0.0.1:8000"
+    })
+  })
+
+  it("clears manual multi-user tokens when the target server changes", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
+    process.env.NEXT_PUBLIC_API_URL = "https://new-api.example.test"
+    delete process.env.NEXT_PUBLIC_X_API_KEY
+    delete process.env.NEXT_PUBLIC_API_BEARER
+    localStorage.setItem(
+      "tldwConfig",
+      JSON.stringify({
+        authMode: "multi-user",
+        accessToken: "old-access-token",
+        refreshToken: "old-refresh-token",
+        serverUrl: "https://old-api.example.test"
+      })
+    )
+
+    await importAndAwaitBootstrap()
+
+    expect(readStoredValue("tldwConfig")).toEqual(
+      expect.objectContaining({
+        authMode: "multi-user",
+        serverUrl: "https://new-api.example.test"
+      })
+    )
+    const nextConfig = readStoredValue("tldwConfig") as Record<string, unknown>
+    expect(nextConfig.accessToken).toBeUndefined()
+    expect(nextConfig.refreshToken).toBeUndefined()
+  })
+
   it("repairs a stale env LAN host to the current browser host during bootstrap", async () => {
     process.env.NEXT_PUBLIC_API_URL = "http://192.168.5.184:8000"
 

@@ -1186,7 +1186,7 @@ describe("background proxy fallback safety", () => {
     expect(chunks.some((chunk) => chunk.includes('"event":"run_started"'))).toBe(true)
   })
 
-  it("does not replay a non-idempotent POST after a connection (first-token) timeout", async () => {
+  it("does not replay a non-idempotent POST after a response-acquisition timeout", async () => {
     vi.useFakeTimers()
     mocks.sendMessage.mockResolvedValue({ ok: true })
     mocks.storageGet.mockImplementation(async (key: string) => {
@@ -1215,7 +1215,7 @@ describe("background proxy fallback safety", () => {
         addListener: (listener: () => void) => onDisconnectListeners.add(listener),
         removeListener: (listener: () => void) => onDisconnectListeners.delete(listener)
       },
-      // Never emit any data: simulate a slow/stuck first token.
+      // Never emit an open event: simulate a stalled response acquisition.
       postMessage: vi.fn(),
       disconnect: vi.fn(() => {
         onDisconnectListeners.forEach((listener) => listener())
@@ -1475,8 +1475,9 @@ describe("background proxy fallback safety", () => {
         onMessageListeners.forEach((listener) =>
           listener({
             event: "error",
-            status: 401,
-            message: "Unauthorized"
+            status: 429,
+            message: "Too Many Requests",
+            retryAfter: "40"
           })
         )
       }),
@@ -1510,10 +1511,57 @@ describe("background proxy fallback safety", () => {
 
     try {
       await expect(consume()).rejects.toMatchObject({
-        message: "Unauthorized",
-        status: 401
+        message: "Too Many Requests",
+        status: 429,
+        retryAfter: 40
       })
       expect(fetchSpy).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it("preserves Retry-After on direct stream fallback errors", async () => {
+    mocks.sendMessage.mockResolvedValue({ ok: true })
+    mocks.connect.mockImplementation(() => {
+      throw new Error("runtime port unavailable")
+    })
+    mocks.storageGet.mockImplementation(async (key: string) => {
+      if (key === "tldwConfig") {
+        return {
+          serverUrl: "http://127.0.0.1:8000",
+          authMode: "single-user",
+          apiKey: "not-a-real-key"
+        }
+      }
+      return null
+    })
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(null, {
+          status: 503,
+          statusText: "Service Unavailable",
+          headers: { "Retry-After": "40" }
+        })
+      ) as any
+    )
+
+    const { bgStream } = await importProxy()
+    const consume = async () => {
+      for await (const _chunk of bgStream({
+        path: "/api/v1/notifications/stream" as unknown as `/${string}`,
+        method: "GET"
+      })) {
+        // no-op
+      }
+    }
+
+    try {
+      await expect(consume()).rejects.toMatchObject({
+        status: 503,
+        retryAfter: 40
+      })
     } finally {
       vi.unstubAllGlobals()
     }
@@ -2110,6 +2158,39 @@ describe("background proxy fallback safety", () => {
 
     expect(chunks).toHaveLength(180)
     expect(rafSpy).toHaveBeenCalled()
+  })
+
+  it("signals response acquisition before the first stream data item", async () => {
+    mocks.sendMessage.mockResolvedValue({ ok: true })
+    const onMessageListeners = new Set<(msg: any) => void>()
+    const port = {
+      onMessage: {
+        addListener: (listener: (msg: any) => void) => onMessageListeners.add(listener),
+        removeListener: (listener: (msg: any) => void) => onMessageListeners.delete(listener)
+      },
+      onDisconnect: {
+        addListener: vi.fn(),
+        removeListener: vi.fn()
+      },
+      postMessage: vi.fn(() => {
+        onMessageListeners.forEach((listener) => listener({ event: "open" }))
+        onMessageListeners.forEach((listener) => listener({ event: "done" }))
+      }),
+      disconnect: vi.fn()
+    }
+    mocks.connect.mockReturnValue(port as any)
+    const onOpen = vi.fn()
+
+    const { bgStream } = await importProxy()
+    for await (const _chunk of bgStream({
+      path: "/api/v1/notifications/stream" as unknown as `/${string}`,
+      method: "GET",
+      onOpen
+    })) {
+      // The open signal is deliberately independent of stream data.
+    }
+
+    expect(onOpen).toHaveBeenCalledTimes(1)
   })
 
   it("preserves chunk ordering when draining queued stream data", async () => {

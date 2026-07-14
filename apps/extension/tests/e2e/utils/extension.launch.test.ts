@@ -35,6 +35,7 @@ describe("launchWithExtension", () => {
     const page = {
       waitForTimeout: vi.fn().mockResolvedValue(undefined),
       goto: vi.fn().mockResolvedValue(undefined),
+      reload: vi.fn().mockResolvedValue(undefined),
       evaluate: vi.fn().mockResolvedValue(undefined),
       waitForFunction: vi.fn().mockResolvedValue(undefined),
     }
@@ -120,6 +121,7 @@ describe("launchWithExtension", () => {
     const page = {
       waitForTimeout: vi.fn().mockResolvedValue(undefined),
       goto: vi.fn().mockResolvedValue(undefined),
+      reload: vi.fn().mockResolvedValue(undefined),
       evaluate: vi.fn().mockResolvedValue(undefined),
       waitForFunction: vi.fn().mockResolvedValue(undefined),
     }
@@ -191,6 +193,7 @@ describe("launchWithExtension", () => {
     const page = {
       waitForTimeout: vi.fn().mockResolvedValue(undefined),
       goto: vi.fn().mockResolvedValue(undefined),
+      reload: vi.fn().mockResolvedValue(undefined),
       evaluate: vi.fn().mockResolvedValue(undefined),
       waitForFunction: vi.fn().mockResolvedValue(undefined),
     }
@@ -238,6 +241,7 @@ describe("launchWithExtension", () => {
         `chrome-extension://${extensionId}/options.html`
       )
       expect(page.evaluate).toHaveBeenCalledWith(expect.any(Function), seedConfig)
+      expect(page.reload).toHaveBeenCalledWith({ waitUntil: "domcontentloaded" })
     } finally {
       fs.rmSync(tempRoot, { recursive: true, force: true })
     }
@@ -252,6 +256,7 @@ describe("launchWithExtension", () => {
     const page = {
       waitForTimeout: vi.fn().mockResolvedValue(undefined),
       goto: vi.fn().mockResolvedValue(undefined),
+      reload: vi.fn().mockResolvedValue(undefined),
       evaluate: vi.fn().mockResolvedValue(undefined),
       waitForFunction: vi.fn().mockResolvedValue(undefined),
     }
@@ -316,6 +321,7 @@ describe("launchWithExtension", () => {
     const page = {
       waitForTimeout: vi.fn().mockResolvedValue(undefined),
       goto: vi.fn().mockResolvedValue(undefined),
+      reload: vi.fn().mockResolvedValue(undefined),
       evaluate: vi.fn().mockResolvedValue(undefined),
       waitForFunction: vi.fn().mockResolvedValue(undefined),
     }
@@ -377,6 +383,7 @@ describe("launchWithExtension", () => {
     const page = {
       waitForTimeout: vi.fn().mockResolvedValue(undefined),
       goto: vi.fn().mockResolvedValue(undefined),
+      reload: vi.fn().mockResolvedValue(undefined),
       evaluate: vi.fn().mockResolvedValue(undefined),
       waitForFunction: vi.fn().mockResolvedValue(undefined),
     }
@@ -469,6 +476,7 @@ describe("launchWithExtension", () => {
     const page = {
       waitForTimeout: vi.fn().mockResolvedValue(undefined),
       goto: vi.fn().mockResolvedValue(undefined),
+      reload: vi.fn().mockResolvedValue(undefined),
       evaluate: vi.fn().mockResolvedValue(undefined),
       waitForFunction: vi.fn().mockResolvedValue(undefined),
       locator: vi.fn(() => ({

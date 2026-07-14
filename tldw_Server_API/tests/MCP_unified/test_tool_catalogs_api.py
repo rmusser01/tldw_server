@@ -338,6 +338,13 @@ async def test_org_team_scoped_catalog_management(tmp_path, monkeypatch):
         sally_id = _create_user(conn, "sally_tcat", "sally@example.com")
 
     from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
+
+    users_repo = AuthnzUsersRepo(db_pool=await get_db_pool())
+    await users_repo.assign_role_if_missing(user_id=admin_id, role_name="admin")
+    await users_repo.assign_role_if_missing(user_id=robert_id, role_name="user")
+    await users_repo.assign_role_if_missing(user_id=sally_id, role_name="user")
 
     api_key_manager = APIKeyManager()
     await api_key_manager.initialize()
