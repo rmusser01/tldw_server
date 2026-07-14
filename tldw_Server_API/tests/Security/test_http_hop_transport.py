@@ -86,6 +86,19 @@ class RecordingStream(httpcore.AsyncNetworkStream):
         return None
 
 
+class NullTLSResultStream(RecordingStream):
+    """Simulate a backend that violates the start_tls return contract."""
+
+    async def start_tls(
+        self,
+        ssl_context: ssl.SSLContext,
+        server_hostname: str | None = None,
+        timeout: float | None = None,
+    ) -> httpcore.AsyncNetworkStream:
+        self.tls_calls.append((ssl_context, server_hostname, timeout))
+        return None  # type: ignore[return-value]
+
+
 class RecordingBackend(httpcore.AsyncNetworkBackend):
     """Delegate backend that records the address selected by the hop."""
 
@@ -263,7 +276,7 @@ async def test_builds_request_framing_only_from_explicit_contract() -> None:
     assert _header_values(request_bytes, b"connection") == [b"close"]
     assert _header_values(request_bytes, b"content-length") == [b"7"]
     assert _header_values(request_bytes, b"transfer-encoding") == []
-    assert _header_values(request_bytes, b"accept-encoding") == [b"identity"]
+    assert _header_values(request_bytes, b"accept-encoding") == [b"gzip, deflate"]
     assert _header_values(request_bytes, b"authorization") == [b"Bearer explicit-route-secret"]
     assert request_bytes.endswith(b"\r\n\r\npayload")
 
@@ -424,6 +437,22 @@ async def test_https_rejects_stream_without_tls_evidence_before_write() -> None:
     assert exc.value.code == "tls_error"
     assert tls_stream.writes == []
     assert tls_stream.closed is True
+    assert tcp_stream.closed is True
+
+
+async def test_https_rejects_missing_tls_stream_with_typed_error() -> None:
+    tcp_stream = NullTLSResultStream(server_addr=("8.8.8.8", 443))
+    backend = RecordingBackend(tcp_stream)
+
+    with pytest.raises(http_hop.HTTPHopError) as exc:
+        await _execute(
+            _request(scheme="https", port=443),
+            ("8.8.8.8",),
+            backend,
+        )
+
+    assert exc.value.code == "tls_error"
+    assert tcp_stream.writes == []
     assert tcp_stream.closed is True
 
 

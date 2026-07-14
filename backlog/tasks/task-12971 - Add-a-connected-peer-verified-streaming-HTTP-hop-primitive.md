@@ -4,7 +4,7 @@ title: Add a connected-peer-verified streaming HTTP hop primitive
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-14 15:52'
+updated_date: '2026-07-14 16:55'
 labels:
   - security
   - http-client
@@ -59,6 +59,8 @@ Adversarial plan review found that HTTPcore's internal h11 limit is per incomple
 2026-07-14 Stage 1 complete: added immutable normalized request/limit/error contracts, strict canonical host/target/header validation, complete-set DNS/IP denial (including mapped, NAT64, 6to4, Teredo, site-local, scoped, private, reserved, and malformed answers), an off-event-loop bounded resolver adapter with legacy compatibility, and direct HTTPcore/certifi dependency floors. Verification: 115 focused and adjacent tests passed; Ruff, Black, compileall, and git diff --check passed. Two adversarial review rounds were resolved and the final re-review reported no actionable findings. Stage 2 validated-peer transport remains in progress.
 
 2026-07-14 Stage 2 complete: added a one-use HTTPcore backend/pool that dials only the first validated literal address, verifies peer IP and port before HTTP bytes and again after TLS, preserves the route Host/SNI, uses a fresh certifi-only TLS context with cached SSL evidence, forces HTTP/1.1, blocks UDS/retry/second-dial paths, rejects 101 upgrades, and returns redirects without following them. Verification: 127 contract/transport tests and 71 legacy compatibility tests passed; Ruff, Black, compileall, and git diff --check passed. Two independent review/fix rounds ended clean. Authoritative raw/header/decompression counters and the public one-argument entrypoint remain Stage 3 work.
+
+2026-07-14 Stage 3 complete: added an aggregate plaintext header and wire-byte guard ahead of h11, encoded-length preflight, bounded identity/gzip/zlib-deflate decoding, decompressed and parser-input ceilings, stable sanitized failure mapping, one whole-hop deadline, and the public one-argument request_http_hop API. Central HTTPcore logging is floored at INFO to prevent response headers and hostile protocol bytes from leaking through DEBUG traces. Review fixes covered unsafe decompressor finalization, framing and status edge cases, RFC-correct 205 and HEAD behavior including coalesced trailing bytes, deterministic decoder fixtures, actual failure-stream closure assertions, and an explicit optimized-Python-safe TLS invariant. Verification: 179 contract/transport/streaming tests and 259 complete focused/legacy compatibility tests passed; focused Ruff, Black, compileall, Python 3.10 grammar parsing, Bandit, and git diff --check passed. Independent security, spec/correctness, and simplification re-reviews ended clean. Full-file Ruff on legacy app/main.py retains 10 unrelated baseline findings; the six-line HTTPcore logger-floor delta is regression-tested and compile-checked.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

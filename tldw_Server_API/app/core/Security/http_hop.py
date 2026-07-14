@@ -7,9 +7,10 @@ import ipaddress
 import math
 import re
 import ssl
+import zlib
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, Protocol
 
 import certifi
 import httpcore
@@ -96,6 +97,8 @@ _HEADER_NAME_PATTERN = re.compile(r"[!#$%&'*+.^_`|~0-9a-z-]+\Z")
 _DNS_LABEL_PATTERN = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
 _LEGACY_NUMERIC_HOST_PATTERN = re.compile(r"(?:0x[0-9a-f]+|[0-9]+)(?:\.(?:0x[0-9a-f]+|[0-9]+)){0,3}\Z")
 _TARGET_PATTERN = re.compile(r"(?:[A-Za-z0-9._~!$&'()*+,;=:@/?-]|%[0-9A-Fa-f]{2})*\Z")
+_HEADER_BLOCK_END_PATTERN = re.compile(rb"\n\r?\n")
+_STATUS_LINE_PATTERN = re.compile(rb"HTTP/(1\.[01]) ([0-9]{3})(?: [^\r\n]*)?\Z")
 _DENIED_IPV6_TRANSITION_NETWORKS = (
     ipaddress.ip_network("::/96"),
     ipaddress.ip_network("::ffff:0:0/96"),
@@ -382,6 +385,145 @@ async def _resolve_validated_ips(
 @dataclass(slots=True)
 class _PeerEvidence:
     connected_ip: str | None = None
+    response_header_bytes: int = 0
+    response_header_count: int = 0
+    wire_bytes: int = 0
+    final_http_version: bytes | None = None
+    final_status: int | None = None
+    final_content_lengths: tuple[bytes, ...] = ()
+
+
+class _ContentDecoder(Protocol):
+    """Small structural subset shared by zlib and deterministic test decoders."""
+
+    eof: bool
+    unused_data: bytes
+    unconsumed_tail: bytes
+
+    def decompress(self, data: bytes, max_length: int = 0) -> bytes: ...
+
+
+class _RawResponseGuard:
+    """Bound plaintext response headers and wire bytes before h11 sees them."""
+
+    def __init__(self, *, evidence: _PeerEvidence, limits: HTTPHopLimits) -> None:
+        self._evidence = evidence
+        self._limits = limits
+        self._pending = bytearray()
+        self._scan_position = 0
+        self._output_position = 0
+        self._final_headers_seen = False
+
+    async def read(
+        self,
+        stream: httpcore.AsyncNetworkStream,
+        max_bytes: int,
+        timeout: float | None,
+    ) -> bytes:
+        """Return only bytes already admitted by the header/wire ceilings."""
+        if self._output_position < len(self._pending):
+            return self._read_pending(max_bytes)
+
+        if self._final_headers_seen:
+            return await self._read_wire(stream, max_bytes, timeout)
+
+        while not self._final_headers_seen:
+            partial_header_bytes = len(self._pending) - self._scan_position
+            remaining = (
+                self._limits.max_response_header_bytes - self._evidence.response_header_bytes - partial_header_bytes
+            )
+            read_size = min(max_bytes, _MAX_NETWORK_READ_BYTES, max(1, remaining + 1))
+            data = await stream.read(read_size, timeout=timeout)
+            if not data:
+                raise HTTPHopError("protocol_error")
+            self._pending.extend(data)
+            self._scan_header_blocks()
+
+            if not self._final_headers_seen:
+                observed = self._evidence.response_header_bytes + len(self._pending) - self._scan_position
+                if observed > self._limits.max_response_header_bytes:
+                    raise HTTPHopError("response_headers_too_large")
+
+        return self._read_pending(max_bytes)
+
+    def _read_pending(self, max_bytes: int) -> bytes:
+        end = min(len(self._pending), self._output_position + max_bytes)
+        data = bytes(self._pending[self._output_position : end])
+        self._output_position = end
+        if self._output_position == len(self._pending):
+            self._pending.clear()
+            self._scan_position = 0
+            self._output_position = 0
+        return data
+
+    async def _read_wire(
+        self,
+        stream: httpcore.AsyncNetworkStream,
+        max_bytes: int,
+        timeout: float | None,
+    ) -> bytes:
+        remaining = self._limits.max_wire_bytes - self._evidence.wire_bytes
+        read_size = min(max_bytes, _MAX_NETWORK_READ_BYTES, max(1, remaining + 1))
+        data = await stream.read(read_size, timeout=timeout)
+        if len(data) > remaining:
+            raise HTTPHopError("response_too_large")
+        self._evidence.wire_bytes += len(data)
+        return data
+
+    def _scan_header_blocks(self) -> None:
+        while True:
+            match = _HEADER_BLOCK_END_PATTERN.search(self._pending, self._scan_position)
+            if match is None:
+                return
+            block_end = match.end()
+            block = bytes(self._pending[self._scan_position : block_end])
+            self._record_header_block(block)
+            self._scan_position = block_end
+            if self._final_headers_seen:
+                body_bytes = len(self._pending) - block_end
+                if body_bytes > self._limits.max_wire_bytes:
+                    raise HTTPHopError("response_too_large")
+                self._evidence.wire_bytes = body_bytes
+                return
+
+    def _record_header_block(self, block: bytes) -> None:
+        self._evidence.response_header_bytes += len(block)
+        if self._evidence.response_header_bytes > self._limits.max_response_header_bytes:
+            raise HTTPHopError("response_headers_too_large")
+
+        lines = block.split(b"\n")
+        if len(lines) < 3:
+            raise HTTPHopError("protocol_error")
+        status_line = lines[0].removesuffix(b"\r")
+        status_match = _STATUS_LINE_PATTERN.fullmatch(status_line)
+        if status_match is None:
+            raise HTTPHopError("protocol_error")
+        http_version = status_match.group(1)
+        status = int(status_match.group(2))
+        if status < 100 or status > 599 or status == 101:
+            raise HTTPHopError("protocol_error")
+
+        field_lines = [line.removesuffix(b"\r") for line in lines[1:-2]]
+        self._evidence.response_header_count += len(field_lines)
+        if self._evidence.response_header_count > self._limits.max_response_headers:
+            raise HTTPHopError("response_headers_too_large")
+
+        if 100 <= status < 200:
+            return
+
+        content_lengths: list[bytes] = []
+        for line in field_lines:
+            if not line or line[:1] in {b" ", b"\t"}:
+                continue
+            name, separator, value = line.partition(b":")
+            if separator and name.lower() == b"content-length":
+                content_lengths.append(value.strip(b" \t"))
+        if len(content_lengths) > 1:
+            raise HTTPHopError("protocol_error")
+        self._evidence.final_content_lengths = tuple(content_lengths)
+        self._evidence.final_http_version = http_version
+        self._evidence.final_status = status
+        self._final_headers_seen = True
 
 
 def _verified_peer_ip(
@@ -468,6 +610,7 @@ class _PeerVerifiedStream(httpcore.AsyncNetworkStream):
         expected_port: int,
         tls_context: ssl.SSLContext | None,
         evidence: _PeerEvidence,
+        response_guard: _RawResponseGuard,
         tls_active: bool = False,
         ssl_object: object | None = None,
     ) -> None:
@@ -478,6 +621,7 @@ class _PeerVerifiedStream(httpcore.AsyncNetworkStream):
         self._expected_port = expected_port
         self._tls_context = tls_context
         self._evidence = evidence
+        self._response_guard = response_guard
         self._tls_active = tls_active
         self._tls_started = tls_active
         self._ssl_object = ssl_object
@@ -486,9 +630,10 @@ class _PeerVerifiedStream(httpcore.AsyncNetworkStream):
         if self._scheme == "https" and not self._tls_active:
             await _close_stream_quietly(self._stream)
             raise HTTPHopError("peer_verification_failed")
-        return await self._stream.read(
-            min(max_bytes, _MAX_NETWORK_READ_BYTES),
-            timeout=timeout,
+        return await self._response_guard.read(
+            self._stream,
+            max_bytes,
+            timeout,
         )
 
     async def write(self, buffer: bytes, timeout: float | None = None) -> None:
@@ -535,7 +680,9 @@ class _PeerVerifiedStream(httpcore.AsyncNetworkStream):
         if failure is not None:
             await _close_stream_quietly(self._stream)
             raise failure
-        assert tls_stream is not None
+        if tls_stream is None:
+            await _close_stream_quietly(self._stream)
+            raise HTTPHopError("tls_error")
 
         ssl_object: object | None = None
         ssl_metadata_failed = False
@@ -573,6 +720,7 @@ class _PeerVerifiedStream(httpcore.AsyncNetworkStream):
             expected_port=self._expected_port,
             tls_context=self._tls_context,
             evidence=self._evidence,
+            response_guard=self._response_guard,
             tls_active=True,
             ssl_object=ssl_object,
         )
@@ -596,6 +744,7 @@ class _PinnedBackend(httpcore.AsyncNetworkBackend):
         expected_port: int,
         tls_context: ssl.SSLContext | None,
         evidence: _PeerEvidence,
+        response_guard: _RawResponseGuard,
     ) -> None:
         self._delegate = delegate
         self._scheme = scheme
@@ -604,6 +753,7 @@ class _PinnedBackend(httpcore.AsyncNetworkBackend):
         self._expected_port = expected_port
         self._tls_context = tls_context
         self._evidence = evidence
+        self._response_guard = response_guard
         self._dial_started = False
 
     async def connect_tcp(
@@ -650,6 +800,7 @@ class _PinnedBackend(httpcore.AsyncNetworkBackend):
             expected_port=self._expected_port,
             tls_context=self._tls_context,
             evidence=self._evidence,
+            response_guard=self._response_guard,
         )
 
     async def connect_unix_socket(
@@ -696,7 +847,7 @@ def _transport_headers(
     headers = [
         (b"Host", _host_header_value(request)),
         (b"Connection", b"close"),
-        (b"Accept-Encoding", b"identity"),
+        (b"Accept-Encoding", b"gzip, deflate"),
     ]
     headers.extend((name.encode("ascii"), value.encode("ascii")) for name, value in request.headers)
     return headers
@@ -704,6 +855,141 @@ def _transport_headers(
 
 def _response_headers(response: httpcore.Response) -> tuple[tuple[str, str], ...]:
     return tuple((name.decode("ascii").lower(), value.decode("latin-1")) for name, value in response.headers)
+
+
+def _body_is_permitted(request: NormalizedHTTPHopRequest, status_code: int) -> bool:
+    return request.method != "HEAD" and status_code not in {204, 205, 304}
+
+
+def _transfer_is_chunked(response: httpcore.Response) -> bool:
+    values = [value.strip().lower() for name, value in response.headers if name.lower() == b"transfer-encoding"]
+    if not values:
+        return False
+    if values != [b"chunked"]:
+        raise HTTPHopError("protocol_error")
+    return True
+
+
+def _declared_content_length(evidence: _PeerEvidence) -> int | None:
+    if not evidence.final_content_lengths:
+        return None
+    if len(evidence.final_content_lengths) != 1:
+        raise HTTPHopError("protocol_error")
+    value = evidence.final_content_lengths[0]
+    if not value or not value.isdigit():
+        raise HTTPHopError("protocol_error")
+    return int(value)
+
+
+def _content_encoding(response: httpcore.Response) -> Literal["identity", "gzip", "deflate"]:
+    values = [value.strip().lower() for name, value in response.headers if name.lower() == b"content-encoding"]
+    if not values:
+        return "identity"
+    if len(values) != 1 or b"," in values[0]:
+        raise HTTPHopError("unsupported_content_encoding")
+    if values[0] == b"identity":
+        return "identity"
+    if values[0] == b"gzip":
+        return "gzip"
+    if values[0] == b"deflate":
+        return "deflate"
+    raise HTTPHopError("unsupported_content_encoding")
+
+
+def _extend_decoded_body(body: bytearray, data: bytes, limits: HTTPHopLimits) -> None:
+    new_size = len(body) + len(data)
+    if new_size > limits.max_decompressed_bytes:
+        raise HTTPHopError("decompressed_response_too_large")
+    if new_size > limits.max_parser_input_bytes:
+        raise HTTPHopError("parser_input_too_large")
+    body.extend(data)
+
+
+def _decoder_output_limit(body: bytearray, limits: HTTPHopLimits) -> int:
+    remaining = min(
+        limits.max_decompressed_bytes - len(body),
+        limits.max_parser_input_bytes - len(body),
+    )
+    return remaining + 1
+
+
+def _decompress_bounded(
+    decoder: _ContentDecoder,
+    data: bytes,
+    max_length: int,
+) -> bytes:
+    try:
+        return decoder.decompress(data, max_length)
+    except zlib.error:
+        pass
+    raise HTTPHopError("invalid_content_encoding")
+
+
+def _decode_compressed_input(
+    decoder: _ContentDecoder,
+    encoded: bytes,
+    body: bytearray,
+    limits: HTTPHopLimits,
+) -> None:
+    pending = encoded
+    while pending:
+        if decoder.eof:
+            raise HTTPHopError("invalid_content_encoding")
+        output = _decompress_bounded(
+            decoder,
+            pending,
+            _decoder_output_limit(body, limits),
+        )
+        _extend_decoded_body(body, output, limits)
+        if decoder.unused_data:
+            raise HTTPHopError("invalid_content_encoding")
+        tail = decoder.unconsumed_tail
+        if tail:
+            if tail == pending and not output:
+                raise HTTPHopError("invalid_content_encoding")
+            pending = tail
+            continue
+        return
+
+
+def _finish_content_decoder(
+    decoder: _ContentDecoder,
+    body: bytearray,
+    limits: HTTPHopLimits,
+) -> None:
+    while not decoder.eof:
+        output = _decompress_bounded(
+            decoder,
+            b"",
+            _decoder_output_limit(body, limits),
+        )
+        _extend_decoded_body(body, output, limits)
+        if decoder.unused_data or decoder.unconsumed_tail:
+            raise HTTPHopError("invalid_content_encoding")
+        if decoder.eof:
+            return
+        if not output:
+            raise HTTPHopError("invalid_content_encoding")
+
+
+async def _read_decoded_body(
+    response: httpcore.Response,
+    *,
+    encoding: Literal["identity", "gzip", "deflate"],
+    limits: HTTPHopLimits,
+) -> bytes:
+    body = bytearray()
+    if encoding == "identity":
+        async for chunk in response.aiter_stream():
+            _extend_decoded_body(body, chunk, limits)
+        return bytes(body)
+
+    window_bits = zlib.MAX_WBITS | 16 if encoding == "gzip" else zlib.MAX_WBITS
+    decoder: _ContentDecoder = zlib.decompressobj(window_bits)
+    async for chunk in response.aiter_stream():
+        _decode_compressed_input(decoder, chunk, body, limits)
+    _finish_content_decoder(decoder, body, limits)
+    return bytes(body)
 
 
 async def _perform_http_hop(
@@ -714,6 +1000,7 @@ async def _perform_http_hop(
 ) -> HTTPHopResponse:
     selected_ip = resolved_ips[0]
     evidence = _PeerEvidence()
+    response_guard = _RawResponseGuard(evidence=evidence, limits=request.limits)
     tls_context = _build_tls_context() if request.scheme == "https" else None
     backend = _PinnedBackend(
         network_backend,
@@ -723,6 +1010,7 @@ async def _perform_http_hop(
         expected_port=request.port,
         tls_context=tls_context,
         evidence=evidence,
+        response_guard=response_guard,
     )
     url = httpcore.URL(
         scheme=request.scheme,
@@ -737,12 +1025,6 @@ async def _perform_http_hop(
         "read": request.limits.read_timeout_seconds,
         "write": request.limits.write_timeout_seconds,
     }
-    body = bytearray()
-    body_ceiling = min(
-        request.limits.max_decompressed_bytes,
-        request.limits.max_parser_input_bytes,
-    )
-
     async with httpcore.AsyncConnectionPool(
         ssl_context=tls_context,
         proxy=None,
@@ -761,17 +1043,43 @@ async def _perform_http_hop(
             content=content,
             extensions={"timeout": timeouts},
         ) as response:
-            if response.status == 101:
+            if evidence.final_status is None or evidence.final_status != response.status:
                 raise HTTPHopError("protocol_error")
-            content_encodings = [
-                value.strip().lower() for name, value in response.headers if name.lower() == b"content-encoding"
-            ]
-            if content_encodings not in ([], [b"identity"]):
-                raise HTTPHopError("unsupported_content_encoding")
-            async for chunk in response.aiter_stream():
-                if len(body) + len(chunk) > body_ceiling:
+            body_permitted = _body_is_permitted(request, response.status)
+            chunked = _transfer_is_chunked(response)
+            declared_length = _declared_content_length(evidence)
+            if chunked and evidence.final_http_version != b"1.1":
+                raise HTTPHopError("protocol_error")
+            if chunked and declared_length is not None:
+                raise HTTPHopError("protocol_error")
+            if response.status == 204 and (chunked or declared_length is not None):
+                raise HTTPHopError("protocol_error")
+            if body_permitted and not chunked and declared_length is not None:
+                if declared_length > request.limits.max_wire_bytes:
                     raise HTTPHopError("response_too_large")
-                body.extend(chunk)
+            encoding = _content_encoding(response) if body_permitted else "identity"
+            body = await _read_decoded_body(
+                response,
+                encoding=encoding,
+                limits=request.limits,
+            )
+            if not body_permitted:
+                empty_chunked_205 = (
+                    request.method != "HEAD"
+                    and response.status == 205
+                    and chunked
+                    and not body
+                    and evidence.wire_bytes == 5
+                )
+                if body or (evidence.wire_bytes and not empty_chunked_205):
+                    raise HTTPHopError("protocol_error")
+            if (
+                body_permitted
+                and not chunked
+                and declared_length is not None
+                and evidence.wire_bytes != declared_length
+            ):
+                raise HTTPHopError("protocol_error")
             headers = _response_headers(response)
 
     if evidence.connected_ip is None:
@@ -782,8 +1090,8 @@ async def _perform_http_hop(
         body=bytes(body),
         resolved_ips=resolved_ips,
         connected_ip=evidence.connected_ip,
-        response_header_bytes=0,
-        wire_bytes=len(body),
+        response_header_bytes=evidence.response_header_bytes,
+        wire_bytes=evidence.wire_bytes,
     )
 
 
@@ -819,10 +1127,51 @@ async def _execute_http_hop(
     raise failure
 
 
+async def _request_http_hop(
+    request: NormalizedHTTPHopRequest,
+    *,
+    resolver: _Resolver,
+    network_backend: httpcore.AsyncNetworkBackend,
+) -> HTTPHopResponse:
+    """Private deterministic seam covered by the whole-hop deadline."""
+    if not isinstance(request, NormalizedHTTPHopRequest):
+        raise HTTPHopError("invalid_request")
+
+    async def execute() -> HTTPHopResponse:
+        resolved_ips = await _resolve_validated_ips(request, resolver=resolver)
+        return await _execute_http_hop(
+            request,
+            resolved_ips=resolved_ips,
+            network_backend=network_backend,
+        )
+
+    try:
+        return await asyncio.wait_for(
+            execute(),
+            timeout=request.limits.total_timeout_seconds,
+        )
+    except asyncio.CancelledError:
+        raise
+    except asyncio.TimeoutError:
+        raise HTTPHopError("total_timeout", retryable=True) from None
+
+
+async def request_http_hop(
+    request: NormalizedHTTPHopRequest,
+) -> HTTPHopResponse:
+    """Perform one bounded request using only production resolver/transport inputs."""
+    return await _request_http_hop(
+        request,
+        resolver=_default_resolver,
+        network_backend=httpcore.AnyIOBackend(),
+    )
+
+
 __all__ = [
     "HTTPHopError",
     "HTTPHopErrorCode",
     "HTTPHopLimits",
     "HTTPHopResponse",
     "NormalizedHTTPHopRequest",
+    "request_http_hop",
 ]

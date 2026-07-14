@@ -714,6 +714,12 @@ def _redirect_external_loggers() -> None:
         logging.getLogger("aiosqlite").setLevel(level)
     except _LOGGING_SETUP_EXCEPTIONS as exc:
         _safe_debug(f"Failed to set aiosqlite log level: {exc}")
+    try:
+        # HTTPcore DEBUG traces include complete response headers and raw parser
+        # exceptions, which may contain cookies, signed URLs, or hostile bytes.
+        logging.getLogger("httpcore").setLevel(logging.INFO)
+    except _LOGGING_SETUP_EXCEPTIONS as exc:
+        _safe_debug(f"Failed to set httpcore log level: {exc}")
 
 
 def _install_stderr_redirect() -> None:

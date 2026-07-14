@@ -31,7 +31,7 @@
 | --- | --- | --- | --- | --- |
 | 1. Contracts/dependency/DNS | Complete | Import/collection failure: missing `Security.http_hop` | 115 focused/adjacent tests passed; static checks passed | Two review/fix rounds; final clean verdict |
 | 2. Validated peer transport | Complete | 32/32 failed: missing `_execute_http_hop` | 127 contract/transport tests and 71 compatibility tests passed; static checks passed | Two review/fix rounds; final clean verdicts |
-| 3. Bounded response streaming | Not Started | Pending | Pending | Pending |
+| 3. Bounded response streaming | Complete | Initial suite: 27 failed, 10 passed | 179 contract/transport/streaming and 259 focused/compatibility tests passed; static/security checks passed | Security/spec/simplification reviews clean after fixes |
 | 4. Isolation/concurrency/finalization | Not Started | Pending | Pending | Pending |
 
 ## 2026-07-14 — Stage 2 validated-peer transport
@@ -45,3 +45,14 @@
 - Review fixes added controlled `Accept-Encoding: identity`, TLS timeout mapping, SSL evidence validation, raw-HTTP SSL metadata masking, expanded/scoped peer cases, explicit request framing, and a one-use dial guard.
 - Stage 3 intentionally owns authoritative aggregate header/raw-wire/decompressed/parser counters and the public one-argument entrypoint; Stage 2's execution seam remains module-private until those invariants are installed.
 - Final independent spec and security re-reviews: clean, with no remaining actionable Stage 2 findings.
+
+## 2026-07-14 — Stage 3 bounded response streaming
+
+- RED: the initial 37-case streaming suite produced 27 failures and 10 passes before authoritative response limits and the public entrypoint existed. Later review regressions were also demonstrated red before each fix.
+- GREEN: 179 contract/transport/streaming tests and the complete 259-test focused/legacy compatibility set passed after the final review fixes. Black, focused Ruff, compileall, Python 3.10 grammar parsing, Bandit, and `git diff --check` passed on the Stage 3 scope.
+- Added an independent plaintext response guard ahead of h11 that cumulatively bounds every informational/final header block and all post-header wire bytes, including chunk framing and trailers.
+- Added encoded `Content-Length` preflight, strict framing/status checks, identity/gzip/zlib-deflate streaming, bounded decompressor input/final drain, decompressed/parser ceilings, stable sanitized transport/protocol/timeout errors, and a whole-hop deadline covering DNS through response close.
+- Published the exact one-argument `request_http_hop(request)` API while retaining only a module-private deterministic resolver/backend seam for tests.
+- Raised HTTPcore's central logging floor to INFO because its DEBUG paths emit complete response headers and raw protocol exception bytes; regression coverage proves successful `Set-Cookie` values and malformed-body secrets are not traced.
+- Review-driven fixes covered unsafe `Decompress.flush()` assumptions, `Transfer-Encoding` plus `Content-Length`, out-of-range statuses, `204`/`205` framing, HTTP/1.0 transfer encoding, HTTPcore wire-log leakage, `HEAD` precedence and coalesced trailing bytes for chunked `205` responses, deterministic decoder fixtures, actual stream-close assertions, and an optimized-Python-safe TLS invariant.
+- Full-file Ruff on legacy `app/main.py` still reports 10 unrelated baseline findings; the six-line logger-floor change is regression-tested and compile-checked, and the focused Stage 3 files are Ruff-clean.
