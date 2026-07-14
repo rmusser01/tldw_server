@@ -40,8 +40,10 @@
 - Modify: `tldw_Server_API/app/api/v1/endpoints/shared_keys_scoped.py`
 - Modify: `tldw_Server_API/app/api/v1/endpoints/user_keys.py`
 - Modify: `tldw_Server_API/app/core/AuthNZ/repos/org_provider_secrets_repo.py`
+- Modify: `tldw_Server_API/app/services/admin_byok_service.py`
 - Test: `tldw_Server_API/tests/AuthNZ_Unit/test_byok_helpers.py`
 - Test: `tldw_Server_API/tests/AuthNZ_Unit/test_byok_runtime.py`
+- Test: `tldw_Server_API/tests/Admin/test_admin_byok_service_sanitizers.py`
 - Test: `tldw_Server_API/tests/AuthNZ_Unit/test_provider_credential_runtime.py`
 - Test: `tldw_Server_API/tests/AuthNZ_SQLite/test_byok_endpoints_sqlite.py`
 - Test: `tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_org_provider_secrets_repo_sqlite.py`
