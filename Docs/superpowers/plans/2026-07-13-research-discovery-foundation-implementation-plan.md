@@ -102,7 +102,7 @@ Independent-review hardening: `test(research): harden legacy execution golden`
 
 **Tests:** Unit and property tests for construction, referential integrity, determinism, coalescing, fallback order, and physical-request budgets.
 
-**Status:** In Progress (external review fix round)
+**Status:** Complete
 
 ### Files
 
