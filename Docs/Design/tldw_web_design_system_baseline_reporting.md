@@ -11,7 +11,7 @@ verifier output rather than hand-counted.
 
 This document defines the reporting and cleanup workflow for migration PRs.
 The staged CI tightening path is defined in
-`Docs/Design/tldw_web_design_system_ci_gate_path.md`.
+[tldw_web_design_system_ci_gate_path.md](tldw_web_design_system_ci_gate_path.md).
 
 ## Report Sections
 

@@ -24,8 +24,12 @@ rows so migration PRs can shrink debt deliberately.
 
 1. **Report-only PR signal**
    - Owner: `.github/workflows/frontend-required.yml`
-   - Trigger: `apps/packages/ui/**`, `apps/tldw-frontend/**`, and design-system
-     docs/scripts.
+   - Trigger: `tldw_frontend_changed` from
+     [`Helper_Scripts/ci/path_classifier.py`](../../Helper_Scripts/ci/path_classifier.py),
+     currently covering `apps/tldw-frontend/**`, `apps/packages/ui/**`,
+     `apps/extension/**`, `apps/bun.lock`, and
+     `apps/tldw-frontend/package-lock.json`. Docs-only changes do not trigger
+     this signal unless the classifier is intentionally extended.
    - Behavior: install `apps` dependencies, run `bun run verify:design-system-state`
      from `apps/packages/ui`, and keep `continue-on-error: true`.
    - Exit criteria: at least one week of stable CI runtime and no false positives.
@@ -39,10 +43,13 @@ rows so migration PRs can shrink debt deliberately.
      baseline exceptions and no blocked findings.
 
 3. **Required stale-baseline cleanup**
-   - Owner: product-state guard script plus `frontend-required`.
+   - Owner:
+     [`apps/packages/ui/scripts/verify-design-system-product-state.mjs`](../../apps/packages/ui/scripts/verify-design-system-product-state.mjs)
+     plus `frontend-required`.
    - Behavior: make stale baseline rows fail CI.
    - Entry criteria: all open migration PRs use the stale-row cleanup workflow
-     in `tldw_web_design_system_baseline_reporting.md`.
+     in
+     [tldw_web_design_system_baseline_reporting.md](tldw_web_design_system_baseline_reporting.md).
 
 4. **Area-zero enforcement**
    - Owner: tracker issues under TASK-45.44 / GitHub epic #1655.
