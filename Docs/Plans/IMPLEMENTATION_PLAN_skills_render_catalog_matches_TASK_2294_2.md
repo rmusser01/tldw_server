@@ -177,7 +177,7 @@ Expected: the complete module suite passes with the old response shape.
 
 **Tests**: `test_skills_module.py` matching tests.
 
-**Status**: In Progress
+**Status**: Complete
 
 ### Task 2.1: Add the field and happy-path resolver
 
@@ -190,7 +190,7 @@ Expected: the complete module suite passes with the old response shape.
 - Produces: `_catalog_matches_from_listing(list[str], Any) -> list[str] | None`.
 - Produces: `SkillsModule._resolve_catalog_matches(list[str], Any) -> list[str] | None`.
 
-- [ ] **Step 1: Add deterministic failing contract tests**
+- [x] **Step 1: Add deterministic failing contract tests**
 
 Add:
 
@@ -247,7 +247,7 @@ list_tools.assert_awaited_once_with({}, user_catalogs[1].context)
 
 Add a Skill without declarations and assert `catalog_matches == []` and both protocol mocks are untouched.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 ```bash
 source ../../.venv/bin/activate
@@ -256,7 +256,7 @@ python -m pytest -q tldw_Server_API/app/core/MCP_unified/tests/test_skills_modul
 
 Expected: `catalog_matches` and resolver behavior are absent.
 
-- [ ] **Step 3: Implement pure matching**
+- [x] **Step 3: Implement pure matching**
 
 Add below `_clamped_integer`:
 
@@ -307,7 +307,7 @@ def _catalog_matches_from_listing(
     return matches
 ```
 
-- [ ] **Step 4: Append matches after database cleanup**
+- [x] **Step 4: Append matches after database cleanup**
 
 Import `MCPProtocol` from `tldw_Server_API.app.core.MCP_unified.protocol`. Change the render dispatch to:
 
@@ -339,7 +339,7 @@ Add:
         return _catalog_matches_from_listing(declarations, listing)
 ```
 
-- [ ] **Step 5: Verify green and commit**
+- [x] **Step 5: Verify green and commit**
 
 ```bash
 source ../../.venv/bin/activate
@@ -360,7 +360,7 @@ Expected: all module tests pass. Do not add a factory abstraction, cache, status
 
 **Tests**: Failure and lifecycle tests in `test_skills_module.py`.
 
-**Status**: Not Started
+**Status**: In Progress
 
 ### Task 3.1: Bound the post-render lookup
 
