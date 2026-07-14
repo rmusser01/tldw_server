@@ -386,10 +386,15 @@ class SkillsModule(BaseModule):
         if not valid_declarations:
             return []
         try:
-            listing = await MCPProtocol()._handle_tools_list({}, context)
-            task = asyncio.current_task()
-            if task is not None and task.cancelling():
-                raise asyncio.CancelledError
+            listing_task = asyncio.create_task(
+                MCPProtocol()._handle_tools_list({}, context)
+            )
+            try:
+                listing = await asyncio.shield(listing_task)
+            except asyncio.CancelledError:
+                listing_task.cancel()
+                await asyncio.gather(listing_task, return_exceptions=True)
+                raise
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - advisory lookup fails closed

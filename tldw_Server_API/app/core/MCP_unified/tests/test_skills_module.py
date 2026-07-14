@@ -654,6 +654,62 @@ async def test_catalog_matching_returns_partial_well_formed_matches(
     assert result["catalog_matches"] == ["rag.search"]
 
 
+@pytest.mark.parametrize(
+    "descriptor",
+    [
+        {"name": "rag.search"},
+        {"name": "rag.search", "canExecute": None},
+        {"name": "rag.search", "canExecute": 1},
+        {"name": "rag.search", "canExecute": "true"},
+        {"canExecute": True},
+        {"name": None, "canExecute": True},
+        {"name": "   ", "canExecute": True},
+    ],
+)
+@pytest.mark.asyncio
+async def test_catalog_matching_rejects_non_executable_descriptors(
+    user_catalogs: dict[int, UserCatalog],
+    catalog_protocol_stub: tuple[Mock, AsyncMock],
+    descriptor: dict[str, Any],
+) -> None:
+    await _seed_review_skill(user_catalogs[1].service)
+    factory, list_tools = catalog_protocol_stub
+    list_tools.return_value = {"tools": [descriptor]}
+    module = await _module()
+
+    result = await module.execute_tool(
+        "skills.render",
+        {"skill_name": "review-paper"},
+        context=user_catalogs[1].context,
+    )
+
+    assert result["catalog_matches"] == []
+    factory.assert_called_once_with()
+    list_tools.assert_awaited_once_with({}, user_catalogs[1].context)
+
+
+@pytest.mark.asyncio
+async def test_catalog_matching_does_not_require_python_311_task_api(
+    user_catalogs: dict[int, UserCatalog],
+    catalog_protocol_stub: tuple[Mock, AsyncMock],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = await _module()
+
+    with monkeypatch.context() as compatibility:
+        compatibility.setattr(
+            skills_module.asyncio,
+            "current_task",
+            Mock(return_value=SimpleNamespace()),
+        )
+        matches = await module._resolve_catalog_matches(
+            ["rag.search"],
+            user_catalogs[1].context,
+        )
+
+    assert matches == ["rag.search"]
+
+
 @pytest.mark.asyncio
 async def test_render_with_no_declarations_skips_catalog_lookup(
     user_catalogs: dict[int, UserCatalog],
