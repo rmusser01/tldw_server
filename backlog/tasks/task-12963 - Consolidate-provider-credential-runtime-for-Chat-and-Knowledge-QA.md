@@ -1,10 +1,10 @@
 ---
 id: TASK-12963
 title: Consolidate provider credential runtime for Chat and Knowledge QA
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-07-14 01:52'
+updated_date: '2026-07-14 02:06'
 labels: []
 dependencies: []
 documentation:
@@ -31,7 +31,7 @@ Design and implement a shared execution-scoped provider credential runtime used 
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Docs/superpowers/plans/2026-07-14-provider-credential-runtime-dev-integration-plan.md
+Completed; integration plan removed after final verification. Design: Docs/superpowers/specs/2026-07-12-shared-provider-credential-runtime-design.md
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -76,12 +76,14 @@ Docs/superpowers/plans/2026-07-14-provider-credential-runtime-dev-integration-pl
 2026-07-13: Tasks 12 and 13 complete. Commits ffbc73dfc1, 1399ffef70, and 7905df629b add the cross-surface no-fallback/secret-leak gate, close authenticated RAG ablate/simple/advanced runtime gaps, reject credential handles before checkpoint persistence, and protect credential-derived embedding endpoints across egress, transport, logs, metrics, manual tracing, third-party logging, and OpenTelemetry auto-instrumentation. Public redirect observability remains accurate. Final committed-tree verification: backend union 240 passed, 1 documented TestClient streaming skip; frontend 35 passed; Chromium credential workflow 1 passed; full HTTP client 95 passed. All changed Python files py_compile clean; git diff check clean. Broad Bandit artifact /tmp/bandit_TASK-12112_final.json matches base exactly: 34 existing Low findings, 0 new, 0 Medium/High, 0 scan errors. Ruff E9/F821 final sweep found only two unchanged ChatBadRequestError F821 baseline findings present at 4f88741711; Task 13 touched scope is clean. Independent whole-feature review ended with no findings and explicit SPEC APPROVED / QUALITY APPROVED.
 
 2026-07-14: Integration cleanup approved. Preserve the completed source branch, replay only provider-credential-runtime commits onto current origin/dev, renumber this task because TASK-12112 collides on the target branch, resolve target overlap, and rerun the full verification gate.
+
+2026-07-13: Current-dev integration complete on codex/provider-credential-runtime-dev. Replayed the 70 provider-credential commits onto origin/dev at 8dbeb383ac, preserving current-dev RAG diagnostic sanitization, response-acquisition stream semantics, origin-bound frontend credential handling, and safe/idempotent-only replay after background handoff. Corrected one stale Retry-After test fixture to include the current origin-bound manual credential metadata; production fail-closed credential behavior was unchanged. Final integrated verification: backend gate 240 passed and 1 documented TestClient streaming skip; affected frontend matrix 95 passed; full HTTP client suite 112 passed; Chromium Knowledge QA credential/no-fallback workflow 1 passed; frontend TypeScript typecheck passed; all changed Python files py_compile clean; git diff check clean. Ruff E9/F821 found only two ChatBadRequestError findings reproduced identically on origin/dev. Bandit scanned the changed production Python scope with 0 findings on both integrated (50,914 LOC) and origin/dev baseline (45,056 LOC), 0 scan errors. Final range-diff/conflict review found no unresolved Critical or Important issues. Latest origin/dev ancestry rechecked at completion: 0 behind. The two unrelated untracked watchlist templates remain untouched.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented and verified one server-only execution-scoped credential runtime for Chat and provider-backed RAG, including hosted query embeddings. Authenticated execution uses user, team, organization, then server precedence; invalid credentials, store failures, and revoked scope fail closed. Credentials are non-serializable and excluded from cache/checkpoint/client state, semantic cache is retrieval-only and tenant-safe, and terminal stream errors cannot trigger unsafe non-stream replay. Final committed-tree verification passed across backend, frontend, browser, HTTP compatibility, static compilation, security baseline delta, and independent whole-feature review. Known skip: one pre-existing TestClient streaming test is skipped because it hangs under TestClient. The unrelated untracked watchlist templates were not touched. A human-authored PR Change summary is still required before merge.
+Integrated the reviewed server-only provider credential runtime onto the latest origin/dev while preserving current development behavior at overlapping RAG and frontend stream boundaries. Chat and all provider-backed RAG paths, including hosted query embeddings, share one execution-scoped credential policy with user/team/org/server precedence; invalid credentials, store failures, and revoked scopes fail closed. Credentials remain non-serializable and excluded from client/cache/checkpoint state, semantic cache remains retrieval-only, and terminal stream failures cannot trigger unsafe replay. Final current-dev verification passed: backend 240 passed/1 documented skip, frontend 95 passed, HTTP client 112 passed, Chromium workflow 1 passed, TypeScript and Python compilation passed, Bandit found 0 issues with no baseline delta, and final integration review found no unresolved issues. The credential task was renumbered to TASK-12963 without modifying the existing TASK-12112 microphone task. The two unrelated untracked watchlist templates were not touched. A human-authored PR Change summary is still required before merge.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
