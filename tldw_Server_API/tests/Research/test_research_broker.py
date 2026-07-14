@@ -2,7 +2,6 @@ import pytest
 
 from tldw_Server_API.app.core.Research.models import ResearchPlan
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -212,6 +211,13 @@ async def test_broker_passes_resolved_provider_config_and_preserves_provider_ide
     assert academic_provider.calls[0]["config"] == {"providers": ["arxiv"], "max_results": 2}
     assert web_provider.calls[0]["config"] == {"engine": "kagi", "result_count": 3}
     assert {source.provider for source in result.sources} == {"local_corpus", "arxiv", "kagi"}
+    assert [
+        (source.source_id, note.note_id) for source, note in zip(result.sources, result.evidence_notes, strict=True)
+    ] == [
+        ("src_7aef3f6cf7e9", "note_9c1e03fe5b64"),
+        ("src_72b0a1007cc7", "note_3fd24e3f8693"),
+        ("src_47fc41c2bc20", "note_817ae2d4c1e1"),
+    ]
 
 
 @pytest.mark.asyncio

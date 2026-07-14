@@ -25,23 +25,23 @@
 
 ## Execution Preflight
 
-- [ ] Read the official Backlog task-execution workflow, confirm TASK-12968.1, TASK-12971, and TASK-12968.7 are complete, move TASK-12968.2 to In Progress, and link this plan before the first runtime edit.
-- [ ] Verify the worktree is isolated and clean apart from the approved task/plan changes.
-- [ ] Re-read the TASK-12971 public transport contract and exact focused-test paths; update only the Stage 3 import/test path if its delivered public name differs.
+- [x] Read the official Backlog task-execution workflow, confirm TASK-12968.1, TASK-12971, and TASK-12968.7 are complete, move TASK-12968.2 to In Progress, and link this plan before the first runtime edit.
+- [x] Verify the worktree is isolated and clean apart from the approved task/plan changes.
+- [x] Re-read the TASK-12971 public transport contract and exact focused-test paths; update only the Stage 3 import/test path if its delivered public name differs.
 
 ## Shared Gate Before Every Commit
 
 Before every stage commit, run all tests introduced in that stage and every earlier stage, the impacted existing discovery tests, `python -m compileall -q` on touched Python paths, `ruff check` and `black --check` on every touched Python file, and `git diff --check`. Fix failures before committing; do not defer these gates to Stage 5.
 
-## Stage 1: Freeze Legacy Execution Behavior
+## Task 1 / Stage 1: Freeze Legacy Execution Behavior
 
 **Goal:** Characterize what the current eight-source path actually does before adding a parallel V2 path.
 
 **Success Criteria:** A checked-in golden fixture and focused tests freeze selection, provider invocation, ordering, warnings, source statuses, partial/all-failure behavior, and serialized response projections without network access.
 
-**Tests:** Existing legacy selection contract plus new fake-provider execution characterization.
+**Tests:** Existing legacy selection contract plus new recording-provider execution characterization.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Files
 
@@ -52,13 +52,16 @@ Before every stage commit, run all tests introduced in that stage and every earl
 
 ### Test-first steps
 
-- [ ] Write tests with injected deterministic adapters for all eight current sources.
-- [ ] Cover omitted, empty, explicit-source, category-only, and source/category-union selection through the real V1 service boundary.
-- [ ] Pin source priority, result ordering, provider call arguments/counts, source status ordering, warning ordering, partial failure, all failure, valid-empty, malformed provider payload, and a documented stable serialization projection.
-- [ ] Freeze the injected clock or omit volatile `SourceStatus.elapsed_ms`, `DiscoveryMetrics.elapsed_ms`, request IDs, and generated timestamps from the golden projection. Assert their types/ranges separately.
-- [ ] Add fixed-input, hard-coded expected `src_...` source IDs and `note_...` evidence IDs through the real Research broker identity path.
-- [ ] Generate the golden JSON mechanically from reviewed stable expected values, then make the test compare byte-stable canonical content.
-- [ ] Run the existing discovery catalog/router/service/selection/identity suites to prove the fixture describes current behavior rather than changing it.
+- [x] Write tests with injected deterministic adapters for all eight current sources.
+- [x] Inject a deterministic no-I/O OA resolver and a tripwire that would fail if the default resolver were constructed or called.
+- [x] Cover omitted, empty, explicit-source, category-only, and source/category-union selection through the real V1 service boundary.
+- [x] Preserve the observed V1 semantics: omitted or empty selection defaults to the three `open_research_graph` sources, result aggregation follows source priority rather than adapter completion order, and any malformed item makes that source `internal_error`.
+- [x] Pin source priority, result ordering, provider call arguments/counts, source status ordering, warning ordering, partial failure, all failure, valid-empty, malformed provider payload, and a documented stable serialization projection.
+- [x] Freeze the injected clock or omit volatile `SourceStatus.elapsed_ms`, `DiscoveryMetrics.elapsed_ms`, request IDs, and generated timestamps from the golden projection. Assert their types/ranges separately.
+- [x] Serialize through `ResearchDiscoverySearchResponse.model_validate(...).model_dump(mode="json")`, then freeze only the stable projection.
+- [x] Add fixed-input hard-coded Research broker goldens through `collect_focus_area`: local `src_7aef3f6cf7e9` / `note_9c1e03fe5b64`, academic `src_72b0a1007cc7` / `note_3fd24e3f8693`, and web `src_47fc41c2bc20` / `note_817ae2d4c1e1`. Do not freeze `retrieved_at`.
+- [x] Generate the golden JSON mechanically from reviewed stable expected values, then compare canonical sorted-key JSON with one trailing newline.
+- [x] Run the existing discovery catalog/router/service/selection/identity suites to prove the fixture describes current behavior rather than changing it.
 
 ### Verify
 
@@ -70,6 +73,8 @@ python -m pytest -q \
   tldw_Server_API/tests/Research/test_research_discovery_catalog.py \
   tldw_Server_API/tests/Research/test_research_discovery_router.py \
   tldw_Server_API/tests/Research/test_research_discovery_service.py \
+  tldw_Server_API/tests/Research/test_research_discovery_selection.py \
+  tldw_Server_API/tests/Research/test_research_discovery_identity.py \
   tldw_Server_API/tests/Research/test_research_broker.py
 python -m compileall -q \
   tldw_Server_API/tests/Research/test_research_discovery_legacy_execution_contract.py \
@@ -87,11 +92,11 @@ git diff --check
 
 `test(research): freeze legacy discovery execution contract`
 
-## Stage 2: Add Pure V2 Contracts, Registry, and Planner
+## Task 2 / Stage 2: Add Pure V2 Contracts, Registry, and Planner
 
 **Goal:** Compile source intent into a deterministic, budgeted effective plan without performing I/O or touching V1 identities.
 
-**Success Criteria:** Frozen V2 values model source, route, backend, policy, attempt, dispatch reservation, source predicate, provenance, budget, and outcome identity; the registry supports aliases and multiple routes; the planner deterministically coalesces compatible backend work and rejects impossible budgets.
+**Success Criteria:** Frozen V2 values model source, route, backend, policy, attempt, dispatch intent, dispatch allowance, source predicate, readiness, provenance, budget, and outcome identity; the registry supports aliases and multiple routes; the planner deterministically coalesces compatible backend work and rejects impossible budgets without creating runtime journal reservations.
 
 **Tests:** Unit and property tests for construction, referential integrity, determinism, coalescing, fallback order, and physical-request budgets.
 
@@ -108,18 +113,19 @@ git diff --check
 
 ### Test-first steps
 
-- [ ] Start with failing constructor tests for frozen, slots-based dataclasses and validated catalog IDs, route references, policy digests, exact origins, query modes, typed source predicates, and credential requirements.
+- [ ] Start with failing constructor tests for frozen, slots-based dataclasses and validated catalog IDs, route references, policy digests, exact origins, query modes, typed source predicates, credential requirements, immutable readiness overlays, and explicit `offline_fixture` or `synthetic` execution modes. There is no production-default execution mode.
+- [ ] Define a frozen `DispatchIntent` containing route ID, policy digest, operation kind, method, path, typed query pairs, and limits. It describes work but cannot dispatch or debit work itself.
 - [ ] Add an additive route-independent V2 document identity; assert existing `build_fingerprint`, `stable_result_id`, serialized V1 result IDs, and Deep Research evidence IDs remain byte-for-byte unchanged.
 - [ ] Build a V2 registry for the eight existing targets without mutating `default_source_catalog()`. Record exact routes/backends and make legacy `site_hosts` descriptive only.
 - [ ] Mark OpenAlex's V2 API route credentialed and typed unavailable/skipped, carry no secret material or secret-reference interface in the foundation registry, and never inherit the stale V1 `requires_credentials=False` claim. Leave V1 unchanged.
-- [ ] Start with an OpenAlex V2 selection regression: the planner returns a typed unavailable/skipped outcome, emits zero executable attempts and zero physical reservations, and a recording gateway observes zero calls. Do not add a positive credentialed branch; authenticated enablement is deferred to a separately authorized future program.
+- [ ] Start with an OpenAlex V2 selection regression: the planner returns a typed unavailable/skipped outcome and emits zero executable attempts and zero dispatch allowance. The zero-gateway-call tripwire belongs to Stage 4E, after the gateway boundary exists. Do not add a positive credentialed branch; authenticated enablement is deferred to a separately authorized future program.
 - [ ] Reconcile all eight existing targets (arXiv, PubMed, Semantic Scholar, Zenodo, OpenAlex, OSF, Figshare, and Crossref) against the frozen ledger's target, route, backend, credential, query-mode, and source-predicate declarations. The Crossref Metadata Search seed row resolves to the existing stable `crossref` product ID; do not create a parallel `crossref_metadata_search` runtime identity.
-- [ ] Compile explicit V2 selections into stable ordered attempts with selection reasons, route fallback order, policy/catalog versions, and declared physical reservations.
+- [ ] Compile explicit V2 selections plus an immutable readiness overlay into stable ordered attempts with selection reasons, route fallback order, policy/catalog versions, and declared dispatch allowances. Mark the seven credentialless routes fixture-executable and OpenAlex unavailable.
 - [ ] Coalesce only requests whose backend, normalized query, filters, policy, and source predicates are actually compatible. Preserve requested-target attribution separately from backend identity.
-- [ ] Count PubMed ESearch plus ESummary as two physical reservations. Release an unused second reservation only when no second dispatch occurred.
+- [ ] Count PubMed ESearch plus conditional ESummary as a deterministic allowance of at most two physical dispatches. An empty ESearch leaves unused allowance; it does not create or release an `AttemptJournal` reservation.
 - [ ] Model and report separate ceilings for route attempts, physical dispatches, per-route pages, redirects, retries, aggregate wall time, and returned results.
 - [ ] Add a synthetic two-target shared-backend aggregator to tests so coalescing plus matching, nonmatching, and ambiguous source predicates are exercised even though the eight production foundation routes are direct/native.
-- [ ] Add Hypothesis invariants where available: deterministic plan bytes, no negative budget, used plus released plus outstanding equals reserved, coalescing never increases physical requests, and no dimension exceeds its declared ceiling.
+- [ ] Add Hypothesis invariants where available: deterministic plan bytes, no negative allowance, coalescing never increases physical requests, and no planned dimension exceeds its declared ceiling. Runtime journal accounting invariants belong to Stage 4A.
 
 ### Verify
 
@@ -160,7 +166,7 @@ git diff --check
 
 `feat(research): add pure discovery v2 planning contracts`
 
-## Stage 3: Consume TASK-12971 Through a One-Hop Discovery Gateway
+## Task 3 / Stage 3: Consume TASK-12971 Through a One-Hop Discovery Gateway
 
 **Goal:** Apply discovery route policy to exactly one separately accounted physical hop using the reusable secure transport primitive.
 
@@ -168,7 +174,7 @@ git diff --check
 
 **Tests:** Unit, security, cancellation, revocation, and streaming-boundary tests with an injected fake one-hop primitive; focused integration tests against TASK-12971's local test server only.
 
-**Status:** Not Started (TASK-12971 prerequisite delivered; TASK-12968.2 remains blocked on TASK-12968.7)
+**Status:** Not Started (all prerequisites delivered)
 
 ### Files
 
@@ -181,10 +187,10 @@ git diff --check
 ### Test-first steps
 
 - [ ] Stop if TASK-12971 is not complete or its focused security tests are not green; record the blocker instead of implementing an alternate client.
-- [ ] Write failing tests for exact scheme/host/port/method/path/query enforcement, immutable policy digest binding, revocation before dispatch, query minimization, and independence from environment/config-file allowlists.
+- [ ] Write failing tests for exact scheme/host/port/method/path/query enforcement, canonical policy-digest recomputation and binding, revocation before dispatch, query minimization, and independence from environment/config-file allowlists.
 - [ ] Define `dispatch_once(...)` so one call can perform one physical hop only. Redirect responses and retryable failures return typed data to the executor; they are not followed internally.
 - [ ] Prove no ambient proxy, `.netrc`, cookie, authorization, client certificate, or credential state enters the primitive request.
-- [ ] Preserve TASK-12971's resolved-address, Host/SNI, connected-peer, wire-byte, decompressed-byte, header, time, and parser ceilings in the returned trace.
+- [ ] Preserve TASK-12971's exposed resolved-address, connected-peer, header-byte, and wire-byte evidence. Derive requested Host/SNI and configured ceilings from the validated request, decoded bytes from bounded `len(body)`, and elapsed time around the public call; do not import private TASK-12971 seams or claim fields the public response does not expose.
 - [ ] Return bounded typed errors without query text, response bodies, local paths, secrets, or unsafe provider detail.
 
 ### Verify
@@ -216,40 +222,155 @@ git diff --check
 
 `feat(research): add one-hop discovery gateway facade`
 
-## Stage 4: Add Gateway-Only V2 Adapters and Executor
+## Task 4 / Stage 4A: Add the Executor-Owned Dispatch Boundary and Journal
 
-**Goal:** Execute the eight existing source routes offline through one injected gateway boundary with truthful per-dispatch accounting and inert results.
+**Goal:** Make one component solely responsible for reservation, policy revalidation, dispatch IDs, gateway calls, debits, cancellation, and candidate commit.
 
-**Success Criteria:** All V2-enabled adapters use only the gateway, every initial/page/redirect/retry request receives a new reservation and `dispatch_id`, every budget and cancellation transition is reportable, typed partial outcomes are deterministic, and static/runtime boundary tests prove there is no alternate network or retrieval path.
+**Success Criteria:** Adapters receive only an executor-owned `dispatch(intent)` capability bound to one planned attempt, never the raw gateway; every physical operation is journaled exactly once; allowances remain distinct from runtime reservations and debits; and scripted offline tests cover every state transition and budget dimension.
 
-**Tests:** Per-adapter fixture tests, executor state-machine tests, tripwire tests, and AST network-boundary tests.
+**Status:** Not Started
+
+### Files
+
+- Add `tldw_Server_API/app/core/Research/discovery/executor.py`.
+- Add `tldw_Server_API/tests/Research/test_research_discovery_executor.py`.
+
+### Test-first steps
+
+- [ ] Use a scripted adapter to prove it can request work only by yielding a validated `DispatchIntent` to executor-owned `dispatch(intent)`; it cannot access the gateway directly.
+- [ ] Bind each dispatch capability to one planned `attempt_id`, route ID, policy digest, and remaining allowance. Reject cross-attempt/cross-route intents and undeclared operation transitions; include a malicious scripted-adapter regression.
+- [ ] Add a minimal in-memory `AttemptJournal` with explicit `reserved`, `dispatching`, `succeeded`, `valid_empty`, `failed`, `timed_out`, `cancelled`, `skipped`, and `indeterminate_after_dispatch` transitions. Do not add durable storage.
+- [ ] Create a journal reservation only immediately before an initial, page, redirect, or retry dispatch; assign a fresh `dispatch_id`; debit on transition to `dispatching`; and release only a definitely unused pre-dispatch reservation. Unused planner allowance is not a journal transition.
+- [ ] Inject fail-closed `policy_is_active(route_id, digest)`, recompute and verify the canonical digest before dispatch, and recheck before committing candidates. Test tampered digests and revocation during the hop: accounting remains debited while candidate content is suppressed.
+- [ ] Reconstruct pagination from typed cursor fields into the approved route template. Reject absolute cursor URLs, cross-origin cursors, undeclared query keys, repeated cursors, and work beyond per-route page/redirect/retry ceilings or the aggregate deadline.
+- [ ] Permit retries only for explicitly retryable outcomes on idempotent methods. Debit failed dispatched work and surface possible duplicate work; never release or silently replay a dispatch that may have reached the provider.
+- [ ] Enforce route-attempt, physical-dispatch, page, redirect, retry, aggregate-wall-time, and returned-result budgets independently. Apply a deterministic result cap before candidate commit and report truncation.
+- [ ] Test cancellation before dispatch (reservation released), while dispatching with no definitive result (`indeterminate_after_dispatch`, debit retained), and after a definitive result (debit retained; late content suppressed if cancellation wins the commit boundary).
+- [ ] Add accounting invariants: used plus released plus outstanding equals reserved, every dispatching record has a unique ID, and no counter exceeds its ceiling.
+
+### Verify
+
+```bash
+source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
+python -m pytest -q \
+  tldw_Server_API/tests/Research/test_research_discovery_executor.py \
+  tldw_Server_API/tests/Research/test_research_discovery_gateway.py \
+  tldw_Server_API/tests/Research/test_research_discovery_contracts.py \
+  tldw_Server_API/tests/Research/test_research_discovery_planner.py
+python -m compileall -q \
+  tldw_Server_API/app/core/Research/discovery/executor.py \
+  tldw_Server_API/tests/Research/test_research_discovery_executor.py
+ruff check tldw_Server_API/app/core/Research/discovery/executor.py tldw_Server_API/tests/Research/test_research_discovery_executor.py
+black --check tldw_Server_API/app/core/Research/discovery/executor.py tldw_Server_API/tests/Research/test_research_discovery_executor.py
+git diff --check
+```
+
+### Commit
+
+`feat(research): add accounted discovery executor`
+
+## Task 5 / Stage 4B: Add Five Bounded JSON Adapters
+
+**Goal:** Implement the simple JSON protocols for Semantic Scholar, Crossref, Zenodo, Figshare, and OSF over the executor-owned dispatch capability.
+
+**Success Criteria:** The five adapters parse bounded offline fixtures, return inert metadata/snippets, and have no raw transport or legacy-wrapper access.
 
 **Status:** Not Started
 
 ### Files
 
 - Add `tldw_Server_API/app/core/Research/discovery/gateway_adapters.py`.
-- Add `tldw_Server_API/app/core/Research/discovery/executor.py`.
 - Add `tldw_Server_API/tests/Research/test_research_discovery_gateway_adapters.py`.
-- Add `tldw_Server_API/tests/Research/test_research_discovery_executor.py`.
-- Add `tldw_Server_API/tests/Research/test_research_discovery_network_boundary.py`.
-- Add sanitized provider fixtures under the existing Research test-fixture convention discovered during implementation; do not create a second fixture framework.
+- Add sanitized provider fixtures under the existing Research fixture convention; do not create a second framework.
 
 ### Test-first steps
 
-- [ ] Write adapter tests for OpenAlex, Semantic Scholar, Crossref, arXiv, PubMed, Zenodo, Figshare, and OSF using inert fixture URLs and a recording gateway.
-- [ ] Implement V2 parsers directly over gateway responses. Do not import the legacy Third_Party search wrappers: arXiv hides fetch/sleep behavior and PubMed hides two physical calls.
-- [ ] Cover success, valid empty, bounded pagination, rate-limit metadata, timeout, cancellation, malformed/schema-drift payloads, unsafe echoed errors, and missing or ambiguous attribution.
-- [ ] Add a minimal in-memory `AttemptJournal` with explicit `reserved`, `dispatching`, `succeeded`, `valid_empty`, `failed`, `timed_out`, `cancelled`, `skipped`, and `indeterminate_after_dispatch` transitions. Do not add durable storage.
-- [ ] Reserve before every initial request, page, redirect, and retry; revalidate the frozen route policy; assign a fresh `dispatch_id` before calling the gateway; never reuse an ID after an indeterminate dispatch.
-- [ ] Reconstruct pagination from typed cursor fields into the approved route template. Reject absolute cursor URLs, cross-origin cursors, undeclared query keys, repeated cursors, and work beyond per-route page/redirect/retry ceilings or the aggregate deadline.
-- [ ] Permit retries only for explicitly retryable outcomes on idempotent methods. Debit failed dispatched work and surface possible duplicate work; never release or silently replay a dispatch that may have reached the provider.
-- [ ] Enforce route-attempt, physical-dispatch, page, redirect, retry, aggregate-wall-time, and returned-result budgets independently. Apply a deterministic result cap before normalization output and report truncation.
-- [ ] Test cancellation before dispatch (unused reservation released), while dispatching with no definitive result (`indeterminate_after_dispatch`, debit retained), and after a definitive gateway result (debit retained, late candidate content suppressed if cancellation won the commit boundary).
-- [ ] Validate aggregator source predicates before attribution. Ambiguous or nonmatching records remain unattributed to the requested target.
-- [ ] Run the synthetic shared-backend aggregator through planner, executor, and normalization to prove matching, nonmatching, ambiguous attribution, and one physical coalesced request end to end.
-- [ ] Prove result URLs receive zero requests and that provider failures make zero calls to generic fetch, Media, scraping, Playwright, cookies, or secrets.
-- [ ] Add an AST test that fails V2 adapter imports/construction of `httpx`, `aiohttp`, `requests`, `urllib`, sockets, SDK default transports, and legacy Third_Party networking. Only `gateway.py` may consume TASK-12971's transport API.
+- [ ] Cover success, valid empty, bounded pagination, rate-limit metadata, timeout, cancellation, malformed/schema-drift payloads, unsafe echoed errors, and inert result URLs.
+- [ ] Enforce route-level maximum record count, field characters, structural depth, and parse deadline before normalized output; include deeply nested and oversized fixtures.
+- [ ] Rebuild cursors only through typed fields and approved query templates; never accept an absolute next URL.
+- [ ] Prove every adapter uses only executor-owned `dispatch(intent)` and that returned URLs receive zero requests.
+
+### Verify
+
+```bash
+source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
+python -m pytest -q tldw_Server_API/tests/Research/test_research_discovery_gateway_adapters.py tldw_Server_API/tests/Research/test_research_discovery_executor.py
+python -m compileall -q tldw_Server_API/app/core/Research/discovery/gateway_adapters.py tldw_Server_API/tests/Research/test_research_discovery_gateway_adapters.py
+ruff check tldw_Server_API/app/core/Research/discovery/gateway_adapters.py tldw_Server_API/tests/Research/test_research_discovery_gateway_adapters.py
+black --check tldw_Server_API/app/core/Research/discovery/gateway_adapters.py tldw_Server_API/tests/Research/test_research_discovery_gateway_adapters.py
+git diff --check
+```
+
+### Commit
+
+`feat(research): add bounded json discovery adapters`
+
+## Task 6 / Stage 4C: Add the Bounded arXiv Atom Adapter
+
+**Goal:** Parse arXiv Atom responses directly over accounted dispatches without importing the legacy wrapper that hides fetch and sleep behavior.
+
+**Success Criteria:** arXiv fixtures cover bounded success, empty, pagination, malformed XML, excessive structure/fields/records, deadline, and safe error behavior.
+
+**Status:** Not Started
+
+### Test-first steps
+
+- [ ] Add arXiv fixtures and failing adapter tests before implementation.
+- [ ] Reject entity-expansion-style input and enforce structural depth, record, field, input-byte, and parse-deadline ceilings.
+- [ ] Reconstruct pagination from approved numeric cursor fields; do not consume provider-supplied absolute links.
+- [ ] Prove result links are inert and every physical request is mediated by executor-owned `dispatch(intent)`.
+
+### Verify
+
+Run the Task 5 verify commands plus the focused executor, planner, and gateway suites.
+
+### Commit
+
+`feat(research): add bounded arxiv discovery adapter`
+
+## Task 7 / Stage 4D: Add the Two-Dispatch PubMed Adapter
+
+**Goal:** Make PubMed's ESearch and conditional ESummary sequence explicit and truthfully accounted.
+
+**Success Criteria:** ESearch and ESummary are separate intents, reservations, and dispatch IDs; an empty ESearch performs no second reservation or gateway call; and every limit/cancellation/error path is typed and deterministic.
+
+**Status:** Not Started
+
+### Test-first steps
+
+- [ ] Start with failing fixtures for nonempty ESearch plus ESummary, empty ESearch, malformed ID lists, partial summaries, pagination, timeout, cancellation, and unsafe errors.
+- [ ] Prove the two-step path consumes at most the planner's two-dispatch allowance while creating journal reservations only immediately before actual calls.
+- [ ] Apply the XML/parser bounds and cursor rules from Task 6 to both operations.
+- [ ] Do not import the legacy PubMed wrapper or hide the second call inside an SDK/default transport.
+
+### Verify
+
+Run the Task 5 verify commands plus the focused executor, planner, registry-reconciliation, and gateway suites.
+
+### Commit
+
+`feat(research): add accounted pubmed discovery adapter`
+
+## Task 8 / Stage 4E: Prove Registry and Network Boundaries End to End
+
+**Goal:** Close the security boundary over the complete offline V2 registry and exercise attribution/coalescing through planner, executor, and adapters.
+
+**Success Criteria:** The seven enabled adapters exactly equal the recording-tested and statically scanned implementations; OpenAlex remains unavailable with zero calls; and no alternate transport, credential, scraping, Media, or result-dereference path exists.
+
+**Status:** Not Started
+
+### Files
+
+- Add `tldw_Server_API/tests/Research/test_research_discovery_network_boundary.py`.
+- Update focused executor/adapter tests only where needed for end-to-end coverage.
+
+### Test-first steps
+
+- [ ] Derive enabled adapter identities/modules from the registry and assert exact set equality with recording fixtures and statically scanned modules; fail if any enabled adapter is outside the allowlist.
+- [ ] Add an AST test scanning every new V2 production module (`contracts`, `registry`, `planner`, `executor`, and adapters) and rejecting imports/construction of `httpx`, `aiohttp`, `requests`, `urllib`, sockets, SDK default transports, legacy Third_Party networking, and `Security.http_hop`. Only `gateway.py` may consume TASK-12971's transport API.
+- [ ] Assert OpenAlex produces a typed unavailable/skipped result with zero executable attempts, allowances, journal reservations, and gateway calls; no OpenAlex adapter exists.
+- [ ] Run the synthetic shared-backend aggregator end to end and prove matching, nonmatching, ambiguous attribution, and one coalesced physical request.
+- [ ] Prove provider failures and result URLs make zero calls to generic fetch, Media, scraping, Playwright, cookies, secrets, or any unregistered adapter.
 
 ### Verify
 
@@ -264,32 +385,17 @@ python -m pytest -q \
   tldw_Server_API/tests/Research/test_research_discovery_planner.py \
   tldw_Server_API/tests/Research/test_research_discovery_registry_reconciliation.py \
   tldw_Server_API/tests/Research/test_research_discovery_legacy_execution_contract.py
-python -m compileall -q \
-  tldw_Server_API/app/core/Research/discovery/gateway_adapters.py \
-  tldw_Server_API/app/core/Research/discovery/executor.py \
-  tldw_Server_API/tests/Research/test_research_discovery_gateway_adapters.py \
-  tldw_Server_API/tests/Research/test_research_discovery_executor.py \
-  tldw_Server_API/tests/Research/test_research_discovery_network_boundary.py
-ruff check \
-  tldw_Server_API/app/core/Research/discovery/gateway_adapters.py \
-  tldw_Server_API/app/core/Research/discovery/executor.py \
-  tldw_Server_API/tests/Research/test_research_discovery_gateway_adapters.py \
-  tldw_Server_API/tests/Research/test_research_discovery_executor.py \
-  tldw_Server_API/tests/Research/test_research_discovery_network_boundary.py
-black --check \
-  tldw_Server_API/app/core/Research/discovery/gateway_adapters.py \
-  tldw_Server_API/app/core/Research/discovery/executor.py \
-  tldw_Server_API/tests/Research/test_research_discovery_gateway_adapters.py \
-  tldw_Server_API/tests/Research/test_research_discovery_executor.py \
-  tldw_Server_API/tests/Research/test_research_discovery_network_boundary.py
+python -m compileall -q tldw_Server_API/app/core/Research/discovery tldw_Server_API/tests/Research
+ruff check tldw_Server_API/app/core/Research/discovery tldw_Server_API/tests/Research/test_research_discovery_gateway_adapters.py tldw_Server_API/tests/Research/test_research_discovery_executor.py tldw_Server_API/tests/Research/test_research_discovery_network_boundary.py
+black --check tldw_Server_API/app/core/Research/discovery tldw_Server_API/tests/Research/test_research_discovery_gateway_adapters.py tldw_Server_API/tests/Research/test_research_discovery_executor.py tldw_Server_API/tests/Research/test_research_discovery_network_boundary.py
 git diff --check
 ```
 
 ### Commit
 
-`feat(research): execute discovery v2 through the gateway`
+`test(research): prove discovery v2 network boundaries`
 
-## Stage 5: Prove Offline Compatibility and Leave Production Disabled
+## Task 9 / Stage 5: Prove Offline Compatibility and Leave Production Disabled
 
 **Goal:** Demonstrate a reviewable foundation without claiming consumer cutover or live source delivery.
 
@@ -310,7 +416,8 @@ git diff --check
 
 - [ ] Define a stable client-visible compatibility projection, then compare V1 and V2 fixture executions for source ordering, normalized content, status meaning, warnings, and legacy serialization. Compare V1 logical adapter calls separately from V2 physical dispatches: PubMed's one legacy wrapper call intentionally becomes two physical requests, and OpenAlex readiness intentionally becomes credential-gated.
 - [ ] Re-run the hard-coded Research broker `src_...` and `note_...` identity goldens alongside the compatibility projection.
-- [ ] Add an import-boundary test proving V1 production catalog/router/service/endpoint modules do not import or construct the V2 executor, plus a construction test proving V2 requires an explicit offline/synthetic opt-in. Do not claim a no-double-fetch test merely because V2 has no production wiring.
+- [ ] Add an import-boundary test proving V1 production catalog/router/service/endpoint modules do not import or construct the V2 executor, plus a construction test proving V2 requires an explicit offline/synthetic opt-in.
+- [ ] Execute one real legacy service or endpoint request with a raising V2 executor/gateway tripwire and recording V1 adapters. Assert the expected legacy provider counts and zero V2 calls so the no-double-fetch claim exercises a production entry point.
 - [ ] Run the complete existing Research Discovery suite plus all new foundation tests.
 - [ ] Run Bandit on the touched discovery and security integration scope; fix new findings rather than suppressing them.
 - [ ] Request an independent correctness/security review and resolve all important findings before completion.

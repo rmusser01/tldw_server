@@ -76,3 +76,17 @@
 - Fresh controller verification: Node inventory suite 18/18; schema plus legacy-selection pytest 22/22; authoritative validator `errors=[]`, exact report equality, 191 mapped / 35 credentialed; `git diff --check` passed. Five pytest warnings are existing environment/config warnings.
 - Bandit not applicable because no production Python code changed. No live OpenAlex request was made; authenticated enablement remains deferred.
 - TASK-12968.7 finalized Done with 5/5 acceptance criteria and 6/6 DoD items checked; final-summary markers normalized under the approved narrow repair.
+
+## 2026-07-14 — TASK-12968.2 discovery execution foundation
+
+- TASK-12968.2 moved to In Progress after confirming TASK-12968.1, TASK-12971, and TASK-12968.7 are Done; the official plan is linked from Backlog.
+- Execution remains isolated to `.worktrees/research-source-catalog-deep-research`; the dirty root worktree is untouched.
+- Corrected the stale OpenAlex note: V2 is typed unavailable/skipped with zero attempts, allowances, reservations, or gateway calls; no secret-reference interface or positive credentialed branch is in scope; V1 stays unchanged.
+- Preflight review froze actual V1 behavior for Task 1: default selection is the three open-research-graph sources, all-eight execution requires explicit selection, aggregation follows catalog priority, and malformed direct-adapter output fails the whole source.
+- Architecture review separated planner allowances from runtime reservations/debits, made the executor the sole gateway dispatch owner, bound dispatch capabilities to one planned attempt/route/policy/allowance, added pre-dispatch and pre-commit revocation checks, and expanded static boundary coverage to all V2 modules.
+- Split the original oversized adapter stage into executor/journal, five JSON adapters, arXiv, PubMed, and registry/network-boundary tasks. Task 1 is In Progress; no runtime code has been edited yet.
+- Task 1 RED: the focused execution-contract suite failed exactly because `research-discovery-legacy-execution-v1.json` was absent before the fixture and broker identity assertions were added.
+- Task 1 now characterizes the real default catalog → `ResearchSourceRouter` → `ResearchDiscoveryService.search` path with all eight recording adapters, an injected no-I/O OA resolver, a default-resolver tripwire, and owner-scoped temporary `ResearchSessionsDB` factories; V1 production code remains unchanged.
+- Frozen coverage includes omitted/empty/explicit/category/union selection, priority ordering despite reverse completion, provider arguments/counts, ordered statuses/warnings, partial and all failure, valid empty, whole-source malformed-payload failure, canonical public-schema projection, and hard-coded broker source/evidence identities.
+- Task 1 GREEN: focused suite 16/16; full catalog/router/service/selection/identity/broker matrix 127/127; compileall, Ruff, Black, and `git diff --check` passed. Five warnings are existing environment/deprecation warnings. Tests-only Bandit (B101 excluded because assertions are the test contract) reported zero findings and zero errors.
+- Task 1 / Stage 1 is Complete; later V2 tasks remain Not Started.
