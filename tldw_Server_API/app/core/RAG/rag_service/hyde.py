@@ -221,28 +221,16 @@ def _runtime_local_embedding_call_kwargs(
     if normalized not in {"local", "local_api"}:
         return {}
     call_kwargs: dict[str, Any] = {"api_key_override": None, "credentials_resolved": True}
-    if normalized == "local_api":
+    model_spec = _embedding_model_spec_from_config(user_app_config, model_id_override)
+    endpoint = model_spec.get("api_url") if isinstance(model_spec, dict) else getattr(model_spec, "api_url", None)
+    api_key = model_spec.get("api_key") if isinstance(model_spec, dict) else getattr(model_spec, "api_key", None)
+    if normalized == "local_api" and (not isinstance(endpoint, str) or not endpoint.strip()):
         from tldw_Server_API.app.core.Embeddings.async_embeddings import EmbeddingEndpointError
 
-        model_spec = _embedding_model_spec_from_config(user_app_config, model_id_override)
-        endpoint = (
-            model_spec.get("api_url")
-            if isinstance(model_spec, dict)
-            else getattr(model_spec, "api_url", None)
-        )
-        api_key = (
-            model_spec.get("api_key")
-            if isinstance(model_spec, dict)
-            else getattr(model_spec, "api_key", None)
-        )
-        if not isinstance(endpoint, str) or not endpoint.strip():
-            raise EmbeddingEndpointError(normalized)
+        raise EmbeddingEndpointError(normalized)
+    if isinstance(endpoint, str) and endpoint.strip():
         call_kwargs["base_url_override"] = endpoint.strip()
-        call_kwargs["api_key_override"] = (
-            api_key.strip()
-            if isinstance(api_key, str) and api_key.strip()
-            else None
-        )
+        call_kwargs["api_key_override"] = api_key.strip() if isinstance(api_key, str) and api_key.strip() else None
     return call_kwargs
 
 

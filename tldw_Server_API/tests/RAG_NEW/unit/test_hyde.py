@@ -497,17 +497,21 @@ async def test_embed_text_does_not_resolve_local_huggingface(monkeypatch):
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_embed_text_runtime_local_api_uses_exact_selected_deployment(monkeypatch):
+@pytest.mark.parametrize("provider_name", ["local_api", "local"])
+async def test_embed_text_runtime_remote_local_uses_exact_selected_deployment(
+    monkeypatch,
+    provider_name,
+):
     from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create
 
     captured: dict[str, Any] = {}
     runtime = _CredentialRuntime("openai")
     config = {
         "embedding_config": {
-            "default_model_id": "local_api:runtime-model",
+            "default_model_id": f"{provider_name}:runtime-model",
             "models": {
-                "local_api:runtime-model": SimpleNamespace(
-                    provider="local_api",
+                f"{provider_name}:runtime-model": SimpleNamespace(
+                    provider=provider_name,
                     api_url="https://runtime-local.example/embeddings",
                     api_key="configured-runtime-key",
                 ),
@@ -528,6 +532,23 @@ async def test_embed_text_runtime_local_api_uses_exact_selected_deployment(monke
     assert captured["kwargs"] == {
         "api_key_override": "configured-runtime-key",
         "base_url_override": "https://runtime-local.example/embeddings",
+        "credentials_resolved": True,
+    }
+
+
+@pytest.mark.unit
+def test_runtime_local_embedding_call_kwargs_preserves_in_process_local() -> None:
+    config = {
+        "embedding_config": {
+            "default_model_id": "local:in-process-model",
+            "models": {
+                "local:in-process-model": SimpleNamespace(provider="local"),
+            },
+        }
+    }
+
+    assert hyde._runtime_local_embedding_call_kwargs(config, "local") == {
+        "api_key_override": None,
         "credentials_resolved": True,
     }
 
@@ -1429,7 +1450,11 @@ async def test_batch_clustering_uses_runtime_credentials_for_hosted_embeddings(m
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_batch_clustering_runtime_local_api_uses_selected_deployment(monkeypatch):
+@pytest.mark.parametrize("provider_name", ["local_api", "local"])
+async def test_batch_clustering_runtime_remote_local_uses_selected_deployment(
+    monkeypatch,
+    provider_name,
+):
     from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create
     from tldw_Server_API.app.core.RAG.rag_service import unified_pipeline
     from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import UnifiedSearchResult
@@ -1438,10 +1463,10 @@ async def test_batch_clustering_runtime_local_api_uses_selected_deployment(monke
     captured: dict[str, Any] = {}
     config = {
         "embedding_config": {
-            "default_model_id": "local_api:batch-model",
+            "default_model_id": f"{provider_name}:batch-model",
             "models": {
-                "local_api:batch-model": SimpleNamespace(
-                    provider="local_api",
+                f"{provider_name}:batch-model": SimpleNamespace(
+                    provider=provider_name,
                     api_url="https://batch-local.example/embeddings",
                     api_key="configured-batch-key",
                 ),

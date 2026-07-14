@@ -531,8 +531,10 @@ async def test_tool_loop_local_huggingface_embeddings_do_not_resolve_credentials
 
 
 @pytest.mark.asyncio
-async def test_tool_loop_runtime_local_api_uses_exact_selected_deployment(
+@pytest.mark.parametrize("provider_name", ["local_api", "local"])
+async def test_tool_loop_runtime_remote_local_uses_exact_selected_deployment(
     monkeypatch: pytest.MonkeyPatch,
+    provider_name: str,
 ) -> None:
     from tldw_Server_API.app.core import config as core_config
     from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create
@@ -540,10 +542,10 @@ async def test_tool_loop_runtime_local_api_uses_exact_selected_deployment(
     runtime = _CredentialRuntime("openai")
     captured: dict[str, Any] = {}
     embedding_settings = {
-        "default_model_id": "local_api:agentic-model",
+        "default_model_id": f"{provider_name}:agentic-model",
         "models": {
-            "local_api:agentic-model": SimpleNamespace(
-                provider="local_api",
+            f"{provider_name}:agentic-model": SimpleNamespace(
+                provider=provider_name,
                 api_url="https://agentic-local.example/embeddings",
                 api_key="configured-agentic-key",
             ),
@@ -566,7 +568,7 @@ async def test_tool_loop_runtime_local_api_uses_exact_selected_deployment(
         max_tool_calls=1,
         enable_metrics=False,
         agentic_use_provider_embeddings_within=True,
-        agentic_provider_embedding_model_id="local_api:agentic-model",
+        agentic_provider_embedding_model_id=f"{provider_name}:agentic-model",
     )
 
     await agentic_execution.tool_loop(

@@ -170,17 +170,19 @@ async def apply_multi_vector_passages(
                 logger.warning("Query embedding failed; skipping multi-vector passages")
                 return documents
         elif provider == "local_api":
-            provider_config = getattr(svc, "config", None)
-            get_provider = getattr(provider_config, "get_provider", None)
-            configured = get_provider(provider) if callable(get_provider) else None
+            get_provider_config = getattr(svc, "_get_provider_config", None)
+            if callable(get_provider_config):
+                configured = get_provider_config(provider)
+            else:
+                provider_config = getattr(svc, "config", None)
+                get_provider = getattr(provider_config, "get_provider", None)
+                configured = get_provider(provider) if callable(get_provider) else None
             endpoint = getattr(configured, "api_url", None)
             if isinstance(endpoint, str) and endpoint.strip():
                 call_kwargs["base_url_override"] = endpoint.strip()
                 configured_key = getattr(configured, "api_key", None)
                 call_kwargs["api_key_override"] = (
-                    configured_key.strip()
-                    if isinstance(configured_key, str) and configured_key.strip()
-                    else None
+                    configured_key.strip() if isinstance(configured_key, str) and configured_key.strip() else None
                 )
 
     # Embed query

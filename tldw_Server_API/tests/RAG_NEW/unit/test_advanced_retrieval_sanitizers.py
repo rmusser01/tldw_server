@@ -214,6 +214,92 @@ async def test_multi_vector_does_not_resolve_local_embedding_provider(monkeypatc
 
 
 @pytest.mark.asyncio
+@pytest.mark.concurrent
+async def test_concurrent_multi_vector_remote_local_aliases_keep_deployments_isolated(
+    monkeypatch,
+):
+    from tldw_Server_API.app.core.Embeddings.async_embeddings import AsyncEmbeddingService
+    from tldw_Server_API.app.core.Embeddings.simplified_config import (
+        EmbeddingsConfig,
+        ProviderConfig,
+    )
+
+    release = asyncio.Event()
+
+    class _RemoteLocalService:
+        _resolve_provider_alias = AsyncEmbeddingService._resolve_provider_alias
+        _get_provider_config = AsyncEmbeddingService._get_provider_config
+
+        def __init__(self, label: str):
+            self.label = label
+            self.endpoint = f"https://{label}.advanced-local.example/embeddings"
+            self.api_key = f"{label}-advanced-local-key"
+            self.config = EmbeddingsConfig(
+                providers=[
+                    ProviderConfig(
+                        name="local",
+                        api_url=self.endpoint,
+                        api_key=self.api_key,
+                        models=[f"{label}-model"],
+                    )
+                ],
+                default_provider="local",
+                default_model=f"{label}-model",
+            )
+            self.providers = {"local_api": object()}
+            self.query_started = asyncio.Event()
+            self.calls: list[dict[str, Any]] = []
+
+        async def create_embedding(self, **kwargs):
+            self.calls.append(dict(kwargs))
+            self.query_started.set()
+            await asyncio.wait_for(release.wait(), timeout=5)
+            return [1.0, 0.0]
+
+        async def create_embeddings_batch(self, texts, **kwargs):
+            self.calls.append({"texts": texts, **kwargs})
+            return [[1.0, 0.0] for _ in texts]
+
+    first_service = _RemoteLocalService("alpha")
+    second_service = _RemoteLocalService("beta")
+    services = iter([first_service, second_service])
+    monkeypatch.setattr(ar, "get_async_embedding_service", lambda: next(services))
+
+    first_runtime = _CredentialRuntime("openai")
+    second_runtime = _CredentialRuntime("openai")
+    first_task = asyncio.create_task(
+        ar.apply_multi_vector_passages(
+            "alpha",
+            _docs(),
+            credential_runtime=first_runtime,
+        )
+    )
+    await asyncio.wait_for(first_service.query_started.wait(), timeout=1)
+    second_task = asyncio.create_task(
+        ar.apply_multi_vector_passages(
+            "beta",
+            _docs(),
+            credential_runtime=second_runtime,
+        )
+    )
+    await asyncio.wait_for(second_service.query_started.wait(), timeout=1)
+    release.set()
+
+    first_result, second_result = await asyncio.gather(first_task, second_task)
+
+    assert first_result
+    assert second_result
+    assert first_runtime.resolved == []
+    assert second_runtime.resolved == []
+    for service in (first_service, second_service):
+        assert len(service.calls) == 2
+        for call in service.calls:
+            assert call["credentials_resolved"] is True
+            assert call["base_url_override"] == service.endpoint
+            assert call["api_key_override"] == service.api_key
+
+
+@pytest.mark.asyncio
 async def test_multi_vector_missing_hosted_key_degrades_with_bounded_metadata(monkeypatch):
     class _MissingKeyRuntime:
         async def resolve(self, provider: str):
@@ -717,22 +803,26 @@ async def test_media_scoped_model_override_resolves_its_actual_hosted_provider(m
 
 
 @pytest.mark.asyncio
-async def test_media_scoped_local_api_uses_exact_selected_deployment(monkeypatch):
+@pytest.mark.parametrize("provider_name", ["local_api", "local"])
+async def test_media_scoped_remote_local_uses_exact_selected_deployment(
+    monkeypatch,
+    provider_name,
+):
     from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create
 
     runtime = _CredentialRuntime("openai")
     captured: dict[str, Any] = {}
     config = {
         "embedding_config": {
-            "default_model_id": "local_api:default-model",
+            "default_model_id": f"{provider_name}:default-model",
             "models": {
-                "local_api:default-model": SimpleNamespace(
-                    provider="local_api",
+                f"{provider_name}:default-model": SimpleNamespace(
+                    provider=provider_name,
                     api_url="https://default-local.example/embeddings",
                     api_key="default-key-must-not-be-used",
                 ),
-                "local_api:scoped-model": SimpleNamespace(
-                    provider="local_api",
+                f"{provider_name}:scoped-model": SimpleNamespace(
+                    provider=provider_name,
                     api_url="https://scoped-local.example/embeddings",
                     api_key="scoped-runtime-key",
                 ),
@@ -759,7 +849,7 @@ async def test_media_scoped_local_api_uses_exact_selected_deployment(monkeypatch
     monkeypatch.setattr(
         retriever,
         "_resolve_scoped_query_embedding_override",
-        lambda **kwargs: "local_api:scoped-model",
+        lambda **kwargs: f"{provider_name}:scoped-model",
     )
     monkeypatch.setattr(Embeddings_Create, "get_embedding_config", lambda: config)
     monkeypatch.setattr(Embeddings_Create, "create_embeddings_batch", fake_create)
@@ -772,7 +862,7 @@ async def test_media_scoped_local_api_uses_exact_selected_deployment(monkeypatch
 
     assert runtime.resolved == []
     assert runtime.marked == []
-    assert captured["model_id_override"] == "local_api:scoped-model"
+    assert captured["model_id_override"] == f"{provider_name}:scoped-model"
     assert captured["kwargs"] == {
         "api_key_override": "scoped-runtime-key",
         "base_url_override": "https://scoped-local.example/embeddings",
