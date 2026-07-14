@@ -43,6 +43,7 @@ modified_files:
 - apps/packages/ui/src/store/workspace.ts
 - apps/tldw-frontend/__tests__/components/layout/WebLayout.chat-scroll-contract.test.tsx
 - apps/tldw-frontend/components/layout/WebLayout.tsx
+- apps/packages/ui/src/store/__tests__/workspace.test.ts
 ---
 
 ## Description
@@ -81,7 +82,7 @@ Verification: focused shared UI suite passed 9 files / 164 tests; WebLayout suit
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Certified GitHub issue #2606's beginner/no-key Research Workspace journey and promoted RW-UAT-027 to Pass. The implementation fixes fresh hydration/migration races, restores route tours without global chrome, removes persistent tour-banner clutter, and preserves all mobile controls. The definitive clean CDP run passed 17/17 checkpoints and now has durable, force-tracked manifests: browser-context network capture, browser-level worker/extension target observation, and unique browser-generated start/end sentinels correlate an 11-line backend API segment with zero workspace migration traffic. Focused regressions, the maintained real-backend check, lint, artifact integrity, secret scanning, and diff hygiene pass; only unrelated repository-wide TypeScript/formatting baselines remain documented.
+Certified GitHub issue #2606's beginner/no-key Research Workspace journey and promoted RW-UAT-027 to Pass. The implementation fixes fresh hydration/migration races, restores route tours without global chrome, removes persistent tour-banner clutter, and preserves all mobile controls. The definitive clean CDP run passed 17/17 checkpoints and now has durable, force-tracked manifests: browser-context network capture, browser-level worker/extension target observation, and unique browser-generated start/end sentinels correlate an 11-line backend API segment with zero workspace migration traffic. Final pre-PR verification passed 219 focused shared-UI tests across 9 files and 14 WebLayout tests; the quota-warning test now uses a persistable workspace envelope so it still exercises quota handling without conflicting with the intentional empty-hydration suppression. The maintained real-backend check, lint, artifact integrity, secret scanning, and diff hygiene also pass; only unrelated repository-wide TypeScript/formatting baselines remain documented.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

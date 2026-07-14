@@ -1461,7 +1461,10 @@ describe("workspace store snapshot persistence", () => {
     )
 
     await expect(
-      storage.setItem(STORAGE_KEY, '{"state":{"workspaceName":"Overflow"}}')
+      storage.setItem(
+        STORAGE_KEY,
+        '{"state":{"workspaceId":"workspace-overflow","workspaceName":"Overflow"}}'
+      )
     ).resolves.toBeUndefined()
 
     expect(quotaEvents).toHaveLength(1)
