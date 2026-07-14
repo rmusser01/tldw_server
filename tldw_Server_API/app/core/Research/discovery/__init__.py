@@ -37,7 +37,7 @@ _EXPORTS = {
     "default_discovery_adapters": (".adapters", "default_discovery_adapters"),
     "default_source_catalog": (".catalog", "default_source_catalog"),
 }
-_SUBMODULES = frozenset({"adapters", "catalog", "models", "router", "service"})
+_SUBMODULES = frozenset({"adapters", "catalog", "identity", "models", "router", "service"})
 
 
 def __getattr__(name: str) -> object:

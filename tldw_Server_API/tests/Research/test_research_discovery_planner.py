@@ -17,6 +17,7 @@ from tldw_Server_API.app.core.Research.discovery.contracts import (
     CredentialStatus,
     ExactOrigin,
     ExecutionMode,
+    PlannedDispatchGroup,
     PredicateOperator,
     QueryMode,
     QueryPair,
@@ -89,11 +90,14 @@ def _request(
 
 def _aggregator_registry(
     *,
+    first_predicate: SourcePredicate | None = None,
     second_predicate: SourcePredicate | None = None,
     limits: RouteLimits | None = None,
     max_physical_dispatches: int = 1,
+    adapter_id: str = "shared_aggregator_v2",
+    adapter_version: str = "synthetic-v1",
 ) -> tuple[DiscoveryRegistry, ReadinessOverlay]:
-    first_predicate = SourcePredicate(
+    first_predicate = first_predicate or SourcePredicate(
         field_path=("source", "collection"),
         operator=PredicateOperator.EQUALS_ANY,
         values=("shared-index",),
@@ -109,7 +113,7 @@ def _aggregator_registry(
     route = AccessRoute(
         route_id="shared_aggregator_search",
         backend_id="shared_aggregator",
-        adapter_id="shared_aggregator_v2",
+        adapter_id=adapter_id,
         route_kind=RouteKind.AGGREGATOR,
         query_modes=(QueryMode.STRUCTURED_QUERY,),
         source_constraint=SourceConstraint.PROVIDER_SOURCE_FILTER,
@@ -117,7 +121,7 @@ def _aggregator_registry(
         credential_requirement=CredentialRequirement.NONE,
         fallback_order=0,
         max_physical_dispatches=max_physical_dispatches,
-        adapter_version="synthetic-v1",
+        adapter_version=adapter_version,
         policy=policy,
     )
     sources = (
@@ -176,7 +180,7 @@ def test_openalex_is_typed_unavailable_with_no_attempt_or_dispatch_allowance() -
         budget=_budget(),
     )
 
-    assert plan.attempts == ()
+    assert plan.dispatch_groups == ()
     assert plan.allowance.route_attempts == 0
     assert plan.allowance.physical_dispatches == 0
     assert plan.allowance.returned_results == 0
@@ -222,7 +226,7 @@ def test_openalex_has_no_positive_branch_even_if_readiness_is_marked_ready() -> 
         budget=_budget(),
     )
 
-    assert plan.attempts == ()
+    assert plan.dispatch_groups == ()
     assert plan.allowance.physical_dispatches == 0
     assert plan.skipped[0].code is SkippedCode.CREDENTIALED_OUT_OF_SCOPE
 
@@ -235,7 +239,7 @@ def test_foundation_plan_compiles_seven_routes_and_pubmed_two_dispatch_allowance
         budget=_budget(),
     )
 
-    assert [attempt.backend_id for attempt in plan.attempts] == [
+    assert [group.backend_id for group in plan.dispatch_groups] == [
         "semantic_scholar_graph_api",
         "crossref_api",
         "arxiv_api",
@@ -253,6 +257,40 @@ def test_foundation_plan_compiles_seven_routes_and_pubmed_two_dispatch_allowance
     assert [skipped.requested_source_id for skipped in plan.skipped] == ["openalex"]
 
 
+@pytest.mark.parametrize(
+    ("source_ids", "result_limit", "capacity", "expected"),
+    [
+        (("arxiv",), 101, 100, 100),
+        (("arxiv", "crossref"), 150, 200, 150),
+        (("arxiv", "crossref"), 250, 200, 200),
+        (("pubmed",), 101, 100, 100),
+        (
+            ("semantic_scholar", "crossref", "arxiv", "pubmed", "zenodo", "figshare", "osf"),
+            25,
+            700,
+            25,
+        ),
+    ],
+)
+def test_returned_results_are_global_post_executor_cap_not_raw_candidate_capacity(
+    source_ids: tuple[str, ...],
+    result_limit: int,
+    capacity: int,
+    expected: int,
+) -> None:
+    registry = foundation_registry()
+    plan = compile_discovery_plan(
+        _request(source_ids, result_limit=result_limit),
+        registry=registry,
+        readiness=foundation_readiness(ExecutionMode.SYNTHETIC),
+        budget=_budget(max_results=expected),
+    )
+
+    raw_candidate_capacity = sum(group.limits.max_results for group in plan.dispatch_groups)
+    assert raw_candidate_capacity == capacity
+    assert plan.allowance.returned_results == expected
+
+
 def test_pubmed_declares_two_possible_dispatches_without_runtime_accounting() -> None:
     plan = compile_discovery_plan(
         _request(("pubmed",)),
@@ -260,18 +298,18 @@ def test_pubmed_declares_two_possible_dispatches_without_runtime_accounting() ->
         readiness=foundation_readiness(ExecutionMode.SYNTHETIC),
         budget=_budget(),
     )
-    attempt = plan.attempts[0]
+    group = plan.dispatch_groups[0]
 
-    assert attempt.allowance.physical_dispatches == 2
-    assert [intent.operation_kind.value for intent in attempt.intents] == [
+    assert group.allowance.physical_dispatches == 2
+    assert [intent.operation_kind.value for intent in group.intents] == [
         "search",
         "conditional_summary",
     ]
-    assert [intent.path for intent in attempt.intents] == [
+    assert [intent.path for intent in group.intents] == [
         "/entrez/eutils/esearch.fcgi",
         "/entrez/eutils/esummary.fcgi",
     ]
-    assert not any(hasattr(attempt.allowance, name) for name in ("reservation", "reserved", "debit", "release"))
+    assert not any(hasattr(group.allowance, name) for name in ("reservation", "reserved", "debit", "release"))
 
 
 def test_plan_bytes_and_attempt_ids_are_deterministic_after_input_normalization() -> None:
@@ -298,8 +336,45 @@ def test_plan_bytes_and_attempt_ids_are_deterministic_after_input_normalization(
     )
 
     assert canonical_plan_bytes(first) == canonical_plan_bytes(second)
-    assert tuple(attempt.attempt_id for attempt in first.attempts) == tuple(
-        attempt.attempt_id for attempt in second.attempts
+    assert tuple(group.dispatch_group_id for group in first.dispatch_groups) == tuple(
+        group.dispatch_group_id for group in second.dispatch_groups
+    )
+
+
+def test_canonical_predicate_values_produce_equal_plan_bytes_and_attempt_ids() -> None:
+    first_registry, first_readiness = _aggregator_registry(
+        first_predicate=SourcePredicate(
+            field_path=("source", "collection"),
+            operator=PredicateOperator.EQUALS_ANY,
+            values=(" Shared   Index ",),
+        )
+    )
+    second_registry, second_readiness = _aggregator_registry(
+        first_predicate=SourcePredicate(
+            field_path=("source", "collection"),
+            operator=PredicateOperator.EQUALS_ANY,
+            values=("shared index",),
+        )
+    )
+
+    first = compile_discovery_plan(
+        _request(("target_a",)),
+        registry=first_registry,
+        readiness=first_readiness,
+        budget=_budget(),
+    )
+    second = compile_discovery_plan(
+        _request(("target_a",)),
+        registry=second_registry,
+        readiness=second_readiness,
+        budget=_budget(),
+    )
+
+    assert canonical_plan_bytes(first) == canonical_plan_bytes(second)
+    assert first.dispatch_groups[0].dispatch_group_id == second.dispatch_groups[0].dispatch_group_id
+    assert (
+        first.dispatch_groups[0].logical_attempts[0].logical_attempt_id
+        == second.dispatch_groups[0].logical_attempts[0].logical_attempt_id
     )
 
 
@@ -319,16 +394,82 @@ def test_shared_backend_work_coalesces_distinct_attribution_predicates() -> None
 
     assert plan.allowance.route_attempts == 2
     assert plan.allowance.physical_dispatches == 1
-    assert len(plan.attempts) == 1
-    assert [target.catalog_source_id for target in plan.attempts[0].requested_targets] == [
+    assert len(plan.dispatch_groups) == 1
+    assert [attempt.catalog_source_id for attempt in plan.dispatch_groups[0].logical_attempts] == [
         "target_a",
         "target_b",
     ]
-    assert plan.attempts[0].backend_id == "shared_aggregator"
-    assert [target.source_predicate for target in plan.attempts[0].requested_targets] == [
+    assert plan.dispatch_groups[0].backend_id == "shared_aggregator"
+    assert [attempt.source_predicate for attempt in plan.dispatch_groups[0].logical_attempts] == [
         registry.get_source("target_a").route_references[0].source_predicate,
         second_predicate,
     ]
+
+
+def test_coalescing_preserves_physical_and_per_target_logical_identity() -> None:
+    registry, readiness = _aggregator_registry()
+    single = compile_discovery_plan(
+        _request(("target_a",)),
+        registry=registry,
+        readiness=readiness,
+        budget=_budget(),
+    )
+    coalesced = compile_discovery_plan(
+        _request(("target_a", "target_b")),
+        registry=registry,
+        readiness=readiness,
+        budget=_budget(),
+    )
+    single_group = single.dispatch_groups[0]
+    coalesced_group = coalesced.dispatch_groups[0]
+    coalesced_ids = {
+        attempt.catalog_source_id: attempt.logical_attempt_id for attempt in coalesced_group.logical_attempts
+    }
+
+    assert single_group.dispatch_group_id == coalesced_group.dispatch_group_id
+    assert single_group.logical_attempts[0].logical_attempt_id == coalesced_ids["target_a"]
+    assert len(set(coalesced_ids.values())) == 2
+    assert single.allowance.route_attempts == 1
+    assert coalesced.allowance.route_attempts == 2
+    assert single.allowance.physical_dispatches == coalesced.allowance.physical_dispatches == 1
+
+
+def test_dispatch_group_freezes_adapter_identity_and_hashes_adapter_revisions() -> None:
+    baseline_registry, baseline_readiness = _aggregator_registry()
+    revised_id_registry, revised_id_readiness = _aggregator_registry(adapter_id="shared_aggregator_v3")
+    revised_version_registry, revised_version_readiness = _aggregator_registry(adapter_version="synthetic-v2")
+
+    def compile_group(registry: DiscoveryRegistry, readiness: ReadinessOverlay) -> PlannedDispatchGroup:
+        return compile_discovery_plan(
+            _request(("target_a",)),
+            registry=registry,
+            readiness=readiness,
+            budget=_budget(),
+        ).dispatch_groups[0]
+
+    baseline = compile_group(baseline_registry, baseline_readiness)
+    revised_id = compile_group(revised_id_registry, revised_id_readiness)
+    revised_version = compile_group(revised_version_registry, revised_version_readiness)
+    route = baseline_registry.routes[0]
+
+    assert baseline.adapter_id == route.adapter_id
+    assert baseline.adapter_version == route.adapter_version
+    assert baseline.policy_digest == revised_id.policy_digest == revised_version.policy_digest
+    assert baseline.dispatch_group_id != revised_id.dispatch_group_id
+    assert baseline.dispatch_group_id != revised_version.dispatch_group_id
+
+
+def test_coalesced_targets_count_one_physical_route_result_capacity() -> None:
+    registry, readiness = _aggregator_registry()
+    plan = compile_discovery_plan(
+        _request(("target_a", "target_b"), result_limit=75),
+        registry=registry,
+        readiness=readiness,
+        budget=_budget(max_results=50),
+    )
+
+    assert len(plan.dispatch_groups) == 1
+    assert plan.allowance.returned_results == 50
 
 
 def test_shared_aggregator_predicates_keep_three_valued_target_attribution() -> None:
@@ -344,7 +485,7 @@ def test_shared_aggregator_predicates_keep_three_valued_target_attribution() -> 
         readiness=readiness,
         budget=_budget(),
     )
-    targets = plan.attempts[0].requested_targets
+    targets = plan.dispatch_groups[0].logical_attempts
 
     first_predicate = targets[0].source_predicate
     second_predicate = targets[1].source_predicate
@@ -384,7 +525,7 @@ def test_physical_and_wall_time_allowances_cover_pages_redirects_and_retries() -
         ),
     )
 
-    assert plan.attempts[0].allowance.physical_dispatches == 4
+    assert plan.dispatch_groups[0].allowance.physical_dispatches == 4
     assert plan.allowance.physical_dispatches == 4
     assert plan.allowance.max_pages_per_route == 2
     assert plan.allowance.redirects == 1
@@ -461,7 +602,7 @@ def test_planner_preserves_ordered_fallback_attempts() -> None:
         budget=_budget(),
     )
 
-    assert [(attempt.route_id, attempt.fallback_order) for attempt in plan.attempts] == [
+    assert [(group.route_id, group.fallback_order) for group in plan.dispatch_groups] == [
         (primary.route_id, 0),
         (fallback.route_id, 1),
     ]

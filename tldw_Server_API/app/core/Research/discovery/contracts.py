@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 from collections.abc import Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any
 
@@ -210,12 +210,16 @@ class SourcePredicate:
         for segment in self.field_path:
             _validate_identifier("source_predicate_field", segment)
         _require_enum("predicate_operator", self.operator, PredicateOperator)
-        if not self.values or any(not isinstance(value, str) or not value for value in self.values):
-            raise ValueError("invalid_source_predicate_values")
-        if len(set(self.values)) != len(self.values):
-            raise ValueError("duplicate_source_predicate_value")
         if not isinstance(self.case_sensitive, bool):
             raise TypeError("case_sensitive_must_be_bool")
+        if not self.values or any(not isinstance(value, str) for value in self.values):
+            raise ValueError("invalid_source_predicate_values")
+        normalized_values = tuple(sorted(_predicate_text(value, self.case_sensitive) for value in self.values))
+        if any(not value for value in normalized_values):
+            raise ValueError("invalid_source_predicate_values")
+        if len(set(normalized_values)) != len(normalized_values):
+            raise ValueError("duplicate_source_predicate_value")
+        object.__setattr__(self, "values", normalized_values)
 
 
 @dataclass(frozen=True, slots=True)
@@ -450,7 +454,7 @@ class DispatchIntent:
 
 @dataclass(frozen=True, slots=True)
 class DispatchAllowance:
-    """Worst-case physical work the planner permits for one attempt."""
+    """Worst-case physical work the planner permits for one dispatch group."""
 
     physical_dispatches: int
     pages: int
@@ -465,14 +469,16 @@ class DispatchAllowance:
 
 
 @dataclass(frozen=True, slots=True)
-class RequestedTarget:
-    """Logical target attribution retained on physical work."""
+class PlannedLogicalAttempt:
+    """One stable target/route attempt retained on physical work."""
 
+    logical_attempt_id: str
     catalog_source_id: str
     selection_reason: str
     source_predicate: SourcePredicate | None
 
     def __post_init__(self) -> None:
+        _validate_identifier("logical_attempt_id", self.logical_attempt_id)
         _validate_identifier("catalog_source_id", self.catalog_source_id)
         _require_nonempty("selection_reason", self.selection_reason)
         if self.source_predicate is not None and not isinstance(self.source_predicate, SourcePredicate):
@@ -480,44 +486,70 @@ class RequestedTarget:
 
 
 @dataclass(frozen=True, slots=True)
-class PlannedAttempt:
-    """One immutable coalesced unit of planned work."""
+class PlannedDispatchGroup:
+    """One immutable coalesced unit of physical work."""
 
-    attempt_id: str
+    dispatch_group_id: str
     route_id: str
     backend_id: str
+    adapter_id: str
+    adapter_version: str
     policy_digest: str
+    limits: RouteLimits
     normalized_query: str
     filters: tuple[QueryPair, ...]
-    requested_targets: tuple[RequestedTarget, ...]
+    logical_attempts: tuple[PlannedLogicalAttempt, ...]
     fallback_order: int
     intents: tuple[DispatchIntent, ...]
     allowance: DispatchAllowance
 
     def __post_init__(self) -> None:
-        _validate_identifier("attempt_id", self.attempt_id)
+        _validate_identifier("dispatch_group_id", self.dispatch_group_id)
         _validate_identifier("route_id", self.route_id)
         _validate_identifier("backend_id", self.backend_id)
+        _validate_identifier("adapter_id", self.adapter_id)
+        _require_nonempty("adapter_version", self.adapter_version)
         _validate_digest("policy_digest", self.policy_digest)
+        if not isinstance(self.limits, RouteLimits):
+            raise TypeError("limits_must_be_route_limits")
         _require_nonempty("normalized_query", self.normalized_query)
-        for name in ("filters", "requested_targets", "intents"):
+        for name in ("filters", "logical_attempts", "intents"):
             _require_tuple(name, getattr(self, name))
-        if not self.requested_targets or not self.intents:
-            raise ValueError("attempt_requires_targets_and_intents")
+        if not self.logical_attempts or not self.intents:
+            raise ValueError("dispatch_group_requires_logical_attempts_and_intents")
         if any(not isinstance(item, QueryPair) for item in self.filters):
             raise TypeError("filters_must_be_query_pair_tuple")
-        if any(not isinstance(item, RequestedTarget) for item in self.requested_targets):
-            raise TypeError("requested_targets_must_be_requested_target_tuple")
+        if any(not isinstance(item, PlannedLogicalAttempt) for item in self.logical_attempts):
+            raise TypeError("logical_attempts_must_be_planned_logical_attempt_tuple")
         if any(not isinstance(item, DispatchIntent) for item in self.intents):
             raise TypeError("intents_must_be_dispatch_intent_tuple")
         _require_nonnegative_int("fallback_order", self.fallback_order)
         if not isinstance(self.allowance, DispatchAllowance):
             raise TypeError("allowance_must_be_dispatch_allowance")
+        logical_attempt_ids = tuple(item.logical_attempt_id for item in self.logical_attempts)
+        if len(set(logical_attempt_ids)) != len(logical_attempt_ids):
+            raise ValueError("duplicate_logical_attempt_id")
+        catalog_source_ids = tuple(item.catalog_source_id for item in self.logical_attempts)
+        if len(set(catalog_source_ids)) != len(catalog_source_ids):
+            raise ValueError("duplicate_logical_target")
+        for intent in self.intents:
+            if intent.route_id != self.route_id:
+                raise ValueError("intent_route_mismatch")
+            if intent.policy_digest != self.policy_digest:
+                raise ValueError("intent_policy_mismatch")
+            if intent.limits != self.limits:
+                raise ValueError("intent_limits_mismatch")
+        if (
+            self.allowance.pages != self.limits.max_pages
+            or self.allowance.redirects != self.limits.max_redirects
+            or self.allowance.retries != self.limits.max_retries
+        ):
+            raise ValueError("allowance_limits_mismatch")
         required_dispatches = (
             len(self.intents) + max(self.allowance.pages - 1, 0) + self.allowance.redirects + self.allowance.retries
         )
         if self.allowance.physical_dispatches < required_dispatches:
-            raise ValueError("attempt_work_exceeds_physical_dispatches")
+            raise ValueError("dispatch_group_work_exceeds_physical_dispatches")
 
 
 @dataclass(frozen=True, slots=True)
@@ -540,7 +572,11 @@ class SkippedTarget:
 
 @dataclass(frozen=True, slots=True)
 class PlannedBudgetAllowance:
-    """Worst-case plan dimensions compared with independent ceilings."""
+    """Worst-case work plus the global post-executor returned-result cap.
+
+    Physical routes may produce more raw candidates before that global cap is
+    applied; raw candidate capacity is not a returned-result dimension.
+    """
 
     route_attempts: int
     physical_dispatches: int
@@ -574,28 +610,91 @@ class DiscoveryPlan:
     execution_mode: ExecutionMode
     normalized_query: str
     filters: tuple[QueryPair, ...]
-    attempts: tuple[PlannedAttempt, ...]
+    result_limit: int
+    dispatch_groups: tuple[PlannedDispatchGroup, ...]
     skipped: tuple[SkippedTarget, ...]
     ceilings: BudgetCeilings
-    allowance: PlannedBudgetAllowance
+    allowance: PlannedBudgetAllowance = field(init=False)
 
     def __post_init__(self) -> None:
         for name in ("planner_version", "catalog_version", "registry_version", "readiness_version"):
             _require_nonempty(name, getattr(self, name))
         _require_enum("execution_mode", self.execution_mode, ExecutionMode)
         _require_nonempty("normalized_query", self.normalized_query)
-        for name in ("filters", "attempts", "skipped"):
+        _require_positive_int("result_limit", self.result_limit)
+        for name in ("filters", "dispatch_groups", "skipped"):
             _require_tuple(name, getattr(self, name))
         if any(not isinstance(item, QueryPair) for item in self.filters):
             raise TypeError("filters_must_be_query_pair_tuple")
-        if any(not isinstance(item, PlannedAttempt) for item in self.attempts):
-            raise TypeError("attempts_must_be_planned_attempt_tuple")
+        if any(not isinstance(item, PlannedDispatchGroup) for item in self.dispatch_groups):
+            raise TypeError("dispatch_groups_must_be_planned_dispatch_group_tuple")
         if any(not isinstance(item, SkippedTarget) for item in self.skipped):
             raise TypeError("skipped_must_be_skipped_target_tuple")
         if not isinstance(self.ceilings, BudgetCeilings):
             raise TypeError("ceilings_must_be_budget_ceilings")
-        if not isinstance(self.allowance, PlannedBudgetAllowance):
-            raise TypeError("allowance_must_be_planned_budget_allowance")
+        dispatch_group_ids = tuple(group.dispatch_group_id for group in self.dispatch_groups)
+        if len(set(dispatch_group_ids)) != len(dispatch_group_ids):
+            raise ValueError("duplicate_dispatch_group_id")
+        logical_attempt_ids = tuple(
+            attempt.logical_attempt_id for group in self.dispatch_groups for attempt in group.logical_attempts
+        )
+        if len(set(logical_attempt_ids)) != len(logical_attempt_ids):
+            raise ValueError("duplicate_logical_attempt_id")
+        for group in self.dispatch_groups:
+            if group.normalized_query != self.normalized_query:
+                raise ValueError("plan_query_mismatch")
+            if group.filters != self.filters:
+                raise ValueError("plan_filters_mismatch")
+        allowance = derive_plan_allowance(self.dispatch_groups, self.result_limit)
+        object.__setattr__(self, "allowance", allowance)
+        violation = budget_ceiling_violation(allowance, self.ceilings)
+        if violation is not None:
+            raise ValueError(f"budget_exceeded:{violation}")
+
+
+def derive_plan_allowance(
+    dispatch_groups: tuple[PlannedDispatchGroup, ...],
+    result_limit: int,
+) -> PlannedBudgetAllowance:
+    """Derive aggregate work and the global returned-result cap."""
+    _require_tuple("dispatch_groups", dispatch_groups)
+    _require_positive_int("result_limit", result_limit)
+    if any(not isinstance(group, PlannedDispatchGroup) for group in dispatch_groups):
+        raise TypeError("dispatch_groups_must_be_planned_dispatch_group_tuple")
+    return PlannedBudgetAllowance(
+        route_attempts=sum(len(group.logical_attempts) for group in dispatch_groups),
+        physical_dispatches=sum(group.allowance.physical_dispatches for group in dispatch_groups),
+        max_pages_per_route=max((group.allowance.pages for group in dispatch_groups), default=0),
+        redirects=sum(group.allowance.redirects for group in dispatch_groups),
+        retries=sum(group.allowance.retries for group in dispatch_groups),
+        aggregate_wall_time_ms=sum(
+            group.limits.timeout_ms * group.allowance.physical_dispatches for group in dispatch_groups
+        ),
+        returned_results=(
+            min(result_limit, sum(group.limits.max_results for group in dispatch_groups)) if dispatch_groups else 0
+        ),
+    )
+
+
+def budget_ceiling_violation(
+    allowance: PlannedBudgetAllowance,
+    ceilings: BudgetCeilings,
+) -> str | None:
+    """Return the first exceeded independent plan dimension, if any."""
+    if not isinstance(allowance, PlannedBudgetAllowance):
+        raise TypeError("allowance_must_be_planned_budget_allowance")
+    if not isinstance(ceilings, BudgetCeilings):
+        raise TypeError("ceilings_must_be_budget_ceilings")
+    checks = (
+        ("route_attempts", allowance.route_attempts, ceilings.max_route_attempts),
+        ("physical_dispatches", allowance.physical_dispatches, ceilings.max_physical_dispatches),
+        ("pages_per_route", allowance.max_pages_per_route, ceilings.max_pages_per_route),
+        ("redirects", allowance.redirects, ceilings.max_redirects),
+        ("retries", allowance.retries, ceilings.max_retries),
+        ("wall_time_ms", allowance.aggregate_wall_time_ms, ceilings.max_wall_time_ms),
+        ("returned_results", allowance.returned_results, ceilings.max_results),
+    )
+    return next((name for name, planned, ceiling in checks if planned > ceiling), None)
 
 
 @dataclass(frozen=True, slots=True)

@@ -27,7 +27,9 @@ _SUBMODULES = frozenset(
         "broker",
         "checkpoint_service",
         "limits",
+        "models",
         "planner",
+        "providers",
         "synthesizer",
     }
 )

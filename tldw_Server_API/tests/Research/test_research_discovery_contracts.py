@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import subprocess
@@ -26,14 +27,14 @@ from tldw_Server_API.app.core.Research.discovery.contracts import (
     ExactOrigin,
     ExecutionMode,
     OperationKind,
-    PlannedAttempt,
     PlannedBudgetAllowance,
+    PlannedDispatchGroup,
+    PlannedLogicalAttempt,
     PredicateOperator,
     QueryMode,
     QueryPair,
     ReadinessOverlay,
     ReadinessState,
-    RequestedTarget,
     RouteKind,
     RouteLimits,
     RoutePolicy,
@@ -88,6 +89,86 @@ def _route() -> AccessRoute:
     )
 
 
+def _logical_attempt(
+    *,
+    logical_attempt_id: str = "logical_attempt_v2_example",
+    catalog_source_id: str = "example",
+    source_predicate: SourcePredicate | None = None,
+) -> PlannedLogicalAttempt:
+    return PlannedLogicalAttempt(
+        logical_attempt_id=logical_attempt_id,
+        catalog_source_id=catalog_source_id,
+        selection_reason="explicit",
+        source_predicate=source_predicate,
+    )
+
+
+def _dispatch_group(
+    *,
+    dispatch_group_id: str = "dispatch_group_v2_example",
+    logical_attempts: tuple[PlannedLogicalAttempt, ...] | None = None,
+    policy: RoutePolicy | None = None,
+    allowance: DispatchAllowance | None = None,
+    filters: tuple[QueryPair, ...] = (),
+    normalized_query: str = "test",
+) -> PlannedDispatchGroup:
+    policy = policy or _policy()
+    return PlannedDispatchGroup(
+        dispatch_group_id=dispatch_group_id,
+        route_id="example_api_direct",
+        backend_id="example_api",
+        adapter_id="example_v2",
+        adapter_version="example-v2",
+        policy_digest=policy.policy_digest,
+        limits=policy.limits,
+        normalized_query=normalized_query,
+        filters=filters,
+        logical_attempts=logical_attempts if logical_attempts is not None else (_logical_attempt(),),
+        fallback_order=0,
+        intents=(
+            DispatchIntent(
+                route_id="example_api_direct",
+                policy_digest=policy.policy_digest,
+                operation_kind=OperationKind.SEARCH,
+                method="GET",
+                path="/works",
+                query_pairs=(QueryPair("query", normalized_query),),
+                limits=policy.limits,
+            ),
+        ),
+        allowance=allowance
+        or DispatchAllowance(
+            policy.limits.max_pages + policy.limits.max_redirects + policy.limits.max_retries,
+            policy.limits.max_pages,
+            policy.limits.max_redirects,
+            policy.limits.max_retries,
+        ),
+    )
+
+
+def _plan(
+    *,
+    dispatch_groups: tuple[PlannedDispatchGroup, ...] | None = None,
+    ceilings: BudgetCeilings | None = None,
+    filters: tuple[QueryPair, ...] = (),
+    normalized_query: str = "test",
+    result_limit: int = 1,
+) -> DiscoveryPlan:
+    return DiscoveryPlan(
+        planner_version="planner-v2",
+        catalog_version="catalog-v2",
+        registry_version="registry-v2",
+        readiness_version="readiness-v2",
+        execution_mode=ExecutionMode.SYNTHETIC,
+        normalized_query=normalized_query,
+        filters=filters,
+        result_limit=result_limit,
+        dispatch_groups=dispatch_groups if dispatch_groups is not None else (_dispatch_group(),),
+        skipped=(),
+        ceilings=ceilings or BudgetCeilings(1, 1, 1, 0, 0, 1_000, 1),
+    )
+
+
 def test_contract_values_are_frozen_slots_dataclasses() -> None:
     predicate = SourcePredicate(
         field_path=("source", "id"),
@@ -136,11 +217,8 @@ def test_contract_values_are_frozen_slots_dataclasses() -> None:
         query_pairs=(QueryPair(name="query", value="test"),),
         limits=_policy().limits,
     )
-    requested_target = RequestedTarget(
-        catalog_source_id="example",
-        selection_reason="explicit",
-        source_predicate=predicate,
-    )
+    logical_attempt = _logical_attempt(source_predicate=predicate)
+    dispatch_group = _dispatch_group(logical_attempts=(logical_attempt,))
     provenance = DiscoveryProvenanceV2(
         requested_catalog_source_ids=("example",),
         route_id="example_api_direct",
@@ -166,7 +244,8 @@ def test_contract_values_are_frozen_slots_dataclasses() -> None:
         overlay,
         allowance,
         intent,
-        requested_target,
+        logical_attempt,
+        dispatch_group,
         provenance,
         identity,
     )
@@ -225,7 +304,7 @@ def test_nested_contract_values_must_have_the_declared_immutable_types() -> None
         operator=PredicateOperator.EQUALS_ANY,
         values=("example",),
     )
-    target = RequestedTarget("example", "explicit", predicate)
+    logical_attempt = _logical_attempt(source_predicate=predicate)
     intent = DispatchIntent(
         route_id="example_api_direct",
         policy_digest=_policy().policy_digest,
@@ -236,14 +315,17 @@ def test_nested_contract_values_must_have_the_declared_immutable_types() -> None
         limits=_policy().limits,
     )
     allowance = DispatchAllowance(1, 1, 0, 0)
-    valid_attempt = PlannedAttempt(
-        attempt_id="attempt_v2_example",
+    valid_dispatch_group = PlannedDispatchGroup(
+        dispatch_group_id="dispatch_group_v2_example",
         route_id="example_api_direct",
         backend_id="example_api",
+        adapter_id="example_v2",
+        adapter_version="example-v2",
         policy_digest=_policy().policy_digest,
+        limits=_policy().limits,
         normalized_query="test",
         filters=(),
-        requested_targets=(target,),
+        logical_attempts=(logical_attempt,),
         fallback_order=0,
         intents=(intent,),
         allowance=allowance,
@@ -256,10 +338,10 @@ def test_nested_contract_values_must_have_the_declared_immutable_types() -> None
         "execution_mode": ExecutionMode.SYNTHETIC,
         "normalized_query": "test",
         "filters": (),
-        "attempts": (valid_attempt,),
+        "result_limit": 1,
+        "dispatch_groups": (valid_dispatch_group,),
         "skipped": (),
         "ceilings": BudgetCeilings(1, 1, 1, 0, 0, 1_000, 1),
-        "allowance": PlannedBudgetAllowance(1, 1, 1, 0, 0, 1_000, 1),
     }
 
     constructors = (
@@ -280,44 +362,53 @@ def test_nested_contract_values_must_have_the_declared_immutable_types() -> None
             execution_mode=ExecutionMode.SYNTHETIC,
             routes=(object(),),  # type: ignore[arg-type]
         ),
-        lambda: PlannedAttempt(
-            attempt_id="attempt_v2_example",
+        lambda: PlannedDispatchGroup(
+            dispatch_group_id="dispatch_group_v2_example",
             route_id="example_api_direct",
             backend_id="example_api",
+            adapter_id="example_v2",
+            adapter_version="example-v2",
             policy_digest=_policy().policy_digest,
+            limits=_policy().limits,
             normalized_query="test",
             filters=(object(),),  # type: ignore[arg-type]
-            requested_targets=(target,),
+            logical_attempts=(logical_attempt,),
             fallback_order=0,
             intents=(intent,),
             allowance=allowance,
         ),
-        lambda: PlannedAttempt(
-            attempt_id="attempt_v2_example",
+        lambda: PlannedDispatchGroup(
+            dispatch_group_id="dispatch_group_v2_example",
             route_id="example_api_direct",
             backend_id="example_api",
+            adapter_id="example_v2",
+            adapter_version="example-v2",
             policy_digest=_policy().policy_digest,
+            limits=_policy().limits,
             normalized_query="test",
             filters=(),
-            requested_targets=(object(),),  # type: ignore[arg-type]
+            logical_attempts=(object(),),  # type: ignore[arg-type]
             fallback_order=0,
             intents=(intent,),
             allowance=allowance,
         ),
-        lambda: PlannedAttempt(
-            attempt_id="attempt_v2_example",
+        lambda: PlannedDispatchGroup(
+            dispatch_group_id="dispatch_group_v2_example",
             route_id="example_api_direct",
             backend_id="example_api",
+            adapter_id="example_v2",
+            adapter_version="example-v2",
             policy_digest=_policy().policy_digest,
+            limits=_policy().limits,
             normalized_query="test",
             filters=(),
-            requested_targets=(target,),
+            logical_attempts=(logical_attempt,),
             fallback_order=0,
             intents=(object(),),  # type: ignore[arg-type]
             allowance=allowance,
         ),
         lambda: DiscoveryPlan(**{**plan_values, "filters": (object(),)}),  # type: ignore[arg-type]
-        lambda: DiscoveryPlan(**{**plan_values, "attempts": (object(),)}),  # type: ignore[arg-type]
+        lambda: DiscoveryPlan(**{**plan_values, "dispatch_groups": (object(),)}),  # type: ignore[arg-type]
         lambda: DiscoveryPlan(**{**plan_values, "skipped": (object(),)}),  # type: ignore[arg-type]
     )
 
@@ -392,6 +483,35 @@ def test_source_predicate_reports_match_nonmatch_and_ambiguity() -> None:
     assert evaluate_source_predicate(predicate, {"source": {"name": "Other"}}) is AttributionMatch.NON_MATCH
     assert evaluate_source_predicate(predicate, {"source": {}}) is AttributionMatch.AMBIGUOUS
     assert evaluate_source_predicate(predicate, {"source": {"name": {"nested": "value"}}}) is AttributionMatch.AMBIGUOUS
+
+
+def test_source_predicate_values_are_canonical_and_cannot_match_everything() -> None:
+    canonical = SourcePredicate(
+        field_path=("source", "name"),
+        operator=PredicateOperator.CONTAINS_ANY,
+        values=("  Journal   Name ", "ARCHIVE"),
+    )
+    equivalent = SourcePredicate(
+        field_path=("source", "name"),
+        operator=PredicateOperator.CONTAINS_ANY,
+        values=("archive", "journal name"),
+    )
+
+    assert canonical.values == ("archive", "journal name")
+    assert canonical == equivalent
+    assert hash(canonical) == hash(equivalent)
+    with pytest.raises(ValueError, match="invalid_source_predicate_values"):
+        SourcePredicate(
+            field_path=("source", "name"),
+            operator=PredicateOperator.CONTAINS_ANY,
+            values=(" \t\n ",),
+        )
+    with pytest.raises(ValueError, match="duplicate_source_predicate_value"):
+        SourcePredicate(
+            field_path=("source", "name"),
+            operator=PredicateOperator.EQUALS_ANY,
+            values=("Journal", " journal "),
+        )
 
 
 @pytest.mark.parametrize("mode", ["production", "", None])
@@ -479,14 +599,17 @@ def test_route_and_attempt_allowances_cover_pages_redirects_and_retries() -> Non
         limits=expanded_policy.limits,
     )
     with pytest.raises(ValueError, match="physical_dispatch"):
-        PlannedAttempt(
-            attempt_id="attempt_v2_example",
+        PlannedDispatchGroup(
+            dispatch_group_id="dispatch_group_v2_example",
             route_id="example_api_direct",
             backend_id="example_api",
+            adapter_id="example_v2",
+            adapter_version="example-v2",
             policy_digest=expanded_policy.policy_digest,
+            limits=expanded_policy.limits,
             normalized_query="test",
             filters=(),
-            requested_targets=(RequestedTarget("example", "explicit", None),),
+            logical_attempts=(_logical_attempt(),),
             fallback_order=0,
             intents=(
                 intent,
@@ -496,20 +619,133 @@ def test_route_and_attempt_allowances_cover_pages_redirects_and_retries() -> Non
                     path="/summary",
                 ),
             ),
-            allowance=DispatchAllowance(physical_dispatches=1, pages=1, redirects=0, retries=0),
+            allowance=DispatchAllowance(physical_dispatches=4, pages=2, redirects=1, retries=1),
         )
-    with pytest.raises(ValueError, match="physical_dispatch"):
-        PlannedAttempt(
-            attempt_id="attempt_v2_example",
+    with pytest.raises(ValueError, match="allowance_limits_mismatch"):
+        PlannedDispatchGroup(
+            dispatch_group_id="dispatch_group_v2_example",
             route_id="example_api_direct",
             backend_id="example_api",
+            adapter_id="example_v2",
+            adapter_version="example-v2",
             policy_digest=expanded_policy.policy_digest,
+            limits=expanded_policy.limits,
             normalized_query="test",
             filters=(),
-            requested_targets=(RequestedTarget("example", "explicit", None),),
+            logical_attempts=(_logical_attempt(),),
             fallback_order=0,
             intents=(intent,),
             allowance=DispatchAllowance(physical_dispatches=0, pages=0, redirects=0, retries=0),
+        )
+
+
+@pytest.mark.parametrize(
+    ("change", "expected"),
+    [
+        (
+            lambda group: replace(
+                group,
+                intents=(replace(group.intents[0], route_id="other_route"),),
+            ),
+            "intent_route_mismatch",
+        ),
+        (
+            lambda group: replace(
+                group,
+                intents=(replace(group.intents[0], policy_digest="0" * 64),),
+            ),
+            "intent_policy_mismatch",
+        ),
+        (
+            lambda group: replace(
+                group,
+                intents=(
+                    replace(
+                        group.intents[0],
+                        limits=replace(group.limits, max_results=group.limits.max_results - 1),
+                    ),
+                ),
+            ),
+            "intent_limits_mismatch",
+        ),
+        (
+            lambda group: replace(
+                group,
+                allowance=replace(group.allowance, pages=0),
+            ),
+            "allowance_limits_mismatch",
+        ),
+    ],
+)
+def test_dispatch_group_rejects_cross_route_policy_limit_and_allowance_state(
+    change: object,
+    expected: str,
+) -> None:
+    with pytest.raises(ValueError, match=expected):
+        change(_dispatch_group())  # type: ignore[operator]
+
+
+def test_dispatch_group_rejects_duplicate_logical_attempt_and_target_ids() -> None:
+    logical_attempt = _logical_attempt()
+    duplicate_attempt_id = replace(logical_attempt, catalog_source_id="other")
+    duplicate_target_id = replace(
+        logical_attempt,
+        logical_attempt_id="logical_attempt_v2_other",
+    )
+
+    with pytest.raises(ValueError, match="duplicate_logical_attempt_id"):
+        _dispatch_group(logical_attempts=(logical_attempt, duplicate_attempt_id))
+    with pytest.raises(ValueError, match="duplicate_logical_target"):
+        _dispatch_group(logical_attempts=(logical_attempt, duplicate_target_id))
+
+
+def test_plan_rejects_duplicate_ids_and_cross_group_query_or_filter_state() -> None:
+    first = _dispatch_group()
+    duplicate_group_id = replace(
+        first,
+        logical_attempts=(
+            _logical_attempt(
+                logical_attempt_id="logical_attempt_v2_other",
+                catalog_source_id="other",
+            ),
+        ),
+    )
+    duplicate_logical_id = replace(
+        first,
+        dispatch_group_id="dispatch_group_v2_other",
+    )
+
+    with pytest.raises(ValueError, match="duplicate_dispatch_group_id"):
+        _plan(dispatch_groups=(first, duplicate_group_id))
+    with pytest.raises(ValueError, match="duplicate_logical_attempt_id"):
+        _plan(dispatch_groups=(first, duplicate_logical_id))
+    with pytest.raises(ValueError, match="plan_query_mismatch"):
+        _plan(dispatch_groups=(first,), normalized_query="other")
+    with pytest.raises(ValueError, match="plan_filters_mismatch"):
+        _plan(filters=(QueryPair("year", "2025"),))
+
+
+def test_plan_derives_allowance_and_rejects_zero_budget_work_or_forged_aggregate() -> None:
+    plan = _plan(result_limit=101, ceilings=BudgetCeilings(1, 1, 1, 0, 0, 1_000, 25))
+
+    assert next(field for field in fields(DiscoveryPlan) if field.name == "allowance").init is False
+    assert plan.allowance == PlannedBudgetAllowance(1, 1, 1, 0, 0, 1_000, 25)
+    with pytest.raises(ValueError, match="budget_exceeded:route_attempts"):
+        _plan(ceilings=BudgetCeilings(0, 0, 0, 0, 0, 0, 0))
+    with pytest.raises(TypeError, match="allowance"):
+        DiscoveryPlan(
+            planner_version="planner-v2",
+            catalog_version="catalog-v2",
+            registry_version="registry-v2",
+            readiness_version="readiness-v2",
+            execution_mode=ExecutionMode.SYNTHETIC,
+            normalized_query="test",
+            filters=(),
+            result_limit=1,
+            dispatch_groups=(),
+            skipped=(),
+            ceilings=BudgetCeilings(0, 0, 0, 0, 0, 0, 0),
+            allowance=PlannedBudgetAllowance(0, 0, 0, 0, 0, 0, 0),  # type: ignore[call-arg]
         )
 
 
@@ -536,6 +772,66 @@ def test_v2_document_identity_is_route_independent_and_v1_identity_is_unchanged(
     assert "aggregator" not in v2_from_crossref.document_id
 
 
+def test_pure_foundation_modules_have_no_io_or_runtime_service_dependencies() -> None:
+    source_root = Path(__file__).resolve().parents[2] / "app" / "core" / "Research" / "discovery"
+    forbidden_import_parts = {
+        "aiohttp",
+        "config",
+        "configparser",
+        "configuration",
+        "database",
+        "databases",
+        "db",
+        "db_management",
+        "dotenv",
+        "ftplib",
+        "http",
+        "httpx",
+        "requests",
+        "settings",
+        "smtplib",
+        "socket",
+        "sqlite3",
+        "urllib",
+        "urllib3",
+        "workflow",
+        "workflows",
+    }
+    forbidden_calls = {"getenv", "open", "read_bytes", "read_text", "urlopen"}
+    forbidden_import_symbols = {*forbidden_calls, "environ"}
+    violations: list[str] = []
+
+    for filename in ("contracts.py", "registry.py", "planner.py"):
+        path = source_root / filename
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=filename)
+        for node in ast.walk(tree):
+            imported: tuple[str, ...] = ()
+            if isinstance(node, ast.Import):
+                imported = tuple(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                imported = (
+                    *((node.module,) if node.module else ()),
+                    *(alias.name for alias in node.names),
+                )
+            for module_name in imported:
+                parts = {part.casefold() for part in module_name.split(".")}
+                if parts & forbidden_import_parts or module_name.casefold() in forbidden_import_symbols:
+                    violations.append(f"{filename}:{node.lineno}:import:{module_name}")
+            if isinstance(node, ast.Call):
+                if isinstance(node.func, ast.Name) and node.func.id in forbidden_calls:
+                    violations.append(f"{filename}:{node.lineno}:call:{node.func.id}")
+                elif isinstance(node.func, ast.Attribute) and (
+                    node.func.attr in forbidden_calls or node.func.attr.startswith("read_")
+                ):
+                    violations.append(f"{filename}:{node.lineno}:call:{node.func.attr}")
+            if isinstance(node, ast.Attribute) and node.attr == "environ":
+                violations.append(f"{filename}:{node.lineno}:environment_read")
+            if isinstance(node, ast.Name) and node.id == "environ":
+                violations.append(f"{filename}:{node.lineno}:environment_read")
+
+    assert violations == []
+
+
 def test_normal_contract_import_is_side_effect_free(tmp_path: Path) -> None:
     repository_root = Path(__file__).resolve().parents[3]
     environment = os.environ.copy()
@@ -555,13 +851,17 @@ def reject_side_effect(event, args):
     if event == "open":
         mode = args[1] if len(args) > 1 else None
         flags = args[2] if len(args) > 2 else 0
+        raw_path = args[0]
+        path = os.fspath(raw_path).casefold() if isinstance(raw_path, (str, bytes, os.PathLike)) else ""
+        code_read = path.endswith((".py", ".pyc", ".so", ".dylib"))
+        read_open = bool(path) and not code_read
         if (
             isinstance(mode, str) and any(marker in mode for marker in "wax+")
         ) or (
             isinstance(flags, int)
             and flags & (os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND)
-        ):
-            raise RuntimeError(f"write_open:{args[0]}")
+        ) or read_open:
+            raise RuntimeError(f"forbidden_open:{args[0]}")
     if event in {"os.mkdir", "sqlite3.connect", "socket.__new__"}:
         raise RuntimeError(event)
 
@@ -578,7 +878,7 @@ planner.compile_discovery_plan(
     budget=contracts.BudgetCeilings(1, 1, 1, 0, 0, 20_000, 1),
 )
 discovery_prefix = "tldw_Server_API.app.core.Research.discovery."
-forbidden_suffixes = {"adapters", "catalog", "models", "router", "service"}
+forbidden_suffixes = {"adapters", "catalog", "identity", "models", "router", "service"}
 loaded = sorted(
     name for name in sys.modules
     if name.startswith(discovery_prefix) and name.removeprefix(discovery_prefix).split(".", 1)[0] in forbidden_suffixes
@@ -588,7 +888,9 @@ forbidden_prefixes = (
     "tldw_Server_API.app.core.Research.broker",
     "tldw_Server_API.app.core.Research.checkpoint_service",
     "tldw_Server_API.app.core.Research.limits",
+    "tldw_Server_API.app.core.Research.models",
     "tldw_Server_API.app.core.Research.planner",
+    "tldw_Server_API.app.core.Research.providers",
     "tldw_Server_API.app.core.Research.synthesizer",
     "tldw_Server_API.app.core.AuthNZ",
     "tldw_Server_API.app.core.DB_Management",
@@ -685,13 +987,15 @@ def test_research_package_keeps_implicit_submodule_import_behavior() -> None:
                 "broker",
                 "checkpoint_service",
                 "limits",
+                "models",
                 "planner",
+                "providers",
                 "synthesizer",
             ),
         ),
         (
             "tldw_Server_API.app.core.Research.discovery",
-            ("adapters", "catalog", "models", "router", "service"),
+            ("adapters", "catalog", "identity", "models", "router", "service"),
         ),
     ],
 )

@@ -15,16 +15,19 @@ from .contracts import (
     DispatchAllowance,
     DispatchIntent,
     OperationKind,
-    PlannedAttempt,
     PlannedBudgetAllowance,
+    PlannedDispatchGroup,
+    PlannedLogicalAttempt,
     QueryPair,
     ReadinessOverlay,
     ReadinessState,
-    RequestedTarget,
     SkippedCode,
     SkippedStatus,
     SkippedTarget,
     SourceDefinition,
+    SourcePredicate,
+    budget_ceiling_violation,
+    derive_plan_allowance,
 )
 from .registry import DiscoveryRegistry
 
@@ -67,7 +70,9 @@ class PlanningRequest:
 class _LogicalAttempt:
     source_priority: int
     route: AccessRoute
-    target: RequestedTarget
+    catalog_source_id: str
+    selection_reason: str
+    source_predicate: SourcePredicate | None
     normalized_query: str
     filters: tuple[QueryPair, ...]
     intents: tuple[DispatchIntent, ...]
@@ -132,11 +137,9 @@ def compile_discovery_plan(
                 _LogicalAttempt(
                     source_priority=source.priority,
                     route=route,
-                    target=RequestedTarget(
-                        catalog_source_id=source.catalog_source_id,
-                        selection_reason="explicit",
-                        source_predicate=references[route.route_id].source_predicate,
-                    ),
+                    catalog_source_id=source.catalog_source_id,
+                    selection_reason="explicit",
+                    source_predicate=references[route.route_id].source_predicate,
                     normalized_query=normalized_query,
                     filters=filters,
                     intents=intents,
@@ -148,8 +151,8 @@ def compile_discovery_plan(
                     ),
                 )
             )
-    attempts = _coalesce(logical)
-    allowance = _plan_allowance(logical, attempts, request.result_limit, registry)
+    dispatch_groups = _coalesce(logical)
+    allowance = derive_plan_allowance(dispatch_groups, request.result_limit)
     _enforce_budget(allowance, budget)
     return DiscoveryPlan(
         planner_version=PLANNER_VERSION,
@@ -159,10 +162,10 @@ def compile_discovery_plan(
         execution_mode=readiness.execution_mode,
         normalized_query=normalized_query,
         filters=filters,
-        attempts=attempts,
+        result_limit=request.result_limit,
+        dispatch_groups=dispatch_groups,
         skipped=tuple(skipped),
         ceilings=budget,
-        allowance=allowance,
     )
 
 
@@ -281,12 +284,14 @@ def _intent(
     )
 
 
-def _coalesce(logical: list[_LogicalAttempt]) -> tuple[PlannedAttempt, ...]:
+def _coalesce(logical: list[_LogicalAttempt]) -> tuple[PlannedDispatchGroup, ...]:
     grouped: dict[tuple[object, ...], list[_LogicalAttempt]] = {}
     for item in logical:
         key = (
             item.route.route_id,
             item.route.backend_id,
+            item.route.adapter_id,
+            item.route.adapter_version,
             item.normalized_query,
             item.filters,
             item.route.policy.policy_digest,
@@ -296,100 +301,73 @@ def _coalesce(logical: list[_LogicalAttempt]) -> tuple[PlannedAttempt, ...]:
         )
         grouped.setdefault(key, []).append(item)
 
-    attempts: list[PlannedAttempt] = []
+    dispatch_groups: list[PlannedDispatchGroup] = []
     for group in grouped.values():
         first = group[0]
-        targets = tuple(
-            item.target
-            for item in sorted(
-                group,
-                key=lambda item: (item.source_priority, item.target.catalog_source_id),
+        dispatch_group_id = _dispatch_group_id(first)
+        logical_attempts = tuple(
+            PlannedLogicalAttempt(
+                logical_attempt_id=_logical_attempt_id(item, dispatch_group_id),
+                catalog_source_id=item.catalog_source_id,
+                selection_reason=item.selection_reason,
+                source_predicate=item.source_predicate,
             )
+            for item in sorted(group, key=lambda item: (item.source_priority, item.catalog_source_id))
         )
-        attempt_id = _attempt_id(first, targets)
-        attempts.append(
-            PlannedAttempt(
-                attempt_id=attempt_id,
+        dispatch_groups.append(
+            PlannedDispatchGroup(
+                dispatch_group_id=dispatch_group_id,
                 route_id=first.route.route_id,
                 backend_id=first.route.backend_id,
+                adapter_id=first.route.adapter_id,
+                adapter_version=first.route.adapter_version,
                 policy_digest=first.route.policy.policy_digest,
+                limits=first.route.policy.limits,
                 normalized_query=first.normalized_query,
                 filters=first.filters,
-                requested_targets=targets,
+                logical_attempts=logical_attempts,
                 fallback_order=first.route.fallback_order,
                 intents=first.intents,
                 allowance=first.allowance,
             )
         )
-    return tuple(attempts)
+    return tuple(dispatch_groups)
 
 
-def _attempt_id(
-    logical: _LogicalAttempt,
-    targets: tuple[RequestedTarget, ...],
-) -> str:
+def _dispatch_group_id(logical: _LogicalAttempt) -> str:
     material = {
+        "adapter_id": logical.route.adapter_id,
+        "adapter_version": logical.route.adapter_version,
+        "allowance": asdict(logical.allowance),
         "backend_id": logical.route.backend_id,
         "fallback_order": logical.route.fallback_order,
         "filters": [asdict(item) for item in logical.filters],
         "intents": [asdict(item) for item in logical.intents],
+        "limits": asdict(logical.route.policy.limits),
         "normalized_query": logical.normalized_query,
         "policy_digest": logical.route.policy.policy_digest,
         "route_id": logical.route.route_id,
-        "targets": [asdict(item) for item in targets],
     }
-    return f"attempt_v2_{hashlib.sha256(_canonical_json(material)).hexdigest()[:24]}"
+    return f"dispatch_group_v2_{hashlib.sha256(_canonical_json(material)).hexdigest()[:24]}"
 
 
-def _plan_allowance(
-    logical: list[_LogicalAttempt],
-    attempts: tuple[PlannedAttempt, ...],
-    result_limit: int,
-    registry: DiscoveryRegistry,
-) -> PlannedBudgetAllowance:
-    physical = sum(attempt.allowance.physical_dispatches for attempt in attempts)
-    pages = max((attempt.allowance.pages for attempt in attempts), default=0)
-    redirects = sum(attempt.allowance.redirects for attempt in attempts)
-    retries = sum(attempt.allowance.retries for attempt in attempts)
-    wall_time = sum(
-        registry.get_route(attempt.route_id).policy.limits.timeout_ms * attempt.allowance.physical_dispatches
-        for attempt in attempts
-    )
-    return PlannedBudgetAllowance(
-        route_attempts=len(logical),
-        physical_dispatches=physical,
-        max_pages_per_route=pages,
-        redirects=redirects,
-        retries=retries,
-        aggregate_wall_time_ms=wall_time,
-        returned_results=result_limit if attempts else 0,
-    )
+def _logical_attempt_id(logical: _LogicalAttempt, dispatch_group_id: str) -> str:
+    material = {
+        "catalog_source_id": logical.catalog_source_id,
+        "dispatch_group_id": dispatch_group_id,
+        "selection_reason": logical.selection_reason,
+        "source_predicate": asdict(logical.source_predicate) if logical.source_predicate is not None else None,
+    }
+    return f"logical_attempt_v2_{hashlib.sha256(_canonical_json(material)).hexdigest()[:24]}"
 
 
 def _enforce_budget(
     allowance: PlannedBudgetAllowance,
     budget: BudgetCeilings,
 ) -> None:
-    checks = (
-        ("route_attempts", allowance.route_attempts, budget.max_route_attempts),
-        (
-            "physical_dispatches",
-            allowance.physical_dispatches,
-            budget.max_physical_dispatches,
-        ),
-        (
-            "pages_per_route",
-            allowance.max_pages_per_route,
-            budget.max_pages_per_route,
-        ),
-        ("redirects", allowance.redirects, budget.max_redirects),
-        ("retries", allowance.retries, budget.max_retries),
-        ("wall_time_ms", allowance.aggregate_wall_time_ms, budget.max_wall_time_ms),
-        ("returned_results", allowance.returned_results, budget.max_results),
-    )
-    for name, planned, ceiling in checks:
-        if planned > ceiling:
-            raise PlanningError(f"budget_exceeded:{name}")
+    violation = budget_ceiling_violation(allowance, budget)
+    if violation is not None:
+        raise PlanningError(f"budget_exceeded:{violation}")
 
 
 def _validate_readiness_references(

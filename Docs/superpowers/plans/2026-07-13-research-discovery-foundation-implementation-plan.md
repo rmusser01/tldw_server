@@ -102,7 +102,7 @@ Independent-review hardening: `test(research): harden legacy execution golden`
 
 **Tests:** Unit and property tests for construction, referential integrity, determinism, coalescing, fallback order, and physical-request budgets.
 
-**Status:** Complete
+**Status:** In Progress (external review fix round)
 
 ### Files
 
@@ -174,6 +174,9 @@ git diff --check
 - GREEN: 57 focused Task 2 tests, 97 exact plan tests, 107 impacted package/import tests, and the complete 574-test Research suite passed. The complete Research suite preceded the final lazy-submodule edge hardening; the subsequent focused, exact, and impacted suites cover those final changes.
 - Quality gates: compileall, Ruff, Black, Python 3.10 AST parsing, and `git diff --check` passed. Bandit reported zero findings and zero errors across 1,487 production lines.
 - Independent review: five Important findings and two final compatibility/accounting edge cases were fixed RED-first; the same reviewer returned a final CLEAN verdict.
+- External-review fix RED: 2/2 predicate regressions failed before canonicalization, and the consolidated remaining suite stopped on the absent logical-attempt/dispatch-group contract boundary before production edits.
+- External-review fix GREEN: 64/64 focused contract/planner tests, 115/115 exact plan tests, 200/200 impacted package/jobs/endpoint tests, and 594/594 complete Research tests passed on the settled diff.
+- External-review fix gates: compileall, Ruff, Black, Python 3.10 AST parsing, and diff hygiene passed; Bandit reported zero findings and zero errors across 1,161 touched production lines. Task 2 remains In Progress pending external controller re-review.
 
 ## Task 3 / Stage 3: Consume TASK-12971 Through a One-Hop Discovery Gateway
 
@@ -247,7 +250,7 @@ git diff --check
 ### Test-first steps
 
 - [ ] Use a scripted adapter to prove it can request work only by yielding a validated `DispatchIntent` to executor-owned `dispatch(intent)`; it cannot access the gateway directly.
-- [ ] Bind each dispatch capability to one planned `attempt_id`, route ID, policy digest, and remaining allowance. Reject cross-attempt/cross-route intents and undeclared operation transitions; include a malicious scripted-adapter regression.
+- [ ] Bind each dispatch capability to one planned `dispatch_group_id`, route ID, policy digest, and remaining allowance. Reject cross-group/cross-route intents and undeclared operation transitions; include a malicious scripted-adapter regression.
 - [ ] Add a minimal in-memory `AttemptJournal` with explicit `reserved`, `dispatching`, `succeeded`, `valid_empty`, `failed`, `timed_out`, `cancelled`, `skipped`, and `indeterminate_after_dispatch` transitions. Do not add durable storage.
 - [ ] Create a journal reservation only immediately before an initial, page, redirect, or retry dispatch; assign a fresh `dispatch_id`; debit on transition to `dispatching`; and release only a definitely unused pre-dispatch reservation. Unused planner allowance is not a journal transition.
 - [ ] Inject fail-closed `policy_is_active(route_id, digest)`, recompute and verify the canonical digest before dispatch, and recheck before committing candidates. Test tampered digests and revocation during the hop: accounting remains debited while candidate content is suppressed.
