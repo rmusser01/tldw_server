@@ -1,17 +1,15 @@
 ---
 id: TASK-12112
 title: Consolidate provider credential runtime for Chat and Knowledge QA
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-07-13 22:26'
+updated_date: '2026-07-14 01:11'
 labels: []
 dependencies: []
 documentation:
   - >-
     Docs/superpowers/specs/2026-07-12-shared-provider-credential-runtime-design.md
-  - >-
-    Docs/superpowers/plans/2026-07-12-shared-provider-credential-runtime-implementation-plan.md
 ---
 
 ## Description
@@ -26,14 +24,14 @@ Design and implement a shared execution-scoped provider credential runtime used 
 - [x] #2 Invalid credentials, credential-store failures, and revoked background scope fail closed.
 - [x] #3 RAG semantic cache reuses documents but never cached generated answers.
 - [x] #4 Streaming credential errors use sanitized structured codes and do not trigger non-stream fallback.
-- [ ] #5 Focused backend/frontend tests and Bandit pass for touched scope.
-- [ ] #6 Chat and all provider-backed RAG call paths, including query-time hosted embeddings, use the shared credential runtime with explicit no-fallback semantics.
+- [x] #5 Focused backend/frontend tests and Bandit pass for touched scope.
+- [x] #6 Chat and all provider-backed RAG call paths, including query-time hosted embeddings, use the shared credential runtime with explicit no-fallback semantics.
 <!-- AC:END -->
 
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Docs/superpowers/plans/2026-07-12-shared-provider-credential-runtime-implementation-plan.md
+Completed; implementation plan removed after finalization per repository instructions. Design: Docs/superpowers/specs/2026-07-12-shared-provider-credential-runtime-design.md
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -74,24 +72,22 @@ Docs/superpowers/plans/2026-07-12-shared-provider-credential-runtime-implementat
 2026-07-13: Task 10 complete. Commits e36c3538dd, 55d81d3b3f, and c4df083458 bind new RAG batch checkpoints to server-derived owner/team/org metadata, authorize owner or explicit admin before runtime creation and early completion, reload strict current memberships, recompute base-URL authority, keep legacy ownerless checkpoints on server credentials, and persist only bounded result error codes. Review hardening aligns owner credentials, media/notes/prompts/Kanban paths, request/cache identity, and the ambient content ScopeContext for both self-resume and delegated-admin resume; delegated admin bypass is removed, caller scope is restored after runtime/media cleanup, malformed membership rows and orphan ownerless scopes fail closed, and ownerless server checkpoints omit credential metadata. Fresh root verification: checkpoint/resume suite 85 passed; adjacent provider-credential suite 19 passed; Ruff and py_compile clean; Bandit 0 findings/0 errors over 2,345 production LOC; diff check clean. Independent final specification and quality/security reviews approved c4df083458 with no open findings.
 
 2026-07-13: Task 11 complete. Commit 5c7d8a11ce adds a shared versioned terminal RAG stream contract, explicit clean completion, sanitized provider errors, exact EOF-before-replay validation, and fail-closed frontend/background transport behavior. Unsafe stream POSTs never direct-fetch replay after background handoff; standard RAG no longer retries arbitrary HTTP 500 responses; malformed/unknown terminal events fail closed; optional provider status_code compatibility is retained. Final root verification: backend 79 passed; frontend 80 passed; Ruff and py_compile clean; Bandit 0 findings/0 errors across 3,014 production LOC; diff checks clean. Independent specification and quality/security re-reviews approved with no open findings.
+
+2026-07-13: Tasks 12 and 13 complete. Commits ffbc73dfc1, 1399ffef70, and 7905df629b add the cross-surface no-fallback/secret-leak gate, close authenticated RAG ablate/simple/advanced runtime gaps, reject credential handles before checkpoint persistence, and protect credential-derived embedding endpoints across egress, transport, logs, metrics, manual tracing, third-party logging, and OpenTelemetry auto-instrumentation. Public redirect observability remains accurate. Final committed-tree verification: backend union 240 passed, 1 documented TestClient streaming skip; frontend 35 passed; Chromium credential workflow 1 passed; full HTTP client 95 passed. All changed Python files py_compile clean; git diff check clean. Broad Bandit artifact /tmp/bandit_TASK-12112_final.json matches base exactly: 34 existing Low findings, 0 new, 0 Medium/High, 0 scan errors. Ruff E9/F821 final sweep found only two unchanged ChatBadRequestError F821 baseline findings present at 4f88741711; Task 13 touched scope is clean. Independent whole-feature review ended with no findings and explicit SPEC APPROVED / QUALITY APPROVED.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-
+Implemented and verified one server-only execution-scoped credential runtime for Chat and provider-backed RAG, including hosted query embeddings. Authenticated execution uses user, team, organization, then server precedence; invalid credentials, store failures, and revoked scope fail closed. Credentials are non-serializable and excluded from cache/checkpoint/client state, semantic cache is retrieval-only and tenant-safe, and terminal stream errors cannot trigger unsafe non-stream replay. Final committed-tree verification passed across backend, frontend, browser, HTTP compatibility, static compilation, security baseline delta, and independent whole-feature review. Known skip: one pre-existing TestClient streaming test is skipped because it hangs under TestClient. The unrelated untracked watchlist templates were not touched. A human-authored PR Change summary is still required before merge.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
