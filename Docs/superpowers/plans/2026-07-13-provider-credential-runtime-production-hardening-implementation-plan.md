@@ -37,11 +37,15 @@
 - Modify: `tldw_Server_API/app/core/AuthNZ/repos/user_provider_secrets_repo.py`
 - Modify: `tldw_Server_API/app/api/v1/endpoints/chat.py`
 - Modify: `tldw_Server_API/app/api/v1/endpoints/rag_unified.py`
+- Modify: `tldw_Server_API/app/api/v1/endpoints/shared_keys_scoped.py`
 - Modify: `tldw_Server_API/app/api/v1/endpoints/user_keys.py`
+- Modify: `tldw_Server_API/app/core/AuthNZ/repos/org_provider_secrets_repo.py`
 - Test: `tldw_Server_API/tests/AuthNZ_Unit/test_byok_helpers.py`
 - Test: `tldw_Server_API/tests/AuthNZ_Unit/test_byok_runtime.py`
 - Test: `tldw_Server_API/tests/AuthNZ_Unit/test_provider_credential_runtime.py`
 - Test: `tldw_Server_API/tests/AuthNZ_SQLite/test_byok_endpoints_sqlite.py`
+- Test: `tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_org_provider_secrets_repo_sqlite.py`
+- Test: `tldw_Server_API/tests/AuthNZ_SQLite/test_byok_runtime_sqlite.py`
 - Test: `tldw_Server_API/tests/AuthNZ_Postgres/test_byok_oauth_endpoints_pg.py`
 - Test: `tldw_Server_API/tests/Chat/integration/test_chat_endpoint_simplified.py`
 - Test: `tldw_Server_API/tests/RAG_NEW/unit/test_rag_provider_credentials.py`
@@ -49,6 +53,8 @@
 **Interfaces:**
 - `canonical_provider_name(provider: str) -> str` owns the adapter alias table.
 - `provider_lookup_names(provider: str) -> tuple[str, ...]` returns canonical first, then registered legacy aliases.
+- Unknown provider identifiers retain trim/lower spelling; underscore-to-hyphen normalization is used only to recognize registered aliases.
+- User and shared credential repositories apply the same canonical-first, one-legacy-row, conflict, revocation, touch, and delete semantics.
 - `derive_trusted_credential_scope(request: Any, current_user: Any) -> tuple[int | None, list[int], list[int], bool]` returns only validated active team/org IDs; absent active IDs return empty lists.
 - `AuthnzUserProviderSecretsRepo.update_secret_if_active_and_unchanged(..., expected_encrypted_blob: str) -> bool` updates only the exact still-active row.
 - Runtime usage persistence receives a bounded, monkeypatchable drain deadline and releases runtime cache references even when the database task does not cooperate.
@@ -97,6 +103,10 @@
 - [ ] **Step 9: Implement bounded best-effort usage persistence and run Task 1 GREEN**
 
   Use one drain helper from caller cancellation and runtime close. Permit normal completion inside the grace period; after the deadline cancel the usage task, stop awaiting it, clear runtime-owned references, and preserve caller cancellation. Run all Task 1 tests plus `git diff --check`.
+
+- [ ] **Step 9a: Close independent-review gaps for shared aliases, revocation, and listing**
+
+  Add RED regressions proving active team/org alias rows resolve canonically at the runtime boundary, revoked selected shared rows block every lower-precedence source, canonical rows win over one legacy row, multiple legacy rows fail closed, and legacy rows remain touchable/revocable. Add `/users/keys` response tests that fold canonical/legacy rows with runtime-equivalent conflict and revocation authority. Preserve unknown provider identifiers such as `foo_bar` unchanged. Implement the shared repository/endpoint fixes, then rerun Task 1's full fixed-seed union and both `concurrent` seeds.
 
 - [ ] **Step 10: Commit Task 1**
 
