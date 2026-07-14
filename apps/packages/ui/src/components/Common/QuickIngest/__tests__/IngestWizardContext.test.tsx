@@ -1448,6 +1448,12 @@ describe("IngestWizardContext", () => {
       })
       // Overall status remains running
       expect(screen.getByTestId("status").textContent).toBe("running")
+      expect(screen.getByTestId("progressIds").textContent).toBe("b")
+      expect(
+        JSON.parse(screen.getByTestId("queueItems").textContent || "[]").map(
+          (item: { id: string }) => item.id
+        )
+      ).toEqual(["b"])
     })
   })
 

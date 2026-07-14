@@ -88,6 +88,7 @@ type Action =
   | { type: "START_PROCESSING" }
   | { type: "CANCEL_PROCESSING" }
   | { type: "CANCEL_ITEM"; id: string }
+  | { type: "REQUEST_ITEM_CANCELLATION"; id: string }
   | { type: "UPDATE_ITEM_PROGRESS"; progress: ItemProgress }
   | { type: "UPDATE_PROCESSING_STATE"; state: Partial<WizardProcessingState> }
   | { type: "SET_RESULTS"; results: WizardResultItem[] }
@@ -788,17 +789,54 @@ const reducer = (
         },
       }
 
-    case "CANCEL_ITEM":
+    case "CANCEL_ITEM": {
+      const remainingQueueItems = state.queueItems.filter(
+        (item) => item.id !== action.id
+      )
+      const remainingRunInputs = state.pendingRunRequest?.inputs.filter(
+        (input) => input.occurrenceId !== action.id
+      )
+      const remainingReviewOverrides = state.pendingRunRequest?.reviewOverrides
+        ? Object.fromEntries(
+            Object.entries(state.pendingRunRequest.reviewOverrides).filter(
+              ([occurrenceId]) => occurrenceId !== action.id
+            )
+          )
+        : undefined
+      return {
+        ...state,
+        queueItems: remainingQueueItems,
+        pendingRunRequest: state.pendingRunRequest
+          ? {
+              ...state.pendingRunRequest,
+              inputs: remainingRunInputs || [],
+              ...(remainingReviewOverrides &&
+              Object.keys(remainingReviewOverrides).length > 0
+                ? { reviewOverrides: remainingReviewOverrides }
+                : { reviewOverrides: undefined }),
+            }
+          : null,
+        processingState: {
+          ...state.processingState,
+          perItemProgress: state.processingState.perItemProgress.filter(
+            (progress) => progress.id !== action.id
+          ),
+        },
+      }
+    }
+
+    case "REQUEST_ITEM_CANCELLATION":
       return {
         ...state,
         processingState: {
           ...state.processingState,
           perItemProgress: state.processingState.perItemProgress.map((p) =>
-            p.id === action.id &&
-            p.status !== "complete" &&
-            p.status !== "failed" &&
-            p.status !== "cancelled"
-              ? { ...p, status: "cancelled" as const }
+            p.id === action.id && p.lifecycleState !== "terminal"
+              ? {
+                  ...p,
+                  lifecycleState: "cancellation_requested" as const,
+                  currentStage: "",
+                }
               : p
           ),
         },
@@ -917,6 +955,8 @@ type IngestWizardContextValue = {
   skipToProcessing: () => void
   cancelProcessing: () => void
   cancelItem: (id: string) => void
+  checkStatus: (id: string) => void
+  reconnect: () => void
   updateItemProgress: (progress: ItemProgress) => void
   updateProcessingState: (state: Partial<WizardProcessingState>) => void
   setResults: (results: WizardResultItem[]) => void
@@ -944,6 +984,9 @@ type IngestWizardProviderProps = {
   onStateChange?: (state: IngestWizardState) => void
   presetMap?: PresetMap
   onCancelProcessing?: () => boolean
+  onCancelItem?: (id: string) => boolean
+  onCheckStatus?: (id: string) => void
+  onReconnect?: () => void
 }
 
 export const IngestWizardProvider: React.FC<IngestWizardProviderProps> = ({
@@ -952,6 +995,9 @@ export const IngestWizardProvider: React.FC<IngestWizardProviderProps> = ({
   onStateChange,
   presetMap = DEFAULT_PRESETS,
   onCancelProcessing,
+  onCancelItem,
+  onCheckStatus,
+  onReconnect,
 }) => {
   const reducerWithPresetMap = useCallback(
     (state: IngestWizardState, action: Action) =>
@@ -1005,7 +1051,15 @@ export const IngestWizardProvider: React.FC<IngestWizardProviderProps> = ({
     if (onCancelProcessing?.()) return
     dispatch({ type: "CANCEL_PROCESSING" })
   }, [onCancelProcessing])
-  const cancelItem = useCallback((id: string) => dispatch({ type: "CANCEL_ITEM", id }), [])
+  const cancelItem = useCallback((id: string) => {
+    if (onCancelItem?.(id)) {
+      dispatch({ type: "REQUEST_ITEM_CANCELLATION", id })
+      return
+    }
+    dispatch({ type: "CANCEL_ITEM", id })
+  }, [onCancelItem])
+  const checkStatus = useCallback((id: string) => onCheckStatus?.(id), [onCheckStatus])
+  const reconnect = useCallback(() => onReconnect?.(), [onReconnect])
   const updateItemProgress = useCallback(
     (progress: ItemProgress) =>
       dispatch({ type: "UPDATE_ITEM_PROGRESS", progress }),
@@ -1045,6 +1099,8 @@ export const IngestWizardProvider: React.FC<IngestWizardProviderProps> = ({
       skipToProcessing,
       cancelProcessing,
       cancelItem,
+      checkStatus,
+      reconnect,
       updateItemProgress,
       updateProcessingState,
       setResults,
@@ -1068,6 +1124,8 @@ export const IngestWizardProvider: React.FC<IngestWizardProviderProps> = ({
       skipToProcessing,
       cancelProcessing,
       cancelItem,
+      checkStatus,
+      reconnect,
       updateItemProgress,
       updateProcessingState,
       setResults,

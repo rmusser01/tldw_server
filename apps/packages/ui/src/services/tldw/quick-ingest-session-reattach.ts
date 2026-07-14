@@ -260,7 +260,13 @@ const snapshotFromRun = (
   lifecycle: deriveRunLifecycle(snapshot.items),
   jobs: snapshot.items.map((item) => ({
     jobId: item.jobId,
+    attempt: item.attempt,
     status: runItemStatus(item),
+    lifecycleState: item.state,
+    terminalOutcome: item.outcome,
+    progressPercent: item.progressPercent,
+    progressMessage: item.progressMessage,
+    retryable: item.retryable,
     result: {
       media_id: item.mediaId,
       outcome: item.outcome,
@@ -390,6 +396,10 @@ export const reattachQuickIngestSession = async (
                   error instanceof Error ? `${error.name} ${error.message}` : ""
                 ))
         if (retryable) {
+          const progressMessage =
+            error instanceof Error && error.message.trim()
+              ? error.message.trim()
+              : "Run status is temporarily unavailable. Quick ingest will retry."
           const jobIds = normalizeJobIds(tracking.jobIds)
           const submittedItemIds = resolveSubmittedItemIds(tracking)
           const jobIdToItemId = normalizeJobIdToItemId(tracking.jobIdToItemId)
@@ -397,20 +407,25 @@ export const reattachQuickIngestSession = async (
             jobIds.length > 0
               ? jobIds.map((jobId, index) => ({
                   jobId,
-                  status: "processing",
+                  status: "status_unavailable",
+                  lifecycleState: "status_unavailable" as const,
+                  progressMessage,
+                  retryable: true,
                   sourceItemId:
                     jobIdToItemId[String(jobId)] || submittedItemIds[index],
                 }))
               : submittedItemIds.map((sourceItemId) => ({
                   jobId: null,
-                  status: "processing",
+                  status: "status_unavailable",
+                  lifecycleState: "status_unavailable" as const,
+                  progressMessage,
+                  retryable: true,
                   sourceItemId,
                 }))
           return {
             lifecycle: "processing",
             jobs,
-            errorMessage:
-              "Run status is temporarily unavailable. Quick ingest will retry.",
+            errorMessage: progressMessage,
           }
         }
         return interruptedSnapshot()

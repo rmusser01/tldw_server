@@ -354,7 +354,7 @@ describe("reattachQuickIngestSession", () => {
             batch_id: "batch-1",
             media_id: null,
             planned_collection_item_id: null,
-            attempt: 1,
+            attempt: 4,
             retryable: false,
           },
         ],
@@ -377,6 +377,12 @@ describe("reattachQuickIngestSession", () => {
         jobId: 77,
         sourceItemId: "occ-reattach-1",
         status: "running",
+        lifecycleState: "running",
+        terminalOutcome: null,
+        progressPercent: 40,
+        progressMessage: "Downloading",
+        retryable: false,
+        attempt: 4,
       }),
     ])
     expect(mocks.bgRequest).toHaveBeenCalledTimes(2)
@@ -806,11 +812,13 @@ describe("reattachQuickIngestSession", () => {
       jobs: [
         expect.objectContaining({
           sourceItemId: "occ-accepted-1",
-          status: "processing",
+          status: "status_unavailable",
+          lifecycleState: "status_unavailable",
+          retryable: true,
         }),
       ],
     })
-    expect(snapshot.errorMessage).toMatch(/temporar|retry/i)
+    expect(snapshot.errorMessage).toMatch(/temporar|unavailable|try again|retry/i)
   })
 
   it("marks a persisted processing session as interrupted when reattachment cannot prove live progress", async () => {
@@ -852,11 +860,22 @@ describe("reattachQuickIngestSession", () => {
     }
   )
 
-  it.each([429, 503])(
-    "keeps a run session processing when status reattachment is retryable (%s)",
-    async (status) => {
+  it.each([
+    [429, /too many|rate|try again/i],
+    [503, /unavailable|try again/i],
+    [undefined, /network|connect|unavailable/i],
+  ])(
+    "returns canonical status-unavailable evidence when run reattachment is retryable (%s)",
+    async (status, expectedMessage) => {
       mocks.bgRequest.mockRejectedValue(
-        Object.assign(new Error("temporarily unavailable"), { status })
+        Object.assign(
+          new Error(
+            status == null
+              ? "network disconnected"
+              : "temporarily unavailable"
+          ),
+          status == null ? {} : { status }
+        )
       )
 
       const result = await reattachQuickIngestSession({
@@ -872,11 +891,14 @@ describe("reattachQuickIngestSession", () => {
           expect.objectContaining({
             jobId: 77,
             sourceItemId: "occ-retryable",
-            status: "processing",
+            status: "status_unavailable",
+            lifecycleState: "status_unavailable",
+            progressMessage: expect.stringMatching(expectedMessage),
+            retryable: true,
           }),
         ],
       })
-      expect(result.errorMessage).toMatch(/temporar|retry/i)
+      expect(result.errorMessage).toMatch(expectedMessage)
       expect(mocks.bgRequest).toHaveBeenCalledTimes(1)
     }
   )

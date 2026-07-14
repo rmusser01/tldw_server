@@ -1,8 +1,8 @@
-import React, { useCallback, useMemo, useState } from "react"
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
+import { useVirtualizer } from "@tanstack/react-virtual"
 import {
   Check,
-  Circle,
   Loader2,
   X,
   Minimize2,
@@ -19,16 +19,14 @@ import {
 import type { ItemProgress, ItemProgressStatus, WizardQueueItem } from "./types"
 import { useIngestWizard } from "./IngestWizardContext"
 import { useQuickIngestSessionStore } from "@/store/quick-ingest-session"
+import { QUICK_INGEST_ACCEPT_STRING } from "./constants"
+import { validateQuickIngestFile } from "./QueueTab/FileDropZone"
+import { submitQuickIngestBatch } from "@/services/tldw/quick-ingest-batch"
+import { readQuickIngestFileBytes } from "./file-bytes"
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-
-/**
- * Ordered stages for per-item multi-stage progress indicator.
- */
-const PROCESSING_STAGES = ["uploading", "processing", "analyzing", "storing"] as const
-type ProcessingStage = (typeof PROCESSING_STAGES)[number]
 
 /**
  * Map of detected media types to lucide icon components.
@@ -53,6 +51,8 @@ const TERMINAL_STATUSES = new Set<ItemProgressStatus>([
   "cancelled",
 ])
 
+const LIST_VIRTUALIZATION_THRESHOLD = 100
+
 type FailedProcessingItem = {
   id: string
   label: string
@@ -60,6 +60,9 @@ type FailedProcessingItem = {
   fileName?: string
   error?: string
 }
+
+type LifecycleGroup = "active" | "attention" | "terminal"
+type ProcessingFilter = "all" | LifecycleGroup
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -85,79 +88,31 @@ const formatEstimated = (seconds: number): string => {
   return `~${m} min remaining`
 }
 
-/**
- * Determine the visual state of each stage dot relative to the item's current status.
- */
-const getStageState = (
-  stage: ProcessingStage,
-  itemStatus: ItemProgressStatus
-): "done" | "active" | "pending" | "failed" => {
-  const stageIndex = PROCESSING_STAGES.indexOf(stage)
-  const activeIndex = PROCESSING_STAGES.indexOf(itemStatus as ProcessingStage)
-
-  if (itemStatus === "complete") return "done"
-  if (itemStatus === "failed") {
-    // Stages before the failure point are done; the failure point is failed; rest pending
-    if (activeIndex >= 0) {
-      if (stageIndex < activeIndex) return "done"
-      if (stageIndex === activeIndex) return "failed"
-      return "pending"
-    }
-    // If status doesn't map to a stage (e.g. failed during queued), mark first as failed
-    return stageIndex === 0 ? "failed" : "pending"
+const lifecycleGroup = (
+  progress: ItemProgress,
+  item?: WizardQueueItem
+): LifecycleGroup => {
+  if (
+    progress.lifecycleState === "terminal" ||
+    (!progress.lifecycleState && TERMINAL_STATUSES.has(progress.status))
+  ) {
+    return "terminal"
   }
-  if (itemStatus === "cancelled" || itemStatus === "queued") return "pending"
-
-  // Active processing: check relative position
-  if (activeIndex < 0) return "pending"
-  if (stageIndex < activeIndex) return "done"
-  if (stageIndex === activeIndex) return "active"
-  return "pending"
+  if (
+    progress.lifecycleState === "status_unavailable" ||
+    progress.lifecycleState === "cancellation_requested" ||
+    (progress.lifecycleState === "awaiting_upload" && !item?.file)
+  ) {
+    return "attention"
+  }
+  return "active"
 }
 
-// ---------------------------------------------------------------------------
-// Sub-components
-// ---------------------------------------------------------------------------
-
-type StageIndicatorProps = {
-  stage: ProcessingStage
-  visualState: "done" | "active" | "pending" | "failed"
-  label: string
-}
-
-const StageIndicator: React.FC<StageIndicatorProps> = ({
-  stage: _stage,
-  visualState,
-  label,
-}) => {
-  return (
-    <div className="flex flex-col items-center gap-0.5" title={label}>
-      <span className="flex h-4 w-4 items-center justify-center">
-        {visualState === "done" ? (
-          <Check className="h-3.5 w-3.5 text-primary" strokeWidth={2.5} aria-hidden="true" />
-        ) : visualState === "active" ? (
-          <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" aria-hidden="true" />
-        ) : visualState === "failed" ? (
-          <X className="h-3.5 w-3.5 text-danger" strokeWidth={2.5} aria-hidden="true" />
-        ) : (
-          <Circle className="h-2.5 w-2.5 text-text-muted" aria-hidden="true" />
-        )}
-      </span>
-      <span
-        className={`text-[9px] leading-none ${
-          visualState === "active"
-            ? "font-medium text-primary"
-            : visualState === "done"
-              ? "text-text-muted"
-              : visualState === "failed"
-                ? "text-danger"
-                : "text-text-muted opacity-50"
-        }`}
-      >
-        {label}
-      </span>
-    </div>
-  )
+const itemDisplayName = (item: WizardQueueItem): string => {
+  if (item.playlist?.ordinal && item.playlist.title) {
+    return `${item.playlist.ordinal}. ${item.playlist.title}`
+  }
+  return item.playlist?.title || item.fileName || item.url || item.id
 }
 
 // ---------------------------------------------------------------------------
@@ -169,29 +124,68 @@ type ItemRowProps = {
   progress: ItemProgress
   qi: (key: string, defaultValue: string, options?: Record<string, unknown>) => string
   onCancel: (id: string) => void
+  onCheckStatus: (id: string) => void
+  onReconnect: () => void
+  onReselectFile: (id: string, file: File) => void
+  onRetryUpload: (id: string) => void
 }
 
-const ItemRow: React.FC<ItemRowProps> = ({ item, progress, qi, onCancel }) => {
+const ItemRow: React.FC<ItemRowProps> = ({
+  item,
+  progress,
+  qi,
+  onCancel,
+  onCheckStatus,
+  onReconnect,
+  onReselectFile,
+  onRetryUpload,
+}) => {
   const IconComponent = TYPE_ICON_MAP[item.detectedType] || File
-  const displayName = item.fileName || item.url || item.id
-  const isTerminal = TERMINAL_STATUSES.has(progress.status)
-  const isActive =
-    progress.status !== "queued" &&
-    progress.status !== "complete" &&
-    progress.status !== "failed" &&
-    progress.status !== "cancelled"
-
-  const stageLabels: Record<ProcessingStage, string> = useMemo(
-    () => ({
-      uploading: qi("processing.stage.upload", "Upload"),
-      processing: qi("processing.stage.process", "Process"),
-      analyzing: qi("processing.stage.analyze", "Analyze"),
-      storing: qi("processing.stage.store", "Store"),
-    }),
-    [qi]
-  )
+  const displayName = itemDisplayName(item)
+  const group = lifecycleGroup(progress, item)
+  const isTerminal = group === "terminal"
+  const isActive = group === "active"
+  const replacementInputRef = useRef<HTMLInputElement>(null)
 
   const statusLabel = useMemo(() => {
+    switch (progress.lifecycleState) {
+      case "staged":
+      case "preparing":
+        return qi("processing.status.preparing", "Preparing")
+      case "awaiting_upload":
+        return item.file
+          ? qi("processing.status.awaitingUpload", "Awaiting upload")
+          : qi("processing.status.fileReattachRequired", "File reattach required")
+      case "submit_pending":
+        return qi("processing.status.submitPending", "Submit pending")
+      case "queued":
+        return qi("processing.status.queued", "Queued")
+      case "running":
+        return qi("processing.status.running", "Running")
+      case "cancellation_requested":
+        return qi("processing.status.cancellationRequested", "Cancellation requested")
+      case "status_unavailable":
+        return qi("processing.status.statusUnavailable", "Status unavailable")
+      case "terminal":
+        switch (progress.terminalOutcome) {
+          case "included_existing":
+            return qi("processing.outcome.includedExisting", "Included existing")
+          case "metadata_updated":
+            return qi("processing.outcome.metadataUpdated", "Metadata updated")
+          case "skipped_existing":
+            return qi("processing.outcome.skippedExisting", "Skipped existing")
+          case "submit_failed":
+            return qi("processing.outcome.submitFailed", "Submit failed")
+          case "processing_failed":
+            return qi("processing.outcome.processingFailed", "Processing failed")
+          case "metadata_update_failed":
+            return qi("processing.outcome.metadataUpdateFailed", "Metadata update failed")
+          case "cancelled":
+            return qi("processing.status.cancelled", "Cancelled")
+          default:
+            return qi("processing.outcome.completed", "Completed")
+        }
+    }
     switch (progress.status) {
       case "queued":
         return qi("processing.status.queued", "Queued")
@@ -212,7 +206,7 @@ const ItemRow: React.FC<ItemRowProps> = ({ item, progress, qi, onCancel }) => {
       default:
         return ""
     }
-  }, [progress.status, qi])
+  }, [item.file, progress.lifecycleState, progress.status, progress.terminalOutcome, qi])
 
   const handleCancel = useCallback(
     (e: React.MouseEvent) => {
@@ -279,46 +273,16 @@ const ItemRow: React.FC<ItemRowProps> = ({ item, progress, qi, onCancel }) => {
           </div>
         </div>
 
-        {/* Multi-stage progress indicator */}
-        {progress.status !== "queued" && (
-          <div className="flex items-center gap-1">
-            {/* Stage dots with connectors */}
-            <div className="flex items-center gap-0">
-              {PROCESSING_STAGES.map((stage, idx) => {
-                const state = getStageState(stage, progress.status)
-                return (
-                  <React.Fragment key={stage}>
-                    {idx > 0 && (
-                      <div
-                        className={`mx-0.5 h-px w-3 sm:w-5 ${
-                          state === "done" || state === "active"
-                            ? "bg-primary"
-                            : state === "failed"
-                              ? "bg-danger"
-                              : "bg-border"
-                        }`}
-                        aria-hidden="true"
-                      />
-                    )}
-                    <StageIndicator
-                      stage={stage}
-                      visualState={state}
-                      label={stageLabels[stage]}
-                    />
-                  </React.Fragment>
-                )
-              })}
-            </div>
+        {progress.currentStage && progress.currentStage !== statusLabel && (
+          <p className="text-xs text-text-muted">{progress.currentStage}</p>
+        )}
 
-            {/* Progress bar for active items */}
-            {isActive && (
-              <div className="ml-2 hidden h-1.5 flex-1 overflow-hidden rounded-full bg-surface2 sm:block">
-                <div
-                  className="h-full rounded-full bg-primary transition-all duration-300"
-                  style={{ width: `${progress.progressPercent}%` }}
-                />
-              </div>
-            )}
+        {isActive && progress.progressPercent > 0 && (
+          <div className="h-1.5 overflow-hidden rounded-full bg-surface2">
+            <div
+              className="h-full rounded-full bg-primary transition-all duration-300"
+              style={{ width: `${progress.progressPercent}%` }}
+            />
           </div>
         )}
 
@@ -328,8 +292,75 @@ const ItemRow: React.FC<ItemRowProps> = ({ item, progress, qi, onCancel }) => {
         )}
       </div>
 
+      {progress.lifecycleState === "status_unavailable" && (
+        <div className="flex flex-shrink-0 items-center gap-1">
+          <button
+            type="button"
+            onClick={() => onCheckStatus(item.id)}
+            className="rounded px-2 py-1 text-xs text-primary hover:bg-primary/10"
+          >
+            {qi("processing.checkAgain", "Check again")}
+          </button>
+          <button
+            type="button"
+            onClick={onReconnect}
+            className="rounded px-2 py-1 text-xs text-primary hover:bg-primary/10"
+          >
+            {qi("processing.reconnect", "Reconnect")}
+          </button>
+        </div>
+      )}
+
+      {progress.lifecycleState === "awaiting_upload" && !item.file && (
+        <div className="flex flex-shrink-0 items-center">
+          <input
+            ref={replacementInputRef}
+            type="file"
+            accept={QUICK_INGEST_ACCEPT_STRING}
+            className="sr-only"
+            aria-label={qi(
+              "processing.replacementFileAria",
+              "Replacement file for {{name}}",
+              { name: displayName }
+            )}
+            onChange={(event) => {
+              const file = event.currentTarget.files?.[0]
+              if (file) onReselectFile(item.id, file)
+              event.currentTarget.value = ""
+            }}
+          />
+          <button
+            type="button"
+            className="rounded px-2 py-1 text-xs text-primary hover:bg-primary/10"
+            aria-label={qi(
+              "processing.reselectFileAria",
+              "Reselect file for {{name}}",
+              { name: displayName }
+            )}
+            onClick={() => replacementInputRef.current?.click()}
+          >
+            {qi("processing.reselectFile", "Reselect file")}
+          </button>
+        </div>
+      )}
+
+      {progress.lifecycleState === "awaiting_upload" && item.file && (
+        <button
+          type="button"
+          className="flex-shrink-0 rounded px-2 py-1 text-xs text-primary hover:bg-primary/10"
+          aria-label={qi(
+            "processing.retryUploadAria",
+            "Retry upload for {{name}}",
+            { name: displayName }
+          )}
+          onClick={() => onRetryUpload(item.id)}
+        >
+          {qi("processing.retryUpload", "Retry upload")}
+        </button>
+      )}
+
       {/* Cancel button */}
-      {!isTerminal && (
+      {!isTerminal && progress.lifecycleState !== "cancellation_requested" && (
         <button
           type="button"
           onClick={handleCancel}
@@ -355,10 +386,23 @@ type ProcessingStepProps = {
 
 export const ProcessingStep: React.FC<ProcessingStepProps> = ({ onCancelAll }) => {
   const { t } = useTranslation(["option"])
-  const { state, cancelProcessing, cancelItem, minimize } = useIngestWizard()
+  const {
+    state,
+    cancelProcessing,
+    cancelItem,
+    checkStatus,
+    reconnect,
+    minimize,
+    updateQueueItems,
+    updateItemProgress,
+  } = useIngestWizard()
   const { processingState, queueItems } = state
   const tracking = useQuickIngestSessionStore((store) => store.session?.tracking)
   const [failedExportNotice, setFailedExportNotice] = useState<string | null>(null)
+  const [processingFilter, setProcessingFilter] = useState<ProcessingFilter>("all")
+  const [focusedProcessingIndex, setFocusedProcessingIndex] = useState(0)
+  const processingListRef = useRef<HTMLDivElement>(null)
+  const pendingProcessingFocusRef = useRef<number | null>(null)
 
   const qi = useCallback(
     (key: string, defaultValue: string, options?: Record<string, unknown>) =>
@@ -376,6 +420,95 @@ export const ProcessingStep: React.FC<ProcessingStepProps> = ({ onCancelAll }) =
     }
     return map
   }, [queueItems])
+
+  const lifecycleCounts = useMemo(() => {
+    const result: Record<LifecycleGroup, number> = {
+      active: 0,
+      attention: 0,
+      terminal: 0,
+    }
+    for (const progress of processingState.perItemProgress) {
+      result[lifecycleGroup(progress, queueItemMap.get(progress.id))] += 1
+    }
+    return result
+  }, [processingState.perItemProgress, queueItemMap])
+
+  const filteredProgress = useMemo(
+    () =>
+      processingState.perItemProgress.filter(
+        (progress) =>
+          processingFilter === "all" ||
+          lifecycleGroup(progress, queueItemMap.get(progress.id)) === processingFilter
+      ),
+    [processingFilter, processingState.perItemProgress, queueItemMap]
+  )
+  const usesVirtualProcessing =
+    processingState.perItemProgress.length >= LIST_VIRTUALIZATION_THRESHOLD
+
+  // TanStack Virtual exposes an imperative object that React Compiler skips.
+  // eslint-disable-next-line react-hooks/incompatible-library
+  const processingVirtualizer = useVirtualizer({
+    count: usesVirtualProcessing ? filteredProgress.length : 0,
+    getScrollElement: () => processingListRef.current,
+    estimateSize: () => 76,
+    overscan: 6,
+    getItemKey: (index) => filteredProgress[index]?.id ?? index,
+    measureElement: (element) => element?.getBoundingClientRect().height || 76,
+  })
+  const processingVirtualItems = processingVirtualizer.getVirtualItems()
+
+  const focusProcessingIndex = useCallback(
+    (requestedIndex: number) => {
+      if (filteredProgress.length === 0) return
+      const nextIndex = Math.max(
+        0,
+        Math.min(requestedIndex, filteredProgress.length - 1)
+      )
+      setFocusedProcessingIndex(nextIndex)
+      const row = processingListRef.current?.querySelector<HTMLElement>(
+        `[data-index="${nextIndex}"]`
+      )
+      if (row) {
+        pendingProcessingFocusRef.current = null
+        row.focus()
+        return
+      }
+      pendingProcessingFocusRef.current = nextIndex
+      processingVirtualizer.scrollToIndex(nextIndex)
+    },
+    [filteredProgress.length, processingVirtualizer]
+  )
+
+  useEffect(() => {
+    const pendingIndex = pendingProcessingFocusRef.current
+    if (pendingIndex == null) return
+    const row = processingListRef.current?.querySelector<HTMLElement>(
+      `[data-index="${pendingIndex}"]`
+    )
+    if (!row) return
+    pendingProcessingFocusRef.current = null
+    row.focus()
+  }, [processingVirtualItems])
+
+  useEffect(() => {
+    if (filteredProgress.length === 0) {
+      setFocusedProcessingIndex(0)
+      return
+    }
+    if (focusedProcessingIndex >= filteredProgress.length) {
+      setFocusedProcessingIndex(filteredProgress.length - 1)
+    }
+  }, [filteredProgress.length, focusedProcessingIndex])
+
+  const workerProgressMessage = useMemo(
+    () =>
+      processingState.perItemProgress.find(
+        (progress) =>
+          lifecycleGroup(progress, queueItemMap.get(progress.id)) === "active" &&
+          progress.currentStage
+      )?.currentStage || null,
+    [processingState.perItemProgress, queueItemMap]
+  )
 
   const trackingSummary = useMemo(() => {
     if (!tracking) return null
@@ -505,6 +638,209 @@ export const ProcessingStep: React.FC<ProcessingStepProps> = ({ onCancelAll }) =
     [cancelItem]
   )
 
+  const uploadFile = useCallback(
+    (id: string, file: File) => {
+      const validationError = validateQuickIngestFile(file)
+      const currentProgress = processingState.perItemProgress.find(
+        (progress) => progress.id === id
+      )
+      if (validationError) {
+        updateItemProgress({
+          id,
+          attempt: currentProgress?.attempt,
+          status: "queued",
+          lifecycleState: "awaiting_upload",
+          terminalOutcome: null,
+          progressPercent: currentProgress?.progressPercent ?? 0,
+          currentStage: validationError,
+          estimatedRemaining: currentProgress?.estimatedRemaining ?? 0,
+          error: validationError,
+          retryable: true,
+        })
+        return
+      }
+
+      const sessionId = String(tracking?.sessionId || "").trim()
+      const runId = String(tracking?.runId || "").trim()
+      if (!sessionId || !runId) return
+      void (async () => {
+        try {
+          const data = Array.from(
+            new Uint8Array(await readQuickIngestFileBytes(file))
+          )
+          const response = await submitQuickIngestBatch({
+            entries: [],
+            files: [
+              {
+                id,
+                name: file.name,
+                type: file.type || undefined,
+                data,
+              },
+            ],
+            storeRemote: state.presetConfig.storeRemote,
+            processOnly: !state.presetConfig.storeRemote,
+            common: state.presetConfig.common,
+            advancedValues: state.presetConfig.advancedValues,
+            pendingRunRequest: {
+              inputs: [
+                {
+                  inputKind: "file_stub",
+                  occurrenceId: id,
+                  attempt:
+                    Number.isSafeInteger(currentProgress?.attempt) &&
+                    Number(currentProgress?.attempt) > 0
+                      ? Number(currentProgress?.attempt)
+                      : 1,
+                  name: file.name,
+                  contentType: file.type || undefined,
+                  sizeBytes: file.size,
+                },
+              ],
+            },
+            __quickIngestSessionId: sessionId,
+            __quickIngestRunId: runId,
+          })
+          if (!response.accepted) {
+            throw new Error(
+              response.error || "The replacement file was not accepted."
+            )
+          }
+          updateItemProgress({
+            id,
+            attempt: currentProgress?.attempt,
+            status: "queued",
+            lifecycleState: "queued",
+            terminalOutcome: null,
+            progressPercent: currentProgress?.progressPercent ?? 0,
+            currentStage: qi("processing.status.queued", "Queued"),
+            estimatedRemaining: 0,
+            retryable: false,
+          })
+        } catch (error) {
+          updateItemProgress({
+            id,
+            attempt: currentProgress?.attempt,
+            status: "queued",
+            lifecycleState: "awaiting_upload",
+            terminalOutcome: null,
+            progressPercent: currentProgress?.progressPercent ?? 0,
+            currentStage:
+              error instanceof Error
+                ? error.message
+                : qi(
+                    "processing.status.fileUploadFailed",
+                    "Replacement file upload failed. Try again."
+                  ),
+            estimatedRemaining: 0,
+            error:
+              error instanceof Error
+                ? error.message
+                : "Replacement file upload failed.",
+            retryable: true,
+          })
+        }
+      })()
+    },
+    [
+      processingState.perItemProgress,
+      qi,
+      state.presetConfig,
+      tracking,
+      updateItemProgress,
+    ]
+  )
+
+  const handleReselectFile = useCallback(
+    (id: string, file: File) => {
+      if (validateQuickIngestFile(file)) {
+        uploadFile(id, file)
+        return
+      }
+      const currentProgress = processingState.perItemProgress.find(
+        (progress) => progress.id === id
+      )
+      updateQueueItems((items) =>
+        items.map((item) =>
+          item.id === id
+            ? {
+                ...item,
+                file,
+                fileName: file.name,
+                fileSize: file.size,
+                mimeType: file.type || undefined,
+                validation: { valid: true },
+              }
+            : item
+        )
+      )
+      updateItemProgress({
+        id,
+        attempt: currentProgress?.attempt,
+        status: "queued",
+        lifecycleState: "awaiting_upload",
+        terminalOutcome: null,
+        progressPercent: currentProgress?.progressPercent ?? 0,
+        currentStage: qi(
+          "processing.status.fileSelected",
+          "File selected. Ready to upload."
+        ),
+        estimatedRemaining: currentProgress?.estimatedRemaining ?? 0,
+        retryable: true,
+      })
+      uploadFile(id, file)
+    },
+    [
+      processingState.perItemProgress,
+      qi,
+      updateItemProgress,
+      updateQueueItems,
+      uploadFile,
+    ]
+  )
+
+  const handleRetryUpload = useCallback(
+    (id: string) => {
+      const file = queueItemMap.get(id)?.file
+      if (file) uploadFile(id, file)
+    },
+    [queueItemMap, uploadFile]
+  )
+
+  const handleProcessingRowKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLElement>, index: number) => {
+      let nextIndex: number | null = null
+      switch (event.key) {
+        case "ArrowDown":
+          nextIndex = index + 1
+          break
+        case "ArrowUp":
+          nextIndex = index - 1
+          break
+        case "Home":
+          nextIndex = 0
+          break
+        case "End":
+          nextIndex = filteredProgress.length - 1
+          break
+      }
+      if (nextIndex == null) return
+      event.preventDefault()
+      focusProcessingIndex(nextIndex)
+    },
+    [filteredProgress.length, focusProcessingIndex]
+  )
+
+  const handleProcessingFilterChange = useCallback(
+    (nextFilter: ProcessingFilter) => {
+      setProcessingFilter(nextFilter)
+      setFocusedProcessingIndex(0)
+      pendingProcessingFocusRef.current = 0
+      processingVirtualizer.scrollToIndex(0)
+    },
+    [processingVirtualizer]
+  )
+
   const handleExportFailedItems = useCallback(async () => {
     if (failedItems.length === 0) {
       setFailedExportNotice(
@@ -630,12 +966,9 @@ export const ProcessingStep: React.FC<ProcessingStepProps> = ({ onCancelAll }) =
                 "Processing content... This may take a few minutes for large files."
               )}
             </p>
-            <p className="mt-0.5 text-xs text-text-muted">
-              {qi(
-                "processing.banner.subtitle",
-                "Processing and indexing content"
-              )}
-            </p>
+            {workerProgressMessage && (
+              <p className="mt-0.5 text-xs text-text-muted">{workerProgressMessage}</p>
+            )}
           </div>
         </div>
       )}
@@ -661,23 +994,113 @@ export const ProcessingStep: React.FC<ProcessingStepProps> = ({ onCancelAll }) =
           </div>
         )}
 
-      {/* Item list */}
-      <div className="flex max-h-[50vh] flex-col gap-2 overflow-y-auto" role="list">
-        {processingState.perItemProgress.map((progress) => {
-          const queueItem = queueItemMap.get(progress.id)
-          if (!queueItem) return null
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="text-xs text-text-muted" htmlFor="quick-ingest-processing-filter">
+          {qi("processing.filter.label", "Show")}
+        </label>
+        <select
+          id="quick-ingest-processing-filter"
+          aria-label={qi("processing.filter.aria", "Filter processing items")}
+          className="rounded border border-border bg-surface px-2 py-1 text-xs text-text"
+          value={processingFilter}
+          onChange={(event) =>
+            handleProcessingFilterChange(event.target.value as ProcessingFilter)
+          }
+        >
+          <option value="all">
+            {qi("processing.filter.all", "All")} ({processingState.perItemProgress.length})
+          </option>
+          <option value="active">
+            {qi("processing.filter.active", "Active")} ({lifecycleCounts.active})
+          </option>
+          <option value="attention">
+            {qi("processing.filter.attention", "Needs attention")} ({lifecycleCounts.attention})
+          </option>
+          <option value="terminal">
+            {qi("processing.filter.terminal", "Terminal")} ({lifecycleCounts.terminal})
+          </option>
+        </select>
+      </div>
 
-          return (
-            <div key={progress.id} role="listitem">
-              <ItemRow
-                item={queueItem}
-                progress={progress}
-                qi={qi}
-                onCancel={handleCancelItem}
-              />
-            </div>
-          )
-        })}
+      {/* Item list */}
+      <div
+        ref={processingListRef}
+        className="max-h-[50vh] overflow-y-auto"
+        role="list"
+        aria-label={qi("processing.items.aria", "Processing items")}
+      >
+        {!usesVirtualProcessing && (
+          <div className="space-y-2">
+            {filteredProgress.map((progress, index) => {
+              const queueItem = queueItemMap.get(progress.id)
+              if (!queueItem) return null
+              const group = lifecycleGroup(progress, queueItem)
+              return (
+                <div
+                  key={progress.id}
+                  role="listitem"
+                  tabIndex={0}
+                  aria-setsize={filteredProgress.length}
+                  aria-posinset={index + 1}
+                  data-lifecycle-group={group}
+                  data-index={index}
+                >
+                  <ItemRow
+                    item={queueItem}
+                    progress={progress}
+                    qi={qi}
+                    onCancel={handleCancelItem}
+                    onCheckStatus={checkStatus}
+                    onReconnect={reconnect}
+                    onReselectFile={handleReselectFile}
+                    onRetryUpload={handleRetryUpload}
+                  />
+                </div>
+              )
+            })}
+          </div>
+        )}
+        {usesVirtualProcessing && <div
+          className="relative w-full"
+          style={{ height: processingVirtualizer.getTotalSize() }}
+        >
+          {processingVirtualItems.map((virtualRow) => {
+            const progress = filteredProgress[virtualRow.index]
+            const queueItem = progress ? queueItemMap.get(progress.id) : undefined
+            if (!progress || !queueItem) return null
+            const group = lifecycleGroup(progress, queueItem)
+
+            return (
+              <div
+                key={virtualRow.key}
+                ref={processingVirtualizer.measureElement}
+                role="listitem"
+                tabIndex={virtualRow.index === focusedProcessingIndex ? 0 : -1}
+                aria-setsize={filteredProgress.length}
+                aria-posinset={virtualRow.index + 1}
+                data-lifecycle-group={group}
+                data-index={virtualRow.index}
+                onFocus={() => setFocusedProcessingIndex(virtualRow.index)}
+                onKeyDown={(event) =>
+                  handleProcessingRowKeyDown(event, virtualRow.index)
+                }
+                className="absolute left-0 top-0 w-full pb-2"
+                style={{ transform: `translateY(${virtualRow.start}px)` }}
+              >
+                <ItemRow
+                  item={queueItem}
+                  progress={progress}
+                  qi={qi}
+                  onCancel={handleCancelItem}
+                  onCheckStatus={checkStatus}
+                  onReconnect={reconnect}
+                  onReselectFile={handleReselectFile}
+                  onRetryUpload={handleRetryUpload}
+                />
+              </div>
+            )
+          })}
+        </div>}
       </div>
 
       {/* Summary bar */}

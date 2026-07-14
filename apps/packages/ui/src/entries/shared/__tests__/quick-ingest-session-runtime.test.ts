@@ -343,6 +343,7 @@ describe("quick ingest session runtime", () => {
       jobs: [
         {
           jobId: 81,
+          attempt: 4,
           status: "running",
           sourceItemId: "occ-restored",
         },
@@ -377,6 +378,7 @@ describe("quick ingest session runtime", () => {
         runId: "run-restored",
         occurrenceId: "occ-restored",
         jobId: 81,
+        attempt: 4,
         status: "running",
         result: expect.objectContaining({
           id: "occ-restored",
@@ -613,6 +615,55 @@ describe("quick ingest session runtime", () => {
       expect.objectContaining({ runId: "run-delayed" }),
       "user_cancelled"
     )
+  })
+
+  it("rejects a stale cancellation generation before it can touch the current run", async () => {
+    vi.useFakeTimers()
+    const cancelRun = vi.fn().mockResolvedValue({ ok: true })
+    const runtime = createQuickIngestSessionRuntime({
+      run: vi.fn(),
+      emit: vi.fn(),
+      loadRunSessions: vi.fn().mockResolvedValue([
+        {
+          version: 1,
+          kind: "run",
+          sessionId: "session-cancel-generation",
+          runId: "run-cancel-generation",
+          generation: "generation-cancel-current-g2",
+          attemptToken: "attempt-cancel-generation",
+          submissionState: "acknowledged",
+          occurrenceIds: ["occ-cancel-generation"],
+          jobIdToItemId: {},
+          startedAt: 463,
+        },
+      ]),
+      saveRunSession: vi.fn(),
+      reattachRun: vi.fn().mockResolvedValue({
+        lifecycle: "processing",
+        jobs: [],
+        errorMessage: null,
+      }),
+      cancelRun,
+    } as any)
+
+    try {
+      await runtime.restore()
+      const response = await (runtime as any).cancel(
+        "session-cancel-generation",
+        "user_cancelled",
+        undefined,
+        "generation-cancel-stale-g1",
+      )
+
+      expect(response).toMatchObject({
+        ok: false,
+        error: expect.stringMatching(/generation|stale|superseded/i),
+      })
+      expect(cancelRun).not.toHaveBeenCalled()
+    } finally {
+      vi.clearAllTimers()
+      vi.useRealTimers()
+    }
   })
 
   it("includes occurrence results when an authoritative restore fails", async () => {
@@ -2236,5 +2287,1364 @@ describe("quick ingest session runtime", () => {
       "run-terminal-old",
       expect.any(String)
     )
+  })
+
+  it("preserves canonical lifecycle and progress evidence in restored progress events", async () => {
+    vi.useFakeTimers()
+    const record = {
+      version: 1,
+      kind: "run",
+      sessionId: "session-canonical-progress",
+      runId: "run-canonical-progress",
+      generation: "generation-canonical-progress",
+      attemptToken: "attempt-canonical-progress",
+      occurrenceIds: ["occ-canonical-progress"],
+      jobIdToItemId: { "71": "occ-canonical-progress" },
+      startedAt: Date.now(),
+    }
+    const emit = vi.fn()
+    const runtime = createQuickIngestSessionRuntime({
+      run: vi.fn(),
+      emit,
+      loadRunSessions: vi.fn().mockResolvedValue([record]),
+      saveRunSession: vi.fn(),
+      reattachRun: vi.fn().mockResolvedValue({
+        lifecycle: "processing",
+        jobs: [
+          {
+            jobId: 71,
+            status: "awaiting_upload",
+            lifecycleState: "awaiting_upload",
+            progressPercent: 23,
+            progressMessage: "Waiting for replacement file",
+            retryable: true,
+            sourceItemId: "occ-canonical-progress",
+          },
+        ],
+        errorMessage: null,
+      }),
+    } as any)
+
+    try {
+      await runtime.restore()
+
+      expect(emit).toHaveBeenCalledWith(
+        "tldw:quick-ingest/progress",
+        expect.objectContaining({
+          sessionId: "session-canonical-progress",
+          runId: "run-canonical-progress",
+          occurrenceId: "occ-canonical-progress",
+          lifecycleState: "awaiting_upload",
+          progressPercentage: 23,
+          progressMessage: "Waiting for replacement file",
+          retryable: true,
+        })
+      )
+    } finally {
+      vi.clearAllTimers()
+      vi.useRealTimers()
+    }
+  })
+
+  it("forwards occurrence-scoped cancellation to the restored run authority", async () => {
+    vi.useFakeTimers()
+    const record = {
+      version: 1,
+      kind: "run",
+      sessionId: "session-row-cancel",
+      runId: "run-row-cancel",
+      generation: "generation-row-cancel",
+      attemptToken: "attempt-row-cancel",
+      occurrenceIds: ["occ-row-cancel", "occ-other"],
+      jobIdToItemId: {},
+      startedAt: Date.now(),
+    }
+    const cancelRun = vi.fn().mockResolvedValue({ ok: true })
+    const runtime = createQuickIngestSessionRuntime({
+      run: vi.fn(),
+      emit: vi.fn(),
+      loadRunSessions: vi.fn().mockResolvedValue([record]),
+      saveRunSession: vi.fn(),
+      reattachRun: vi.fn().mockResolvedValue({
+        lifecycle: "processing",
+        jobs: [],
+        errorMessage: null,
+      }),
+      cancelRun,
+    } as any)
+
+    try {
+      await runtime.restore()
+      await (runtime.cancel as any)(
+        "session-row-cancel",
+        "user_cancelled",
+        ["occ-row-cancel"]
+      )
+
+      expect(cancelRun).toHaveBeenCalledWith(
+        expect.objectContaining({ runId: "run-row-cancel" }),
+        "user_cancelled",
+        ["occ-row-cancel"]
+      )
+    } finally {
+      vi.clearAllTimers()
+      vi.useRealTimers()
+    }
+  })
+
+  it("preserves canonical retry eligibility in terminal persistence and replay", async () => {
+    vi.useFakeTimers()
+    const record = {
+      version: 1,
+      kind: "run",
+      sessionId: "session-terminal-retryable",
+      runId: "run-terminal-retryable",
+      generation: "generation-terminal-retryable",
+      attemptToken: "attempt-terminal-retryable",
+      occurrenceIds: ["occ-terminal-retryable"],
+      jobIdToItemId: { "91": "occ-terminal-retryable" },
+      startedAt: Date.now(),
+    }
+    const emit = vi.fn()
+    const saveRunSession = vi.fn().mockResolvedValue(true)
+    const runtime = createQuickIngestSessionRuntime({
+      run: vi.fn(),
+      emit,
+      loadRunSessions: vi.fn().mockResolvedValue([record]),
+      saveRunSession,
+      reattachRun: vi.fn().mockResolvedValue({
+        lifecycle: "failed",
+        jobs: [
+          {
+            jobId: 91,
+            status: "failed",
+            sourceItemId: "occ-terminal-retryable",
+            lifecycleState: "terminal",
+            terminalOutcome: "processing_failed",
+            progressPercent: 100,
+            retryable: true,
+            error: "Temporary worker outage",
+          },
+        ],
+        errorMessage: "Temporary worker outage",
+      }),
+    } as any)
+
+    try {
+      await runtime.restore()
+
+      const terminalEmission = emit.mock.calls.find(
+        ([type]) => type === "tldw:quick-ingest/failed"
+      )
+      expect(terminalEmission?.[1]?.results).toEqual([
+        expect.objectContaining({
+          id: "occ-terminal-retryable",
+          retryable: true,
+        }),
+      ])
+
+      const replay = await runtime.replay("session-terminal-retryable")
+      expect((replay as any).event?.payload?.results).toEqual([
+        expect.objectContaining({
+          id: "occ-terminal-retryable",
+          retryable: true,
+        }),
+      ])
+      expect(saveRunSession).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "terminal" }),
+        "session-terminal-retryable",
+        "run-terminal-retryable",
+        "generation-terminal-retryable"
+      )
+    } finally {
+      vi.clearAllTimers()
+      vi.useRealTimers()
+    }
+  })
+
+  it("cancels one pre-run occurrence without cancelling or submitting its siblings", async () => {
+    let releasePreparation!: () => void
+    const preparationGate = new Promise<void>((resolve) => {
+      releasePreparation = resolve
+    })
+    let runContext: any
+    const submittedOccurrenceIds: string[] = []
+    const emit = vi.fn()
+    const runtime = createQuickIngestSessionRuntime({
+      run: vi.fn(async (payload: any, context: any) => {
+        runContext = context
+        await preparationGate
+        const inputs = payload.pendingRunRequest.inputs as Array<{
+          occurrenceId: string
+        }>
+        const isOccurrenceCancelled = context.isOccurrenceCancelled
+        for (const input of inputs) {
+          if (
+            typeof isOccurrenceCancelled === "function" &&
+            isOccurrenceCancelled(input.occurrenceId)
+          ) {
+            continue
+          }
+          submittedOccurrenceIds.push(input.occurrenceId)
+        }
+        return { results: [] }
+      }),
+      emit,
+      saveRunSession: vi.fn().mockResolvedValue(true),
+      createSessionId: () => "session-pre-run-row-cancel",
+    } as any)
+
+    const ack = await runtime.start({
+      pendingRunRequest: {
+        inputs: [
+          { occurrenceId: "occ-pre-run-cancel" },
+          { occurrenceId: "occ-pre-run-continue" },
+        ],
+      },
+    })
+    expect(ack.ok).toBe(true)
+    await vi.waitFor(() => expect(runContext).toBeTruthy())
+
+    const response = await (runtime.cancel as any)(
+      "session-pre-run-row-cancel",
+      "user_cancelled",
+      ["occ-pre-run-cancel"]
+    )
+    expect(response).toEqual({ ok: true })
+    expect(runContext.isCancelled()).toBe(false)
+    expect(runContext.isOccurrenceCancelled).toBeTypeOf("function")
+
+    releasePreparation()
+    await vi.waitFor(() =>
+      expect(submittedOccurrenceIds).toEqual(["occ-pre-run-continue"])
+    )
+    expect(
+      emit.mock.calls.some(
+        ([type]) => type === "tldw:quick-ingest/cancelled"
+      )
+    ).toBe(false)
+  })
+
+  it("re-arms a retained terminal session after an accepted retry instead of replaying its tombstone", async () => {
+    vi.useFakeTimers()
+    const retainedExpiresAt = Date.now() + 60_000
+    const terminalRecord = {
+      version: 1,
+      kind: "terminal",
+      sessionId: "session-extension-retry-rearm",
+      runId: "run-extension-retry-rearm",
+      generation: "generation-extension-retry-old",
+      attemptToken: "attempt-extension-retry-rearm",
+      expiresAt: retainedExpiresAt,
+      event: {
+        type: "tldw:quick-ingest/failed",
+        payload: {
+          sessionId: "session-extension-retry-rearm",
+          runId: "run-extension-retry-rearm",
+          results: [
+            {
+              id: "occ-extension-retry-rearm",
+              status: "error",
+              retryable: true,
+              error: "Temporary worker outage",
+            },
+          ],
+        },
+      },
+    }
+    const emit = vi.fn()
+    const callOrder: string[] = []
+    const saveRunSession = vi.fn(async (record: any) => {
+      callOrder.push(`save:${record.kind}`)
+      return true
+    })
+    const retryRun = vi.fn(async () => {
+      callOrder.push("retry")
+      return { ok: true }
+    })
+    const reattachRun = vi.fn().mockResolvedValue({
+      lifecycle: "processing",
+      jobs: [
+        {
+          jobId: 92,
+          status: "queued",
+          sourceItemId: "occ-extension-retry-rearm",
+          lifecycleState: "queued",
+          progressPercent: 0,
+          retryable: false,
+        },
+      ],
+      errorMessage: null,
+    })
+    const runtime = createQuickIngestSessionRuntime({
+      run: vi.fn(),
+      emit,
+      loadRunSessions: vi.fn().mockResolvedValue([terminalRecord]),
+      saveRunSession,
+      retryRun,
+      reattachRun,
+    } as any)
+
+    try {
+      await runtime.restore()
+      const retry = (runtime as any).retry
+      expect(retry).toBeTypeOf("function")
+      if (typeof retry !== "function") return
+
+      const response = await retry(
+        "session-extension-retry-rearm",
+        "run-extension-retry-rearm",
+        ["occ-extension-retry-rearm"]
+      )
+
+      expect(response).toMatchObject({
+        ok: true,
+        generation: expect.not.stringMatching(/old/),
+      })
+      expect(retryRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: "session-extension-retry-rearm",
+          runId: "run-extension-retry-rearm",
+        }),
+        ["occ-extension-retry-rearm"]
+      )
+      expect(saveRunSession).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          kind: "retrying",
+          sessionId: "session-extension-retry-rearm",
+          runId: "run-extension-retry-rearm",
+          generation: expect.not.stringMatching(/old/),
+        }),
+        "session-extension-retry-rearm",
+        "run-extension-retry-rearm",
+        "generation-extension-retry-old"
+      )
+      const reservedGeneration = saveRunSession.mock.calls[0]?.[0]?.generation
+      expect(saveRunSession.mock.calls[0]?.[0]?.expiresAt).toBeGreaterThan(
+        retainedExpiresAt,
+      )
+      expect(saveRunSession).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          kind: "run",
+          sessionId: "session-extension-retry-rearm",
+          runId: "run-extension-retry-rearm",
+          generation: reservedGeneration,
+        }),
+        "session-extension-retry-rearm",
+        "run-extension-retry-rearm",
+        reservedGeneration
+      )
+      expect(callOrder).toEqual(["save:retrying", "retry", "save:run"])
+      expect(reattachRun).toHaveBeenCalled()
+      expect(
+        emit.mock.calls.slice(0).some(
+          ([type, payload]) =>
+            type === "tldw:quick-ingest/failed" &&
+            payload?.error === "Temporary worker outage"
+        )
+      ).toBe(false)
+    } finally {
+      vi.clearAllTimers()
+      vi.useRealTimers()
+    }
+  })
+
+  it("allows only one concurrent retry caller to reserve authority and mutate the backend", async () => {
+    const terminalRecord = {
+      version: 1,
+      kind: "terminal",
+      sessionId: "session-extension-retry-concurrent",
+      runId: "run-extension-retry-concurrent",
+      generation: "generation-extension-retry-concurrent-old",
+      attemptToken: "attempt-extension-retry-concurrent",
+      expiresAt: Date.now() + 60_000,
+      event: {
+        type: "tldw:quick-ingest/failed",
+        payload: {
+          sessionId: "session-extension-retry-concurrent",
+          runId: "run-extension-retry-concurrent",
+          results: [
+            {
+              id: "occ-extension-retry-concurrent",
+              status: "error",
+              retryable: true,
+              error: "Retryable failure",
+            },
+          ],
+        },
+      },
+    }
+    let stored: any = terminalRecord
+    const saveRunSession = vi.fn(
+      async (record: any, _sessionId: string, _runId: string, expected: string) => {
+        if (stored.generation !== expected) return false
+        stored = record
+        return true
+      }
+    )
+    const retryRun = vi.fn().mockResolvedValue({ ok: true })
+    const runtime = createQuickIngestSessionRuntime({
+      run: vi.fn(),
+      emit: vi.fn(),
+      loadRunSessions: vi.fn(async () => [stored]),
+      saveRunSession,
+      retryRun,
+      reattachRun: vi.fn().mockResolvedValue({
+        lifecycle: "processing",
+        jobs: [],
+        errorMessage: null,
+      }),
+    } as any)
+
+    await runtime.restore()
+    const responses = await Promise.all([
+      (runtime as any).retry(
+        "session-extension-retry-concurrent",
+        "run-extension-retry-concurrent",
+        ["occ-extension-retry-concurrent"]
+      ),
+      (runtime as any).retry(
+        "session-extension-retry-concurrent",
+        "run-extension-retry-concurrent",
+        ["occ-extension-retry-concurrent"]
+      ),
+    ])
+
+    expect(retryRun).toHaveBeenCalledTimes(1)
+    expect(responses.filter((response) => response.ok)).toHaveLength(1)
+    expect(responses.filter((response) => !response.ok)).toEqual([
+      expect.objectContaining({
+        error: expect.stringMatching(/retry|reserved|superseded/i),
+      }),
+    ])
+  })
+
+  it("does not let restore promote a retry reservation while its live owner awaits the backend", async () => {
+    const terminalRecord = {
+      version: 1,
+      kind: "terminal",
+      sessionId: "session-extension-retry-staggered",
+      runId: "run-extension-retry-staggered",
+      generation: "generation-extension-retry-staggered-old",
+      attemptToken: "attempt-extension-retry-staggered",
+      expiresAt: Date.now() + 60_000,
+      event: {
+        type: "tldw:quick-ingest/failed",
+        payload: {
+          sessionId: "session-extension-retry-staggered",
+          runId: "run-extension-retry-staggered",
+          results: [
+            {
+              id: "occ-extension-retry-staggered",
+              status: "error",
+              retryable: true,
+              error: "Retryable failure",
+            },
+          ],
+        },
+      },
+    }
+    let stored: any = terminalRecord
+    let reservationSaved!: () => void
+    const reservationGate = new Promise<void>((resolve) => {
+      reservationSaved = resolve
+    })
+    const saveRunSession = vi.fn(
+      async (record: any, _sessionId: string, _runId: string, expected: string) => {
+        if (stored.generation !== expected) return false
+        stored = record
+        if (record?.kind === "retrying") reservationSaved()
+        return true
+      },
+    )
+    let releaseRetry!: () => void
+    const retryGate = new Promise<void>((resolve) => {
+      releaseRetry = resolve
+    })
+    const retryRun = vi.fn(async () => {
+      await retryGate
+      return { ok: true }
+    })
+    const reattachRun = vi.fn().mockResolvedValue({
+      lifecycle: "processing",
+      jobs: [],
+      errorMessage: null,
+    })
+    const runtime = createQuickIngestSessionRuntime({
+      run: vi.fn(),
+      emit: vi.fn(),
+      loadRunSessions: vi.fn(async () => [stored]),
+      saveRunSession,
+      retryRun,
+      reattachRun,
+    } as any)
+
+    await runtime.restore()
+    const first = (runtime as any).retry(
+      "session-extension-retry-staggered",
+      "run-extension-retry-staggered",
+      ["occ-extension-retry-staggered"],
+    )
+    await reservationGate
+    await vi.waitFor(() => expect(retryRun).toHaveBeenCalledTimes(1))
+
+    try {
+      const second = await (runtime as any).retry(
+        "session-extension-retry-staggered",
+        "run-extension-retry-staggered",
+        ["occ-extension-retry-staggered"],
+      )
+
+      expect(second).toMatchObject({
+        ok: false,
+        error: expect.stringMatching(/busy|reserved|retry.*progress|live owner/i),
+      })
+      expect(retryRun).toHaveBeenCalledTimes(1)
+      expect(reattachRun).not.toHaveBeenCalled()
+      expect(
+        saveRunSession.mock.calls.some(([record]) => record?.kind === "run"),
+      ).toBe(false)
+    } finally {
+      releaseRetry()
+      await first
+    }
+  })
+
+  it("restores a retryable terminal record in the reserved generation when the backend rejects retry", async () => {
+    const terminalRecord = {
+      version: 1,
+      kind: "terminal",
+      sessionId: "session-extension-retry-reject",
+      runId: "run-extension-retry-reject",
+      generation: "generation-extension-retry-reject-old",
+      attemptToken: "attempt-extension-retry-reject",
+      expiresAt: Date.now() + 60_000,
+      event: {
+        type: "tldw:quick-ingest/failed",
+        payload: {
+          sessionId: "session-extension-retry-reject",
+          runId: "run-extension-retry-reject",
+          results: [
+            {
+              id: "occ-extension-retry-reject",
+              status: "error",
+              retryable: true,
+              error: "Retryable failure",
+            },
+          ],
+        },
+      },
+    }
+    let stored: any = terminalRecord
+    const callOrder: string[] = []
+    const saveRunSession = vi.fn(
+      async (record: any, _sessionId: string, _runId: string, expected: string) => {
+        callOrder.push(`save:${record.kind}`)
+        if (stored.generation !== expected) return false
+        stored = record
+        return true
+      }
+    )
+    const retryRun = vi.fn(async () => {
+      callOrder.push("retry")
+      return { ok: false, error: "Backend rejected retry" }
+    })
+    const runtime = createQuickIngestSessionRuntime({
+      run: vi.fn(),
+      emit: vi.fn(),
+      loadRunSessions: vi.fn(async () => [stored]),
+      saveRunSession,
+      retryRun,
+      reattachRun: vi.fn(),
+    } as any)
+
+    await runtime.restore()
+    await expect(
+      (runtime as any).retry(
+        "session-extension-retry-reject",
+        "run-extension-retry-reject",
+        ["occ-extension-retry-reject"]
+      )
+    ).resolves.toMatchObject({ ok: false, error: "Backend rejected retry" })
+
+    expect(callOrder).toEqual(["save:retrying", "retry", "save:terminal"])
+    const reservedGeneration = saveRunSession.mock.calls[0]?.[0]?.generation
+    expect(stored).toMatchObject({
+      kind: "terminal",
+      generation: reservedGeneration,
+      event: {
+        payload: {
+          results: [
+            expect.objectContaining({
+              id: "occ-extension-retry-reject",
+              retryable: true,
+            }),
+          ],
+        },
+      },
+    })
+  })
+
+  it("keeps ambiguous retry authority reserved until staged occurrences are reconciled and resubmitted", async () => {
+    const terminalRecord = {
+      version: 1,
+      kind: "terminal",
+      sessionId: "session-extension-retry-ambiguous",
+      runId: "run-extension-retry-ambiguous",
+      generation: "generation-extension-retry-ambiguous-old",
+      attemptToken: "attempt-extension-retry-ambiguous",
+      expiresAt: Date.now() + 60_000,
+      event: {
+        type: "tldw:quick-ingest/failed",
+        payload: {
+          sessionId: "session-extension-retry-ambiguous",
+          runId: "run-extension-retry-ambiguous",
+          results: [
+            {
+              id: "occ-extension-retry-ambiguous",
+              status: "error",
+              retryable: true,
+              error: "Retryable failure",
+            },
+          ],
+        },
+      },
+    }
+    let stored: any = terminalRecord
+    const saveRunSession = vi.fn(
+      async (record: any, _sessionId: string, _runId: string, expected: string) => {
+        if (stored.generation !== expected) return false
+        stored = record
+        return true
+      },
+    )
+    const retryRun = vi.fn().mockResolvedValue({
+      ok: false,
+      indeterminate: true,
+      error: "Retry was accepted but its response timed out.",
+    })
+    const reattachRun = vi.fn().mockResolvedValue({
+      lifecycle: "processing",
+      jobs: [
+        {
+          jobId: 815,
+          status: "processing",
+          sourceItemId: "occ-extension-retry-ambiguous",
+          lifecycleState: "running",
+          progressPercent: 17,
+          retryable: false,
+        },
+      ],
+      errorMessage: null,
+    })
+    const runtime = createQuickIngestSessionRuntime({
+      run: vi.fn(),
+      emit: vi.fn(),
+      loadRunSessions: vi.fn(async () => [stored]),
+      saveRunSession,
+      retryRun,
+      reattachRun,
+    } as any)
+
+    await runtime.restore()
+    const first = await (runtime as any).retry(
+      "session-extension-retry-ambiguous",
+      "run-extension-retry-ambiguous",
+      ["occ-extension-retry-ambiguous"],
+    )
+    expect(first).toMatchObject({
+      ok: false,
+      indeterminate: true,
+      generation: expect.not.stringMatching(/old/),
+    })
+    expect(stored).toMatchObject({
+      kind: "retrying",
+      generation: first.generation,
+      occurrenceIds: ["occ-extension-retry-ambiguous"],
+    })
+    expect(reattachRun).not.toHaveBeenCalled()
+    expect(retryRun).toHaveBeenCalledTimes(1)
+  })
+
+  it("reconciles a restored retry reservation before promoting it to active polling", async () => {
+    let stored: any = {
+      version: 1,
+      kind: "retrying",
+      sessionId: "session-extension-retry-restore-reconcile",
+      runId: "run-extension-retry-restore-reconcile",
+      generation: "generation-extension-retry-restore-reconcile-g2",
+      attemptToken: "attempt-extension-retry-restore-reconcile",
+      occurrenceIds: ["occ-extension-retry-restore-reconcile"],
+      startedAt: Date.now(),
+      expiresAt: Date.now() + 60_000,
+      event: {
+        type: "tldw:quick-ingest/failed",
+        payload: {
+          sessionId: "session-extension-retry-restore-reconcile",
+          runId: "run-extension-retry-restore-reconcile",
+          results: [
+            {
+              id: "occ-extension-retry-restore-reconcile",
+              status: "error",
+              retryable: true,
+              error: "Retry response was lost",
+            },
+          ],
+        },
+      },
+    }
+    const saveRunSession = vi.fn(
+      async (record: any, _sessionId: string, _runId: string, expected: string) => {
+        if (stored.generation !== expected) return false
+        stored = record
+        return true
+      },
+    )
+    const retryRun = vi.fn().mockResolvedValue({ ok: true })
+    const reattachRun = vi.fn().mockResolvedValue({
+      lifecycle: "processing",
+      jobs: [
+        {
+          jobId: 816,
+          status: "queued",
+          sourceItemId: "occ-extension-retry-restore-reconcile",
+          lifecycleState: "queued",
+          progressPercent: 0,
+          retryable: false,
+        },
+      ],
+      errorMessage: null,
+    })
+    const runtime = createQuickIngestSessionRuntime({
+      run: vi.fn(),
+      emit: vi.fn(),
+      loadRunSessions: vi.fn(async () => [stored]),
+      saveRunSession,
+      retryRun,
+      reattachRun,
+    } as any)
+
+    await runtime.restore()
+
+    expect(retryRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "extension-runtime",
+        sessionId: "session-extension-retry-restore-reconcile",
+        runId: "run-extension-retry-restore-reconcile",
+        generation: "generation-extension-retry-restore-reconcile-g2",
+      }),
+      ["occ-extension-retry-restore-reconcile"],
+      { reconcileOnly: true },
+    )
+    expect(stored).toMatchObject({
+      kind: "run",
+      generation: "generation-extension-retry-restore-reconcile-g2",
+    })
+    expect(reattachRun).toHaveBeenCalledTimes(1)
+  })
+
+  it("returns pending g2 across repeated restore reconciliation without issuing a second backend retry", async () => {
+    let stored: any = {
+      version: 1,
+      kind: "retrying",
+      sessionId: "session-extension-retry-pending-reconcile",
+      runId: "run-extension-retry-pending-reconcile",
+      generation: "generation-extension-retry-pending-reconcile-g2",
+      attemptToken: "attempt-extension-retry-pending-reconcile",
+      occurrenceIds: ["occ-extension-retry-pending-reconcile"],
+      startedAt: Date.now(),
+      expiresAt: Date.now() + 60_000,
+      event: {
+        type: "tldw:quick-ingest/failed",
+        payload: {
+          sessionId: "session-extension-retry-pending-reconcile",
+          runId: "run-extension-retry-pending-reconcile",
+          results: [
+            {
+              id: "occ-extension-retry-pending-reconcile",
+              status: "error",
+              retryable: true,
+              error: "Retry response was lost",
+            },
+          ],
+        },
+      },
+    }
+    let authoritativeManifestAvailable = false
+    const retryRun = vi.fn(async (_tracking, _occurrenceIds, options) => {
+      expect(options).toEqual({ reconcileOnly: true })
+      return authoritativeManifestAvailable
+        ? { ok: true }
+        : {
+            ok: false,
+            indeterminate: true,
+            error: "Authoritative run manifest is temporarily unavailable.",
+          }
+    })
+    const saveRunSession = vi.fn(
+      async (record: any, _sessionId: string, _runId: string, expected: string) => {
+        if (stored.generation !== expected) return false
+        stored = record
+        return true
+      },
+    )
+    const reattachRun = vi.fn().mockResolvedValue({
+      lifecycle: "processing",
+      jobs: [
+        {
+          jobId: 817,
+          status: "queued",
+          sourceItemId: "occ-extension-retry-pending-reconcile",
+          lifecycleState: "queued",
+          progressPercent: 0,
+          retryable: false,
+        },
+      ],
+      errorMessage: null,
+    })
+    const runtime = createQuickIngestSessionRuntime({
+      run: vi.fn(),
+      emit: vi.fn(),
+      loadRunSessions: vi.fn(async () => [stored]),
+      saveRunSession,
+      retryRun,
+      reattachRun,
+    } as any)
+
+    await runtime.restore()
+    const pending = await runtime.retry(
+      "session-extension-retry-pending-reconcile",
+      "run-extension-retry-pending-reconcile",
+      ["occ-extension-retry-pending-reconcile"],
+    )
+
+    expect(pending).toMatchObject({
+      ok: false,
+      indeterminate: true,
+      generation: "generation-extension-retry-pending-reconcile-g2",
+    })
+    expect(stored).toMatchObject({
+      kind: "retrying",
+      generation: "generation-extension-retry-pending-reconcile-g2",
+    })
+    expect(reattachRun).not.toHaveBeenCalled()
+
+    authoritativeManifestAvailable = true
+    const reconciled = await runtime.retry(
+      "session-extension-retry-pending-reconcile",
+      "run-extension-retry-pending-reconcile",
+      ["occ-extension-retry-pending-reconcile"],
+    )
+
+    expect(reconciled).toEqual({
+      ok: true,
+      generation: "generation-extension-retry-pending-reconcile-g2",
+    })
+    expect(retryRun).toHaveBeenCalledTimes(3)
+    expect(
+      retryRun.mock.calls.every(([, , options]) => options?.reconcileOnly),
+    ).toBe(true)
+    expect(stored).toMatchObject({
+      kind: "run",
+      generation: "generation-extension-retry-pending-reconcile-g2",
+    })
+    expect(reattachRun).toHaveBeenCalledTimes(1)
+  })
+
+  it("reconciles newer active authority when an accepted retry loses its active-transition CAS", async () => {
+    const terminalRecord = {
+      version: 1,
+      kind: "terminal",
+      sessionId: "session-extension-retry-cas-loss",
+      runId: "run-extension-retry-cas-loss",
+      generation: "generation-extension-retry-cas-loss-old",
+      attemptToken: "attempt-extension-retry-cas-loss",
+      expiresAt: Date.now() + 60_000,
+      event: {
+        type: "tldw:quick-ingest/failed",
+        payload: {
+          sessionId: "session-extension-retry-cas-loss",
+          runId: "run-extension-retry-cas-loss",
+          results: [
+            {
+              id: "occ-extension-retry-cas-loss",
+              status: "error",
+              retryable: true,
+              error: "Retained failure",
+            },
+          ],
+        },
+      },
+    }
+    const newerActive = {
+      version: 1,
+      kind: "run",
+      sessionId: "session-extension-retry-cas-loss",
+      runId: "run-extension-retry-cas-loss",
+      generation: "generation-extension-retry-newer-authority",
+      attemptToken: "attempt-extension-retry-cas-loss",
+      submissionState: "acknowledged",
+      occurrenceIds: ["occ-extension-retry-cas-loss"],
+      jobIdToItemId: {},
+      startedAt: 777,
+    }
+    let stored: any = terminalRecord
+    let saveCalls = 0
+    const saveRunSession = vi.fn(async (record: any) => {
+      saveCalls += 1
+      if (saveCalls === 1) {
+        stored = record
+        return true
+      }
+      stored = newerActive
+      return false
+    })
+    const reattachRun = vi.fn().mockResolvedValue({
+      lifecycle: "processing",
+      jobs: [],
+      errorMessage: null,
+    })
+    const runtime = createQuickIngestSessionRuntime({
+      run: vi.fn(),
+      emit: vi.fn(),
+      loadRunSessions: vi.fn(async () => [stored]),
+      saveRunSession,
+      retryRun: vi.fn().mockResolvedValue({ ok: true }),
+      reattachRun,
+    } as any)
+
+    await runtime.restore()
+    await (runtime as any).retry(
+      "session-extension-retry-cas-loss",
+      "run-extension-retry-cas-loss",
+      ["occ-extension-retry-cas-loss"]
+    )
+
+    expect(reattachRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "session-extension-retry-cas-loss",
+        runId: "run-extension-retry-cas-loss",
+        startedAt: 777,
+      }),
+      { transportPreference: "poll" }
+    )
+    await expect(
+      runtime.replay("session-extension-retry-cas-loss")
+    ).resolves.toMatchObject({ ok: true, active: true })
+  })
+
+  it("keeps an accepted retry polling in memory when active persistence throws", async () => {
+    const terminalRecord = {
+      version: 1,
+      kind: "terminal",
+      sessionId: "session-extension-retry-persist-throw",
+      runId: "run-extension-retry-persist-throw",
+      generation: "generation-extension-retry-persist-throw-old",
+      attemptToken: "attempt-extension-retry-persist-throw",
+      expiresAt: Date.now() + 60_000,
+      event: {
+        type: "tldw:quick-ingest/failed",
+        payload: {
+          sessionId: "session-extension-retry-persist-throw",
+          runId: "run-extension-retry-persist-throw",
+          results: [
+            {
+              id: "occ-extension-retry-persist-throw",
+              status: "error",
+              retryable: true,
+              error: "Retryable failure",
+            },
+          ],
+        },
+      },
+    }
+    let saveCalls = 0
+    const saveRunSession = vi.fn(async () => {
+      saveCalls += 1
+      if (saveCalls === 1) return true
+      throw new Error("storage unavailable")
+    })
+    const reattachRun = vi.fn().mockResolvedValue({
+      lifecycle: "processing",
+      jobs: [
+        {
+          jobId: 814,
+          status: "processing",
+          sourceItemId: "occ-extension-retry-persist-throw",
+          lifecycleState: "running",
+          progressPercent: 43,
+          retryable: false,
+        },
+      ],
+      errorMessage: null,
+    })
+    const runtime = createQuickIngestSessionRuntime({
+      run: vi.fn(),
+      emit: vi.fn(),
+      loadRunSessions: vi.fn().mockResolvedValue([terminalRecord]),
+      saveRunSession,
+      retryRun: vi.fn().mockResolvedValue({ ok: true }),
+      reattachRun,
+    } as any)
+
+    await runtime.restore()
+    await expect(
+      (runtime as any).retry(
+        "session-extension-retry-persist-throw",
+        "run-extension-retry-persist-throw",
+        ["occ-extension-retry-persist-throw"]
+      )
+    ).resolves.toMatchObject({
+      ok: false,
+      generation: expect.not.stringMatching(/old/),
+      error: expect.stringMatching(/persist|recover|storage/i),
+    })
+
+    expect(reattachRun).toHaveBeenCalled()
+    await expect(
+      runtime.replay("session-extension-retry-persist-throw")
+    ).resolves.toMatchObject({ ok: true, active: true })
+  })
+
+  it("retries once after reconciliation proves a lost retry request never advanced the backend", async () => {
+    let stored: any = {
+      version: 1,
+      kind: "terminal",
+      sessionId: "session-extension-retry-lost-before-delivery",
+      runId: "run-extension-retry-lost-before-delivery",
+      generation: "generation-extension-retry-lost-before-delivery-g1",
+      attemptToken: "attempt-extension-retry-lost-before-delivery",
+      expiresAt: Date.now() + 60_000,
+      event: {
+        type: "tldw:quick-ingest/failed",
+        payload: {
+          sessionId: "session-extension-retry-lost-before-delivery",
+          runId: "run-extension-retry-lost-before-delivery",
+          results: [
+            {
+              id: "occ-extension-retry-lost-before-delivery",
+              status: "error",
+              retryable: true,
+              error: "Retryable failure",
+            },
+          ],
+        },
+      },
+    }
+    const saveRunSession = vi.fn(
+      async (record: any, _sessionId?: string, _runId?: string, expected?: string) => {
+        if (expected && stored?.generation !== expected) return false
+        stored = record
+        return true
+      },
+    )
+    let retryPosts = 0
+    let reconcileCalls = 0
+    let authoritativeSubmissions = 0
+    const retryRun = vi.fn(async (_tracking, _occurrenceIds, options) => {
+      if (options?.reconcileOnly) {
+        reconcileCalls += 1
+        return {
+          ok: false,
+          indeterminate: true,
+          notAdvanced: true,
+          error: "The selected URL has not advanced beyond attempt 1.",
+        }
+      }
+      retryPosts += 1
+      if (retryPosts === 1) {
+        return {
+          ok: false,
+          indeterminate: true,
+          notAdvanced: true,
+          error: "Retry request timed out before backend delivery.",
+        }
+      }
+      authoritativeSubmissions += 1
+      return { ok: true }
+    })
+    const reattachRun = vi.fn().mockResolvedValue({
+      lifecycle: "processing",
+      jobs: [
+        {
+          jobId: 940,
+          status: "queued",
+          sourceItemId: "occ-extension-retry-lost-before-delivery",
+          lifecycleState: "queued",
+          progressPercent: 0,
+          retryable: false,
+        },
+      ],
+      errorMessage: null,
+    })
+    const runtime = createQuickIngestSessionRuntime({
+      run: vi.fn(),
+      emit: vi.fn(),
+      loadRunSessions: vi.fn(async () => (stored ? [stored] : [])),
+      saveRunSession,
+      retryRun,
+      reattachRun,
+    } as any)
+
+    await runtime.restore()
+    const first = await runtime.retry(
+      "session-extension-retry-lost-before-delivery",
+      "run-extension-retry-lost-before-delivery",
+      ["occ-extension-retry-lost-before-delivery"],
+    )
+    expect(first).toMatchObject({
+      ok: false,
+      indeterminate: true,
+      generation: expect.not.stringMatching(/g1$/),
+    })
+
+    const second = await runtime.retry(
+      "session-extension-retry-lost-before-delivery",
+      "run-extension-retry-lost-before-delivery",
+      ["occ-extension-retry-lost-before-delivery"],
+    )
+
+    expect(second).toEqual({ ok: true, generation: first.generation })
+    expect(reconcileCalls).toBeGreaterThanOrEqual(1)
+    expect(retryPosts).toBe(2)
+    expect(authoritativeSubmissions).toBe(1)
+    expect(stored).toMatchObject({
+      kind: "run",
+      generation: first.generation,
+    })
+    expect(reattachRun).toHaveBeenCalledTimes(1)
+  })
+
+  it("routes pending retry occurrence cancellation through g2 and rejects stale g1 without mutation", async () => {
+    const terminalGeneration = "generation-extension-pending-cancel-g1"
+    let stored: any = {
+      version: 1,
+      kind: "terminal",
+      sessionId: "session-extension-pending-cancel",
+      runId: "run-extension-pending-cancel",
+      generation: terminalGeneration,
+      attemptToken: "attempt-extension-pending-cancel",
+      expiresAt: Date.now() + 60_000,
+      event: {
+        type: "tldw:quick-ingest/failed",
+        payload: {
+          sessionId: "session-extension-pending-cancel",
+          runId: "run-extension-pending-cancel",
+          results: [
+            {
+              id: "occ-extension-pending-cancel",
+              status: "error",
+              retryable: true,
+              error: "Retryable failure",
+            },
+          ],
+        },
+      },
+    }
+    const saveRunSession = vi.fn(
+      async (record: any, _sessionId?: string, _runId?: string, expected?: string) => {
+        if (expected && stored?.generation !== expected) return false
+        stored = record
+        return true
+      },
+    )
+    const retryRun = vi.fn(async (_tracking, _occurrenceIds, options) => ({
+      ok: false,
+      indeterminate: true,
+      ...(options?.reconcileOnly ? { notAdvanced: true } : {}),
+      error: "Retry authority is awaiting reconciliation.",
+    }))
+    const cancelRun = vi.fn().mockResolvedValue({ ok: true })
+    const runtime = createQuickIngestSessionRuntime({
+      run: vi.fn(),
+      emit: vi.fn(),
+      loadRunSessions: vi.fn(async () => [stored]),
+      saveRunSession,
+      retryRun,
+      cancelRun,
+    } as any)
+
+    await runtime.restore()
+    const retry = await runtime.retry(
+      "session-extension-pending-cancel",
+      "run-extension-pending-cancel",
+      ["occ-extension-pending-cancel"],
+    )
+    expect(retry).toMatchObject({
+      ok: false,
+      indeterminate: true,
+      generation: expect.not.stringMatching(/g1$/),
+    })
+
+    const stale = await runtime.cancel(
+      "session-extension-pending-cancel",
+      "user_cancelled",
+      ["occ-extension-pending-cancel"],
+      terminalGeneration,
+    )
+    expect(stale).toMatchObject({
+      ok: false,
+      generation: retry.generation,
+      error: expect.stringMatching(/generation|superseded/i),
+    })
+    expect(cancelRun).not.toHaveBeenCalled()
+
+    const current = await runtime.cancel(
+      "session-extension-pending-cancel",
+      "user_cancelled",
+      ["occ-extension-pending-cancel"],
+      retry.generation,
+    )
+
+    expect(current).toEqual({ ok: true })
+    expect(cancelRun).toHaveBeenCalledTimes(1)
+    expect(cancelRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "extension-runtime",
+        sessionId: "session-extension-pending-cancel",
+        runId: "run-extension-pending-cancel",
+        generation: retry.generation,
+      }),
+      "user_cancelled",
+      ["occ-extension-pending-cancel"],
+    )
+    expect(stored).toMatchObject({
+      kind: "retrying",
+      generation: retry.generation,
+      occurrenceIds: ["occ-extension-pending-cancel"],
+    })
+  })
+
+  it("routes pending g2 Cancel All without occurrence ids and retires its fence only at terminal authority", async () => {
+    const terminalGeneration = "generation-extension-pending-cancel-all-g1"
+    let stored: any = {
+      version: 1,
+      kind: "terminal",
+      sessionId: "session-extension-pending-cancel-all",
+      runId: "run-extension-pending-cancel-all",
+      generation: terminalGeneration,
+      attemptToken: "attempt-extension-pending-cancel-all",
+      expiresAt: Date.now() + 60_000,
+      event: {
+        type: "tldw:quick-ingest/failed",
+        payload: {
+          sessionId: "session-extension-pending-cancel-all",
+          runId: "run-extension-pending-cancel-all",
+          results: [
+            {
+              id: "occ-extension-pending-cancel-all",
+              status: "error",
+              retryable: true,
+              error: "Retryable failure",
+            },
+          ],
+        },
+      },
+    }
+    const saveRunSession = vi.fn(
+      async (record: any, _sessionId?: string, _runId?: string, expected?: string) => {
+        if (expected && stored?.generation !== expected) return false
+        stored = record
+        return true
+      },
+    )
+    const retryRun = vi.fn(async (_tracking, _occurrenceIds, options) => ({
+      ok: false,
+      indeterminate: true,
+      ...(options?.reconcileOnly ? { notAdvanced: true } : {}),
+      error: "Retry authority is awaiting reconciliation.",
+    }))
+    const cancelRun = vi.fn().mockResolvedValue({ ok: true })
+    const runtime = createQuickIngestSessionRuntime({
+      run: vi.fn(),
+      emit: vi.fn(),
+      loadRunSessions: vi.fn(async () => [stored]),
+      saveRunSession,
+      retryRun,
+      cancelRun,
+    } as any)
+
+    await runtime.restore()
+    const retry = await runtime.retry(
+      "session-extension-pending-cancel-all",
+      "run-extension-pending-cancel-all",
+      ["occ-extension-pending-cancel-all"],
+    )
+    expect(retry).toMatchObject({
+      ok: false,
+      indeterminate: true,
+      generation: expect.not.stringMatching(/g1$/),
+    })
+
+    const stale = await runtime.cancel(
+      "session-extension-pending-cancel-all",
+      "user_cancelled",
+      undefined,
+      terminalGeneration,
+    )
+    expect(stale).toMatchObject({
+      ok: false,
+      generation: retry.generation,
+      error: expect.stringMatching(/generation|superseded/i),
+    })
+    expect(cancelRun).not.toHaveBeenCalled()
+
+    const current = await runtime.cancel(
+      "session-extension-pending-cancel-all",
+      "user_cancelled",
+      undefined,
+      retry.generation,
+    )
+
+    expect(current).toEqual({ ok: true })
+    expect(cancelRun).toHaveBeenCalledTimes(1)
+    expect(cancelRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "extension-runtime",
+        sessionId: "session-extension-pending-cancel-all",
+        runId: "run-extension-pending-cancel-all",
+        generation: retry.generation,
+      }),
+      "user_cancelled",
+    )
+    expect(stored).toMatchObject({
+      kind: "retrying",
+      generation: retry.generation,
+      occurrenceIds: ["occ-extension-pending-cancel-all"],
+    })
+
+    stored = {
+      version: 1,
+      kind: "terminal",
+      sessionId: "session-extension-pending-cancel-all",
+      runId: "run-extension-pending-cancel-all",
+      generation: retry.generation,
+      attemptToken: "attempt-extension-pending-cancel-all",
+      expiresAt: Date.now() + 60_000,
+      event: {
+        type: "tldw:quick-ingest/cancelled",
+        payload: {
+          sessionId: "session-extension-pending-cancel-all",
+          runId: "run-extension-pending-cancel-all",
+          generation: retry.generation,
+          results: [],
+        },
+      },
+    }
+    await runtime.restore()
+
+    const afterTerminal = await runtime.cancel(
+      "session-extension-pending-cancel-all",
+      "user_cancelled",
+      undefined,
+      retry.generation,
+    )
+    expect(afterTerminal).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/not found|terminal/i),
+    })
+    expect(cancelRun).toHaveBeenCalledTimes(1)
   })
 })

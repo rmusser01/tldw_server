@@ -13,12 +13,16 @@ export type QuickIngestSessionStartAck = {
 
 export type QuickIngestSessionCancelResponse = {
   ok: boolean
+  generation?: string
+  indeterminate?: boolean
+  notAdvanced?: boolean
   error?: string
 }
 
 export type QuickIngestSessionRunContext = {
   sessionId: string
   isCancelled: () => boolean
+  isOccurrenceCancelled: (occurrenceId: string) => boolean
   registerAbortController: (controller: AbortController) => void
   setJobIds: (jobIds: number[]) => void
   setRunTracking: (tracking: PersistedQuickIngestTracking) => Promise<void>
@@ -64,6 +68,16 @@ export type QuickIngestCompactTerminalSession =
     event: QuickIngestRuntimeEvent
   }
 
+export type QuickIngestCompactRetryingSession =
+  QuickIngestCompactSessionBase & {
+    kind: "retrying"
+    runId: string
+    occurrenceIds: string[]
+    startedAt: number
+    expiresAt: number
+    event: QuickIngestRuntimeEvent
+  }
+
 export type QuickIngestCompactReviewSession =
   QuickIngestCompactSessionBase & {
     kind: "review"
@@ -74,6 +88,7 @@ export type QuickIngestCompactReviewSession =
 export type QuickIngestCompactRunSession =
   | QuickIngestCompactStartSession
   | QuickIngestCompactActiveRunSession
+  | QuickIngestCompactRetryingSession
   | QuickIngestCompactTerminalSession
   | QuickIngestCompactReviewSession
 
@@ -96,7 +111,13 @@ type RuntimeDeps = {
   ) => Promise<ReattachedQuickIngestSnapshot>
   cancelRun?: (
     tracking: PersistedQuickIngestTracking,
-    reason: string
+    reason: string,
+    occurrenceIds?: string[]
+  ) => Promise<QuickIngestSessionCancelResponse>
+  retryRun?: (
+    tracking: PersistedQuickIngestTracking,
+    occurrenceIds: string[],
+    options?: { reconcileOnly?: boolean }
   ) => Promise<QuickIngestSessionCancelResponse>
   createSessionId?: () => string
 }
@@ -108,6 +129,9 @@ type QuickIngestSession = {
   status: SessionStatus
   cancelled: boolean
   cancelRequested: boolean
+  cancelledOccurrenceIds: Set<string>
+  occurrenceIds: string[]
+  startedAt: number
   jobIds: number[]
   runRecord: QuickIngestCompactActiveRunSession | null
   runRecordPersisted: boolean
@@ -208,6 +232,9 @@ const compactTerminalResult = (value: unknown) => {
     ...(type ? { type } : {}),
     ...(data && Object.keys(data).length > 0 ? { data } : {}),
     ...(result.error ? { error: compactString(result.error) } : {}),
+    ...(typeof result.retryable === "boolean"
+      ? { retryable: result.retryable }
+      : {}),
   }
 }
 
@@ -225,6 +252,7 @@ const compactTerminalEvent = (
     return null
   }
   const rawResults = Array.isArray(payload.results) ? payload.results : []
+  const generation = compactString(payload.generation, MAX_COMPACT_ID_LENGTH)
   if (rawResults.length > MAX_COMPACT_OCCURRENCES) return null
   const results = rawResults.map(compactTerminalResult)
   if (results.some((result) => result === null)) return null
@@ -233,6 +261,7 @@ const compactTerminalEvent = (
     payload: {
       sessionId,
       runId,
+      ...(isCompactId(generation) ? { generation } : {}),
       results,
       ...(payload.error ? { error: compactString(payload.error) } : {}),
       ...(payload.reason ? { reason: compactString(payload.reason) } : {}),
@@ -257,6 +286,7 @@ const compactEssentialTerminalEvent = (
     return null
   }
   const rawResults = Array.isArray(payload.results) ? payload.results : []
+  const generation = compactString(payload.generation, MAX_COMPACT_ID_LENGTH)
   if (rawResults.length > MAX_COMPACT_OCCURRENCES) return null
   const results = rawResults.map((value) => {
     const compacted = compactTerminalResult(value)
@@ -269,12 +299,20 @@ const compactEssentialTerminalEvent = (
       id: compacted.id,
       ...(compacted.status ? { status: compacted.status } : {}),
       ...(outcome ? { data: { outcome } } : {}),
+      ...(typeof compacted.retryable === "boolean"
+        ? { retryable: compacted.retryable }
+        : {}),
     }
   })
   if (results.some((result) => result === null)) return null
   const compacted = {
     type: event.type,
-    payload: { sessionId, runId, results },
+    payload: {
+      sessionId,
+      runId,
+      ...(isCompactId(generation) ? { generation } : {}),
+      results,
+    },
   }
   return serializedByteLength(compacted) <= MAX_COMPACT_TERMINAL_BYTES
     ? compacted
@@ -504,6 +542,42 @@ export const parseQuickIngestCompactRunSession = (
   ) {
     return null
   }
+  if (kind === "retrying") {
+    if (
+      !isCompactId(candidate.runId) ||
+      !isCompactId(candidate.generation) ||
+      !persistedAttemptToken ||
+      typeof candidate.expiresAt !== "number" ||
+      !Number.isFinite(candidate.expiresAt) ||
+      candidate.expiresAt > Date.now() + TERMINAL_TOMBSTONE_TTL_MS + 1_000 ||
+      !candidate.event ||
+      typeof candidate.event !== "object" ||
+      Array.isArray(candidate.event)
+    ) {
+      return null
+    }
+    const event = compactTerminalEvent(
+      candidate.event as QuickIngestRuntimeEvent,
+      candidate.sessionId,
+      candidate.runId
+    )
+    if (!event) return null
+    const retrying: QuickIngestCompactRetryingSession = {
+      version: 1,
+      kind: "retrying",
+      sessionId: candidate.sessionId,
+      runId: candidate.runId,
+      generation: candidate.generation,
+      attemptToken: persistedAttemptToken,
+      occurrenceIds: [...occurrenceIds] as string[],
+      startedAt: candidate.startedAt,
+      expiresAt: candidate.expiresAt,
+      event,
+    }
+    return serializedByteLength(retrying) <= MAX_COMPACT_TERMINAL_BYTES
+      ? retrying
+      : null
+  }
   if (kind === "start") {
     if (
       !isCompactId(candidate.generation) ||
@@ -592,6 +666,7 @@ const trackingFromRecord = (
   mode: "extension-runtime",
   sessionId: record.sessionId,
   runId: String(record?.runId || "").trim(),
+  generation: record.generation,
   ...(record.submissionState
     ? { submissionState: record.submissionState }
     : {}),
@@ -668,6 +743,12 @@ export const createQuickIngestSessionRuntime = (deps: RuntimeDeps) => {
     string,
     { attemptToken: string; promise: Promise<QuickIngestSessionStartAck> }
   >()
+  const retryOwners = new Set<string>()
+  const pendingRetryReservations = new Map<
+    string,
+    QuickIngestCompactRetryingSession
+  >()
+  const retryReservationsReadyForPost = new Set<string>()
   const pollIntervalMs = 1_500
   let pollRunRecord: (
     record: QuickIngestCompactActiveRunSession
@@ -770,6 +851,9 @@ export const createQuickIngestSessionRuntime = (deps: RuntimeDeps) => {
         status: "running",
         cancelled: false,
         cancelRequested: false,
+        cancelledOccurrenceIds: new Set(),
+        occurrenceIds: [...record.occurrenceIds],
+        startedAt: record.startedAt,
         jobIds: Object.keys(record.jobIdToItemId)
           .map(Number)
           .filter((jobId) => Number.isSafeInteger(jobId) && jobId > 0),
@@ -830,9 +914,15 @@ export const createQuickIngestSessionRuntime = (deps: RuntimeDeps) => {
       await emitSessionEvent("tldw:quick-ingest/progress", {
         sessionId: record.sessionId,
         runId: record.runId,
+        generation: record.generation,
         occurrenceId: job.sourceItemId,
         jobId: job.jobId,
+        attempt: job.attempt,
         status: job.status,
+        lifecycleState: job.lifecycleState,
+        progressPercentage: job.progressPercent,
+        progressMessage: job.progressMessage,
+        retryable: job.retryable,
         result,
         error: terminalError,
       })
@@ -875,6 +965,7 @@ export const createQuickIngestSessionRuntime = (deps: RuntimeDeps) => {
         status: terminalError ? "error" : "ok",
         data: job.result,
         error: terminalError,
+        retryable: job.retryable,
       }
     })
     const eventType =
@@ -888,6 +979,7 @@ export const createQuickIngestSessionRuntime = (deps: RuntimeDeps) => {
       payload: {
         sessionId: record.sessionId,
         runId: record.runId,
+        generation: record.generation,
         ...(eventType === "tldw:quick-ingest/completed"
           ? { results }
           : eventType === "tldw:quick-ingest/cancelled"
@@ -1097,6 +1189,9 @@ export const createQuickIngestSessionRuntime = (deps: RuntimeDeps) => {
       status: "running",
       cancelled: false,
       cancelRequested: false,
+      cancelledOccurrenceIds: new Set(),
+      occurrenceIds: [...marker.occurrenceIds],
+      startedAt: marker.startedAt,
       jobIds: [],
       runRecord: null,
       runRecordPersisted: false,
@@ -1111,6 +1206,8 @@ export const createQuickIngestSessionRuntime = (deps: RuntimeDeps) => {
         const result = await deps.run(payload, {
           sessionId,
           isCancelled: () => session.cancelled || session.cancelRequested,
+          isOccurrenceCancelled: (occurrenceId: string) =>
+            session.cancelledOccurrenceIds.has(String(occurrenceId || "").trim()),
           registerAbortController: (controller: AbortController) => {
             session.abortControllers.add(controller)
           },
@@ -1192,6 +1289,7 @@ export const createQuickIngestSessionRuntime = (deps: RuntimeDeps) => {
           emitProgress: async (progressPayload: Record<string, unknown>) => {
             await emitSessionEvent("tldw:quick-ingest/progress", {
               sessionId,
+              generation: session.generation,
               ...progressPayload
             })
           }
@@ -1205,6 +1303,7 @@ export const createQuickIngestSessionRuntime = (deps: RuntimeDeps) => {
               type: "tldw:quick-ingest/review-required",
               payload: {
                 sessionId,
+                generation: session.generation,
                 reviewRequired: result.reviewRequired,
               },
             },
@@ -1271,6 +1370,7 @@ export const createQuickIngestSessionRuntime = (deps: RuntimeDeps) => {
         )
         await emitSessionEvent("tldw:quick-ingest/completed", {
           sessionId,
+          generation: session.generation,
           results: Array.isArray(result?.results) ? result.results : [],
           summary: result?.summary || {}
         })
@@ -1307,6 +1407,7 @@ export const createQuickIngestSessionRuntime = (deps: RuntimeDeps) => {
         )
         await emitSessionEvent("tldw:quick-ingest/failed", {
           sessionId,
+          generation: session.generation,
           error: error instanceof Error ? error.message : String(error || "Quick ingest failed.")
         })
       } finally {
@@ -1348,7 +1449,9 @@ export const createQuickIngestSessionRuntime = (deps: RuntimeDeps) => {
 
   const cancel = async (
     sessionId: string,
-    reason: string = "user_cancelled"
+    reason: string = "user_cancelled",
+    occurrenceIds?: string[],
+    expectedGeneration?: string,
   ): Promise<QuickIngestSessionCancelResponse> => {
     const normalizedSessionId = String(sessionId || "").trim()
     if (!normalizedSessionId) {
@@ -1359,39 +1462,115 @@ export const createQuickIngestSessionRuntime = (deps: RuntimeDeps) => {
       await restore()
     }
     const session = sessions.get(normalizedSessionId)
+    const pendingRetryReservation =
+      pendingRetryReservations.get(normalizedSessionId)
+    if (!session && pendingRetryReservation) {
+      const normalizedExpectedGeneration = compactString(
+        expectedGeneration,
+        MAX_COMPACT_ID_LENGTH,
+      )
+      if (
+        expectedGeneration !== undefined &&
+        (!isCompactId(normalizedExpectedGeneration) ||
+          normalizedExpectedGeneration !== pendingRetryReservation.generation)
+      ) {
+        return {
+          ok: false,
+          generation: pendingRetryReservation.generation,
+          error: "Quick ingest cancellation was superseded by a newer generation.",
+        }
+      }
+      const isOccurrenceScoped = occurrenceIds !== undefined
+      const scopedOccurrenceIds = normalizeIds(occurrenceIds)
+      if (
+        isOccurrenceScoped &&
+        (scopedOccurrenceIds.length === 0 ||
+          scopedOccurrenceIds.some(
+            (occurrenceId) =>
+              !pendingRetryReservation.occurrenceIds.includes(occurrenceId),
+          ))
+      ) {
+        return {
+          ok: false,
+          error: "Pending retry cancellation requires its selected occurrence scope.",
+        }
+      }
+      if (!deps.cancelRun) {
+        return { ok: false, error: "Run cancellation is unavailable." }
+      }
+      const activeRecord: QuickIngestCompactActiveRunSession = {
+        version: 1,
+        kind: "run",
+        sessionId: pendingRetryReservation.sessionId,
+        runId: pendingRetryReservation.runId,
+        generation: pendingRetryReservation.generation,
+        attemptToken: pendingRetryReservation.attemptToken,
+        submissionState: "acknowledged",
+        occurrenceIds: [...pendingRetryReservation.occurrenceIds],
+        jobIdToItemId: {},
+        startedAt: pendingRetryReservation.startedAt,
+      }
+      const tracking = trackingFromRecord(activeRecord)
+      const response = isOccurrenceScoped
+        ? await deps.cancelRun(tracking, reason, scopedOccurrenceIds)
+        : await deps.cancelRun(tracking, reason)
+      if (response.ok) {
+        retryReservationsReadyForPost.delete(normalizedSessionId)
+      }
+      return response
+    }
     if (!session) {
       return { ok: false, error: "Session not found." }
     }
-    if (session.cancelled || session.cancelRequested) {
+    const normalizedExpectedGeneration = compactString(
+      expectedGeneration,
+      MAX_COMPACT_ID_LENGTH,
+    )
+    if (
+      expectedGeneration !== undefined &&
+      (!isCompactId(normalizedExpectedGeneration) ||
+        normalizedExpectedGeneration !== session.generation)
+    ) {
+      return {
+        ok: false,
+        generation: session.generation,
+        error: "Quick ingest cancellation was superseded by a newer generation.",
+      }
+    }
+    const scopedOccurrenceIds = normalizeIds(occurrenceIds)
+    const isOccurrenceScoped = scopedOccurrenceIds.length > 0
+    if (session.cancelled || (!isOccurrenceScoped && session.cancelRequested)) {
       return { ok: true }
     }
 
     if (session.runRecord) {
-      session.cancelRequested = true
-      for (const controller of Array.from(session.abortControllers)) {
-        try {
-          controller.abort()
-        } catch {
-          // best effort
+      if (!isOccurrenceScoped) {
+        session.cancelRequested = true
+        for (const controller of Array.from(session.abortControllers)) {
+          try {
+            controller.abort()
+          } catch {
+            // best effort
+          }
         }
       }
       if (!deps.cancelRun) {
-        session.cancelRequested = false
+        if (!isOccurrenceScoped) session.cancelRequested = false
         scheduleRunPoll(session, session.runRecord)
         return { ok: false, error: "Run cancellation is unavailable." }
       }
       try {
-        const response = await deps.cancelRun(
-          trackingFromRecord(session.runRecord),
-          reason
-        )
+        const tracking = trackingFromRecord(session.runRecord)
+        const response = isOccurrenceScoped
+          ? await deps.cancelRun(tracking, reason, scopedOccurrenceIds)
+          : await deps.cancelRun(tracking, reason)
         if (!response.ok) {
-          session.cancelRequested = false
+          if (!isOccurrenceScoped) session.cancelRequested = false
           scheduleRunPoll(session, session.runRecord)
           return response
         }
       } catch (error) {
-        session.cancelRequested = false
+        if (!isOccurrenceScoped) session.cancelRequested = false
         scheduleRunPoll(session, session.runRecord)
         return {
           ok: false,
@@ -1406,6 +1585,47 @@ export const createQuickIngestSessionRuntime = (deps: RuntimeDeps) => {
         session.pollTimer = null
       }
       scheduleRunPoll(session, session.runRecord)
+      return { ok: true }
+    }
+
+    if (isOccurrenceScoped) {
+      for (const occurrenceId of scopedOccurrenceIds) {
+        session.cancelledOccurrenceIds.add(occurrenceId)
+      }
+      session.occurrenceIds = session.occurrenceIds.filter(
+        (occurrenceId) => !session.cancelledOccurrenceIds.has(occurrenceId)
+      )
+      const marker: QuickIngestCompactStartSession = {
+        version: 1,
+        kind: "start",
+        sessionId: normalizedSessionId,
+        generation: session.generation,
+        attemptToken: session.attemptToken,
+        occurrenceIds: [...session.occurrenceIds],
+        startedAt: session.startedAt,
+      }
+      try {
+        const applied = await deps.saveRunSession?.(
+          marker,
+          normalizedSessionId,
+          undefined,
+          session.generation
+        )
+        if (applied === false) {
+          return {
+            ok: false,
+            error: "Occurrence cancellation recovery was superseded.",
+          }
+        }
+      } catch (error) {
+        return {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Occurrence cancellation could not be persisted.",
+        }
+      }
       return { ok: true }
     }
 
@@ -1430,6 +1650,7 @@ export const createQuickIngestSessionRuntime = (deps: RuntimeDeps) => {
     }
     await emitSessionEvent("tldw:quick-ingest/cancelled", {
       sessionId: normalizedSessionId,
+      generation: session.generation,
       reason,
       jobIds: session.jobIds,
     })
@@ -1474,12 +1695,79 @@ export const createQuickIngestSessionRuntime = (deps: RuntimeDeps) => {
     for (const record of recordsBySession.values()) {
       try {
         if (record.kind === "terminal" || record.kind === "review") {
+          const pendingReservation = pendingRetryReservations.get(
+            record.sessionId
+          )
+          if (
+            !pendingReservation ||
+            pendingReservation.generation === record.generation
+          ) {
+            pendingRetryReservations.delete(record.sessionId)
+            retryReservationsReadyForPost.delete(record.sessionId)
+          }
           if (record.expiresAt <= Date.now()) {
             await cleanupExpiredReplay(record)
             continue
           }
           replayRecords.set(record.sessionId, record)
           lastEvents.set(record.sessionId, record.event)
+          continue
+        }
+        if (record.kind === "retrying") {
+          if (record.expiresAt <= Date.now()) {
+            pendingRetryReservations.delete(record.sessionId)
+            retryReservationsReadyForPost.delete(record.sessionId)
+            await deps.saveRunSession?.(
+              null,
+              record.sessionId,
+              record.runId,
+              record.generation
+            )
+            continue
+          }
+          pendingRetryReservations.set(record.sessionId, record)
+          if (retryOwners.has(`${record.sessionId}:${record.runId}`)) {
+            continue
+          }
+          const activeRecord: QuickIngestCompactActiveRunSession = {
+            version: 1,
+            kind: "run",
+            sessionId: record.sessionId,
+            runId: record.runId,
+            generation: record.generation,
+            attemptToken: record.attemptToken,
+            submissionState: "acknowledged",
+            occurrenceIds: [...record.occurrenceIds],
+            jobIdToItemId: {},
+            startedAt: record.startedAt,
+          }
+          if (!deps.retryRun) continue
+          const reconciled = await deps.retryRun(
+            trackingFromRecord(activeRecord),
+            record.occurrenceIds,
+            { reconcileOnly: true }
+          )
+          if (!reconciled.ok) {
+            if (reconciled.notAdvanced) {
+              retryReservationsReadyForPost.add(record.sessionId)
+            } else {
+              retryReservationsReadyForPost.delete(record.sessionId)
+            }
+            continue
+          }
+          retryReservationsReadyForPost.delete(record.sessionId)
+          const applied = await deps.saveRunSession?.(
+            activeRecord,
+            record.sessionId,
+            record.runId,
+            record.generation
+          )
+          if (applied === false) {
+            pendingRetryReservations.delete(record.sessionId)
+            continue
+          }
+          pendingRetryReservations.delete(record.sessionId)
+          if (deps.reattachRun) await pollRunRecord(activeRecord)
           continue
         }
         if (record.kind === "start") {
@@ -1492,6 +1780,9 @@ export const createQuickIngestSessionRuntime = (deps: RuntimeDeps) => {
             status: "running",
             cancelled: false,
             cancelRequested: false,
+            cancelledOccurrenceIds: new Set(),
+            occurrenceIds: [...record.occurrenceIds],
+            startedAt: record.startedAt,
             jobIds: [],
             runRecord: null,
             runRecordPersisted: true,
@@ -1517,9 +1808,9 @@ export const createQuickIngestSessionRuntime = (deps: RuntimeDeps) => {
           scheduleReplayCleanup(record)
           continue
         }
-        if (record.kind !== "run") continue
+        if (record.kind !== "run" && record.kind !== "retrying") continue
         const session = sessions.get(record.sessionId)
-        if (session) scheduleRunPoll(session, record)
+        if (session?.runRecord) scheduleRunPoll(session, session.runRecord)
       }
     }
   }
@@ -1531,6 +1822,394 @@ export const createQuickIngestSessionRuntime = (deps: RuntimeDeps) => {
     })
     restoreInFlight = pending
     return pending
+  }
+
+  const retry = async (
+    sessionId: string,
+    runId: string,
+    occurrenceIds: string[]
+  ): Promise<QuickIngestSessionCancelResponse> => {
+    const normalizedSessionId = compactString(sessionId, MAX_COMPACT_ID_LENGTH);
+    const normalizedRunId = compactString(runId, MAX_COMPACT_ID_LENGTH);
+    const requestedOccurrenceIds = normalizeIds(occurrenceIds);
+    if (
+      !isCompactId(normalizedSessionId) ||
+      !isCompactId(normalizedRunId) ||
+      requestedOccurrenceIds.length === 0
+    ) {
+      return { ok: false, error: "Quick ingest retry identity is invalid." };
+    }
+    if (!deps.retryRun) {
+      return { ok: false, error: "Run retry is unavailable." };
+    }
+    if (!deps.saveRunSession) {
+      return { ok: false, error: "Retry recovery storage is unavailable." };
+    }
+    const retryOwnerKey = `${normalizedSessionId}:${normalizedRunId}`;
+    const busyResponse = {
+      ok: false,
+      error: "Quick ingest retry is already in progress for this run.",
+    };
+    if (retryOwners.has(retryOwnerKey)) return busyResponse;
+    if (deps.loadRunSessions) await restore();
+    if (retryOwners.has(retryOwnerKey)) return busyResponse;
+    const restoredSession = sessions.get(normalizedSessionId)
+    if (
+      restoredSession?.status === "running" &&
+      restoredSession.runRecord?.runId === normalizedRunId
+    ) {
+      return { ok: true, generation: restoredSession.generation }
+    }
+    const pendingReservation = pendingRetryReservations.get(normalizedSessionId)
+    if (pendingReservation) {
+      const matchesRequest =
+        pendingReservation.runId === normalizedRunId &&
+        pendingReservation.occurrenceIds.length === requestedOccurrenceIds.length &&
+        pendingReservation.occurrenceIds.every(
+          (occurrenceId, index) => occurrenceId === requestedOccurrenceIds[index]
+        )
+      if (!matchesRequest) {
+        return {
+          ok: false,
+          generation: pendingReservation.generation,
+          error: "Retry authority is reserved for another request.",
+        }
+      }
+      if (!retryReservationsReadyForPost.has(normalizedSessionId)) {
+        return {
+          ok: false,
+          generation: pendingReservation.generation,
+          indeterminate: true,
+          error: "Retry reconciliation is waiting for an authoritative run manifest.",
+        }
+      }
+      retryOwners.add(retryOwnerKey)
+      retryReservationsReadyForPost.delete(normalizedSessionId)
+      try {
+        const activeRecord: QuickIngestCompactActiveRunSession = {
+          version: 1,
+          kind: "run",
+          sessionId: pendingReservation.sessionId,
+          runId: pendingReservation.runId,
+          generation: pendingReservation.generation,
+          attemptToken: pendingReservation.attemptToken,
+          submissionState: "acknowledged",
+          occurrenceIds: [...pendingReservation.occurrenceIds],
+          jobIdToItemId: {},
+          startedAt: pendingReservation.startedAt,
+        }
+        const retried = await deps.retryRun(
+          trackingFromRecord(activeRecord),
+          pendingReservation.occurrenceIds,
+        )
+        if (!retried.ok) {
+          if (retried.notAdvanced) {
+            retryReservationsReadyForPost.add(normalizedSessionId)
+          }
+          if (!retried.indeterminate) {
+            const terminalRecord: QuickIngestCompactTerminalSession = {
+              version: 1,
+              kind: "terminal",
+              sessionId: pendingReservation.sessionId,
+              runId: pendingReservation.runId,
+              generation: pendingReservation.generation,
+              attemptToken: pendingReservation.attemptToken,
+              expiresAt: pendingReservation.expiresAt,
+              event: pendingReservation.event,
+            }
+            const applied = await deps.saveRunSession(
+              terminalRecord,
+              normalizedSessionId,
+              normalizedRunId,
+              pendingReservation.generation,
+            )
+            if (applied !== false) {
+              pendingRetryReservations.delete(normalizedSessionId)
+              replayRecords.set(normalizedSessionId, terminalRecord)
+              lastEvents.set(normalizedSessionId, terminalRecord.event)
+            }
+          }
+          return { ...retried, generation: pendingReservation.generation }
+        }
+        const applied = await deps.saveRunSession(
+          activeRecord,
+          normalizedSessionId,
+          normalizedRunId,
+          pendingReservation.generation,
+        )
+        if (applied === false) {
+          return {
+            ok: false,
+            generation: pendingReservation.generation,
+            error: "Retry recovery was superseded; newer authority was reconciled.",
+          }
+        }
+        pendingRetryReservations.delete(normalizedSessionId)
+        const session: QuickIngestSession = {
+          sessionId: normalizedSessionId,
+          generation: pendingReservation.generation,
+          attemptToken: pendingReservation.attemptToken,
+          status: "running",
+          cancelled: false,
+          cancelRequested: false,
+          cancelledOccurrenceIds: new Set(),
+          occurrenceIds: [...pendingReservation.occurrenceIds],
+          startedAt: pendingReservation.startedAt,
+          jobIds: [],
+          runRecord: activeRecord,
+          runRecordPersisted: true,
+          runPersistenceRetryAt: 0,
+          abortControllers: new Set(),
+          pollTimer: null,
+        }
+        sessions.set(normalizedSessionId, session)
+        if (deps.reattachRun) await pollRunRecord(activeRecord)
+        return { ok: true, generation: pendingReservation.generation }
+      } finally {
+        retryOwners.delete(retryOwnerKey)
+      }
+    }
+    const retained = replayRecords.get(normalizedSessionId);
+    if (
+      !retained ||
+      retained.kind !== "terminal" ||
+      retained.runId !== normalizedRunId
+    ) {
+      return { ok: false, error: "Retryable terminal run was not found." };
+    }
+    const retainedResultIds = new Set(
+      (Array.isArray(retained.event.payload?.results)
+        ? retained.event.payload.results
+        : []
+      )
+        .map((result) =>
+          result && typeof result === "object" && !Array.isArray(result)
+            ? compactString(
+                (result as Record<string, unknown>).id,
+                MAX_COMPACT_ID_LENGTH,
+              )
+            : "",
+        )
+        .filter(isCompactId),
+    );
+    if (
+      requestedOccurrenceIds.some(
+        (occurrenceId) => !retainedResultIds.has(occurrenceId),
+      )
+    ) {
+      return {
+        ok: false,
+        error: "Retry occurrence is not part of the retained terminal run.",
+      };
+    }
+
+    retryOwners.add(retryOwnerKey);
+    try {
+      const generation = defaultGeneration();
+      const startedAt = Date.now();
+      const reservation: QuickIngestCompactRetryingSession = {
+        version: 1,
+        kind: "retrying",
+        sessionId: normalizedSessionId,
+        runId: normalizedRunId,
+        generation,
+        attemptToken: retained.attemptToken,
+        occurrenceIds: requestedOccurrenceIds,
+        startedAt,
+        expiresAt: Date.now() + TERMINAL_TOMBSTONE_TTL_MS,
+        event: retained.event,
+      };
+      let reserved: boolean | void;
+      try {
+        reserved = await deps.saveRunSession(
+          reservation,
+          normalizedSessionId,
+          normalizedRunId,
+          retained.generation,
+        );
+      } catch (error) {
+        return {
+          ok: false,
+          error:
+            error instanceof Error
+              ? `Retry reservation could not be persisted: ${error.message}`
+              : "Retry reservation could not be persisted.",
+        };
+      }
+      if (reserved === false) {
+        return {
+          ok: false,
+          error: "Retry authority is already reserved or was superseded.",
+        };
+      }
+      pendingRetryReservations.set(normalizedSessionId, reservation)
+
+      if (
+        replayRecords.get(normalizedSessionId)?.generation ===
+        retained.generation
+      ) {
+        replayRecords.delete(normalizedSessionId);
+        lastEvents.delete(normalizedSessionId);
+      }
+
+      const tracking: PersistedQuickIngestTracking = {
+        mode: "extension-runtime",
+        sessionId: normalizedSessionId,
+        runId: normalizedRunId,
+        generation,
+        submissionState: "acknowledged",
+        submissionOccurrenceIds: requestedOccurrenceIds,
+        submittedItemIds: requestedOccurrenceIds,
+        itemIds: requestedOccurrenceIds,
+        jobIds: [],
+        jobIdToItemId: {},
+        startedAt,
+      };
+      const rollbackReservation = async (): Promise<boolean> => {
+        const terminalRecord: QuickIngestCompactTerminalSession = {
+          ...retained,
+          generation,
+        };
+        try {
+          const applied = await deps.saveRunSession?.(
+            terminalRecord,
+            normalizedSessionId,
+            normalizedRunId,
+            generation,
+          );
+          if (applied === false) {
+            if (deps.loadRunSessions) await restore();
+            return false;
+          }
+          replayRecords.set(normalizedSessionId, terminalRecord);
+          lastEvents.set(normalizedSessionId, terminalRecord.event);
+          pendingRetryReservations.delete(normalizedSessionId);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      const activeRecord: QuickIngestCompactActiveRunSession = {
+        version: 1,
+        kind: "run",
+        sessionId: normalizedSessionId,
+        runId: normalizedRunId,
+        generation,
+        attemptToken: retained.attemptToken,
+        submissionState: "acknowledged",
+        occurrenceIds: requestedOccurrenceIds,
+        jobIdToItemId: {},
+        startedAt,
+      };
+      let retryResponse: QuickIngestSessionCancelResponse;
+      try {
+        retryResponse = await deps.retryRun(tracking, requestedOccurrenceIds);
+      } catch (error) {
+        await rollbackReservation();
+        return {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "The ingest run could not be retried.",
+        };
+      }
+      if (!retryResponse.ok) {
+        if (!retryResponse.indeterminate) {
+          await rollbackReservation();
+          return retryResponse;
+        }
+        if (retryResponse.notAdvanced) {
+          retryReservationsReadyForPost.add(normalizedSessionId)
+        }
+        return { ...retryResponse, generation };
+      }
+      try {
+        const applied = await deps.saveRunSession(
+          activeRecord,
+          normalizedSessionId,
+          normalizedRunId,
+          generation,
+        );
+        if (applied === false) {
+          pendingRetryReservations.delete(normalizedSessionId)
+          retryReservationsReadyForPost.delete(normalizedSessionId)
+          if (deps.loadRunSessions) await restore();
+          return {
+            ok: false,
+            error:
+              "Retry recovery was superseded; newer authority was reconciled.",
+          };
+        }
+      } catch (error) {
+        const session: QuickIngestSession = {
+          sessionId: normalizedSessionId,
+          generation,
+          attemptToken: retained.attemptToken,
+          status: "running",
+          cancelled: false,
+          cancelRequested: false,
+          cancelledOccurrenceIds: new Set(),
+          occurrenceIds: requestedOccurrenceIds,
+          startedAt,
+          jobIds: [],
+          runRecord: activeRecord,
+          runRecordPersisted: false,
+          runPersistenceRetryAt: 0,
+          abortControllers: new Set(),
+          pollTimer: null,
+        };
+        sessions.set(normalizedSessionId, session);
+        if (deps.reattachRun) {
+          try {
+            await pollRunRecord(activeRecord);
+          } catch {
+            scheduleRunPoll(session, activeRecord);
+          }
+        }
+        return {
+          ok: false,
+          generation,
+          error:
+            error instanceof Error
+              ? `Retry recovery could not be persisted: ${error.message}. Live polling remains active.`
+              : "Retry recovery could not be persisted. Live polling remains active.",
+        };
+      }
+
+      pendingRetryReservations.delete(normalizedSessionId)
+      retryReservationsReadyForPost.delete(normalizedSessionId)
+      const session: QuickIngestSession = {
+        sessionId: normalizedSessionId,
+        generation,
+        attemptToken: retained.attemptToken,
+        status: "running",
+        cancelled: false,
+        cancelRequested: false,
+        cancelledOccurrenceIds: new Set(),
+        occurrenceIds: requestedOccurrenceIds,
+        startedAt,
+        jobIds: [],
+        runRecord: activeRecord,
+        runRecordPersisted: true,
+        runPersistenceRetryAt: 0,
+        abortControllers: new Set(),
+        pollTimer: null,
+      };
+      sessions.set(normalizedSessionId, session);
+      replayRecords.delete(normalizedSessionId);
+      lastEvents.delete(normalizedSessionId);
+      if (deps.reattachRun) {
+        try {
+          await pollRunRecord(activeRecord);
+        } catch {
+          scheduleRunPoll(session, activeRecord);
+        }
+      }
+      return { ok: true, generation };
+    } finally {
+      retryOwners.delete(retryOwnerKey);
+    }
   }
 
   const replay = async (sessionId: string) => {
@@ -1614,6 +2293,7 @@ export const createQuickIngestSessionRuntime = (deps: RuntimeDeps) => {
   return {
     start,
     cancel,
+    retry,
     restore,
     replay,
     acknowledgeReplay,

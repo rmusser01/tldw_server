@@ -1,7 +1,7 @@
 import React from "react"
 import { existsSync, readFileSync } from "node:fs"
 import path from "node:path"
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { afterEach, describe, it, expect, vi, beforeEach } from "vitest"
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
@@ -17,6 +17,27 @@ const getProvidersStatusMock = vi.hoisted(() =>
 
 const capabilityMocks = vi.hoisted(() => ({
   useServerCapabilities: vi.fn(),
+}))
+
+const lifecycleMocks = vi.hoisted(() => ({
+  cancelQuickIngestSession: vi.fn(),
+  queryQuickIngestSession: vi.fn(),
+  reattachQuickIngestSession: vi.fn(),
+  retryQuickIngestSession: vi.fn(),
+  retryRunItems: vi.fn(),
+  submitQuickIngestBatch: vi.fn(),
+}))
+
+const transportMocks = vi.hoisted(() => ({
+  bgRequest: vi.fn(),
+}))
+
+const runtimeMocks = vi.hoisted(() => ({
+  listeners: [] as Array<(message: any) => void>,
+}))
+
+const virtualizerMocks = vi.hoisted(() => ({
+  latestOptions: null as any,
 }))
 
 // react-i18next
@@ -276,7 +297,8 @@ vi.mock("antd", () => ({
 }))
 
 // lucide-react — render simple spans with the icon name for testability
-vi.mock("lucide-react", () => {
+vi.mock("lucide-react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("lucide-react")>()
   const iconNames = [
     "ArrowLeft",
     "ArrowRight",
@@ -309,7 +331,7 @@ vi.mock("lucide-react", () => {
     "Search",
     "Download",
   ]
-  const mocks: Record<string, any> = {}
+  const mocks: Record<string, any> = { ...actual }
   for (const name of iconNames) {
     mocks[name] = (props: any) => (
       <span
@@ -326,12 +348,22 @@ vi.mock("wxt/browser", () => ({
   browser: {
     runtime: {
       onMessage: {
-        addListener: vi.fn(),
-        removeListener: vi.fn(),
+        addListener: (listener: (message: any) => void) => {
+          runtimeMocks.listeners.push(listener)
+        },
+        removeListener: (listener: (message: any) => void) => {
+          const index = runtimeMocks.listeners.indexOf(listener)
+          if (index >= 0) runtimeMocks.listeners.splice(index, 1)
+        },
       },
     },
   },
 }))
+
+vi.mock("react-router-dom", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react-router-dom")>()
+  return { ...actual, useNavigate: () => vi.fn() }
+})
 
 // SSE hook — no-op
 vi.mock("@/components/Common/QuickIngest/useIngestSSE", () => ({
@@ -340,7 +372,9 @@ vi.mock("@/components/Common/QuickIngest/useIngestSSE", () => ({
 }))
 
 vi.mock("@tanstack/react-virtual", () => ({
-  useVirtualizer: ({ count, getItemKey }: any) => {
+  useVirtualizer: (options: any) => {
+    virtualizerMocks.latestOptions = options
+    const { count, getItemKey } = options
     const [start, setStart] = React.useState(0)
     const mountedCount = Math.min(count, 12)
     const boundedStart = Math.min(start, Math.max(0, count - mountedCount))
@@ -392,6 +426,10 @@ vi.mock(
         </div>
       )
     },
+    validateQuickIngestFile: (file: File) =>
+      file.name === "invalid-replacement.bin"
+        ? "Unsupported replacement file"
+        : null,
     default: function MockFileDropZone({ onFilesAdded, autoFocus }: any) {
       const ref = React.useRef<HTMLDivElement>(null)
       React.useEffect(() => {
@@ -422,14 +460,25 @@ vi.mock(
 
 // background-proxy
 vi.mock("@/services/background-proxy", () => ({
-  bgRequest: vi.fn().mockResolvedValue({}),
+  bgRequest: transportMocks.bgRequest,
 }))
 
 vi.mock("@/services/tldw/quick-ingest-batch", () => ({
-  cancelQuickIngestSession: vi.fn().mockResolvedValue({ ok: true }),
+  cancelQuickIngestSession: lifecycleMocks.cancelQuickIngestSession,
+  queryQuickIngestSession: lifecycleMocks.queryQuickIngestSession,
+  retryQuickIngestSession: lifecycleMocks.retryQuickIngestSession,
   startQuickIngestSession: vi.fn().mockResolvedValue({ ok: true, sessionId: "qi-test" }),
-  submitQuickIngestBatch: vi.fn().mockResolvedValue({ ok: true, results: [] }),
+  submitQuickIngestBatch: lifecycleMocks.submitQuickIngestBatch,
 }))
+
+vi.mock("@/services/tldw/quick-ingest-session-reattach", () => ({
+  reattachQuickIngestSession: lifecycleMocks.reattachQuickIngestSession,
+}))
+
+vi.mock("@/services/tldw/playlist-ingest", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/tldw/playlist-ingest")>()
+  return { ...actual, retryRunItems: lifecycleMocks.retryRunItems }
+})
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
@@ -451,6 +500,8 @@ vi.mock("@/components/Common/QuickIngest/FloatingProgressWidget", () => ({
 let uuidCounter = 0
 beforeEach(() => {
   uuidCounter = 0
+  runtimeMocks.listeners.splice(0)
+  virtualizerMocks.latestOptions = null
   getTranscriptionModelsMock.mockReset().mockResolvedValue({ all_models: [] })
   getProvidersStatusMock.mockReset().mockResolvedValue({
     providers: [],
@@ -461,6 +512,34 @@ beforeEach(() => {
     capabilities: { ffmpegAvailable: true },
     loading: false,
   })
+  lifecycleMocks.cancelQuickIngestSession.mockReset().mockResolvedValue({ ok: true })
+  lifecycleMocks.queryQuickIngestSession.mockReset().mockResolvedValue({
+    ok: true,
+    active: true,
+    event: null,
+  })
+  lifecycleMocks.retryQuickIngestSession.mockReset().mockResolvedValue({ ok: true })
+  lifecycleMocks.submitQuickIngestBatch.mockReset().mockResolvedValue({
+    ok: true,
+    accepted: true,
+    runId: "run-file-resume",
+  })
+  transportMocks.bgRequest.mockReset().mockResolvedValue({})
+  lifecycleMocks.retryRunItems.mockReset().mockResolvedValue({
+    contractVersion: 2,
+    runId: "run-lifecycle",
+    version: 2,
+    processingOccurrences: [],
+  })
+  lifecycleMocks.reattachQuickIngestSession.mockReset().mockResolvedValue({
+    lifecycle: "processing",
+    jobs: [],
+    errorMessage: null,
+  })
+})
+
+afterEach(() => {
+  vi.useRealTimers()
 })
 vi.stubGlobal(
   "crypto",
@@ -482,12 +561,17 @@ import { WizardConfigureStep } from "@/components/Common/QuickIngest/WizardConfi
 import { ReviewStep } from "@/components/Common/QuickIngest/ReviewStep"
 import { ProcessingStep } from "@/components/Common/QuickIngest/ProcessingStep"
 import { WizardResultsStep } from "@/components/Common/QuickIngest/WizardResultsStep"
+import { QuickIngestWizardModal } from "@/components/Common/QuickIngestWizardModal"
 import { useQuickIngestSessionStore } from "@/store/quick-ingest-session"
 import { resolvePresetMap } from "@/components/Common/QuickIngest/presets"
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+const emitRuntimeMessage = (message: any) => {
+  for (const listener of [...runtimeMocks.listeners]) listener(message)
+}
 
 /**
  * ContextSpy renders nothing but captures the wizard context reference
@@ -582,6 +666,10 @@ const WizardTestHarness: React.FC<{
   isCheckingConnection?: boolean
   onRetryConnection?: () => void
   onQuickProcess?: () => void
+  onCancelProcessing?: () => boolean
+  onCancelItem?: (id: string) => boolean
+  onCheckStatus?: (id: string) => void
+  onReconnect?: () => void
   initialState?: Partial<IngestWizardState>
   analysisProviderWarning?: string | null
   focusAnalysisProvider?: boolean
@@ -592,12 +680,22 @@ const WizardTestHarness: React.FC<{
   isCheckingConnection,
   onRetryConnection,
   onQuickProcess,
+  onCancelProcessing,
+  onCancelItem,
+  onCheckStatus,
+  onReconnect,
   initialState,
   analysisProviderWarning,
   focusAnalysisProvider,
 }) => {
   return (
-    <IngestWizardProvider initialState={initialState}>
+    <IngestWizardProvider
+      initialState={initialState}
+      onCancelProcessing={onCancelProcessing}
+      onCancelItem={onCancelItem}
+      onCheckStatus={onCheckStatus}
+      onReconnect={onReconnect}
+    >
       <ContextSpy />
       <InnerWizardContent
         onClose={onClose}
@@ -2100,6 +2198,973 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
         value: originalClipboard,
       })
     }
+  })
+
+  it("Step 4 — renders authoritative lifecycle evidence without fabricated stages", async () => {
+    const onCheckStatus = vi.fn()
+    const onReconnect = vi.fn()
+    const lifecycleStates = [
+      ["upload-ready", "Upload ready", "awaiting_upload"],
+      ["file-missing", "Missing file", "awaiting_upload"],
+      ["submit-pending", "Pending submit", "submit_pending"],
+      ["queued", "Queued talk", "queued"],
+      ["running", "Running talk", "running"],
+      ["cancel-requested", "Cancelling talk", "cancellation_requested"],
+      ["status-unavailable", "Offline talk", "status_unavailable"],
+      ["terminal", "Finished talk", "terminal"],
+    ] as const
+    const queueItems = lifecycleStates.map(([id, title], index) => ({
+      id,
+      kind: id.includes("file") || id === "upload-ready" ? "file" : "url",
+      ...(id.includes("file") || id === "upload-ready"
+        ? {
+            fileName: `${id}.mp4`,
+            sourceRef: { kind: "file_stub", occurrenceId: id },
+            ...(id === "upload-ready"
+              ? { file: new File(["video"], `${id}.mp4`, { type: "video/mp4" }) }
+              : {}),
+          }
+        : {
+            url: `https://example.com/${id}`,
+            sourceRef: {
+              kind: "direct_url",
+              occurrenceId: id,
+              url: `https://example.com/${id}`,
+            },
+          }),
+      detectedType: "video",
+      icon: "Film",
+      fileSize: 5,
+      validation: { valid: true },
+      playlist: { title, ordinal: index + 1 },
+    })) as any
+    const perItemProgress = lifecycleStates.map(([id, , lifecycleState]) => ({
+      id,
+      status: "processing",
+      lifecycleState,
+      terminalOutcome: lifecycleState === "terminal" ? "completed" : null,
+      progressPercent: lifecycleState === "running" ? 37 : 0,
+      currentStage:
+        lifecycleState === "running" ? "Downloading source" : lifecycleState,
+      estimatedRemaining: 0,
+      retryable: lifecycleState === "status_unavailable",
+    })) as any
+
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        onCheckStatus={onCheckStatus}
+        onReconnect={onReconnect}
+        initialState={{
+          currentStep: 4,
+          highestStep: 4,
+          queueItems,
+          processingState: {
+            status: "running",
+            elapsed: 12,
+            estimatedRemaining: 0,
+            perItemProgress,
+          },
+        }}
+      />
+    )
+
+    expect(screen.getByText("Awaiting upload")).toBeInTheDocument()
+    expect(screen.getByText("File reattach required")).toBeInTheDocument()
+    expect(screen.getByText("Submit pending")).toBeInTheDocument()
+    expect(screen.getByText("Queued")).toBeInTheDocument()
+    expect(screen.getByText("Running")).toBeInTheDocument()
+    expect(screen.getByText("Cancellation requested")).toBeInTheDocument()
+    expect(screen.getByText("Status unavailable")).toBeInTheDocument()
+    expect(screen.getByText("Completed")).toBeInTheDocument()
+    expect(screen.getByText("5. Running talk")).toBeInTheDocument()
+    expect(screen.getByText("Downloading source")).toBeInTheDocument()
+    expect(screen.queryByText("Analyze")).not.toBeInTheDocument()
+    expect(screen.queryByText("Store")).not.toBeInTheDocument()
+    expect(virtualizerMocks.latestOptions?.count).toBe(0)
+
+    await userEvent.click(screen.getByRole("button", { name: "Check again" }))
+    expect(onCheckStatus).toHaveBeenCalledWith("status-unavailable")
+    await userEvent.click(screen.getByRole("button", { name: "Reconnect" }))
+    expect(onReconnect).toHaveBeenCalledTimes(1)
+  })
+
+  it("Step 4 — reselects a missing local file without changing occurrence authority", async () => {
+    const sourceRef = {
+      kind: "file_stub" as const,
+      occurrenceId: "occ-missing-file",
+    }
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        initialState={{
+          currentStep: 4,
+          highestStep: 4,
+          queueItems: [
+            {
+              id: "occ-missing-file",
+              kind: "file",
+              fileName: "missing-recording.mp4",
+              sourceRef,
+              detectedType: "video",
+              icon: "Film",
+              fileSize: 10,
+              validation: { valid: true },
+              playlist: { title: "Missing recording", ordinal: 4 },
+            },
+          ] as any,
+          processingState: {
+            status: "running",
+            elapsed: 5,
+            estimatedRemaining: 0,
+            perItemProgress: [
+              {
+                id: "occ-missing-file",
+                status: "queued",
+                lifecycleState: "awaiting_upload",
+                terminalOutcome: null,
+                progressPercent: 0,
+                currentStage: "File reattach required",
+                estimatedRemaining: 0,
+                retryable: true,
+              },
+            ],
+          },
+        }}
+      />
+    )
+
+    const replacement = new File(["replacement"], "replacement.mp4", {
+      type: "video/mp4",
+    })
+    expect(
+      screen.getByRole("button", {
+        name: "Reselect file for 4. Missing recording",
+      })
+    ).toBeInTheDocument()
+    fireEvent.change(
+      screen.getByLabelText("Replacement file for 4. Missing recording"),
+      { target: { files: [replacement] } }
+    )
+
+    await waitFor(() => {
+      expect(ctxRef?.state.queueItems[0]).toMatchObject({
+        id: "occ-missing-file",
+        fileName: "replacement.mp4",
+        sourceRef,
+        validation: { valid: true },
+      })
+      expect(ctxRef?.state.queueItems[0]?.file).toBe(replacement)
+    })
+  })
+
+  it("Step 4 — resumes the same awaiting-upload occurrence in its existing run after file reselection", async () => {
+    useQuickIngestSessionStore.getState().upsertSession({
+      lifecycle: "processing",
+      currentStep: 4,
+      queueItems: [
+        {
+          id: "occ-existing-run-file",
+          kind: "file",
+          fileName: "missing-existing-run.mp4",
+          sourceRef: {
+            kind: "file_stub",
+            occurrenceId: "occ-existing-run-file",
+          },
+          detectedType: "video",
+          icon: "Film",
+          fileSize: 10,
+          validation: { valid: false, warnings: ["File reattach required"] },
+          playlist: { title: "Existing run recording", ordinal: 6 },
+        } as any,
+      ],
+      processingState: {
+        status: "running",
+        elapsed: 5,
+        estimatedRemaining: 0,
+        perItemProgress: [
+          {
+            id: "occ-existing-run-file",
+            status: "queued",
+            lifecycleState: "awaiting_upload",
+            terminalOutcome: null,
+            progressPercent: 0,
+            currentStage: "File reattach required",
+            estimatedRemaining: 0,
+            retryable: true,
+          },
+        ],
+      },
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "qi-existing-run-file",
+        runId: "run-existing-file-resume",
+        submissionOccurrenceIds: ["occ-existing-run-file"],
+        submittedItemIds: ["occ-existing-run-file"],
+        startedAt: Date.now(),
+      },
+    })
+    lifecycleMocks.reattachQuickIngestSession.mockResolvedValue({
+      lifecycle: "processing",
+      jobs: [
+        {
+          jobId: null,
+          status: "awaiting_upload",
+          sourceItemId: "occ-existing-run-file",
+          lifecycleState: "awaiting_upload",
+          terminalOutcome: null,
+          progressPercent: 0,
+          progressMessage: "File reattach required",
+          retryable: true,
+          attempt: 4,
+        },
+      ],
+      errorMessage: null,
+    })
+
+    render(<QuickIngestWizardModal open onClose={onClose} />)
+    const replacement = new File(["replacement"], "replacement-existing.mp4", {
+      type: "video/mp4",
+    })
+    Object.defineProperty(replacement, "arrayBuffer", {
+      configurable: true,
+      value: undefined,
+    })
+    fireEvent.change(
+      await screen.findByLabelText(
+        "Replacement file for 6. Existing run recording"
+      ),
+      { target: { files: [replacement] } }
+    )
+
+    await waitFor(() => {
+      expect(lifecycleMocks.submitQuickIngestBatch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          __quickIngestSessionId: "qi-existing-run-file",
+          __quickIngestRunId: "run-existing-file-resume",
+          pendingRunRequest: {
+            inputs: [
+              expect.objectContaining({
+                inputKind: "file_stub",
+                occurrenceId: "occ-existing-run-file",
+                attempt: 4,
+              }),
+            ],
+          },
+          files: [
+            expect.objectContaining({
+              id: "occ-existing-run-file",
+              name: "replacement-existing.mp4",
+            }),
+          ],
+        })
+      )
+    })
+    expect(
+      useQuickIngestSessionStore.getState().session?.queueItems[0]
+    ).toMatchObject({
+      id: "occ-existing-run-file",
+      fileName: "replacement-existing.mp4",
+    })
+  })
+
+  it("Step 4 — preserves an extension retry attempt through reattach and a failed replacement upload retry", async () => {
+    useQuickIngestSessionStore.getState().upsertSession({
+      lifecycle: "processing",
+      currentStep: 4,
+      queueItems: [
+        {
+          id: "occ-existing-run-file-retry",
+          kind: "file",
+          fileName: "missing-existing-run-retry.mp4",
+          sourceRef: {
+            kind: "file_stub",
+            occurrenceId: "occ-existing-run-file-retry",
+          },
+          detectedType: "video",
+          icon: "Film",
+          fileSize: 10,
+          validation: { valid: false, warnings: ["File reattach required"] },
+          playlist: { title: "Existing retry recording", ordinal: 7 },
+        } as any,
+      ],
+      processingState: {
+        status: "running",
+        elapsed: 5,
+        estimatedRemaining: 0,
+        perItemProgress: [
+          {
+            id: "occ-existing-run-file-retry",
+            status: "queued",
+            lifecycleState: "awaiting_upload",
+            terminalOutcome: null,
+            progressPercent: 0,
+            currentStage: "File reattach required",
+            estimatedRemaining: 0,
+            retryable: true,
+          },
+        ],
+      },
+      tracking: {
+        mode: "extension-runtime",
+        sessionId: "qi-existing-run-file-retry",
+        runId: "run-existing-file-retry",
+        generation: "generation-existing-file-retry",
+        submissionOccurrenceIds: ["occ-existing-run-file-retry"],
+        submittedItemIds: ["occ-existing-run-file-retry"],
+        startedAt: Date.now(),
+      },
+    })
+    lifecycleMocks.submitQuickIngestBatch
+      .mockResolvedValueOnce({
+        ok: false,
+        accepted: false,
+        error: "Upload temporarily unavailable",
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        accepted: true,
+        runId: "run-existing-file-retry",
+      })
+
+    render(<QuickIngestWizardModal open onClose={onClose} />)
+    await screen.findByLabelText(
+      "Replacement file for 7. Existing retry recording"
+    )
+    act(() => {
+      emitRuntimeMessage({
+        type: "tldw:quick-ingest/progress",
+        payload: {
+          sessionId: "qi-existing-run-file-retry",
+          runId: "run-existing-file-retry",
+          generation: "generation-existing-file-retry",
+          occurrenceId: "occ-existing-run-file-retry",
+          jobId: null,
+          attempt: 4,
+          status: "awaiting_upload",
+          lifecycleState: "awaiting_upload",
+          progressPercentage: 0,
+          progressMessage: "File reattach required",
+          retryable: true,
+          result: {
+            id: "occ-existing-run-file-retry",
+            status: "awaiting_upload",
+            type: "video",
+          },
+        },
+      })
+    })
+    await waitFor(() => {
+      expect(
+        useQuickIngestSessionStore.getState().session?.processingState
+          .perItemProgress[0]
+      ).toMatchObject({ attempt: 4, lifecycleState: "awaiting_upload" })
+    })
+
+    const invalidReplacement = new File(
+      ["invalid"],
+      "invalid-replacement.bin"
+    )
+    fireEvent.change(
+      screen.getByLabelText("Replacement file for 7. Existing retry recording"),
+      { target: { files: [invalidReplacement] } }
+    )
+    await waitFor(() => {
+      expect(
+        useQuickIngestSessionStore.getState().session?.processingState
+          .perItemProgress[0]
+      ).toMatchObject({
+        attempt: 4,
+        lifecycleState: "awaiting_upload",
+        currentStage: "Unsupported replacement file",
+      })
+    })
+
+    const replacement = new File(["replacement"], "replacement-retry.mp4", {
+      type: "video/mp4",
+    })
+    let releaseFirstRead!: (bytes: ArrayBuffer) => void
+    const firstReadGate = new Promise<ArrayBuffer>((resolve) => {
+      releaseFirstRead = resolve
+    })
+    const readBytes = vi
+      .fn()
+      .mockImplementationOnce(() => firstReadGate)
+      .mockResolvedValue(Uint8Array.from([9, 8, 7]).buffer)
+    Object.defineProperty(replacement, "arrayBuffer", {
+      configurable: true,
+      value: readBytes,
+    })
+    fireEvent.change(
+      screen.getByLabelText("Replacement file for 7. Existing retry recording"),
+      { target: { files: [replacement] } }
+    )
+
+    await waitFor(() => {
+      expect(
+        useQuickIngestSessionStore.getState().session?.processingState
+          .perItemProgress[0]
+      ).toMatchObject({
+        attempt: 4,
+        lifecycleState: "awaiting_upload",
+        currentStage: "File selected. Ready to upload.",
+      })
+    })
+    act(() => {
+      releaseFirstRead(Uint8Array.from([9, 8, 7]).buffer)
+    })
+
+    await waitFor(() => {
+      expect(lifecycleMocks.submitQuickIngestBatch).toHaveBeenCalledTimes(1)
+      expect(
+        useQuickIngestSessionStore.getState().session?.processingState
+          .perItemProgress[0]
+      ).toMatchObject({
+        attempt: 4,
+        lifecycleState: "awaiting_upload",
+        currentStage: "Upload temporarily unavailable",
+        retryable: true,
+      })
+    })
+
+    await userEvent.click(
+      screen.getByRole("button", {
+        name: "Retry upload for 7. Existing retry recording",
+      })
+    )
+
+    await waitFor(() =>
+      expect(lifecycleMocks.submitQuickIngestBatch).toHaveBeenCalledTimes(2)
+    )
+    expect(readBytes).toHaveBeenCalledTimes(2)
+    for (const [payload] of lifecycleMocks.submitQuickIngestBatch.mock.calls) {
+      expect(payload).toMatchObject({
+        __quickIngestSessionId: "qi-existing-run-file-retry",
+        __quickIngestRunId: "run-existing-file-retry",
+        pendingRunRequest: {
+          inputs: [
+            expect.objectContaining({
+              occurrenceId: "occ-existing-run-file-retry",
+              attempt: 4,
+            }),
+          ],
+        },
+        files: [
+          {
+            id: "occ-existing-run-file-retry",
+            name: "replacement-retry.mp4",
+            data: [9, 8, 7],
+          },
+        ],
+      })
+    }
+    await waitFor(() => {
+      expect(
+        useQuickIngestSessionStore.getState().session?.processingState
+          .perItemProgress[0]
+      ).toMatchObject({
+        attempt: 4,
+        lifecycleState: "queued",
+        currentStage: "Queued",
+        retryable: false,
+      })
+    })
+  })
+
+  it.each([
+    ["rate limited", 429],
+    ["service unavailable", 503],
+    ["network disconnected", undefined],
+  ])(
+    "maps %s status errors to recoverable status-unavailable evidence",
+    async (message, status) => {
+      const modalModule = await import(
+        "@/components/Common/QuickIngestWizardModal"
+      )
+      const buildUnavailableProgress = (modalModule as any)
+        .buildStatusUnavailableProgressFromReattachError
+      expect(buildUnavailableProgress).toBeTypeOf("function")
+      if (typeof buildUnavailableProgress !== "function") return
+      const queueItems = [
+        {
+          id: "occ-status-recovery",
+          kind: "url",
+          url: "https://example.com/status-recovery",
+          detectedType: "video",
+          icon: "Film",
+          fileSize: 0,
+          validation: { valid: true },
+        },
+      ] as any
+      const perItemProgress = buildUnavailableProgress(
+        Object.assign(new Error(message), status == null ? {} : { status }),
+        queueItems,
+        [
+          {
+            id: "occ-status-recovery",
+            status: "processing",
+            lifecycleState: "running",
+            terminalOutcome: null,
+            progressPercent: 31,
+            currentStage: "Running",
+            estimatedRemaining: 0,
+          },
+        ]
+      )
+
+      render(
+        <WizardTestHarness
+          onClose={onClose}
+          initialState={{
+            currentStep: 4,
+            highestStep: 4,
+            queueItems,
+            processingState: {
+              status: "running",
+              elapsed: 1,
+              estimatedRemaining: 0,
+              perItemProgress,
+            },
+          }}
+        />
+      )
+
+      expect(perItemProgress[0]).toMatchObject({
+        lifecycleState: "status_unavailable",
+        terminalOutcome: null,
+        progressPercent: 31,
+        retryable: true,
+        currentStage: expect.stringMatching(new RegExp(message, "i")),
+      })
+      expect(
+        screen.getByRole("button", { name: "Check again" })
+      ).toBeInTheDocument()
+      expect(
+        screen.getByRole("button", { name: "Reconnect" })
+      ).toBeInTheDocument()
+    }
+  )
+
+  it.each([
+    ["rate limited", 429, /too many|rate|try again/i],
+    ["service unavailable", 503, /unavailable|try again/i],
+    ["network disconnected", undefined, /network|connect|unavailable/i],
+  ])(
+    "propagates real service %s recovery evidence into the Modal",
+    async (message, status, expectedMessage) => {
+      const actualReattach = await vi.importActual<
+        typeof import("@/services/tldw/quick-ingest-session-reattach")
+      >("@/services/tldw/quick-ingest-session-reattach")
+      lifecycleMocks.reattachQuickIngestSession.mockImplementation(
+        actualReattach.reattachQuickIngestSession
+      )
+      transportMocks.bgRequest.mockRejectedValue(
+        Object.assign(
+          new Error(message),
+          status == null ? {} : { status }
+        )
+      )
+      useQuickIngestSessionStore.getState().upsertSession({
+        lifecycle: "processing",
+        currentStep: 4,
+        queueItems: [
+          {
+            id: "occ-real-status-unavailable",
+            kind: "url",
+            url: "https://example.com/real-status-unavailable",
+            detectedType: "video",
+            icon: "Film",
+            fileSize: 0,
+            validation: { valid: true },
+            playlist: { title: "Recovery target", ordinal: 2 },
+          } as any,
+        ],
+        processingState: {
+          status: "running",
+          elapsed: 1,
+          estimatedRemaining: 0,
+          perItemProgress: [
+            {
+              id: "occ-real-status-unavailable",
+              status: "processing",
+              lifecycleState: "running",
+              terminalOutcome: null,
+              progressPercent: 31,
+              currentStage: "Running",
+              estimatedRemaining: 0,
+            },
+          ],
+        },
+        tracking: {
+          mode: "webui-direct",
+          sessionId: `qi-real-status-${status ?? "network"}`,
+          runId: `run-real-status-${status ?? "network"}`,
+          jobIds: [717],
+          submissionOccurrenceIds: ["occ-real-status-unavailable"],
+          submittedItemIds: ["occ-real-status-unavailable"],
+          startedAt: Date.now(),
+        },
+      })
+
+      render(<QuickIngestWizardModal open onClose={onClose} />)
+
+      await waitFor(() => {
+        expect(
+          useQuickIngestSessionStore.getState().session?.processingState
+            .perItemProgress[0]
+        ).toMatchObject({
+          id: "occ-real-status-unavailable",
+          lifecycleState: "status_unavailable",
+          retryable: true,
+          currentStage: expect.stringMatching(expectedMessage),
+        })
+      })
+      expect(
+        screen.getByRole("button", { name: "Check again" })
+      ).toBeInTheDocument()
+    }
+  )
+
+  it("Step 4 — keeps authoritative row and run cancellation pending", async () => {
+    const user = userEvent.setup()
+    const onCancelItem = vi.fn().mockReturnValue(true)
+    const onCancelProcessing = vi.fn().mockReturnValue(true)
+
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        onCancelItem={onCancelItem}
+        onCancelProcessing={onCancelProcessing}
+        initialState={{
+          currentStep: 4,
+          highestStep: 4,
+          queueItems: [
+            {
+              id: "occ-cancel-row",
+              kind: "url",
+              url: "https://example.com/cancel-row",
+              sourceRef: {
+                kind: "direct_url",
+                occurrenceId: "occ-cancel-row",
+                url: "https://example.com/cancel-row",
+              },
+              detectedType: "video",
+              icon: "Film",
+              fileSize: 0,
+              validation: { valid: true },
+              playlist: { title: "Cancellation target", ordinal: 9 },
+            },
+          ],
+          processingState: {
+            status: "running",
+            elapsed: 2,
+            estimatedRemaining: 0,
+            perItemProgress: [
+              {
+                id: "occ-cancel-row",
+                status: "processing",
+                lifecycleState: "running",
+                terminalOutcome: null,
+                progressPercent: 25,
+                currentStage: "Downloading source",
+                estimatedRemaining: 0,
+              } as any,
+            ],
+          },
+        }}
+      />
+    )
+
+    await user.click(
+      screen.getByRole("button", { name: "Cancel 9. Cancellation target" })
+    )
+    expect(onCancelItem).toHaveBeenCalledWith("occ-cancel-row")
+    expect(screen.getByText("Cancellation requested")).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Cancel All" }))
+    expect(onCancelProcessing).toHaveBeenCalledTimes(1)
+  })
+
+  it("Step 4 — bounds 500 lifecycle rows and filters by actionable state", async () => {
+    const queueItems = Array.from({ length: 500 }, (_, index) => {
+      const occurrence = index + 1
+      return {
+        id: `occ-lifecycle-${occurrence}`,
+        kind: "url",
+        url: `https://example.com/watch/${occurrence}`,
+        sourceRef: {
+          kind: "direct_url",
+          occurrenceId: `occ-lifecycle-${occurrence}`,
+          url: `https://example.com/watch/${occurrence}`,
+        },
+        detectedType: "video",
+        icon: "Film",
+        fileSize: 0,
+        validation: { valid: true },
+        playlist: { title: `Lifecycle talk ${occurrence}`, ordinal: occurrence },
+      }
+    }) as any
+    const perItemProgress = queueItems.map((item: any, index: number) => {
+      const group = index % 3
+      return {
+        id: item.id,
+        status: group === 2 ? "complete" : "processing",
+        lifecycleState:
+          group === 0
+            ? "running"
+            : group === 1
+              ? "status_unavailable"
+              : "terminal",
+        terminalOutcome: group === 2 ? "completed" : null,
+        progressPercent: group === 2 ? 100 : 20,
+        currentStage: group === 0 ? "Downloading source" : "",
+        estimatedRemaining: 0,
+      }
+    }) as any
+
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        initialState={{
+          currentStep: 4,
+          highestStep: 4,
+          queueItems,
+          processingState: {
+            status: "running",
+            elapsed: 10,
+            estimatedRemaining: 0,
+            perItemProgress,
+          },
+        }}
+      />
+    )
+
+    const list = screen.getByRole("list", { name: "Processing items" })
+    expect(within(list).getAllByRole("listitem").length).toBeLessThanOrEqual(12)
+    expect(within(list).getAllByRole("listitem")[0]).toHaveAttribute(
+      "aria-setsize",
+      "500"
+    )
+    expect(within(list).getAllByRole("listitem")[0]).toHaveAttribute(
+      "aria-posinset",
+      "1"
+    )
+    expect(virtualizerMocks.latestOptions?.count).toBe(500)
+
+    const initialRows = within(list).getAllByRole("listitem")
+    initialRows[0].focus()
+    fireEvent.keyDown(initialRows[0], { key: "ArrowDown" })
+    expect(initialRows[1]).toHaveFocus()
+
+    fireEvent.keyDown(initialRows[1], { key: "End" })
+    await waitFor(() => {
+      expect(screen.getByText("500. Lifecycle talk 500")).toBeInTheDocument()
+      expect(within(list).getAllByRole("listitem").at(-1)).toHaveFocus()
+    })
+
+    fireEvent.keyDown(within(list).getAllByRole("listitem").at(-1)!, {
+      key: "Home",
+    })
+    await waitFor(() => {
+      expect(screen.getByText("1. Lifecycle talk 1")).toBeInTheDocument()
+      expect(within(list).getAllByRole("listitem")[0]).toHaveFocus()
+    })
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Filter processing items" }), {
+      target: { value: "attention" },
+    })
+    expect(screen.getByText("Needs attention (167)")).toBeInTheDocument()
+    expect(within(list).getAllByRole("listitem")[0]).toHaveFocus()
+    for (const row of within(list).getAllByRole("listitem")) {
+      expect(row).toHaveAttribute("data-lifecycle-group", "attention")
+    }
+  })
+
+  it("dispatches occurrence and whole-run cancellation to durable run authority", async () => {
+    const user = userEvent.setup()
+    useQuickIngestSessionStore.getState().upsertSession({
+      lifecycle: "processing",
+      currentStep: 4,
+      queueItems: [
+        {
+          id: "occ-real-cancel",
+          kind: "url",
+          url: "https://example.com/real-cancel",
+          sourceRef: {
+            kind: "direct_url",
+            occurrenceId: "occ-real-cancel",
+            url: "https://example.com/real-cancel",
+          },
+          detectedType: "video",
+          icon: "Film",
+          fileSize: 0,
+          validation: { valid: true },
+          playlist: { title: "Real cancellation", ordinal: 12 },
+        } as any,
+      ],
+      processingState: {
+        status: "running",
+        elapsed: 4,
+        estimatedRemaining: 0,
+        perItemProgress: [
+          {
+            id: "occ-real-cancel",
+            status: "processing",
+            lifecycleState: "running",
+            terminalOutcome: null,
+            progressPercent: 25,
+            currentStage: "Downloading source",
+            estimatedRemaining: 0,
+          } as any,
+        ],
+      },
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "qi-real-cancel",
+        runId: "run-real-cancel",
+        submittedItemIds: ["occ-real-cancel"],
+        startedAt: Date.now(),
+      },
+    })
+    lifecycleMocks.reattachQuickIngestSession.mockResolvedValue({
+      lifecycle: "processing",
+      jobs: [
+        {
+          jobId: 77,
+          status: "running",
+          sourceItemId: "occ-real-cancel",
+          lifecycleState: "running",
+          terminalOutcome: null,
+          progressPercent: 25,
+          progressMessage: "Downloading source",
+        },
+      ],
+      errorMessage: null,
+    })
+
+    render(<QuickIngestWizardModal open onClose={onClose} />)
+    await user.click(
+      await screen.findByRole("button", { name: "Cancel 12. Real cancellation" })
+    )
+    await waitFor(() => {
+      expect(lifecycleMocks.cancelQuickIngestSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tracking: expect.objectContaining({ runId: "run-real-cancel" }),
+          occurrenceIds: ["occ-real-cancel"],
+        })
+      )
+    })
+    expect(screen.getByText("Cancellation requested")).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Cancel All" }))
+    await waitFor(() => {
+      expect(lifecycleMocks.cancelQuickIngestSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tracking: expect.objectContaining({ runId: "run-real-cancel" }),
+          occurrenceIds: undefined,
+        })
+      )
+    })
+  })
+
+  it("retries eligible run occurrences and reconciles the authoritative snapshot", async () => {
+    vi.useFakeTimers()
+    useQuickIngestSessionStore.getState().upsertSession({
+      lifecycle: "partial_failure",
+      currentStep: 5,
+      queueItems: [
+        {
+          id: "occ-retry-run",
+          kind: "url",
+          url: "https://example.com/retry-target",
+          detectedType: "video",
+          icon: "Film",
+          fileSize: 0,
+          validation: { valid: true },
+          playlist: { title: "Retry target", ordinal: 1 },
+          sourceRef: {
+            kind: "direct_url",
+            occurrenceId: "occ-retry-run",
+            url: "https://example.com/retry-target",
+          },
+        } as any,
+      ],
+      results: [
+        {
+          id: "occ-retry-run",
+          status: "error",
+          outcome: "failed",
+          terminalOutcome: "processing_failed",
+          type: "video",
+          title: "Retry target",
+          error: "Network timed out",
+        } as any,
+      ],
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "qi-retry-run",
+        runId: "run-retry-run",
+        submittedItemIds: ["occ-retry-run"],
+        startedAt: Date.now(),
+      },
+    })
+    lifecycleMocks.reattachQuickIngestSession
+      .mockResolvedValueOnce({
+        lifecycle: "processing",
+        jobs: [
+          {
+            jobId: null,
+            status: "queued",
+            sourceItemId: "occ-retry-run",
+            lifecycleState: "queued",
+            terminalOutcome: null,
+            progressPercent: 0,
+            progressMessage: "Queued after retry reconciliation",
+          },
+        ],
+        errorMessage: null,
+      })
+      .mockResolvedValue({
+        lifecycle: "processing",
+        jobs: [
+          {
+            jobId: 901,
+            status: "failed",
+            sourceItemId: "occ-retry-run",
+            lifecycleState: "terminal",
+            terminalOutcome: "processing_failed",
+            progressPercent: 100,
+            error: "Worker failed after retry",
+          },
+        ],
+        errorMessage: null,
+      })
+
+    render(<QuickIngestWizardModal open onClose={onClose} />)
+    fireEvent.click(
+      screen.getByRole("button", { name: "Retry Retry target" })
+    )
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(lifecycleMocks.retryQuickIngestSession).toHaveBeenCalledWith({
+      sessionId: "qi-retry-run",
+      tracking: expect.objectContaining({ runId: "run-retry-run" }),
+      occurrenceIds: ["occ-retry-run"],
+    })
+    expect(lifecycleMocks.reattachQuickIngestSession).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: "run-retry-run" })
+    )
+    expect(screen.getByText("Queued after retry reconciliation")).toBeInTheDocument()
+    expect(lifecycleMocks.reattachQuickIngestSession).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000)
+    })
+
+    expect(lifecycleMocks.reattachQuickIngestSession).toHaveBeenCalledTimes(2)
+    expect(screen.getAllByText("Worker failed after retry")).not.toHaveLength(0)
   })
 
   // -------------------------------------------------------------------------

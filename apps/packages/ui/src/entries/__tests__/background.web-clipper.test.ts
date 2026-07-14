@@ -129,6 +129,7 @@ import { RouteShell } from "@/routes/app-route"
 import { buildClipDraft } from "@/services/web-clipper/draft-builder"
 import { CLIPPER_CAPTURE_MESSAGE_TYPE } from "@/services/web-clipper/pending-draft"
 import * as backgroundEntry from "@/entries/background"
+import { createQuickIngestSessionRuntime } from "@/entries/shared/quick-ingest-session-runtime"
 import {
   buildUploadRuntimeResponse,
   cancelQuickIngestRunInBackground,
@@ -368,6 +369,530 @@ describe("background playlist run delegation", () => {
       { preferDirect: true },
     )
     expect(cancelResponse).toEqual({ ok: true })
+  })
+
+  it("forwards occurrence-scoped cancellation through the background adapter", async () => {
+    const tracking = {
+      mode: "extension-runtime" as const,
+      runId: "run-adapter-row",
+      submissionOccurrenceIds: ["occ-adapter-row", "occ-adapter-other"],
+    }
+    const cancel = vi.fn().mockResolvedValue({ runId: "run-adapter-row" })
+
+    const response = await (cancelQuickIngestRunInBackground as any)(
+      tracking,
+      "user_cancelled",
+      cancel,
+      ["occ-adapter-row"]
+    )
+
+    expect(cancel).toHaveBeenCalledWith(
+      expect.anything(),
+      "run-adapter-row",
+      {
+        reason: "user_cancelled",
+        occurrenceIds: ["occ-adapter-row"],
+      },
+      { preferDirect: true }
+    )
+    expect(response).toEqual({ ok: true })
+  })
+
+  it("retries occurrences through shared run authority in the background adapter", async () => {
+    const retryQuickIngestRunInBackground = (backgroundEntry as any)
+      .retryQuickIngestRunInBackground
+    expect(retryQuickIngestRunInBackground).toBeTypeOf("function")
+    if (typeof retryQuickIngestRunInBackground !== "function") return
+    const retry = vi.fn().mockResolvedValue({
+      contractVersion: 2,
+      runId: "run-adapter-retry",
+      version: 2,
+      processingOccurrences: [
+        {
+          occurrenceId: "occ-adapter-retry",
+          inputKind: "direct_url",
+          state: "staged",
+        },
+      ],
+    })
+    const submitRetried = vi.fn().mockResolvedValue({ ok: true })
+
+    const response = await retryQuickIngestRunInBackground(
+      "run-adapter-retry",
+      ["occ-adapter-retry"],
+      retry,
+      submitRetried,
+    )
+
+    expect(retry).toHaveBeenCalledWith(
+      expect.anything(),
+      "run-adapter-retry",
+      ["occ-adapter-retry"],
+      { preferDirect: true }
+    )
+    expect(submitRetried).toHaveBeenCalledTimes(1)
+    expect(response).toEqual({ ok: true })
+  })
+
+  it("submits authoritative staged extension retry occurrences before reporting success", async () => {
+    const retryQuickIngestRunInBackground = (backgroundEntry as any)
+      .retryQuickIngestRunInBackground
+    const retryResult = {
+      contractVersion: 2,
+      runId: "run-adapter-retry-submit",
+      version: 2,
+      processingOccurrences: [
+        {
+          occurrenceId: "occ-adapter-retry-url",
+          ordinal: 1,
+          inputKind: "direct_url",
+          sourceUrl: "https://server.example/extension-authoritative.mp4",
+          sourceKind: "video",
+          displayMetadata: {
+            sourceUrl: "https://cached.invalid/extension-display.mp4",
+          },
+          state: "staged",
+          outcome: null,
+          jobId: null,
+          batchId: null,
+          attempt: 3,
+          plannedCollectionItemId: null,
+        },
+        {
+          occurrenceId: "occ-adapter-retry-file",
+          ordinal: 2,
+          inputKind: "file_stub",
+          sourceUrl: null,
+          sourceKind: "file",
+          displayMetadata: {},
+          state: "awaiting_upload",
+          outcome: null,
+          jobId: null,
+          batchId: null,
+          attempt: 4,
+          plannedCollectionItemId: null,
+        },
+      ],
+    }
+    const retry = vi.fn().mockResolvedValue(retryResult)
+    const submitRetried = vi.fn().mockResolvedValue({ ok: true })
+
+    const response = await retryQuickIngestRunInBackground(
+      "run-adapter-retry-submit",
+      ["occ-adapter-retry-url", "occ-adapter-retry-file"],
+      retry,
+      submitRetried,
+    )
+
+    expect(submitRetried).toHaveBeenCalledTimes(1)
+    expect(submitRetried).toHaveBeenCalledWith(retryResult)
+    expect(response).toEqual({ ok: true })
+  })
+
+  it("keeps extension g2 durably retrying when known-success resubmission fails", async () => {
+    let stored: unknown[] = [
+      {
+        version: 1,
+        kind: "terminal",
+        sessionId: "session-background-retry-submit-failure",
+        runId: "run-background-retry-submit-failure",
+        generation: "generation-background-retry-submit-failure-g1",
+        attemptToken: "attempt-background-retry-submit-failure",
+        expiresAt: Date.now() + 60_000,
+        event: {
+          type: "tldw:quick-ingest/failed",
+          payload: {
+            sessionId: "session-background-retry-submit-failure",
+            runId: "run-background-retry-submit-failure",
+            results: [
+              {
+                id: "occ-background-retry-submit-failure",
+                status: "error",
+                retryable: true,
+                error: "Retryable failure",
+              },
+            ],
+          },
+        },
+      },
+    ]
+    const saveRunSession = createQuickIngestRunSessionSaver(
+      async () => stored,
+      async (records) => {
+        stored = records
+      },
+    )
+    const retryTransport = vi.fn().mockResolvedValue({
+      contractVersion: 2,
+      runId: "run-background-retry-submit-failure",
+      version: 2,
+      processingOccurrences: [
+        {
+          occurrenceId: "occ-background-retry-submit-failure",
+          ordinal: 1,
+          inputKind: "direct_url",
+          sourceUrl: "https://server.example/extension-submit-failure.mp4",
+          sourceKind: "video",
+          displayMetadata: {},
+          state: "staged",
+          outcome: null,
+          jobId: null,
+          batchId: null,
+          attempt: 2,
+          plannedCollectionItemId: null,
+        },
+      ],
+    })
+    const submitRetried = vi.fn().mockResolvedValue({
+      ok: false,
+      error: "Authoritative retry source was rejected during submission.",
+    })
+    const reattachRun = vi.fn()
+    const runtime = createQuickIngestSessionRuntime({
+      run: vi.fn(),
+      emit: vi.fn(),
+      loadRunSessions: async () => stored,
+      saveRunSession,
+      retryRun: (tracking: any, occurrenceIds: string[]) =>
+        (backgroundEntry as any).retryQuickIngestRunInBackground(
+          String(tracking.runId || ""),
+          occurrenceIds,
+          retryTransport,
+          submitRetried,
+        ),
+      reattachRun,
+    } as any)
+
+    await runtime.restore()
+    const response = await runtime.retry(
+      "session-background-retry-submit-failure",
+      "run-background-retry-submit-failure",
+      ["occ-background-retry-submit-failure"],
+    )
+
+    expect(response).toMatchObject({
+      ok: false,
+      indeterminate: true,
+      generation: expect.not.stringMatching(/g1$/),
+      error: expect.stringMatching(/source|submission|rejected/i),
+    })
+    expect(stored).toEqual([
+      expect.objectContaining({
+        kind: "retrying",
+        sessionId: "session-background-retry-submit-failure",
+        generation: response.generation,
+      }),
+    ])
+    expect(retryTransport).toHaveBeenCalledTimes(1)
+    expect(submitRetried).toHaveBeenCalledTimes(1)
+    expect(reattachRun).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    {
+      label: "an ambiguous lost response",
+      error: Object.assign(new Error("Retry response timed out"), {
+        name: "TimeoutError",
+      }),
+      expectedIndeterminate: true,
+    },
+    ...[500, 502, 503, 504].map((status) => ({
+      label: `an HTTP ${status} retry response`,
+      error: Object.assign(
+        new Error(status === 504 ? "Gateway Timeout" : `HTTP ${status}`),
+        { status },
+      ),
+      expectedIndeterminate: true,
+    })),
+    {
+      label: "an explicit server rejection",
+      error: Object.assign(new Error("Retry was rejected"), { status: 409 }),
+      expectedIndeterminate: false,
+    },
+  ])("classifies $label before retry authority is reconciled", async ({
+    error,
+    expectedIndeterminate,
+  }) => {
+    const retryQuickIngestRunInBackground = (backgroundEntry as any)
+      .retryQuickIngestRunInBackground
+    const response = await retryQuickIngestRunInBackground(
+      "run-adapter-retry-classification",
+      ["occ-adapter-retry-classification"],
+      vi.fn().mockRejectedValue(error),
+    )
+
+    expect(response).toMatchObject({
+      ok: false,
+      ...(expectedIndeterminate ? { indeterminate: true } : {}),
+      error: error.message,
+    })
+    if (!expectedIndeterminate) {
+      expect(response.indeterminate).not.toBe(true)
+    }
+  })
+
+  it("preserves not-advanced reconciliation evidence after a retry response is lost before backend mutation", async () => {
+    const retryQuickIngestRunInBackground = (backgroundEntry as any)
+      .retryQuickIngestRunInBackground
+    const reconcile = vi.fn().mockResolvedValue({
+      ok: false,
+      indeterminate: true,
+      notAdvanced: true,
+      error: "The authoritative run has not advanced to the reserved retry yet.",
+    })
+
+    const response = await retryQuickIngestRunInBackground(
+      "run-adapter-retry-not-advanced",
+      ["occ-adapter-retry-not-advanced"],
+      vi.fn().mockRejectedValue(
+        Object.assign(new Error("Retry request timed out before delivery"), {
+          status: 0,
+        }),
+      ),
+      vi.fn(),
+      {},
+      reconcile,
+    )
+
+    expect(reconcile).toHaveBeenCalledWith(
+      "run-adapter-retry-not-advanced",
+      ["occ-adapter-retry-not-advanced"],
+    )
+    expect(response).toMatchObject({
+      ok: false,
+      indeterminate: true,
+      notAdvanced: true,
+    })
+  })
+
+  it("reconciles an empty successful retry response before promoting extension authority", async () => {
+    const retryQuickIngestRunInBackground = (backgroundEntry as any)
+      .retryQuickIngestRunInBackground
+    const submitRetried = vi.fn().mockResolvedValue({ ok: true })
+    const reconcile = vi.fn().mockResolvedValue({
+      ok: false,
+      indeterminate: true,
+      notAdvanced: true,
+      error: "The authoritative run has not advanced to the reserved retry yet.",
+    })
+
+    const response = await retryQuickIngestRunInBackground(
+      "run-adapter-empty-retry-not-advanced",
+      ["occ-adapter-empty-retry-not-advanced"],
+      vi.fn().mockResolvedValue({
+        contractVersion: 2,
+        runId: "run-adapter-empty-retry-not-advanced",
+        version: 1,
+        processingOccurrences: [],
+      }),
+      submitRetried,
+      {},
+      reconcile,
+    )
+
+    expect(submitRetried).toHaveBeenCalledTimes(1)
+    expect(reconcile).toHaveBeenCalledWith(
+      "run-adapter-empty-retry-not-advanced",
+      ["occ-adapter-empty-retry-not-advanced"],
+    )
+    expect(response).toMatchObject({
+      ok: false,
+      indeterminate: true,
+      notAdvanced: true,
+    })
+  })
+
+  it("keeps an accepted-upstream 504 retry reserved while authoritative resubmission is unavailable", async () => {
+    vi.useFakeTimers()
+    let stored: unknown[] = [
+      {
+        version: 1,
+        kind: "terminal",
+        sessionId: "session-background-retry-504",
+        runId: "run-background-retry-504",
+        generation: "generation-background-retry-504-old",
+        attemptToken: "attempt-background-retry-504",
+        expiresAt: Date.now() + 60_000,
+        event: {
+          type: "tldw:quick-ingest/failed",
+          payload: {
+            sessionId: "session-background-retry-504",
+            runId: "run-background-retry-504",
+            results: [
+              {
+                id: "occ-background-retry-504",
+                status: "error",
+                retryable: true,
+                error: "Retryable upstream failure",
+              },
+            ],
+          },
+        },
+      },
+    ]
+    const saveRunSession = createQuickIngestRunSessionSaver(
+      async () => stored,
+      async (records) => {
+        stored = records
+      },
+    )
+    let acceptedUpstream = false
+    const retryTransport = vi.fn(async () => {
+      acceptedUpstream = true
+      throw Object.assign(new Error("Gateway Timeout"), { status: 504 })
+    })
+    const reattachRun = vi.fn().mockResolvedValue({
+      lifecycle: "processing",
+      jobs: [
+        {
+          jobId: 504,
+          attempt: 3,
+          status: "processing",
+          sourceItemId: "occ-background-retry-504",
+          lifecycleState: "running",
+          progressPercent: 12,
+        },
+      ],
+      errorMessage: null,
+    })
+    const runtime = createQuickIngestSessionRuntime({
+      run: vi.fn(),
+      emit: vi.fn(),
+      loadRunSessions: async () => stored,
+      saveRunSession,
+      retryRun: (tracking: any, occurrenceIds: string[]) =>
+        (backgroundEntry as any).retryQuickIngestRunInBackground(
+          String(tracking.runId || ""),
+          occurrenceIds,
+          retryTransport,
+        ),
+      reattachRun,
+    } as any)
+
+    try {
+      await runtime.restore()
+      const response = await runtime.retry(
+        "session-background-retry-504",
+        "run-background-retry-504",
+        ["occ-background-retry-504"],
+      )
+
+      expect(acceptedUpstream).toBe(true)
+      expect(response).toMatchObject({
+        ok: false,
+        indeterminate: true,
+        generation: expect.not.stringMatching(/old/),
+      })
+      expect(stored).toEqual([
+        expect.objectContaining({
+          kind: "retrying",
+          sessionId: "session-background-retry-504",
+          generation: response.generation,
+        }),
+      ])
+      expect(reattachRun).not.toHaveBeenCalled()
+    } finally {
+      vi.clearAllTimers()
+      vi.useRealTimers()
+    }
+  })
+
+  it("delegates extension retry to runtime re-arming instead of replaying a retained tombstone", async () => {
+    vi.useFakeTimers()
+    const retryQuickIngestSessionInBackground = (backgroundEntry as any)
+      .retryQuickIngestSessionInBackground
+    expect(retryQuickIngestSessionInBackground).toBeTypeOf("function")
+    if (typeof retryQuickIngestSessionInBackground !== "function") return
+    let stored: unknown[] = [
+      {
+        version: 1,
+        kind: "terminal",
+        sessionId: "session-background-retry-rearm",
+        runId: "run-background-retry-rearm",
+        generation: "generation-background-retry-old",
+        attemptToken: "attempt-background-retry-rearm",
+        expiresAt: Date.now() + 60_000,
+        event: {
+          type: "tldw:quick-ingest/failed",
+          payload: {
+            sessionId: "session-background-retry-rearm",
+            runId: "run-background-retry-rearm",
+            results: [
+              {
+                id: "occ-background-retry-rearm",
+                status: "error",
+                retryable: true,
+                error: "stale retained tombstone",
+              },
+            ],
+          },
+        },
+      },
+    ]
+    const saveRunSession = createQuickIngestRunSessionSaver(
+      async () => stored,
+      async (records) => {
+        stored = records
+      }
+    )
+    const retryRun = vi.fn().mockResolvedValue({ ok: true })
+    const reattachRun = vi.fn().mockResolvedValue({
+      lifecycle: "processing",
+      jobs: [
+        {
+          jobId: 93,
+          status: "queued",
+          sourceItemId: "occ-background-retry-rearm",
+          lifecycleState: "queued",
+          progressPercent: 0,
+        },
+      ],
+      errorMessage: null,
+    })
+    const runtime = createQuickIngestSessionRuntime({
+      run: vi.fn(),
+      emit: vi.fn(),
+      loadRunSessions: async () => stored,
+      saveRunSession,
+      retryRun,
+      reattachRun,
+    } as any)
+
+    try {
+      await runtime.restore()
+      const replay = vi.spyOn(runtime, "replay")
+      const response = await retryQuickIngestSessionInBackground(
+        runtime,
+        "session-background-retry-rearm",
+        "run-background-retry-rearm",
+        ["occ-background-retry-rearm"]
+      )
+
+      expect(response).toEqual({
+        ok: true,
+        generation: expect.not.stringMatching(/old/),
+      })
+      expect(retryRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: "session-background-retry-rearm",
+          runId: "run-background-retry-rearm",
+        }),
+        ["occ-background-retry-rearm"]
+      )
+      expect(stored).toEqual([
+        expect.objectContaining({
+          kind: "run",
+          sessionId: "session-background-retry-rearm",
+          runId: "run-background-retry-rearm",
+          generation: expect.not.stringMatching(/old/),
+        }),
+      ])
+      expect(reattachRun).toHaveBeenCalled()
+      expect(replay).not.toHaveBeenCalled()
+    } finally {
+      vi.clearAllTimers()
+      vi.useRealTimers()
+    }
   })
 
   it("serializes tracking writes before cancellation cleanup", async () => {
@@ -688,6 +1213,46 @@ describe("background playlist run delegation", () => {
 
     expect(terminalBytes).toBeLessThanOrEqual(2 * 1_024 * 1_024)
     expect(byteResult.some((record) => record.sessionId === "session-terminal-cap-100")).toBe(false)
+  })
+
+  it("counts non-evictable retry reservations against the aggregate recovery budget", async () => {
+    const makeRetrying = (index: number) => ({
+      version: 1,
+      kind: "retrying",
+      sessionId: `session-retrying-byte-cap-${index}`,
+      runId: `run-retrying-byte-cap-${index}`,
+      generation: `generation-retrying-byte-cap-${index}`,
+      attemptToken: `attempt-retrying-byte-cap-${index}`,
+      occurrenceIds: [`occ-retrying-byte-cap-${index}`],
+      startedAt: index,
+      expiresAt: Date.now() + 60_000,
+      event: {
+        type: "tldw:quick-ingest/failed",
+        payload: {
+          sessionId: `session-retrying-byte-cap-${index}`,
+          runId: `run-retrying-byte-cap-${index}`,
+          results: [
+            {
+              id: `occ-retrying-byte-cap-${index}`,
+              status: "error",
+              retryable: true,
+              error: "x".repeat(400_000),
+            },
+          ],
+        },
+      },
+    })
+    const retained = Array.from({ length: 5 }, (_, index) =>
+      makeRetrying(index),
+    )
+    const persist = vi.fn()
+    const save = createQuickIngestRunSessionSaver(
+      async () => retained,
+      persist,
+    )
+
+    await expect(save(makeRetrying(5) as any)).resolves.toBe(false)
+    expect(persist).not.toHaveBeenCalled()
   })
 
   it("evicts review tombstones before active recovery authority at the session cap", () => {

@@ -56,10 +56,14 @@ import {
   type QuickIngestSessionRunContext,
   type QuickIngestSessionRunResult,
 } from "@/entries/shared/quick-ingest-session-runtime";
-import { submitQuickIngestBatch } from "@/services/tldw/quick-ingest-batch";
+import {
+  reconcileRetriedQuickIngestOccurrences,
+  submitQuickIngestBatch,
+  submitRetriedQuickIngestOccurrences,
+} from "@/services/tldw/quick-ingest-batch";
 import { reattachQuickIngestSession } from "@/services/tldw/quick-ingest-session-reattach";
 import { mediaMethods } from "@/services/tldw/domains/media";
-import { cancelRun } from "@/services/tldw/playlist-ingest";
+import { cancelRun, retryRunItems } from "@/services/tldw/playlist-ingest";
 import {
   createIngestJobsTracker,
   pollTrackedIngestJobs,
@@ -165,6 +169,7 @@ export const delegatePendingQuickIngestRun = async (
     ...payload,
     __quickIngestSessionId: context.sessionId,
     __quickIngestShouldStop: context.isCancelled,
+    __quickIngestIsOccurrenceCancelled: context.isOccurrenceCancelled,
     onTrackingMetadata: context.setRunTracking,
   });
   const reviewRequired = Array.isArray(response.reviewRequired)
@@ -216,6 +221,15 @@ const isQuickIngestReplayRecord = (record: unknown): boolean =>
       !Array.isArray(record) &&
       ((record as Record<string, unknown>).kind === "terminal" ||
         (record as Record<string, unknown>).kind === "review"),
+  );
+
+const isQuickIngestBudgetedRecoveryRecord = (record: unknown): boolean =>
+  isQuickIngestReplayRecord(record) ||
+  Boolean(
+    record &&
+      typeof record === "object" &&
+      !Array.isArray(record) &&
+      (record as Record<string, unknown>).kind === "retrying",
   );
 
 const quickIngestRecordTimestamp = (record: unknown): number => {
@@ -273,14 +287,14 @@ const boundQuickIngestRunSessions = (records: unknown[]): unknown[] | null => {
       });
     return candidates[0]?.index ?? -1;
   };
-  const terminalBytes = (): number =>
+  const recoveryBytes = (): number =>
     next
-      .filter(isQuickIngestReplayRecord)
+      .filter(isQuickIngestBudgetedRecoveryRecord)
       .reduce((total, record) => total + quickIngestRecordBytes(record), 0);
 
   while (
     next.length > MAX_QUICK_INGEST_RUN_SESSIONS ||
-    terminalBytes() > MAX_QUICK_INGEST_TERMINAL_BYTES
+    recoveryBytes() > MAX_QUICK_INGEST_TERMINAL_BYTES
   ) {
     const index = oldestTerminalIndex();
     if (index < 0) return null;
@@ -311,7 +325,8 @@ const mutateQuickIngestRunSessions = (
       if (
         record?.kind === "terminal" &&
         stored.kind !== "start" &&
-        stored.kind !== "run"
+        stored.kind !== "run" &&
+        stored.kind !== "retrying"
       ) {
         return false;
       }
@@ -399,6 +414,7 @@ export const cancelQuickIngestRunInBackground = async (
   tracking: Parameters<typeof reattachQuickIngestSession>[0],
   reason: string,
   cancel: typeof cancelRun = cancelRun,
+  occurrenceIds?: string[],
 ): Promise<{ ok: boolean; error?: string }> => {
   const runId = String(tracking.runId || "").trim();
   if (!runId) return { ok: false, error: "Missing run id." };
@@ -406,7 +422,10 @@ export const cancelQuickIngestRunInBackground = async (
     await cancel(
       mediaMethods,
       runId,
-      { reason },
+      {
+        reason,
+        ...(occurrenceIds !== undefined ? { occurrenceIds } : {}),
+      },
       { preferDirect: true },
     );
     return { ok: true };
@@ -420,6 +439,123 @@ export const cancelQuickIngestRunInBackground = async (
     };
   }
 };
+
+export const retryQuickIngestRunInBackground = async (
+  runId: string,
+  occurrenceIds: string[],
+  retry: typeof retryRunItems = retryRunItems,
+  submitRetried: typeof submitRetriedQuickIngestOccurrences =
+    submitRetriedQuickIngestOccurrences,
+  options: { reconcileOnly?: boolean } = {},
+  reconcile: typeof reconcileRetriedQuickIngestOccurrences =
+    reconcileRetriedQuickIngestOccurrences,
+): Promise<{
+  ok: boolean;
+  indeterminate?: boolean;
+  notAdvanced?: boolean;
+  error?: string;
+}> => {
+  const normalizedRunId = String(runId || "").trim();
+  const normalizedOccurrenceIds = Array.from(
+    new Set(
+      (occurrenceIds || [])
+        .map((value) => String(value || "").trim())
+        .filter(Boolean),
+    ),
+  );
+  if (!normalizedRunId) return { ok: false, error: "Missing run id." };
+  if (normalizedOccurrenceIds.length === 0) {
+    return { ok: false, error: "No retryable occurrences were selected." };
+  }
+  if (options.reconcileOnly) {
+    const reconciled = await reconcile(
+      normalizedRunId,
+      normalizedOccurrenceIds,
+    );
+    return {
+      ok: reconciled.ok,
+      ...(reconciled.indeterminate ? { indeterminate: true } : {}),
+      ...(reconciled.notAdvanced ? { notAdvanced: true } : {}),
+      ...(reconciled.error ? { error: reconciled.error } : {}),
+    };
+  }
+  try {
+    const retryResult = await retry(
+      mediaMethods,
+      normalizedRunId,
+      normalizedOccurrenceIds,
+      { preferDirect: true },
+    );
+    const submitted = await submitRetried(retryResult);
+    if (submitted.ok && retryResult.processingOccurrences.length === 0) {
+      return reconcile(normalizedRunId, normalizedOccurrenceIds);
+    }
+    return submitted.ok
+      ? submitted
+      : { ...submitted, indeterminate: true };
+  } catch (error) {
+    const status =
+      error && typeof error === "object"
+        ? Number((error as { status?: unknown }).status)
+        : Number.NaN;
+    const indeterminateStatuses = new Set([500, 502, 503, 504]);
+    const indeterminate =
+      !Number.isInteger(status) ||
+      status < 400 ||
+      status > 599 ||
+      indeterminateStatuses.has(status);
+    if (indeterminate) {
+      const reconciled = await reconcile(
+        normalizedRunId,
+        normalizedOccurrenceIds,
+      );
+      if (reconciled.ok) return { ok: true };
+      if (reconciled.notAdvanced) {
+        return {
+          ok: false,
+          indeterminate: true,
+          notAdvanced: true,
+          error:
+            error instanceof Error
+              ? error.message
+              : "The ingest occurrences could not be retried.",
+        };
+      }
+    }
+    return {
+      ok: false,
+      ...(indeterminate ? { indeterminate: true } : {}),
+      error:
+        error instanceof Error
+          ? error.message
+          : "The ingest occurrences could not be retried.",
+    };
+  }
+};
+
+export const retryQuickIngestSessionInBackground = async (
+  runtime: {
+    retry: (
+      sessionId: string,
+      runId: string,
+      occurrenceIds: string[],
+    ) => Promise<{
+      ok: boolean;
+      generation?: string;
+      indeterminate?: boolean;
+      error?: string;
+    }>;
+  },
+  sessionId: string,
+  runId: string,
+  occurrenceIds: string[],
+): Promise<{
+  ok: boolean;
+  generation?: string;
+  indeterminate?: boolean;
+  error?: string;
+}> =>
+  runtime.retry(sessionId, runId, occurrenceIds);
 
 const waitFor = (delayMs: number): Promise<void> =>
   new Promise((resolve) => {
@@ -3500,6 +3636,14 @@ export default defineBackground({
       reattachRun: (tracking, options) =>
         pollQuickIngestRunInBackground(tracking, options),
       cancelRun: cancelQuickIngestRunInBackground,
+      retryRun: (tracking, occurrenceIds, options) =>
+        retryQuickIngestRunInBackground(
+          String(tracking.runId || ""),
+          occurrenceIds,
+          retryRunItems,
+          submitRetriedQuickIngestOccurrences,
+          options,
+        ),
       createSessionId: createQuickIngestSessionId,
     });
 
@@ -3579,12 +3723,27 @@ export default defineBackground({
       if (message.type === "tldw:quick-ingest/cancel") {
         const sessionId = String(message?.payload?.sessionId || "").trim();
         const reason = String(message?.payload?.reason || "user_cancelled");
+        const expectedGeneration = String(
+          message?.payload?.expectedGeneration || "",
+        ).trim();
+        const occurrenceIds = Array.isArray(message?.payload?.occurrenceIds)
+          ? message.payload.occurrenceIds
+          : undefined;
         if (!sessionId) {
           return { ok: false, error: "Missing sessionId." };
         }
 
         const session = getQuickIngestModalSession(sessionId);
-        if (session) {
+        const runtimeCancel = await quickIngestSessionRuntime.cancel(
+          sessionId,
+          reason,
+          occurrenceIds,
+          expectedGeneration || undefined,
+        );
+        if (!runtimeCancel.ok) {
+          return runtimeCancel;
+        }
+        if (session && !occurrenceIds?.length) {
           session.cancelled = true;
           void persistSessionState();
           for (const controller of Array.from(session.abortControllers)) {
@@ -3596,16 +3755,21 @@ export default defineBackground({
           }
           session.abortControllers.clear();
         }
-
-        const runtimeCancel = await quickIngestSessionRuntime.cancel(
-          sessionId,
-          reason,
-        );
-        if (!runtimeCancel.ok) {
-          if (session) session.cancelled = false;
-          return runtimeCancel;
-        }
         return { ok: true };
+      }
+      if (message.type === "tldw:quick-ingest/retry") {
+        const sessionId = String(message?.payload?.sessionId || "").trim();
+        const runId = String(message?.payload?.runId || "").trim();
+        const occurrenceIds = Array.isArray(message?.payload?.occurrenceIds)
+          ? message.payload.occurrenceIds
+          : [];
+        if (!sessionId) return { ok: false, error: "Missing sessionId." };
+        return await retryQuickIngestSessionInBackground(
+          quickIngestSessionRuntime,
+          sessionId,
+          runId,
+          occurrenceIds,
+        );
       }
       if (message.type === "tldw:quick-ingest-batch") {
         return await runQuickIngestBatch(message.payload || {});

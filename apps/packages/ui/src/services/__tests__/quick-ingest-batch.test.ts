@@ -1070,6 +1070,214 @@ describe("submitQuickIngestBatch", () => {
     )
   })
 
+  it("records a direct occurrence cancellation during create and cancels the created server row before upload", async () => {
+    let resolveCreate!: (value: unknown) => void
+    const createPromise = new Promise((resolve) => {
+      resolveCreate = resolve
+    })
+    mocks.bgRequest
+      .mockReturnValueOnce(createPromise)
+      .mockResolvedValueOnce({
+        contract_version: 2,
+        run_id: "run-row-cancel-during-create",
+        status: "running",
+        counts: { total: 2, staged: 1, cancellation_requested: 1 },
+        version: 2,
+        collection_id: null,
+        batch_ids: [],
+        created_at: "2026-07-13T00:00:00Z",
+        updated_at: "2026-07-13T00:00:01Z",
+        expires_at: "2026-07-20T00:00:00Z",
+      })
+    mocks.bgUpload.mockResolvedValue({
+      batch_id: "batch-row-cancel-during-create",
+      jobs: [{ id: 902 }],
+      errors: [],
+      submissions: [
+        {
+          occurrence_id: "occ-row-continue-during-create",
+          status: "accepted",
+          accepted: true,
+          job_id: 902,
+          batch_id: "batch-row-cancel-during-create",
+          error_code: null,
+          message: null,
+          retryable: false,
+          attempt: 1,
+        },
+      ],
+    })
+
+    const submitted = submitQuickIngestBatch({
+      entries: [
+        {
+          id: "occ-row-cancel-during-create",
+          url: "https://cached.invalid/cancel",
+          type: "video",
+        },
+        {
+          id: "occ-row-continue-during-create",
+          url: "https://cached.invalid/continue",
+          type: "video",
+        },
+      ],
+      files: [],
+      storeRemote: true,
+      processOnly: false,
+      __quickIngestSessionId: "qi-direct-row-cancel-during-create",
+      pendingRunRequest: {
+        inputs: [
+          {
+            inputKind: "direct_url",
+            occurrenceId: "occ-row-cancel-during-create",
+            url: "https://client.invalid/cancel",
+          },
+          {
+            inputKind: "direct_url",
+            occurrenceId: "occ-row-continue-during-create",
+            url: "https://client.invalid/continue",
+          },
+        ],
+      },
+    } as any)
+    await vi.waitFor(() => expect(mocks.bgRequest).toHaveBeenCalledTimes(1))
+
+    await expect(
+      cancelQuickIngestSession({
+        sessionId: "qi-direct-row-cancel-during-create",
+        reason: "user_cancelled",
+        occurrenceIds: ["occ-row-cancel-during-create"],
+      })
+    ).resolves.toEqual({ ok: true })
+
+    resolveCreate({
+      contract_version: 2,
+      run_id: "run-row-cancel-during-create",
+      status: "staged",
+      version: 1,
+      status_url: "/api/v1/media/ingest/runs/run-row-cancel-during-create",
+      items_url: "/api/v1/media/ingest/runs/run-row-cancel-during-create/items",
+      events_url: "/api/v1/media/ingest/runs/run-row-cancel-during-create/events/stream",
+      processing_occurrences: [
+        {
+          occurrence_id: "occ-row-cancel-during-create",
+          ordinal: 1,
+          input_kind: "direct_url",
+          source_url: "https://server.example/cancel",
+          source_kind: "video",
+          display_metadata: {},
+          state: "staged",
+          outcome: null,
+          job_id: null,
+          batch_id: null,
+          attempt: 1,
+          planned_collection_item_id: null,
+        },
+        {
+          occurrence_id: "occ-row-continue-during-create",
+          ordinal: 2,
+          input_kind: "direct_url",
+          source_url: "https://server.example/continue",
+          source_kind: "video",
+          display_metadata: {},
+          state: "staged",
+          outcome: null,
+          job_id: null,
+          batch_id: null,
+          attempt: 1,
+          planned_collection_item_id: null,
+        },
+      ],
+    })
+
+    await expect(submitted).resolves.toMatchObject({
+      accepted: true,
+      runId: "run-row-cancel-during-create",
+    })
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/media/ingest/runs/run-row-cancel-during-create/cancel",
+        body: {
+          reason: "user_cancelled",
+          occurrence_ids: ["occ-row-cancel-during-create"],
+        },
+      })
+    )
+    expect(mocks.bgUpload).toHaveBeenCalledTimes(1)
+    expect(mocks.bgUpload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fields: expect.objectContaining({
+          occurrence_ids: ["occ-row-continue-during-create"],
+        }),
+      })
+    )
+  })
+
+  it("does not create a direct run after its reserved session was already cancelled", async () => {
+    const ack = await startQuickIngestSession({
+      entries: [],
+      files: [],
+      pendingRunRequest: {
+        inputs: [
+          {
+            inputKind: "direct_url",
+            occurrenceId: "occ-cancel-before-create",
+            url: "https://example.com/cancel-before-create",
+          },
+        ],
+      },
+      storeRemote: true,
+      processOnly: false,
+    } as any)
+    expect(ack).toMatchObject({
+      ok: true,
+      sessionId: expect.stringMatching(/^qi-direct-/),
+    })
+
+    await expect(
+      cancelQuickIngestSession({
+        sessionId: ack.sessionId,
+        reason: "user_cancelled",
+      })
+    ).resolves.toEqual({ ok: true })
+
+    mocks.bgRequest.mockResolvedValue({
+      contract_version: 2,
+      run_id: "run-must-not-be-created",
+      status: "staged",
+      version: 1,
+      status_url: "/api/v1/media/ingest/runs/run-must-not-be-created",
+      items_url: "/api/v1/media/ingest/runs/run-must-not-be-created/items",
+      events_url: "/api/v1/media/ingest/runs/run-must-not-be-created/events/stream",
+      processing_occurrences: [],
+    })
+
+    await expect(
+      submitQuickIngestBatch({
+        entries: [],
+        files: [],
+        pendingRunRequest: {
+          inputs: [
+            {
+              inputKind: "direct_url",
+              occurrenceId: "occ-cancel-before-create",
+              url: "https://example.com/cancel-before-create",
+            },
+          ],
+        },
+        storeRemote: true,
+        processOnly: false,
+        __quickIngestSessionId: ack.sessionId,
+      } as any)
+    ).resolves.toMatchObject({
+      ok: false,
+      accepted: false,
+      submissionBlocked: true,
+    })
+    expect(mocks.bgRequest).not.toHaveBeenCalled()
+    expect(mocks.bgUpload).not.toHaveBeenCalled()
+  })
+
   it("stops later chunks and cancels the run when cancellation arrives between chunks", async () => {
     const occurrences = Array.from({ length: 51 }, (_, index) => ({
       occurrence_id: `occ-cancel-chunk-${index + 1}`,
@@ -1166,6 +1374,129 @@ describe("submitQuickIngestBatch", () => {
       expect.objectContaining({
         path: "/api/v1/media/ingest/runs/run-cancel-between-chunks/cancel",
         body: { reason: "user_cancelled" },
+      })
+    )
+  })
+
+  it("rechecks occurrence cancellation before each chunk and omits a cancelled later row", async () => {
+    const occurrences = Array.from({ length: 51 }, (_, index) => ({
+      occurrence_id: `occ-row-cancel-chunk-${index + 1}`,
+      ordinal: index + 1,
+      input_kind: "direct_url",
+      source_url: `https://server.example/row-cancel-chunk-${index + 1}`,
+      source_kind: "video",
+      display_metadata: {},
+      state: "staged",
+      outcome: null,
+      job_id: null,
+      batch_id: null,
+      attempt: 1,
+      planned_collection_item_id: null,
+    }))
+    mocks.bgRequest.mockImplementation(async (request: any) => {
+      if (String(request.path).endsWith("/cancel")) {
+        return {
+          contract_version: 2,
+          run_id: "run-row-cancel-between-chunks",
+          status: "running",
+          counts: { total: 51, queued: 50, cancellation_requested: 1 },
+          version: 2,
+          collection_id: null,
+          batch_ids: ["batch-row-cancel-first"],
+          created_at: "2026-07-13T00:00:00Z",
+          updated_at: "2026-07-13T00:00:01Z",
+          expires_at: "2026-07-20T00:00:00Z",
+        }
+      }
+      return {
+        contract_version: 2,
+        run_id: "run-row-cancel-between-chunks",
+        status: "staged",
+        version: 1,
+        status_url: "/api/v1/media/ingest/runs/run-row-cancel-between-chunks",
+        items_url: "/api/v1/media/ingest/runs/run-row-cancel-between-chunks/items",
+        events_url: "/api/v1/media/ingest/runs/run-row-cancel-between-chunks/events/stream",
+        processing_occurrences: occurrences,
+      }
+    })
+    let uploadCount = 0
+    mocks.bgUpload.mockImplementation(async () => {
+      uploadCount += 1
+      if (uploadCount === 1) {
+        const rowCancel = await cancelQuickIngestSession({
+          sessionId: "qi-direct-row-cancel-between-chunks",
+          reason: "user_cancelled",
+          occurrenceIds: ["occ-row-cancel-chunk-51"],
+          tracking: {
+            mode: "webui-direct",
+            runId: "run-row-cancel-between-chunks",
+          },
+        } as any)
+        expect(rowCancel).toEqual({ ok: true })
+      }
+      const start = uploadCount === 1 ? 0 : 50
+      const count = uploadCount === 1 ? 50 : 1
+      return {
+        batch_id:
+          uploadCount === 1
+            ? "batch-row-cancel-first"
+            : "batch-row-cancel-second",
+        jobs: Array.from({ length: count }, (_, index) => ({
+          id: start + index + 1,
+        })),
+        errors: [],
+        submissions: Array.from({ length: count }, (_, index) => ({
+          occurrence_id: `occ-row-cancel-chunk-${start + index + 1}`,
+          status: "accepted",
+          accepted: true,
+          job_id: start + index + 1,
+          batch_id:
+            uploadCount === 1
+              ? "batch-row-cancel-first"
+              : "batch-row-cancel-second",
+          error_code: null,
+          message: null,
+          retryable: false,
+          attempt: 1,
+        })),
+      }
+    })
+
+    const result = await submitQuickIngestBatch({
+      entries: occurrences.map((occurrence) => ({
+        id: occurrence.occurrence_id,
+        url: "https://cached.invalid/ignored",
+        type: "video",
+      })),
+      files: [],
+      storeRemote: true,
+      processOnly: false,
+      __quickIngestSessionId: "qi-direct-row-cancel-between-chunks",
+      pendingRunRequest: {
+        inputs: occurrences.map((occurrence) => ({
+          inputKind: "direct_url",
+          occurrenceId: occurrence.occurrence_id,
+          url: "https://client.invalid/ignored",
+        })),
+      },
+    } as any)
+
+    expect(mocks.bgUpload).toHaveBeenCalledTimes(1)
+    expect(result).toMatchObject({
+      ok: true,
+      accepted: true,
+      runId: "run-row-cancel-between-chunks",
+    })
+    expect(JSON.stringify(mocks.bgUpload.mock.calls)).not.toContain(
+      "occ-row-cancel-chunk-51"
+    )
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/media/ingest/runs/run-row-cancel-between-chunks/cancel",
+        body: {
+          reason: "user_cancelled",
+          occurrence_ids: ["occ-row-cancel-chunk-51"],
+        },
       })
     )
   })
@@ -3568,6 +3899,77 @@ describe("submitQuickIngestBatch", () => {
     )
   })
 
+  it("cancels only the requested occurrence in a tracked version-2 run", async () => {
+    mocks.bgRequest.mockResolvedValue({
+      contract_version: 2,
+      run_id: "run-cancel-row",
+      status: "running",
+      counts: { total: 2, running: 1, cancellation_requested: 1 },
+      version: 2,
+      collection_id: null,
+      batch_ids: [],
+      created_at: "2026-07-13T00:00:00Z",
+      updated_at: "2026-07-13T00:00:01Z",
+      expires_at: "2026-07-20T00:00:00Z",
+    })
+
+    const response = await cancelQuickIngestSession({
+      sessionId: "qi-direct-row-cancel",
+      reason: "user_cancelled",
+      occurrenceIds: ["occ-cancel-row"],
+      tracking: {
+        mode: "webui-direct",
+        runId: "run-cancel-row",
+      },
+    } as any)
+
+    expect(response).toEqual({ ok: true })
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/media/ingest/runs/run-cancel-row/cancel",
+        body: {
+          reason: "user_cancelled",
+          occurrence_ids: ["occ-cancel-row"],
+        },
+      }),
+    )
+  })
+
+  it.each([404, 405, 501])(
+    "fails an unsupported occurrence-scoped run cancellation without falling back to whole batches (%s)",
+    async (status) => {
+      mocks.bgRequest.mockRejectedValue(
+        Object.assign(new Error("run occurrence cancellation unsupported"), {
+          status,
+        })
+      )
+
+      const response = await cancelQuickIngestSession({
+        sessionId: `qi-direct-row-unsupported-${status}`,
+        reason: "user_cancelled",
+        occurrenceIds: ["occ-row-unsupported"],
+        tracking: {
+          mode: "webui-direct",
+          runId: `run-row-unsupported-${status}`,
+          batchIds: ["batch-must-not-be-cancelled"],
+        },
+      } as any)
+
+      expect(response).toMatchObject({ ok: false })
+      expect(response.error).toMatch(/occurrence|unsupported|run|cancel/i)
+      expect(mocks.bgRequest).toHaveBeenCalledTimes(1)
+      expect(mocks.bgRequest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          path: `/api/v1/media/ingest/runs/run-row-unsupported-${status}/cancel`,
+          body: {
+            reason: "user_cancelled",
+            occurrence_ids: ["occ-row-unsupported"],
+          },
+        })
+      )
+    }
+  )
+
   it("reports a live run cancellation failure instead of claiming success", async () => {
     mocks.bgRequest.mockRejectedValue(
       Object.assign(new Error("service unavailable"), { status: 503 }),
@@ -3641,6 +4043,2458 @@ describe("submitQuickIngestBatch", () => {
       })
     )
     expect(response).toEqual({ ok: true })
+  })
+
+  it("routes extension-run row cancellation with run, generation, and occurrence authority", async () => {
+    mocks.runtimeId = "ext-row-cancel"
+    mocks.manifestVersion = 2
+    mocks.sendMessage.mockResolvedValueOnce({ ok: true }).mockResolvedValueOnce({
+      ok: true,
+    })
+
+    const response = await cancelQuickIngestSession({
+      sessionId: "qi-extension-row-cancel",
+      reason: "user_cancelled",
+      occurrenceIds: ["occ-extension-row-cancel"],
+      tracking: {
+        mode: "extension-runtime",
+        sessionId: "qi-extension-row-cancel",
+        runId: "run-extension-row-cancel",
+        generation: "generation-extension-row-cancel",
+      },
+    } as any)
+
+    expect(mocks.sendMessage).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        type: "tldw:quick-ingest/cancel",
+        payload: {
+          sessionId: "qi-extension-row-cancel",
+          runId: "run-extension-row-cancel",
+          expectedGeneration: "generation-extension-row-cancel",
+          reason: "user_cancelled",
+          occurrenceIds: ["occ-extension-row-cancel"],
+        },
+      })
+    )
+    expect(mocks.bgRequest).not.toHaveBeenCalled()
+    expect(response).toEqual({ ok: true })
+  })
+
+  it("routes extension retries through the shared session authority", async () => {
+    mocks.runtimeId = "ext-row-retry"
+    mocks.manifestVersion = 2
+    mocks.sendMessage.mockResolvedValueOnce({ ok: true }).mockResolvedValueOnce({
+      ok: true,
+    })
+    const quickIngestBatchModule = await import("@/services/tldw/quick-ingest-batch")
+    const retryQuickIngestSession = (quickIngestBatchModule as any)
+      .retryQuickIngestSession
+
+    expect(retryQuickIngestSession).toBeTypeOf("function")
+    if (typeof retryQuickIngestSession !== "function") return
+
+    const response = await retryQuickIngestSession({
+      sessionId: "qi-extension-row-retry",
+      occurrenceIds: ["occ-extension-row-retry"],
+      tracking: {
+        mode: "extension-runtime",
+        sessionId: "qi-extension-row-retry",
+        runId: "run-extension-row-retry",
+      },
+    })
+
+    expect(mocks.sendMessage).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        type: "tldw:quick-ingest/retry",
+        payload: {
+          sessionId: "qi-extension-row-retry",
+          runId: "run-extension-row-retry",
+          occurrenceIds: ["occ-extension-row-retry"],
+        },
+      })
+    )
+    expect(response).toEqual({ ok: true })
+  })
+
+  it("submits direct retry jobs from the authoritative retry response and leaves file stubs awaiting reselection", async () => {
+    mocks.bgRequest.mockResolvedValue({
+      contract_version: 2,
+      run_id: "run-direct-retry-submit",
+      version: 2,
+      processing_occurrences: [
+        {
+          occurrence_id: "occ-direct-retry-url",
+          ordinal: 1,
+          input_kind: "direct_url",
+          source_url: "https://server.example/authoritative-retry.mp4",
+          source_kind: "video",
+          display_metadata: {
+            title: "Authoritative retry",
+            source_url: "https://cached.invalid/display-only-retry.mp4",
+          },
+          state: "staged",
+          outcome: null,
+          job_id: null,
+          batch_id: null,
+          attempt: 2,
+          planned_collection_item_id: null,
+        },
+        {
+          occurrence_id: "occ-direct-retry-file",
+          ordinal: 2,
+          input_kind: "file_stub",
+          source_url: null,
+          source_kind: "file",
+          display_metadata: { title: "Reselect me" },
+          state: "awaiting_upload",
+          outcome: null,
+          job_id: null,
+          batch_id: null,
+          attempt: 4,
+          planned_collection_item_id: null,
+        },
+      ],
+    })
+    mocks.bgUpload.mockResolvedValue({
+      batch_id: "batch-direct-retry-submit",
+      jobs: [{ id: 902 }],
+      errors: [],
+      submissions: [
+        {
+          occurrence_id: "occ-direct-retry-url",
+          status: "accepted",
+          accepted: true,
+          job_id: 902,
+          batch_id: "batch-direct-retry-submit",
+          error_code: null,
+          message: null,
+          retryable: false,
+          attempt: 2,
+        },
+      ],
+    })
+    const quickIngestBatchModule = await import("@/services/tldw/quick-ingest-batch")
+    const retryQuickIngestSession = (quickIngestBatchModule as any)
+      .retryQuickIngestSession
+
+    const response = await retryQuickIngestSession({
+      sessionId: "qi-direct-retry-submit",
+      occurrenceIds: ["occ-direct-retry-url", "occ-direct-retry-file"],
+      cachedSourceUrls: {
+        "occ-direct-retry-url": "https://cached.invalid/queue-retry.mp4",
+      },
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "qi-direct-retry-submit",
+        runId: "run-direct-retry-submit",
+        generation: "generation-direct-retry-submit-g1",
+      },
+    })
+
+    expect(response).toMatchObject({
+      ok: true,
+      generation: expect.not.stringMatching(/g1$/),
+    })
+    expect(mocks.bgUpload).toHaveBeenCalledTimes(1)
+    expect(mocks.bgUpload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/media/ingest/jobs",
+        fields: expect.objectContaining({
+          run_id: "run-direct-retry-submit",
+          occurrence_ids: ["occ-direct-retry-url"],
+          attempts: [2],
+          urls: ["https://server.example/authoritative-retry.mp4"],
+        }),
+      }),
+    )
+    expect(JSON.stringify(mocks.bgUpload.mock.calls)).not.toContain(
+      "cached.invalid",
+    )
+    expect(JSON.stringify(mocks.bgUpload.mock.calls)).not.toContain(
+      "occ-direct-retry-file",
+    )
+  })
+
+  it("refuses a sixty-fifth live direct retry reservation before backend mutation", async () => {
+    let retryPosts = 0
+    mocks.bgRequest.mockImplementation(async (request: any) => {
+      if (request.path.endsWith("/retry")) {
+        retryPosts += 1
+        throw Object.assign(new Error("Gateway Timeout"), { status: 504 })
+      }
+      throw Object.assign(new Error("Run manifest unavailable"), { status: 503 })
+    })
+    const quickIngestBatchModule = await import("@/services/tldw/quick-ingest-batch")
+    const retryQuickIngestSession = (quickIngestBatchModule as any)
+      .retryQuickIngestSession
+
+    for (let index = 0; index < 64; index += 1) {
+      const response = await retryQuickIngestSession({
+        sessionId: `qi-direct-retry-cap-${index}`,
+        occurrenceIds: [`occ-direct-retry-cap-${index}`],
+        tracking: {
+          mode: "webui-direct",
+          sessionId: `qi-direct-retry-cap-${index}`,
+          runId: `run-direct-retry-cap-${index}`,
+          generation: `generation-direct-retry-cap-${index}-g1`,
+        },
+      })
+      expect(response).toMatchObject({
+        ok: false,
+        indeterminate: true,
+        generation: expect.any(String),
+      })
+    }
+
+    const refused = await retryQuickIngestSession({
+      sessionId: "qi-direct-retry-cap-refused",
+      occurrenceIds: ["occ-direct-retry-cap-refused"],
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "qi-direct-retry-cap-refused",
+        runId: "run-direct-retry-cap-refused",
+        generation: "generation-direct-retry-cap-refused-g1",
+      },
+    })
+
+    expect(refused).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/capacity|reconcile|full/i),
+    })
+    expect(refused).not.toHaveProperty("generation")
+    expect(retryPosts).toBe(64)
+  })
+
+  it("prunes expired direct retry reservations and admits a new retry", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(Date.now() + 25 * 60 * 60 * 1_000)
+    let retryPosts = 0
+    mocks.bgRequest.mockImplementation(async (request: any) => {
+      if (request.path.endsWith("/retry")) {
+        retryPosts += 1
+        return {
+          contract_version: 2,
+          run_id: "run-direct-retry-cap-after-expiry",
+          version: 2,
+          processing_occurrences: [],
+        }
+      }
+      if (request.path.includes("/items")) {
+        return {
+          contract_version: 2,
+          run_id: "run-direct-retry-cap-after-expiry",
+          version: 2,
+          items: [
+            {
+              occurrence_id: "occ-direct-retry-cap-after-expiry",
+              ordinal: 0,
+              input_kind: "direct_url",
+              source_url: "https://example.com/direct-retry-cap-after-expiry",
+              normalized_source_id: null,
+              source_kind: "video",
+              display_metadata: {},
+              action: "ingest",
+              state: "terminal",
+              outcome: "completed",
+              progress_percent: 100,
+              progress_message: null,
+              job_id: 903,
+              batch_id: "batch-direct-retry-cap-after-expiry",
+              media_id: 903,
+              planned_collection_item_id: null,
+              attempt: 2,
+              retryable: false,
+            },
+          ],
+          next_cursor: null,
+        }
+      }
+      return {
+        contract_version: 2,
+        run_id: "run-direct-retry-cap-after-expiry",
+        status: "completed",
+        counts: { total: 1, completed: 1 },
+        version: 2,
+        collection_id: null,
+        batch_ids: ["batch-direct-retry-cap-after-expiry"],
+        created_at: "2026-07-14T00:00:00Z",
+        updated_at: "2026-07-14T00:00:01Z",
+        expires_at: "2026-07-21T00:00:00Z",
+      }
+    })
+    const quickIngestBatchModule = await import("@/services/tldw/quick-ingest-batch")
+    const retryQuickIngestSession = (quickIngestBatchModule as any)
+      .retryQuickIngestSession
+
+    const response = await retryQuickIngestSession({
+      sessionId: "qi-direct-retry-cap-after-expiry",
+      occurrenceIds: ["occ-direct-retry-cap-after-expiry"],
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "qi-direct-retry-cap-after-expiry",
+        runId: "run-direct-retry-cap-after-expiry",
+        generation: "generation-direct-retry-cap-after-expiry-g1",
+      },
+    })
+
+    expect(response).toMatchObject({
+      ok: true,
+      generation: expect.not.stringMatching(/g1$/),
+    })
+    expect(retryPosts).toBe(1)
+  })
+
+  it.each([
+    Object.assign(new Error("Retry response was lost"), { status: 0 }),
+    Object.assign(new Error("Internal Server Error"), { status: 500 }),
+    Object.assign(new Error("Bad Gateway"), { status: 502 }),
+    Object.assign(new Error("Service Unavailable"), { status: 503 }),
+    Object.assign(new Error("Gateway Timeout"), { status: 504 }),
+  ])("retains direct retry authority for an ambiguous %s", async (error) => {
+    mocks.bgRequest.mockRejectedValue(error)
+    const quickIngestBatchModule = await import("@/services/tldw/quick-ingest-batch")
+    const retryQuickIngestSession = (quickIngestBatchModule as any)
+      .retryQuickIngestSession
+    const suffix = String((error as any).status)
+
+    const response = await retryQuickIngestSession({
+      sessionId: `qi-direct-retry-ambiguous-${suffix}`,
+      occurrenceIds: [`occ-direct-retry-ambiguous-${suffix}`],
+      tracking: {
+        mode: "webui-direct",
+        sessionId: `qi-direct-retry-ambiguous-${suffix}`,
+        runId: `run-direct-retry-ambiguous-${suffix}`,
+        generation: `generation-direct-retry-ambiguous-${suffix}-g1`,
+      },
+    })
+
+    expect(response).toMatchObject({
+      ok: false,
+      indeterminate: true,
+      generation: expect.not.stringMatching(/g1$/),
+    })
+  })
+
+  it("reconciles an ambiguous direct retry from the authoritative manifest and idempotently submits its advanced attempt", async () => {
+    let retryPosts = 0
+    mocks.bgRequest.mockImplementation(async (request: any) => {
+      if (request.path.endsWith("/retry")) {
+        retryPosts += 1
+        throw Object.assign(new Error("Gateway Timeout"), { status: 504 })
+      }
+      if (request.path.includes("/items")) {
+        return {
+          contract_version: 2,
+          run_id: "run-direct-retry-reconcile",
+          version: 2,
+          items: [
+            {
+              occurrence_id: "occ-direct-retry-reconcile",
+              ordinal: 1,
+              input_kind: "direct_url",
+              source_url: "https://server.example/reconciled-attempt.mp4",
+              normalized_source_id: null,
+              source_kind: "video",
+              display_metadata: {
+                source_url: "https://cached.invalid/reconciled-display.mp4",
+              },
+              action: "ingest",
+              state: "staged",
+              outcome: null,
+              progress_percent: null,
+              progress_message: null,
+              job_id: null,
+              batch_id: null,
+              media_id: null,
+              planned_collection_item_id: null,
+              attempt: 2,
+              retryable: false,
+            },
+          ],
+          next_cursor: null,
+        }
+      }
+      return {
+        contract_version: 2,
+        run_id: "run-direct-retry-reconcile",
+        status: "running",
+        counts: { total: 1, staged: 1 },
+        version: 2,
+        collection_id: null,
+        batch_ids: [],
+        created_at: "2026-07-14T00:00:00Z",
+        updated_at: "2026-07-14T00:00:01Z",
+        expires_at: "2026-07-21T00:00:00Z",
+      }
+    })
+    mocks.bgUpload
+      .mockRejectedValueOnce(
+        Object.assign(new Error("Submission response was lost"), { status: 0 }),
+      )
+      .mockResolvedValueOnce({
+        batch_id: "batch-direct-retry-reconcile",
+        jobs: [{ id: 903 }],
+        errors: [],
+        submissions: [
+          {
+            occurrence_id: "occ-direct-retry-reconcile",
+            status: "accepted",
+            accepted: true,
+            job_id: 903,
+            batch_id: "batch-direct-retry-reconcile",
+            error_code: null,
+            message: null,
+            retryable: false,
+            attempt: 2,
+          },
+        ],
+      })
+    const quickIngestBatchModule = await import("@/services/tldw/quick-ingest-batch")
+    const retryQuickIngestSession = (quickIngestBatchModule as any)
+      .retryQuickIngestSession
+
+    const response = await retryQuickIngestSession({
+      sessionId: "qi-direct-retry-reconcile",
+      occurrenceIds: ["occ-direct-retry-reconcile"],
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "qi-direct-retry-reconcile",
+        runId: "run-direct-retry-reconcile",
+        generation: "generation-direct-retry-reconcile-g1",
+      },
+    })
+
+    expect(response).toMatchObject({
+      ok: true,
+      generation: expect.not.stringMatching(/g1$/),
+    })
+    expect(retryPosts).toBe(1)
+    expect(mocks.bgUpload).toHaveBeenCalledTimes(2)
+    expect(mocks.bgUpload.mock.calls[1]?.[0]).toEqual(
+      mocks.bgUpload.mock.calls[0]?.[0],
+    )
+    expect(mocks.bgUpload.mock.calls[0]?.[0]).toMatchObject({
+      fields: {
+        run_id: "run-direct-retry-reconcile",
+        occurrence_ids: ["occ-direct-retry-reconcile"],
+        attempts: [2],
+        urls: ["https://server.example/reconciled-attempt.mp4"],
+      },
+    })
+    expect(JSON.stringify(mocks.bgUpload.mock.calls)).not.toContain(
+      "cached.invalid",
+    )
+  })
+
+  it("reconciles a retained ambiguous direct reservation before issuing another backend retry", async () => {
+    let manifestAvailable = false
+    let retryPosts = 0
+    mocks.bgRequest.mockImplementation(async (request: any) => {
+      if (request.path.endsWith("/retry")) {
+        retryPosts += 1
+        throw Object.assign(new Error("Gateway Timeout"), { status: 504 })
+      }
+      if (!manifestAvailable) {
+        throw Object.assign(new Error("Run manifest unavailable"), {
+          status: 503,
+        })
+      }
+      if (request.path.includes("/items")) {
+        return {
+          contract_version: 2,
+          run_id: "run-direct-retry-retained",
+          version: 2,
+          items: [
+            {
+              occurrence_id: "occ-direct-retry-retained",
+              ordinal: 1,
+              input_kind: "direct_url",
+              source_url: "https://server.example/retained-attempt.mp4",
+              normalized_source_id: null,
+              source_kind: "video",
+              display_metadata: {},
+              action: "ingest",
+              state: "staged",
+              outcome: null,
+              progress_percent: null,
+              progress_message: null,
+              job_id: null,
+              batch_id: null,
+              media_id: null,
+              planned_collection_item_id: null,
+              attempt: 2,
+              retryable: false,
+            },
+          ],
+          next_cursor: null,
+        }
+      }
+      return {
+        contract_version: 2,
+        run_id: "run-direct-retry-retained",
+        status: "running",
+        counts: { total: 1, staged: 1 },
+        version: 2,
+        collection_id: null,
+        batch_ids: [],
+        created_at: "2026-07-14T00:00:00Z",
+        updated_at: "2026-07-14T00:00:01Z",
+        expires_at: "2026-07-21T00:00:00Z",
+      }
+    })
+    mocks.bgUpload.mockResolvedValue({
+      batch_id: "batch-direct-retry-retained",
+      jobs: [{ id: 904 }],
+      errors: [],
+      submissions: [
+        {
+          occurrence_id: "occ-direct-retry-retained",
+          status: "accepted",
+          accepted: true,
+          job_id: 904,
+          batch_id: "batch-direct-retry-retained",
+          error_code: null,
+          message: null,
+          retryable: false,
+          attempt: 2,
+        },
+      ],
+    })
+    const quickIngestBatchModule = await import("@/services/tldw/quick-ingest-batch")
+    const retryQuickIngestSession = (quickIngestBatchModule as any)
+      .retryQuickIngestSession
+
+    const first = await retryQuickIngestSession({
+      sessionId: "qi-direct-retry-retained",
+      occurrenceIds: ["occ-direct-retry-retained"],
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "qi-direct-retry-retained",
+        runId: "run-direct-retry-retained",
+        generation: "generation-direct-retry-retained-g1",
+      },
+    })
+    manifestAvailable = true
+    const second = await retryQuickIngestSession({
+      sessionId: "qi-direct-retry-retained",
+      occurrenceIds: ["occ-direct-retry-retained"],
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "qi-direct-retry-retained",
+        runId: "run-direct-retry-retained",
+        generation: first.generation,
+      },
+    })
+
+    expect.soft(first).toMatchObject({
+      ok: false,
+      indeterminate: true,
+      generation: expect.not.stringMatching(/g1$/),
+    })
+    expect(second).toMatchObject({
+      ok: true,
+      generation: first.generation,
+    })
+    expect(retryPosts).toBe(1)
+    expect(mocks.bgUpload).toHaveBeenCalledTimes(1)
+  })
+
+  it("retains mixed-manifest retry authority until every selected URL occurrence is active", async () => {
+    let secondOccurrenceAdvanced = false
+    let retryPosts = 0
+    mocks.bgRequest.mockImplementation(async (request: any) => {
+      if (request.path.endsWith("/retry")) {
+        retryPosts += 1
+        throw Object.assign(new Error("Gateway Timeout"), { status: 504 })
+      }
+      if (request.path.includes("/items")) {
+        return {
+          contract_version: 2,
+          run_id: "run-direct-retry-mixed-manifest",
+          version: secondOccurrenceAdvanced ? 3 : 2,
+          items: [
+            {
+              occurrence_id: "occ-direct-retry-mixed-first",
+              ordinal: 1,
+              input_kind: "direct_url",
+              source_url: "https://server.example/mixed-first.mp4",
+              normalized_source_id: null,
+              source_kind: "video",
+              display_metadata: {},
+              action: "ingest",
+              state: secondOccurrenceAdvanced ? "queued" : "staged",
+              outcome: null,
+              progress_percent: null,
+              progress_message: null,
+              job_id: secondOccurrenceAdvanced ? 920 : null,
+              batch_id: secondOccurrenceAdvanced ? "batch-mixed-first" : null,
+              media_id: null,
+              planned_collection_item_id: null,
+              attempt: 2,
+              retryable: false,
+            },
+            {
+              occurrence_id: "occ-direct-retry-mixed-second",
+              ordinal: 2,
+              input_kind: "direct_url",
+              source_url: "https://server.example/mixed-second.mp4",
+              normalized_source_id: null,
+              source_kind: "video",
+              display_metadata: {},
+              action: "ingest",
+              state: secondOccurrenceAdvanced ? "staged" : "terminal",
+              outcome: secondOccurrenceAdvanced ? null : "processing_failed",
+              progress_percent: null,
+              progress_message: null,
+              job_id: null,
+              batch_id: null,
+              media_id: null,
+              planned_collection_item_id: null,
+              attempt: secondOccurrenceAdvanced ? 2 : 1,
+              retryable: !secondOccurrenceAdvanced,
+            },
+            {
+              occurrence_id: "occ-direct-retry-mixed-file",
+              ordinal: 3,
+              input_kind: "file_stub",
+              source_url: null,
+              normalized_source_id: null,
+              source_kind: "file",
+              display_metadata: {},
+              action: "ingest",
+              state: "awaiting_upload",
+              outcome: null,
+              progress_percent: null,
+              progress_message: null,
+              job_id: null,
+              batch_id: null,
+              media_id: null,
+              planned_collection_item_id: null,
+              attempt: 2,
+              retryable: false,
+            },
+          ],
+          next_cursor: null,
+        }
+      }
+      return {
+        contract_version: 2,
+        run_id: "run-direct-retry-mixed-manifest",
+        status: "running",
+        counts: { total: 3 },
+        version: secondOccurrenceAdvanced ? 3 : 2,
+        collection_id: null,
+        batch_ids: [],
+        created_at: "2026-07-14T00:00:00Z",
+        updated_at: "2026-07-14T00:00:01Z",
+        expires_at: "2026-07-21T00:00:00Z",
+      }
+    })
+    mocks.bgUpload
+      .mockRejectedValueOnce(
+        Object.assign(new Error("Submission response was lost"), { status: 0 }),
+      )
+      .mockImplementation(async (request: any) => ({
+        batch_id: `batch-${request.fields.occurrence_ids[0]}`,
+        jobs: [{ id: request.fields.occurrence_ids[0].endsWith("first") ? 920 : 921 }],
+        errors: [],
+        submissions: request.fields.occurrence_ids.map(
+          (occurrenceId: string, index: number) => ({
+            occurrence_id: occurrenceId,
+            status: "accepted",
+            accepted: true,
+            job_id: 920 + index,
+            batch_id: `batch-${occurrenceId}`,
+            error_code: null,
+            message: null,
+            retryable: false,
+            attempt: request.fields.attempts[index],
+          }),
+        ),
+      }))
+    const quickIngestBatchModule = await import("@/services/tldw/quick-ingest-batch")
+    const retryQuickIngestSession = (quickIngestBatchModule as any)
+      .retryQuickIngestSession
+    const occurrenceIds = [
+      "occ-direct-retry-mixed-first",
+      "occ-direct-retry-mixed-second",
+      "occ-direct-retry-mixed-file",
+    ]
+
+    const first = await retryQuickIngestSession({
+      sessionId: "qi-direct-retry-mixed-manifest",
+      occurrenceIds,
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "qi-direct-retry-mixed-manifest",
+        runId: "run-direct-retry-mixed-manifest",
+        generation: "generation-direct-retry-mixed-manifest-g1",
+      },
+    })
+    expect.soft(first).toMatchObject({
+      ok: false,
+      indeterminate: true,
+      generation: expect.not.stringMatching(/g1$/),
+    })
+    expect.soft(mocks.bgUpload).toHaveBeenCalledTimes(2)
+    expect.soft(mocks.bgUpload.mock.calls[1]?.[0]).toEqual(
+      mocks.bgUpload.mock.calls[0]?.[0],
+    )
+
+    secondOccurrenceAdvanced = true
+    const second = await retryQuickIngestSession({
+      sessionId: "qi-direct-retry-mixed-manifest",
+      occurrenceIds,
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "qi-direct-retry-mixed-manifest",
+        runId: "run-direct-retry-mixed-manifest",
+        generation: first.generation,
+      },
+    })
+
+    expect(second).toMatchObject({ ok: true, generation: first.generation })
+    expect(retryPosts).toBe(1)
+    expect(mocks.bgUpload).toHaveBeenCalledTimes(3)
+    expect(mocks.bgUpload.mock.calls[0]?.[0]).toMatchObject({
+      fields: {
+        occurrence_ids: ["occ-direct-retry-mixed-first"],
+        attempts: [2],
+      },
+    })
+    expect(mocks.bgUpload.mock.calls[2]?.[0]).toMatchObject({
+      fields: {
+        occurrence_ids: ["occ-direct-retry-mixed-second"],
+        attempts: [2],
+      },
+    })
+    expect(JSON.stringify(mocks.bgUpload.mock.calls)).not.toContain(
+      "occ-direct-retry-mixed-file",
+    )
+  })
+
+  it("fails closed when a direct retry response lacks an authoritative source or attempt", async () => {
+    mocks.bgRequest.mockResolvedValue({
+      contract_version: 2,
+      run_id: "run-direct-retry-invalid-authority",
+      version: 2,
+      processing_occurrences: [
+        {
+          occurrence_id: "occ-direct-retry-invalid-authority",
+          ordinal: 1,
+          input_kind: "direct_url",
+          source_url: null,
+          source_kind: "video",
+          display_metadata: {
+            source_url: "https://cached.invalid/must-not-be-promoted.mp4",
+          },
+          state: "staged",
+          outcome: null,
+          job_id: null,
+          batch_id: null,
+          attempt: 0,
+          planned_collection_item_id: null,
+        },
+      ],
+    })
+    const quickIngestBatchModule = await import("@/services/tldw/quick-ingest-batch")
+    const retryQuickIngestSession = (quickIngestBatchModule as any)
+      .retryQuickIngestSession
+
+    const response = await retryQuickIngestSession({
+      sessionId: "qi-direct-retry-invalid-authority",
+      occurrenceIds: ["occ-direct-retry-invalid-authority"],
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "qi-direct-retry-invalid-authority",
+        runId: "run-direct-retry-invalid-authority",
+        generation: "generation-direct-retry-invalid-authority-g1",
+      },
+    })
+
+    expect(response).toMatchObject({
+      ok: false,
+      generation: expect.any(String),
+      error: expect.stringMatching(/authoritative|source|attempt/i),
+    })
+    expect(mocks.bgUpload).not.toHaveBeenCalled()
+  })
+
+  it("rolls direct retry authority back only after a deterministic rejection", async () => {
+    let retryPosts = 0
+    mocks.bgRequest.mockImplementation(async (request: any) => {
+      if (request.path.endsWith("/retry")) {
+        retryPosts += 1
+        if (retryPosts === 1) {
+          throw Object.assign(new Error("Retry conflict"), { status: 409 })
+        }
+        return {
+          contract_version: 2,
+          run_id: "run-direct-retry-deterministic",
+          version: 2,
+          processing_occurrences: [],
+        }
+      }
+      if (request.path.includes("/items")) {
+        return {
+          contract_version: 2,
+          run_id: "run-direct-retry-deterministic",
+          version: 2,
+          items: [
+            {
+              occurrence_id: "occ-direct-retry-deterministic",
+              ordinal: 0,
+              input_kind: "direct_url",
+              source_url: "https://example.com/direct-retry-deterministic",
+              normalized_source_id: null,
+              source_kind: "video",
+              display_metadata: {},
+              action: "ingest",
+              state: "terminal",
+              outcome: "completed",
+              progress_percent: 100,
+              progress_message: null,
+              job_id: 904,
+              batch_id: "batch-direct-retry-deterministic",
+              media_id: 904,
+              planned_collection_item_id: null,
+              attempt: 2,
+              retryable: false,
+            },
+          ],
+          next_cursor: null,
+        }
+      }
+      return {
+        contract_version: 2,
+        run_id: "run-direct-retry-deterministic",
+        status: "completed",
+        counts: { total: 1, completed: 1 },
+        version: 2,
+        collection_id: null,
+        batch_ids: ["batch-direct-retry-deterministic"],
+        created_at: "2026-07-14T00:00:00Z",
+        updated_at: "2026-07-14T00:00:01Z",
+        expires_at: "2026-07-21T00:00:00Z",
+      }
+    })
+    const quickIngestBatchModule = await import("@/services/tldw/quick-ingest-batch")
+    const retryQuickIngestSession = (quickIngestBatchModule as any)
+      .retryQuickIngestSession
+    const tracking = {
+      mode: "webui-direct",
+      sessionId: "qi-direct-retry-deterministic",
+      runId: "run-direct-retry-deterministic",
+      generation: "generation-direct-retry-deterministic-g1",
+    }
+
+    const rejected = await retryQuickIngestSession({
+      sessionId: tracking.sessionId,
+      occurrenceIds: ["occ-direct-retry-deterministic"],
+      tracking,
+    })
+    const retried = await retryQuickIngestSession({
+      sessionId: tracking.sessionId,
+      occurrenceIds: ["occ-direct-retry-deterministic"],
+      tracking,
+    })
+
+    expect(rejected).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/retry|unavailable|conflict/i),
+    })
+    expect(rejected).not.toHaveProperty("generation")
+    expect(rejected).not.toHaveProperty("indeterminate", true)
+    expect(retried).toMatchObject({
+      ok: true,
+      generation: expect.not.stringMatching(/g1$/),
+    })
+  })
+
+  it("advances direct retry authority so a later cancellation cannot match the old generation", async () => {
+    mocks.bgRequest.mockImplementation(async (request: any) => {
+      if (request.path.endsWith("/retry")) {
+        return {
+          contract_version: 2,
+          run_id: "run-direct-retry-generation",
+          version: 2,
+          processing_occurrences: [],
+        }
+      }
+      if (request.path.includes("/items")) {
+        return {
+          contract_version: 2,
+          run_id: "run-direct-retry-generation",
+          version: 2,
+          items: [
+            {
+              occurrence_id: "occ-direct-retry-generation",
+              ordinal: 0,
+              input_kind: "direct_url",
+              source_url: "https://example.com/direct-retry-generation",
+              normalized_source_id: null,
+              source_kind: "video",
+              display_metadata: {},
+              action: "ingest",
+              state: "terminal",
+              outcome: "completed",
+              progress_percent: 100,
+              progress_message: null,
+              job_id: 900,
+              batch_id: "batch-direct-retry-generation",
+              media_id: 900,
+              planned_collection_item_id: null,
+              attempt: 2,
+              retryable: false,
+            },
+          ],
+          next_cursor: null,
+        }
+      }
+      return {
+        contract_version: 2,
+        run_id: "run-direct-retry-generation",
+        status: "completed",
+        counts: { total: 1, completed: 1 },
+        version: 2,
+        collection_id: null,
+        batch_ids: ["batch-direct-retry-generation"],
+        created_at: "2026-07-14T00:00:00Z",
+        updated_at: "2026-07-14T00:00:01Z",
+        expires_at: "2026-07-21T00:00:00Z",
+      }
+    })
+    const quickIngestBatchModule = await import("@/services/tldw/quick-ingest-batch")
+    const retryQuickIngestSession = (quickIngestBatchModule as any)
+      .retryQuickIngestSession
+
+    expect(retryQuickIngestSession).toBeTypeOf("function")
+    if (typeof retryQuickIngestSession !== "function") return
+
+    const first = await retryQuickIngestSession({
+      sessionId: "qi-direct-retry-generation",
+      occurrenceIds: ["occ-direct-retry-generation"],
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "qi-direct-retry-generation",
+        runId: "run-direct-retry-generation",
+        generation: "generation-direct-retry-old",
+      },
+    })
+    const second = await retryQuickIngestSession({
+      sessionId: "qi-direct-retry-generation",
+      occurrenceIds: ["occ-direct-retry-generation"],
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "qi-direct-retry-generation",
+        runId: "run-direct-retry-generation",
+        generation: first.generation,
+      },
+    })
+
+    expect(first).toMatchObject({
+      ok: true,
+      generation: expect.not.stringMatching(/old/),
+    })
+    expect(second).toMatchObject({
+      ok: true,
+      generation: expect.any(String),
+    })
+    expect(second.generation).not.toBe(first.generation)
+  })
+
+  it("keeps direct retry recovery indeterminate when an empty retry response has not advanced the selected URL", async () => {
+    let retryPosts = 0
+    mocks.bgRequest.mockImplementation(async (request: any) => {
+      if (request.path.endsWith("/retry")) {
+        retryPosts += 1
+        return {
+          contract_version: 2,
+          run_id: "run-direct-retry-empty-not-advanced",
+          version: 1,
+          processing_occurrences: [],
+        }
+      }
+      if (request.path.includes("/items")) {
+        return {
+          contract_version: 2,
+          run_id: "run-direct-retry-empty-not-advanced",
+          version: 1,
+          items: [
+            {
+              occurrence_id: "occ-direct-retry-empty-not-advanced",
+              ordinal: 0,
+              input_kind: "direct_url",
+              source_url: "https://example.com/direct-retry-empty-not-advanced",
+              normalized_source_id: null,
+              source_kind: "video",
+              display_metadata: {},
+              action: "ingest",
+              state: "terminal",
+              outcome: "processing_failed",
+              progress_percent: null,
+              progress_message: null,
+              job_id: null,
+              batch_id: null,
+              media_id: null,
+              planned_collection_item_id: null,
+              attempt: 1,
+              retryable: true,
+            },
+          ],
+          next_cursor: null,
+        }
+      }
+      return {
+        contract_version: 2,
+        run_id: "run-direct-retry-empty-not-advanced",
+        status: "failed",
+        counts: { total: 1, failed: 1 },
+        version: 1,
+        collection_id: null,
+        batch_ids: [],
+        created_at: "2026-07-14T00:00:00Z",
+        updated_at: "2026-07-14T00:00:01Z",
+        expires_at: "2026-07-21T00:00:00Z",
+      }
+    })
+    const { retryQuickIngestSession } = await import(
+      "@/services/tldw/quick-ingest-batch"
+    )
+    const originalTracking = {
+      mode: "webui-direct" as const,
+      sessionId: "qi-direct-retry-empty-not-advanced",
+      runId: "run-direct-retry-empty-not-advanced",
+      generation: "generation-direct-retry-empty-not-advanced-g1",
+    }
+
+    const first = await retryQuickIngestSession({
+      sessionId: originalTracking.sessionId,
+      occurrenceIds: ["occ-direct-retry-empty-not-advanced"],
+      tracking: originalTracking,
+    })
+
+    expect(first).toMatchObject({
+      ok: false,
+      indeterminate: true,
+      notAdvanced: true,
+      generation: expect.not.stringMatching(/g1$/),
+    })
+    const second = await retryQuickIngestSession({
+      sessionId: originalTracking.sessionId,
+      occurrenceIds: ["occ-direct-retry-empty-not-advanced"],
+      tracking: { ...originalTracking, generation: first.generation },
+    })
+    expect(second).toMatchObject({
+      ok: false,
+      indeterminate: true,
+      notAdvanced: true,
+      generation: first.generation,
+    })
+    expect(retryPosts).toBe(2)
+  })
+
+  it("rejects a stale direct cancellation after retry advances the session generation", async () => {
+    mocks.bgRequest.mockImplementation(async (request: any) => {
+      if (request.path.endsWith("/retry")) {
+        return {
+          contract_version: 2,
+          run_id: "run-direct-cancel-generation",
+          version: 2,
+          processing_occurrences: [],
+        }
+      }
+      if (request.path.includes("/items")) {
+        return {
+          contract_version: 2,
+          run_id: "run-direct-cancel-generation",
+          version: 2,
+          items: [
+            {
+              occurrence_id: "occ-direct-cancel-generation",
+              ordinal: 0,
+              input_kind: "direct_url",
+              source_url: "https://example.com/direct-cancel-generation",
+              normalized_source_id: null,
+              source_kind: "video",
+              display_metadata: {},
+              action: "ingest",
+              state: "running",
+              outcome: null,
+              progress_percent: 30,
+              progress_message: "Processing",
+              job_id: 905,
+              batch_id: "batch-direct-cancel-generation",
+              media_id: null,
+              planned_collection_item_id: null,
+              attempt: 2,
+              retryable: false,
+            },
+          ],
+          next_cursor: null,
+        }
+      }
+      return {
+        contract_version: 2,
+        run_id: "run-direct-cancel-generation",
+        status: "running",
+        counts: { total: 1, running: 1 },
+        version: 2,
+        collection_id: null,
+        batch_ids: ["batch-direct-cancel-generation"],
+        created_at: "2026-07-13T00:00:00Z",
+        updated_at: "2026-07-13T00:00:01Z",
+        expires_at: "2026-07-20T00:00:00Z",
+      }
+    })
+    const quickIngestBatchModule = await import("@/services/tldw/quick-ingest-batch")
+    const retryQuickIngestSession = (quickIngestBatchModule as any)
+      .retryQuickIngestSession
+
+    const retry = await retryQuickIngestSession({
+      sessionId: "qi-direct-cancel-generation",
+      occurrenceIds: ["occ-direct-cancel-generation"],
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "qi-direct-cancel-generation",
+        runId: "run-direct-cancel-generation",
+        generation: "generation-direct-cancel-g1",
+      },
+    })
+    expect(retry).toMatchObject({
+      ok: true,
+      generation: expect.not.stringMatching(/g1$/),
+    })
+
+    mocks.bgRequest.mockClear()
+    mocks.bgRequest.mockResolvedValue({
+      contract_version: 2,
+      run_id: "run-direct-cancel-generation",
+      status: "cancelled",
+      counts: { total: 1, cancelled: 1 },
+      version: 3,
+      collection_id: null,
+      batch_ids: [],
+      created_at: "2026-07-13T00:00:00Z",
+      updated_at: "2026-07-13T00:00:01Z",
+      expires_at: "2026-07-20T00:00:00Z",
+    })
+
+    const stale = await cancelQuickIngestSession({
+      sessionId: "qi-direct-cancel-generation",
+      reason: "user_cancelled",
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "qi-direct-cancel-generation",
+        runId: "run-direct-cancel-generation",
+        generation: "generation-direct-cancel-g1",
+      },
+    })
+    expect(stale).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/generation|stale|superseded/i),
+    })
+    expect(mocks.bgRequest).not.toHaveBeenCalled()
+
+    const current = await cancelQuickIngestSession({
+      sessionId: "qi-direct-cancel-generation",
+      reason: "user_cancelled",
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "qi-direct-cancel-generation",
+        runId: "run-direct-cancel-generation",
+        generation: retry.generation,
+      },
+    })
+    expect(current).toEqual({ ok: true })
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps direct retry generation authority across an existing-run replacement upload", async () => {
+    mocks.bgRequest.mockResolvedValue({
+      contract_version: 2,
+      run_id: "run-direct-file-generation",
+      version: 2,
+      processing_occurrences: [
+        {
+          occurrence_id: "occ-direct-file-generation",
+          ordinal: 1,
+          input_kind: "file_stub",
+          source_url: null,
+          source_kind: "file",
+          display_metadata: { title: "Replacement required" },
+          state: "awaiting_upload",
+          outcome: null,
+          job_id: null,
+          batch_id: null,
+          attempt: 2,
+          planned_collection_item_id: null,
+        },
+      ],
+    })
+    const quickIngestBatchModule = await import("@/services/tldw/quick-ingest-batch")
+    const retryQuickIngestSession = (quickIngestBatchModule as any)
+      .retryQuickIngestSession
+
+    const retry = await retryQuickIngestSession({
+      sessionId: "qi-direct-file-generation",
+      occurrenceIds: ["occ-direct-file-generation"],
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "qi-direct-file-generation",
+        runId: "run-direct-file-generation",
+        generation: "generation-direct-file-generation-g1",
+      },
+    })
+    expect(retry).toMatchObject({
+      ok: true,
+      generation: expect.not.stringMatching(/g1$/),
+    })
+
+    mocks.bgUpload.mockResolvedValue({
+      batch_id: "batch-direct-file-generation",
+      jobs: [{ id: 905 }],
+      errors: [],
+      submissions: [
+        {
+          occurrence_id: "occ-direct-file-generation",
+          status: "accepted",
+          accepted: true,
+          job_id: 905,
+          batch_id: "batch-direct-file-generation",
+          error_code: null,
+          message: null,
+          retryable: false,
+          attempt: 2,
+        },
+      ],
+    })
+    const upload = await submitQuickIngestBatch({
+      entries: [],
+      files: [
+        {
+          id: "occ-direct-file-generation",
+          name: "replacement.mp4",
+          type: "video/mp4",
+          data: [1, 2, 3],
+        },
+      ],
+      storeRemote: true,
+      processOnly: false,
+      pendingRunRequest: {
+        inputs: [
+          {
+            inputKind: "file_stub",
+            occurrenceId: "occ-direct-file-generation",
+            attempt: 2,
+            name: "replacement.mp4",
+            contentType: "video/mp4",
+            sizeBytes: 3,
+          },
+        ],
+      },
+      __quickIngestSessionId: "qi-direct-file-generation",
+      __quickIngestRunId: "run-direct-file-generation",
+    } as any)
+    expect(upload.accepted).toBe(true)
+
+    mocks.bgRequest.mockClear()
+    mocks.bgRequest.mockResolvedValue({
+      contract_version: 2,
+      run_id: "run-direct-file-generation",
+      status: "cancelled",
+      counts: { total: 1, cancelled: 1 },
+      version: 3,
+      collection_id: null,
+      batch_ids: ["batch-direct-file-generation"],
+      created_at: "2026-07-14T00:00:00Z",
+      updated_at: "2026-07-14T00:00:01Z",
+      expires_at: "2026-07-21T00:00:00Z",
+    })
+    const stale = await cancelQuickIngestSession({
+      sessionId: "qi-direct-file-generation",
+      reason: "user_cancelled",
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "qi-direct-file-generation",
+        runId: "run-direct-file-generation",
+        generation: "generation-direct-file-generation-g1",
+      },
+    })
+
+    expect(stale).toMatchObject({
+      ok: false,
+      generation: retry.generation,
+      error: expect.stringMatching(/generation|stale|superseded/i),
+    })
+    expect(mocks.bgRequest).not.toHaveBeenCalled()
+  })
+
+  it("coalesces a direct g2 retry while the g1-to-g2 owner is still awaiting the backend", async () => {
+    let releaseOwner!: () => void
+    const ownerGate = new Promise<void>((resolve) => {
+      releaseOwner = resolve
+    })
+    let retryPosts = 0
+    mocks.bgRequest.mockImplementation(async (request: any) => {
+      if (request.path.endsWith("/retry")) {
+        retryPosts += 1
+        if (retryPosts === 1) await ownerGate
+        return {
+          contract_version: 2,
+          run_id: "run-direct-retry-owner",
+          version: 2,
+          processing_occurrences: [],
+        }
+      }
+      if (request.path.includes("/items")) {
+        return {
+          contract_version: 2,
+          run_id: "run-direct-retry-owner",
+          version: 1,
+          items: [
+            {
+              occurrence_id: "occ-direct-retry-owner",
+              ordinal: 1,
+              input_kind: "direct_url",
+              source_url: "https://server.example/retry-owner.mp4",
+              normalized_source_id: null,
+              source_kind: "video",
+              display_metadata: {},
+              action: "ingest",
+              state: "terminal",
+              outcome: "processing_failed",
+              progress_percent: null,
+              progress_message: null,
+              job_id: null,
+              batch_id: null,
+              media_id: null,
+              planned_collection_item_id: null,
+              attempt: 1,
+              retryable: true,
+            },
+          ],
+          next_cursor: null,
+        }
+      }
+      return {
+        contract_version: 2,
+        run_id: "run-direct-retry-owner",
+        status: "failed",
+        counts: { total: 1, terminal: 1 },
+        version: 1,
+        collection_id: null,
+        batch_ids: [],
+        created_at: "2026-07-14T00:00:00Z",
+        updated_at: "2026-07-14T00:00:01Z",
+        expires_at: "2026-07-21T00:00:00Z",
+      }
+    })
+    const { retryQuickIngestSession } = await import(
+      "@/services/tldw/quick-ingest-batch"
+    )
+    const input = {
+      sessionId: "qi-direct-retry-owner",
+      occurrenceIds: ["occ-direct-retry-owner"],
+      tracking: {
+        mode: "webui-direct" as const,
+        sessionId: "qi-direct-retry-owner",
+        runId: "run-direct-retry-owner",
+        generation: "generation-direct-retry-owner-g1",
+      },
+    }
+
+    const owner = retryQuickIngestSession(input)
+    await vi.waitFor(() => expect(retryPosts).toBe(1))
+    const stale = await retryQuickIngestSession(input)
+    expect(stale).toMatchObject({
+      ok: false,
+      generation: expect.not.stringMatching(/g1$/),
+      error: expect.stringMatching(/generation|superseded/i),
+    })
+
+    const concurrent = retryQuickIngestSession({
+      ...input,
+      tracking: { ...input.tracking, generation: stale.generation },
+    })
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    const postsBeforeOwnerSettled = retryPosts
+    releaseOwner()
+    await Promise.allSettled([owner, concurrent])
+
+    expect(postsBeforeOwnerSettled).toBe(1)
+    expect(retryPosts).toBe(1)
+  })
+
+  it("does not let an awaiting file mask a status-unavailable URL during direct retry reconciliation", async () => {
+    let retryPosts = 0
+    mocks.bgRequest.mockImplementation(async (request: any) => {
+      if (request.path.endsWith("/retry")) {
+        retryPosts += 1
+        throw Object.assign(new Error("Gateway Timeout"), { status: 504 })
+      }
+      if (request.path.includes("/items")) {
+        return {
+          contract_version: 2,
+          run_id: "run-direct-retry-file-status",
+          version: 2,
+          items: [
+            {
+              occurrence_id: "occ-direct-retry-file-status-file",
+              ordinal: 1,
+              input_kind: "file_stub",
+              source_url: null,
+              normalized_source_id: null,
+              source_kind: "file",
+              display_metadata: {},
+              action: "ingest",
+              state: "awaiting_upload",
+              outcome: null,
+              progress_percent: null,
+              progress_message: null,
+              job_id: null,
+              batch_id: null,
+              media_id: null,
+              planned_collection_item_id: null,
+              attempt: 2,
+              retryable: false,
+            },
+            {
+              occurrence_id: "occ-direct-retry-file-status-url",
+              ordinal: 2,
+              input_kind: "direct_url",
+              source_url: "https://server.example/status-unavailable.mp4",
+              normalized_source_id: null,
+              source_kind: "video",
+              display_metadata: {},
+              action: "ingest",
+              state: "status_unavailable",
+              outcome: null,
+              progress_percent: null,
+              progress_message: "Status unavailable",
+              job_id: null,
+              batch_id: null,
+              media_id: null,
+              planned_collection_item_id: null,
+              attempt: 1,
+              retryable: true,
+            },
+          ],
+          next_cursor: null,
+        }
+      }
+      return {
+        contract_version: 2,
+        run_id: "run-direct-retry-file-status",
+        status: "running",
+        counts: { total: 2 },
+        version: 2,
+        collection_id: null,
+        batch_ids: [],
+        created_at: "2026-07-14T00:00:00Z",
+        updated_at: "2026-07-14T00:00:01Z",
+        expires_at: "2026-07-21T00:00:00Z",
+      }
+    })
+    const { retryQuickIngestSession } = await import(
+      "@/services/tldw/quick-ingest-batch"
+    )
+
+    const response = await retryQuickIngestSession({
+      sessionId: "qi-direct-retry-file-status",
+      occurrenceIds: [
+        "occ-direct-retry-file-status-file",
+        "occ-direct-retry-file-status-url",
+      ],
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "qi-direct-retry-file-status",
+        runId: "run-direct-retry-file-status",
+        generation: "generation-direct-retry-file-status-g1",
+      },
+    })
+
+    expect(response).toMatchObject({
+      ok: false,
+      indeterminate: true,
+      generation: expect.not.stringMatching(/g1$/),
+      error: expect.stringMatching(/status|manifest|unavailable/i),
+    })
+    expect(retryPosts).toBe(1)
+    expect(mocks.bgUpload).not.toHaveBeenCalled()
+  })
+
+  it("retries only the still-terminal URL after a partial mixed manifest without reselecting its file", async () => {
+    let firstUrlSubmitted = false
+    let retryPosts = 0
+    mocks.bgRequest.mockImplementation(async (request: any) => {
+      if (request.path.endsWith("/retry")) {
+        retryPosts += 1
+        if (retryPosts === 1) {
+          throw Object.assign(new Error("Retry response was lost"), { status: 504 })
+        }
+        return {
+          contract_version: 2,
+          run_id: "run-direct-retry-partial-mixed",
+          version: 3,
+          processing_occurrences: [
+            {
+              occurrence_id: "occ-direct-retry-partial-b",
+              ordinal: 2,
+              input_kind: "direct_url",
+              source_url: "https://server.example/partial-b.mp4",
+              source_kind: "video",
+              display_metadata: {},
+              state: "staged",
+              outcome: null,
+              job_id: null,
+              batch_id: null,
+              attempt: 2,
+              planned_collection_item_id: null,
+            },
+          ],
+        }
+      }
+      if (request.path.includes("/items")) {
+        return {
+          contract_version: 2,
+          run_id: "run-direct-retry-partial-mixed",
+          version: 2,
+          items: [
+            {
+              occurrence_id: "occ-direct-retry-partial-a",
+              ordinal: 1,
+              input_kind: "direct_url",
+              source_url: "https://server.example/partial-a.mp4",
+              normalized_source_id: null,
+              source_kind: "video",
+              display_metadata: {},
+              action: "ingest",
+              state: firstUrlSubmitted ? "queued" : "staged",
+              outcome: null,
+              progress_percent: null,
+              progress_message: null,
+              job_id: firstUrlSubmitted ? 930 : null,
+              batch_id: firstUrlSubmitted ? "batch-partial-a" : null,
+              media_id: null,
+              planned_collection_item_id: null,
+              attempt: 2,
+              retryable: false,
+            },
+            {
+              occurrence_id: "occ-direct-retry-partial-b",
+              ordinal: 2,
+              input_kind: "direct_url",
+              source_url: "https://server.example/partial-b.mp4",
+              normalized_source_id: null,
+              source_kind: "video",
+              display_metadata: {},
+              action: "ingest",
+              state: "terminal",
+              outcome: "processing_failed",
+              progress_percent: null,
+              progress_message: null,
+              job_id: null,
+              batch_id: null,
+              media_id: null,
+              planned_collection_item_id: null,
+              attempt: 1,
+              retryable: true,
+            },
+            {
+              occurrence_id: "occ-direct-retry-partial-file",
+              ordinal: 3,
+              input_kind: "file_stub",
+              source_url: null,
+              normalized_source_id: null,
+              source_kind: "file",
+              display_metadata: {},
+              action: "ingest",
+              state: "awaiting_upload",
+              outcome: null,
+              progress_percent: null,
+              progress_message: null,
+              job_id: null,
+              batch_id: null,
+              media_id: null,
+              planned_collection_item_id: null,
+              attempt: 2,
+              retryable: false,
+            },
+          ],
+          next_cursor: null,
+        }
+      }
+      return {
+        contract_version: 2,
+        run_id: "run-direct-retry-partial-mixed",
+        status: "running",
+        counts: { total: 3 },
+        version: 2,
+        collection_id: null,
+        batch_ids: [],
+        created_at: "2026-07-14T00:00:00Z",
+        updated_at: "2026-07-14T00:00:01Z",
+        expires_at: "2026-07-21T00:00:00Z",
+      }
+    })
+    mocks.bgUpload.mockImplementation(async (request: any) => {
+      if (request.fields.occurrence_ids.includes("occ-direct-retry-partial-a")) {
+        firstUrlSubmitted = true
+      }
+      return {
+        batch_id: `batch-${request.fields.occurrence_ids[0]}`,
+        jobs: [{ id: request.fields.occurrence_ids[0].endsWith("a") ? 930 : 931 }],
+        errors: [],
+        submissions: request.fields.occurrence_ids.map(
+          (occurrenceId: string, index: number) => ({
+            occurrence_id: occurrenceId,
+            status: "accepted",
+            accepted: true,
+            job_id: 930 + index,
+            batch_id: `batch-${occurrenceId}`,
+            error_code: null,
+            message: null,
+            retryable: false,
+            attempt: request.fields.attempts[index],
+          }),
+        ),
+      }
+    })
+    const { retryQuickIngestSession } = await import(
+      "@/services/tldw/quick-ingest-batch"
+    )
+    const occurrenceIds = [
+      "occ-direct-retry-partial-a",
+      "occ-direct-retry-partial-b",
+      "occ-direct-retry-partial-file",
+    ]
+    const tracking = {
+      mode: "webui-direct" as const,
+      sessionId: "qi-direct-retry-partial-mixed",
+      runId: "run-direct-retry-partial-mixed",
+      generation: "generation-direct-retry-partial-mixed-g1",
+    }
+
+    const first = await retryQuickIngestSession({
+      sessionId: tracking.sessionId,
+      occurrenceIds,
+      tracking,
+    })
+    expect(first).toMatchObject({
+      ok: false,
+      indeterminate: true,
+      generation: expect.not.stringMatching(/g1$/),
+    })
+
+    const second = await retryQuickIngestSession({
+      sessionId: tracking.sessionId,
+      occurrenceIds,
+      tracking: { ...tracking, generation: first.generation },
+    })
+
+    expect(second).toMatchObject({ ok: true, generation: first.generation })
+    expect(retryPosts).toBe(2)
+    expect(mocks.bgUpload).toHaveBeenCalledTimes(2)
+    expect(mocks.bgUpload.mock.calls[0]?.[0]).toMatchObject({
+      fields: {
+        occurrence_ids: ["occ-direct-retry-partial-a"],
+        attempts: [2],
+      },
+    })
+    expect(mocks.bgUpload.mock.calls[1]?.[0]).toMatchObject({
+      fields: {
+        occurrence_ids: ["occ-direct-retry-partial-b"],
+        attempts: [2],
+      },
+    })
+    expect(JSON.stringify(mocks.bgUpload.mock.calls)).not.toContain(
+      "occ-direct-retry-partial-file",
+    )
+  })
+
+  it("keeps a lost file-only retry reserved until one explicit retry returns awaiting upload", async () => {
+    let retryPosts = 0
+    mocks.bgRequest.mockImplementation(async (request: any) => {
+      if (request.path.endsWith("/retry")) {
+        retryPosts += 1
+        if (retryPosts === 1) {
+          throw Object.assign(new Error("Retry response was lost"), { status: 504 })
+        }
+        return {
+          contract_version: 2,
+          run_id: "run-direct-retry-file-only",
+          version: 2,
+          processing_occurrences: [
+            {
+              occurrence_id: "occ-direct-retry-file-only",
+              ordinal: 0,
+              input_kind: "file_stub",
+              source_url: null,
+              source_kind: "file",
+              display_metadata: { file_name: "retry.mp4" },
+              state: "awaiting_upload",
+              outcome: null,
+              job_id: null,
+              batch_id: null,
+              attempt: 2,
+              planned_collection_item_id: null,
+            },
+          ],
+        }
+      }
+      if (request.path.includes("/items")) {
+        return {
+          contract_version: 2,
+          run_id: "run-direct-retry-file-only",
+          version: 1,
+          items: [
+            {
+              occurrence_id: "occ-direct-retry-file-only",
+              ordinal: 0,
+              input_kind: "file_stub",
+              source_url: null,
+              normalized_source_id: null,
+              source_kind: "file",
+              display_metadata: { file_name: "retry.mp4" },
+              action: "ingest",
+              state: "terminal",
+              outcome: "submit_failed",
+              progress_percent: null,
+              progress_message: null,
+              job_id: null,
+              batch_id: null,
+              media_id: null,
+              planned_collection_item_id: null,
+              attempt: 1,
+              retryable: true,
+            },
+          ],
+          next_cursor: null,
+        }
+      }
+      return {
+        contract_version: 2,
+        run_id: "run-direct-retry-file-only",
+        status: "failed",
+        counts: { total: 1, terminal: 1, submit_failed: 1 },
+        version: 1,
+        collection_id: null,
+        batch_ids: [],
+        created_at: "2026-07-14T00:00:00Z",
+        updated_at: "2026-07-14T00:00:01Z",
+        expires_at: "2026-07-21T00:00:00Z",
+      }
+    })
+    const { retryQuickIngestSession } = await import(
+      "@/services/tldw/quick-ingest-batch"
+    )
+    const tracking = {
+      mode: "webui-direct" as const,
+      sessionId: "qi-direct-retry-file-only",
+      runId: "run-direct-retry-file-only",
+      generation: "generation-direct-retry-file-only-g1",
+    }
+
+    const lost = await retryQuickIngestSession({
+      sessionId: tracking.sessionId,
+      occurrenceIds: ["occ-direct-retry-file-only"],
+      tracking,
+    })
+    expect(lost).toMatchObject({
+      ok: false,
+      indeterminate: true,
+      notAdvanced: true,
+      generation: expect.not.stringMatching(/g1$/),
+    })
+
+    const recovered = await retryQuickIngestSession({
+      sessionId: tracking.sessionId,
+      occurrenceIds: ["occ-direct-retry-file-only"],
+      tracking: { ...tracking, generation: lost.generation },
+    })
+
+    expect(recovered).toMatchObject({ ok: true, generation: lost.generation })
+    expect(retryPosts).toBe(2)
+    expect(mocks.bgUpload).not.toHaveBeenCalled()
+  })
+
+  it("keeps a partial mixed retry reserved when only its file stub has not advanced", async () => {
+    let retryPosts = 0
+    mocks.bgRequest.mockImplementation(async (request: any) => {
+      if (request.path.endsWith("/retry")) {
+        retryPosts += 1
+        if (retryPosts === 1) {
+          throw Object.assign(new Error("Retry response was lost"), { status: 504 })
+        }
+        return {
+          contract_version: 2,
+          run_id: "run-direct-retry-partial-file",
+          version: 3,
+          processing_occurrences: [
+            {
+              occurrence_id: "occ-direct-retry-partial-file",
+              ordinal: 1,
+              input_kind: "file_stub",
+              source_url: null,
+              source_kind: "file",
+              display_metadata: { file_name: "partial.mp4" },
+              state: "awaiting_upload",
+              outcome: null,
+              job_id: null,
+              batch_id: null,
+              attempt: 2,
+              planned_collection_item_id: null,
+            },
+          ],
+        }
+      }
+      if (request.path.includes("/items")) {
+        return {
+          contract_version: 2,
+          run_id: "run-direct-retry-partial-file",
+          version: 2,
+          items: [
+            {
+              occurrence_id: "occ-direct-retry-partial-url",
+              ordinal: 0,
+              input_kind: "direct_url",
+              source_url: "https://server.example/partial-file-url.mp4",
+              normalized_source_id: null,
+              source_kind: "video",
+              display_metadata: {},
+              action: "ingest",
+              state: "queued",
+              outcome: null,
+              progress_percent: 0,
+              progress_message: "Queued",
+              job_id: 960,
+              batch_id: "batch-partial-file-url",
+              media_id: null,
+              planned_collection_item_id: null,
+              attempt: 2,
+              retryable: false,
+            },
+            {
+              occurrence_id: "occ-direct-retry-partial-file",
+              ordinal: 1,
+              input_kind: "file_stub",
+              source_url: null,
+              normalized_source_id: null,
+              source_kind: "file",
+              display_metadata: { file_name: "partial.mp4" },
+              action: "ingest",
+              state: "terminal",
+              outcome: "submit_failed",
+              progress_percent: null,
+              progress_message: null,
+              job_id: null,
+              batch_id: null,
+              media_id: null,
+              planned_collection_item_id: null,
+              attempt: 1,
+              retryable: true,
+            },
+          ],
+          next_cursor: null,
+        }
+      }
+      return {
+        contract_version: 2,
+        run_id: "run-direct-retry-partial-file",
+        status: "running",
+        counts: { total: 2, queued: 1, terminal: 1 },
+        version: 2,
+        collection_id: null,
+        batch_ids: ["batch-partial-file-url"],
+        created_at: "2026-07-14T00:00:00Z",
+        updated_at: "2026-07-14T00:00:01Z",
+        expires_at: "2026-07-21T00:00:00Z",
+      }
+    })
+    const { retryQuickIngestSession } = await import(
+      "@/services/tldw/quick-ingest-batch"
+    )
+    const occurrenceIds = [
+      "occ-direct-retry-partial-url",
+      "occ-direct-retry-partial-file",
+    ]
+    const tracking = {
+      mode: "webui-direct" as const,
+      sessionId: "qi-direct-retry-partial-file",
+      runId: "run-direct-retry-partial-file",
+      generation: "generation-direct-retry-partial-file-g1",
+    }
+
+    const lost = await retryQuickIngestSession({
+      sessionId: tracking.sessionId,
+      occurrenceIds,
+      tracking,
+    })
+    expect(lost).toMatchObject({
+      ok: false,
+      indeterminate: true,
+      notAdvanced: true,
+      generation: expect.not.stringMatching(/g1$/),
+    })
+
+    const recovered = await retryQuickIngestSession({
+      sessionId: tracking.sessionId,
+      occurrenceIds,
+      tracking: { ...tracking, generation: lost.generation },
+    })
+
+    expect(recovered).toMatchObject({ ok: true, generation: lost.generation })
+    expect(retryPosts).toBe(2)
+    expect(mocks.bgUpload).not.toHaveBeenCalled()
+  })
+
+  it("prunes an expired direct retry generation before accepting the original fenced generation", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-07-14T00:00:00Z"))
+    let retryPosts = 0
+    mocks.bgRequest.mockImplementation(async (request: any) => {
+      if (request.path.endsWith("/retry")) {
+        retryPosts += 1
+        if (retryPosts === 1) {
+          throw Object.assign(new Error("Gateway Timeout"), { status: 504 })
+        }
+        return {
+          contract_version: 2,
+          run_id: "run-direct-retry-generation-expiry",
+          version: 2,
+          processing_occurrences: [],
+        }
+      }
+      if (request.path.includes("/items")) {
+        const advanced = retryPosts > 1
+        return {
+          contract_version: 2,
+          run_id: "run-direct-retry-generation-expiry",
+          version: advanced ? 2 : 1,
+          items: [
+            {
+              occurrence_id: "occ-direct-retry-generation-expiry",
+              ordinal: 0,
+              input_kind: "direct_url",
+              source_url: "https://example.com/direct-retry-generation-expiry",
+              normalized_source_id: null,
+              source_kind: "video",
+              display_metadata: {},
+              action: "ingest",
+              state: "terminal",
+              outcome: advanced ? "completed" : "processing_failed",
+              progress_percent: advanced ? 100 : null,
+              progress_message: null,
+              job_id: advanced ? 901 : null,
+              batch_id: advanced ? "batch-direct-retry-generation-expiry" : null,
+              media_id: advanced ? 901 : null,
+              planned_collection_item_id: null,
+              attempt: advanced ? 2 : 1,
+              retryable: !advanced,
+            },
+          ],
+          next_cursor: null,
+        }
+      }
+      return {
+        contract_version: 2,
+        run_id: "run-direct-retry-generation-expiry",
+        status: retryPosts > 1 ? "completed" : "failed",
+        counts: { total: 1 },
+        version: retryPosts > 1 ? 2 : 1,
+        collection_id: null,
+        batch_ids:
+          retryPosts > 1 ? ["batch-direct-retry-generation-expiry"] : [],
+        created_at: "2026-07-14T00:00:00Z",
+        updated_at: "2026-07-14T00:00:01Z",
+        expires_at: "2026-07-21T00:00:00Z",
+      }
+    })
+    const { retryQuickIngestSession } = await import(
+      "@/services/tldw/quick-ingest-batch"
+    )
+    const originalTracking = {
+      mode: "webui-direct" as const,
+      sessionId: "qi-direct-retry-generation-expiry",
+      runId: "run-direct-retry-generation-expiry",
+      generation: "generation-direct-retry-generation-expiry-g1",
+    }
+
+    const first = await retryQuickIngestSession({
+      sessionId: originalTracking.sessionId,
+      occurrenceIds: ["occ-direct-retry-generation-expiry"],
+      tracking: originalTracking,
+    })
+    expect(first).toMatchObject({
+      ok: false,
+      indeterminate: true,
+      generation: expect.not.stringMatching(/g1$/),
+    })
+
+    vi.setSystemTime(Date.now() + 25 * 60 * 60 * 1_000)
+    const afterExpiry = await retryQuickIngestSession({
+      sessionId: originalTracking.sessionId,
+      occurrenceIds: ["occ-direct-retry-generation-expiry"],
+      tracking: originalTracking,
+    })
+
+    expect(afterExpiry).toMatchObject({
+      ok: true,
+      generation: expect.not.stringMatching(/g1$/),
+    })
+    expect(retryPosts).toBe(2)
+  })
+
+  it("retires direct generation authority only after current-generation whole-run cancellation", async () => {
+    let retryPosts = 0
+    mocks.bgRequest.mockImplementation(async (request: any) => {
+      if (request.path.endsWith("/retry")) {
+        retryPosts += 1
+        return {
+          contract_version: 2,
+          run_id: "run-direct-retry-generation-retire",
+          version: retryPosts + 1,
+          processing_occurrences: [],
+        }
+      }
+      if (request.path.includes("/items")) {
+        return {
+          contract_version: 2,
+          run_id: "run-direct-retry-generation-retire",
+          version: retryPosts + 1,
+          items: [
+            {
+              occurrence_id: "occ-direct-retry-generation-retire",
+              ordinal: 0,
+              input_kind: "direct_url",
+              source_url: "https://example.com/direct-retry-generation-retire",
+              normalized_source_id: null,
+              source_kind: "video",
+              display_metadata: {},
+              action: "ingest",
+              state: "running",
+              outcome: null,
+              progress_percent: 20,
+              progress_message: "Processing",
+              job_id: 906,
+              batch_id: "batch-direct-retry-generation-retire",
+              media_id: null,
+              planned_collection_item_id: null,
+              attempt: retryPosts + 1,
+              retryable: false,
+            },
+          ],
+          next_cursor: null,
+        }
+      }
+      return {
+        contract_version: 2,
+        run_id: "run-direct-retry-generation-retire",
+        status: "running",
+        counts: { total: 1, running: 1 },
+        version: retryPosts + 1,
+        collection_id: null,
+        batch_ids: [],
+        created_at: "2026-07-14T00:00:00Z",
+        updated_at: "2026-07-14T00:00:01Z",
+        expires_at: "2026-07-21T00:00:00Z",
+      }
+    })
+    const { retryQuickIngestSession } = await import(
+      "@/services/tldw/quick-ingest-batch"
+    )
+    const originalTracking = {
+      mode: "webui-direct" as const,
+      sessionId: "qi-direct-retry-generation-retire",
+      runId: "run-direct-retry-generation-retire",
+      generation: "generation-direct-retry-generation-retire-g1",
+    }
+    const retry = await retryQuickIngestSession({
+      sessionId: originalTracking.sessionId,
+      occurrenceIds: ["occ-direct-retry-generation-retire"],
+      tracking: originalTracking,
+    })
+
+    const stale = await cancelQuickIngestSession({
+      sessionId: originalTracking.sessionId,
+      tracking: originalTracking,
+    })
+    expect(stale).toMatchObject({
+      ok: false,
+      generation: retry.generation,
+      error: expect.stringMatching(/generation|superseded/i),
+    })
+
+    const current = await cancelQuickIngestSession({
+      sessionId: originalTracking.sessionId,
+      tracking: { ...originalTracking, generation: retry.generation },
+    })
+    expect(current).toEqual({ ok: true })
+
+    const reused = await retryQuickIngestSession({
+      sessionId: originalTracking.sessionId,
+      occurrenceIds: ["occ-direct-retry-generation-retire"],
+      tracking: originalTracking,
+    })
+    expect(reused).toMatchObject({
+      ok: true,
+      generation: expect.not.stringMatching(/g1$/),
+    })
+    expect(retryPosts).toBe(2)
+  })
+
+  it("keeps whole-run retry generation authority when only the selected occurrence is resolved", async () => {
+    let cancelPosts = 0
+    mocks.bgRequest.mockImplementation(async (request: { path?: string }) => {
+      if (request.path?.endsWith("/retry")) {
+        return {
+          contract_version: 2,
+          run_id: "run-direct-retry-selected-resolved",
+          version: 2,
+          processing_occurrences: [],
+        }
+      }
+      if (request.path?.includes("/items")) {
+        return {
+          contract_version: 2,
+          run_id: "run-direct-retry-selected-resolved",
+          version: 2,
+          items: [
+            {
+              occurrence_id: "occ-direct-retry-selected-resolved",
+              ordinal: 0,
+              input_kind: "direct_url",
+              source_url: "https://example.com/direct-retry-selected-resolved",
+              normalized_source_id: null,
+              source_kind: "video",
+              display_metadata: {},
+              action: "ingest",
+              state: "terminal",
+              outcome: "completed",
+              progress_percent: 100,
+              progress_message: null,
+              job_id: 902,
+              batch_id: "batch-direct-retry-selected-resolved",
+              media_id: 902,
+              planned_collection_item_id: null,
+              retryable: false,
+              attempt: 2,
+            },
+            {
+              occurrence_id: "occ-direct-retry-active-sibling",
+              ordinal: 1,
+              input_kind: "direct_url",
+              source_url: "https://example.com/direct-retry-active-sibling",
+              normalized_source_id: null,
+              source_kind: "video",
+              display_metadata: {},
+              action: "ingest",
+              state: "running",
+              outcome: null,
+              progress_percent: 40,
+              progress_message: "Processing",
+              job_id: 903,
+              batch_id: "batch-direct-retry-active-sibling",
+              media_id: null,
+              planned_collection_item_id: null,
+              retryable: false,
+              attempt: 1,
+            },
+          ],
+          next_cursor: null,
+        }
+      }
+      if (request.path?.endsWith("/cancel")) {
+        cancelPosts += 1
+        return {
+          contract_version: 2,
+          run_id: "run-direct-retry-selected-resolved",
+          status: "cancelled",
+          counts: { total: 2, cancelled: 2 },
+          version: 3,
+          collection_id: null,
+          batch_ids: [],
+          created_at: "2026-07-14T00:00:00Z",
+          updated_at: "2026-07-14T00:00:02Z",
+          expires_at: "2026-07-21T00:00:00Z",
+        }
+      }
+      return {
+        contract_version: 2,
+        run_id: "run-direct-retry-selected-resolved",
+        status: "running",
+        counts: { total: 2, completed: 1, running: 1 },
+        version: 2,
+        collection_id: null,
+        batch_ids: [
+          "batch-direct-retry-selected-resolved",
+          "batch-direct-retry-active-sibling",
+        ],
+        created_at: "2026-07-14T00:00:00Z",
+        updated_at: "2026-07-14T00:00:01Z",
+        expires_at: "2026-07-21T00:00:00Z",
+      }
+    })
+    const { retryQuickIngestSession } = await import(
+      "@/services/tldw/quick-ingest-batch"
+    )
+    const originalTracking = {
+      mode: "webui-direct" as const,
+      sessionId: "qi-direct-retry-selected-resolved",
+      runId: "run-direct-retry-selected-resolved",
+      generation: "generation-direct-retry-selected-resolved-g1",
+    }
+    const retry = await retryQuickIngestSession({
+      sessionId: originalTracking.sessionId,
+      occurrenceIds: ["occ-direct-retry-selected-resolved"],
+      tracking: originalTracking,
+    })
+    expect(retry).toMatchObject({
+      ok: true,
+      generation: expect.not.stringMatching(/g1$/),
+    })
+
+    const stale = await cancelQuickIngestSession({
+      sessionId: originalTracking.sessionId,
+      tracking: originalTracking,
+    })
+    expect(stale).toMatchObject({
+      ok: false,
+      generation: retry.generation,
+      error: expect.stringMatching(/generation|superseded/i),
+    })
+    expect(cancelPosts).toBe(0)
+
+    const current = await cancelQuickIngestSession({
+      sessionId: originalTracking.sessionId,
+      tracking: { ...originalTracking, generation: retry.generation },
+    })
+    expect(current).toEqual({ ok: true })
+    expect(cancelPosts).toBe(1)
+  })
+
+  it.each(["completed", "cancelled", "partial_failure"] as const)(
+    "retires direct generation authority when retry reconciliation has authoritative %s run status",
+    async (runStatus) => {
+      const terminalOutcome =
+        runStatus === "completed"
+          ? "completed"
+          : runStatus === "cancelled"
+            ? "cancelled"
+            : "processing_failed"
+      mocks.bgRequest.mockImplementation(async (request: { path?: string }) => {
+        if (request.path?.endsWith("/retry")) {
+          return {
+            contract_version: 2,
+            run_id: "run-direct-retry-terminal-retire",
+            version: 2,
+            processing_occurrences: [],
+          }
+        }
+        if (request.path?.includes("/items")) {
+          return {
+            contract_version: 2,
+            run_id: "run-direct-retry-terminal-retire",
+            version: 2,
+            items: [
+              {
+                occurrence_id: "occ-direct-retry-terminal-retire",
+                ordinal: 0,
+                input_kind: "direct_url",
+                source_url: "https://example.com/direct-retry-terminal-retire",
+                normalized_source_id: null,
+                source_kind: "video",
+                display_metadata: {},
+                action: "ingest",
+                state: "terminal",
+                outcome: terminalOutcome,
+                progress_percent: 100,
+                progress_message: null,
+                job_id: 902,
+                batch_id: "batch-direct-retry-terminal-retire",
+                media_id: 902,
+                planned_collection_item_id: null,
+                retryable: false,
+                attempt: 2,
+              },
+            ],
+            next_cursor: null,
+          }
+        }
+        return {
+          contract_version: 2,
+          run_id: "run-direct-retry-terminal-retire",
+          status: runStatus,
+          counts:
+            runStatus === "partial_failure"
+              ? { total: 1, processing_failed: 1 }
+              : { total: 1, [runStatus]: 1 },
+          version: 2,
+          collection_id: null,
+          batch_ids: [],
+          created_at: "2026-07-14T00:00:00Z",
+          updated_at: "2026-07-14T00:00:01Z",
+          expires_at: "2026-07-21T00:00:00Z",
+        }
+      })
+      const { retryQuickIngestSession } = await import(
+        "@/services/tldw/quick-ingest-batch"
+      )
+      const originalTracking = {
+        mode: "webui-direct" as const,
+        sessionId: "qi-direct-retry-terminal-retire",
+        runId: "run-direct-retry-terminal-retire",
+        generation: "generation-direct-retry-terminal-retire-g1",
+      }
+      const retry = await retryQuickIngestSession({
+        sessionId: originalTracking.sessionId,
+        occurrenceIds: ["occ-direct-retry-terminal-retire"],
+        tracking: originalTracking,
+      })
+      expect(retry).toMatchObject({
+        ok: true,
+        generation: expect.not.stringMatching(/g1$/),
+      })
+
+      mocks.bgRequest.mockResolvedValue({
+        contract_version: 2,
+        run_id: "run-direct-retry-terminal-retire",
+        status: "cancelled",
+        counts: { total: 1, cancelled: 1 },
+        version: 3,
+        collection_id: null,
+        batch_ids: [],
+        created_at: "2026-07-14T00:00:00Z",
+        updated_at: "2026-07-14T00:00:02Z",
+        expires_at: "2026-07-21T00:00:00Z",
+      })
+      const retired = await cancelQuickIngestSession({
+        sessionId: originalTracking.sessionId,
+        tracking: originalTracking,
+      })
+
+      expect(retired).toEqual({ ok: true })
+      expect(mocks.bgRequest).toHaveBeenCalledTimes(4)
+    },
+  )
+
+  it("retires a successful nonempty direct retry generation only after terminal reattach", async () => {
+    mocks.bgRequest.mockImplementation(async (request: any) => {
+      if (request.path.endsWith("/retry")) {
+        return {
+          contract_version: 2,
+          run_id: "run-direct-retry-terminal-hook",
+          version: 2,
+          processing_occurrences: [
+            {
+              occurrence_id: "occ-direct-retry-terminal-hook-url",
+              ordinal: 0,
+              input_kind: "direct_url",
+              source_url: "https://server.example/terminal-hook.mp4",
+              source_kind: "video",
+              display_metadata: {},
+              state: "staged",
+              outcome: null,
+              job_id: null,
+              batch_id: null,
+              attempt: 2,
+              planned_collection_item_id: null,
+            },
+            {
+              occurrence_id: "occ-direct-retry-terminal-hook-file",
+              ordinal: 1,
+              input_kind: "file_stub",
+              source_url: null,
+              source_kind: "file",
+              display_metadata: { file_name: "replacement.mp4" },
+              state: "awaiting_upload",
+              outcome: null,
+              job_id: null,
+              batch_id: null,
+              attempt: 2,
+              planned_collection_item_id: null,
+            },
+          ],
+        }
+      }
+      return {
+        contract_version: 2,
+        run_id: "run-direct-retry-terminal-hook",
+        status: "cancelled",
+        counts: { total: 2, cancelled: 2 },
+        version: 3,
+        collection_id: null,
+        batch_ids: ["batch-direct-retry-terminal-hook"],
+        created_at: "2026-07-14T00:00:00Z",
+        updated_at: "2026-07-14T00:00:02Z",
+        expires_at: "2026-07-21T00:00:00Z",
+      }
+    })
+    mocks.bgUpload.mockResolvedValue({
+      batch_id: "batch-direct-retry-terminal-hook",
+      jobs: [{ id: 961 }],
+      errors: [],
+      submissions: [
+        {
+          occurrence_id: "occ-direct-retry-terminal-hook-url",
+          status: "accepted",
+          accepted: true,
+          job_id: 961,
+          batch_id: "batch-direct-retry-terminal-hook",
+          error_code: null,
+          message: null,
+          retryable: false,
+          attempt: 2,
+        },
+      ],
+    })
+    const quickIngest = await import("@/services/tldw/quick-ingest-batch")
+    const originalTracking = {
+      mode: "webui-direct" as const,
+      sessionId: "qi-direct-retry-terminal-hook",
+      runId: "run-direct-retry-terminal-hook",
+      generation: "generation-direct-retry-terminal-hook-g1",
+    }
+
+    const retry = await quickIngest.retryQuickIngestSession({
+      sessionId: originalTracking.sessionId,
+      occurrenceIds: [
+        "occ-direct-retry-terminal-hook-url",
+        "occ-direct-retry-terminal-hook-file",
+      ],
+      tracking: originalTracking,
+    })
+    const fenced = await cancelQuickIngestSession({
+      sessionId: originalTracking.sessionId,
+      tracking: originalTracking,
+    })
+    expect(fenced).toMatchObject({
+      ok: false,
+      generation: retry.generation,
+      error: expect.stringMatching(/generation|superseded/i),
+    })
+
+    const retireDirectQuickIngestSessionAuthority = (quickIngest as any)
+      .retireDirectQuickIngestSessionAuthority
+    expect(retireDirectQuickIngestSessionAuthority).toBeTypeOf("function")
+    if (typeof retireDirectQuickIngestSessionAuthority !== "function") return
+    retireDirectQuickIngestSessionAuthority(
+      originalTracking.sessionId,
+      retry.generation,
+    )
+
+    const retired = await cancelQuickIngestSession({
+      sessionId: originalTracking.sessionId,
+      tracking: originalTracking,
+    })
+    expect(retired).toEqual({ ok: true })
+    expect(mocks.bgUpload).toHaveBeenCalledTimes(1)
+    expect(JSON.stringify(mocks.bgUpload.mock.calls)).not.toContain(
+      "occ-direct-retry-terminal-hook-file",
+    )
   })
 
   it("cancels persisted direct batches after refresh using tracking metadata", async () => {

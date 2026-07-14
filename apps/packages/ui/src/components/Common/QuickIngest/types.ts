@@ -1,3 +1,8 @@
+import type {
+  PlaylistRunItemOutcome,
+  PlaylistRunItemState,
+} from "@/services/tldw/playlist-ingest"
+
 /**
  * Represents a status summary for Quick Ingest items.
  * @property label - Display text for the status.
@@ -150,6 +155,7 @@ export type PersistedQuickIngestTracking = {
   submissionOccurrenceIds?: string[]
   sessionId?: string
   runId?: string
+  generation?: string
   batchId?: string
   batchIds?: string[]
   collectionId?: string
@@ -166,7 +172,13 @@ export type PersistedQuickIngestTracking = {
 
 export type ReattachedQuickIngestJob = {
   jobId: number | null
+  attempt?: number
   status: string
+  lifecycleState?: PlaylistRunItemState
+  terminalOutcome?: PlaylistRunItemOutcome | null
+  progressPercent?: number | null
+  progressMessage?: string | null
+  retryable?: boolean
   result?: unknown
   error?: string
   sourceItemId?: string
@@ -372,6 +384,14 @@ export type ItemProgress = {
   estimatedRemaining: number
   /** Error message if status is 'failed'. */
   error?: string
+  /** Authoritative server lifecycle for durable run occurrences. */
+  lifecycleState?: PlaylistRunItemState
+  /** Authoritative terminal result, present only when lifecycleState is terminal. */
+  terminalOutcome?: PlaylistRunItemOutcome | null
+  /** Whether the server currently permits retrying this occurrence. */
+  retryable?: boolean
+  /** Authoritative server attempt for an existing run occurrence. */
+  attempt?: number
 }
 
 /**
@@ -399,6 +419,10 @@ export type ErrorClassification =
  * Extended result item with error classification for the wizard.
  */
 export type WizardResultItem = ResultItem & {
+  /** Authoritative terminal outcome from the durable run. */
+  terminalOutcome?: PlaylistRunItemOutcome | null
+  /** Authoritative retry eligibility from the durable run. */
+  retryable?: boolean
   /** Classification of the error, if status is "error". */
   errorClassification?: ErrorClassification
   /** Duration of processing in milliseconds. */

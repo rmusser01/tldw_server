@@ -414,6 +414,8 @@ export type PlaylistDirectUrlInput = {
 export type PlaylistFileStubInput = {
   inputKind: "file_stub";
   occurrenceId: string;
+  /** Existing-run resume attempt; omitted when creating a new run. */
+  attempt?: number;
   name: string;
   contentType?: string;
   sizeBytes: number;
@@ -1952,6 +1954,7 @@ type SubmitPendingChunksOptions = {
     request: PlaylistIngestSubmissionRequest,
   ) => Promise<ApiPlaylistIngestSubmissionResponse>;
   shouldStop?: () => boolean;
+  isOccurrenceCancelled?: (occurrenceId: string) => boolean;
   onProgress?: (
     result: PlaylistIngestSubmitPendingResult,
   ) => void | Promise<void>;
@@ -2016,6 +2019,7 @@ export const submitPendingChunks = async ({
   chunkSize,
   submitChunk,
   shouldStop,
+  isOccurrenceCancelled,
   onProgress,
 }: SubmitPendingChunksOptions): Promise<PlaylistIngestSubmitPendingResult> => {
   const pending = run.processingOccurrences.filter((occurrence) =>
@@ -2063,7 +2067,8 @@ export const submitPendingChunks = async ({
       .slice(chunkIndex)
       .flatMap((remaining) =>
         remaining.occurrences.map((occurrence) => occurrence.occurrenceId),
-      ),
+      )
+      .filter((occurrenceId) => !isOccurrenceCancelled?.(occurrenceId)),
     ...omittedOccurrenceIds,
   ];
 
@@ -2078,7 +2083,10 @@ export const submitPendingChunks = async ({
         error: new DOMException("Aborted", "AbortError"),
       };
     }
-    const chunk = groupedChunk.occurrences;
+    const chunk = groupedChunk.occurrences.filter(
+      (occurrence) => !isOccurrenceCancelled?.(occurrence.occurrenceId),
+    );
+    if (chunk.length === 0) continue;
     const urls = chunk.filter(
       (occurrence) => occurrence.inputKind !== "file_stub",
     );
@@ -2173,12 +2181,7 @@ export const submitPendingChunks = async ({
         retryAfterMs: playlistRetryAfterMs(error),
         unsentOccurrenceIds: [
           ...chunk.map((occurrence) => occurrence.occurrenceId),
-          ...chunks
-            .slice(chunkIndex + 1)
-            .flatMap((remaining) =>
-              remaining.occurrences.map((occurrence) => occurrence.occurrenceId),
-            ),
-          ...omittedOccurrenceIds,
+          ...remainingOccurrenceIds(chunkIndex + 1),
         ],
         error,
       };

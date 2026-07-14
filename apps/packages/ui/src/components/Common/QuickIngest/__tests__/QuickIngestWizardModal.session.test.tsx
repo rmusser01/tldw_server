@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
   startQuickIngestSession: vi.fn(),
   submitQuickIngestBatch: vi.fn(),
   cancelQuickIngestSession: vi.fn(),
+  retryQuickIngestSession: vi.fn(),
+  retireDirectQuickIngestSessionAuthority: vi.fn(),
   queryQuickIngestSession: vi.fn(),
   acknowledgeQuickIngestSessionReplay: vi.fn(),
   reattachQuickIngestSession: vi.fn(),
@@ -24,6 +26,7 @@ const mocks = vi.hoisted(() => ({
     lastError: null as string | null,
     offlineBypass: false,
   },
+  delayedPayloadFile: null as File | null,
 }))
 
 vi.mock("react-i18next", () => ({
@@ -168,6 +171,9 @@ vi.mock("@/services/tldw/quick-ingest-batch", () => ({
   cancelQuickIngestSession: (...args: unknown[]) => mocks.cancelQuickIngestSession(...args),
   getQuickIngestAnalysisProviderWarning: (...args: unknown[]) =>
     mocks.getQuickIngestAnalysisProviderWarning(...args),
+  retryQuickIngestSession: (...args: unknown[]) => mocks.retryQuickIngestSession(...args),
+  retireDirectQuickIngestSessionAuthority: (...args: unknown[]) =>
+    mocks.retireDirectQuickIngestSessionAuthority(...args),
   queryQuickIngestSession: (...args: unknown[]) => mocks.queryQuickIngestSession(...args),
   acknowledgeQuickIngestSessionReplay: (...args: unknown[]) =>
     mocks.acknowledgeQuickIngestSessionReplay(...args),
@@ -221,6 +227,72 @@ vi.mock("@/components/Common/QuickIngest/AddContentStep", async () => {
             }}
           >
             Queue And Process
+          </button>
+          <button
+            onClick={() => {
+              const file = mocks.delayedPayloadFile
+              if (!file) return
+              setQueueItems([
+                {
+                  id: "occ-pre-authority-file-cancel",
+                  kind: "file",
+                  file,
+                  fileName: file.name,
+                  sourceRef: {
+                    kind: "file_stub",
+                    occurrenceId: "occ-pre-authority-file-cancel",
+                  },
+                  detectedType: "video",
+                  icon: "Film",
+                  fileSize: file.size,
+                  mimeType: file.type,
+                  validation: { valid: true },
+                },
+                {
+                  id: "occ-pre-authority-url-continue",
+                  kind: "url",
+                  url: "https://example.com/pre-authority-continue",
+                  sourceRef: {
+                    kind: "direct_url",
+                    occurrenceId: "occ-pre-authority-url-continue",
+                    url: "https://example.com/pre-authority-continue",
+                  },
+                  detectedType: "web",
+                  icon: "Globe",
+                  fileSize: 0,
+                  validation: { valid: true },
+                },
+              ])
+              onQuickProcess?.()
+            }}
+          >
+            Queue Delayed File With Sibling And Process
+          </button>
+          <button
+            onClick={() => {
+              const file = mocks.delayedPayloadFile
+              if (!file) return
+              setQueueItems([
+                {
+                  id: "occ-pre-authority-run-cancel",
+                  kind: "file",
+                  file,
+                  fileName: file.name,
+                  sourceRef: {
+                    kind: "file_stub",
+                    occurrenceId: "occ-pre-authority-run-cancel",
+                  },
+                  detectedType: "video",
+                  icon: "Film",
+                  fileSize: file.size,
+                  mimeType: file.type,
+                  validation: { valid: true },
+                },
+              ])
+              onQuickProcess?.()
+            }}
+          >
+            Queue Delayed File And Process
           </button>
           <button
             onClick={() => {
@@ -523,7 +595,7 @@ vi.mock("@/components/Common/QuickIngest/ProcessingStep", async () => {
   >("@/components/Common/QuickIngest/IngestWizardContext")
   return {
     ProcessingStep: ({ onCancelAll }: { onCancelAll?: () => void }) => {
-      const { state, cancelProcessing } = actual.useIngestWizard()
+      const { state, cancelProcessing, cancelItem, checkStatus } = actual.useIngestWizard()
       return (
         <div data-testid="wizard-processing">
           {state.processingState.status}:{state.processingState.perItemProgress.length}
@@ -539,6 +611,8 @@ vi.mock("@/components/Common/QuickIngest/ProcessingStep", async () => {
           >
             Cancel Processing
           </button>
+          <button onClick={() => cancelItem(state.queueItems[0]?.id || "")}>Cancel first item</button>
+          <button onClick={() => checkStatus(state.queueItems[0]?.id || "")}>Check first item</button>
         </div>
       )
     },
@@ -553,9 +627,11 @@ vi.mock("@/components/Common/QuickIngest/WizardResultsStep", async () => {
     WizardResultsStep: ({
       onOpenCollection,
       onIngestMore,
+      onRetryItems,
     }: {
       onOpenCollection?: (collectionId: string) => void
       onIngestMore?: () => void
+      onRetryItems?: (itemIds: string[]) => void
     }) => {
       const { state, reset } = actual.useIngestWizard()
       return (
@@ -563,7 +639,7 @@ vi.mock("@/components/Common/QuickIngest/WizardResultsStep", async () => {
           {state.processingState.status}:{state.results.length}
           {state.results.map((item) => (
             <div key={item.id} data-testid={`wizard-result-${item.id}`}>
-              {item.id}:{item.outcome}:{item.message || ""}
+              {item.id}:{item.outcome}:{item.title || ""}:{item.message || ""}
             </div>
           ))}
           {onOpenCollection ? (
@@ -571,6 +647,13 @@ vi.mock("@/components/Common/QuickIngest/WizardResultsStep", async () => {
               type="button"
               onClick={() => onOpenCollection("7")}>
               Open collection
+            </button>
+          ) : null}
+          {state.results[0] && onRetryItems ? (
+            <button
+              type="button"
+              onClick={() => onRetryItems([state.results[0].id])}>
+              Retry first result
             </button>
           ) : null}
           <button type="button" onClick={onIngestMore || reset}>
@@ -628,6 +711,8 @@ describe("QuickIngestWizardModal session runtime", () => {
     mocks.startQuickIngestSession.mockReset()
     mocks.submitQuickIngestBatch.mockReset()
     mocks.cancelQuickIngestSession.mockReset()
+    mocks.retryQuickIngestSession.mockReset()
+    mocks.retireDirectQuickIngestSessionAuthority.mockReset()
     mocks.queryQuickIngestSession.mockReset()
     mocks.acknowledgeQuickIngestSessionReplay.mockReset()
     mocks.reattachQuickIngestSession.mockReset()
@@ -646,7 +731,9 @@ describe("QuickIngestWizardModal session runtime", () => {
       lastError: null,
       offlineBypass: false,
     })
+    mocks.delayedPayloadFile = null
     mocks.cancelQuickIngestSession.mockResolvedValue({ ok: true })
+    mocks.retryQuickIngestSession.mockResolvedValue({ ok: true })
     mocks.queryQuickIngestSession.mockResolvedValue({ ok: true, active: true, event: null })
     mocks.acknowledgeQuickIngestSessionReplay.mockResolvedValue({ ok: true })
     useQuickIngestSessionStore.setState({
@@ -1720,6 +1807,345 @@ describe("QuickIngestWizardModal session runtime", () => {
     )
   })
 
+  it("maps every canonical runtime lifecycle field without discarding progress evidence", async () => {
+    const sessionId = "qi-runtime-canonical-lifecycle"
+    const states = [
+      "awaiting_upload",
+      "queued",
+      "running",
+      "cancellation_requested",
+      "status_unavailable",
+    ] as const
+    useQuickIngestSessionStore.getState().upsertSession({
+      ...createEmptyQuickIngestSession(),
+      lifecycle: "processing",
+      currentStep: 4,
+      queueItems: [...states, "terminal"].map((state) => ({
+        id: `occ-${state}`,
+        kind: "url",
+        url: `https://example.com/${state}`,
+        detectedType: "web",
+        icon: "Globe",
+        fileSize: 0,
+        validation: { valid: true },
+      })) as any,
+      processingState: {
+        status: "running",
+        perItemProgress: [...states, "terminal"].map((state) => ({
+          id: `occ-${state}`,
+          status: "queued",
+          progressPercent: 0,
+          currentStage: "Queued",
+          estimatedRemaining: 0,
+        })),
+        elapsed: 3,
+        estimatedRemaining: 20,
+      },
+      tracking: {
+        mode: "extension-runtime",
+        sessionId,
+        runId: "run-runtime-canonical-lifecycle",
+        itemIds: [...states, "terminal"].map((state) => `occ-${state}`),
+        startedAt: Date.now(),
+      } as any,
+    })
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    await waitFor(() => expect(mocks.runtimeListeners.length).toBeGreaterThan(0))
+
+    for (const [index, lifecycleState] of states.entries()) {
+      emitRuntimeMessage({
+        type: "tldw:quick-ingest/progress",
+        payload: {
+          sessionId,
+          runId: "run-runtime-canonical-lifecycle",
+          occurrenceId: `occ-${lifecycleState}`,
+          status: lifecycleState,
+          lifecycleState,
+          progressPercentage: 17 + index,
+          progressMessage:
+            lifecycleState === "awaiting_upload"
+              ? "File reattach required"
+              : `Server says ${lifecycleState}`,
+          retryable:
+            lifecycleState === "awaiting_upload" ||
+            lifecycleState === "status_unavailable",
+          result: {
+            id: `occ-${lifecycleState}`,
+            status: lifecycleState,
+            type: "html",
+          },
+        },
+      })
+      await waitFor(() => {
+        expect(
+          useQuickIngestSessionStore
+            .getState()
+            .session?.processingState.perItemProgress.find(
+              (item) => item.id === `occ-${lifecycleState}`
+            )
+        ).toMatchObject({
+          lifecycleState,
+          progressPercent: 17 + index,
+          currentStage:
+            lifecycleState === "awaiting_upload"
+              ? "File reattach required"
+              : `Server says ${lifecycleState}`,
+          retryable:
+            lifecycleState === "awaiting_upload" ||
+            lifecycleState === "status_unavailable",
+        })
+      })
+    }
+
+    emitRuntimeMessage({
+      type: "tldw:quick-ingest/progress",
+      payload: {
+        sessionId,
+        runId: "run-runtime-canonical-lifecycle",
+        occurrenceId: "occ-terminal",
+        status: "completed",
+        lifecycleState: "terminal",
+        progressPercentage: 100,
+        progressMessage: "Completed",
+        retryable: false,
+        result: {
+          id: "occ-terminal",
+          status: "ok",
+          type: "html",
+          data: { outcome: "processed" },
+        },
+      },
+    })
+
+    await waitFor(() => {
+      expect(
+        useQuickIngestSessionStore
+          .getState()
+          .session?.processingState.perItemProgress.find(
+            (item) => item.id === "occ-terminal"
+          )
+      ).toMatchObject({
+        lifecycleState: "terminal",
+        terminalOutcome: "completed",
+        progressPercent: 100,
+        retryable: false,
+      })
+    })
+  })
+
+  it("shows local pre-run work as preparing until server authority is established", async () => {
+    let resolveStart!: (value: unknown) => void
+    mocks.startQuickIngestSession.mockReturnValue(
+      new Promise((resolve) => {
+        resolveStart = resolve
+      })
+    )
+    useQuickIngestSessionStore.getState().createDraftSession()
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    await userEvent.click(screen.getByRole("button", { name: "Queue And Process" }))
+
+    await waitFor(() => {
+      expect(
+        useQuickIngestSessionStore.getState().session?.processingState
+          .perItemProgress[0]
+      ).toMatchObject({
+        status: "queued",
+        lifecycleState: "preparing",
+        currentStage: "Preparing",
+      })
+    })
+
+    resolveStart({ ok: false, error: "test cleanup" })
+  })
+
+  it.each([
+    { acknowledgement: "acknowledged", cancellation: "row" },
+    { acknowledgement: "acknowledged", cancellation: "whole" },
+    { acknowledgement: "indeterminate", cancellation: "row" },
+    { acknowledgement: "indeterminate", cancellation: "whole" },
+  ] as const)(
+    "forwards a pending $cancellation cancellation once an $acknowledgement extension start reveals authority",
+    async ({ acknowledgement, cancellation }) => {
+      let resolveStart!: (value: unknown) => void
+      mocks.startQuickIngestSession.mockReturnValue(
+        new Promise((resolve) => {
+          resolveStart = resolve
+        })
+      )
+      useQuickIngestSessionStore.getState().createDraftSession()
+      const sessionId = `qi-extension-${acknowledgement}-${cancellation}-cancel`
+
+      render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+      fireEvent.click(screen.getByRole("button", { name: "Queue And Process" }))
+      await waitFor(() =>
+        expect(mocks.startQuickIngestSession).toHaveBeenCalledTimes(1)
+      )
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: cancellation === "row" ? "Cancel first item" : "Cancel Processing",
+        })
+      )
+
+      await act(async () => {
+        resolveStart(
+          acknowledgement === "acknowledged"
+            ? { ok: true, sessionId }
+            : {
+                ok: false,
+                indeterminate: true,
+                sessionId,
+                error: "The accepted start response was lost.",
+              }
+        )
+        await Promise.resolve()
+      })
+
+      await waitFor(() => {
+        expect(mocks.cancelQuickIngestSession).toHaveBeenCalledWith(
+          expect.objectContaining({
+            sessionId,
+            reason: "user_cancelled",
+            occurrenceIds:
+              cancellation === "row" ? ["queued-url-1"] : undefined,
+          })
+        )
+      })
+    }
+  )
+
+  it("does not let a cancelled direct response finalize the cancelled authority as failed", async () => {
+    let resolveSubmission!: (value: unknown) => void
+    mocks.startQuickIngestSession.mockResolvedValue({
+      ok: true,
+      sessionId: "qi-direct-cancelled-response",
+    })
+    mocks.submitQuickIngestBatch.mockReturnValue(
+      new Promise((resolve) => {
+        resolveSubmission = resolve
+      })
+    )
+    useQuickIngestSessionStore.getState().createDraftSession()
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: "Queue And Process" }))
+    await waitFor(() =>
+      expect(mocks.submitQuickIngestBatch).toHaveBeenCalledTimes(1)
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Cancel Processing" }))
+    await waitFor(() =>
+      expect(mocks.cancelQuickIngestSession).toHaveBeenCalledTimes(1)
+    )
+
+    await act(async () => {
+      resolveSubmission({
+        ok: true,
+        results: [
+          {
+            id: "queued-url-1",
+            status: "error",
+            type: "html",
+            error: "Cancelled by user.",
+            data: { outcome: "cancelled" },
+          },
+        ],
+      })
+      await Promise.resolve()
+    })
+
+    await waitFor(() => {
+      expect(useQuickIngestSessionStore.getState().session).toMatchObject({
+        currentStep: 4,
+      })
+    })
+    expect(screen.queryByTestId("wizard-results")).not.toBeInTheDocument()
+  })
+
+  it("omits a row cancelled while its direct payload bytes are still being prepared", async () => {
+    let releaseBytes!: () => void
+    const byteGate = new Promise<ArrayBuffer>((resolve) => {
+      releaseBytes = () => resolve(Uint8Array.from([1, 2, 3]).buffer)
+    })
+    const delayedFile = {
+      name: "delayed-row.mp4",
+      type: "video/mp4",
+      size: 3,
+      lastModified: 1,
+      arrayBuffer: vi.fn(() => byteGate),
+    } as unknown as File
+    mocks.delayedPayloadFile = delayedFile
+    useQuickIngestSessionStore.getState().createDraftSession()
+    mocks.startQuickIngestSession.mockResolvedValue({
+      ok: true,
+      sessionId: "qi-direct-pre-authority-row-cancel",
+    })
+    mocks.submitQuickIngestBatch.mockReturnValue(new Promise(() => {}))
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    await userEvent.click(
+      screen.getByRole("button", {
+        name: "Queue Delayed File With Sibling And Process",
+      })
+    )
+    await waitFor(() => expect(delayedFile.arrayBuffer).toHaveBeenCalledTimes(1))
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel first item" }))
+    await act(async () => {
+      releaseBytes()
+      await byteGate
+    })
+
+    await waitFor(() =>
+      expect(mocks.startQuickIngestSession).toHaveBeenCalledTimes(1)
+    )
+    const payload = mocks.startQuickIngestSession.mock.calls[0]?.[0]
+    expect(payload).toMatchObject({
+      entries: [
+        expect.objectContaining({ id: "occ-pre-authority-url-continue" }),
+      ],
+      files: [],
+    })
+    expect(JSON.stringify(payload)).not.toContain("occ-pre-authority-file-cancel")
+  })
+
+  it("does not start a direct run cancelled while payload bytes are still being prepared", async () => {
+    let releaseBytes!: () => void
+    const byteGate = new Promise<ArrayBuffer>((resolve) => {
+      releaseBytes = () => resolve(Uint8Array.from([4, 5, 6]).buffer)
+    })
+    const delayedFile = {
+      name: "delayed-run.mp4",
+      type: "video/mp4",
+      size: 3,
+      lastModified: 1,
+      arrayBuffer: vi.fn(() => byteGate),
+    } as unknown as File
+    mocks.delayedPayloadFile = delayedFile
+    useQuickIngestSessionStore.getState().createDraftSession()
+    mocks.startQuickIngestSession.mockResolvedValue({
+      ok: true,
+      sessionId: "qi-direct-pre-authority-run-cancel",
+    })
+    mocks.submitQuickIngestBatch.mockReturnValue(new Promise(() => {}))
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    await userEvent.click(
+      screen.getByRole("button", { name: "Queue Delayed File And Process" })
+    )
+    await waitFor(() => expect(delayedFile.arrayBuffer).toHaveBeenCalledTimes(1))
+    fireEvent.click(screen.getByRole("button", { name: "Cancel Processing" }))
+
+    await act(async () => {
+      releaseBytes()
+      await byteGate
+      await new Promise((resolve) => window.setTimeout(resolve, 10))
+    })
+
+    expect(mocks.startQuickIngestSession).not.toHaveBeenCalled()
+    expect(mocks.submitQuickIngestBatch).not.toHaveBeenCalled()
+  })
+
   it("retains an indeterminate accepted extension identity as interrupted instead of terminalizing locally", async () => {
     const user = userEvent.setup()
     useQuickIngestSessionStore.getState().createDraftSession()
@@ -2356,6 +2782,7 @@ describe("QuickIngestWizardModal session runtime", () => {
             status: "ok",
             url: "https://example.com/article",
             type: "html",
+            data: { outcome: "metadata_updated" },
           },
         ],
       },
@@ -2364,6 +2791,12 @@ describe("QuickIngestWizardModal session runtime", () => {
     await waitFor(() => {
       expect(screen.getByTestId("wizard-results")).toHaveTextContent("complete:1")
     })
+    expect(useQuickIngestSessionStore.getState().session?.results).toEqual([
+      expect.objectContaining({
+        id: "queued-url-1",
+        terminalOutcome: "metadata_updated",
+      }),
+    ])
   })
 
   it("normalizes runtime duplicate results from db_message into skipped items", async () => {
@@ -2489,13 +2922,19 @@ describe("QuickIngestWizardModal session runtime", () => {
     })
 
     expect(useQuickIngestSessionStore.getState().session?.results).toEqual([])
-    expect(
-      useQuickIngestSessionStore
-        .getState()
-        .session?.processingState.perItemProgress.find(
-          (item) => item.id === "queued-partial-accepted"
-        )
-    ).toMatchObject({ status: "processing" })
+    await waitFor(() => {
+      expect(
+        useQuickIngestSessionStore
+          .getState()
+          .session?.processingState.perItemProgress.find(
+            (item) => item.id === "queued-partial-accepted"
+          )
+      ).toMatchObject({
+        status: "processing",
+        progressPercent: 0,
+        currentStage: "running",
+      })
+    })
 
     emitRuntimeMessage({
       type: "tldw:quick-ingest/failed",
@@ -4015,6 +4454,7 @@ describe("QuickIngestWizardModal session runtime", () => {
             expect.objectContaining({
               id: "queued-authoritative-cancel",
               status: "processing",
+              lifecycleState: "cancellation_requested",
               currentStage: expect.stringMatching(/cancellation requested/i),
             }),
           ],
@@ -4264,6 +4704,106 @@ describe("QuickIngestWizardModal session runtime", () => {
     })
   })
 
+  it("does not let a late row-cancel rejection overwrite a newer terminal result", async () => {
+    let rejectCancel!: (reason: unknown) => void
+    mocks.cancelQuickIngestSession.mockReturnValue(
+      new Promise((_resolve, reject) => {
+        rejectCancel = reject
+      })
+    )
+    useQuickIngestSessionStore.getState().upsertSession({
+      ...createEmptyQuickIngestSession(),
+      lifecycle: "processing",
+      currentStep: 4,
+      queueItems: [
+        {
+          id: "occ-cancel-race",
+          kind: "url",
+          url: "https://example.com/cancel-race",
+          detectedType: "web",
+          icon: "Globe",
+          fileSize: 0,
+          validation: { valid: true },
+        } as any,
+      ],
+      processingState: {
+        status: "running",
+        perItemProgress: [
+          {
+            id: "occ-cancel-race",
+            status: "processing",
+            lifecycleState: "running",
+            terminalOutcome: null,
+            progressPercent: 48,
+            currentStage: "Running",
+            estimatedRemaining: 10,
+          },
+        ],
+        elapsed: 3,
+        estimatedRemaining: 10,
+      },
+      tracking: {
+        mode: "extension-runtime",
+        sessionId: "qi-cancel-race",
+        runId: "run-cancel-race",
+        itemIds: ["occ-cancel-race"],
+        startedAt: Date.now(),
+      } as any,
+    })
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    await userEvent.click(
+      screen.getByRole("button", { name: "Cancel first item" })
+    )
+    await waitFor(() => {
+      expect(mocks.cancelQuickIngestSession).toHaveBeenCalledWith(
+        expect.objectContaining({ occurrenceIds: ["occ-cancel-race"] })
+      )
+    })
+
+    emitRuntimeMessage({
+      type: "tldw:quick-ingest/completed",
+      payload: {
+        sessionId: "qi-cancel-race",
+        runId: "run-cancel-race",
+        results: [
+          {
+            id: "occ-cancel-race",
+            status: "ok",
+            type: "html",
+            data: { outcome: "processed" },
+          },
+        ],
+      },
+    })
+    await waitFor(() => {
+      expect(useQuickIngestSessionStore.getState().session).toMatchObject({
+        lifecycle: "completed",
+        results: [expect.objectContaining({ id: "occ-cancel-race", outcome: "processed" })],
+      })
+    })
+
+    rejectCancel(new Error("cancel request arrived too late"))
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(useQuickIngestSessionStore.getState().session).toMatchObject({
+      lifecycle: "completed",
+      processingState: {
+        perItemProgress: [
+          expect.objectContaining({
+            id: "occ-cancel-race",
+            lifecycleState: "terminal",
+            terminalOutcome: "completed",
+          }),
+        ],
+      },
+      results: [expect.objectContaining({ id: "occ-cancel-race", outcome: "processed" })],
+    })
+  })
+
   it("keeps polling persisted direct-job reattach until the resumed session reaches a terminal state", async () => {
     vi.useFakeTimers()
     mocks.reattachQuickIngestSession
@@ -4330,5 +4870,1277 @@ describe("QuickIngestWizardModal session runtime", () => {
 
     expect(mocks.reattachQuickIngestSession).toHaveBeenCalledTimes(2)
     expect(screen.getByTestId("wizard-results")).toHaveTextContent("complete:1")
+  })
+
+  it("persists a runtime-provided run id into extension tracking", async () => {
+    useQuickIngestSessionStore.getState().upsertSession({
+      ...createEmptyQuickIngestSession(),
+      lifecycle: "processing",
+      currentStep: 4,
+      queueItems: [
+        {
+          id: "occ-runtime-run-id",
+          kind: "url",
+          url: "https://example.com/runtime-run-id",
+          detectedType: "video",
+          icon: "Film",
+          fileSize: 0,
+          validation: { valid: true },
+        } as any,
+      ],
+      processingState: {
+        status: "running",
+        perItemProgress: [
+          {
+            id: "occ-runtime-run-id",
+            status: "queued",
+            progressPercent: 0,
+            currentStage: "Queued",
+            estimatedRemaining: 0,
+          },
+        ],
+        elapsed: 0,
+        estimatedRemaining: 0,
+      },
+      tracking: {
+        mode: "extension-runtime",
+        sessionId: "qi-runtime-run-id",
+        itemIds: ["occ-runtime-run-id"],
+        startedAt: Date.now(),
+      } as any,
+    })
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    emitRuntimeMessage({
+      type: "tldw:quick-ingest/progress",
+      payload: {
+        sessionId: "qi-runtime-run-id",
+        runId: "run-runtime-authoritative",
+        occurrenceId: "occ-runtime-run-id",
+        status: "running",
+        result: {
+          id: "occ-runtime-run-id",
+          status: "running",
+          type: "video",
+        },
+      },
+    })
+
+    await waitFor(() => {
+      expect(useQuickIngestSessionStore.getState().session?.tracking).toMatchObject({
+        mode: "extension-runtime",
+        sessionId: "qi-runtime-run-id",
+        runId: "run-runtime-authoritative",
+      })
+    })
+  })
+
+  it("adopts a persistence-degraded accepted retry generation and keeps live runtime monitoring", async () => {
+    mocks.retryQuickIngestSession.mockResolvedValue({
+      ok: false,
+      generation: "generation-persist-degraded-new",
+      error: "Retry recovery could not be persisted. Live polling remains active.",
+    })
+    mocks.reattachQuickIngestSession.mockResolvedValue({
+      lifecycle: "processing",
+      jobs: [
+        {
+          jobId: 816,
+          status: "processing",
+          sourceItemId: "occ-persist-degraded-retry",
+          lifecycleState: "running",
+          progressPercent: 21,
+          progressMessage: "Monitoring accepted retry",
+          retryable: false,
+        },
+      ],
+      errorMessage: null,
+    })
+    useQuickIngestSessionStore.getState().upsertSession({
+      ...createEmptyQuickIngestSession(),
+      lifecycle: "processing",
+      currentStep: 4,
+      queueItems: [
+        {
+          id: "occ-persist-degraded-retry",
+          kind: "url",
+          url: "https://example.com/persist-degraded-retry",
+          detectedType: "web",
+          icon: "Globe",
+          fileSize: 0,
+          validation: { valid: true },
+        } as any,
+      ],
+      processingState: {
+        status: "running",
+        perItemProgress: [
+          {
+            id: "occ-persist-degraded-retry",
+            status: "processing",
+            lifecycleState: "running",
+            terminalOutcome: null,
+            progressPercent: 48,
+            currentStage: "Running",
+            estimatedRemaining: 10,
+          },
+        ],
+        elapsed: 3,
+        estimatedRemaining: 10,
+      },
+      tracking: {
+        mode: "extension-runtime",
+        sessionId: "qi-persist-degraded-retry",
+        runId: "run-persist-degraded-retry",
+        generation: "generation-persist-degraded-old",
+        itemIds: ["occ-persist-degraded-retry"],
+        startedAt: Date.now(),
+      } as any,
+    })
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    emitRuntimeMessage({
+      type: "tldw:quick-ingest/failed",
+      payload: {
+        sessionId: "qi-persist-degraded-retry",
+        runId: "run-persist-degraded-retry",
+        generation: "generation-persist-degraded-old",
+        error: "Temporary worker failure",
+        results: [
+          {
+            id: "occ-persist-degraded-retry",
+            status: "error",
+            type: "html",
+            retryable: true,
+            error: "Temporary worker failure",
+            data: { outcome: "processing_failed" },
+          },
+        ],
+      },
+    })
+    expect(await screen.findByTestId("wizard-results")).toBeInTheDocument()
+    await userEvent.click(
+      screen.getByRole("button", { name: "Retry first result" })
+    )
+
+    await waitFor(() => {
+      expect(useQuickIngestSessionStore.getState().session).toMatchObject({
+        lifecycle: "processing",
+        currentStep: 4,
+        tracking: {
+          generation: "generation-persist-degraded-new",
+        },
+        errorMessage: expect.stringMatching(/persist|recovery|polling/i),
+      })
+    })
+
+    emitRuntimeMessage({
+      type: "tldw:quick-ingest/progress",
+      payload: {
+        sessionId: "qi-persist-degraded-retry",
+        runId: "run-persist-degraded-retry",
+        generation: "generation-persist-degraded-new",
+        occurrenceId: "occ-persist-degraded-retry",
+        status: "processing",
+        progressPercentage: 64,
+        progressMessage: "Indexing accepted retry",
+        result: {
+          id: "occ-persist-degraded-retry",
+          status: "processing",
+          type: "html",
+        },
+      },
+    })
+    await waitFor(() => {
+      expect(
+        useQuickIngestSessionStore.getState().session?.processingState
+          .perItemProgress[0]
+      ).toMatchObject({
+        id: "occ-persist-degraded-retry",
+        progressPercent: 64,
+        currentStage: "Indexing accepted retry",
+      })
+    })
+  })
+
+  it("reconciles a retained direct retry reservation on the recovery timer before ordinary polling again", async () => {
+    vi.useFakeTimers()
+    const calls: string[] = []
+    mocks.retryQuickIngestSession
+      .mockImplementationOnce(async () => {
+        calls.push("retry")
+        return {
+          ok: false,
+          indeterminate: true,
+          generation: "generation-direct-recurring-retry-g2",
+          error: "Authoritative retry resubmission is temporarily unavailable.",
+        }
+      })
+      .mockImplementationOnce(async () => {
+        calls.push("retry")
+        return {
+          ok: false,
+          indeterminate: true,
+          generation: "generation-direct-recurring-retry-g2",
+          error: "Authoritative retry resubmission is still unavailable.",
+        }
+      })
+    mocks.reattachQuickIngestSession.mockImplementation(async () => {
+      calls.push("reattach")
+      return {
+        lifecycle: "processing",
+        jobs: [
+          {
+            jobId: 950,
+            status: "status_unavailable",
+            sourceItemId: "occ-direct-recurring-retry",
+            lifecycleState: "status_unavailable",
+            progressPercent: 0,
+            progressMessage: "Retry resubmission is temporarily unavailable",
+            retryable: true,
+          },
+        ],
+        errorMessage: "Retry resubmission is temporarily unavailable",
+      }
+    })
+    useQuickIngestSessionStore.getState().upsertSession({
+      ...createEmptyQuickIngestSession(),
+      lifecycle: "interrupted",
+      currentStep: 5,
+      queueItems: [
+        {
+          id: "occ-direct-recurring-retry",
+          kind: "url",
+          url: "https://example.com/direct-recurring-retry",
+          detectedType: "video",
+          icon: "Film",
+          fileSize: 0,
+          validation: { valid: true },
+        } as any,
+      ],
+      processingState: {
+        status: "error",
+        perItemProgress: [
+          {
+            id: "occ-direct-recurring-retry",
+            status: "error",
+            lifecycleState: "terminal",
+            terminalOutcome: "processing_failed",
+            progressPercent: 100,
+            currentStage: "Retryable failure",
+            estimatedRemaining: 0,
+            retryable: true,
+          },
+        ],
+        elapsed: 3,
+        estimatedRemaining: 0,
+      },
+      results: [
+        {
+          id: "occ-direct-recurring-retry",
+          status: "error",
+          outcome: "processing_failed",
+          title: "Direct recurring retry",
+          message: "Retryable failure",
+          retryable: true,
+        } as any,
+      ],
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "qi-direct-recurring-retry",
+        runId: "run-direct-recurring-retry",
+        generation: "generation-direct-recurring-retry-g1",
+        itemIds: ["occ-direct-recurring-retry"],
+        startedAt: Date.now(),
+      } as any,
+    })
+
+    const mounted = render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: "Retry first result" }))
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(calls.slice(0, 2)).toEqual(["retry", "reattach"])
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000)
+    })
+
+    expect(calls.slice(0, 3)).toEqual(["retry", "reattach", "retry"])
+    expect(mocks.retryQuickIngestSession).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        sessionId: "qi-direct-recurring-retry",
+        occurrenceIds: ["occ-direct-recurring-retry"],
+        tracking: expect.objectContaining({
+          runId: "run-direct-recurring-retry",
+          generation: "generation-direct-recurring-retry-g2",
+        }),
+      }),
+    )
+
+    mounted.unmount()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000)
+    })
+    expect(mocks.retryQuickIngestSession).toHaveBeenCalledTimes(2)
+  })
+
+  it("uses one reattach owner after direct retry publication and cancels its late work on unmount", async () => {
+    vi.useFakeTimers()
+    let resolveRetry!: (response: any) => void
+    const retryResponse = new Promise<any>((resolve) => {
+      resolveRetry = resolve
+    })
+    let resolveReattach!: (snapshot: any) => void
+    const reattachSnapshot = new Promise<any>((resolve) => {
+      resolveReattach = resolve
+    })
+    mocks.retryQuickIngestSession.mockReturnValue(retryResponse)
+    mocks.reattachQuickIngestSession.mockReturnValue(reattachSnapshot)
+    useQuickIngestSessionStore.getState().upsertSession({
+      ...createEmptyQuickIngestSession(),
+      lifecycle: "interrupted",
+      currentStep: 5,
+      queueItems: [
+        {
+          id: "occ-direct-single-owner",
+          kind: "url",
+          url: "https://example.com/direct-single-owner",
+          detectedType: "video",
+          icon: "Film",
+          fileSize: 0,
+          validation: { valid: true },
+        } as any,
+      ],
+      processingState: {
+        status: "error",
+        perItemProgress: [
+          {
+            id: "occ-direct-single-owner",
+            status: "error",
+            lifecycleState: "terminal",
+            terminalOutcome: "processing_failed",
+            progressPercent: 100,
+            currentStage: "Retryable failure",
+            estimatedRemaining: 0,
+            retryable: true,
+          },
+        ],
+        elapsed: 3,
+        estimatedRemaining: 0,
+      },
+      results: [
+        {
+          id: "occ-direct-single-owner",
+          status: "error",
+          outcome: "processing_failed",
+          title: "Direct single owner",
+          message: "Retryable failure",
+          retryable: true,
+        } as any,
+      ],
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "qi-direct-single-owner",
+        runId: "run-direct-single-owner",
+        generation: "generation-direct-single-owner-g1",
+        itemIds: ["occ-direct-single-owner"],
+        startedAt: Date.now(),
+      } as any,
+    })
+
+    const mounted = render(
+      <React.StrictMode>
+        <QuickIngestWizardModal open onClose={vi.fn()} />
+      </React.StrictMode>
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Retry first result" }))
+    await act(async () => {
+      resolveRetry({
+        ok: false,
+        indeterminate: true,
+        generation: "generation-direct-single-owner-g2",
+        error: "Retry delivery is awaiting reconciliation.",
+      })
+      await retryResponse
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(mocks.reattachQuickIngestSession).toHaveBeenCalledTimes(1)
+    mounted.unmount()
+
+    await act(async () => {
+      resolveReattach({
+        lifecycle: "processing",
+        jobs: [
+          {
+            jobId: 962,
+            status: "status_unavailable",
+            sourceItemId: "occ-direct-single-owner",
+            lifecycleState: "status_unavailable",
+            progressPercent: 0,
+            progressMessage: "Retry delivery is awaiting reconciliation.",
+            retryable: true,
+          },
+        ],
+        errorMessage: "Retry delivery is awaiting reconciliation.",
+      })
+      await reattachSnapshot
+      await vi.advanceTimersByTimeAsync(4_000)
+    })
+
+    expect(mocks.reattachQuickIngestSession).toHaveBeenCalledTimes(1)
+    expect(mocks.retryQuickIngestSession).toHaveBeenCalledTimes(1)
+  })
+
+  it("retires direct retry generation authority when reattach reaches terminal completion", async () => {
+    mocks.reattachQuickIngestSession.mockResolvedValue({
+      lifecycle: "completed",
+      jobs: [
+        {
+          jobId: 963,
+          status: "completed",
+          sourceItemId: "occ-direct-terminal-retire-hook",
+          lifecycleState: "completed",
+          terminalOutcome: "processed",
+          progressPercent: 100,
+          retryable: false,
+          result: { media_id: "media-direct-terminal-retire-hook" },
+        },
+      ],
+      errorMessage: null,
+    })
+    useQuickIngestSessionStore.getState().upsertSession({
+      ...createEmptyQuickIngestSession(),
+      lifecycle: "processing",
+      currentStep: 4,
+      queueItems: [
+        {
+          id: "occ-direct-terminal-retire-hook",
+          kind: "url",
+          url: "https://example.com/direct-terminal-retire-hook",
+          detectedType: "video",
+          icon: "Film",
+          fileSize: 0,
+          validation: { valid: true },
+        } as any,
+      ],
+      processingState: {
+        status: "running",
+        perItemProgress: [
+          {
+            id: "occ-direct-terminal-retire-hook",
+            status: "processing",
+            lifecycleState: "running",
+            terminalOutcome: null,
+            progressPercent: 80,
+            currentStage: "Processing",
+            estimatedRemaining: 1,
+            retryable: false,
+          },
+        ],
+        elapsed: 3,
+        estimatedRemaining: 1,
+      },
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "qi-direct-terminal-retire-hook",
+        runId: "run-direct-terminal-retire-hook",
+        generation: "generation-direct-terminal-retire-hook-g2",
+        itemIds: ["occ-direct-terminal-retire-hook"],
+        jobIds: [963],
+        startedAt: Date.now(),
+      } as any,
+    })
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+
+    await waitFor(() =>
+      expect(useQuickIngestSessionStore.getState().session).toMatchObject({
+        lifecycle: "completed",
+        results: [
+          expect.objectContaining({
+            id: "occ-direct-terminal-retire-hook",
+            mediaId: "media-direct-terminal-retire-hook",
+          }),
+        ],
+      })
+    )
+    expect(mocks.retireDirectQuickIngestSessionAuthority).toHaveBeenCalledTimes(1)
+    expect(mocks.retireDirectQuickIngestSessionAuthority).toHaveBeenCalledWith(
+      "qi-direct-terminal-retire-hook",
+      "generation-direct-terminal-retire-hook-g2",
+    )
+  })
+
+  it.each(["cancelled", "partial_failure"] as const)(
+    "retires direct retry generation authority when reattach resolves as %s",
+    async (lifecycle) => {
+      mocks.reattachQuickIngestSession.mockResolvedValue({
+        lifecycle,
+        jobs: [],
+        errorMessage: lifecycle === "partial_failure" ? "One item failed" : null,
+      })
+      useQuickIngestSessionStore.getState().upsertSession({
+        ...createEmptyQuickIngestSession(),
+        lifecycle: "processing",
+        currentStep: 4,
+        queueItems: [],
+        processingState: {
+          status: "running",
+          perItemProgress: [],
+          elapsed: 1,
+          estimatedRemaining: 1,
+        },
+        tracking: {
+          mode: "webui-direct",
+          sessionId: `qi-direct-${lifecycle}-retire-hook`,
+          runId: `run-direct-${lifecycle}-retire-hook`,
+          generation: `generation-direct-${lifecycle}-retire-hook-g2`,
+          itemIds: [],
+          startedAt: Date.now(),
+        } as any,
+      })
+
+      render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+
+      await waitFor(() =>
+        expect(mocks.retireDirectQuickIngestSessionAuthority).toHaveBeenCalledWith(
+          `qi-direct-${lifecycle}-retire-hook`,
+          `generation-direct-${lifecycle}-retire-hook-g2`,
+        )
+      )
+    }
+  )
+
+  it("does not retire direct generation authority for an interrupted status observation", async () => {
+    mocks.reattachQuickIngestSession.mockResolvedValue({
+      lifecycle: "interrupted",
+      jobs: [],
+      errorMessage: "Authorization is required to observe the run.",
+    })
+    useQuickIngestSessionStore.getState().upsertSession({
+      ...createEmptyQuickIngestSession(),
+      lifecycle: "processing",
+      currentStep: 4,
+      queueItems: [],
+      processingState: {
+        status: "running",
+        perItemProgress: [],
+        elapsed: 1,
+        estimatedRemaining: 1,
+      },
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "qi-direct-interrupted-retire-hook",
+        runId: "run-direct-interrupted-retire-hook",
+        generation: "generation-direct-interrupted-retire-hook-g2",
+        itemIds: [],
+        startedAt: Date.now(),
+      } as any,
+    })
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+
+    await waitFor(() =>
+      expect(useQuickIngestSessionStore.getState().session).toMatchObject({
+        lifecycle: "interrupted",
+        errorMessage: "Authorization is required to observe the run.",
+      })
+    )
+    expect(mocks.retireDirectQuickIngestSessionAuthority).not.toHaveBeenCalled()
+  })
+
+  it.each(["resolve", "reject"] as const)(
+    "scopes a stale row cancel %s to its original generation after authority advances",
+    async (settlement) => {
+      let resolveOldCancel!: (response: { ok: boolean; error?: string }) => void
+      let rejectOldCancel!: (reason: unknown) => void
+      const oldCancel = new Promise<{ ok: boolean; error?: string }>(
+        (resolve, reject) => {
+          resolveOldCancel = resolve
+          rejectOldCancel = reject
+        }
+      )
+      mocks.cancelQuickIngestSession
+        .mockReturnValueOnce(oldCancel)
+        .mockResolvedValueOnce({ ok: true })
+      mocks.reattachQuickIngestSession.mockResolvedValue({
+        lifecycle: "processing",
+        jobs: [
+          {
+            jobId: 817,
+            status: "processing",
+            sourceItemId: "occ-row-cancel-generation",
+            lifecycleState: "running",
+            progressPercent: 12,
+            progressMessage: "New generation running",
+            retryable: false,
+          },
+        ],
+        errorMessage: null,
+      })
+      useQuickIngestSessionStore.getState().upsertSession({
+        ...createEmptyQuickIngestSession(),
+        lifecycle: "processing",
+        currentStep: 4,
+        queueItems: [
+          {
+            id: "occ-row-cancel-generation",
+            kind: "url",
+            url: "https://example.com/row-cancel-generation",
+            detectedType: "web",
+            icon: "Globe",
+            fileSize: 0,
+            validation: { valid: true },
+          } as any,
+        ],
+        processingState: {
+          status: "running",
+          perItemProgress: [
+            {
+              id: "occ-row-cancel-generation",
+              status: "processing",
+              lifecycleState: "running",
+              terminalOutcome: null,
+              progressPercent: 48,
+              currentStage: "Old generation running",
+              estimatedRemaining: 10,
+            },
+          ],
+          elapsed: 3,
+          estimatedRemaining: 10,
+        },
+        tracking: {
+          mode: "extension-runtime",
+          sessionId: "qi-row-cancel-generation",
+          runId: "run-row-cancel-generation",
+          generation: "generation-row-cancel-old",
+          itemIds: ["occ-row-cancel-generation"],
+          startedAt: Date.now(),
+        } as any,
+      })
+
+      render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+      fireEvent.click(screen.getByRole("button", { name: "Cancel first item" }))
+      await waitFor(() =>
+        expect(mocks.cancelQuickIngestSession).toHaveBeenCalledTimes(1)
+      )
+      act(() => {
+        useQuickIngestSessionStore.getState().markProcessingTracking({
+          mode: "extension-runtime",
+          sessionId: "qi-row-cancel-generation",
+          runId: "run-row-cancel-generation",
+          generation: "generation-row-cancel-new",
+          itemIds: ["occ-row-cancel-generation"],
+          startedAt: Date.now(),
+        } as any)
+      })
+      await waitFor(() => {
+        expect(useQuickIngestSessionStore.getState().session?.tracking).toMatchObject({
+          generation: "generation-row-cancel-new",
+        })
+      })
+
+      await act(async () => {
+        if (settlement === "resolve") {
+          resolveOldCancel({
+            ok: false,
+            error: "old generation row cancel failed late",
+          })
+        } else {
+          rejectOldCancel(new Error("old generation row cancel failed late"))
+        }
+        await Promise.resolve()
+      })
+
+      expect(
+        useQuickIngestSessionStore.getState().session?.processingState
+          .perItemProgress[0]
+      ).toMatchObject({
+        id: "occ-row-cancel-generation",
+        currentStage: expect.not.stringMatching(/old generation row cancel/i),
+      })
+      fireEvent.click(screen.getByRole("button", { name: "Cancel first item" }))
+      await waitFor(() =>
+        expect(mocks.cancelQuickIngestSession).toHaveBeenCalledTimes(2)
+      )
+      expect(mocks.cancelQuickIngestSession).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          occurrenceIds: ["occ-row-cancel-generation"],
+          tracking: expect.objectContaining({
+            generation: "generation-row-cancel-new",
+          }),
+        })
+      )
+    }
+  )
+
+  it("does not let a late whole-run cancel rejection overwrite terminal completion", async () => {
+    let rejectCancel!: (reason: unknown) => void
+    mocks.cancelQuickIngestSession.mockReturnValue({
+      then: vi.fn(() => ({
+        catch: (onRejected: (reason: unknown) => void) => {
+          rejectCancel = onRejected
+        },
+      })),
+    } as any)
+    useQuickIngestSessionStore.getState().upsertSession({
+      ...createEmptyQuickIngestSession(),
+      lifecycle: "processing",
+      currentStep: 4,
+      queueItems: [
+        {
+          id: "occ-whole-cancel-race",
+          kind: "url",
+          url: "https://example.com/whole-cancel-race",
+          detectedType: "web",
+          icon: "Globe",
+          fileSize: 0,
+          validation: { valid: true },
+        } as any,
+      ],
+      processingState: {
+        status: "running",
+        perItemProgress: [
+          {
+            id: "occ-whole-cancel-race",
+            status: "processing",
+            lifecycleState: "running",
+            terminalOutcome: null,
+            progressPercent: 48,
+            currentStage: "Running",
+            estimatedRemaining: 10,
+          },
+        ],
+        elapsed: 3,
+        estimatedRemaining: 10,
+      },
+      tracking: {
+        mode: "extension-runtime",
+        sessionId: "qi-whole-cancel-race",
+        runId: "run-whole-cancel-race",
+        itemIds: ["occ-whole-cancel-race"],
+        startedAt: Date.now(),
+      } as any,
+    })
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: "Cancel Processing" }))
+    await waitFor(() =>
+      expect(mocks.cancelQuickIngestSession).toHaveBeenCalled()
+    )
+
+    emitRuntimeMessage({
+      type: "tldw:quick-ingest/completed",
+      payload: {
+        sessionId: "qi-whole-cancel-race",
+        runId: "run-whole-cancel-race",
+        results: [
+          {
+            id: "occ-whole-cancel-race",
+            status: "ok",
+            type: "html",
+            data: { outcome: "processed" },
+          },
+        ],
+      },
+    })
+    await waitFor(() =>
+      expect(useQuickIngestSessionStore.getState().session?.lifecycle).toBe(
+        "completed"
+      )
+    )
+
+    act(() => {
+      rejectCancel(new Error("cancel request arrived after completion"))
+    })
+
+    expect(useQuickIngestSessionStore.getState().session).toMatchObject({
+      lifecycle: "completed",
+      processingState: { status: "complete" },
+      results: [
+        expect.objectContaining({
+          id: "occ-whole-cancel-race",
+          outcome: "processed",
+        }),
+      ],
+    })
+  })
+
+  it.each(["resolve", "reject"] as const)(
+    "scopes a stale whole-run cancel %s to the old generation after terminal retry",
+    async (settlement) => {
+      let resolveOldCancel!: (response: { ok: boolean }) => void
+      let rejectOldCancel!: (reason: unknown) => void
+      const oldCancel = new Promise<{ ok: boolean }>((resolve, reject) => {
+        resolveOldCancel = resolve
+        rejectOldCancel = reject
+      })
+      mocks.cancelQuickIngestSession
+        .mockReturnValueOnce(oldCancel)
+        .mockResolvedValueOnce({ ok: true })
+      mocks.retryQuickIngestSession.mockResolvedValue({
+        ok: true,
+        generation: "generation-whole-cancel-new",
+      })
+      mocks.reattachQuickIngestSession.mockResolvedValue({
+        lifecycle: "processing",
+        jobs: [
+          {
+            jobId: 909,
+            status: "processing",
+            sourceItemId: "occ-whole-cancel-generation",
+            lifecycleState: "running",
+            progressPercent: 12,
+            retryable: false,
+          },
+        ],
+        errorMessage: null,
+      })
+      useQuickIngestSessionStore.getState().upsertSession({
+        ...createEmptyQuickIngestSession(),
+        lifecycle: "processing",
+        currentStep: 4,
+        queueItems: [
+          {
+            id: "occ-whole-cancel-generation",
+            kind: "url",
+            url: "https://example.com/whole-cancel-generation",
+            detectedType: "web",
+            icon: "Globe",
+            fileSize: 0,
+            validation: { valid: true },
+          } as any,
+        ],
+        processingState: {
+          status: "running",
+          perItemProgress: [
+            {
+              id: "occ-whole-cancel-generation",
+              status: "processing",
+              lifecycleState: "running",
+              terminalOutcome: null,
+              progressPercent: 48,
+              currentStage: "Running",
+              estimatedRemaining: 10,
+            },
+          ],
+          elapsed: 3,
+          estimatedRemaining: 10,
+        },
+        tracking: {
+          mode: "webui-direct",
+          sessionId: "qi-whole-cancel-generation",
+          runId: "run-whole-cancel-generation",
+          generation: "generation-whole-cancel-old",
+          itemIds: ["occ-whole-cancel-generation"],
+          startedAt: Date.now(),
+        } as any,
+      })
+
+      render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+      fireEvent.click(screen.getByRole("button", { name: "Cancel Processing" }))
+      await waitFor(() =>
+        expect(mocks.cancelQuickIngestSession).toHaveBeenCalledTimes(1)
+      )
+
+      emitRuntimeMessage({
+        type: "tldw:quick-ingest/failed",
+        payload: {
+          sessionId: "qi-whole-cancel-generation",
+          runId: "run-whole-cancel-generation",
+          generation: "generation-whole-cancel-old",
+          error: "Temporary worker failure",
+          results: [
+            {
+              id: "occ-whole-cancel-generation",
+              status: "error",
+              type: "html",
+              retryable: true,
+              error: "Temporary worker failure",
+              data: { outcome: "processing_failed" },
+            },
+          ],
+        },
+      })
+      expect(await screen.findByTestId("wizard-results")).toBeInTheDocument()
+
+      await userEvent.click(
+        screen.getByRole("button", { name: "Retry first result" })
+      )
+      await waitFor(() => {
+        expect(
+          useQuickIngestSessionStore.getState().session?.processingState.status
+        ).toBe("running")
+      })
+
+      await act(async () => {
+        if (settlement === "resolve") {
+          resolveOldCancel({ ok: true })
+        } else {
+          rejectOldCancel(new Error("old generation cancel failed late"))
+        }
+        await Promise.resolve()
+      })
+
+      await waitFor(() => {
+        expect(useQuickIngestSessionStore.getState().session).toMatchObject({
+          lifecycle: "processing",
+          currentStep: 4,
+          tracking: {
+            sessionId: "qi-whole-cancel-generation",
+            runId: "run-whole-cancel-generation",
+            generation: "generation-whole-cancel-new",
+          },
+          processingState: {
+            status: "running",
+            perItemProgress: [
+              expect.objectContaining({
+                id: "occ-whole-cancel-generation",
+                currentStage: expect.not.stringMatching(/old generation/i),
+              }),
+            ],
+          },
+        })
+      })
+
+      fireEvent.click(screen.getByRole("button", { name: "Cancel Processing" }))
+      await waitFor(() =>
+        expect(mocks.cancelQuickIngestSession).toHaveBeenCalledTimes(2)
+      )
+      expect(mocks.cancelQuickIngestSession).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          sessionId: "qi-whole-cancel-generation",
+          tracking: expect.objectContaining({
+            generation: "generation-whole-cancel-new",
+          }),
+        })
+      )
+    }
+  )
+
+  it("prefers queue playlist identity over a direct reattach result title", async () => {
+    mocks.reattachQuickIngestSession.mockResolvedValue({
+      lifecycle: "completed",
+      jobs: [
+        {
+          jobId: 404,
+          status: "completed",
+          sourceItemId: "occ-direct-queue-title",
+          result: {
+            media_id: "media-direct-title",
+            title: "Raw server title",
+          },
+        },
+      ],
+      errorMessage: null,
+    })
+    useQuickIngestSessionStore.getState().upsertSession({
+      ...createEmptyQuickIngestSession(),
+      lifecycle: "processing",
+      currentStep: 4,
+      queueItems: [
+        {
+          id: "occ-direct-queue-title",
+          kind: "url",
+          url: "https://example.com/direct-title",
+          detectedType: "video",
+          icon: "Film",
+          fileSize: 0,
+          validation: { valid: true },
+          playlist: { ordinal: 4, title: "Queue-owned title" },
+        } as any,
+      ],
+      processingState: {
+        status: "running",
+        perItemProgress: [],
+        elapsed: 0,
+        estimatedRemaining: 0,
+      },
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "qi-direct-queue-title",
+        runId: "run-direct-queue-title",
+        itemIds: ["occ-direct-queue-title"],
+        startedAt: Date.now(),
+      } as any,
+    })
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+
+    await waitFor(() => {
+      expect(useQuickIngestSessionStore.getState().session?.results).toEqual([
+        expect.objectContaining({
+          id: "occ-direct-queue-title",
+          title: "4. Queue-owned title",
+        }),
+      ])
+    })
+  })
+
+  it("prefers queue playlist identity over extension data.title", async () => {
+    useQuickIngestSessionStore.getState().upsertSession({
+      ...createEmptyQuickIngestSession(),
+      lifecycle: "processing",
+      currentStep: 4,
+      queueItems: [
+        {
+          id: "occ-extension-queue-title",
+          kind: "url",
+          url: "https://example.com/extension-title",
+          detectedType: "video",
+          icon: "Film",
+          fileSize: 0,
+          validation: { valid: true },
+          playlist: { ordinal: 8, title: "Extension queue title" },
+        } as any,
+      ],
+      processingState: {
+        status: "running",
+        perItemProgress: [],
+        elapsed: 0,
+        estimatedRemaining: 0,
+      },
+      tracking: {
+        mode: "extension-runtime",
+        sessionId: "qi-extension-queue-title",
+        runId: "run-extension-queue-title",
+        itemIds: ["occ-extension-queue-title"],
+        startedAt: Date.now(),
+      } as any,
+    })
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    emitRuntimeMessage({
+      type: "tldw:quick-ingest/completed",
+      payload: {
+        sessionId: "qi-extension-queue-title",
+        runId: "run-extension-queue-title",
+        results: [
+          {
+            id: "occ-extension-queue-title",
+            status: "ok",
+            type: "video",
+            data: {
+              outcome: "processed",
+              title: "Raw extension data title",
+            },
+          },
+        ],
+      },
+    })
+
+    await waitFor(() => {
+      expect(useQuickIngestSessionStore.getState().session?.results).toEqual([
+        expect.objectContaining({
+          id: "occ-extension-queue-title",
+          title: "8. Extension queue title",
+        }),
+      ])
+    })
+  })
+
+  it.each([
+    ["webui-direct", "qi-direct-check-again", "run-direct-check-again"],
+    ["extension-runtime", "qi-extension-check-again", "run-extension-check-again"],
+  ] as const)(
+    "Check again bypasses unchanged recovery guards for %s",
+    async (mode, sessionId, runId) => {
+      mocks.reattachQuickIngestSession.mockResolvedValue({
+        lifecycle: "processing",
+        jobs: [
+          {
+            jobId: 515,
+            status: "status_unavailable",
+            sourceItemId: "occ-check-again",
+            lifecycleState: "status_unavailable",
+            progressPercent: 31,
+            progressMessage: "Status temporarily unavailable",
+            retryable: true,
+          },
+        ],
+        errorMessage: "Status temporarily unavailable",
+      })
+      useQuickIngestSessionStore.getState().upsertSession({
+        ...createEmptyQuickIngestSession(),
+        lifecycle: "processing",
+        currentStep: 4,
+        queueItems: [
+          {
+            id: "occ-check-again",
+            kind: "url",
+            url: "https://example.com/check-again",
+            detectedType: "video",
+            icon: "Film",
+            fileSize: 0,
+            validation: { valid: true },
+          } as any,
+        ],
+        processingState: {
+          status: "running",
+          perItemProgress: [
+            {
+              id: "occ-check-again",
+              status: "processing",
+              lifecycleState: "status_unavailable",
+              terminalOutcome: null,
+              progressPercent: 31,
+              currentStage: "Status temporarily unavailable",
+              estimatedRemaining: 0,
+              retryable: true,
+            },
+          ],
+          elapsed: 0,
+          estimatedRemaining: 0,
+        },
+        tracking: {
+          mode,
+          sessionId,
+          runId,
+          itemIds: ["occ-check-again"],
+          ...(mode === "webui-direct" ? { jobIds: [515] } : {}),
+          startedAt: Date.now(),
+        } as any,
+      })
+
+      render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+      if (mode === "webui-direct") {
+        await waitFor(() =>
+          expect(mocks.reattachQuickIngestSession).toHaveBeenCalledTimes(1)
+        )
+      } else {
+        await waitFor(() =>
+          expect(mocks.queryQuickIngestSession).toHaveBeenCalledTimes(1)
+        )
+      }
+
+      await userEvent.click(
+        screen.getByRole("button", { name: "Check first item" })
+      )
+
+      if (mode === "webui-direct") {
+        await waitFor(() =>
+          expect(mocks.reattachQuickIngestSession).toHaveBeenCalledTimes(2)
+        )
+      } else {
+        await waitFor(() =>
+          expect(mocks.queryQuickIngestSession).toHaveBeenCalledTimes(2)
+        )
+      }
+    }
+  )
+
+  it("applies the direct Check again response without cancelling it through a second refresh nonce", async () => {
+    let resolveRefresh!: (snapshot: any) => void
+    const refreshedSnapshot = new Promise<any>((resolve) => {
+      resolveRefresh = resolve
+    })
+    mocks.reattachQuickIngestSession
+      .mockResolvedValueOnce({
+        lifecycle: "processing",
+        jobs: [
+          {
+            jobId: 516,
+            status: "status_unavailable",
+            sourceItemId: "occ-direct-check-response",
+            lifecycleState: "status_unavailable",
+            progressPercent: 31,
+            progressMessage: "Status temporarily unavailable",
+            retryable: true,
+          },
+        ],
+        errorMessage: "Status temporarily unavailable",
+      })
+      .mockReturnValueOnce(refreshedSnapshot)
+      .mockReturnValue(new Promise(() => {}))
+    useQuickIngestSessionStore.getState().upsertSession({
+      ...createEmptyQuickIngestSession(),
+      lifecycle: "processing",
+      currentStep: 4,
+      queueItems: [
+        {
+          id: "occ-direct-check-response",
+          kind: "url",
+          url: "https://example.com/direct-check-response",
+          detectedType: "video",
+          icon: "Film",
+          fileSize: 0,
+          validation: { valid: true },
+        } as any,
+      ],
+      processingState: {
+        status: "running",
+        perItemProgress: [
+          {
+            id: "occ-direct-check-response",
+            status: "processing",
+            lifecycleState: "status_unavailable",
+            terminalOutcome: null,
+            progressPercent: 31,
+            currentStage: "Status temporarily unavailable",
+            estimatedRemaining: 0,
+            retryable: true,
+          },
+        ],
+        elapsed: 0,
+        estimatedRemaining: 0,
+      },
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "qi-direct-check-response",
+        runId: "run-direct-check-response",
+        jobIds: [516],
+        itemIds: ["occ-direct-check-response"],
+        startedAt: Date.now(),
+      } as any,
+    })
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    await waitFor(() =>
+      expect(mocks.reattachQuickIngestSession).toHaveBeenCalledTimes(1)
+    )
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Check first item" })
+    )
+    await waitFor(() =>
+      expect(mocks.reattachQuickIngestSession).toHaveBeenCalledTimes(2)
+    )
+
+    await act(async () => {
+      resolveRefresh({
+        lifecycle: "completed",
+        jobs: [
+          {
+            jobId: 516,
+            status: "completed",
+            sourceItemId: "occ-direct-check-response",
+            lifecycleState: "completed",
+            terminalOutcome: "processed",
+            progressPercent: 100,
+            retryable: false,
+            result: { media_id: "media-direct-check-response" },
+          },
+        ],
+        errorMessage: null,
+      })
+      await refreshedSnapshot
+    })
+
+    await waitFor(() => {
+      expect(useQuickIngestSessionStore.getState().session).toMatchObject({
+        lifecycle: "completed",
+        results: [
+          expect.objectContaining({
+            id: "occ-direct-check-response",
+            mediaId: "media-direct-check-response",
+          }),
+        ],
+      })
+    })
+    expect(mocks.reattachQuickIngestSession).toHaveBeenCalledTimes(2)
   })
 })

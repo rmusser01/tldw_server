@@ -310,6 +310,7 @@ const sanitizeTracking = (
       submissionOccurrenceIds.length > 0 ? submissionOccurrenceIds : undefined,
     sessionId: tracking.sessionId?.trim() || undefined,
     runId: sanitizeRunId(tracking.runId),
+    generation: sanitizeRunId(tracking.generation),
     batchId:
       tracking.batchId?.trim() ||
       (batchIds.length > 0 ? batchIds[batchIds.length - 1] : undefined),
@@ -364,6 +365,7 @@ const mergeTracking = (
     ],
     sessionId: next.sessionId || base.sessionId,
     runId: next.runId || base.runId,
+    generation: next.generation || base.generation,
     batchId: next.batchId || base.batchId,
     batchIds: [...(base.batchIds || []), ...(next.batchIds || [])],
     collectionId: next.collectionId || base.collectionId,
