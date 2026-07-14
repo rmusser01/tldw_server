@@ -1,10 +1,10 @@
 ---
 id: TASK-12112
 title: Consolidate provider credential runtime for Chat and Knowledge QA
-status: Done
+status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-14 01:11'
+updated_date: '2026-07-14 01:25'
 labels: []
 dependencies: []
 documentation:
@@ -31,7 +31,7 @@ Design and implement a shared execution-scoped provider credential runtime used 
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Completed; implementation plan removed after finalization per repository instructions. Design: Docs/superpowers/specs/2026-07-12-shared-provider-credential-runtime-design.md
+Docs/superpowers/plans/2026-07-14-provider-credential-runtime-dev-integration-plan.md
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -74,6 +74,8 @@ Completed; implementation plan removed after finalization per repository instruc
 2026-07-13: Task 11 complete. Commit 5c7d8a11ce adds a shared versioned terminal RAG stream contract, explicit clean completion, sanitized provider errors, exact EOF-before-replay validation, and fail-closed frontend/background transport behavior. Unsafe stream POSTs never direct-fetch replay after background handoff; standard RAG no longer retries arbitrary HTTP 500 responses; malformed/unknown terminal events fail closed; optional provider status_code compatibility is retained. Final root verification: backend 79 passed; frontend 80 passed; Ruff and py_compile clean; Bandit 0 findings/0 errors across 3,014 production LOC; diff checks clean. Independent specification and quality/security re-reviews approved with no open findings.
 
 2026-07-13: Tasks 12 and 13 complete. Commits ffbc73dfc1, 1399ffef70, and 7905df629b add the cross-surface no-fallback/secret-leak gate, close authenticated RAG ablate/simple/advanced runtime gaps, reject credential handles before checkpoint persistence, and protect credential-derived embedding endpoints across egress, transport, logs, metrics, manual tracing, third-party logging, and OpenTelemetry auto-instrumentation. Public redirect observability remains accurate. Final committed-tree verification: backend union 240 passed, 1 documented TestClient streaming skip; frontend 35 passed; Chromium credential workflow 1 passed; full HTTP client 95 passed. All changed Python files py_compile clean; git diff check clean. Broad Bandit artifact /tmp/bandit_TASK-12112_final.json matches base exactly: 34 existing Low findings, 0 new, 0 Medium/High, 0 scan errors. Ruff E9/F821 final sweep found only two unchanged ChatBadRequestError F821 baseline findings present at 4f88741711; Task 13 touched scope is clean. Independent whole-feature review ended with no findings and explicit SPEC APPROVED / QUALITY APPROVED.
+
+2026-07-14: Integration cleanup approved. Preserve the completed source branch, replay only provider-credential-runtime commits onto current origin/dev, renumber this task because TASK-12112 collides on the target branch, resolve target overlap, and rerun the full verification gate.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
