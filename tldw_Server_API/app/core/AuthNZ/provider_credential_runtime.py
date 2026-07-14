@@ -11,12 +11,13 @@ from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
     ByokResolutionError,
     ByokResolutionStatus,
     ResolvedByokCredentials,
+    ServerFallbackCredentials,
     resolve_byok_credentials,
 )
 from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 
 _Resolver = Callable[..., Awaitable[ResolvedByokCredentials]]
-_FallbackResolver = Callable[[str], str | None]
+_FallbackResolver = Callable[[str], str | ServerFallbackCredentials | None]
 USAGE_TASK_DRAIN_TIMEOUT_SECONDS = 0.25
 
 

@@ -182,6 +182,41 @@ def test_explicit_absent_config_is_plain_provider_scoped_mapping(provider, secti
     assert "credentials_resolved" not in request
 
 
+def test_bedrock_runtime_default_chain_satisfies_shared_auth_contract():
+    provider, request, _internal = chat_service._build_adapter_request_from_chat_args(
+        _args(
+            api_provider="bedrock",
+            model="meta.llama3-8b-instruct",
+            api_key=None,
+            app_config={"bedrock_api": {"_runtime_auth_source": "aws_default_chain"}},
+            credentials_resolved=True,
+        )
+    )
+
+    assert provider == "bedrock"
+    assert request["api_key"] is None
+    assert request["credentials_resolved"] is True
+
+
+def test_bedrock_runtime_absent_auth_fails_before_server_key_resolution(monkeypatch):
+    monkeypatch.setattr(
+        adapter_utils,
+        "resolve_provider_api_key_from_config",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not resolve")),
+    )
+
+    with pytest.raises(ChatConfigurationError, match="API key is required"):
+        chat_service._build_adapter_request_from_chat_args(
+            _args(
+                api_provider="bedrock",
+                model="meta.llama3-8b-instruct",
+                api_key=None,
+                app_config={"bedrock_api": {}},
+                credentials_resolved=True,
+            )
+        )
+
+
 def test_explicit_missing_model_does_not_use_default_model_environment(monkeypatch):
     monkeypatch.setenv("DEFAULT_MODEL_MOONSHOT", "server-env-model")
 

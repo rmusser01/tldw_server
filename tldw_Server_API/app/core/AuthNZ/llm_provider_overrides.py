@@ -2,22 +2,27 @@ from __future__ import annotations
 
 import json
 import threading
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+    ByokResolutionError,
+    ServerFallbackCredentials,
+)
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
 from tldw_Server_API.app.core.AuthNZ.repos.llm_provider_overrides_repo import (
     AuthnzLLMProviderOverridesRepo,
 )
-from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
     decrypt_byok_payload,
     loads_envelope,
     normalize_provider_name,
 )
+from tldw_Server_API.app.core.testing import is_truthy
 
 
 @dataclass(frozen=True)
@@ -28,6 +33,7 @@ class LLMProviderOverride:
     config: dict[str, Any] = field(default_factory=dict)
     api_key: str | None = None
     credential_fields: dict[str, Any] = field(default_factory=dict)
+    credentials_invalid: bool = False
     api_key_hint: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -89,14 +95,26 @@ def _parse_override_row(row: dict[str, Any]) -> LLMProviderOverride:
     api_key: str | None = None
     credential_fields: dict[str, Any] = {}
     secret_blob = row.get("secret_blob")
+    credentials_invalid = row.get("api_key_hint") is not None and not secret_blob
     if secret_blob:
         try:
             payload = decrypt_byok_payload(loads_envelope(secret_blob))
-            api_key = payload.get("api_key")
+            if not isinstance(payload, dict):
+                raise ValueError("Provider override credential payload must be an object")
+            api_key_raw = payload.get("api_key")
+            if isinstance(api_key_raw, str) and api_key_raw.strip():
+                api_key = api_key_raw
+            else:
+                credentials_invalid = True
             credential_fields_raw = payload.get("credential_fields")
-            if isinstance(credential_fields_raw, dict):
+            if credential_fields_raw is None:
+                credential_fields = {}
+            elif isinstance(credential_fields_raw, dict):
                 credential_fields = credential_fields_raw
+            else:
+                credentials_invalid = True
         except Exception:
+            credentials_invalid = True
             logger.warning("Provider override decrypt failed")
 
     return LLMProviderOverride(
@@ -106,6 +124,7 @@ def _parse_override_row(row: dict[str, Any]) -> LLMProviderOverride:
         config=config,
         api_key=api_key,
         credential_fields=credential_fields,
+        credentials_invalid=credentials_invalid,
         api_key_hint=row.get("api_key_hint"),
         created_at=row.get("created_at"),
         updated_at=row.get("updated_at"),
@@ -273,6 +292,32 @@ def get_override_credentials(provider: str) -> dict[str, Any] | None:
         "api_key": override.api_key,
         "credential_fields": override.credential_fields,
     }
+
+
+def get_override_server_fallback(provider: str) -> ServerFallbackCredentials | None:
+    """Return one atomic server fallback for a configured provider override."""
+    try:
+        override = get_llm_provider_override(provider)
+        if not override:
+            return None
+        if override.credentials_invalid:
+            raise ByokResolutionError("invalid_provider_credentials", provider)
+        config = override.config if isinstance(override.config, dict) else {}
+        auth_source = config.get("auth_source") if "auth_source" in config else None
+        if not isinstance(override.credential_fields, Mapping):
+            raise ByokResolutionError("invalid_provider_credentials", provider)
+        credential_fields = dict(override.credential_fields)
+    except ByokResolutionError:
+        raise
+    except Exception:
+        raise ByokResolutionError("invalid_provider_credentials", provider) from None
+    if override.api_key is None and not credential_fields and auth_source is None:
+        return None
+    return ServerFallbackCredentials(
+        api_key=override.api_key,
+        credential_fields=credential_fields,
+        auth_source=auth_source,
+    )
 
 
 async def refresh_llm_provider_overrides(pool: DatabasePool | None = None) -> dict[str, LLMProviderOverride]:

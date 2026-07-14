@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 import pytest
@@ -292,6 +294,69 @@ def test_explicit_local_api_uses_per_call_key_and_url(monkeypatch, tmp_path):
     assert seen[0]["headers"]["Authorization"] == "Bearer local-call-key"
     assert seen[0]["sensitive_observability"] is True
     assert config["embedding_config"]["models"][model_id]["api_key"] == "model-spec-key"
+
+
+@pytest.mark.unit
+@pytest.mark.concurrent
+def test_explicit_concurrent_local_api_calls_keep_same_endpoint_keys_isolated(monkeypatch, tmp_path):
+    monkeypatch.setattr(ec, "_EMBEDDINGS_STORAGE_ALLOWLIST_ROOT", tmp_path.resolve())
+    model_id, config = _config(
+        tmp_path,
+        "local_api",
+        api_url="http://configured.example/embeddings",
+    )
+    endpoint = "http://shared.example/embeddings"
+    calls: list[tuple[str, str, str]] = []
+    lock = threading.Lock()
+    both_arrived = threading.Event()
+    release = threading.Event()
+
+    class Response:
+        status_code = 200
+
+        def __init__(self, marker: float):
+            self.marker = marker
+
+        def json(self):
+            return {"embeddings": [[self.marker]]}
+
+        def close(self):
+            return None
+
+    def fake_fetch(**kwargs):
+        authorization = kwargs["headers"].get("Authorization", "")
+        text = kwargs["json"]["texts"][0]
+        with lock:
+            calls.append((authorization, kwargs["url"], text))
+            if len(calls) == 2:
+                both_arrived.set()
+        if not release.wait(5):
+            raise TimeoutError("concurrent local embedding calls did not release")
+        return Response(1.0 if authorization == "Bearer key-alpha" else 2.0)
+
+    monkeypatch.setattr("tldw_Server_API.app.core.http_client.fetch", fake_fetch)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(
+                ec.create_embedding,
+                label,
+                config,
+                model_id,
+                api_key_override=f"key-{label}",
+                base_url_override=endpoint,
+                credentials_resolved=True,
+            )
+            for label in ("alpha", "beta")
+        ]
+        assert both_arrived.wait(5)
+        release.set()
+        results = [future.result(timeout=5) for future in futures]
+
+    assert results == [[1.0], [2.0]]
+    assert set(calls) == {
+        ("Bearer key-alpha", endpoint, "alpha"),
+        ("Bearer key-beta", endpoint, "beta"),
+    }
 
 
 @pytest.mark.unit

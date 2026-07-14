@@ -43,6 +43,7 @@ from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
     get_llm_provider_overrides_snapshot,
     get_override_default_model,
     get_override_model_priority,
+    get_override_server_fallback,
     validate_provider_override,
 )
 
@@ -230,6 +231,7 @@ from tldw_Server_API.app.api.v1.schemas.chat_dictionary_schemas import (
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
     ByokResolutionError,
+    ServerFallbackCredentials,
     record_byok_missing_credentials,
 )
 from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
@@ -2806,7 +2808,10 @@ async def create_chat_completion(
         logger.warning(f"Input validation error: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid request.") from e
 
-    def _fallback_resolver(name: str) -> str | None:
+    def _fallback_resolver(name: str) -> str | ServerFallbackCredentials | None:
+        override_fallback = get_override_server_fallback(name)
+        if override_fallback is not None:
+            return override_fallback
         key_val, _ = resolve_provider_api_key(
             name,
             prefer_module_keys_in_tests=True,
@@ -3676,15 +3681,35 @@ async def create_chat_completion(
 
                 # Centralized provider capabilities
                 try:
+                    from tldw_Server_API.app.core.LLM_Calls.adapter_utils import provider_auth_is_resolved
                     from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
                 except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
 
                     def provider_requires_api_key(_provider: str) -> bool:  # type: ignore[misc]
                         return True
 
+                    def provider_auth_is_resolved(  # type: ignore[misc]
+                        _provider: str,
+                        *,
+                        api_key,
+                        app_config,
+                        credentials_resolved,
+                    ) -> bool:
+                        del _provider, app_config, credentials_resolved
+                        return isinstance(api_key, str) and bool(api_key.strip())
+
                 # Allow explicit mock forcing in tests even if provider key is absent
                 _force_mock = _shared_is_truthy(os.getenv("CHAT_FORCE_MOCK", ""))
-                if provider_requires_api_key(target_api_provider) and not provider_api_key and not _force_mock:
+                if (
+                    provider_requires_api_key(target_api_provider)
+                    and not provider_auth_is_resolved(
+                        target_api_provider,
+                        api_key=provider_api_key,
+                        app_config=app_config_override,
+                        credentials_resolved=True,
+                    )
+                    and not _force_mock
+                ):
                     record_byok_missing_credentials(target_api_provider, operation="chat")
 
                     # Distinguish "no LLM providers configured at all" (fresh install) from
@@ -4054,7 +4079,12 @@ async def create_chat_completion(
                     credential_handles[normalized_provider] = refreshed_handle
                     active_credential.update(provider=normalized_provider, handle=refreshed_handle)
                     provider_api_key_new = refreshed_handle.api_key
-                    if provider_requires_api_key(target_provider) and not provider_api_key_new:
+                    if provider_requires_api_key(target_provider) and not provider_auth_is_resolved(
+                        target_provider,
+                        api_key=provider_api_key_new,
+                        app_config=refreshed_handle.app_config,
+                        credentials_resolved=True,
+                    ):
                         logger.error(
                             f"API key for provider '{target_provider}' is missing or not configured (fallback)."
                         )

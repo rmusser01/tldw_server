@@ -7,7 +7,7 @@ import json
 import os
 import sqlite3
 import threading
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
@@ -151,6 +151,16 @@ _PROVIDER_CONFIG_KEYS = frozenset(
         "org_id",
         "project",
         "project_id",
+    }
+)
+_HUGGINGFACE_RUNTIME_CONFIG_KEYS = frozenset(
+    {
+        "use_router_url_format",
+        "huggingface_use_router_url_format",
+        "router_base_url",
+        "huggingface_router_base_url",
+        "api_chat_path",
+        "huggingface_api_chat_path",
     }
 )
 
@@ -315,6 +325,15 @@ class ByokResolutionError(Exception):
         super().__init__(f"{self.code}: {self.provider}")
 
 
+@dataclass(frozen=True)
+class ServerFallbackCredentials:
+    """Atomic server-side fallback credentials for one provider."""
+
+    api_key: str | None
+    credential_fields: Mapping[str, Any]
+    auth_source: str | None = None
+
+
 def _credential_fields_from_payload(
     payload: dict[str, Any],
     provider: str,
@@ -448,32 +467,70 @@ def _fallback_result(
     provider: str,
     *,
     allowlisted: bool,
-    fallback_resolver: Callable[[str], str | None] | None,
+    fallback_resolver: Callable[[str], str | ServerFallbackCredentials | None] | None,
 ) -> ResolvedByokCredentials:
-    api_key = None
+    fallback_value: str | ServerFallbackCredentials | None = None
     if fallback_resolver is not None:
         try:
-            api_key = fallback_resolver(provider)
+            fallback_value = fallback_resolver(provider)
         except _BYOK_RUNTIME_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug(f"BYOK fallback resolver failed for {provider}: {exc}")
-            api_key = None
-    if api_key is None:
+            fallback_value = None
+
+    credential_fields: dict[str, Any] = {}
+    auth_source: str | None = None
+    if isinstance(fallback_value, ServerFallbackCredentials):
+        try:
+            api_key = _coerce_nonempty_string(fallback_value.api_key)
+            auth_source = _coerce_nonempty_string(fallback_value.auth_source)
+            if fallback_value.api_key is not None and api_key is None:
+                raise ValueError("api_key must be a non-empty string")
+            if fallback_value.auth_source is not None and auth_source is None:
+                raise ValueError("auth_source must be a non-empty string")
+            credential_fields = _sanitize_credential_fields(
+                provider,
+                dict(fallback_value.credential_fields),
+                allow_base_url=True,
+            )
+        except _BYOK_RUNTIME_NONCRITICAL_EXCEPTIONS:
+            raise ByokResolutionError("invalid_provider_credentials", provider) from None
+
+        valid_api_key_auth = bool(api_key) and auth_source in {None, "api_key"}
+        valid_default_chain_auth = (
+            provider == "bedrock"
+            and api_key is None
+            and auth_source == "aws_default_chain"
+        )
+        if not (valid_api_key_auth or valid_default_chain_auth):
+            raise ByokResolutionError("invalid_provider_credentials", provider)
+    elif fallback_value is None:
         api_key = resolve_server_default_key(provider)
-    source = "server_default" if api_key else "none"
+    elif isinstance(fallback_value, str):
+        api_key = _coerce_nonempty_string(fallback_value)
+    else:
+        raise ByokResolutionError("invalid_provider_credentials", provider)
+
+    is_resolved = bool(api_key) or auth_source == "aws_default_chain"
+    source = "server_default" if is_resolved else "none"
     return ResolvedByokCredentials(
         provider=provider,
         api_key=api_key,
-        app_config=_build_app_config(provider, {}),
-        credential_fields={},
+        app_config=_build_app_config(provider, credential_fields, auth_source=auth_source),
+        credential_fields=credential_fields,
         source=source,
         allowlisted=allowlisted,
-        status=(ByokResolutionStatus.RESOLVED if api_key else ByokResolutionStatus.ABSENT),
-        auth_source=None,
+        status=(ByokResolutionStatus.RESOLVED if is_resolved else ByokResolutionStatus.ABSENT),
+        auth_source=auth_source,
         _touch_cb=None,
     )
 
 
-def _build_app_config(provider: str, credential_fields: dict[str, Any]) -> dict[str, Any] | None:
+def _build_app_config(
+    provider: str,
+    credential_fields: dict[str, Any],
+    *,
+    auth_source: str | None = None,
+) -> dict[str, Any] | None:
     try:
         base_cfg = loaded_config_data
     except _BYOK_RUNTIME_NONCRITICAL_EXCEPTIONS:
@@ -490,8 +547,13 @@ def _build_app_config(provider: str, credential_fields: dict[str, Any]) -> dict[
     if base_cfg:
         try:
             if section and isinstance(base_cfg.get(section), dict):
+                allowed_provider_keys = _PROVIDER_CONFIG_KEYS
+                if provider_norm == "huggingface":
+                    allowed_provider_keys = allowed_provider_keys | _HUGGINGFACE_RUNTIME_CONFIG_KEYS
                 cleaned_provider = {
-                    k: copy.deepcopy(v) for k, v in base_cfg.get(section, {}).items() if k in _PROVIDER_CONFIG_KEYS
+                    k: copy.deepcopy(v)
+                    for k, v in base_cfg.get(section, {}).items()
+                    if k in allowed_provider_keys
                 }
                 if cleaned_provider:
                     scrubbed_cfg[section] = cleaned_provider
@@ -507,6 +569,11 @@ def _build_app_config(provider: str, credential_fields: dict[str, Any]) -> dict[
         except _BYOK_RUNTIME_NONCRITICAL_EXCEPTIONS:
             scrubbed_cfg = {}
     merged = merge_app_config_overrides(scrubbed_cfg or None, provider, credential_fields)
+    if auth_source is not None and section:
+        selected = merged.get(section)
+        selected_config = dict(selected) if isinstance(selected, dict) else {}
+        selected_config["_runtime_auth_source"] = auth_source
+        merged[section] = selected_config
     return merged or None
 
 
@@ -1209,7 +1276,7 @@ async def resolve_byok_credentials(
     request: Any | None = None,
     team_ids: list[int] | None = None,
     org_ids: list[int] | None = None,
-    fallback_resolver: Callable[[str], str | None] | None = None,
+    fallback_resolver: Callable[[str], str | ServerFallbackCredentials | None] | None = None,
     force_oauth_refresh: bool = False,
     trusted_base_url_override: bool | None = None,
 ) -> ResolvedByokCredentials:

@@ -497,7 +497,7 @@ async def test_embed_text_does_not_resolve_local_huggingface(monkeypatch):
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_embed_text_runtime_local_api_uses_exact_endpoint_without_key(monkeypatch):
+async def test_embed_text_runtime_local_api_uses_exact_selected_deployment(monkeypatch):
     from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create
 
     captured: dict[str, Any] = {}
@@ -509,7 +509,7 @@ async def test_embed_text_runtime_local_api_uses_exact_endpoint_without_key(monk
                 "local_api:runtime-model": SimpleNamespace(
                     provider="local_api",
                     api_url="https://runtime-local.example/embeddings",
-                    api_key="configured-key-must-not-be-used",
+                    api_key="configured-runtime-key",
                 ),
             },
         }
@@ -526,8 +526,41 @@ async def test_embed_text_runtime_local_api_uses_exact_endpoint_without_key(monk
     assert runtime.resolved == []
     assert runtime.marked == []
     assert captured["kwargs"] == {
-        "api_key_override": None,
+        "api_key_override": "configured-runtime-key",
         "base_url_override": "https://runtime-local.example/embeddings",
+        "credentials_resolved": True,
+    }
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_embed_text_runtime_local_api_preserves_keyless_gateway(monkeypatch):
+    from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create
+
+    captured: dict[str, Any] = {}
+    config = {
+        "embedding_config": {
+            "default_model_id": "local_api:keyless-model",
+            "models": {
+                "local_api:keyless-model": SimpleNamespace(
+                    provider="local_api",
+                    api_url="https://keyless-local.example/embeddings",
+                ),
+            },
+        }
+    }
+
+    def fake_create(texts, user_app_config, model_id_override=None, **kwargs):
+        captured["kwargs"] = kwargs
+        return [[0.2, 0.3]]
+
+    monkeypatch.setattr(Embeddings_Create, "get_embedding_config", lambda: config)
+    monkeypatch.setattr(Embeddings_Create, "create_embeddings_batch", fake_create)
+
+    assert await hyde.embed_text("keyless", credential_runtime=_CredentialRuntime("openai")) == [0.2, 0.3]
+    assert captured["kwargs"] == {
+        "api_key_override": None,
+        "base_url_override": "https://keyless-local.example/embeddings",
         "credentials_resolved": True,
     }
 
@@ -1396,7 +1429,7 @@ async def test_batch_clustering_uses_runtime_credentials_for_hosted_embeddings(m
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_batch_clustering_runtime_local_api_uses_endpoint_without_key(monkeypatch):
+async def test_batch_clustering_runtime_local_api_uses_selected_deployment(monkeypatch):
     from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create
     from tldw_Server_API.app.core.RAG.rag_service import unified_pipeline
     from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import UnifiedSearchResult
@@ -1410,7 +1443,7 @@ async def test_batch_clustering_runtime_local_api_uses_endpoint_without_key(monk
                 "local_api:batch-model": SimpleNamespace(
                     provider="local_api",
                     api_url="https://batch-local.example/embeddings",
-                    api_key="configured-key-must-not-be-used",
+                    api_key="configured-batch-key",
                 ),
             },
         }
@@ -1437,7 +1470,7 @@ async def test_batch_clustering_runtime_local_api_uses_endpoint_without_key(monk
     assert runtime.resolved == []
     assert runtime.marked == []
     assert captured["kwargs"] == {
-        "api_key_override": None,
+        "api_key_override": "configured-batch-key",
         "base_url_override": "https://batch-local.example/embeddings",
         "credentials_resolved": True,
     }

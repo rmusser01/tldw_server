@@ -176,6 +176,12 @@ async def apply_multi_vector_passages(
             endpoint = getattr(configured, "api_url", None)
             if isinstance(endpoint, str) and endpoint.strip():
                 call_kwargs["base_url_override"] = endpoint.strip()
+                configured_key = getattr(configured, "api_key", None)
+                call_kwargs["api_key_override"] = (
+                    configured_key.strip()
+                    if isinstance(configured_key, str) and configured_key.strip()
+                    else None
+                )
 
     # Embed query
     try:

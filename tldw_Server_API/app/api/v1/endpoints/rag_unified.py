@@ -56,7 +56,13 @@ from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
     derive_trusted_credential_scope,
     is_trusted_base_url_principal,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+    ByokResolutionError,
+    ServerFallbackCredentials,
+)
+from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+    get_override_server_fallback,
+)
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_READ
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
@@ -158,7 +164,10 @@ def _build_credential_runtime_for_scope(
 ) -> ProviderCredentialRuntime:
     """Create a provider runtime from an already trusted execution scope."""
 
-    def fallback_resolver(provider: str) -> str | None:
+    def fallback_resolver(provider: str) -> str | ServerFallbackCredentials | None:
+        override_fallback = get_override_server_fallback(provider)
+        if override_fallback is not None:
+            return override_fallback
         api_key, _ = resolve_provider_api_key(
             provider,
             prefer_module_keys_in_tests=True,

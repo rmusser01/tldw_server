@@ -305,6 +305,69 @@ async def test_runtime_credentials_bypass_shared_embedding_cache(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.concurrent
+async def test_concurrent_local_api_calls_keep_same_endpoint_keys_isolated(monkeypatch):
+    config = EmbeddingsConfig(
+        providers=[
+            ProviderConfig(
+                name="local_api",
+                api_key="server-local-key",
+                api_url="https://configured-local.example/embeddings",
+                models=["local-model"],
+                fallback_model="local-model",
+            )
+        ],
+        batching=BatchingConfig(enabled=True),
+        security=SecurityConfig(enable_rate_limiting=False),
+        default_provider="local_api",
+        default_model="local-model",
+    )
+    service = AsyncEmbeddingService(config=config)
+    service.cache = TrackingCache()
+    pool = get_pool_manager().get_pool("local_api")
+    endpoint = "https://shared-local.example/embeddings"
+    calls: list[tuple[str, str, str]] = []
+    both_arrived = asyncio.Event()
+    release = asyncio.Event()
+
+    async def fake_request(*_args, **kwargs):
+        authorization = kwargs["headers"].get("Authorization", "")
+        text = kwargs["json_data"]["texts"][0]
+        calls.append((authorization, kwargs["url"], text))
+        if len(calls) == 2:
+            both_arrived.set()
+        await asyncio.wait_for(release.wait(), timeout=5)
+        marker = 1.0 if authorization == "Bearer key-alpha" else 2.0
+        return {"embeddings": [[marker]]}
+
+    monkeypatch.setattr(pool, "request", fake_request)
+    tasks = [
+        asyncio.create_task(
+            service.create_embedding(
+                label,
+                provider="local_api",
+                model="local-model",
+                api_key_override=f"key-{label}",
+                base_url_override=endpoint,
+                credentials_resolved=True,
+            )
+        )
+        for label in ("alpha", "beta")
+    ]
+    await asyncio.wait_for(both_arrived.wait(), timeout=5)
+    release.set()
+    assert await asyncio.gather(*tasks) == [[1.0], [2.0]]
+
+    assert set(calls) == {
+        ("Bearer key-alpha", endpoint, "alpha"),
+        ("Bearer key-beta", endpoint, "beta"),
+    }
+    assert service.cache.get_keys == []
+    assert service.cache.set_keys == []
+    assert service.providers["local_api"].api_key == "server-local-key"
+
+
+@pytest.mark.asyncio
 async def test_legacy_local_api_cache_identity_includes_configured_endpoint(monkeypatch):
     shared_cache = SharedMemoryCache()
     calls = []

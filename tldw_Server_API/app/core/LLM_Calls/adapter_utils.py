@@ -61,6 +61,28 @@ def resolve_provider_section(provider: str) -> str:
     )
 
 
+def provider_auth_is_resolved(
+    provider: str,
+    *,
+    api_key: Any,
+    app_config: dict[str, Any] | None,
+    credentials_resolved: bool,
+) -> bool:
+    """Return whether an execution-scoped provider auth contract is usable."""
+    if isinstance(api_key, str) and api_key.strip():
+        return True
+    provider_norm = normalize_provider(provider)
+    if provider_norm != "bedrock" or credentials_resolved is not True:
+        return False
+    if not isinstance(app_config, dict):
+        return False
+    section = resolve_provider_section(provider_norm)
+    provider_config = app_config.get(section) or {}
+    if not isinstance(provider_config, dict):
+        return False
+    return provider_config.get("_runtime_auth_source") == "aws_default_chain"
+
+
 def ensure_app_config(app_config: dict[str, Any] | None = None) -> dict[str, Any]:
     if app_config is not None:
         return app_config

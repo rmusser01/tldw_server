@@ -717,7 +717,7 @@ async def test_media_scoped_model_override_resolves_its_actual_hosted_provider(m
 
 
 @pytest.mark.asyncio
-async def test_media_scoped_local_api_uses_exact_endpoint_without_configured_key(monkeypatch):
+async def test_media_scoped_local_api_uses_exact_selected_deployment(monkeypatch):
     from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create
 
     runtime = _CredentialRuntime("openai")
@@ -734,7 +734,7 @@ async def test_media_scoped_local_api_uses_exact_endpoint_without_configured_key
                 "local_api:scoped-model": SimpleNamespace(
                     provider="local_api",
                     api_url="https://scoped-local.example/embeddings",
-                    api_key="scoped-key-must-not-be-used",
+                    api_key="scoped-runtime-key",
                 ),
             },
         }
@@ -774,7 +774,7 @@ async def test_media_scoped_local_api_uses_exact_endpoint_without_configured_key
     assert runtime.marked == []
     assert captured["model_id_override"] == "local_api:scoped-model"
     assert captured["kwargs"] == {
-        "api_key_override": None,
+        "api_key_override": "scoped-runtime-key",
         "base_url_override": "https://scoped-local.example/embeddings",
         "credentials_resolved": True,
     }

@@ -706,17 +706,23 @@ async def tool_loop(
             from tldw_Server_API.app.core.config import load_comprehensive_config
 
             loaded_config = load_comprehensive_config() or {}
-            embedding_app_config = _embedding_config_snapshot(
-                loaded_config,
-                scrub_secrets=credential_runtime is not None,
-            )
             embedding_provider = _embedding_provider_from_config(
-                embedding_app_config,
+                loaded_config,
                 getattr(cfg, "agentic_provider_embedding_model_id", None),
             )
             embedding_model_id = _effective_embedding_model_id(
-                embedding_app_config,
+                loaded_config,
                 getattr(cfg, "agentic_provider_embedding_model_id", None),
+            )
+            if credential_runtime is not None and embedding_provider in {"local", "local_api"}:
+                embedding_call_kwargs = _runtime_local_embedding_call_kwargs(
+                    loaded_config,
+                    embedding_provider,
+                    getattr(cfg, "agentic_provider_embedding_model_id", None),
+                )
+            embedding_app_config = _embedding_config_snapshot(
+                loaded_config,
+                scrub_secrets=credential_runtime is not None,
             )
             # Hugging Face in this synchronous service is an in-process provider.
             if credential_runtime is not None:
@@ -725,7 +731,7 @@ async def tool_loop(
                         credential_runtime,
                         embedding_provider,
                     )
-                else:
+                elif embedding_provider not in {"local", "local_api"}:
                     embedding_call_kwargs = _runtime_local_embedding_call_kwargs(
                         embedding_app_config,
                         embedding_provider,

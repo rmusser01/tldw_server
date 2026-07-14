@@ -284,7 +284,7 @@ async def test_tool_loop_local_huggingface_embeddings_do_not_resolve_credentials
     }
 
     def fake_create(texts, app_config, model_id_override=None, **kwargs):
-        captured["kwargs"] = kwargs
+        captured.update(app_config=app_config, kwargs=kwargs)
         return [[1.0, 0.0] for _ in texts]
 
     monkeypatch.setattr(
@@ -315,7 +315,7 @@ async def test_tool_loop_local_huggingface_embeddings_do_not_resolve_credentials
 
 
 @pytest.mark.asyncio
-async def test_tool_loop_runtime_local_api_uses_exact_endpoint_without_key(
+async def test_tool_loop_runtime_local_api_uses_exact_selected_deployment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tldw_Server_API.app.core import config as core_config
@@ -329,13 +329,13 @@ async def test_tool_loop_runtime_local_api_uses_exact_endpoint_without_key(
             "local_api:agentic-model": SimpleNamespace(
                 provider="local_api",
                 api_url="https://agentic-local.example/embeddings",
-                api_key="configured-key-must-not-be-used",
+                api_key="configured-agentic-key",
             ),
         },
     }
 
     def fake_create(texts, app_config, model_id_override=None, **kwargs):
-        captured["kwargs"] = kwargs
+        captured.update(app_config=app_config, kwargs=kwargs)
         return [[1.0, 0.0] for _ in texts]
 
     monkeypatch.setattr(
@@ -363,10 +363,12 @@ async def test_tool_loop_runtime_local_api_uses_exact_endpoint_without_key(
     assert runtime.resolved == []
     assert runtime.marked == []
     assert captured["kwargs"] == {
-        "api_key_override": None,
+        "api_key_override": "configured-agentic-key",
         "base_url_override": "https://agentic-local.example/embeddings",
         "credentials_resolved": True,
     }
+    assert "configured-agentic-key" not in repr(captured["app_config"])
+    assert "configured-agentic-key" not in repr(agentic_execution._INTRA_DOC_VEC_CACHE)
 
 
 @pytest.mark.asyncio

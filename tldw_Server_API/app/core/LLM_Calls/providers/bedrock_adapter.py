@@ -285,6 +285,25 @@ class BedrockAdapter(ChatProvider):
         override = (request or {}).get("base_url")
         if isinstance(override, str) and override.strip():
             return _normalize_bedrock_base_url(override, runtime_endpoint=False)
+        app_config = (request or {}).get("app_config") or {}
+        provider_config = (
+            app_config.get("bedrock_api") or {}
+            if (request or {}).get("credentials_resolved") is True and isinstance(app_config, dict)
+            else {}
+        )
+        if not isinstance(provider_config, dict):
+            provider_config = {}
+        configured_runtime = provider_config.get("runtime_endpoint")
+        if isinstance(configured_runtime, str) and configured_runtime.strip():
+            return _normalize_bedrock_base_url(configured_runtime, runtime_endpoint=True)
+        configured_base = (
+            provider_config.get("api_base_url")
+            or provider_config.get("base_url")
+            or provider_config.get("api_url")
+            or provider_config.get("endpoint")
+        )
+        if isinstance(configured_base, str) and configured_base.strip():
+            return _normalize_bedrock_base_url(configured_base, runtime_endpoint=False)
         runtime = os.getenv("BEDROCK_RUNTIME_ENDPOINT")
         if runtime:
             # Expect a hostname like https://bedrock-runtime.us-west-2.amazonaws.com
@@ -361,10 +380,49 @@ class BedrockAdapter(ChatProvider):
         )
 
     def _build_headers(self, *, request: dict[str, Any], url: str, payload: dict[str, Any]) -> dict[str, str]:
+        from tldw_Server_API.app.core.LLM_Calls.adapter_utils import provider_auth_is_resolved
+
         headers = merge_extra_headers({"Content-Type": "application/json"}, request)
         host = _url_hostname(url)
         is_runtime_host = _is_aws_bedrock_runtime_host(host)
         is_mantle_host = _is_aws_bedrock_mantle_host(host)
+        credentials_resolved = request.get("credentials_resolved") is True
+        if credentials_resolved:
+            api_key = _first_nonempty(request.get("api_key"))
+            if not provider_auth_is_resolved(
+                self.name,
+                api_key=api_key,
+                app_config=request.get("app_config"),
+                credentials_resolved=True,
+            ):
+                raise ChatConfigurationError(
+                    provider=self.name,
+                    message="Bedrock runtime authentication was not resolved for this call.",
+                )
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+                return headers
+            if not (is_runtime_host or is_mantle_host):
+                raise ChatConfigurationError(
+                    provider=self.name,
+                    message="AWS default-chain authentication requires an AWS Bedrock endpoint.",
+                )
+            credentials = self._resolve_sigv4_credentials(request)
+            if credentials is None:
+                raise ChatConfigurationError(
+                    provider=self.name,
+                    message="AWS default-chain credentials are unavailable for Bedrock.",
+                )
+            headers.update(
+                _build_sigv4_headers(
+                    url=url,
+                    payload=payload,
+                    region=self._resolve_region(request, url),
+                    credentials=credentials,
+                )
+            )
+            return headers
+
         key = _first_nonempty(
             request.get("api_key"),
             os.getenv("BEDROCK_API_KEY"),

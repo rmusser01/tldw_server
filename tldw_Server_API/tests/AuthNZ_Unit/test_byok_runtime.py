@@ -31,6 +31,280 @@ def _decrypted_payload_from_row(row: dict) -> dict:
     return decrypt_byok_payload(loads_envelope(row["encrypted_blob"]))
 
 
+def _server_fallback_value(**kwargs):
+    """Construct one production structured server fallback."""
+    from tldw_Server_API.app.core.AuthNZ.byok_runtime import ServerFallbackCredentials
+
+    return ServerFallbackCredentials(**kwargs)
+
+
+@pytest.mark.asyncio
+async def test_structured_server_fallback_keeps_key_fields_and_auth_source_atomic(monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+
+    fields = {
+        "base_url": "https://override-openai.example/v1",
+        "org_id": "override-org",
+        "project_id": "override-project",
+    }
+    monkeypatch.setattr(byok_runtime, "is_byok_enabled", lambda: False)
+    monkeypatch.setattr(byok_runtime, "is_provider_allowlisted", lambda _provider: True)
+    monkeypatch.setattr(byok_runtime, "validate_base_url_override", lambda value: value)
+    monkeypatch.setattr(
+        byok_runtime,
+        "loaded_config_data",
+        {
+            "openai_api": {"model": "gpt-4o-mini", "api_key": "config-secret"},
+            "anthropic_api": {"api_key": "unrelated-secret"},
+        },
+    )
+    monkeypatch.setattr(
+        byok_runtime,
+        "resolve_server_default_key",
+        lambda _provider: (_ for _ in ()).throw(AssertionError("must not mix fallback sources")),
+    )
+
+    resolved = await byok_runtime.resolve_byok_credentials(
+        "openai",
+        user_id=None,
+        fallback_resolver=lambda _provider: _server_fallback_value(
+            api_key="override-key",
+            credential_fields=fields,
+            auth_source="api_key",
+        ),
+    )
+    fields["org_id"] = "mutated-after-resolution"
+
+    assert resolved.api_key == "override-key"
+    assert resolved.auth_source == "api_key"
+    assert resolved.credential_fields == {
+        "base_url": "https://override-openai.example/v1",
+        "org_id": "override-org",
+        "project_id": "override-project",
+    }
+    assert resolved.app_config == {
+        "openai_api": {
+            "model": "gpt-4o-mini",
+            "api_base_url": "https://override-openai.example/v1",
+            "org_id": "override-org",
+            "project_id": "override-project",
+            "_runtime_auth_source": "api_key",
+        }
+    }
+    assert "anthropic_api" not in resolved.app_config
+    assert "config-secret" not in repr(resolved.app_config)
+    assert "unrelated-secret" not in repr(resolved.app_config)
+
+
+@pytest.mark.asyncio
+async def test_malformed_structured_server_fallback_fails_without_secondary_key(monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+
+    secondary_calls: list[str] = []
+    monkeypatch.setattr(byok_runtime, "is_byok_enabled", lambda: False)
+    monkeypatch.setattr(byok_runtime, "is_provider_allowlisted", lambda _provider: True)
+    monkeypatch.setattr(
+        byok_runtime,
+        "resolve_server_default_key",
+        lambda provider: secondary_calls.append(provider) or "secondary-key",
+    )
+
+    with pytest.raises(byok_runtime.ByokResolutionError) as exc_info:
+        await byok_runtime.resolve_byok_credentials(
+            "openai",
+            user_id=None,
+            fallback_resolver=lambda _provider: _server_fallback_value(
+                api_key=None,
+                credential_fields={"org_id": "must-not-pair"},
+                auth_source="api_key",
+            ),
+        )
+
+    assert exc_info.value.code == "invalid_provider_credentials"
+    assert secondary_calls == []
+
+
+@pytest.mark.asyncio
+async def test_legacy_string_server_fallback_remains_supported(monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+
+    monkeypatch.setattr(byok_runtime, "is_byok_enabled", lambda: False)
+    monkeypatch.setattr(byok_runtime, "is_provider_allowlisted", lambda _provider: True)
+
+    resolved = await byok_runtime.resolve_byok_credentials(
+        "openai",
+        user_id=None,
+        fallback_resolver=lambda _provider: "legacy-server-key",
+    )
+
+    assert resolved.api_key == "legacy-server-key"
+    assert resolved.source == "server_default"
+
+
+@pytest.mark.asyncio
+async def test_structured_bedrock_default_chain_is_certified_without_api_key(monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+
+    monkeypatch.setattr(byok_runtime, "is_byok_enabled", lambda: False)
+    monkeypatch.setattr(byok_runtime, "is_provider_allowlisted", lambda _provider: True)
+    monkeypatch.setattr(byok_runtime, "loaded_config_data", {"bedrock_api": {"model": "meta.model"}})
+
+    resolved = await byok_runtime.resolve_byok_credentials(
+        "bedrock",
+        user_id=None,
+        fallback_resolver=lambda _provider: byok_runtime.ServerFallbackCredentials(
+            api_key=None,
+            credential_fields={},
+            auth_source="aws_default_chain",
+        ),
+    )
+
+    assert resolved.api_key is None
+    assert resolved.status is byok_runtime.ByokResolutionStatus.RESOLVED
+    assert resolved.auth_source == "aws_default_chain"
+    assert resolved.app_config == {
+        "bedrock_api": {
+            "model": "meta.model",
+            "_runtime_auth_source": "aws_default_chain",
+        }
+    }
+
+
+@pytest.mark.asyncio
+async def test_admin_override_fallback_keeps_key_and_fields_atomic(monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime, llm_provider_overrides
+
+    monkeypatch.setattr(byok_runtime, "is_byok_enabled", lambda: False)
+    monkeypatch.setattr(byok_runtime, "is_provider_allowlisted", lambda _provider: True)
+    monkeypatch.setattr(byok_runtime, "validate_base_url_override", lambda value: value)
+    monkeypatch.setattr(byok_runtime, "loaded_config_data", {})
+    llm_provider_overrides.set_llm_provider_overrides_cache_for_tests(
+        {
+            "openai": llm_provider_overrides.LLMProviderOverride(
+                provider="openai",
+                api_key="admin-key",
+                credential_fields={
+                    "base_url": "https://admin-openai.example/v1",
+                    "org_id": "admin-org",
+                },
+                config={"auth_source": "api_key"},
+            )
+        }
+    )
+    try:
+        resolved = await byok_runtime.resolve_byok_credentials(
+            "openai",
+            user_id=None,
+            fallback_resolver=llm_provider_overrides.get_override_server_fallback,
+        )
+    finally:
+        llm_provider_overrides.set_llm_provider_overrides_cache_for_tests({})
+
+    assert resolved.api_key == "admin-key"
+    assert resolved.credential_fields == {
+        "base_url": "https://admin-openai.example/v1",
+        "org_id": "admin-org",
+    }
+    assert resolved.app_config == {
+        "openai_api": {
+            "api_base_url": "https://admin-openai.example/v1",
+            "org_id": "admin-org",
+            "_runtime_auth_source": "api_key",
+        }
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("row", "decrypted_payload"),
+    [
+        (
+            {"provider": "openai", "secret_blob": "opaque"},
+            {
+                "api_key": "stored-key",
+                "credential_fields": ["not", "an", "object"],
+            },
+        ),
+        ({"provider": "openai", "secret_blob": "opaque"}, {}),
+        ({"provider": "openai", "api_key_hint": "stored-hint"}, {}),
+    ],
+)
+async def test_corrupt_stored_admin_override_fails_without_secondary_key(
+    monkeypatch,
+    row,
+    decrypted_payload,
+):
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime, llm_provider_overrides
+
+    secondary_calls: list[str] = []
+    monkeypatch.setattr(byok_runtime, "is_byok_enabled", lambda: False)
+    monkeypatch.setattr(byok_runtime, "is_provider_allowlisted", lambda _provider: True)
+    monkeypatch.setattr(
+        byok_runtime,
+        "resolve_server_default_key",
+        lambda provider: secondary_calls.append(provider) or "secondary-key",
+    )
+    monkeypatch.setattr(llm_provider_overrides, "loads_envelope", lambda _blob: {})
+    monkeypatch.setattr(
+        llm_provider_overrides,
+        "decrypt_byok_payload",
+        lambda _envelope: decrypted_payload,
+    )
+    override = llm_provider_overrides._parse_override_row(row)
+    llm_provider_overrides.set_llm_provider_overrides_cache_for_tests(
+        {"openai": override}
+    )
+
+    try:
+        with pytest.raises(byok_runtime.ByokResolutionError) as exc_info:
+            await byok_runtime.resolve_byok_credentials(
+                "openai",
+                user_id=None,
+                fallback_resolver=llm_provider_overrides.get_override_server_fallback,
+            )
+    finally:
+        llm_provider_overrides.set_llm_provider_overrides_cache_for_tests({})
+
+    assert exc_info.value.code == "invalid_provider_credentials"
+    assert secondary_calls == []
+
+
+@pytest.mark.asyncio
+async def test_malformed_admin_override_helper_state_fails_without_secondary_key(monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime, llm_provider_overrides
+
+    secondary_calls: list[str] = []
+    monkeypatch.setattr(byok_runtime, "is_byok_enabled", lambda: False)
+    monkeypatch.setattr(byok_runtime, "is_provider_allowlisted", lambda _provider: True)
+    monkeypatch.setattr(
+        byok_runtime,
+        "resolve_server_default_key",
+        lambda provider: secondary_calls.append(provider) or "secondary-key",
+    )
+    llm_provider_overrides.set_llm_provider_overrides_cache_for_tests(
+        {
+            "openai": llm_provider_overrides.LLMProviderOverride(
+                provider="openai",
+                api_key="stored-key",
+                credential_fields=["not", "a", "mapping"],  # type: ignore[arg-type]
+            )
+        }
+    )
+
+    try:
+        with pytest.raises(byok_runtime.ByokResolutionError) as exc_info:
+            await byok_runtime.resolve_byok_credentials(
+                "openai",
+                user_id=None,
+                fallback_resolver=llm_provider_overrides.get_override_server_fallback,
+            )
+    finally:
+        llm_provider_overrides.set_llm_provider_overrides_cache_for_tests({})
+
+    assert exc_info.value.code == "invalid_provider_credentials"
+    assert secondary_calls == []
+
+
 @pytest.mark.asyncio
 async def test_resolve_byok_credentials_invalid_fields_raise_typed_failure(monkeypatch):
     from tldw_Server_API.app.core.AuthNZ import byok_runtime

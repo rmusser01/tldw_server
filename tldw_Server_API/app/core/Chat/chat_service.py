@@ -1823,6 +1823,7 @@ def _build_adapter_request_from_chat_args(chat_args: dict[str, Any]) -> tuple[st
     from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
         ensure_app_config,
         normalize_provider,
+        provider_auth_is_resolved,
         resolve_provider_api_key_from_config,
         resolve_provider_model,
         resolve_provider_section,
@@ -1866,7 +1867,12 @@ def _build_adapter_request_from_chat_args(chat_args: dict[str, Any]) -> tuple[st
 
     if credentials_resolved:
         api_key = chat_args.get("api_key")
-        if provider_requires_api_key(provider) and not (isinstance(api_key, str) and api_key.strip()):
+        if provider_requires_api_key(provider) and not provider_auth_is_resolved(
+            provider,
+            api_key=api_key,
+            app_config=app_config,
+            credentials_resolved=True,
+        ):
             raise ChatConfigurationError(
                 provider=provider,
                 message="API key is required for provider.",
@@ -1882,6 +1888,8 @@ def _build_adapter_request_from_chat_args(chat_args: dict[str, Any]) -> tuple[st
         "api_key": api_key,
         "app_config": app_config,
     }
+    if credentials_resolved and provider == "bedrock":
+        request["credentials_resolved"] = True
     base_url_override = _resolve_base_url_override(provider, chat_args)
     if base_url_override:
         request["base_url"] = base_url_override

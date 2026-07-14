@@ -259,10 +259,30 @@ class OpenAIAdapter(ChatProvider):
             return float(fallback)
         return float(self.capabilities().get("default_timeout_seconds", 60))
 
-    def _openai_headers(self, api_key: str | None) -> dict[str, str]:
+    def _openai_headers(
+        self,
+        api_key: str | None,
+        request: dict[str, Any],
+    ) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
+        config = request.get("app_config") or {}
+        provider_config: Any = {}
+        if isinstance(config, dict):
+            provider_config = config.get("openai_api") or {}
+        if not isinstance(provider_config, dict):
+            provider_config = {}
+        organization = (
+            provider_config.get("org_id")
+            or provider_config.get("organization_id")
+            or provider_config.get("organization")
+        )
+        project = provider_config.get("project_id") or provider_config.get("project")
+        if isinstance(organization, str) and organization.strip():
+            headers["OpenAI-Organization"] = organization.strip()
+        if isinstance(project, str) and project.strip():
+            headers["OpenAI-Project"] = project.strip()
         return headers
 
     def chat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
@@ -276,7 +296,7 @@ class OpenAIAdapter(ChatProvider):
             url = f"{self._resolve_base_url(request).rstrip('/')}/chat/completions"
             payload, cache_intent_diagnostic = apply_billing_prompt_cache_intent(self.name, payload, request)
             payload = merge_extra_body(payload, request)
-            headers = merge_extra_headers(self._openai_headers(api_key), request)
+            headers = merge_extra_headers(self._openai_headers(api_key, request), request)
             try:
                 resolved_timeout = self._resolve_timeout(request, timeout)
                 with http_client_factory(timeout=resolved_timeout) as client:
@@ -300,7 +320,7 @@ class OpenAIAdapter(ChatProvider):
             url = f"{self._resolve_base_url(request).rstrip('/')}/chat/completions"
             payload, _cache_intent_diagnostic = apply_billing_prompt_cache_intent(self.name, payload, request)
             payload = merge_extra_body(payload, request)
-            headers = merge_extra_headers(self._openai_headers(api_key), request)
+            headers = merge_extra_headers(self._openai_headers(api_key, request), request)
             try:
                 resolved_timeout = self._resolve_timeout(request, timeout)
                 with http_client_factory(timeout=resolved_timeout) as client:

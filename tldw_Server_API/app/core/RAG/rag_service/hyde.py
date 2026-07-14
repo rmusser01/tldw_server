@@ -216,14 +216,11 @@ def _runtime_local_embedding_call_kwargs(
     provider: str | None,
     model_id_override: str | None = None,
 ) -> dict[str, Any]:
-    """Build a key-free execution boundary for runtime-bound local embeddings."""
+    """Build the exact selected local embedding deployment boundary."""
     normalized = str(provider or "").strip().lower()
     if normalized not in {"local", "local_api"}:
         return {}
-    call_kwargs: dict[str, Any] = {
-        "api_key_override": None,
-        "credentials_resolved": True,
-    }
+    call_kwargs: dict[str, Any] = {"api_key_override": None, "credentials_resolved": True}
     if normalized == "local_api":
         from tldw_Server_API.app.core.Embeddings.async_embeddings import EmbeddingEndpointError
 
@@ -233,9 +230,19 @@ def _runtime_local_embedding_call_kwargs(
             if isinstance(model_spec, dict)
             else getattr(model_spec, "api_url", None)
         )
+        api_key = (
+            model_spec.get("api_key")
+            if isinstance(model_spec, dict)
+            else getattr(model_spec, "api_key", None)
+        )
         if not isinstance(endpoint, str) or not endpoint.strip():
             raise EmbeddingEndpointError(normalized)
         call_kwargs["base_url_override"] = endpoint.strip()
+        call_kwargs["api_key_override"] = (
+            api_key.strip()
+            if isinstance(api_key, str) and api_key.strip()
+            else None
+        )
     return call_kwargs
 
 
