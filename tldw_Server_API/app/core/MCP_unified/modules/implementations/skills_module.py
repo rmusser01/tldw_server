@@ -385,7 +385,19 @@ class SkillsModule(BaseModule):
         ]
         if not valid_declarations:
             return []
-        listing = await MCPProtocol()._handle_tools_list({}, context)
+        try:
+            listing = await MCPProtocol()._handle_tools_list({}, context)
+            task = asyncio.current_task()
+            if task is not None and task.cancelling():
+                raise asyncio.CancelledError
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - advisory lookup fails closed
+            logger.warning(
+                "Skills catalog matching unavailable: {}",
+                exc.__class__.__name__,
+            )
+            return None
         return _catalog_matches_from_listing(valid_declarations, listing)
 
     @staticmethod
