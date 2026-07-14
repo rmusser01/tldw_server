@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import traceback
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, TypeVar
@@ -87,6 +88,18 @@ def _catalog_matches_from_listing(
         seen.add(name)
         matches.append(name)
     return matches
+
+
+def _safe_failure_frames(error: BaseException) -> list[dict[str, str | int]]:
+    """Return bounded traceback metadata without paths, source, or error text."""
+    return [
+        {
+            "file": Path(frame.filename).name[:128],
+            "function": frame.name[:128],
+            "line": frame.lineno,
+        }
+        for frame in traceback.extract_tb(error.__traceback__, limit=4)
+    ]
 
 
 class SkillsModule(BaseModule):
@@ -385,15 +398,16 @@ class SkillsModule(BaseModule):
         ]
         if not valid_declarations:
             return []
+        catalog_handler = self.config.tool_catalog_handler
+        if catalog_handler is None:
+            return None
         try:
-            from ...server import get_mcp_server
-
             timeout_seconds = min(
                 float(self.config.timeout_seconds),
                 CATALOG_LOOKUP_TIMEOUT_CAP_SECONDS,
             )
             listing_task = asyncio.create_task(
-                get_mcp_server().protocol._handle_tools_list({}, context)
+                catalog_handler({}, context)
             )
             try:
                 listing = await asyncio.wait_for(
@@ -407,10 +421,14 @@ class SkillsModule(BaseModule):
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - advisory lookup fails closed
-            logger.warning(
-                "Skills catalog matching unavailable: {}",
-                exc.__class__.__name__,
-            )
+            request_logger = getattr(context, "logger", logger)
+            request_logger.bind(
+                operation="skills.catalog_matches",
+                component="skills",
+                tool_name="skills.render",
+                error_type=exc.__class__.__name__,
+                failure_frames=_safe_failure_frames(exc),
+            ).warning("Skills catalog matching unavailable")
             return None
         return _catalog_matches_from_listing(valid_declarations, listing)
 

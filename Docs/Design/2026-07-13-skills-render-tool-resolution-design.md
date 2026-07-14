@@ -41,8 +41,9 @@ The implementation reuses existing code:
   behavior needed by render.
 - `MCPProtocol._handle_tools_list()` builds the embedded request catalog and
   attaches `canExecute`.
-- `MCPDiscoveryModule` already calls that protocol handler from a module, so
-  the dependency direction is established.
+- `MCPServer` owns the active protocol and injects its bound list handler into
+  module configuration. `SkillsModule` therefore has no server singleton or
+  protocol-construction dependency.
 
 `SkillExecutor.execute()` is not needed for dry render. Calling substitution
 directly and copying the existing metadata keeps render structurally outside
@@ -107,7 +108,7 @@ nor converted into an execution grant.
 | --- | --- |
 | `["rag.search"]` | Matching completed and these declared base names appeared with `canExecute is True`. |
 | `[]` | Matching completed with no matches, or the Skill had no valid declaration strings and no catalog read was needed. |
-| `null` | Protocol construction, catalog lookup, or the top-level catalog response failed. Matching was not computed. |
+| `null` | The catalog handler was unavailable, catalog lookup failed, or the top-level catalog response was malformed. Matching was not computed. |
 
 An absent field identifies an older server. A returned list is best effort,
 not proof that the catalog was complete: the reused protocol handler logs and
@@ -155,10 +156,10 @@ Malformed descriptors are ignored. A malformed top-level response or non-list
    the existing response fields, and applies the rendered-output limit.
 4. The request-scoped service lifecycle closes the Skills database.
 5. No valid declaration strings returns `catalog_matches: []` immediately.
-6. Otherwise, reuse the active server protocol and call
-   `_handle_tools_list({}, context)` once with the same `RequestContext`,
-   bounded by the smaller of the Skills module timeout and two seconds. Do not
-   construct a protocol per render.
+6. Otherwise, call the active server protocol handler injected through
+   `ModuleConfig` once with the same `RequestContext`, bounded by the smaller
+   of the Skills module timeout and two seconds. Do not locate a global server
+   or construct a protocol per render.
 7. Validate the top-level result, match eligible descriptors, and append
    `catalog_matches`.
 8. A whole-lookup exception returns `catalog_matches: null` without changing
@@ -196,19 +197,27 @@ decision and remains separate work.
 
 The module must preserve existing input, authorization, not-found, integrity,
 storage, render-size, database-cleanup, and cancellation behavior. Newly
-emitted logs contain no prompt content, declaration values, catalog payloads,
-paths, policies, credentials, or raw exception text.
+emitted warnings use the request-bound logger with operation, component, tool,
+exception-class, and bounded traceback-frame metadata. They contain no prompt
+content, declaration values, catalog payloads, absolute paths, source lines,
+policies, credentials, or raw exception text.
 
 ## Implementation Scope
 
-Expected production changes are limited to:
+The full task's production/documentation changes are limited to:
 
+- one optional catalog-handler dependency on `ModuleConfig`;
+- `MCPServer` composition-root wiring for the active protocol handler;
 - `tldw_Server_API/app/core/MCP_unified/modules/implementations/skills_module.py`;
 - `Docs/MCP/Unified/Modules.md`.
 
+The dependency-injection review follow-up changes only the first three
+production paths above; the operator document already describes the public
+`catalog_matches` behavior and requires no wording change for handler ownership.
+
 Tests remain in the existing Skills module and integration suites. No frontend,
-REST, gateway, profile, protocol, parser, executor, database, or response-model
-production file is required.
+REST, gateway, profile, protocol implementation, parser, executor, database, or
+response-model production file is required.
 
 ## Verification
 

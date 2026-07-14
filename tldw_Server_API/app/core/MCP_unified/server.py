@@ -984,6 +984,7 @@ class MCPServer:
                         circuit_breaker_max_timeout=m.get("circuit_breaker_max_timeout", 300),
                         settings=_resolve_env_placeholders(m.get("settings", {})),
                         circuit_breaker_factory=self.dependencies.circuit_breaker_factory,
+                        tool_catalog_handler=self.protocol._handle_tools_list,
                     )
                     await self.module_registry.register_module(module_id, cls, mc)
                     logger.info(f"Registered MCP module: {module_id} ({class_ref})")

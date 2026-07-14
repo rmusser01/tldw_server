@@ -34,19 +34,18 @@ from tldw_Server_API.app.core.Skills.skills_service import (
 pytestmark = pytest.mark.unit
 
 
-@pytest.fixture(autouse=True)
-def catalog_protocol_stub(
-    monkeypatch: pytest.MonkeyPatch,
-) -> tuple[Mock, AsyncMock]:
-    from tldw_Server_API.app.core.MCP_unified import server as mcp_server
+async def _default_catalog_handler(
+    _arguments: dict[str, Any],
+    _context: Any,
+) -> dict[str, Any]:
+    return {"tools": [{"name": "rag.search", "canExecute": True}]}
 
-    list_tools = AsyncMock(
+
+@pytest.fixture
+def catalog_handler() -> AsyncMock:
+    return AsyncMock(
         return_value={"tools": [{"name": "rag.search", "canExecute": True}]}
     )
-    protocol = SimpleNamespace(_handle_tools_list=list_tools)
-    get_server = Mock(return_value=SimpleNamespace(protocol=protocol))
-    monkeypatch.setattr(mcp_server, "get_mcp_server", get_server)
-    return get_server, list_tools
 
 
 @dataclass
@@ -86,8 +85,18 @@ def user_catalogs(tmp_path: Path) -> dict[int, UserCatalog]:
         catalog.db.close_all_connections()
 
 
-async def _module(settings: dict[str, Any] | None = None) -> SkillsModule:
-    module = SkillsModule(ModuleConfig(name="skills", settings=settings or {}))
+async def _module(
+    settings: dict[str, Any] | None = None,
+    *,
+    tool_catalog_handler: Any = _default_catalog_handler,
+) -> SkillsModule:
+    module = SkillsModule(
+        ModuleConfig(
+            name="skills",
+            settings=settings or {},
+            tool_catalog_handler=tool_catalog_handler,
+        )
+    )
     await module.on_initialize()
     return module
 
@@ -533,20 +542,19 @@ async def test_render_is_forced_dry_and_preserves_arguments(
 
 
 @pytest.mark.asyncio
-async def test_render_reuses_active_protocol_for_catalog_matching(
+async def test_render_uses_injected_catalog_handler(
     user_catalogs: dict[int, UserCatalog],
-    catalog_protocol_stub: tuple[Mock, AsyncMock],
+    catalog_handler: AsyncMock,
 ) -> None:
     await _seed_review_skill(user_catalogs[1].service)
-    _get_server, list_tools = catalog_protocol_stub
-    used_active_protocol = asyncio.Event()
+    used_injected_handler = asyncio.Event()
 
     async def active_listing(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
-        used_active_protocol.set()
+        used_injected_handler.set()
         return {"tools": [{"name": "rag.search", "canExecute": True}]}
 
-    list_tools.side_effect = active_listing
-    module = await _module()
+    catalog_handler.side_effect = active_listing
+    module = await _module(tool_catalog_handler=catalog_handler)
 
     result = await module.execute_tool(
         "skills.render",
@@ -554,7 +562,7 @@ async def test_render_reuses_active_protocol_for_catalog_matching(
         context=user_catalogs[1].context,
     )
 
-    assert used_active_protocol.is_set()
+    assert used_injected_handler.is_set()
     assert result["catalog_matches"] == ["rag.search"]
 
 
@@ -562,7 +570,7 @@ async def test_render_reuses_active_protocol_for_catalog_matching(
 async def test_render_matches_exact_catalog_and_preserves_declaration_order(
     user_catalogs: dict[int, UserCatalog],
     monkeypatch: pytest.MonkeyPatch,
-    catalog_protocol_stub: tuple[Mock, AsyncMock],
+    catalog_handler: AsyncMock,
 ) -> None:
     await _seed_review_skill(user_catalogs[1].service)
     original_get_skill = SkillsService.get_skill
@@ -585,8 +593,7 @@ async def test_render_matches_exact_catalog_and_preserves_declaration_order(
         return skill
 
     monkeypatch.setattr(SkillsService, "get_skill", declared_tools)
-    factory, list_tools = catalog_protocol_stub
-    list_tools.return_value = {
+    catalog_handler.return_value = {
         "tools": [
             {"name": "Bash", "canExecute": True},
             {"name": "rag.search", "canExecute": True},
@@ -596,7 +603,7 @@ async def test_render_matches_exact_catalog_and_preserves_declaration_order(
             "malformed",
         ]
     }
-    module = await _module()
+    module = await _module(tool_catalog_handler=catalog_handler)
 
     result = await module.execute_tool(
         "skills.render",
@@ -606,27 +613,21 @@ async def test_render_matches_exact_catalog_and_preserves_declaration_order(
 
     assert result["catalog_matches"] == ["rag.search", "Bash"]
     assert "undeclared.tool" not in result["catalog_matches"]
-    factory.assert_called_once_with()
-    list_tools.assert_awaited_once_with({}, user_catalogs[1].context)
+    catalog_handler.assert_awaited_once_with({}, user_catalogs[1].context)
 
 
-@pytest.mark.parametrize("failure_point", ["resolution", "listing"])
 @pytest.mark.asyncio
 async def test_catalog_matching_failure_preserves_successful_render(
     user_catalogs: dict[int, UserCatalog],
-    catalog_protocol_stub: tuple[Mock, AsyncMock],
-    failure_point: str,
-    monkeypatch: pytest.MonkeyPatch,
+    catalog_handler: AsyncMock,
 ) -> None:
     await _seed_review_skill(user_catalogs[1].service)
-    factory, list_tools = catalog_protocol_stub
-    if failure_point == "resolution":
-        factory.side_effect = RuntimeError("SENTINEL_PRIVATE_DETAIL")
-    else:
-        list_tools.side_effect = RuntimeError("SENTINEL_PRIVATE_DETAIL")
-    warning = Mock()
-    monkeypatch.setattr(skills_module, "logger", SimpleNamespace(warning=warning))
-    module = await _module()
+    catalog_handler.side_effect = RuntimeError("SENTINEL_PRIVATE_DETAIL")
+    request_logger = Mock()
+    warning_logger = Mock()
+    request_logger.bind.return_value = warning_logger
+    user_catalogs[1].context.logger = request_logger
+    module = await _module(tool_catalog_handler=catalog_handler)
 
     result = await module.execute_tool(
         "skills.render",
@@ -636,21 +637,42 @@ async def test_catalog_matching_failure_preserves_successful_render(
 
     assert result["rendered_prompt"] == "Review issue 42"
     assert result["catalog_matches"] is None
-    warning.assert_called_once_with(
-        "Skills catalog matching unavailable: {}",
-        "RuntimeError",
+    request_logger.bind.assert_called_once()
+    safe_context = request_logger.bind.call_args.kwargs
+    assert safe_context["operation"] == "skills.catalog_matches"
+    assert safe_context["component"] == "skills"
+    assert safe_context["tool_name"] == "skills.render"
+    assert safe_context["error_type"] == "RuntimeError"
+    assert safe_context["failure_frames"]
+    assert "SENTINEL_PRIVATE_DETAIL" not in str(safe_context)
+    warning_logger.warning.assert_called_once_with(
+        "Skills catalog matching unavailable"
     )
-    assert "SENTINEL_PRIVATE_DETAIL" not in str(warning.call_args)
+
+
+@pytest.mark.asyncio
+async def test_catalog_matching_without_injected_handler_fails_closed(
+    user_catalogs: dict[int, UserCatalog],
+) -> None:
+    await _seed_review_skill(user_catalogs[1].service)
+    module = await _module(tool_catalog_handler=None)
+
+    result = await module.execute_tool(
+        "skills.render",
+        {"skill_name": "review-paper", "arguments": "issue 42"},
+        context=user_catalogs[1].context,
+    )
+
+    assert result["rendered_prompt"] == "Review issue 42"
+    assert result["catalog_matches"] is None
 
 
 @pytest.mark.asyncio
 async def test_catalog_matching_timeout_preserves_render_and_drains_lookup(
     user_catalogs: dict[int, UserCatalog],
-    catalog_protocol_stub: tuple[Mock, AsyncMock],
-    monkeypatch: pytest.MonkeyPatch,
+    catalog_handler: AsyncMock,
 ) -> None:
     await _seed_review_skill(user_catalogs[1].service)
-    _factory, list_tools = catalog_protocol_stub
     started = asyncio.Event()
     finished = asyncio.Event()
 
@@ -661,11 +683,18 @@ async def test_catalog_matching_timeout_preserves_render_and_drains_lookup(
         finally:
             finished.set()
 
-    list_tools.side_effect = stalled_listing
-    warning = Mock()
-    monkeypatch.setattr(skills_module, "logger", SimpleNamespace(warning=warning))
+    catalog_handler.side_effect = stalled_listing
+    request_logger = Mock()
+    warning_logger = Mock()
+    request_logger.bind.return_value = warning_logger
+    user_catalogs[1].context.logger = request_logger
     module = SkillsModule(
-        ModuleConfig(name="skills", settings={}, timeout_seconds=0.01)
+        ModuleConfig(
+            name="skills",
+            settings={},
+            timeout_seconds=0.01,
+            tool_catalog_handler=catalog_handler,
+        )
     )
     await module.on_initialize()
 
@@ -682,9 +711,8 @@ async def test_catalog_matching_timeout_preserves_render_and_drains_lookup(
     assert finished.is_set()
     assert result["rendered_prompt"] == "Review issue 42"
     assert result["catalog_matches"] is None
-    warning.assert_called_once_with(
-        "Skills catalog matching unavailable: {}",
-        "TimeoutError",
+    warning_logger.warning.assert_called_once_with(
+        "Skills catalog matching unavailable"
     )
 
 
@@ -692,13 +720,12 @@ async def test_catalog_matching_timeout_preserves_render_and_drains_lookup(
 @pytest.mark.asyncio
 async def test_catalog_matching_returns_none_for_malformed_envelope(
     user_catalogs: dict[int, UserCatalog],
-    catalog_protocol_stub: tuple[Mock, AsyncMock],
+    catalog_handler: AsyncMock,
     listing: Any,
 ) -> None:
     await _seed_review_skill(user_catalogs[1].service)
-    _factory, list_tools = catalog_protocol_stub
-    list_tools.return_value = listing
-    module = await _module()
+    catalog_handler.return_value = listing
+    module = await _module(tool_catalog_handler=catalog_handler)
 
     result = await module.execute_tool(
         "skills.render",
@@ -712,12 +739,13 @@ async def test_catalog_matching_returns_none_for_malformed_envelope(
 @pytest.mark.asyncio
 async def test_catalog_matching_returns_partial_well_formed_matches(
     user_catalogs: dict[int, UserCatalog],
-    catalog_protocol_stub: tuple[Mock, AsyncMock],
+    catalog_handler: AsyncMock,
 ) -> None:
     await _seed_review_skill(user_catalogs[1].service)
-    _factory, list_tools = catalog_protocol_stub
-    list_tools.return_value = {"tools": [{"name": "rag.search", "canExecute": True}]}
-    module = await _module()
+    catalog_handler.return_value = {
+        "tools": [{"name": "rag.search", "canExecute": True}]
+    }
+    module = await _module(tool_catalog_handler=catalog_handler)
 
     result = await module.execute_tool(
         "skills.render",
@@ -743,13 +771,12 @@ async def test_catalog_matching_returns_partial_well_formed_matches(
 @pytest.mark.asyncio
 async def test_catalog_matching_rejects_non_executable_descriptors(
     user_catalogs: dict[int, UserCatalog],
-    catalog_protocol_stub: tuple[Mock, AsyncMock],
+    catalog_handler: AsyncMock,
     descriptor: dict[str, Any],
 ) -> None:
     await _seed_review_skill(user_catalogs[1].service)
-    factory, list_tools = catalog_protocol_stub
-    list_tools.return_value = {"tools": [descriptor]}
-    module = await _module()
+    catalog_handler.return_value = {"tools": [descriptor]}
+    module = await _module(tool_catalog_handler=catalog_handler)
 
     result = await module.execute_tool(
         "skills.render",
@@ -758,14 +785,12 @@ async def test_catalog_matching_rejects_non_executable_descriptors(
     )
 
     assert result["catalog_matches"] == []
-    factory.assert_called_once_with()
-    list_tools.assert_awaited_once_with({}, user_catalogs[1].context)
+    catalog_handler.assert_awaited_once_with({}, user_catalogs[1].context)
 
 
 @pytest.mark.asyncio
 async def test_catalog_matching_does_not_require_python_311_task_api(
     user_catalogs: dict[int, UserCatalog],
-    catalog_protocol_stub: tuple[Mock, AsyncMock],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     await _seed_review_skill(user_catalogs[1].service)
@@ -790,7 +815,7 @@ async def test_catalog_matching_does_not_require_python_311_task_api(
 async def test_render_with_no_declarations_skips_catalog_lookup(
     user_catalogs: dict[int, UserCatalog],
     monkeypatch: pytest.MonkeyPatch,
-    catalog_protocol_stub: tuple[Mock, AsyncMock],
+    catalog_handler: AsyncMock,
 ) -> None:
     await _seed_review_skill(user_catalogs[1].service)
     original_get_skill = SkillsService.get_skill
@@ -806,8 +831,7 @@ async def test_render_with_no_declarations_skips_catalog_lookup(
         return skill
 
     monkeypatch.setattr(SkillsService, "get_skill", no_declared_tools)
-    factory, list_tools = catalog_protocol_stub
-    module = await _module()
+    module = await _module(tool_catalog_handler=catalog_handler)
 
     result = await module.execute_tool(
         "skills.render",
@@ -816,15 +840,14 @@ async def test_render_with_no_declarations_skips_catalog_lookup(
     )
 
     assert result["catalog_matches"] == []
-    factory.assert_not_called()
-    list_tools.assert_not_awaited()
+    catalog_handler.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_render_with_only_malformed_declarations_skips_catalog_lookup(
     user_catalogs: dict[int, UserCatalog],
     monkeypatch: pytest.MonkeyPatch,
-    catalog_protocol_stub: tuple[Mock, AsyncMock],
+    catalog_handler: AsyncMock,
 ) -> None:
     await _seed_review_skill(user_catalogs[1].service)
     original_get_skill = SkillsService.get_skill
@@ -840,8 +863,7 @@ async def test_render_with_only_malformed_declarations_skips_catalog_lookup(
         return skill
 
     monkeypatch.setattr(SkillsService, "get_skill", malformed_only_get_skill)
-    factory, list_tools = catalog_protocol_stub
-    module = await _module()
+    module = await _module(tool_catalog_handler=catalog_handler)
 
     result = await module.execute_tool(
         "skills.render",
@@ -850,28 +872,25 @@ async def test_render_with_only_malformed_declarations_skips_catalog_lookup(
     )
 
     assert result["catalog_matches"] == []
-    factory.assert_not_called()
-    list_tools.assert_not_awaited()
+    catalog_handler.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_catalog_runs_after_database_close(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    catalog_protocol_stub: tuple[Mock, AsyncMock],
+    catalog_handler: AsyncMock,
 ) -> None:
     TrackingDB.instances = []
     ScenarioService.scenario = "render"
     monkeypatch.setattr(skills_module, "CharactersRAGDB", TrackingDB)
     monkeypatch.setattr(skills_module, "SkillsService", ScenarioService)
-    _factory, list_tools = catalog_protocol_stub
-
     async def assert_database_closed(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
         assert TrackingDB.instances[0].closed is True
         return {"tools": [{"name": "rag.search", "canExecute": True}]}
 
-    list_tools.side_effect = assert_database_closed
-    module = await _module()
+    catalog_handler.side_effect = assert_database_closed
+    module = await _module(tool_catalog_handler=catalog_handler)
     context = RequestContext(
         request_id="catalog-after-close",
         user_id="1",
@@ -890,10 +909,9 @@ async def test_catalog_runs_after_database_close(
 @pytest.mark.asyncio
 async def test_catalog_matching_propagates_suppressed_cancellation(
     user_catalogs: dict[int, UserCatalog],
-    catalog_protocol_stub: tuple[Mock, AsyncMock],
+    catalog_handler: AsyncMock,
 ) -> None:
     await _seed_review_skill(user_catalogs[1].service)
-    _factory, list_tools = catalog_protocol_stub
     started = asyncio.Event()
 
     async def suppress_cancellation(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
@@ -903,8 +921,8 @@ async def test_catalog_matching_propagates_suppressed_cancellation(
         except asyncio.CancelledError:
             return {"tools": []}
 
-    list_tools.side_effect = suppress_cancellation
-    module = await _module()
+    catalog_handler.side_effect = suppress_cancellation
+    module = await _module(tool_catalog_handler=catalog_handler)
     task = asyncio.create_task(
         module.execute_tool(
             "skills.render",
