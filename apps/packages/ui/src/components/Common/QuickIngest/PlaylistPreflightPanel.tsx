@@ -29,6 +29,9 @@ type PlaylistPreflightPanelProps = {
   onRetry: () => void;
   onRemove: () => void;
   onRefresh: () => void;
+  onAdd?: () => void;
+  isAdding?: boolean;
+  addError?: string | null;
   onSelectionChange: (occurrenceId: string, selected: boolean) => void;
   onSelectionBatchChange: (updates: readonly PlaylistSelectionUpdate[]) => void;
 };
@@ -189,6 +192,9 @@ export const PlaylistPreflightPanel: React.FC<PlaylistPreflightPanelProps> = ({
   onRetry,
   onRemove,
   onRefresh,
+  onAdd,
+  isAdding = false,
+  addError = null,
   onSelectionChange,
   onSelectionBatchChange,
 }) => {
@@ -336,6 +342,7 @@ export const PlaylistPreflightPanel: React.FC<PlaylistPreflightPanelProps> = ({
           <Button
             size="small"
             onClick={onRefresh}
+            disabled={isAdding}
             aria-label={qi(
               "playlistPreflight.refreshAria",
               "Refresh playlist inspection",
@@ -393,6 +400,7 @@ export const PlaylistPreflightPanel: React.FC<PlaylistPreflightPanelProps> = ({
               size="small"
               type="text"
               onClick={onRemove}
+              disabled={isAdding}
               aria-label={qi(
                 "playlistInspection.removeAria",
                 "Remove playlist inspection for {{url}}",
@@ -439,14 +447,28 @@ export const PlaylistPreflightPanel: React.FC<PlaylistPreflightPanelProps> = ({
             />
           )}
 
+          {addError && <Alert variant="error" title={addError} />}
+
           <div className="flex flex-wrap items-center gap-1.5">
-            <Button size="small" onClick={() => applyVisibleSelection("all")}>
+            <Button
+              size="small"
+              onClick={() => applyVisibleSelection("all")}
+              disabled={isAdding}
+            >
               {qi("playlistPreflight.selectAll", "Select all")}
             </Button>
-            <Button size="small" onClick={() => applyVisibleSelection("none")}>
+            <Button
+              size="small"
+              onClick={() => applyVisibleSelection("none")}
+              disabled={isAdding}
+            >
               {qi("playlistPreflight.selectNone", "Select none")}
             </Button>
-            <Button size="small" onClick={() => applyVisibleSelection("new")}>
+            <Button
+              size="small"
+              onClick={() => applyVisibleSelection("new")}
+              disabled={isAdding}
+            >
               {qi("playlistPreflight.selectNew", "Select new")}
             </Button>
             <label className="ml-auto text-xs text-text-muted">
@@ -549,7 +571,7 @@ export const PlaylistPreflightPanel: React.FC<PlaylistPreflightPanelProps> = ({
                       checked={candidate.selectedOccurrenceIds.has(
                         item.occurrenceId,
                       )}
-                      disabled={!eligible}
+                      disabled={!eligible || isAdding}
                       aria-label={qi(
                         "playlistPreflight.itemSelectionAria",
                         "Select playlist item {{ordinal}}: {{title}}",
@@ -594,7 +616,13 @@ export const PlaylistPreflightPanel: React.FC<PlaylistPreflightPanelProps> = ({
                 count: selectedCount,
               })}
             </Typography.Text>
-            <Button size="small" type="primary" disabled>
+            <Button
+              size="small"
+              type="primary"
+              onClick={onAdd}
+              loading={isAdding}
+              disabled={!onAdd || selectedCount === 0 || isAdding}
+            >
               {qi(
                 "playlistPreflight.addVideos",
                 selectedCount === 1

@@ -6,6 +6,7 @@ import { XCircle } from "lucide-react"
 import { useShallow } from "zustand/react/shallow"
 import { browser } from "wxt/browser"
 import {
+  buildPlaylistIngestRunRequest,
   IngestWizardProvider,
   useIngestWizard,
   type IngestWizardState,
@@ -314,6 +315,7 @@ const buildPersistedQueueItems = (
 ): PersistedWizardQueueItem[] =>
   items.map((item) => ({
     id: item.id,
+    sourceRef: item.sourceRef,
     kind: item.kind || (item.url ? "url" : "file"),
     fileName: item.fileName || item.file?.name,
     name: item.fileName || item.file?.name,
@@ -329,6 +331,7 @@ const buildPersistedQueueItems = (
     mimeType: item.file?.type || item.mimeType,
     validation: item.validation,
     playlist: item.playlist,
+    playlistReview: item.playlistReview,
     conferenceOverride: item.conferenceOverride,
     fileStub:
       item.file || item.fileStub
@@ -445,18 +448,28 @@ const hydrateQueueItems = (
   queueItems: QuickIngestSessionRecord["queueItems"]
 ): WizardQueueItem[] =>
   queueItems.map((item) => {
-    const isFileItem = item.kind === "file" || (!item.url && Boolean(item.fileName || item.name))
+    const sourceKind = item.sourceRef?.kind
+    const isFileItem =
+      sourceKind === "file_stub" ||
+      (!sourceKind &&
+        (item.kind === "file" || (!item.url && Boolean(item.fileName || item.name))))
     if (!isFileItem) {
+      const url =
+        item.sourceRef?.kind === "direct_url"
+          ? item.sourceRef.url
+          : item.url || item.playlist?.sourceUrl
       return {
         id: item.id,
+        sourceRef: item.sourceRef,
         kind: "url",
-        url: item.url,
+        url,
         detectedType: item.detectedType,
         icon: item.icon,
         fileSize: item.fileSize,
         mimeType: item.mimeType,
         validation: item.validation,
         playlist: item.playlist,
+        playlistReview: item.playlistReview,
         conferenceOverride: item.conferenceOverride,
       }
     }
@@ -467,6 +480,7 @@ const hydrateQueueItems = (
 
     return {
       id: item.id,
+      sourceRef: item.sourceRef,
       kind: "file",
       fileName: item.fileName || item.name,
       detectedType: item.detectedType,
@@ -479,6 +493,7 @@ const hydrateQueueItems = (
         warnings,
       },
       playlist: item.playlist,
+      playlistReview: item.playlistReview,
       conferenceOverride: item.conferenceOverride,
       fileStub: item.fileStub || {
         key: item.key,
@@ -720,7 +735,7 @@ const buildResultsFromReattachedJobs = (
   jobs: Array<{
     jobId: number
     status: string
-    result?: any
+    result?: unknown
     error?: string
     sourceItemId?: string
   }>,
@@ -740,6 +755,11 @@ const buildResultsFromReattachedJobs = (
     const resultStatus =
       jobStatus === "completed" && !logicalFailure ? "ok" : "error"
     const isDuplicate = resultStatus === "ok" && completedIngestJobIndicatesSkipped(job.result)
+    const resultRecord =
+      job.result !== null && typeof job.result === "object"
+        ? (job.result as Record<string, unknown>)
+        : null
+    const resultTitle = resultRecord?.title
     return {
       id: item?.id || `reattached-${job.jobId}`,
       status: resultStatus,
@@ -764,7 +784,7 @@ const buildResultsFromReattachedJobs = (
       collectionItemId: tracking?.jobIdToCollectionItemId?.[String(job.jobId)] ?? null,
       retryAttempt: null,
       idempotencyKey: null,
-      title: job.result?.title ?? null,
+      title: typeof resultTitle === "string" ? resultTitle : null,
       data: job.result,
       message: isDuplicate ? DUPLICATE_SKIP_MESSAGE : undefined,
     }

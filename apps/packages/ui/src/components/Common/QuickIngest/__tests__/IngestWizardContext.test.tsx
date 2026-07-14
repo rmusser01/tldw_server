@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from "vitest"
 import { render, screen, act } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import {
+  buildPlaylistIngestRunRequest,
   IngestWizardProvider,
   useIngestWizard,
 } from "../IngestWizardContext"
@@ -23,7 +24,7 @@ vi.mock("react-i18next", () => ({
     t: (key: string, defaultOrOpts?: unknown) =>
       typeof defaultOrOpts === "string"
         ? defaultOrOpts
-        : (defaultOrOpts as Record<string, string>)?.defaultValue ?? key,
+        : ((defaultOrOpts as Record<string, string>)?.defaultValue ?? key),
   }),
 }))
 
@@ -45,6 +46,7 @@ function TestHarness() {
     skipToProcessing,
     cancelProcessing,
     cancelItem,
+    applyPlaylistReviewRequired,
     minimize,
     restore,
     reset,
@@ -61,12 +63,11 @@ function TestHarness() {
         {state.processingState.perItemProgress.map((item) => item.id).join(",")}
       </span>
       <span data-testid="isMinimized">{String(state.isMinimized)}</span>
-      <span data-testid="presetAnalysis">
-        {String(state.presetConfig.common.perform_analysis)}
-      </span>
-      <span data-testid="presetChunkingMode">
-        {state.presetConfig.common.chunking_mode || ""}
-      </span>
+      <span data-testid="pendingRunRequest">{JSON.stringify(state.pendingRunRequest ?? null)}</span>
+      <span data-testid="processingBlock">{JSON.stringify(state.processingBlock ?? null)}</span>
+      <span data-testid="queueItems">{JSON.stringify(state.queueItems)}</span>
+      <span data-testid="presetAnalysis">{String(state.presetConfig.common.perform_analysis)}</span>
+      <span data-testid="presetChunkingMode">{state.presetConfig.common.chunking_mode || ""}</span>
       <span data-testid="presetAutoChunkingGoal">
         {state.presetConfig.common.auto_chunking_goal || ""}
       </span>
@@ -205,6 +206,42 @@ function TestHarness() {
       <button onClick={startProcessing}>startProcessing</button>
       <button onClick={cancelProcessing}>cancelProcessing</button>
       <button onClick={() => cancelItem("a")}>cancelItemA</button>
+      <button
+        onClick={() =>
+          applyPlaylistReviewRequired([
+            {
+              occurrenceId: "occ-review-required",
+              reason: "duplicate_target_changed",
+              evidence: {
+                kind: "library",
+                existingMediaId: 42,
+                duplicateOfOccurrenceId: null,
+              },
+              allowedActions: ["skip", "update_metadata_only"],
+            },
+          ])
+        }
+      >
+        applyReviewRequired
+      </button>
+      <button
+        onClick={() =>
+          applyPlaylistReviewRequired([
+            {
+              occurrenceId: "occ-review-required",
+              reason: "duplicate_no_longer_present",
+              evidence: {
+                kind: "none",
+                existingMediaId: null,
+                duplicateOfOccurrenceId: null,
+              },
+              allowedActions: [],
+            },
+          ])
+        }
+      >
+        applyNoLongerDuplicate
+      </button>
       <button onClick={minimize}>minimize</button>
       <button onClick={restore}>restore</button>
       <button onClick={reset}>reset</button>
@@ -220,7 +257,9 @@ function renderWithProvider() {
   )
 }
 
-function renderWithInitialState(initialState: Parameters<typeof IngestWizardProvider>[0]["initialState"]) {
+function renderWithInitialState(
+  initialState: Parameters<typeof IngestWizardProvider>[0]["initialState"]
+) {
   return render(
     <IngestWizardProvider initialState={initialState}>
       <TestHarness />
@@ -576,6 +615,721 @@ describe("IngestWizardContext", () => {
   // -- Processing -----------------------------------------------------------
 
   describe("processing", () => {
+    it("builds a playlist run request from occurrence authority and explicit review edits", async () => {
+      renderWithInitialState({
+        currentStep: 3,
+        highestStep: 3,
+        queueItems: [
+          {
+            id: "occ-playlist-1",
+            url: "https://cached.example.invalid/watch?v=never-authoritative",
+            sourceRef: {
+              kind: "materialized_playlist_item",
+              materializationId: "opaque-owner-bound-materialization",
+              occurrenceId: "occ-playlist-1",
+            },
+            detectedType: "video",
+            icon: "Film",
+            fileSize: 0,
+            validation: { valid: true },
+            playlist: {
+              title: "Playlist row",
+              ordinal: 4,
+              duplicateStatus: "duplicate_existing",
+              materializationExpiresAt: "2099-07-20T00:00:00Z",
+            },
+            playlistReview: {
+              selected: true,
+              duplicatePolicy: "update_metadata_only",
+              metadataPatch: {
+                title: "Edited title",
+                author: "Edited author",
+                keywordsAdd: ["Research", "research", "video"],
+              },
+              editedFields: ["title", "keywordsAdd"],
+            },
+          },
+        ] as WizardQueueItem[],
+      })
+
+      await act(async () => {
+        await userEvent.click(screen.getByText("startProcessing"))
+      })
+
+      expect(screen.getByTestId("status").textContent).toBe("running")
+      expect(JSON.parse(screen.getByTestId("pendingRunRequest").textContent || "null")).toEqual({
+        inputs: [
+          {
+            inputKind: "materialized_playlist_item",
+            occurrenceId: "occ-playlist-1",
+            materializationId: "opaque-owner-bound-materialization",
+          },
+        ],
+        reviewOverrides: {
+          "occ-playlist-1": {
+            duplicatePolicy: "update_metadata_only",
+            metadataPatch: {
+              title: "Edited title",
+              keywordsAdd: ["Research", "video"],
+            },
+          },
+        },
+      })
+      expect(screen.getByTestId("pendingRunRequest")).not.toHaveTextContent("never-authoritative")
+    })
+
+    it.each([
+      ["blank author", { author: "   " }, ["author"]],
+      ["overlong title", { title: "x".repeat(501) }, ["title"]],
+      [
+        "too many keywords",
+        {
+          keywordsAdd: Array.from({ length: 101 }, (_, index) => `tag-${index}`),
+        },
+        ["keywordsAdd"],
+      ],
+      ["overlong keyword", { keywordsAdd: ["x".repeat(129)] }, ["keywordsAdd"]],
+    ] as const)(
+      "blocks an invalid explicit metadata patch: %s",
+      async (_case, metadataPatch, editedFields) => {
+        renderWithInitialState({
+          currentStep: 3,
+          highestStep: 3,
+          queueItems: [
+            {
+              id: "occ-invalid-patch",
+              sourceRef: {
+                kind: "materialized_playlist_item",
+                materializationId: "materialization-invalid-patch",
+                occurrenceId: "occ-invalid-patch",
+              },
+              detectedType: "video",
+              icon: "Film",
+              fileSize: 0,
+              validation: { valid: true },
+              playlist: {
+                duplicateStatus: "duplicate_existing",
+                materializationExpiresAt: "2099-07-20T00:00:00Z",
+              },
+              playlistReview: {
+                selected: true,
+                duplicatePolicy: "update_metadata_only",
+                metadataPatch,
+                editedFields: [...editedFields],
+              },
+            },
+          ] as WizardQueueItem[],
+        })
+
+        await act(async () => {
+          await userEvent.click(screen.getByText("startProcessing"))
+        })
+
+        expect(screen.getByTestId("status").textContent).toBe("idle")
+        expect(screen.getByTestId("pendingRunRequest").textContent).toBe("null")
+        expect(JSON.parse(screen.getByTestId("processingBlock").textContent || "null")).toEqual({
+          code: "review_required",
+          occurrenceIds: ["occ-invalid-patch"],
+        })
+      }
+    )
+
+    it("blocks an expired playlist materialization instead of falling back to its cached URL", async () => {
+      renderWithInitialState({
+        currentStep: 3,
+        highestStep: 3,
+        queueItems: [
+          {
+            id: "occ-expired",
+            url: "https://cached.example.invalid/watch?v=expired",
+            sourceRef: {
+              kind: "materialized_playlist_item",
+              materializationId: "expired-materialization",
+              occurrenceId: "occ-expired",
+            },
+            detectedType: "video",
+            icon: "Film",
+            fileSize: 0,
+            validation: { valid: true },
+            playlist: {
+              title: "Expired row",
+              ordinal: 1,
+              materializationExpiresAt: "2020-01-01T00:00:00Z",
+            },
+          },
+        ] as WizardQueueItem[],
+      })
+
+      await act(async () => {
+        await userEvent.click(screen.getByText("startProcessing"))
+      })
+
+      expect(screen.getByTestId("status").textContent).toBe("idle")
+      expect(screen.getByTestId("pendingRunRequest").textContent).toBe("null")
+      expect(JSON.parse(screen.getByTestId("processingBlock").textContent || "null")).toEqual({
+        code: "materialization_expired",
+        occurrenceIds: ["occ-expired"],
+      })
+    })
+
+    it.each([
+      ["missing source authority", undefined],
+      [
+        "mismatched occurrence authority",
+        {
+          kind: "materialized_playlist_item" as const,
+          materializationId: "materialization-mismatch",
+          occurrenceId: "different-occurrence",
+        },
+      ],
+      [
+        "empty materialization authority",
+        {
+          kind: "materialized_playlist_item" as const,
+          materializationId: "   ",
+          occurrenceId: "occ-invalid-authority",
+        },
+      ],
+    ])("rejects a cached playlist URL with %s", async (_case, sourceRef) => {
+      renderWithInitialState({
+        currentStep: 3,
+        highestStep: 3,
+        queueItems: [
+          {
+            id: "occ-invalid-authority",
+            url: "https://cached.example.invalid/watch?v=must-not-submit",
+            sourceRef,
+            detectedType: "video",
+            icon: "Film",
+            fileSize: 0,
+            validation: { valid: true },
+            playlist: {
+              title: "Persisted materialized row",
+              materializationExpiresAt: "2099-07-20T00:00:00Z",
+            },
+          },
+        ] as WizardQueueItem[],
+      })
+
+      await act(async () => {
+        await userEvent.click(screen.getByText("startProcessing"))
+      })
+
+      expect(screen.getByTestId("status").textContent).toBe("idle")
+      expect(screen.getByTestId("pendingRunRequest").textContent).toBe("null")
+      expect(JSON.parse(screen.getByTestId("processingBlock").textContent || "null")).toEqual({
+        code: "invalid_run_request",
+        occurrenceIds: ["occ-invalid-authority"],
+      })
+      expect(screen.getByTestId("pendingRunRequest")).not.toHaveTextContent("must-not-submit")
+    })
+
+    it.each([
+      ["source URL", { sourceUrl: "https://cached.example.invalid/source-cue" }],
+      ["playlist ID", { playlistId: "playlist-cue" }],
+      ["playlist title", { playlistTitle: "Playlist cue" }],
+      ["ordinal", { ordinal: 2 }],
+      ["channel or uploader", { channelOrUploader: "Channel cue" }],
+      ["duration", { durationSeconds: 0 }],
+      ["normalized source ID", { normalizedSourceId: "video-cue" }],
+      ["materialization expiry", { materializationExpiresAt: "2099-07-20T00:00:00Z" }],
+    ] as Array<[string, NonNullable<WizardQueueItem["playlist"]>]>) (
+      "rejects a cached materialized URL when only the %s cue survives",
+      (_case, playlist) => {
+        const result = buildPlaylistIngestRunRequest([
+          {
+            id: "orphaned-run-cues",
+            kind: "url",
+            url: "https://cached.example.invalid/must-not-submit-cues",
+            detectedType: "video",
+            icon: "Film",
+            fileSize: 0,
+            validation: { valid: true },
+            playlist,
+          },
+        ])
+
+        expect(result).toEqual({
+          request: null,
+          block: {
+            code: "invalid_run_request",
+            occurrenceIds: ["orphaned-run-cues"],
+          },
+        })
+      }
+    )
+
+    it("keeps duplicate-review-only direct URL metadata eligible", () => {
+      const result = buildPlaylistIngestRunRequest([
+        {
+          id: "direct-duplicate-review",
+          kind: "url",
+          url: "https://example.com/direct-duplicate-review",
+          sourceRef: {
+            kind: "direct_url",
+            occurrenceId: "direct-duplicate-review",
+            url: "https://example.com/direct-duplicate-review",
+          },
+          detectedType: "web",
+          icon: "Globe",
+          fileSize: 0,
+          validation: { valid: true },
+          playlist: {
+            title: "Recovered duplicate title",
+            duplicateStatus: "duplicate_existing",
+          },
+          playlistReview: {
+            selected: true,
+            duplicatePolicy: "skip",
+          },
+        },
+      ])
+
+      expect(result.block).toBeNull()
+      expect(result.request?.inputs[0]).toMatchObject({
+        inputKind: "direct_url",
+        occurrenceId: "direct-duplicate-review",
+        url: "https://example.com/direct-duplicate-review",
+      })
+    })
+
+    it.each([
+      [
+        "direct URL",
+        {
+          kind: "direct_url" as const,
+          occurrenceId: "different-direct-id",
+          url: "https://example.com/direct",
+        },
+      ],
+      [
+        "file stub",
+        {
+          kind: "file_stub" as const,
+          occurrenceId: "different-file-id",
+        },
+      ],
+    ])("rejects mismatched %s occurrence authority", (_case, sourceRef) => {
+      const id = sourceRef.kind === "direct_url" ? "direct-id" : "file-id"
+      const result = buildPlaylistIngestRunRequest([
+        {
+          id,
+          sourceRef,
+          ...(sourceRef.kind === "direct_url"
+            ? { url: sourceRef.url }
+            : { fileName: "restored.txt" }),
+          detectedType: sourceRef.kind === "direct_url" ? "web" : "document",
+          icon: "File",
+          fileSize: 0,
+          validation: { valid: true },
+        },
+      ])
+
+      expect(result.request).toBeNull()
+      expect(result.block).toEqual({
+        code: "invalid_run_request",
+        occurrenceIds: [id],
+      })
+    })
+
+    it("rejects duplicate canonical occurrence identifiers before serialization", () => {
+      const queueItems = [1, 2].map(() => ({
+        id: "duplicate-occurrence",
+        sourceRef: {
+          kind: "direct_url" as const,
+          occurrenceId: "duplicate-occurrence",
+          url: "https://example.com/duplicate",
+        },
+        url: "https://example.com/duplicate",
+        detectedType: "web" as const,
+        icon: "Globe",
+        fileSize: 0,
+        validation: { valid: true },
+      }))
+
+      expect(buildPlaylistIngestRunRequest(queueItems)).toEqual({
+        request: null,
+        block: {
+          code: "invalid_run_request",
+          occurrenceIds: ["duplicate-occurrence"],
+        },
+      })
+    })
+
+    it.each([
+      [
+        "oversized direct URL",
+        {
+          id: "oversized-url",
+          sourceRef: {
+            kind: "direct_url" as const,
+            occurrenceId: "oversized-url",
+            url: "x".repeat(8193),
+          },
+          url: "display-only",
+          detectedType: "web" as const,
+          icon: "Globe",
+          fileSize: 0,
+          validation: { valid: true },
+        },
+      ],
+      [
+        "oversized file name",
+        {
+          id: "oversized-name",
+          sourceRef: { kind: "file_stub" as const, occurrenceId: "oversized-name" },
+          fileName: "x".repeat(256),
+          detectedType: "document" as const,
+          icon: "File",
+          fileSize: 0,
+          validation: { valid: true },
+        },
+      ],
+      [
+        "oversized content type",
+        {
+          id: "oversized-content-type",
+          sourceRef: {
+            kind: "file_stub" as const,
+            occurrenceId: "oversized-content-type",
+          },
+          fileName: "restored.txt",
+          mimeType: "x".repeat(256),
+          detectedType: "document" as const,
+          icon: "File",
+          fileSize: 0,
+          validation: { valid: true },
+        },
+      ],
+      [
+        "oversized file",
+        {
+          id: "oversized-file",
+          sourceRef: { kind: "file_stub" as const, occurrenceId: "oversized-file" },
+          fileName: "restored.txt",
+          detectedType: "document" as const,
+          icon: "File",
+          fileSize: 10 * 1024 ** 4 + 1,
+          validation: { valid: true },
+        },
+      ],
+    ])("rejects backend-invalid %s input bounds", (_case, item) => {
+      expect(buildPlaylistIngestRunRequest([item])).toEqual({
+        request: null,
+        block: { code: "invalid_run_request", occurrenceIds: [item.id] },
+      })
+    })
+
+    it("accepts direct and file inputs at backend contract boundaries", () => {
+      const directUrl = "u".repeat(8192)
+      const result = buildPlaylistIngestRunRequest([
+        {
+          id: "direct-boundary",
+          sourceRef: {
+            kind: "direct_url",
+            occurrenceId: "direct-boundary",
+            url: directUrl,
+          },
+          playlist: { title: "t".repeat(2000) },
+          detectedType: "web",
+          icon: "Globe",
+          fileSize: 0,
+          validation: { valid: true },
+        },
+        {
+          id: "file-boundary",
+          sourceRef: { kind: "file_stub", occurrenceId: "file-boundary" },
+          fileName: "n".repeat(255),
+          mimeType: "c".repeat(255),
+          detectedType: "document",
+          icon: "File",
+          fileSize: 10 * 1024 ** 4,
+          validation: { valid: true },
+        },
+      ])
+
+      expect(result.block).toBeNull()
+      expect(result.request?.inputs).toHaveLength(2)
+    })
+
+    it("blocks more than 500 selected run inputs while allowing 500 selected", () => {
+      const queueItems: WizardQueueItem[] = Array.from({ length: 501 }, (_, index) => {
+        const id = `bounded-run-${index + 1}`
+        const url = `https://example.com/${index + 1}`
+        return {
+          id,
+          sourceRef: { kind: "direct_url" as const, occurrenceId: id, url },
+          url,
+          detectedType: "web" as const,
+          icon: "Globe",
+          fileSize: 0,
+          validation: { valid: true },
+        }
+      })
+
+      expect(buildPlaylistIngestRunRequest(queueItems)).toEqual({
+        request: null,
+        block: {
+          code: "invalid_run_request",
+          occurrenceIds: ["bounded-run-501"],
+        },
+      })
+
+      queueItems[500].playlistReview = { selected: false }
+      const bounded = buildPlaylistIngestRunRequest(queueItems)
+      expect(bounded.block).toBeNull()
+      expect(bounded.request?.inputs).toHaveLength(500)
+    })
+
+    it("validates the exact direct URL display title selected by serialization", () => {
+      const result = buildPlaylistIngestRunRequest([
+        {
+          id: "direct-display-title",
+          sourceRef: {
+            kind: "direct_url",
+            occurrenceId: "direct-display-title",
+            url: "https://example.com/display-title",
+          },
+          fileName: "x".repeat(2001),
+          detectedType: "web",
+          icon: "Globe",
+          fileSize: 0,
+          validation: { valid: true },
+        },
+      ])
+
+      expect(result).toEqual({
+        request: null,
+        block: {
+          code: "invalid_run_request",
+          occurrenceIds: ["direct-display-title"],
+        },
+      })
+
+      const blankTitle = buildPlaylistIngestRunRequest([
+        {
+          id: "blank-direct-display-title",
+          sourceRef: {
+            kind: "direct_url",
+            occurrenceId: "blank-direct-display-title",
+            url: "https://example.com/blank-display-title",
+          },
+          fileName: "   ",
+          detectedType: "web",
+          icon: "Globe",
+          fileSize: 0,
+          validation: { valid: true },
+        },
+      ])
+      expect(blankTitle.request?.inputs[0]).toMatchObject({
+        displayMetadata: { title: null },
+      })
+    })
+
+    it("rejects seeded in-run policies outside the initial safe actions unless the server allows them", () => {
+      const duplicate: WizardQueueItem = {
+        id: "seeded-in-run-policy",
+        sourceRef: {
+          kind: "direct_url",
+          occurrenceId: "seeded-in-run-policy",
+          url: "https://example.com/seeded-in-run-policy",
+        },
+        url: "https://example.com/seeded-in-run-policy",
+        detectedType: "web",
+        icon: "Globe",
+        fileSize: 0,
+        validation: { valid: true },
+        playlist: { duplicateStatus: "duplicate_in_batch" },
+        playlistReview: {
+          selected: true,
+          duplicatePolicy: "include_existing",
+        },
+      }
+
+      expect(buildPlaylistIngestRunRequest([duplicate])).toEqual({
+        request: null,
+        block: {
+          code: "review_required",
+          occurrenceIds: ["seeded-in-run-policy"],
+        },
+      })
+
+      duplicate.playlistReview = {
+        ...duplicate.playlistReview,
+        allowedDuplicatePolicies: ["skip", "include_existing", "overwrite"],
+      }
+      const serverAllowed = buildPlaylistIngestRunRequest([duplicate])
+      expect(serverAllowed.block).toBeNull()
+      expect(serverAllowed.request?.reviewOverrides?.["seeded-in-run-policy"]).toEqual({
+        duplicatePolicy: "include_existing",
+      })
+    })
+
+    it("merges structured review-required recovery and returns to Review without marking rows submitted", async () => {
+      renderWithInitialState({
+        currentStep: 4,
+        highestStep: 4,
+        queueItems: [
+          {
+            id: "occ-review-required",
+            sourceRef: {
+              kind: "materialized_playlist_item",
+              materializationId: "materialization-review-required",
+              occurrenceId: "occ-review-required",
+            },
+            detectedType: "video",
+            icon: "Film",
+            fileSize: 0,
+            validation: { valid: true },
+            playlist: {
+              duplicateStatus: "duplicate_in_batch",
+              materializationExpiresAt: "2099-07-20T00:00:00Z",
+            },
+            playlistReview: {
+              selected: true,
+              duplicatePolicy: "skip",
+              metadataPatch: { title: "Keep this edit" },
+              editedFields: ["title"],
+            },
+          },
+        ] as WizardQueueItem[],
+        pendingRunRequest: {
+          inputs: [
+            {
+              inputKind: "materialized_playlist_item",
+              materializationId: "materialization-review-required",
+              occurrenceId: "occ-review-required",
+            },
+          ],
+        },
+        processingState: {
+          status: "running",
+          perItemProgress: [
+            {
+              id: "occ-review-required",
+              status: "queued",
+              progressPercent: 0,
+              currentStage: "",
+              estimatedRemaining: 0,
+            },
+          ],
+          elapsed: 0,
+          estimatedRemaining: 0,
+        },
+      })
+
+      await act(async () => {
+        await userEvent.click(screen.getByText("applyReviewRequired"))
+      })
+
+      expect(screen.getByTestId("currentStep").textContent).toBe("3")
+      expect(screen.getByTestId("highestStep").textContent).toBe("4")
+      expect(screen.getByTestId("status").textContent).toBe("idle")
+      expect(screen.getByTestId("progressIds").textContent).toBe("")
+      expect(screen.getByTestId("pendingRunRequest").textContent).toBe("null")
+      expect(JSON.parse(screen.getByTestId("queueItems").textContent || "[]")[0]).toMatchObject({
+        playlist: { duplicateStatus: "duplicate_existing" },
+        playlistReview: {
+          selected: true,
+          duplicateEvidence: {
+            kind: "library",
+            existingMediaId: 42,
+            duplicateOfOccurrenceId: null,
+          },
+          allowedDuplicatePolicies: ["skip", "update_metadata_only"],
+          reviewReason: "duplicate_target_changed",
+          metadataPatch: { title: "Keep this edit" },
+          editedFields: ["title"],
+        },
+      })
+      expect(
+        JSON.parse(screen.getByTestId("queueItems").textContent || "[]")[0].playlistReview
+          .duplicatePolicy
+      ).toBeUndefined()
+      expect(JSON.parse(screen.getByTestId("processingBlock").textContent || "null")).toEqual({
+        code: "review_required",
+        occurrenceIds: ["occ-review-required"],
+      })
+    })
+
+    it("clears the Review block when fresh evidence says the row is no longer duplicate", async () => {
+      renderWithInitialState({
+        currentStep: 4,
+        highestStep: 4,
+        queueItems: [
+          {
+            id: "occ-review-required",
+            sourceRef: {
+              kind: "materialized_playlist_item",
+              materializationId: "materialization-no-longer-duplicate",
+              occurrenceId: "occ-review-required",
+            },
+            detectedType: "video",
+            icon: "Film",
+            fileSize: 0,
+            validation: { valid: true },
+            playlist: {
+              duplicateStatus: "duplicate_existing",
+              materializationExpiresAt: "2099-07-20T00:00:00Z",
+            },
+            playlistReview: {
+              selected: true,
+              duplicatePolicy: "overwrite",
+              duplicateEvidence: {
+                kind: "library",
+                existingMediaId: 42,
+                duplicateOfOccurrenceId: null,
+              },
+            },
+          },
+        ],
+        processingBlock: {
+          code: "review_required",
+          occurrenceIds: ["occ-review-required"],
+        },
+      })
+
+      await act(async () => {
+        await userEvent.click(screen.getByText("applyNoLongerDuplicate"))
+      })
+
+      expect(screen.getByTestId("currentStep").textContent).toBe("3")
+      expect(JSON.parse(screen.getByTestId("queueItems").textContent || "[]")[0]).toMatchObject({
+        playlist: { duplicateStatus: "new" },
+        playlistReview: {
+          selected: true,
+          duplicateEvidence: {
+            kind: "none",
+            existingMediaId: null,
+            duplicateOfOccurrenceId: null,
+          },
+          allowedDuplicatePolicies: [],
+          reviewReason: "duplicate_no_longer_present",
+        },
+      })
+      expect(
+        JSON.parse(screen.getByTestId("queueItems").textContent || "[]")[0].playlistReview
+          .duplicatePolicy
+      ).toBeUndefined()
+      expect(screen.getByTestId("processingBlock").textContent).toBe("null")
+
+      await act(async () => {
+        await userEvent.click(screen.getByText("startProcessing"))
+      })
+
+      expect(screen.getByTestId("currentStep").textContent).toBe("4")
+      expect(screen.getByTestId("status").textContent).toBe("running")
+      expect(JSON.parse(screen.getByTestId("pendingRunRequest").textContent || "null")).toEqual({
+        inputs: [
+          {
+            inputKind: "materialized_playlist_item",
+            materializationId: "materialization-no-longer-duplicate",
+            occurrenceId: "occ-review-required",
+          },
+        ],
+      })
+    })
+
     it("skipToProcessing jumps to step 4 with running status", async () => {
       renderWithProvider()
 
@@ -636,7 +1390,7 @@ describe("IngestWizardContext", () => {
       expect(screen.getByTestId("progressIds").textContent).toBe("")
     })
 
-    it("does not quick-process an invalid-only queue", async () => {
+    it("routes an invalid-only quick process to visible review feedback", async () => {
       renderWithProvider()
 
       await act(async () => {
@@ -647,9 +1401,13 @@ describe("IngestWizardContext", () => {
         await userEvent.click(screen.getByText("skipToProcessing"))
       })
 
-      expect(screen.getByTestId("currentStep").textContent).toBe("1")
+      expect(screen.getByTestId("currentStep").textContent).toBe("3")
       expect(screen.getByTestId("status").textContent).toBe("idle")
       expect(screen.getByTestId("progressIds").textContent).toBe("")
+      expect(JSON.parse(screen.getByTestId("processingBlock").textContent || "null")).toEqual({
+        code: "invalid_run_request",
+        occurrenceIds: [],
+      })
     })
 
     it("cancelProcessing sets status to cancelled", async () => {

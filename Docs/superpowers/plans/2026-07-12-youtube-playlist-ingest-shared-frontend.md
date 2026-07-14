@@ -53,7 +53,7 @@
 
 **Tests:** Media-domain tests, capability tests, controller tests, AddContent integration tests.
 
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 1: Add version-2 client models and capability gating
 
@@ -151,7 +151,7 @@ Verification before commit: behavior RED was 13 failed / 7 passed; Strict Mode s
 
 **Tests:** Paging normalizer tests, virtual list tests, selection reconciliation, queue serialization tests.
 
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 3: Paginate and virtualize the preflight panel
 
@@ -184,17 +184,17 @@ Verification before commit: the initial Task 3 paging/panel RED was 13/13 failur
 
 ### Task 4: Materialize occurrences and carry Review-time overrides
 
-- [ ] **Step 1: Write failing queue/review tests**
+- [x] **Step 1: Write failing queue/review tests**
 
 Assert Add sends selected occurrence IDs, creates no rows on materialization failure, stores materialization ID/token plus occurrence ID, renders title/ordinal as primary text, and lets Review edit per-occurrence duplicate policy and only title/author/keywords-add metadata. Add 500-item tests proving both the queue and Review render bounded row counts with filters, and an expired-materialization test proving Start Processing requires reinspection rather than cached URL fallback.
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 Run: `cd apps/tldw-frontend && bunx vitest run ../packages/ui/src/components/Common/QuickIngest/__tests__/IngestWizardContext.test.tsx ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx --maxWorkers=1 --no-file-parallelism --testNamePattern="playlist|materialization|review"`
 
 Expected: FAIL because queue rows contain client-generated IDs and preflight URLs.
 
-- [ ] **Step 3: Extend queue types and materialization handling**
+- [x] **Step 3: Extend queue types and materialization handling**
 
 Add a discriminated source reference to `WizardQueueItem`:
 
@@ -207,11 +207,11 @@ type WizardSourceRef =
 
 Playlist row `id` equals the server occurrence ID. Preserve compact title/playlist/ordinal/channel/duration display data, but never treat cached playlist URLs as authoritative after materialization expiry. Keep duplicate policy/metadata patch in Review state, not materialization state. Virtualize the Add-step queue and `ItemMetadataTable` with stable occurrence keys. Add queue filters for playlist/type/duplicate state and Review filters for selected/duplicates/policy; filters change visibility only, never selection.
 
-- [ ] **Step 4: Build the exact Start Processing payload**
+- [x] **Step 4: Build the exact Start Processing payload**
 
 Serialize selected input records plus `review_overrides[occurrenceId]`. Include an explicit duplicate policy for every current duplicate and include a patch only for explicitly edited allowlisted fields. On backend `review_required`, merge refreshed duplicate evidence and return to Review without marking rows as submitted.
 
-- [ ] **Step 5: Run tests and commit**
+- [x] **Step 5: Run tests and commit**
 
 Run the command from Step 2 without the name filter.
 
@@ -221,6 +221,8 @@ Expected: PASS.
 git add apps/packages/ui/src/components/Common/QuickIngest/types.ts apps/packages/ui/src/components/Common/QuickIngest/IngestWizardContext.tsx apps/packages/ui/src/components/Common/QuickIngest/ReviewStep.tsx apps/packages/ui/src/components/Common/QuickIngest/ItemMetadataTable.tsx apps/packages/ui/src/components/Common/QuickIngest/AddContentStep.tsx apps/packages/ui/src/components/Common/QuickIngest/__tests__
 git commit -m "feat: preserve playlist occurrence identity in review (TASK-12113)"
 ```
+
+Verification before commit: Task 4 was implemented through focused RED/GREEN cycles covering authoritative occurrence materialization, atomic queue mutation, virtualized queue/Review navigation, allowlisted per-occurrence overrides, exact run-request serialization, fail-closed persistence recovery, the 500-input limit, stale duplicate evidence, cached-authority rejection, and evidence-none Review recovery. Final frontend Vitest passed 200/200 across the five Task 4 suites. Backend playlist service and endpoint tests passed 149/149. Repository-pinned production ESLint exited 0 with zero rule findings (apart from the existing Next.js pages-directory informational message), Bandit reported zero findings across the touched 1,334-line backend service, and `git diff --check` passed. Final specification and code-quality re-reviews approved the diff. Full TypeScript was not rerun after the Task 1 three-attempt repository-baseline cap. A blanket Prettier write was not used because the shared package has conflicting frontend/extension configurations; changed hunks were reviewed directly and the whitespace gate passed.
 
 ## Stage 3: Shared run submission and status transport
 

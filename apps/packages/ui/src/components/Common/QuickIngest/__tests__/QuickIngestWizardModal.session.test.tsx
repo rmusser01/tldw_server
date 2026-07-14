@@ -101,7 +101,11 @@ vi.mock("antd", () => ({
     }
   ),
   Collapse: ({ items }: any) => (
-    <div>{items?.map((item: any) => <div key={item.key}>{item.children}</div>)}</div>
+    <div>
+      {items?.map((item: any) => (
+        <div key={item.key}>{item.children}</div>
+      ))}
+    </div>
   ),
 }))
 
@@ -225,7 +229,13 @@ vi.mock("@/components/Common/QuickIngest/AddContentStep", async () => {
               setQueueItems([
                 {
                   id: "conference-talk-1",
+                  kind: "url",
                   url: "https://youtube.com/watch?v=talk-1",
+                  sourceRef: {
+                    kind: "materialized_playlist_item",
+                    materializationId: "conference-materialization",
+                    occurrenceId: "conference-talk-1",
+                  },
                   detectedType: "video",
                   icon: "Film",
                   fileSize: 0,
@@ -236,6 +246,7 @@ vi.mock("@/components/Common/QuickIngest/AddContentStep", async () => {
                     ordinal: 1,
                     normalizedSourceId: "youtube:video:talk-1",
                     duplicateStatus: "new",
+                    materializationExpiresAt: "2099-01-01T00:00:00Z",
                   },
                   conferenceOverride: {
                     selected: true,
@@ -250,8 +261,113 @@ vi.mock("@/components/Common/QuickIngest/AddContentStep", async () => {
           >
             Queue Conference And Process
           </button>
+          <button
+            onClick={() => {
+              setQueueItems([
+                {
+                  id: "occ-persisted-playlist",
+                  kind: "url",
+                  url: "https://cached.example.invalid/watch?v=display-only",
+                  sourceRef: {
+                    kind: "materialized_playlist_item",
+                    materializationId: "opaque-owner-bound-materialization",
+                    occurrenceId: "occ-persisted-playlist",
+                  },
+                  detectedType: "video",
+                  icon: "Film",
+                  fileSize: 0,
+                  validation: { valid: true },
+                  playlist: {
+                    title: "Persisted playlist row",
+                    playlistTitle: "Persisted playlist",
+                    ordinal: 7,
+                    materializationExpiresAt: "2099-01-01T00:00:00Z",
+                  },
+                  playlistReview: {
+                    selected: true,
+                    duplicatePolicy: "overwrite",
+                    editedFields: ["title"],
+                    metadataPatch: { title: "Edited persisted title" },
+                  },
+                },
+              ])
+            }}
+          >
+            Queue Playlist Draft
+          </button>
+          <button
+            onClick={() => {
+              setQueueItems([
+                {
+                  id: "occ-blocked-quick",
+                  kind: "url",
+                  url: "https://cached.example.invalid/watch?v=blocked-quick",
+                  sourceRef: {
+                    kind: "materialized_playlist_item",
+                    materializationId: "blocked-quick-materialization",
+                    occurrenceId: "occ-blocked-quick",
+                  },
+                  detectedType: "video",
+                  icon: "Film",
+                  fileSize: 0,
+                  validation: { valid: true },
+                  playlist: {
+                    duplicateStatus: "duplicate_existing",
+                    materializationExpiresAt: "2099-01-01T00:00:00Z",
+                  },
+                  playlistReview: { selected: true },
+                },
+              ])
+              onQuickProcess?.()
+            }}
+          >
+            Queue Blocked Duplicate And Process
+          </button>
+          <button
+            onClick={() => {
+              setQueueItems([
+                {
+                  id: "direct-review-reload",
+                  kind: "url",
+                  url: "https://example.com/direct-review-reload",
+                  sourceRef: {
+                    kind: "direct_url",
+                    occurrenceId: "direct-review-reload",
+                    url: "https://example.com/direct-review-reload",
+                  },
+                  detectedType: "web",
+                  icon: "Globe",
+                  fileSize: 0,
+                  validation: { valid: true },
+                },
+              ])
+              context.applyPlaylistReviewRequired([
+                {
+                  occurrenceId: "direct-review-reload",
+                  reason: "duplicate_action_required",
+                  evidence: {
+                    kind: "library",
+                    existingMediaId: 42,
+                    duplicateOfOccurrenceId: null,
+                  },
+                  allowedActions: ["skip", "include_existing", "overwrite"],
+                },
+              ])
+            }}
+          >
+            Queue Direct Duplicate Review
+          </button>
           {state.queueItems.map((item) => (
-            <div key={item.id} data-testid={`queued-item-${item.id}`}>
+            <div key={item.id}
+              data-testid={`queued-item-${item.id}`}
+              data-kind={item.kind ?? ""}
+              data-url={item.url ?? ""}
+              data-file-name={item.fileName ?? ""}
+              data-source-ref={JSON.stringify(item.sourceRef ?? null)}
+              data-playlist={JSON.stringify(item.playlist ?? null)}
+              data-playlist-review={JSON.stringify(item.playlistReview ?? null)}
+              data-validation={JSON.stringify(item.validation)}
+            >
               <span>{item.fileName || item.url || item.id}</span>
               {item.validation.warnings?.map((warning) => (
                 <span key={`${item.id}-${warning}`}>{warning}</span>
@@ -264,9 +380,48 @@ vi.mock("@/components/Common/QuickIngest/AddContentStep", async () => {
   }
 })
 
-vi.mock("@/components/Common/QuickIngest/ReviewStep", () => ({
-  ReviewStep: () => <div data-testid="wizard-review" />,
-}))
+vi.mock("@/components/Common/QuickIngest/ReviewStep", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/components/Common/QuickIngest/IngestWizardContext")
+  >("@/components/Common/QuickIngest/IngestWizardContext")
+  return {
+    ReviewStep: () => {
+      const { state, updateQueueItems } = actual.useIngestWizard()
+      return (
+        <div
+          data-testid="wizard-review"
+          data-processing-block={state.processingBlock?.code ?? ""}
+        >
+          <button
+            onClick={() =>
+              updateQueueItems((current) =>
+                current.map((item) => ({
+                  ...item,
+                  playlistReview: {
+                    selected: item.playlistReview?.selected ?? true,
+                    ...(item.playlistReview || {}),
+                    duplicatePolicy: "skip",
+                  },
+                }))
+              )
+            }
+          >
+            Resolve duplicate
+          </button>
+          {state.queueItems.map((item) => (
+            <div
+              key={item.id}
+              data-testid={`review-item-${item.id}`}
+              data-source-ref={JSON.stringify(item.sourceRef ?? null)}
+              data-playlist={JSON.stringify(item.playlist ?? null)}
+              data-validation={JSON.stringify(item.validation)}
+            />
+          ))}
+        </div>
+      )
+    },
+  }
+})
 
 vi.mock("@/components/Common/QuickIngest/WizardConfigureStep", async () => {
   const actual = await vi.importActual<
@@ -371,8 +526,7 @@ vi.mock("@/components/Common/QuickIngest/WizardResultsStep", async () => {
           {onOpenCollection ? (
             <button
               type="button"
-              onClick={() => onOpenCollection("7")}
-            >
+              onClick={() => onOpenCollection("7")}>
               Open collection
             </button>
           ) : null}
@@ -456,6 +610,140 @@ describe("QuickIngestWizardModal session runtime", () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.restoreAllMocks()
+  })
+
+  it("routes a blocked manual quick process to visible Review feedback", async () => {
+    const user = userEvent.setup()
+    useQuickIngestSessionStore.getState().createDraftSession()
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+
+    await user.click(
+      screen.getByRole("button", { name: "Queue Blocked Duplicate And Process" })
+    )
+
+    expect(await screen.findByTestId("wizard-review")).toHaveAttribute(
+      "data-processing-block",
+      "review_required"
+    )
+    expect(mocks.startQuickIngestSession).not.toHaveBeenCalled()
+    expect(mocks.submitQuickIngestBatch).not.toHaveBeenCalled()
+  })
+
+  it("keeps blocked auto-process retry available until Review resolves the block", async () => {
+    const user = userEvent.setup()
+    useQuickIngestSessionStore.getState().createDraftSession({
+      queueItems: [
+        {
+          id: "auto-blocked-duplicate",
+          kind: "url",
+          url: "https://cached.example.invalid/watch?v=auto-blocked",
+          sourceRef: {
+            kind: "materialized_playlist_item",
+            materializationId: "auto-blocked-materialization",
+            occurrenceId: "auto-blocked-duplicate",
+          },
+          detectedType: "video",
+          icon: "Film",
+          fileSize: 0,
+          validation: { valid: true },
+          playlist: {
+            duplicateStatus: "duplicate_existing",
+            materializationExpiresAt: "2099-01-01T00:00:00Z",
+          },
+          playlistReview: { selected: true },
+        },
+      ],
+    } as never)
+    mocks.startQuickIngestSession.mockResolvedValue({
+      ok: true,
+      sessionId: "auto-blocked-session",
+    })
+    mocks.submitQuickIngestBatch.mockReturnValue(new Promise(() => {}))
+
+    render(<QuickIngestWizardModal open autoProcessQueued onClose={vi.fn()} />)
+
+    const review = await screen.findByTestId("wizard-review")
+    expect(review).toHaveAttribute("data-processing-block", "review_required")
+    expect(mocks.startQuickIngestSession).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole("button", { name: "Resolve duplicate" }))
+
+    await waitFor(() => expect(mocks.startQuickIngestSession).toHaveBeenCalledTimes(1))
+    expect(screen.getByTestId("wizard-processing")).toHaveTextContent("running:1")
+  })
+
+  it("reloads fresh duplicate review metadata without invalidating direct URL authority", async () => {
+    const user = userEvent.setup()
+    useQuickIngestSessionStore.getState().createDraftSession()
+    const mounted = render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+
+    await user.click(screen.getByRole("button", { name: "Queue Direct Duplicate Review" }))
+    await waitFor(() => {
+      expect(useQuickIngestSessionStore.getState().session?.queueItems[0]).toMatchObject({
+        sourceRef: {
+          kind: "direct_url",
+          occurrenceId: "direct-review-reload",
+          url: "https://example.com/direct-review-reload",
+        },
+        validation: { valid: true },
+        playlist: { duplicateStatus: "duplicate_existing" },
+      })
+    })
+
+    mounted.unmount()
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+
+    const restored = screen.getByTestId("review-item-direct-review-reload")
+    expect(JSON.parse(restored.getAttribute("data-source-ref") || "null")).toEqual({
+      kind: "direct_url",
+      occurrenceId: "direct-review-reload",
+      url: "https://example.com/direct-review-reload",
+    })
+    expect(JSON.parse(restored.getAttribute("data-playlist") || "null")).toMatchObject({
+      duplicateStatus: "duplicate_existing",
+    })
+    expect(JSON.parse(restored.getAttribute("data-validation") || "null")).toMatchObject({
+      valid: true,
+    })
+  })
+
+  it("hydrates orphaned materialization cues as an invalid display-only row", () => {
+    useQuickIngestSessionStore.getState().upsertSession({
+      ...createEmptyQuickIngestSession(),
+      lifecycle: "draft",
+      currentStep: 1,
+      queueItems: [
+        {
+          id: "hydrate-orphaned-materialized-cues",
+          kind: "url",
+          url: "https://cached.example.invalid/hydrate-orphaned-cues",
+          detectedType: "video",
+          icon: "Film",
+          fileSize: 0,
+          validation: { valid: true },
+          playlist: {
+            sourceUrl: "https://cached.example.invalid/hydrate-orphaned-cues",
+            playlistTitle: "Lost materialization",
+          },
+        },
+      ],
+    } as never)
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+
+    const row = screen.getByTestId("queued-item-hydrate-orphaned-materialized-cues")
+    expect(row).toHaveAttribute(
+      "data-url",
+      "https://cached.example.invalid/hydrate-orphaned-cues"
+    )
+    expect(row).toHaveAttribute("data-source-ref", "null")
+    expect(JSON.parse(row.getAttribute("data-validation") || "null")).toMatchObject({
+      valid: false,
+      errors: ["Reattach this source before processing."],
+    })
+    expect(mocks.startQuickIngestSession).not.toHaveBeenCalled()
+    expect(mocks.submitQuickIngestBatch).not.toHaveBeenCalled()
   })
 
   it("submits the queued wizard batch through the authenticated quick-ingest transport", async () => {
@@ -931,9 +1219,7 @@ describe("QuickIngestWizardModal session runtime", () => {
     await waitFor(() => {
       expect(screen.getByTestId("wizard-results")).toHaveTextContent("complete:1")
     })
-    expect(useQuickIngestSessionStore.getState().session?.openDetail).toEqual(
-      firstSourceDetail
-    )
+    expect(useQuickIngestSessionStore.getState().session?.openDetail).toEqual(firstSourceDetail)
   })
 
   it("syncs cleared first-source add mode from wizard reset", async () => {
@@ -949,9 +1235,7 @@ describe("QuickIngestWizardModal session runtime", () => {
     await user.click(screen.getByRole("button", { name: "Start over" }))
 
     await waitFor(() => {
-      expect(
-        useQuickIngestSessionStore.getState().session?.firstSourceAddMode,
-      ).toBeNull()
+      expect(useQuickIngestSessionStore.getState().session?.firstSourceAddMode).toBeNull()
     })
   })
 
@@ -976,9 +1260,7 @@ describe("QuickIngestWizardModal session runtime", () => {
 
     render(<QuickIngestWizardModal open onClose={vi.fn()} />)
 
-    await user.click(
-      screen.getByRole("button", { name: "Queue Conference And Process" })
-    )
+    await user.click(screen.getByRole("button", { name: "Queue Conference And Process" }))
 
     await waitFor(() => {
       expect(mocks.submitQuickIngestBatch).toHaveBeenCalledTimes(1)
@@ -1530,9 +1812,7 @@ describe("QuickIngestWizardModal session runtime", () => {
       },
     })
 
-    const { rerender } = render(
-      <QuickIngestWizardModal open={false} onClose={onClose} />
-    )
+    const { rerender } = render(<QuickIngestWizardModal open={false} onClose={onClose} />)
 
     rerender(<QuickIngestWizardModal open onClose={onClose} />)
 
@@ -1584,6 +1864,59 @@ describe("QuickIngestWizardModal session runtime", () => {
     expect(screen.getByTestId("wizard-results")).toHaveTextContent("complete:1")
   })
 
+  it("persists and rehydrates playlist materialization authority, expiry, and review choices", async () => {
+    const user = userEvent.setup()
+    useQuickIngestSessionStore.getState().createDraftSession()
+    const mounted = render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+
+    await user.click(screen.getByRole("button", { name: "Queue Playlist Draft" }))
+
+    await waitFor(() => {
+      expect(useQuickIngestSessionStore.getState().session?.queueItems).toEqual([
+        expect.objectContaining({
+          id: "occ-persisted-playlist",
+          sourceRef: {
+            kind: "materialized_playlist_item",
+            materializationId: "opaque-owner-bound-materialization",
+            occurrenceId: "occ-persisted-playlist",
+          },
+          playlist: expect.objectContaining({
+            materializationExpiresAt: "2099-01-01T00:00:00Z",
+          }),
+          playlistReview: expect.objectContaining({
+            selected: true,
+            duplicatePolicy: "overwrite",
+            editedFields: ["title"],
+            metadataPatch: { title: "Edited persisted title" },
+          }),
+        }),
+      ])
+    })
+
+    mounted.unmount()
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+
+    const row = screen.getByTestId("queued-item-occ-persisted-playlist")
+    expect(JSON.parse(row.getAttribute("data-source-ref") || "null")).toEqual({
+      kind: "materialized_playlist_item",
+      materializationId: "opaque-owner-bound-materialization",
+      occurrenceId: "occ-persisted-playlist",
+    })
+    expect(JSON.parse(row.getAttribute("data-playlist") || "null")).toEqual(
+      expect.objectContaining({
+        title: "Persisted playlist row",
+        ordinal: 7,
+        materializationExpiresAt: "2099-01-01T00:00:00Z",
+      })
+    )
+    expect(JSON.parse(row.getAttribute("data-playlist-review") || "null")).toEqual(
+      expect.objectContaining({
+        duplicatePolicy: "overwrite",
+        editedFields: ["title"],
+      })
+    )
+  })
+
   it("restores persisted file stubs with a reattach-required warning", () => {
     useQuickIngestSessionStore.getState().upsertSession({
       ...createEmptyQuickIngestSession(),
@@ -1614,6 +1947,81 @@ describe("QuickIngestWizardModal session runtime", () => {
 
     expect(screen.getByTestId("queued-item-queued-file-1")).toHaveTextContent("clip.mkv")
     expect(screen.getByText("Reattach this file after refresh to process it.")).toBeVisible()
+  })
+
+  it("hydrates corrupt persisted display fields from their source authority", () => {
+    useQuickIngestSessionStore.getState().upsertSession({
+      ...createEmptyQuickIngestSession(),
+      lifecycle: "draft",
+      currentStep: 1,
+      queueItems: [
+        {
+          id: "hydrate-direct",
+          sourceRef: {
+            kind: "direct_url",
+            occurrenceId: "hydrate-direct",
+            url: "https://example.com/hydrate-direct",
+          },
+          kind: "file",
+          url: "https://cached.example.invalid/hydrate-direct",
+          fileName: "wrong-direct.txt",
+          detectedType: "web",
+          icon: "Globe",
+          fileSize: 0,
+          validation: { valid: true },
+        },
+        {
+          id: "hydrate-file",
+          sourceRef: { kind: "file_stub", occurrenceId: "hydrate-file" },
+          kind: "url",
+          url: "https://example.com/not-a-file",
+          name: "hydrate-file.pdf",
+          detectedType: "pdf",
+          icon: "FileText",
+          fileSize: 32,
+          validation: { valid: true },
+        },
+        {
+          id: "hydrate-materialized",
+          sourceRef: {
+            kind: "materialized_playlist_item",
+            materializationId: "hydrate-materialization",
+            occurrenceId: "hydrate-materialized",
+          },
+          kind: "file",
+          url: "https://cached.example.invalid/hydrate-materialized",
+          fileName: "wrong-materialized.txt",
+          detectedType: "video",
+          icon: "Film",
+          fileSize: 0,
+          validation: { valid: true },
+          playlist: { materializationExpiresAt: "2099-01-01T00:00:00Z" },
+        },
+      ],
+    } as never)
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+
+    const direct = screen.getByTestId("queued-item-hydrate-direct")
+    expect(direct).toHaveAttribute("data-kind", "url")
+    expect(direct).toHaveAttribute("data-url", "https://example.com/hydrate-direct")
+    expect(direct).toHaveAttribute("data-file-name", "")
+
+    const file = screen.getByTestId("queued-item-hydrate-file")
+    expect(file).toHaveAttribute("data-kind", "file")
+    expect(file).toHaveAttribute("data-url", "")
+    expect(file).toHaveAttribute("data-file-name", "hydrate-file.pdf")
+    expect(JSON.parse(file.getAttribute("data-validation") || "null")).toMatchObject({
+      valid: false,
+    })
+
+    const materialized = screen.getByTestId("queued-item-hydrate-materialized")
+    expect(materialized).toHaveAttribute("data-kind", "url")
+    expect(materialized).toHaveAttribute(
+      "data-url",
+      "https://cached.example.invalid/hydrate-materialized"
+    )
+    expect(materialized).toHaveAttribute("data-file-name", "")
   })
 
   it("reattaches persisted direct-ingest jobs after refresh", async () => {

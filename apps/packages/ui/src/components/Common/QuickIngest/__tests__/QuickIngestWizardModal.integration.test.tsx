@@ -2,7 +2,7 @@ import React from "react"
 import { existsSync, readFileSync } from "node:fs"
 import path from "node:path"
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 // ---------------------------------------------------------------------------
@@ -337,6 +337,30 @@ vi.mock("wxt/browser", () => ({
 vi.mock("@/components/Common/QuickIngest/useIngestSSE", () => ({
   useIngestSSE: () => {},
   default: () => {},
+}))
+
+vi.mock("@tanstack/react-virtual", () => ({
+  useVirtualizer: ({ count, getItemKey }: any) => {
+    const [start, setStart] = React.useState(0)
+    const mountedCount = Math.min(count, 12)
+    const boundedStart = Math.min(start, Math.max(0, count - mountedCount))
+    return {
+      getTotalSize: () => count * 72,
+      getVirtualItems: () =>
+        Array.from({ length: mountedCount }, (_, offset) => {
+          const index = boundedStart + offset
+          return {
+          index,
+          start: index * 72,
+          size: 72,
+          key: getItemKey?.(index) ?? index,
+          }
+        }),
+      measureElement: vi.fn(),
+      scrollToIndex: (index: number) =>
+        setStart(Math.max(0, index - mountedCount + 1)),
+    }
+  },
 }))
 
 // FileDropZone — simple placeholder div
@@ -764,6 +788,250 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
     expect(configureButton).toBeTruthy()
     expect(configureButton).not.toBeDisabled()
   })
+
+  it("keeps a 500-item playlist queue bounded and filters visibility without removing rows", async () => {
+    const queueItems = Array.from({ length: 500 }, (_, index) => ({
+      id: `occ-queue-scale-${index + 1}`,
+      sourceRef: {
+        kind: "materialized_playlist_item" as const,
+        materializationId: "queue-scale-materialization",
+        occurrenceId: `occ-queue-scale-${index + 1}`,
+      },
+      detectedType: "video" as const,
+      icon: "Film",
+      fileSize: 0,
+      validation: { valid: true },
+      playlist: {
+        title: `Queued video ${index + 1}`,
+        playlistTitle: index < 250 ? "Queue playlist A" : "Queue playlist B",
+        ordinal: index + 1,
+        duplicateStatus: index % 2 === 0 ? ("new" as const) : ("duplicate_existing" as const),
+        materializationExpiresAt: "2099-01-01T00:00:00Z",
+      },
+      playlistReview: { selected: true },
+    }))
+    render(<WizardTestHarness onClose={onClose} initialState={{ queueItems }} />)
+
+    const queueList = screen.getByRole("list", { name: "Queued ingest items" })
+    expect(within(queueList).getAllByRole("listitem").length).toBeLessThan(30)
+
+    const twelfth = queueList.querySelector<HTMLElement>(
+      '[data-occurrence-id="occ-queue-scale-12"]'
+    )
+    twelfth?.focus()
+    fireEvent.keyDown(twelfth as HTMLElement, { key: "ArrowDown" })
+    await waitFor(() =>
+      expect(document.activeElement).toHaveAttribute(
+        "data-occurrence-id",
+        "occ-queue-scale-13"
+      )
+    )
+
+    const thirteenth = queueList.querySelector<HTMLElement>(
+      '[data-occurrence-id="occ-queue-scale-13"]'
+    )
+    const removeButton = within(thirteenth as HTMLElement).getByRole("button", {
+      name: "Remove this item from queue",
+    })
+    removeButton.focus()
+    fireEvent.keyDown(removeButton, { key: "ArrowDown" })
+    expect(removeButton).toHaveFocus()
+    fireEvent.keyDown(removeButton, { key: "Escape" })
+    expect(thirteenth).toHaveFocus()
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Filter queued items by playlist" }), {
+      target: { value: "Queue playlist B" },
+    })
+    await waitFor(() =>
+      expect(document.activeElement).toHaveAttribute(
+        "data-occurrence-id",
+        "occ-queue-scale-263"
+      )
+    )
+
+    act(() => {
+      ctxRef?.updateQueueItems((current) =>
+        current.filter((item) => item.id !== "occ-queue-scale-263")
+      )
+    })
+    await waitFor(() =>
+      expect(document.activeElement).toHaveAttribute(
+        "data-occurrence-id",
+        "occ-queue-scale-264"
+      )
+    )
+
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", {
+        name: "Filter queued items by duplicate state",
+      }),
+      "duplicates"
+    )
+
+    expect(screen.getByText("Showing 125 of 499 queued items")).toBeInTheDocument()
+    expect(ctxRef?.state.queueItems).toHaveLength(499)
+    for (const row of within(queueList).getAllByRole("listitem")) {
+      const occurrenceNumber = Number(row.getAttribute("data-occurrence-id")?.split("-").at(-1))
+      expect(occurrenceNumber % 2).toBe(0)
+    }
+  })
+
+  it("resets stale queue filters when the last playlist row is removed", async () => {
+    const ordinaryUrl = "https://example.com/ordinary-after-filter-reset"
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        initialState={{
+          queueItems: [
+            {
+              id: "filter-reset-playlist",
+              sourceRef: {
+                kind: "materialized_playlist_item",
+                materializationId: "filter-reset-materialization",
+                occurrenceId: "filter-reset-playlist",
+              },
+              detectedType: "video",
+              icon: "Film",
+              fileSize: 0,
+              validation: { valid: true },
+              playlist: {
+                title: "Playlist filter row",
+                playlistTitle: "Temporary playlist",
+                ordinal: 1,
+                duplicateStatus: "new",
+                materializationExpiresAt: "2099-01-01T00:00:00Z",
+              },
+              playlistReview: { selected: true },
+            },
+            {
+              id: "filter-reset-ordinary",
+              sourceRef: {
+                kind: "direct_url",
+                occurrenceId: "filter-reset-ordinary",
+                url: ordinaryUrl,
+              },
+              url: ordinaryUrl,
+              detectedType: "web",
+              icon: "Globe",
+              fileSize: 0,
+              validation: { valid: true },
+            },
+          ],
+        }}
+      />
+    )
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Filter queued items by playlist" }), {
+      target: { value: "Temporary playlist" },
+    })
+    const queueList = screen.getByRole("list", { name: "Queued ingest items" })
+    expect(within(queueList).queryByText(ordinaryUrl)).not.toBeInTheDocument()
+
+    act(() => {
+      ctxRef?.updateQueueItems((current) =>
+        current.filter((item) => item.id !== "filter-reset-playlist")
+      )
+    })
+
+    await waitFor(() => expect(within(queueList).getByText(ordinaryUrl)).toBeInTheDocument())
+    expect(
+      screen.queryByRole("combobox", { name: "Filter queued items by playlist" })
+    ).not.toBeInTheDocument()
+  })
+
+  it("keeps conference metadata opt-in reachable for a materialized playlist", () => {
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        initialState={{
+          queueItems: [
+            {
+              id: "occ-conference-opt-in",
+              sourceRef: {
+                kind: "materialized_playlist_item",
+                materializationId: "conference-opt-in-materialization",
+                occurrenceId: "occ-conference-opt-in",
+              },
+              detectedType: "video",
+              icon: "Film",
+              fileSize: 0,
+              validation: { valid: true },
+              playlist: {
+                title: "Opening keynote",
+                playlistTitle: "Conference playlist",
+                ordinal: 1,
+                duplicateStatus: "new",
+                materializationExpiresAt: "2099-01-01T00:00:00Z",
+              },
+              playlistReview: { selected: true },
+            },
+          ],
+        }}
+      />
+    )
+
+    expect(screen.getByRole("region", { name: "Conference batch metadata" })).toBeInTheDocument()
+    expect(screen.getByRole("textbox", { name: "Collection name" })).toHaveValue(
+      "Conference playlist"
+    )
+  })
+
+  it("keeps virtual conference rows keyboard reachable and re-homes focus after removal", async () => {
+    const queueItems = Array.from({ length: 30 }, (_, index) => {
+      const id = `conference-row-${index + 1}`
+      const url = `https://example.com/talk-${index + 1}`
+      return {
+        id,
+        sourceRef: { kind: "direct_url" as const, occurrenceId: id, url },
+        url,
+        detectedType: "video" as const,
+        icon: "Film",
+        fileSize: 0,
+        validation: { valid: true },
+      }
+    })
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        initialState={{
+          queueItems,
+          conferenceBatchMetadata: {
+            collectionName: "Conference talks",
+            conferenceName: "ExampleConf",
+            eventDate: "",
+            eventYear: "2026",
+            sharedTags: [],
+            sourcePlaylistUrl: "",
+          },
+        }}
+      />
+    )
+
+    const list = screen.getByRole("list", { name: "Conference item metadata" })
+    const twelfth = list.querySelector<HTMLElement>('[data-occurrence-id="conference-row-12"]')
+    twelfth?.focus()
+    fireEvent.keyDown(twelfth as HTMLElement, { key: "ArrowDown" })
+    await waitFor(() =>
+      expect(document.activeElement).toHaveAttribute("data-occurrence-id", "conference-row-13")
+    )
+
+    const titleInput = screen.getByRole("textbox", { name: "Title override for item 13" })
+    titleInput.focus()
+    fireEvent.keyDown(titleInput, { key: "ArrowDown" })
+    expect(titleInput).toHaveFocus()
+    fireEvent.keyDown(titleInput, { key: "Escape" })
+    expect(document.activeElement).toHaveAttribute("data-occurrence-id", "conference-row-13")
+
+    act(() => {
+      ctxRef?.updateQueueItems((current) =>
+        current.filter((item) => item.id !== "conference-row-13")
+      )
+    })
+    await waitFor(() =>
+      expect(document.activeElement).toHaveAttribute("data-occurrence-id", "conference-row-14")
+    )
+  })
+
 
   it("Step 1 — blocks quick processing while disconnected and shows recovery", async () => {
     const user = userEvent.setup()
@@ -1213,6 +1481,522 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
     // Cancel All button should be present
     expect(screen.getByText("Cancel All")).toBeTruthy()
   })
+
+  it("Step 3 playlist review requires an explicit duplicate policy and serializes only edited allowlisted patches", async () => {
+    const user = userEvent.setup()
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        initialState={{
+          currentStep: 3,
+          highestStep: 3,
+          queueItems: [
+            {
+              id: "occ-review-4",
+              kind: "url",
+              url: "https://cached.example.invalid/watch?v=display-only",
+              sourceRef: {
+                kind: "materialized_playlist_item",
+                materializationId: "owner-bound-materialization",
+                occurrenceId: "occ-review-4",
+              },
+              detectedType: "video",
+              icon: "Film",
+              fileSize: 0,
+              validation: { valid: true },
+              playlist: {
+                title: "Playlist row",
+                playlistTitle: "Research playlist",
+                ordinal: 4,
+                duplicateStatus: "duplicate_existing",
+                materializationExpiresAt: "2099-01-01T00:00:00Z",
+              },
+              playlistReview: { selected: true },
+            },
+          ],
+        }}
+      />
+    )
+
+    expect(screen.getAllByText("4. Playlist row")).toHaveLength(2)
+    expect(screen.getByText("Research playlist")).toBeInTheDocument()
+    expect(
+      screen.getByText("https://cached.example.invalid/watch?v=display-only").closest("details")
+    ).toBeInTheDocument()
+    const start = screen.getByRole("button", { name: /start processing/i })
+    expect(start).toBeDisabled()
+
+    const duplicatePolicy = screen.getByRole("combobox", {
+      name: "Duplicate policy for occurrence occ-review-4",
+    })
+    expect(
+      within(duplicatePolicy).getByRole("option", {
+        name: "update metadata only",
+      })
+    ).toBeDisabled()
+    await user.type(
+      screen.getByRole("textbox", {
+        name: "Title override for occurrence occ-review-4",
+      }),
+      "Edited title"
+    )
+    await user.type(
+      screen.getByRole("textbox", {
+        name: "Author override for occurrence occ-review-4",
+      }),
+      "Display-only author"
+    )
+    await user.type(
+      screen.getByRole("textbox", {
+        name: "Keywords to add for occurrence occ-review-4",
+      }),
+      "research, video"
+    )
+    await user.selectOptions(duplicatePolicy, "update_metadata_only")
+    expect(start).toBeEnabled()
+
+    await user.click(start)
+
+    expect(ctxRef?.state.pendingRunRequest).toEqual({
+      inputs: [
+        {
+          inputKind: "materialized_playlist_item",
+          occurrenceId: "occ-review-4",
+          materializationId: "owner-bound-materialization",
+        },
+      ],
+      reviewOverrides: {
+        "occ-review-4": {
+          duplicatePolicy: "update_metadata_only",
+          metadataPatch: {
+            title: "Edited title",
+            author: "Display-only author",
+            keywordsAdd: ["research", "video"],
+          },
+        },
+      },
+    })
+    expect(ctxRef?.state.pendingRunRequest).not.toEqual(
+      expect.objectContaining({
+        url: expect.stringContaining("cached.example.invalid"),
+      })
+    )
+    expect(screen.queryByRole("textbox", { name: /speaker for item/i })).not.toBeInTheDocument()
+  })
+
+  it("Step 3 offers only safe initial actions for an in-run duplicate", () => {
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        initialState={{
+          currentStep: 3,
+          highestStep: 3,
+          queueItems: [
+            {
+              id: "occ-in-run-actions",
+              sourceRef: {
+                kind: "materialized_playlist_item",
+                materializationId: "in-run-actions-materialization",
+                occurrenceId: "occ-in-run-actions",
+              },
+              detectedType: "video",
+              icon: "Film",
+              fileSize: 0,
+              validation: { valid: true },
+              playlist: {
+                duplicateStatus: "duplicate_in_batch",
+                materializationExpiresAt: "2099-01-01T00:00:00Z",
+              },
+              playlistReview: { selected: true },
+            },
+          ],
+        }}
+      />
+    )
+
+    const policy = screen.getByRole("combobox", {
+      name: "Duplicate policy for occurrence occ-in-run-actions",
+    }) as HTMLSelectElement
+    expect(Array.from(policy.options).map((option) => option.value)).toEqual([
+      "",
+      "skip",
+      "overwrite",
+    ])
+  })
+
+  it("lets a user clear one playlist metadata edit and then choose skip", async () => {
+    const user = userEvent.setup()
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        initialState={{
+          currentStep: 3,
+          highestStep: 3,
+          queueItems: [
+            {
+              id: "occ-clear-edit",
+              sourceRef: {
+                kind: "materialized_playlist_item",
+                materializationId: "materialization-clear-edit",
+                occurrenceId: "occ-clear-edit",
+              },
+              detectedType: "video",
+              icon: "Film",
+              fileSize: 0,
+              validation: { valid: true },
+              playlist: {
+                title: "Original title",
+                duplicateStatus: "duplicate_existing",
+                materializationExpiresAt: "2099-01-01T00:00:00Z",
+              },
+              playlistReview: {
+                selected: true,
+                duplicatePolicy: "update_metadata_only",
+                metadataPatch: {
+                  title: "Remove this edit",
+                  author: "Keep this edit",
+                },
+                editedFields: ["title", "author"],
+              },
+            },
+          ],
+        }}
+      />
+    )
+
+    await user.clear(
+      screen.getByRole("textbox", {
+        name: "Title override for occurrence occ-clear-edit",
+      })
+    )
+    await user.clear(
+      screen.getByRole("textbox", {
+        name: "Author override for occurrence occ-clear-edit",
+      })
+    )
+    expect(
+      screen.getByRole("combobox", {
+        name: "Duplicate policy for occurrence occ-clear-edit",
+      })
+    ).toHaveValue("")
+    await user.selectOptions(
+      screen.getByRole("combobox", {
+        name: "Duplicate policy for occurrence occ-clear-edit",
+      }),
+      "skip"
+    )
+
+    const start = screen.getByRole("button", { name: /start processing/i })
+    expect(start).toBeEnabled()
+    await user.click(start)
+    expect(ctxRef?.state.pendingRunRequest).toEqual({
+      inputs: [
+        {
+          inputKind: "materialized_playlist_item",
+          occurrenceId: "occ-clear-edit",
+          materializationId: "materialization-clear-edit",
+        },
+      ],
+      reviewOverrides: {
+        "occ-clear-edit": { duplicatePolicy: "skip" },
+      },
+    })
+  })
+
+  it("does not offer duplicate actions or metadata patches for a known-new playlist row", () => {
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        initialState={{
+          currentStep: 3,
+          highestStep: 3,
+          queueItems: [
+            {
+              id: "occ-known-new",
+              sourceRef: {
+                kind: "materialized_playlist_item",
+                materializationId: "materialization-known-new",
+                occurrenceId: "occ-known-new",
+              },
+              detectedType: "video",
+              icon: "Film",
+              fileSize: 0,
+              validation: { valid: true },
+              playlist: {
+                title: "Known new row",
+                duplicateStatus: "new",
+                materializationExpiresAt: "2099-01-01T00:00:00Z",
+              },
+              playlistReview: {
+                selected: true,
+                duplicateEvidence: {
+                  kind: "none",
+                  existingMediaId: null,
+                  duplicateOfOccurrenceId: null,
+                },
+              },
+            },
+          ],
+        }}
+      />
+    )
+
+    expect(screen.getByText("No duplicate action needed")).toBeInTheDocument()
+    expect(
+      screen.queryByRole("combobox", {
+        name: "Duplicate policy for occurrence occ-known-new",
+      })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("textbox", {
+        name: "Title override for occurrence occ-known-new",
+      })
+    ).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /start processing/i })).toBeEnabled()
+  })
+
+  it("Step 3 playlist review blocks expired materializations with reinspection guidance", () => {
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        initialState={{
+          currentStep: 3,
+          highestStep: 3,
+          queueItems: [
+            {
+              id: "occ-expired-review",
+              url: "https://cached.example.invalid/watch?v=expired",
+              sourceRef: {
+                kind: "materialized_playlist_item",
+                materializationId: "expired-materialization",
+                occurrenceId: "occ-expired-review",
+              },
+              detectedType: "video",
+              icon: "Film",
+              fileSize: 0,
+              validation: { valid: true },
+              playlist: {
+                title: "Expired playlist row",
+                ordinal: 1,
+                materializationExpiresAt: "2020-01-01T00:00:00Z",
+              },
+              playlistReview: { selected: true },
+            },
+          ],
+        }}
+      />
+    )
+
+    expect(
+      screen.getByText("This staged playlist expired. Inspect it again before processing.")
+    ).toBeInTheDocument()
+    const sourceDetails = screen
+      .getByText("https://cached.example.invalid/watch?v=expired")
+      .closest("details")
+    expect(sourceDetails).not.toBeNull()
+    expect(sourceDetails?.closest(".truncate")).toBeNull()
+    expect(screen.getByRole("button", { name: /start processing/i })).toBeDisabled()
+  })
+
+  it("Step 3 blocks a live 500-item playlist plus an ordinary URL without dropping either", () => {
+    const playlistItems = Array.from({ length: 500 }, (_, index) => ({
+      id: `occ-run-cap-${index + 1}`,
+      sourceRef: {
+        kind: "materialized_playlist_item" as const,
+        materializationId: "materialization-run-cap",
+        occurrenceId: `occ-run-cap-${index + 1}`,
+      },
+      detectedType: "video" as const,
+      icon: "Film",
+      fileSize: 0,
+      validation: { valid: true },
+      playlist: {
+        title: `Capacity video ${index + 1}`,
+        playlistTitle: "Capacity playlist",
+        ordinal: index + 1,
+        duplicateStatus: "new" as const,
+        materializationExpiresAt: "2099-01-01T00:00:00Z",
+      },
+      playlistReview: { selected: true },
+    }))
+    const directUrl = "https://example.com/ordinary-after-playlist"
+
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        initialState={{
+          currentStep: 3,
+          highestStep: 3,
+          queueItems: [
+            ...playlistItems,
+            {
+              id: "ordinary-after-playlist",
+              sourceRef: {
+                kind: "direct_url",
+                occurrenceId: "ordinary-after-playlist",
+                url: directUrl,
+              },
+              url: directUrl,
+              detectedType: "web",
+              icon: "Globe",
+              fileSize: 0,
+              validation: { valid: true },
+            },
+          ],
+        }}
+      />
+    )
+
+    expect(screen.getByText(/501 items \| Standard preset/i)).toBeInTheDocument()
+    expect(
+      screen.getByText("Too many items selected. Select no more than 500 items before processing.")
+    ).toBeInTheDocument()
+    expect(ctxRef?.state.queueItems).toHaveLength(501)
+    expect(ctxRef?.state.queueItems.at(-1)?.url).toBe(directUrl)
+    expect(screen.getByRole("button", { name: /start processing/i })).toBeDisabled()
+  })
+
+  it("revalidates materialization expiry atomically when Start Processing is clicked", () => {
+    let now = Date.parse("2026-07-13T00:00:00Z")
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now)
+    try {
+      render(
+        <WizardTestHarness
+          onClose={onClose}
+          initialState={{
+            currentStep: 3,
+            highestStep: 3,
+            queueItems: [
+              {
+                id: "occ-expiry-boundary",
+                sourceRef: {
+                  kind: "materialized_playlist_item",
+                  materializationId: "boundary-materialization",
+                  occurrenceId: "occ-expiry-boundary",
+                },
+                detectedType: "video",
+                icon: "Film",
+                fileSize: 0,
+                validation: { valid: true },
+                playlist: {
+                  title: "Boundary row",
+                  duplicateStatus: "new",
+                  materializationExpiresAt: "2026-07-13T00:00:01Z",
+                },
+                playlistReview: { selected: true },
+              },
+            ],
+          }}
+        />
+      )
+
+      const start = screen.getByRole("button", { name: /start processing/i })
+      expect(start).toBeEnabled()
+      now = Date.parse("2026-07-13T00:00:02Z")
+      fireEvent.click(start)
+
+      expect(ctxRef?.state.currentStep).toBe(3)
+      expect(ctxRef?.state.pendingRunRequest).toBeNull()
+      expect(ctxRef?.state.processingBlock).toEqual({
+        code: "materialization_expired",
+        occurrenceIds: ["occ-expiry-boundary"],
+      })
+      expect(screen.getByRole("button", { name: /start processing/i })).toBeInTheDocument()
+    } finally {
+      nowSpy.mockRestore()
+    }
+  })
+
+  it("keeps a 500-item playlist review bounded and filters visibility without changing selection", async () => {
+    const queueItems = Array.from({ length: 500 }, (_, index) => ({
+      id: `occ-scale-${index + 1}`,
+      sourceRef: {
+        kind: "materialized_playlist_item" as const,
+        materializationId: "materialization-scale",
+        occurrenceId: `occ-scale-${index + 1}`,
+      },
+      detectedType: "video" as const,
+      icon: "Film",
+      fileSize: 0,
+      validation: { valid: true },
+      playlist: {
+        title: `Video ${index + 1}`,
+        playlistTitle: "Scale playlist",
+        ordinal: index + 1,
+        duplicateStatus: index % 2 === 0 ? ("new" as const) : ("duplicate_existing" as const),
+        materializationExpiresAt: "2099-01-01T00:00:00Z",
+      },
+      playlistReview: { selected: true },
+    }))
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        initialState={{ currentStep: 3, highestStep: 3, queueItems }}
+      />
+    )
+
+    const reviewList = screen.getByRole("list", { name: "Items to process" })
+    expect(within(reviewList).getAllByRole("listitem").length).toBeLessThan(30)
+    expect(screen.getByText(/500 items \| Standard preset/i)).toBeInTheDocument()
+
+    const firstReviewRow = reviewList.querySelector<HTMLElement>(
+      '[data-occurrence-id="occ-scale-1"]'
+    )
+    firstReviewRow?.focus()
+    fireEvent.change(screen.getByRole("combobox", { name: "Filter review items" }), {
+      target: { value: "duplicates" },
+    })
+    await waitFor(() =>
+      expect(document.activeElement).toHaveAttribute("data-occurrence-id", "occ-scale-2")
+    )
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Filter review items" }), {
+      target: { value: "selected" },
+    })
+    const twelfthReviewRow = reviewList.querySelector<HTMLElement>(
+      '[data-occurrence-id="occ-scale-12"]'
+    )
+    twelfthReviewRow?.focus()
+    fireEvent.keyDown(twelfthReviewRow as HTMLElement, { key: "ArrowDown" })
+    await waitFor(() =>
+      expect(document.activeElement).toHaveAttribute("data-occurrence-id", "occ-scale-13")
+    )
+
+    const overrideList = screen.getByRole("list", { name: "Playlist review override items" })
+    const twelfthOverrideRow = overrideList.querySelector<HTMLElement>(
+      '[data-occurrence-id="occ-scale-12"]'
+    )
+    twelfthOverrideRow?.focus()
+    fireEvent.keyDown(twelfthOverrideRow as HTMLElement, { key: "ArrowDown" })
+    await waitFor(() =>
+      expect(document.activeElement).toHaveAttribute("data-occurrence-id", "occ-scale-13")
+    )
+
+    const firstOverrideRow = overrideList.querySelector<HTMLElement>(
+      '[data-occurrence-id="occ-scale-3"]'
+    )
+    firstOverrideRow?.focus()
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Filter review items" }), {
+      target: { value: "duplicates" },
+    })
+    await waitFor(() =>
+      expect(document.activeElement).toHaveAttribute("data-occurrence-id", "occ-scale-6")
+    )
+    expect(screen.getByText("Showing 250 of 500 review items")).toBeInTheDocument()
+    expect(ctxRef?.state.queueItems.filter((item) => item.playlistReview?.selected)).toHaveLength(
+      500
+    )
+    for (const row of within(reviewList).getAllByRole("listitem")) {
+      const occurrenceNumber = Number(row.getAttribute("data-occurrence-id")?.split("-").at(-1))
+      expect(occurrenceNumber % 2).toBe(0)
+    }
+    for (const row of within(overrideList).getAllByRole("listitem")) {
+      const occurrenceNumber = Number(row.getAttribute("data-occurrence-id")?.split("-").at(-1))
+      expect(occurrenceNumber % 2).toBe(0)
+    }
+  })
+
 
   it("Step 4 — shows durable collection tracking and exports failed URLs", async () => {
     const user = userEvent.setup()

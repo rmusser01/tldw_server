@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { IngestWizardState } from "../IngestWizardContext";
 import type {
   PlaylistIngestErrorInfo,
+  PlaylistMaterialization,
   PlaylistPreflightAccepted,
   PlaylistPreflightItem,
   PlaylistPreflightItemsPage,
@@ -21,12 +22,14 @@ import type {
   PlaylistPreflightSummary,
 } from "@/services/tldw/playlist-ingest";
 import { PlaylistIngestPublicError } from "@/services/tldw/playlist-ingest";
+import { normalizeUrlForDedupe } from "@/entries/shared/ingest-payloads";
 
 const apiMocks = vi.hoisted(() => ({
   createPlaylistPreflight: vi.fn(),
   getPlaylistPreflight: vi.fn(),
   listPlaylistPreflightItems: vi.fn(),
   cancelPlaylistPreflight: vi.fn(),
+  materializePlaylistPreflight: vi.fn(),
 }));
 
 const capabilityHarness = vi.hoisted(() => ({
@@ -136,7 +139,11 @@ vi.mock("../BatchMetadataPanel", () => ({
 }));
 
 import { AddContentStep } from "../AddContentStep";
-import { IngestWizardProvider, useIngestWizard } from "../IngestWizardContext";
+import {
+  buildPlaylistIngestRunRequest,
+  IngestWizardProvider,
+  useIngestWizard,
+} from "../IngestWizardContext";
 
 const ORDINARY_URL = "https://example.com/article";
 const INVALID_URL = "not a url";
@@ -248,6 +255,25 @@ const page = (
   nextCursor,
 });
 
+const materialization = (
+  preflightId: string,
+  items: PlaylistPreflightItem[],
+): PlaylistMaterialization => ({
+  contractVersion: 2,
+  materializationId: `materialization-${preflightId}`,
+  preflightId,
+  status: "ready",
+  items: items.map((entry) => ({
+    occurrenceId: entry.occurrenceId,
+    ordinal: entry.ordinal,
+    sourceUrl: entry.sourceUrl!,
+    normalizedSourceId: entry.normalizedSourceId,
+    sourceKind: entry.sourceKind,
+    displayMetadata: entry.displayMetadata,
+  })),
+  expiresAt: "2026-07-20T00:00:00Z",
+});
+
 const getIdFromUrl = (url: string): string =>
   new URL(url).searchParams.get("list") || "preflight";
 
@@ -330,6 +356,7 @@ describe("AddContentStep playlist inspection controller", () => {
       .mockReset()
       .mockImplementation(async (preflightId: string) => page(preflightId));
     apiMocks.cancelPlaylistPreflight.mockReset().mockResolvedValue(undefined);
+    apiMocks.materializePlaylistPreflight.mockReset();
   });
 
   afterEach(() => {
@@ -371,6 +398,681 @@ describe("AddContentStep playlist inspection controller", () => {
       ]),
     );
     expectProceedBlocked();
+  });
+
+  it("materializes the exact selected playlist occurrences before adding authoritative flat rows", async () => {
+    const inspectedItems = [
+      itemWith("occ-first", 1, "youtube:video:first", {
+        displayMetadata: {
+          title: "First video",
+          playlistId: "PL-alpha",
+          playlistTitle: "Alpha playlist",
+          channelOrUploader: "Channel A",
+          durationSeconds: 125,
+        },
+      }),
+      itemWith("occ-second", 2, "youtube:video:second", {
+        displayMetadata: {
+          title: "Second video",
+          playlistId: "PL-alpha",
+          playlistTitle: "Alpha playlist",
+        },
+      }),
+    ];
+    apiMocks.getPlaylistPreflight.mockResolvedValue(
+      readySummary("PL-alpha", inspectedItems.length),
+    );
+    apiMocks.listPlaylistPreflightItems.mockResolvedValue(
+      page("PL-alpha", inspectedItems),
+    );
+    apiMocks.materializePlaylistPreflight.mockResolvedValue(
+      materialization("PL-alpha", inspectedItems),
+    );
+    render(<Harness />);
+
+    await addLines(PLAYLIST_A);
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Add 2 videos" }),
+    );
+
+    await waitFor(() => {
+      expect(apiMocks.materializePlaylistPreflight).toHaveBeenCalledWith(
+        "PL-alpha",
+        ["occ-first", "occ-second"],
+      );
+      expect(currentState?.queueItems).toHaveLength(2);
+    });
+    expect(currentState?.queueItems[0]).toMatchObject({
+      id: "occ-first",
+      sourceRef: {
+        kind: "materialized_playlist_item",
+        materializationId: "materialization-PL-alpha",
+        occurrenceId: "occ-first",
+      },
+      playlist: {
+        playlistId: "PL-alpha",
+        playlistTitle: "Alpha playlist",
+        ordinal: 1,
+        title: "First video",
+        channelOrUploader: "Channel A",
+        durationSeconds: 125,
+        materializationExpiresAt: "2026-07-20T00:00:00Z",
+      },
+    });
+    expect(screen.getByText("1. First video")).toBeInTheDocument();
+    expect(
+      within(
+        screen.getByRole("list", { name: "Queued ingest items" }),
+      ).getAllByText("Alpha playlist"),
+    ).toHaveLength(2);
+    expect(screen.queryByText("Inspection ready")).not.toBeInTheDocument();
+  });
+
+  it("recomputes in-batch duplicates from only the selected materialized subset", async () => {
+    const inspectedItems = [
+      itemWith("occ-unselected-first", 1, "youtube:video:shared", {
+        duplicateStatus: "new",
+      }),
+      itemWith("occ-selected-second", 2, "youtube:video:shared", {
+        duplicateStatus: "duplicate_in_batch",
+        duplicateOfOccurrenceId: "occ-unselected-first",
+      }),
+    ];
+    apiMocks.getPlaylistPreflight.mockResolvedValue(
+      readySummary("PL-alpha", inspectedItems.length),
+    );
+    apiMocks.listPlaylistPreflightItems.mockResolvedValue(
+      page("PL-alpha", inspectedItems),
+    );
+    apiMocks.materializePlaylistPreflight.mockResolvedValue(
+      materialization("PL-alpha", [inspectedItems[1]]),
+    );
+    render(<Harness />);
+
+    await addLines(PLAYLIST_A);
+    await userEvent.click(
+      await screen.findByRole("checkbox", {
+        name: "Select playlist item 1: occ-unselected-first",
+      }),
+    );
+    await userEvent.click(
+      screen.getByRole("checkbox", {
+        name: "Select playlist item 2: occ-selected-second",
+      }),
+    );
+    expect(screen.getByText("1 duplicates")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Add 1 video" }));
+
+    await waitFor(() => expect(currentState?.queueItems).toHaveLength(1));
+    expect(apiMocks.materializePlaylistPreflight).toHaveBeenCalledWith(
+      "PL-alpha",
+      ["occ-selected-second"],
+    );
+    expect(currentState?.queueItems[0]).toMatchObject({
+      id: "occ-selected-second",
+      playlist: { duplicateStatus: "new" },
+    });
+  });
+
+  it("keeps a selected materialized alias duplicate when it overlaps an ordinary queued URL", async () => {
+    const queuedUrl = "https://example.com/video?b=2&a=1#display";
+    const queuedAlias = normalizeUrlForDedupe(queuedUrl);
+    const inspectedItems = [
+      itemWith("occ-direct-alias", 1, queuedAlias, {
+        sourceUrl: "https://materialized.example/video/source",
+      }),
+    ];
+    apiMocks.getPlaylistPreflight.mockResolvedValue(readySummary("PL-alpha", 1));
+    apiMocks.listPlaylistPreflightItems.mockResolvedValue(
+      page("PL-alpha", inspectedItems),
+    );
+    apiMocks.materializePlaylistPreflight.mockResolvedValue(
+      materialization("PL-alpha", inspectedItems),
+    );
+    render(
+      <Harness
+        initialState={{
+          queueItems: [
+            {
+              id: "queued-direct",
+              sourceRef: {
+                kind: "direct_url",
+                occurrenceId: "queued-direct",
+                url: queuedUrl,
+              },
+              url: queuedUrl,
+              detectedType: "video",
+              icon: "Film",
+              fileSize: 0,
+              validation: { valid: true },
+            },
+          ],
+        }}
+      />,
+    );
+
+    await addLines(PLAYLIST_A);
+    const selected = await screen.findByRole("checkbox", {
+      name: "Select playlist item 1: occ-direct-alias",
+    });
+    expect(selected).not.toBeChecked();
+    await userEvent.click(selected);
+    await userEvent.click(screen.getByRole("button", { name: "Add 1 video" }));
+
+    await waitFor(() => expect(currentState?.queueItems).toHaveLength(2));
+    expect(currentState?.queueItems[1]).toMatchObject({
+      id: "occ-direct-alias",
+      playlist: { duplicateStatus: "duplicate_in_batch" },
+      playlistReview: { selected: true },
+    });
+    expect(
+      buildPlaylistIngestRunRequest(
+        [currentState!.queueItems[1]],
+        Date.parse("2026-07-13T00:00:00Z"),
+      ).block,
+    ).toEqual({
+      code: "review_required",
+      occurrenceIds: ["occ-direct-alias"],
+    });
+  });
+
+  it("uses materialization order rather than pending-candidate provenance for shared sources", async () => {
+    const inspectedByPreflight = {
+      "PL-alpha": itemWith("occ-alpha-shared", 1, "youtube:video:shared"),
+      "PL-beta": itemWith("occ-beta-shared", 1, "youtube:video:shared"),
+    };
+    apiMocks.getPlaylistPreflight.mockImplementation(
+      async (preflightId: keyof typeof inspectedByPreflight) =>
+        readySummary(preflightId, 1),
+    );
+    apiMocks.listPlaylistPreflightItems.mockImplementation(
+      async (preflightId: keyof typeof inspectedByPreflight) =>
+        page(preflightId, [inspectedByPreflight[preflightId]]),
+    );
+    apiMocks.materializePlaylistPreflight.mockImplementation(
+      async (preflightId: keyof typeof inspectedByPreflight) =>
+        materialization(preflightId, [inspectedByPreflight[preflightId]]),
+    );
+    render(<Harness />);
+
+    await addLines(`${PLAYLIST_A}\n${PLAYLIST_B}`);
+    const laterCandidateSelection = await screen.findByRole("checkbox", {
+      name: "Select playlist item 1: occ-beta-shared",
+    });
+    expect(laterCandidateSelection).not.toBeChecked();
+    await userEvent.click(laterCandidateSelection);
+    await userEvent.click(
+      screen.getAllByRole("button", { name: "Add 1 video" })[1],
+    );
+
+    await waitFor(() => expect(currentState?.queueItems).toHaveLength(1));
+    expect(currentState?.queueItems[0]).toMatchObject({
+      id: "occ-beta-shared",
+      playlist: { duplicateStatus: "new" },
+      playlistReview: { selected: true },
+    });
+    expect(currentState?.queueItems[0]?.playlistReview?.duplicatePolicy).toBeUndefined();
+
+    const remainingCandidateSelection = screen.getByRole("checkbox", {
+      name: "Select playlist item 1: occ-alpha-shared",
+    });
+    if (!(remainingCandidateSelection as HTMLInputElement).checked) {
+      await userEvent.click(remainingCandidateSelection);
+    }
+    await userEvent.click(screen.getByRole("button", { name: "Add 1 video" }));
+
+    await waitFor(() => expect(currentState?.queueItems).toHaveLength(2));
+    expect(currentState?.queueItems.map((row) => row.playlist?.duplicateStatus)).toEqual([
+      "new",
+      "duplicate_in_batch",
+    ]);
+  });
+
+  it("keeps a lone materialized row new when its pending candidate peer is removed", async () => {
+    const inspectedByPreflight = {
+      "PL-alpha": itemWith("occ-alpha-shared", 1, "youtube:video:shared"),
+      "PL-beta": itemWith("occ-beta-shared", 1, "youtube:video:shared"),
+    };
+    apiMocks.getPlaylistPreflight.mockImplementation(
+      async (preflightId: keyof typeof inspectedByPreflight) =>
+        readySummary(preflightId, 1),
+    );
+    apiMocks.listPlaylistPreflightItems.mockImplementation(
+      async (preflightId: keyof typeof inspectedByPreflight) =>
+        page(preflightId, [inspectedByPreflight[preflightId]]),
+    );
+    apiMocks.materializePlaylistPreflight.mockImplementation(
+      async (preflightId: keyof typeof inspectedByPreflight) =>
+        materialization(preflightId, [inspectedByPreflight[preflightId]]),
+    );
+    render(<Harness />);
+
+    await addLines(`${PLAYLIST_A}\n${PLAYLIST_B}`);
+    const laterCandidateSelection = await screen.findByRole("checkbox", {
+      name: "Select playlist item 1: occ-beta-shared",
+    });
+    await userEvent.click(laterCandidateSelection);
+    await userEvent.click(
+      screen.getAllByRole("button", { name: "Add 1 video" })[1],
+    );
+    await waitFor(() => expect(currentState?.queueItems).toHaveLength(1));
+
+    await userEvent.click(
+      screen.getByRole("button", {
+        name: `Remove playlist inspection for ${PLAYLIST_A}`,
+      }),
+    );
+    expect(currentState?.queueItems[0]).toMatchObject({
+      id: "occ-beta-shared",
+      playlist: { duplicateStatus: "new" },
+      playlistReview: { selected: true },
+    });
+    expect(currentState?.queueItems[0]?.playlistReview?.duplicatePolicy).toBeUndefined();
+  });
+
+  it("preserves an inspected unknown duplicate status after materialization", async () => {
+    const inspectedItems = [
+      itemWith("occ-unknown", 1, "youtube:video:unknown", {
+        duplicateStatus: "unknown",
+      }),
+    ];
+    apiMocks.getPlaylistPreflight.mockResolvedValue(readySummary("PL-alpha", 1));
+    apiMocks.listPlaylistPreflightItems.mockResolvedValue(
+      page("PL-alpha", inspectedItems),
+    );
+    apiMocks.materializePlaylistPreflight.mockResolvedValue(
+      materialization("PL-alpha", inspectedItems),
+    );
+    render(<Harness />);
+
+    await addLines(PLAYLIST_A);
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Add 1 video" }),
+    );
+
+    await waitFor(() => expect(currentState?.queueItems).toHaveLength(1));
+    expect(currentState?.queueItems[0]).toMatchObject({
+      id: "occ-unknown",
+      playlist: { duplicateStatus: "unknown" },
+    });
+  });
+
+  it.each([
+    [
+      "request failure",
+      new PlaylistIngestPublicError("server_unreachable"),
+      null,
+    ],
+    ["response mismatch", null, ["occ-first"]],
+  ] as const)(
+    "keeps the candidate and adds zero rows on materialization %s",
+    async (_case, requestError, returnedOccurrenceIds) => {
+      const inspectedItems = [
+        itemWith("occ-first", 1, "youtube:video:first"),
+        itemWith("occ-second", 2, "youtube:video:second"),
+      ];
+      apiMocks.getPlaylistPreflight.mockResolvedValue(
+        readySummary("PL-alpha", inspectedItems.length),
+      );
+      apiMocks.listPlaylistPreflightItems.mockResolvedValue(
+        page("PL-alpha", inspectedItems),
+      );
+      if (requestError) {
+        apiMocks.materializePlaylistPreflight.mockRejectedValue(requestError);
+      } else {
+        apiMocks.materializePlaylistPreflight.mockResolvedValue(
+          materialization(
+            "PL-alpha",
+            inspectedItems.filter((entry) =>
+              returnedOccurrenceIds?.includes(entry.occurrenceId),
+            ),
+          ),
+        );
+      }
+      render(<Harness />);
+
+      await addLines(PLAYLIST_A);
+      await userEvent.click(
+        await screen.findByRole("button", { name: "Add 2 videos" }),
+      );
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(
+            requestError
+              ? "The server could not be reached. Try again."
+              : "The selected playlist items are no longer valid.",
+          ),
+        ).toBeInTheDocument();
+      });
+      expect(currentState?.queueItems).toEqual([]);
+      expect(screen.getByText("Inspection ready")).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Add 2 videos" }),
+      ).toBeEnabled();
+    },
+  );
+
+  it("fails atomically when a returned occurrence id collides with an existing queue row", async () => {
+    const inspectedItems = [itemWith("occ-first", 1, "youtube:video:first")];
+    apiMocks.getPlaylistPreflight.mockResolvedValue(
+      readySummary("PL-alpha", inspectedItems.length),
+    );
+    apiMocks.listPlaylistPreflightItems.mockResolvedValue(
+      page("PL-alpha", inspectedItems),
+    );
+    apiMocks.materializePlaylistPreflight.mockResolvedValue(
+      materialization("PL-alpha", inspectedItems),
+    );
+    render(
+      <Harness
+        initialState={{
+          queueItems: [
+            {
+              id: "occ-first",
+              sourceRef: {
+                kind: "direct_url",
+                occurrenceId: "occ-first",
+                url: ORDINARY_URL,
+              },
+              url: ORDINARY_URL,
+              detectedType: "web",
+              icon: "Globe",
+              fileSize: 0,
+              validation: { valid: true },
+            },
+          ],
+        }}
+      />,
+    );
+
+    await addLines(PLAYLIST_A);
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Add 1 video" }),
+    );
+
+    expect(
+      await screen.findByText(
+        "The selected playlist items are no longer valid.",
+      ),
+    ).toBeInTheDocument();
+    expect(currentState?.queueItems).toHaveLength(1);
+    expect(currentState?.queueItems[0]?.url).toBe(ORDINARY_URL);
+    expect(screen.getByText("Inspection ready")).toBeInTheDocument();
+  });
+
+  it("ignores a second materialization submit while the first request is pending", async () => {
+    const inspectedItems = [
+      itemWith("occ-pending", 1, "youtube:video:pending"),
+    ];
+    const pendingMaterialization = deferred<PlaylistMaterialization>();
+    apiMocks.getPlaylistPreflight.mockResolvedValue(
+      readySummary("PL-alpha", inspectedItems.length),
+    );
+    apiMocks.listPlaylistPreflightItems.mockResolvedValue(
+      page("PL-alpha", inspectedItems),
+    );
+    apiMocks.materializePlaylistPreflight.mockReturnValue(
+      pendingMaterialization.promise,
+    );
+    render(<Harness />);
+
+    await addLines(PLAYLIST_A);
+    const addButton = await screen.findByRole("button", {
+      name: "Add 1 video",
+    });
+    fireEvent.click(addButton);
+    fireEvent.click(addButton);
+
+    expect(apiMocks.materializePlaylistPreflight).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(addButton).toBeDisabled());
+
+    pendingMaterialization.resolve(materialization("PL-alpha", inspectedItems));
+    await waitFor(() => expect(currentState?.queueItems).toHaveLength(1));
+  });
+
+  it("does not lose an ordinary add that commits with materialization", async () => {
+    const inspectedItems = [itemWith("occ-race-add", 1, "youtube:video:race-add")];
+    const pendingMaterialization = deferred<PlaylistMaterialization>();
+    apiMocks.getPlaylistPreflight.mockResolvedValue(readySummary("PL-alpha", 1));
+    apiMocks.listPlaylistPreflightItems.mockResolvedValue(page("PL-alpha", inspectedItems));
+    apiMocks.materializePlaylistPreflight.mockReturnValue(pendingMaterialization.promise);
+    render(<Harness />);
+
+    await addLines(PLAYLIST_A);
+    const materializeButton = await screen.findByRole("button", { name: "Add 1 video" });
+    fireEvent.change(screen.getByRole("textbox", { name: "URL input area" }), {
+      target: { value: ORDINARY_URL },
+    });
+
+    await act(async () => {
+      materializeButton.click();
+      screen.getByRole("button", { name: "Add URLs to queue" }).click();
+      pendingMaterialization.resolve(materialization("PL-alpha", inspectedItems));
+      await pendingMaterialization.promise;
+    });
+
+    await waitFor(() =>
+      expect(currentState?.queueItems.map((row) => row.id)).toEqual([
+        expect.any(String),
+        "occ-race-add",
+      ]),
+    );
+    expect(currentState?.queueItems[0]?.url).toBe(ORDINARY_URL);
+  });
+
+  it("keeps the candidate when an in-updater occurrence collision fails closed", async () => {
+    const inspectedItems = [
+      itemWith("occ-race-collision", 1, "youtube:video:race-collision"),
+    ];
+    const pendingMaterialization = deferred<PlaylistMaterialization>();
+    const uuidSpy = vi
+      .spyOn(globalThis.crypto, "randomUUID")
+      .mockReturnValue("occ-race-collision");
+    apiMocks.getPlaylistPreflight.mockResolvedValue(readySummary("PL-alpha", 1));
+    apiMocks.listPlaylistPreflightItems.mockResolvedValue(page("PL-alpha", inspectedItems));
+    apiMocks.materializePlaylistPreflight.mockReturnValue(pendingMaterialization.promise);
+    render(<Harness />);
+
+    try {
+      await addLines(PLAYLIST_A);
+      const materializeButton = await screen.findByRole("button", { name: "Add 1 video" });
+      fireEvent.change(screen.getByRole("textbox", { name: "URL input area" }), {
+        target: { value: ORDINARY_URL },
+      });
+
+      await act(async () => {
+        materializeButton.click();
+        screen.getByRole("button", { name: "Add URLs to queue" }).click();
+        pendingMaterialization.resolve(materialization("PL-alpha", inspectedItems));
+        await pendingMaterialization.promise;
+      });
+
+      expect(currentState?.queueItems).toHaveLength(1);
+      expect(currentState?.queueItems[0]).toMatchObject({
+        id: "occ-race-collision",
+        sourceRef: { kind: "direct_url" },
+      });
+      expect(await screen.findByText("Inspection ready")).toBeInTheDocument();
+      expect(
+        screen.getByText("The selected playlist items are no longer valid."),
+      ).toBeInTheDocument();
+    } finally {
+      uuidSpy.mockRestore();
+    }
+  });
+
+  it.each([
+    ["remove", false],
+    ["clear", true],
+  ])("does not resurrect rows %sd while materialization is pending", async (_action, clearAll) => {
+    const inspectedItems = [itemWith("occ-race-delete", 1, "youtube:video:race-delete")];
+    const pendingMaterialization = deferred<PlaylistMaterialization>();
+    apiMocks.getPlaylistPreflight.mockResolvedValue(readySummary("PL-alpha", 1));
+    apiMocks.listPlaylistPreflightItems.mockResolvedValue(page("PL-alpha", inspectedItems));
+    apiMocks.materializePlaylistPreflight.mockReturnValue(pendingMaterialization.promise);
+    render(
+      <Harness
+        initialState={{
+          queueItems: [
+            {
+              id: "ordinary-before-race",
+              sourceRef: {
+                kind: "direct_url",
+                occurrenceId: "ordinary-before-race",
+                url: ORDINARY_URL,
+              },
+              url: ORDINARY_URL,
+              detectedType: "document",
+              icon: "file-text",
+              fileSize: 0,
+              validation: { valid: true },
+            },
+          ],
+        }}
+      />,
+    );
+
+    await addLines(PLAYLIST_A);
+    const materializeButton = await screen.findByRole("button", { name: "Add 1 video" });
+    const deleteButton = clearAll
+      ? screen.getByRole("button", { name: "Remove all items from queue" })
+      : screen.getByRole("button", { name: "Remove this item from queue" });
+
+    await act(async () => {
+      materializeButton.click();
+      deleteButton.click();
+      pendingMaterialization.resolve(materialization("PL-alpha", inspectedItems));
+      await pendingMaterialization.promise;
+    });
+
+    await waitFor(() =>
+      expect(currentState?.queueItems.map((row) => row.id)).toEqual(["occ-race-delete"]),
+    );
+  });
+
+  it("locks ready-card refresh, removal, and selection mutations while materializing", async () => {
+    const inspectedItems = [
+      itemWith("occ-pending-lock", 1, "youtube:video:pending-lock"),
+    ];
+    const pendingMaterialization = deferred<PlaylistMaterialization>();
+    apiMocks.getPlaylistPreflight.mockResolvedValue(readySummary("PL-alpha", 1));
+    apiMocks.listPlaylistPreflightItems.mockResolvedValue(
+      page("PL-alpha", inspectedItems),
+    );
+    apiMocks.materializePlaylistPreflight.mockReturnValue(
+      pendingMaterialization.promise,
+    );
+    render(<Harness />);
+
+    await addLines(PLAYLIST_A);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Add 1 video" }),
+    );
+
+    const refresh = screen.getByRole("button", {
+      name: "Refresh playlist inspection",
+    });
+    const remove = screen.getByRole("button", {
+      name: `Remove playlist inspection for ${PLAYLIST_A}`,
+    });
+    const selectAll = screen.getByRole("button", { name: "Select all" });
+    const selectNone = screen.getByRole("button", { name: "Select none" });
+    const selectNew = screen.getByRole("button", { name: "Select new" });
+    const rowSelection = screen.getByRole("checkbox", {
+      name: "Select playlist item 1: occ-pending-lock",
+    });
+    await waitFor(() => {
+      expect(refresh).toBeDisabled();
+      expect(remove).toBeDisabled();
+      expect(selectAll).toBeDisabled();
+      expect(selectNone).toBeDisabled();
+      expect(selectNew).toBeDisabled();
+      expect(rowSelection).toBeDisabled();
+    });
+
+    fireEvent.click(refresh);
+    fireEvent.click(remove);
+    fireEvent.click(selectNone);
+    fireEvent.click(rowSelection);
+    expect(apiMocks.createPlaylistPreflight).toHaveBeenCalledTimes(1);
+    expect(rowSelection).toBeChecked();
+    expect(screen.getByText("Inspection ready")).toBeInTheDocument();
+
+    pendingMaterialization.resolve(materialization("PL-alpha", inspectedItems));
+    await waitFor(() => expect(currentState?.queueItems).toHaveLength(1));
+  });
+
+  it("keeps the candidate locked until the queued materialization commit is verified", async () => {
+    const inspectedItems = [
+      itemWith("occ-commit-lock", 1, "youtube:video:commit-lock"),
+    ];
+    const pendingMaterialization = deferred<PlaylistMaterialization>();
+    apiMocks.getPlaylistPreflight.mockResolvedValue(readySummary("PL-alpha", 1));
+    apiMocks.listPlaylistPreflightItems.mockResolvedValue(
+      page("PL-alpha", inspectedItems),
+    );
+    apiMocks.materializePlaylistPreflight.mockReturnValue(
+      pendingMaterialization.promise,
+    );
+    render(<Harness />);
+
+    await addLines(PLAYLIST_A);
+    const addButton = await screen.findByRole("button", { name: "Add 1 video" });
+    fireEvent.click(addButton);
+    await waitFor(() => expect(addButton).toBeDisabled());
+
+    const unlockedTransitions: MutationRecord[] = [];
+    const observer = new MutationObserver((records) => {
+      for (const record of records) {
+        if (
+          record.attributeName === "disabled" &&
+          !(record.target as HTMLButtonElement).disabled
+        ) {
+          unlockedTransitions.push(record);
+        }
+      }
+    });
+    observer.observe(addButton, { attributes: true, attributeFilter: ["disabled"] });
+
+    pendingMaterialization.resolve(materialization("PL-alpha", inspectedItems));
+    await waitFor(() => expect(currentState?.queueItems).toHaveLength(1));
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Add 1 video" })).not.toBeInTheDocument(),
+    );
+    observer.disconnect();
+
+    expect(unlockedTransitions).toHaveLength(0);
+  });
+
+  it("retries materialization after an error without duplicating queue rows", async () => {
+    const inspectedItems = [itemWith("occ-retry", 1, "youtube:video:retry")];
+    apiMocks.getPlaylistPreflight.mockResolvedValue(
+      readySummary("PL-alpha", inspectedItems.length),
+    );
+    apiMocks.listPlaylistPreflightItems.mockResolvedValue(
+      page("PL-alpha", inspectedItems),
+    );
+    apiMocks.materializePlaylistPreflight
+      .mockRejectedValueOnce(
+        new PlaylistIngestPublicError("server_unreachable"),
+      )
+      .mockResolvedValueOnce(materialization("PL-alpha", inspectedItems));
+    render(<Harness />);
+
+    await addLines(PLAYLIST_A);
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Add 1 video" }),
+    );
+    expect(
+      await screen.findByText("The server could not be reached. Try again."),
+    ).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Add 1 video" }));
+
+    await waitFor(() => expect(currentState?.queueItems).toHaveLength(1));
+    expect(apiMocks.materializePlaylistPreflight).toHaveBeenCalledTimes(2);
+    expect(currentState?.queueItems[0]?.id).toBe("occ-retry");
   });
 
   it("routes Enter through the same candidate inspection handler", async () => {

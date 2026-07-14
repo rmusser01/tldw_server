@@ -870,7 +870,6 @@ def test_run_post_resolves_terminal_actions_and_returns_authoritative_processing
             "review_overrides": {
                 "occ-existing": {
                     "duplicate_policy": "skip",
-                    "existing_media_id": 41,
                 }
             },
             "processing_options": {"media_type": "video"},
@@ -907,6 +906,54 @@ def test_run_post_resolves_terminal_actions_and_returns_authoritative_processing
         "staged": 1,
         "terminal": 1,
         "skipped_existing": 1,
+    }
+
+
+def test_run_post_rejects_an_explicit_stale_duplicate_target(preflight_api, monkeypatch):
+    client, _manager, _clock, _owner = preflight_api
+    media_db = _install_endpoint_media_db(monkeypatch)
+    media_db.rows = [{"id": 41, "url": "https://example.com/existing"}]
+
+    response = client.post(
+        "/api/v1/media/ingest/runs",
+        json={
+            "inputs": [
+                {
+                    "input_kind": "direct_url",
+                    "occurrence_id": "occ-existing",
+                    "url": "https://example.com/existing",
+                    "display_metadata": {"title": "Existing"},
+                }
+            ],
+            "review_overrides": {
+                "occ-existing": {
+                    "duplicate_policy": "skip",
+                    "existing_media_id": 999,
+                }
+            },
+        },
+    )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == {
+        "code": "review_required",
+        "items": [
+            {
+                "occurrence_id": "occ-existing",
+                "reason": "duplicate_target_changed",
+                "evidence": {
+                    "kind": "library",
+                    "existing_media_id": 41,
+                    "duplicate_of_occurrence_id": None,
+                },
+                "allowed_actions": [
+                    "skip",
+                    "include_existing",
+                    "update_metadata_only",
+                    "overwrite",
+                ],
+            }
+        ],
     }
 
 

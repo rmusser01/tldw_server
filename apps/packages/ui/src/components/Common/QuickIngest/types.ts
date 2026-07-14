@@ -206,15 +206,75 @@ export type PlaylistQueueMetadata = {
   playlistId?: string | null
   playlistTitle?: string | null
   ordinal?: number
+  title?: string | null
+  channelOrUploader?: string | null
+  durationSeconds?: number | null
   normalizedSourceId?: string | null
   duplicateStatus?: "new" | "duplicate_in_batch" | "duplicate_existing" | "unknown"
+  /** Cached display-only source. Never use this in place of an expired materialization. */
+  sourceUrl?: string
+  materializationExpiresAt?: string
 }
 
-export type ConferenceDuplicatePolicy =
+export const playlistHasMaterializationCues = (
+  playlist?: PlaylistQueueMetadata
+): boolean =>
+  Boolean(
+    playlist &&
+      ([
+        playlist.sourceUrl,
+        playlist.playlistId,
+        playlist.playlistTitle,
+        playlist.channelOrUploader,
+        playlist.normalizedSourceId,
+        playlist.materializationExpiresAt,
+      ].some((value) => typeof value === "string" && value.length > 0) ||
+        typeof playlist.ordinal === "number" ||
+        typeof playlist.durationSeconds === "number")
+  )
+
+export type WizardDuplicatePolicy =
   | "skip"
   | "overwrite"
   | "update_metadata_only"
   | "include_existing"
+
+export type ConferenceDuplicatePolicy = WizardDuplicatePolicy
+
+/**
+ * The authoritative source identity submitted at run creation.
+ * `materializationId` is the server's single opaque, owner-bound token.
+ */
+export type WizardSourceRef =
+  | {
+      kind: "materialized_playlist_item"
+      materializationId: string
+      occurrenceId: string
+    }
+  | { kind: "direct_url"; occurrenceId: string; url: string }
+  | { kind: "file_stub"; occurrenceId: string }
+
+export type PlaylistReviewMetadataField = "title" | "author" | "keywordsAdd"
+
+export type PlaylistDuplicateEvidence = {
+  kind: "library" | "in_run" | "none"
+  existingMediaId: number | null
+  duplicateOfOccurrenceId: string | null
+}
+
+export type PlaylistReviewState = {
+  selected: boolean
+  duplicatePolicy?: WizardDuplicatePolicy
+  duplicateEvidence?: PlaylistDuplicateEvidence
+  allowedDuplicatePolicies?: WizardDuplicatePolicy[]
+  reviewReason?: string
+  metadataPatch?: {
+    title?: string
+    author?: string
+    keywordsAdd?: string[]
+  }
+  editedFields?: PlaylistReviewMetadataField[]
+}
 
 export type ConferenceBatchMetadata = {
   collectionName: string
@@ -241,6 +301,8 @@ export type ConferenceItemMetadataOverride = {
 export type WizardQueueItem = {
   /** Unique identifier for this queue item. */
   id: string
+  /** Authoritative run input identity. */
+  sourceRef?: WizardSourceRef
   /** Persisted queue item kind for refresh restore. */
   kind?: "url" | "file"
   /** Original file name (for file uploads). */
@@ -267,6 +329,8 @@ export type WizardQueueItem = {
   validation: QueueItemValidation
   /** Metadata carried from a playlist preflight response. */
   playlist?: PlaylistQueueMetadata
+  /** Playlist-specific Review choices, kept separate from conference metadata. */
+  playlistReview?: PlaylistReviewState
   /** Conference-specific metadata overrides for bulk review workflows. */
   conferenceOverride?: ConferenceItemMetadataOverride
 }

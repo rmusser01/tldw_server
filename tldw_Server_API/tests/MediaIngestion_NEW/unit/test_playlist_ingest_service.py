@@ -845,6 +845,58 @@ def test_create_run_accepts_current_library_override_and_persists_patch(service_
     assert media_db.metadata_calls == [{"media_id": 17, "title": "Reviewed title"}]
 
 
+def test_create_run_binds_policy_only_override_to_fresh_library_evidence(service_context):
+    service, store, _manager, media_db = service_context
+    direct = _direct_input("occ-direct", "https://example.com/existing")
+    media_db.rows = [{"id": 17, "url": "https://example.com/existing"}]
+
+    created = service.create_run(
+        "owner-1",
+        inputs=[direct],
+        review_overrides={"occ-direct": {"duplicate_policy": "skip"}},
+    )
+
+    item = store.list_run_items("owner-1", created.run_id)[0]
+    assert item.action == "skip"
+    assert item.media_id == 17
+    assert media_db.lookup_calls == [["https://example.com/existing"]]
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"duplicate_policy": "skip", "existing_media_id": 999},
+        {"duplicate_policy": "skip", "duplicate_of_occurrence_id": "occ-other"},
+        {
+            "duplicate_policy": "skip",
+            "existing_media_id": 17,
+            "duplicate_of_occurrence_id": "occ-other",
+        },
+    ],
+)
+def test_create_run_rejects_explicit_stale_or_conflicting_library_targets(
+    service_context,
+    override,
+):
+    service, _store, manager, media_db = service_context
+    direct = _direct_input("occ-direct", "https://example.com/existing")
+    media_db.rows = [{"id": 17, "url": "https://example.com/existing"}]
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
+        ReviewRequiredError,
+    )
+
+    with pytest.raises(ReviewRequiredError) as exc_info:
+        service.create_run(
+            "owner-1",
+            inputs=[direct],
+            review_overrides={"occ-direct": override},
+        )
+
+    assert exc_info.value.items[0].reason == "duplicate_target_changed"
+    assert _table_count(manager, "media_ingest_runs") == 0
+
+
 @pytest.mark.parametrize(
     ("policy", "patch", "expected_outcome"),
     [
@@ -1077,7 +1129,7 @@ def test_reconcile_initial_list_items_failure_is_pending_without_side_effects(
     assert _table_count(manager, "jobs") == 0
 
 
-def test_create_run_in_run_repeat_requires_occurrence_bound_override(service_context):
+def test_create_run_in_run_repeat_accepts_policy_bound_to_fresh_evidence(service_context):
     service, store, manager, _media_db = service_context
     inputs = [
         _direct_input("occ-first", "https://youtu.be/abc"),
@@ -1101,7 +1153,6 @@ def test_create_run_in_run_repeat_requires_occurrence_bound_override(service_con
         review_overrides={
             "occ-repeat": {
                 "duplicate_policy": "overwrite",
-                "duplicate_of_occurrence_id": "occ-first",
             }
         },
     )

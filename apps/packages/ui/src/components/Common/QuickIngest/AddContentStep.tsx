@@ -1,5 +1,6 @@
-import React, { useCallback, useMemo, useState } from "react"
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Button, Input, Tooltip, Typography } from "antd"
+import { useVirtualizer } from "@tanstack/react-virtual"
 import { useTranslation } from "react-i18next"
 import {
   AlertTriangle,
@@ -15,8 +16,8 @@ import {
 } from "lucide-react"
 import type {
   DetectedMediaType,
-  WizardQueueItem,
   QueueItemValidation,
+  WizardQueueItem,
 } from "./types"
 import { useIngestWizard } from "./IngestWizardContext"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
@@ -30,6 +31,12 @@ import {
   QUICK_INGEST_MAX_FILE_SIZE,
 } from "./constants"
 import { normalizeUrlForDedupe } from "@/entries/shared/ingest-payloads"
+import { tldwClient } from "@/services/tldw/TldwApiClient"
+import {
+  PlaylistIngestPublicError,
+  toPlaylistIngestPublicError,
+} from "@/services/tldw/playlist-ingest"
+import type { PlaylistInspectionCandidate } from "./usePlaylistInspection"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -71,7 +78,9 @@ const detectTypeFromExtension = (name: string): DetectedMediaType => {
 }
 
 const detectTypeFromMime = (mimeType: string | undefined): DetectedMediaType => {
-  const normalized = String(mimeType || "").trim().toLowerCase()
+  const normalized = String(mimeType || "")
+    .trim()
+    .toLowerCase()
   if (!normalized) return "unknown"
   if (normalized.startsWith("audio/")) return "audio"
   if (normalized.startsWith("video/")) return "video"
@@ -146,6 +155,24 @@ const isValidUrl = (raw: string): boolean => {
     return false
   }
 }
+
+const playlistSourceAliases = (
+  normalizedSourceId?: string | null,
+  sourceUrl?: string | null
+): string[] => {
+  const aliases = [
+    normalizedSourceId?.trim() || "",
+    sourceUrl ? normalizeUrlForDedupe(sourceUrl) : "",
+  ]
+  return [...new Set(aliases.filter(Boolean))]
+}
+
+const queueSourceAliases = (item: WizardQueueItem): string[] => [
+  ...playlistSourceAliases(item.playlist?.normalizedSourceId, item.url),
+  ...(item.sourceRef?.kind === "direct_url"
+    ? playlistSourceAliases(null, item.sourceRef.url)
+    : []),
+]
 
 const formatFileSize = (bytes: number): string => {
   if (bytes === 0) return "0 B"
@@ -237,11 +264,29 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
   quickProcessWarning = null,
 }) => {
   const { t } = useTranslation(["option"])
-  const { state, setQueueItems, setPlaylistPreflightSeed, goNext } = useIngestWizard()
+  const { state, updateQueueItems, setPlaylistPreflightSeed, goNext } = useIngestWizard()
   const { queueItems, playlistPreflightSeed, firstSourceAddMode } = state
 
   const [urlInput, setUrlInput] = useState("")
   const [pastedTextInput, setPastedTextInput] = useState("")
+  const [materializingKeys, setMaterializingKeys] = useState<Set<string>>(() => new Set())
+  const [materializationErrors, setMaterializationErrors] = useState<Record<string, string>>({})
+  const [pendingMaterializationCommits, setPendingMaterializationCommits] = useState<
+    Array<{ candidateKey: string; materializationId: string; occurrenceIds: string[] }>
+  >([])
+  const [queuePlaylistFilter, setQueuePlaylistFilter] = useState("all")
+  const [queueTypeFilter, setQueueTypeFilter] = useState("all")
+  const [queueDuplicateFilter, setQueueDuplicateFilter] = useState("all")
+  const materializingKeysRef = useRef(new Set<string>())
+  const queueListRef = useRef<HTMLDivElement | null>(null)
+  const queueRowRefs = useRef(new Map<string, HTMLDivElement>())
+  const queueListOwnsFocusRef = useRef(false)
+  const activeQueueRowRef = useRef<{ id: string; index: number } | null>(null)
+  const [activeQueueId, setActiveQueueId] = useState<string | null>(null)
+  const unlockMaterialization = useCallback((candidateKey: string) => {
+    materializingKeysRef.current.delete(candidateKey)
+    setMaterializingKeys(new Set(materializingKeysRef.current))
+  }, [])
   const { capabilities, loading: capabilitiesLoading } = useServerCapabilities()
   const clearPlaylistPreflightSeed = useCallback(
     () => setPlaylistPreflightSeed(null),
@@ -257,6 +302,31 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
     clearSeed: clearPlaylistPreflightSeed,
   })
   const addPlaylistCandidates = playlistInspection.addCandidates
+  useEffect(() => {
+    if (pendingMaterializationCommits.length === 0) return
+    for (const commit of pendingMaterializationCommits) {
+      const committed = commit.occurrenceIds.every((occurrenceId) =>
+        queueItems.some(
+          (item) =>
+            item.id === occurrenceId &&
+            item.sourceRef?.kind === "materialized_playlist_item" &&
+            item.sourceRef.materializationId === commit.materializationId &&
+            item.sourceRef.occurrenceId === occurrenceId
+        )
+      )
+      if (committed) {
+        playlistInspection.removeCandidate(commit.candidateKey)
+      } else {
+        const message = new PlaylistIngestPublicError("invalid_occurrence_selection").message
+        setMaterializationErrors((current) => ({
+          ...current,
+          [commit.candidateKey]: message,
+        }))
+      }
+      unlockMaterialization(commit.candidateKey)
+    }
+    setPendingMaterializationCommits([])
+  }, [pendingMaterializationCommits, playlistInspection, queueItems, unlockMaterialization])
   const shouldShowPastedTextInput = firstSourceAddMode === "paste_text"
   const shouldFocusUrlInput = firstSourceAddMode === "web_url"
 
@@ -271,11 +341,12 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
   // Add files from the drop zone
   const handleFilesAdded = useCallback(
     (files: File[]) => {
-      const newItems: WizardQueueItem[] = []
-      for (const file of files) {
+      const newItems = files.map((file): WizardQueueItem => {
         const detectedType = detectTypeFromFile(file)
-        const item: WizardQueueItem = {
-          id: crypto.randomUUID(),
+        const id = crypto.randomUUID()
+        return {
+          id,
+          sourceRef: { kind: "file_stub", occurrenceId: id },
           fileName: file.name,
           file,
           detectedType,
@@ -284,12 +355,19 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
           mimeType: file.type || undefined,
           validation: { valid: true },
         }
-        item.validation = validateQueueItem(item, [...queueItems, ...newItems])
-        newItems.push(item)
-      }
-      setQueueItems([...queueItems, ...newItems])
+      })
+      updateQueueItems((current) => {
+        const validated: WizardQueueItem[] = []
+        for (const item of newItems) {
+          validated.push({
+            ...item,
+            validation: validateQueueItem(item, [...current, ...validated]),
+          })
+        }
+        return [...current, ...validated]
+      })
     },
-    [queueItems, setQueueItems]
+    [updateQueueItems]
   )
 
   // Add URLs from the multi-line input
@@ -313,34 +391,46 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
     const newItems: WizardQueueItem[] = []
     for (const url of ordinaryLines) {
       const detectedType = detectTypeFromUrl(url)
+      const id = crypto.randomUUID()
       const item: WizardQueueItem = {
-        id: crypto.randomUUID(),
+        id,
+        sourceRef: { kind: "direct_url", occurrenceId: id, url },
         url,
         detectedType,
         icon: ICON_NAME_MAP[detectedType],
         fileSize: 0,
         validation: { valid: true },
       }
-      item.validation = validateQueueItem(item, [...queueItems, ...newItems])
       newItems.push(item)
     }
 
     if (newItems.length > 0) {
-      setQueueItems([...queueItems, ...newItems])
+      updateQueueItems((current) => {
+        const validated: WizardQueueItem[] = []
+        for (const item of newItems) {
+          validated.push({
+            ...item,
+            validation: validateQueueItem(item, [...current, ...validated]),
+          })
+        }
+        return [...current, ...validated]
+      })
     }
     addPlaylistCandidates(playlistCandidates)
     setUrlInput("")
-  }, [addPlaylistCandidates, queueItems, setQueueItems, urlInput])
+  }, [addPlaylistCandidates, updateQueueItems, urlInput])
 
   const handleAddPastedText = useCallback(() => {
     if (!pastedTextInput.trim()) return
 
     const file = new File([pastedTextInput], "pasted-text.txt", {
-      type: "text/plain"
+      type: "text/plain",
     })
     const detectedType = detectTypeFromFile(file)
+    const id = crypto.randomUUID()
     const item: WizardQueueItem = {
-      id: crypto.randomUUID(),
+      id,
+      sourceRef: { kind: "file_stub", occurrenceId: id },
       fileName: file.name,
       file,
       detectedType,
@@ -349,10 +439,158 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
       mimeType: file.type || undefined,
       validation: { valid: true },
     }
-    item.validation = validateQueueItem(item, queueItems)
-    setQueueItems([...queueItems, item])
+    updateQueueItems((current) => [
+      ...current,
+      { ...item, validation: validateQueueItem(item, current) },
+    ])
     setPastedTextInput("")
-  }, [pastedTextInput, queueItems, setQueueItems])
+  }, [pastedTextInput, updateQueueItems])
+
+  const handleMaterializeCandidate = useCallback(
+    async (candidate: PlaylistInspectionCandidate) => {
+      if (
+        candidate.status !== "ready" ||
+        !candidate.preflightId ||
+        materializingKeysRef.current.has(candidate.key)
+      ) {
+        return
+      }
+      const selectedOccurrenceIds = candidate.items
+        .filter(
+          (item) =>
+            candidate.selectedOccurrenceIds.has(item.occurrenceId) &&
+            Boolean(item.sourceUrl) &&
+            (item.availability === null || item.availability === "available")
+        )
+        .sort((left, right) => left.ordinal - right.ordinal)
+        .map((item) => item.occurrenceId)
+      if (selectedOccurrenceIds.length === 0) return
+
+      materializingKeysRef.current.add(candidate.key)
+      setMaterializingKeys(new Set(materializingKeysRef.current))
+      setMaterializationErrors((current) => {
+        if (!(candidate.key in current)) return current
+        const next = { ...current }
+        delete next[candidate.key]
+        return next
+      })
+      try {
+        const materialization = await tldwClient.materializePlaylistPreflight(
+          candidate.preflightId,
+          selectedOccurrenceIds
+        )
+        const expected = new Set(selectedOccurrenceIds)
+        const returned = new Set(materialization.items.map((item) => item.occurrenceId))
+        if (
+          materialization.preflightId !== candidate.preflightId ||
+          !materialization.materializationId ||
+          materialization.items.length !== selectedOccurrenceIds.length ||
+          returned.size !== expected.size ||
+          [...expected].some((occurrenceId) => !returned.has(occurrenceId)) ||
+          materialization.items.some((item) => !item.sourceUrl)
+        ) {
+          throw new PlaylistIngestPublicError("invalid_occurrence_selection")
+        }
+        const existingQueueIds = new Set(queueItems.map((item) => item.id))
+        if ([...returned].some((occurrenceId) => existingQueueIds.has(occurrenceId))) {
+          throw new PlaylistIngestPublicError("invalid_occurrence_selection")
+        }
+
+        const inspectedByOccurrence = new Map(
+          candidate.items.map((item) => [item.occurrenceId, item] as const)
+        )
+        const sortedMaterializedItems = [...materialization.items].sort(
+          (left, right) => left.ordinal - right.ordinal
+        )
+        updateQueueItems((current) => {
+          if (
+            sortedMaterializedItems.some((item) =>
+              current.some((row) => row.id === item.occurrenceId)
+            )
+          ) {
+            return current
+          }
+          const authoritativeAliases = new Set(current.flatMap(queueSourceAliases))
+          const newItems: WizardQueueItem[] = sortedMaterializedItems.map((item) => {
+            const inspected = inspectedByOccurrence.get(item.occurrenceId)
+            const normalizedSourceId = item.normalizedSourceId?.trim() || null
+            const aliases = new Set([
+              ...playlistSourceAliases(normalizedSourceId, item.sourceUrl),
+              ...playlistSourceAliases(inspected?.normalizedSourceId, inspected?.sourceUrl),
+            ])
+            const overlapsSelectedOrQueued = [...aliases].some((alias) =>
+              authoritativeAliases.has(alias)
+            )
+            const duplicateTargetWasExcluded = Boolean(
+              inspected?.duplicateStatus === "duplicate_in_batch" &&
+                inspected.duplicateOfOccurrenceId &&
+                !expected.has(inspected.duplicateOfOccurrenceId)
+            )
+            const duplicateStatus =
+              inspected?.duplicateStatus === "duplicate_existing"
+                ? "duplicate_existing"
+                : overlapsSelectedOrQueued
+                  ? "duplicate_in_batch"
+                  : inspected?.duplicateStatus === "unknown"
+                    ? "unknown"
+                    : inspected?.duplicateStatus === "duplicate_in_batch" &&
+                        !duplicateTargetWasExcluded
+                      ? "duplicate_in_batch"
+                      : aliases.size > 0
+                        ? "new"
+                        : "unknown"
+            for (const alias of aliases) authoritativeAliases.add(alias)
+            return {
+              id: item.occurrenceId,
+              kind: "url",
+              sourceRef: {
+                kind: "materialized_playlist_item",
+                materializationId: materialization.materializationId,
+                occurrenceId: item.occurrenceId,
+              },
+              // Display-only cache. Run serialization uses sourceRef exclusively.
+              url: item.sourceUrl,
+              detectedType: "video",
+              icon: ICON_NAME_MAP.video,
+              fileSize: 0,
+              validation: { valid: true },
+              playlist: {
+                playlistId: item.displayMetadata.playlistId ?? candidate.summary?.playlistId,
+                playlistTitle:
+                  item.displayMetadata.playlistTitle ?? candidate.summary?.summary?.playlistTitle,
+                ordinal: item.ordinal,
+                title: item.displayMetadata.title,
+                channelOrUploader: item.displayMetadata.channelOrUploader,
+                durationSeconds: item.displayMetadata.durationSeconds,
+                normalizedSourceId,
+                duplicateStatus,
+                sourceUrl: item.sourceUrl,
+                materializationExpiresAt: materialization.expiresAt,
+              },
+              playlistReview: { selected: true },
+            }
+          })
+          return [...current, ...newItems]
+        })
+        setPendingMaterializationCommits((current) => [
+          ...current.filter((commit) => commit.candidateKey !== candidate.key),
+          {
+            candidateKey: candidate.key,
+            materializationId: materialization.materializationId,
+            occurrenceIds: sortedMaterializedItems.map((item) => item.occurrenceId),
+          },
+        ])
+      } catch (error) {
+        const publicError = toPlaylistIngestPublicError(error)
+        setMaterializationErrors((current) => ({
+          ...current,
+          [candidate.key]: publicError.message,
+        }))
+        unlockMaterialization(candidate.key)
+      }
+    },
+    [queueItems, unlockMaterialization, updateQueueItems]
+  )
 
   // Handle Enter key in URL input
   const handleUrlKeyDown = useCallback(
@@ -368,15 +606,15 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
   // Remove an item from the queue
   const handleRemoveItem = useCallback(
     (id: string) => {
-      setQueueItems(queueItems.filter((item) => item.id !== id))
+      updateQueueItems((current) => current.filter((item) => item.id !== id))
     },
-    [queueItems, setQueueItems]
+    [updateQueueItems]
   )
 
   // Clear all items
   const handleClearAll = useCallback(() => {
-    setQueueItems([])
-  }, [setQueueItems])
+    updateQueueItems(() => [])
+  }, [updateQueueItems])
 
   const hasItems = queueItems.length > 0
   const selectedItems = useMemo(
@@ -398,11 +636,157 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
 
   const ffmpegMissing = capabilities?.ffmpegAvailable === false
   const hasAvMediaItems = useMemo(
+    () => queueItems.some((item) => item.detectedType === "audio" || item.detectedType === "video"),
+    [queueItems]
+  )
+  const hasPlaylistItems = useMemo(
+    () => queueItems.some((item) => Boolean(item.playlist)),
+    [queueItems]
+  )
+  useEffect(() => {
+    if (hasPlaylistItems) return
+    setQueuePlaylistFilter("all")
+    setQueueTypeFilter("all")
+    setQueueDuplicateFilter("all")
+  }, [hasPlaylistItems])
+  const queuePlaylistOptions = useMemo(
     () =>
-      queueItems.some(
-        (item) => item.detectedType === "audio" || item.detectedType === "video"
+      Array.from(
+        new Set(
+          queueItems
+            .map((item) => item.playlist?.playlistTitle?.trim())
+            .filter((title): title is string => Boolean(title))
+        )
+      ).sort((left, right) => left.localeCompare(right)),
+    [queueItems]
+  )
+  const queueTypeOptions = useMemo(
+    () =>
+      Array.from(new Set(queueItems.map((item) => item.detectedType))).sort((left, right) =>
+        left.localeCompare(right)
       ),
     [queueItems]
+  )
+  const filteredQueueItems = useMemo(
+    () =>
+      queueItems.filter((item) => {
+        if (queuePlaylistFilter !== "all" && item.playlist?.playlistTitle !== queuePlaylistFilter) {
+          return false
+        }
+        if (queueTypeFilter !== "all" && item.detectedType !== queueTypeFilter) {
+          return false
+        }
+        const duplicateStatus = item.playlist?.duplicateStatus ?? "unknown"
+        if (queueDuplicateFilter === "duplicates") {
+          return (
+            duplicateStatus === "duplicate_existing" || duplicateStatus === "duplicate_in_batch"
+          )
+        }
+        if (queueDuplicateFilter !== "all" && duplicateStatus !== queueDuplicateFilter) {
+          return false
+        }
+        return true
+      }),
+    [queueDuplicateFilter, queueItems, queuePlaylistFilter, queueTypeFilter]
+  )
+  const queueVirtualizer = useVirtualizer({
+    count: filteredQueueItems.length,
+    getScrollElement: () => queueListRef.current,
+    estimateSize: () => 76,
+    overscan: 6,
+    getItemKey: (index) => filteredQueueItems[index]?.id ?? index,
+    measureElement: (element) => element?.getBoundingClientRect().height || 76,
+  })
+  const queueVirtualItems = queueVirtualizer.getVirtualItems()
+  const restoreQueueRowFocus = useCallback((id: string) => {
+    const attempt = (remaining: number) => {
+      if (!queueListOwnsFocusRef.current) return
+      const row = queueRowRefs.current.get(id)
+      if (row) {
+        row.focus()
+        return
+      }
+      if (remaining > 0) window.requestAnimationFrame(() => attempt(remaining - 1))
+    }
+    window.requestAnimationFrame(() => attempt(2))
+  }, [])
+
+  useEffect(() => {
+    const handleFocusIn = (event: FocusEvent) => {
+      const target = event.target
+      if (target instanceof Node && queueListRef.current?.contains(target)) return
+      queueListOwnsFocusRef.current = false
+    }
+    document.addEventListener("focusin", handleFocusIn)
+    return () => document.removeEventListener("focusin", handleFocusIn)
+  }, [])
+
+  useEffect(() => {
+    if (filteredQueueItems.length === 0) {
+      activeQueueRowRef.current = null
+      setActiveQueueId(null)
+      return
+    }
+    const active = activeQueueRowRef.current
+    if (!active) {
+      const id = filteredQueueItems[0].id
+      activeQueueRowRef.current = { id, index: 0 }
+      setActiveQueueId(id)
+      return
+    }
+    const currentIndex = filteredQueueItems.findIndex((item) => item.id === active.id)
+    if (currentIndex >= 0) {
+      active.index = currentIndex
+      if (
+        queueListOwnsFocusRef.current &&
+        !queueRowRefs.current.has(active.id) &&
+        queueVirtualItems.length > 0
+      ) {
+        const nearest = queueVirtualItems.reduce((best, row) =>
+          Math.abs(row.index - currentIndex) < Math.abs(best.index - currentIndex) ? row : best
+        )
+        const nearestItem = filteredQueueItems[nearest.index]
+        if (nearestItem) {
+          activeQueueRowRef.current = { id: nearestItem.id, index: nearest.index }
+          setActiveQueueId(nearestItem.id)
+          restoreQueueRowFocus(nearestItem.id)
+        }
+      }
+      return
+    }
+    const index = Math.min(active.index, filteredQueueItems.length - 1)
+    const id = filteredQueueItems[index].id
+    activeQueueRowRef.current = { id, index }
+    setActiveQueueId(id)
+    if (queueListOwnsFocusRef.current) {
+      queueVirtualizer.scrollToIndex(index, { align: "auto" })
+      restoreQueueRowFocus(id)
+    }
+  }, [filteredQueueItems, queueVirtualItems, queueVirtualizer, restoreQueueRowFocus])
+
+  const handleQueueRowKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>, index: number) => {
+      if (event.target !== event.currentTarget) {
+        if (event.key === "Escape") {
+          event.preventDefault()
+          event.currentTarget.focus()
+        }
+        return
+      }
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return
+      event.preventDefault()
+      const nextIndex = Math.max(
+        0,
+        Math.min(filteredQueueItems.length - 1, index + (event.key === "ArrowDown" ? 1 : -1))
+      )
+      const nextItem = filteredQueueItems[nextIndex]
+      if (!nextItem) return
+      activeQueueRowRef.current = { id: nextItem.id, index: nextIndex }
+      setActiveQueueId(nextItem.id)
+      queueVirtualizer.scrollToIndex(nextIndex, { align: "auto" })
+      restoreQueueRowFocus(nextItem.id)
+    },
+    [filteredQueueItems, queueVirtualizer, restoreQueueRowFocus]
   )
 
   return (
@@ -520,18 +904,25 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
                 qi={qi}
                 onCancel={() => playlistInspection.cancelCandidate(candidate.key)}
                 onRetry={() => playlistInspection.retryCandidate(candidate.key)}
-                onRemove={() => playlistInspection.removeCandidate(candidate.key)}
-                onRefresh={() => playlistInspection.refreshCandidate(candidate.key)}
-                onSelectionChange={(occurrenceId, selected) =>
-                  playlistInspection.setCandidateSelection(
-                    candidate.key,
-                    occurrenceId,
-                    selected
-                  )
-                }
-                onSelectionBatchChange={(updates) =>
+                onRemove={() => {
+                  if (materializingKeysRef.current.has(candidate.key)) return
+                  playlistInspection.removeCandidate(candidate.key)
+                }}
+                onRefresh={() => {
+                  if (materializingKeysRef.current.has(candidate.key)) return
+                  playlistInspection.refreshCandidate(candidate.key)
+                }}
+                onAdd={() => void handleMaterializeCandidate(candidate)}
+                isAdding={materializingKeys.has(candidate.key)}
+                addError={materializationErrors[candidate.key] ?? null}
+                onSelectionChange={(occurrenceId, selected) => {
+                  if (materializingKeysRef.current.has(candidate.key)) return
+                  playlistInspection.setCandidateSelection(candidate.key, occurrenceId, selected)
+                }}
+                onSelectionBatchChange={(updates) => {
+                  if (materializingKeysRef.current.has(candidate.key)) return
                   playlistInspection.setCandidateSelections(candidate.key, updates)
-                }
+                }}
               />
             ))}
             {playlistInspection.hasTruncatedCandidates && (
@@ -612,14 +1003,10 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
               </Typography.Text>
               {invalidItemCount > 0 && (
                 <Typography.Text className="text-xs text-text-muted">
-                  {qi(
-                    "queueValiditySummary",
-                    "{{valid}} valid / {{invalid}} invalid",
-                    {
-                      valid: validItemCount,
-                      invalid: invalidItemCount,
-                    }
-                  )}
+                  {qi("queueValiditySummary", "{{valid}} valid / {{invalid}} invalid", {
+                    valid: validItemCount,
+                    invalid: invalidItemCount,
+                  })}
                 </Typography.Text>
               )}
             </div>
@@ -634,94 +1021,165 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
             </Button>
           </div>
 
-          <div className="mt-2 space-y-1.5">
-            {queueItems.map((item) => (
-              <div
-                key={item.id}
-                className={`flex items-center gap-3 rounded-md border px-3 py-2 ${
-                  !item.validation.valid
-                    ? "border-danger/30 bg-danger/5"
-                    : item.validation.warnings?.length
-                      ? "border-warn/30 bg-warn/5"
-                      : "border-border"
-                }`}
+          {hasPlaylistItems && (
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <select
+                aria-label="Filter queued items by playlist"
+                className="rounded border border-border bg-surface px-2 py-1 text-xs"
+                value={queuePlaylistFilter}
+                onChange={(event) => setQueuePlaylistFilter(event.target.value)}
               >
-                {/* Type icon */}
-                <span className="flex-shrink-0">
-                  {MEDIA_TYPE_ICONS[item.detectedType]}
-                </span>
+                <option value="all">All playlists</option>
+                {queuePlaylistOptions.map((title) => (
+                  <option key={title} value={title}>
+                    {title}
+                  </option>
+                ))}
+              </select>
+              <select
+                aria-label="Filter queued items by type"
+                className="rounded border border-border bg-surface px-2 py-1 text-xs"
+                value={queueTypeFilter}
+                onChange={(event) => setQueueTypeFilter(event.target.value)}
+              >
+                <option value="all">All types</option>
+                {queueTypeOptions.map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
+                ))}
+              </select>
+              <select
+                aria-label="Filter queued items by duplicate state"
+                className="rounded border border-border bg-surface px-2 py-1 text-xs"
+                value={queueDuplicateFilter}
+                onChange={(event) => setQueueDuplicateFilter(event.target.value)}
+              >
+                <option value="all">All duplicate states</option>
+                <option value="new">New</option>
+                <option value="duplicates">Duplicates</option>
+                <option value="unknown">Unknown</option>
+              </select>
+              <span className="text-xs text-text-muted" role="status" aria-live="polite">
+                Showing {filteredQueueItems.length} of {queueItems.length} queued items
+              </span>
+            </div>
+          )}
 
-                {/* Name/URL and metadata */}
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium">
-                    {item.fileName || item.url || qi("untitledItem", "Untitled")}
-                  </div>
-                  <div className="flex items-center gap-2 text-[11px] text-text-muted">
-                    {item.fileSize > 0 && (
-                      <span>{formatFileSize(item.fileSize)}</span>
-                    )}
-                    {ffmpegMissing &&
-                    (item.detectedType === "audio" ||
-                      item.detectedType === "video") ? (
-                      <Tooltip
-                        title={qi(
-                          "ffmpegRequiredTooltip",
-                          "FFmpeg is not installed on the server -- this file may fail to process"
+          <div
+            ref={queueListRef}
+            className="mt-2 max-h-96 overflow-y-auto"
+            role="list"
+            aria-label="Queued ingest items"
+          >
+            <div className="relative w-full" style={{ height: queueVirtualizer.getTotalSize() }}>
+              {queueVirtualItems.map((virtualRow) => {
+                const item = filteredQueueItems[virtualRow.index]
+                if (!item) return null
+                return (
+                  <div
+                    key={virtualRow.key}
+                    ref={(element) => {
+                      queueVirtualizer.measureElement(element)
+                      if (element) queueRowRefs.current.set(item.id, element)
+                      else queueRowRefs.current.delete(item.id)
+                    }}
+                    role="listitem"
+                    tabIndex={activeQueueId === item.id ? 0 : -1}
+                    aria-setsize={filteredQueueItems.length}
+                    aria-posinset={virtualRow.index + 1}
+                    data-occurrence-id={item.sourceRef?.occurrenceId || item.id}
+                    data-index={virtualRow.index}
+                    onFocusCapture={() => {
+                      queueListOwnsFocusRef.current = true
+                      activeQueueRowRef.current = { id: item.id, index: virtualRow.index }
+                      setActiveQueueId(item.id)
+                    }}
+                    onKeyDown={(event) => handleQueueRowKeyDown(event, virtualRow.index)}
+                    className={`absolute left-0 top-0 flex w-full items-center gap-3 rounded-md border px-3 py-2 ${
+                      !item.validation.valid
+                        ? "border-danger/30 bg-danger/5"
+                        : item.validation.warnings?.length
+                          ? "border-warn/30 bg-warn/5"
+                          : "border-border"
+                    }`}
+                    style={{ transform: `translateY(${virtualRow.start}px)` }}
+                  >
+                    {/* Type icon */}
+                    <span className="flex-shrink-0">
+                      {MEDIA_TYPE_ICONS[item.detectedType]}
+                    </span>
+
+                    {/* Name/URL and metadata */}
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium">
+                        {item.playlist?.ordinal && item.playlist?.title
+                          ? `${item.playlist.ordinal}. ${item.playlist.title}`
+                          : item.fileName || item.url || qi("untitledItem", "Untitled")}
+                      </div>
+                      <div className="flex items-center gap-2 text-[11px] text-text-muted">
+                        {item.playlist?.playlistTitle && (
+                          <span>{item.playlist.playlistTitle}</span>
                         )}
-                      >
-                        <Badge
-                          variant="warning"
-                          size="sm"
-                          className="!m-0"
-                        >
-                          <AlertTriangle
-                            className="mr-0.5 h-3 w-3"
-                            aria-hidden="true"
-                          />
-                          {item.detectedType.charAt(0).toUpperCase() +
-                            item.detectedType.slice(1)}
-                        </Badge>
-                      </Tooltip>
-                    ) : (
-                      <Badge
-                        variant="info"
-                        size="sm"
-                        className="!m-0"
-                      >
-                        {item.detectedType === "web"
-                          ? "Web page"
-                          : item.detectedType.charAt(0).toUpperCase() +
-                            item.detectedType.slice(1)}
-                      </Badge>
-                    )}
-                    {item.detectedType !== "unknown" && (
-                      <span className="text-text-subtle">(auto)</span>
-                    )}
-                  </div>
-                  {/* Validation errors/warnings */}
-                  {item.validation.errors?.map((err, i) => (
-                    <div key={`e-${i}`} className="text-[11px] text-danger mt-0.5">
-                      {err}
+                        {item.fileSize > 0 && <span>{formatFileSize(item.fileSize)}</span>}
+                        {ffmpegMissing &&
+                        (item.detectedType === "audio" || item.detectedType === "video") ? (
+                          <Tooltip
+                            title={qi(
+                              "ffmpegRequiredTooltip",
+                              "FFmpeg is not installed on the server -- this file may fail to process"
+                            )}
+                          >
+                            <Badge variant="warning" size="sm" className="!m-0">
+                              <AlertTriangle className="mr-0.5 h-3 w-3" aria-hidden="true" />
+                              {item.detectedType.charAt(0).toUpperCase() +
+                                item.detectedType.slice(1)}
+                            </Badge>
+                          </Tooltip>
+                        ) : (
+                          <Badge variant="info" size="sm" className="!m-0">
+                            {item.detectedType === "web"
+                              ? "Web page"
+                              : item.detectedType.charAt(0).toUpperCase() +
+                                item.detectedType.slice(1)}
+                          </Badge>
+                        )}
+                        {item.detectedType !== "unknown" && (
+                          <span className="text-text-subtle">(auto)</span>
+                        )}
+                      </div>
+                      {/* Validation errors/warnings */}
+                      {item.validation.errors?.map((err, i) => (
+                        <div key={`e-${i}`} className="mt-0.5 text-[11px] text-danger">
+                          {err}
+                        </div>
+                      ))}
+                      {item.validation.warnings?.map((warn, i) => (
+                        <div key={`w-${i}`} className="mt-0.5 text-[11px] text-warn">
+                          {warn}
+                        </div>
+                      ))}
+                      {item.sourceRef?.kind === "materialized_playlist_item" && item.url && (
+                        <details className="text-[11px] text-text-muted">
+                          <summary>Source details</summary>
+                          <span>{item.url}</span>
+                        </details>
+                      )}
                     </div>
-                  ))}
-                  {item.validation.warnings?.map((warn, i) => (
-                    <div key={`w-${i}`} className="text-[11px] text-warn mt-0.5">
-                      {warn}
-                    </div>
-                  ))}
-                </div>
 
-                {/* Remove button */}
-                <button
-                  type="button"
-                  onClick={() => handleRemoveItem(item.id)}
-                  className="flex-shrink-0 rounded p-1 text-text-muted hover:bg-surface2 hover:text-danger transition-colors"
-                  aria-label={qi("removeItemAria", "Remove this item from queue")}
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-            ))}
+                    {/* Remove button */}
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveItem(item.id)}
+                      className="flex-shrink-0 rounded p-1 text-text-muted transition-colors hover:bg-surface2 hover:text-danger"
+                      aria-label={qi("removeItemAria", "Remove this item from queue")}
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
           </div>
         </div>
       )}

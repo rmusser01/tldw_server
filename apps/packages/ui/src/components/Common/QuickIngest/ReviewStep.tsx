@@ -1,5 +1,6 @@
-import React, { useCallback, useMemo } from "react"
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
+import { useVirtualizer } from "@tanstack/react-virtual"
 import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import {
   AlertTriangle,
@@ -14,8 +15,13 @@ import {
   File,
 } from "lucide-react"
 import type { DetectedMediaType, IngestPreset, PresetConfig, WizardQueueItem } from "./types"
-import { useIngestWizard } from "./IngestWizardContext"
+import {
+  buildPlaylistIngestRunRequest,
+  MAX_PLAYLIST_RUN_INPUTS,
+  useIngestWizard,
+} from "./IngestWizardContext"
 import { estimateTotalSeconds, formatEstimate } from "./timeEstimation"
+import { ItemMetadataTable } from "./ItemMetadataTable"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -24,6 +30,8 @@ import { estimateTotalSeconds, formatEstimate } from "./timeEstimation"
 const LARGE_FILE_THRESHOLD = 50 * 1024 * 1024 // 50 MB
 const LONG_TIME_THRESHOLD = 15 * 60 // 15 minutes in seconds
 const LARGE_BATCH_THRESHOLD = 5
+
+type ReviewFilter = "selected" | "duplicates" | "policy"
 
 /**
  * Return a human-readable file size string (e.g., "42 MB", "1.2 GB").
@@ -79,6 +87,9 @@ const TYPE_ICONS: Record<DetectedMediaType, React.ElementType> = {
   unknown: File,
 }
 
+const getQueueItemOccurrenceId = (item: WizardQueueItem): string =>
+  item.sourceRef?.occurrenceId || item.id
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -97,7 +108,14 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
   onRetryConnection,
 }) => {
   const { t } = useTranslation(["option"])
-  const { state, goBack, goNext, startProcessing } = useIngestWizard()
+  const { state, goBack, startProcessing } = useIngestWizard()
+
+  const [filter, setFilter] = useState<ReviewFilter>("selected")
+  const reviewListRef = useRef<HTMLDivElement | null>(null)
+  const reviewRowRefs = useRef(new Map<string, HTMLDivElement>())
+  const reviewListOwnsFocusRef = useRef(false)
+  const activeReviewRowRef = useRef<{ id: string; index: number } | null>(null)
+  const [activeReviewId, setActiveReviewId] = useState<string | null>(null)
 
   const qi = useCallback(
     (key: string, defaultValue: string, options?: Record<string, unknown>) =>
@@ -109,8 +127,133 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
 
   const { queueItems, selectedPreset, presetConfig, conferenceBatchMetadata } = state
   const selectedQueueItems = useMemo(
-    () => queueItems.filter((item) => item.conferenceOverride?.selected !== false),
+    () =>
+      queueItems.filter(
+        (item) => item.conferenceOverride?.selected !== false && item.playlistReview?.selected !== false
+      ),
     [queueItems]
+  )
+  const filteredReviewItems = useMemo(
+    () =>
+      queueItems.filter((item) => {
+        const selected =
+          item.conferenceOverride?.selected !== false && item.playlistReview?.selected !== false
+        const duplicate =
+          item.playlist?.duplicateStatus === "duplicate_existing" ||
+          item.playlist?.duplicateStatus === "duplicate_in_batch" ||
+          item.playlistReview?.duplicateEvidence?.kind === "library" ||
+          item.playlistReview?.duplicateEvidence?.kind === "in_run"
+        if (filter === "duplicates") return duplicate
+        if (filter === "policy") return Boolean(item.playlistReview?.duplicatePolicy)
+        return selected
+      }),
+    [filter, queueItems]
+  )
+  const visibleReviewItemIds = useMemo(
+    () => new Set(filteredReviewItems.map((item) => item.id)),
+    [filteredReviewItems]
+  )
+  // TanStack Virtual exposes an imperative object that React Compiler skips.
+  // eslint-disable-next-line react-hooks/incompatible-library
+  const reviewVirtualizer = useVirtualizer({
+    count: filteredReviewItems.length,
+    getScrollElement: () => reviewListRef.current,
+    estimateSize: () => 62,
+    overscan: 6,
+    getItemKey: (index) => filteredReviewItems[index]?.id ?? index,
+    measureElement: (element) => element?.getBoundingClientRect().height || 62,
+  })
+  const reviewVirtualItems = reviewVirtualizer.getVirtualItems()
+  const restoreReviewRowFocus = useCallback((id: string) => {
+    const attempt = (remaining: number) => {
+      if (!reviewListOwnsFocusRef.current) return
+      const row = reviewRowRefs.current.get(id)
+      if (row) {
+        row.focus()
+        return
+      }
+      if (remaining > 0) window.requestAnimationFrame(() => attempt(remaining - 1))
+    }
+    window.requestAnimationFrame(() => attempt(2))
+  }, [])
+
+  useEffect(() => {
+    const handleFocusIn = (event: FocusEvent) => {
+      const target = event.target
+      if (target instanceof Node && reviewListRef.current?.contains(target)) return
+      reviewListOwnsFocusRef.current = false
+    }
+    document.addEventListener("focusin", handleFocusIn)
+    return () => document.removeEventListener("focusin", handleFocusIn)
+  }, [])
+
+  useEffect(() => {
+    if (filteredReviewItems.length === 0) {
+      activeReviewRowRef.current = null
+      setActiveReviewId(null)
+      return
+    }
+    const active = activeReviewRowRef.current
+    if (!active) {
+      const id = getQueueItemOccurrenceId(filteredReviewItems[0])
+      activeReviewRowRef.current = { id, index: 0 }
+      setActiveReviewId(id)
+      return
+    }
+    const currentIndex = filteredReviewItems.findIndex(
+      (item) => getQueueItemOccurrenceId(item) === active.id
+    )
+    if (currentIndex >= 0) {
+      active.index = currentIndex
+      if (
+        reviewListOwnsFocusRef.current &&
+        !reviewRowRefs.current.has(active.id) &&
+        reviewVirtualItems.length > 0
+      ) {
+        const nearest = reviewVirtualItems.reduce((best, row) =>
+          Math.abs(row.index - currentIndex) < Math.abs(best.index - currentIndex) ? row : best
+        )
+        const nearestItem = filteredReviewItems[nearest.index]
+        if (nearestItem) {
+          const id = getQueueItemOccurrenceId(nearestItem)
+          activeReviewRowRef.current = { id, index: nearest.index }
+          setActiveReviewId(id)
+          restoreReviewRowFocus(id)
+        }
+      }
+      return
+    }
+    const index = Math.min(active.index, filteredReviewItems.length - 1)
+    const id = getQueueItemOccurrenceId(filteredReviewItems[index])
+    activeReviewRowRef.current = { id, index }
+    setActiveReviewId(id)
+    if (reviewListOwnsFocusRef.current) {
+      reviewVirtualizer.scrollToIndex(index, { align: "auto" })
+      restoreReviewRowFocus(id)
+    }
+  }, [filteredReviewItems, restoreReviewRowFocus, reviewVirtualItems, reviewVirtualizer])
+
+  const handleReviewRowKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>, index: number) => {
+      if (event.target !== event.currentTarget) return
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return
+      event.preventDefault()
+      const targetIndex = Math.max(
+        0,
+        Math.min(
+          filteredReviewItems.length - 1,
+          index + (event.key === "ArrowDown" ? 1 : -1)
+        )
+      )
+      const target = filteredReviewItems[targetIndex]
+      if (!target) return
+      const id = getQueueItemOccurrenceId(target)
+      activeReviewRowRef.current = { id, index: targetIndex }
+      setActiveReviewId(id)
+      reviewVirtualizer.scrollToIndex(targetIndex, { align: "auto" })
+      restoreReviewRowFocus(id)
+    },
+    [filteredReviewItems, restoreReviewRowFocus, reviewVirtualizer]
   )
 
   // Compute total estimated time
@@ -136,14 +279,23 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
     () => selectedQueueItems.filter((item) => item.validation.valid).length,
     [selectedQueueItems]
   )
+  const runRequestBuild = useMemo(() => buildPlaylistIngestRunRequest(queueItems), [queueItems])
+  const currentProcessingBlock = state.processingBlock ?? runRequestBuild.block
+  const materializationExpired = currentProcessingBlock?.code === "materialization_expired"
+  const reviewRequired = currentProcessingBlock?.code === "review_required"
+  const exceedsRunInputLimit =
+    currentProcessingBlock?.code === "invalid_run_request" &&
+    validItemCount > MAX_PLAYLIST_RUN_INPUTS
   const canStartProcessing =
-    validItemCount > 0 && isOnlineForIngest && !isCheckingConnection
+    validItemCount > 0 &&
+    runRequestBuild.request !== null &&
+    state.processingBlock === null &&
+    isOnlineForIngest && !isCheckingConnection
 
   const handleStartProcessing = useCallback(() => {
     if (!canStartProcessing) return
     startProcessing()
-    goNext()
-  }, [canStartProcessing, goNext, startProcessing])
+  }, [canStartProcessing, startProcessing])
 
   // Contextual warnings
   const warnings = useMemo(() => {
@@ -188,6 +340,11 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
 
   // Item display name
   const getItemLabel = useCallback((item: WizardQueueItem): string => {
+    if (item.playlist?.title) {
+      return item.playlist.ordinal
+        ? `${item.playlist.ordinal}. ${item.playlist.title}`
+        : item.playlist.title
+    }
     if (item.conferenceOverride?.title) return item.conferenceOverride.title
     if (item.fileName) return item.fileName
     if (item.url) {
@@ -225,9 +382,7 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
               <span className="font-medium text-text">
                 {conferenceBatchMetadata.collectionName || "Conference batch"}
               </span>
-              <span className="text-text-muted">
-                {selectedQueueItems.length} selected
-              </span>
+              <span className="text-text-muted">{selectedQueueItems.length} selected</span>
             </div>
             <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-text-muted">
               {conferenceBatchMetadata.conferenceName && (
@@ -245,40 +400,105 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
             </div>
           </div>
         )}
-        <ul
-          className="divide-y divide-border rounded-lg border border-border bg-surface2"
+        {queueItems.some((item) => item.playlist) && (
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <label className="text-xs text-text-muted">
+              <span className="sr-only">Filter review items</span>
+              <select
+                aria-label="Filter review items"
+                value={filter}
+                onChange={(event) => setFilter(event.target.value as ReviewFilter)}
+                className="rounded border border-border bg-surface px-2 py-1 text-xs"
+              >
+                <option value="selected">Selected</option>
+                <option value="duplicates">Duplicates</option>
+                <option value="policy">Policy chosen</option>
+              </select>
+            </label>
+            <span className="text-xs text-text-muted" role="status" aria-live="polite">
+              Showing {filteredReviewItems.length} of {queueItems.length} review items
+            </span>
+          </div>
+        )}
+        <div
+          ref={reviewListRef}
+          className="max-h-80 overflow-y-auto rounded-lg border border-border bg-surface2"
           role="list"
           aria-label={qi("review.itemList.ariaLabel", "Items to process")}
         >
-          {selectedQueueItems.map((item) => {
-            const IconComponent = TYPE_ICONS[item.detectedType] ?? File
-            const ops = getOperationDescription(item.detectedType, selectedPreset, presetConfig)
-            const label = getItemLabel(item)
+          <div className="relative w-full" style={{ height: reviewVirtualizer.getTotalSize() }}>
+            {reviewVirtualItems.map((virtualRow) => {
+              const item = filteredReviewItems[virtualRow.index]
+              if (!item) return null
+              const IconComponent = TYPE_ICONS[item.detectedType] ?? File
+              const ops = getOperationDescription(item.detectedType, selectedPreset, presetConfig)
+              const label = getItemLabel(item)
 
-            return (
-              <li
-                key={item.id}
-                className="flex items-center gap-3 px-3 py-2.5 text-sm"
-              >
-                <IconComponent
-                  className="h-4 w-4 flex-shrink-0 text-text-muted"
-                  aria-hidden="true"
-                />
-                <span className="min-w-0 flex-1 truncate font-medium text-text" title={item.fileName ?? item.url}>
-                  {label}
-                  {item.conferenceOverride?.speaker && (
-                    <span className="ml-2 font-normal text-text-muted">
-                      {item.conferenceOverride.speaker}
-                    </span>
-                  )}
-                </span>
-                <span className="flex-shrink-0 whitespace-nowrap text-xs text-text-muted">
-                  {presetLabel} &middot; {ops}
-                </span>
-              </li>
-            )
-          })}
-        </ul>
+              return (
+                <div
+                  key={virtualRow.key}
+                  ref={(element) => {
+                    const id = getQueueItemOccurrenceId(item)
+                    if (element) {
+                      reviewRowRefs.current.set(id, element)
+                      reviewVirtualizer.measureElement(element)
+                    } else {
+                      reviewRowRefs.current.delete(id)
+                    }
+                  }}
+                  role="listitem"
+                  tabIndex={activeReviewId === getQueueItemOccurrenceId(item) ? 0 : -1}
+                  aria-setsize={filteredReviewItems.length}
+                  aria-posinset={virtualRow.index + 1}
+                  data-occurrence-id={getQueueItemOccurrenceId(item)}
+                  data-index={virtualRow.index}
+                  onFocusCapture={() => {
+                    const id = getQueueItemOccurrenceId(item)
+                    reviewListOwnsFocusRef.current = true
+                    activeReviewRowRef.current = { id, index: virtualRow.index }
+                    setActiveReviewId(id)
+                  }}
+                  onKeyDown={(event) => handleReviewRowKeyDown(event, virtualRow.index)}
+                  className="absolute left-0 top-0 flex w-full items-center gap-3 border-b border-border px-3 py-2.5 text-sm"
+                  style={{ transform: `translateY(${virtualRow.start}px)` }}
+                >
+                  <IconComponent
+                    className="h-4 w-4 flex-shrink-0 text-text-muted"
+                    aria-hidden="true"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-medium text-text">
+                      {label}
+                      {item.conferenceOverride?.speaker && (
+                        <span className="ml-2 font-normal text-text-muted">
+                          {item.conferenceOverride.speaker}
+                        </span>
+                      )}
+                      {item.playlist?.playlistTitle && (
+                        <span className="ml-2 font-normal text-text-muted">
+                          {item.playlist.playlistTitle}
+                        </span>
+                      )}
+                    </div>
+                    {item.sourceRef?.kind === "materialized_playlist_item" && item.url && (
+                      <details className="font-normal text-[11px] text-text-muted">
+                        <summary>Source details</summary>
+                        <span>{item.url}</span>
+                      </details>
+                    )}
+                  </div>
+                  <span className="flex-shrink-0 whitespace-nowrap text-xs text-text-muted">
+                    {presetLabel} &middot; {ops}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+
+        {queueItems.some((item) => item.sourceRef?.kind === "materialized_playlist_item") && (
+          <ItemMetadataTable mode="playlist" visibleItemIds={visibleReviewItemIds} />
+        )}
 
         {/* Storage mode */}
         <p className="mt-3 text-xs text-text-muted">
@@ -304,14 +524,36 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
                 : undefined
             }
           >
-            {
-              connectionRecoveryMessage ||
+            {connectionRecoveryMessage ||
               qi(
                 "wizard.offline.description",
                 "Reconnect to your tldw server before processing. You can go back and keep editing the queue."
-              )
-            }
+              )}
           </DesignSystemAlert>
+        )}
+
+        {materializationExpired && (
+          <DesignSystemAlert
+            variant="error"
+            className="mt-3"
+            title="This staged playlist expired. Inspect it again before processing."
+          />
+        )}
+
+        {reviewRequired && (
+          <DesignSystemAlert
+            variant="warning"
+            className="mt-3"
+            title="Review duplicate actions and fix invalid metadata changes before processing."
+          />
+        )}
+
+        {exceedsRunInputLimit && (
+          <DesignSystemAlert
+            variant="error"
+            className="mt-3"
+            title="Too many items selected. Select no more than 500 items before processing."
+          />
         )}
 
         {/* Contextual warnings */}

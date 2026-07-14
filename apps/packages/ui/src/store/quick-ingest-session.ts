@@ -1,17 +1,20 @@
 import { createWithEqualityFn } from "zustand/traditional"
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware"
 
-import type {
-  IngestPreset,
-  PresetConfig,
-  QueueItemValidation,
-  WizardProcessingState,
-  WizardResultItem,
-  WizardStep,
-  DetectedMediaType,
-  ConferenceBatchMetadata,
-  ConferenceItemMetadataOverride,
-  PlaylistQueueMetadata,
+import {
+  playlistHasMaterializationCues,
+  type IngestPreset,
+  type PresetConfig,
+  type QueueItemValidation,
+  type WizardProcessingState,
+  type WizardResultItem,
+  type WizardStep,
+  type DetectedMediaType,
+  type ConferenceBatchMetadata,
+  type ConferenceItemMetadataOverride,
+  type PlaylistQueueMetadata,
+  type PlaylistReviewState,
+  type WizardSourceRef,
 } from "@/components/Common/QuickIngest/types"
 import { DEFAULT_PRESET, DEFAULT_PRESETS } from "@/components/Common/QuickIngest/presets"
 import {
@@ -49,6 +52,7 @@ export type PersistedQuickIngestTracking = {
 
 export type PersistedWizardQueueItem = {
   id: string
+  sourceRef?: WizardSourceRef
   kind?: string
   fileName?: string
   name?: string
@@ -63,6 +67,7 @@ export type PersistedWizardQueueItem = {
   mimeType?: string
   validation: QueueItemValidation
   playlist?: PlaylistQueueMetadata
+  playlistReview?: PlaylistReviewState
   conferenceOverride?: ConferenceItemMetadataOverride
   fileStub?: {
     key?: string
@@ -338,62 +343,431 @@ const mergeTracking = (
   })
 }
 
+// Defensive ceiling for restored source rows. Overflow is represented by an
+// invalid sentinel row below so a truncated draft can never appear complete.
+const MAX_PERSISTED_QUEUE_SOURCE_ITEMS = 1000
+const PERSISTED_QUEUE_OVERFLOW_ERROR =
+  "This draft exceeded the 1000-source persistence safety limit. Start a new batch for the omitted sources."
+const MAX_ID_LENGTH = 255
+const MAX_DISPLAY_LENGTH = 2000
+const MAX_REVIEW_PATCH_LENGTH = 500
+const MAX_URL_LENGTH = 8192
+const MAX_VALIDATION_MESSAGES = 20
+const MAX_KEYWORDS = 100
+const MAX_KEYWORD_LENGTH = 128
+
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
+
+const boundedString = (value: unknown, maxLength: number): string | undefined => {
+  if (typeof value !== "string" || !value.trim() || value.length > maxLength) return undefined
+  return value
+}
+
+const canonicalId = (value: unknown): string | undefined => {
+  const id = boundedString(value, MAX_ID_LENGTH)
+  return id && id.trim() === id ? id : undefined
+}
+
+const boundedStringArray = (
+  value: unknown,
+  maxCount: number,
+  maxLength: number
+): string[] | undefined => {
+  if (!Array.isArray(value) || value.length > maxCount) return undefined
+  const strings = value.flatMap((entry) => {
+    const next = boundedString(entry, maxLength)
+    return next ? [next] : []
+  })
+  return strings.length > 0 ? strings : undefined
+}
+
+const sanitizeSourceRef = (value: unknown, itemId: string): WizardSourceRef | undefined => {
+  const sourceRef = asRecord(value)
+  if (!sourceRef || canonicalId(sourceRef.occurrenceId) !== itemId) return undefined
+  if (sourceRef.kind === "materialized_playlist_item") {
+    const materializationId = canonicalId(sourceRef.materializationId)
+    return materializationId
+      ? { kind: "materialized_playlist_item", materializationId, occurrenceId: itemId }
+      : undefined
+  }
+  if (sourceRef.kind === "direct_url") {
+    const url = boundedString(sourceRef.url, MAX_URL_LENGTH)
+    return url ? { kind: "direct_url", occurrenceId: itemId, url } : undefined
+  }
+  return sourceRef.kind === "file_stub"
+    ? { kind: "file_stub", occurrenceId: itemId }
+    : undefined
+}
+
+const sanitizePlaylist = (value: unknown): PlaylistQueueMetadata | undefined => {
+  const playlist = asRecord(value)
+  if (!playlist) return undefined
+  const duplicateStatus =
+    playlist.duplicateStatus === "new" ||
+    playlist.duplicateStatus === "duplicate_in_batch" ||
+    playlist.duplicateStatus === "duplicate_existing" ||
+    playlist.duplicateStatus === "unknown"
+      ? playlist.duplicateStatus
+      : undefined
+  const ordinal =
+    typeof playlist.ordinal === "number" &&
+    Number.isSafeInteger(playlist.ordinal) &&
+    playlist.ordinal > 0 &&
+    playlist.ordinal <= 1_000_000
+      ? playlist.ordinal
+      : undefined
+  const durationSeconds =
+    typeof playlist.durationSeconds === "number" &&
+    Number.isFinite(playlist.durationSeconds) &&
+    playlist.durationSeconds >= 0
+      ? playlist.durationSeconds
+      : undefined
+  const expiresAt = boundedString(playlist.materializationExpiresAt, 64)
+  const materializationExpiresAt =
+    expiresAt && Number.isFinite(Date.parse(expiresAt)) ? expiresAt : undefined
+  const next: PlaylistQueueMetadata = {
+    ...(boundedString(playlist.playlistId, MAX_ID_LENGTH)
+      ? { playlistId: playlist.playlistId as string }
+      : {}),
+    ...(boundedString(playlist.playlistTitle, MAX_DISPLAY_LENGTH)
+      ? { playlistTitle: playlist.playlistTitle as string }
+      : {}),
+    ...(ordinal ? { ordinal } : {}),
+    ...(boundedString(playlist.title, MAX_DISPLAY_LENGTH)
+      ? { title: playlist.title as string }
+      : {}),
+    ...(boundedString(playlist.channelOrUploader, MAX_DISPLAY_LENGTH)
+      ? { channelOrUploader: playlist.channelOrUploader as string }
+      : {}),
+    ...(durationSeconds !== undefined ? { durationSeconds } : {}),
+    ...(boundedString(playlist.normalizedSourceId, MAX_DISPLAY_LENGTH)
+      ? { normalizedSourceId: playlist.normalizedSourceId as string }
+      : {}),
+    ...(duplicateStatus ? { duplicateStatus } : {}),
+    ...(boundedString(playlist.sourceUrl, MAX_URL_LENGTH)
+      ? { sourceUrl: playlist.sourceUrl as string }
+      : {}),
+    ...(materializationExpiresAt ? { materializationExpiresAt } : {}),
+  }
+  return Object.keys(next).length > 0 ? next : undefined
+}
+
+const DUPLICATE_POLICIES = new Set([
+  "skip",
+  "overwrite",
+  "update_metadata_only",
+  "include_existing",
+])
+
+const sanitizePlaylistReview = (value: unknown): PlaylistReviewState | undefined => {
+  const review = asRecord(value)
+  if (!review) return undefined
+  const duplicatePolicy =
+    typeof review.duplicatePolicy === "string" && DUPLICATE_POLICIES.has(review.duplicatePolicy)
+      ? (review.duplicatePolicy as PlaylistReviewState["duplicatePolicy"])
+      : undefined
+  const hasAllowedDuplicatePolicies = Array.isArray(review.allowedDuplicatePolicies)
+  const allowedDuplicatePolicies = hasAllowedDuplicatePolicies
+    ? Array.from(
+        new Set(
+          review.allowedDuplicatePolicies.filter(
+            (policy): policy is "skip" | "overwrite" | "update_metadata_only" | "include_existing" =>
+              typeof policy === "string" && DUPLICATE_POLICIES.has(policy)
+          )
+        )
+      ).slice(0, 4)
+    : []
+  const evidence = asRecord(review.duplicateEvidence)
+  const duplicateEvidence = (() => {
+    if (!evidence) return undefined
+    if (evidence.kind === "none") {
+      return { kind: "none" as const, existingMediaId: null, duplicateOfOccurrenceId: null }
+    }
+    if (
+      evidence.kind === "library" &&
+      typeof evidence.existingMediaId === "number" &&
+      Number.isSafeInteger(evidence.existingMediaId) &&
+      evidence.existingMediaId > 0
+    ) {
+      return {
+        kind: "library" as const,
+        existingMediaId: evidence.existingMediaId,
+        duplicateOfOccurrenceId: null,
+      }
+    }
+    const duplicateOfOccurrenceId = canonicalId(evidence.duplicateOfOccurrenceId)
+    return evidence.kind === "in_run" && duplicateOfOccurrenceId
+      ? {
+          kind: "in_run" as const,
+          existingMediaId: null,
+          duplicateOfOccurrenceId,
+        }
+      : undefined
+  })()
+  const rawPatch = asRecord(review.metadataPatch)
+  const title = boundedString(rawPatch?.title, MAX_REVIEW_PATCH_LENGTH)
+  const author = boundedString(rawPatch?.author, MAX_REVIEW_PATCH_LENGTH)
+  const rawKeywords = rawPatch?.keywordsAdd
+  const keywords = boundedStringArray(rawKeywords, MAX_KEYWORDS, MAX_KEYWORD_LENGTH)
+  const keywordKeys = new Set<string>()
+  const keywordsAdd = keywords?.filter((keyword) => {
+    const key = keyword.toLocaleLowerCase()
+    if (keywordKeys.has(key)) return false
+    keywordKeys.add(key)
+    return true
+  })
+  const metadataPatch = {
+    ...(title ? { title } : {}),
+    ...(author ? { author } : {}),
+    ...(keywordsAdd ? { keywordsAdd } : {}),
+  }
+  const editedFieldSet = new Set(
+    Array.isArray(review.editedFields)
+      ? review.editedFields.filter(
+          (field): field is "title" | "author" | "keywordsAdd" =>
+            field === "title" || field === "author" || field === "keywordsAdd"
+        )
+      : []
+  )
+  const editedFields = (["title", "author", "keywordsAdd"] as const).filter(
+    (field) => editedFieldSet.has(field) && field in metadataPatch
+  )
+  return {
+    selected: typeof review.selected === "boolean" ? review.selected : true,
+    ...(duplicatePolicy ? { duplicatePolicy } : {}),
+    ...(duplicateEvidence ? { duplicateEvidence } : {}),
+    ...(hasAllowedDuplicatePolicies ? { allowedDuplicatePolicies } : {}),
+    ...(boundedString(review.reviewReason, MAX_DISPLAY_LENGTH)
+      ? { reviewReason: review.reviewReason as string }
+      : {}),
+    ...(Object.keys(metadataPatch).length > 0 ? { metadataPatch } : {}),
+    ...(editedFields.length > 0 ? { editedFields } : {}),
+  }
+}
+
+const sanitizeConferenceOverride = (
+  value: unknown
+): ConferenceItemMetadataOverride | undefined => {
+  const override = asRecord(value)
+  if (!override) return undefined
+  const duplicatePolicy =
+    typeof override.duplicatePolicy === "string" &&
+    DUPLICATE_POLICIES.has(override.duplicatePolicy)
+      ? (override.duplicatePolicy as ConferenceItemMetadataOverride["duplicatePolicy"])
+      : undefined
+  const tags = boundedStringArray(override.tags, MAX_KEYWORDS, MAX_KEYWORD_LENGTH)
+  return {
+    selected: typeof override.selected === "boolean" ? override.selected : true,
+    ...(boundedString(override.title, MAX_DISPLAY_LENGTH)
+      ? { title: override.title as string }
+      : {}),
+    ...(boundedString(override.speaker, MAX_DISPLAY_LENGTH)
+      ? { speaker: override.speaker as string }
+      : {}),
+    ...(boundedString(override.talkDate, 64) ? { talkDate: override.talkDate as string } : {}),
+    ...(boundedString(override.track, MAX_DISPLAY_LENGTH)
+      ? { track: override.track as string }
+      : {}),
+    ...(tags ? { tags } : {}),
+    ...(duplicatePolicy ? { duplicatePolicy } : {}),
+  }
+}
+
+const sanitizeValidation = (value: unknown, forceInvalid: boolean): QueueItemValidation => {
+  const validation = asRecord(value)
+  const errors = boundedStringArray(
+    validation?.errors,
+    MAX_VALIDATION_MESSAGES,
+    MAX_DISPLAY_LENGTH
+  ) || []
+  if (forceInvalid && !errors.includes("Reattach this source before processing.")) {
+    errors.push("Reattach this source before processing.")
+  }
+  const warnings = boundedStringArray(
+    validation?.warnings,
+    MAX_VALIDATION_MESSAGES,
+    MAX_DISPLAY_LENGTH
+  )
+  return {
+    valid: forceInvalid
+      ? false
+      : validation === null
+        ? true
+        : typeof validation.valid === "boolean"
+          ? validation.valid
+          : false,
+    ...(errors.length > 0 ? { errors } : {}),
+    ...(warnings ? { warnings } : {}),
+  }
+}
+
 const sanitizeQueueItems = (
   queueItems?: PersistedWizardQueueItem[]
 ): PersistedWizardQueueItem[] => {
   if (!Array.isArray(queueItems)) return []
-
-  return queueItems.map((item) => {
+  const detectedTypes = new Set<DetectedMediaType>([
+    "audio", "video", "document", "pdf", "ebook", "image", "web", "unknown",
+  ])
+  const seenIds = new Set<string>()
+  const sanitized: PersistedWizardQueueItem[] = []
+  for (const item of queueItems) {
+    if (sanitized.length >= MAX_PERSISTED_QUEUE_SOURCE_ITEMS) break
+    const record = asRecord(item)
+    const id = canonicalId(record?.id)
+    if (!record || !id || seenIds.has(id)) continue
+    seenIds.add(id)
+    const sourceRef = sanitizeSourceRef(record.sourceRef, id)
+    const playlist = sanitizePlaylist(record.playlist)
+    const playlistReview = sanitizePlaylistReview(record.playlistReview)
+    const conferenceOverride = sanitizeConferenceOverride(record.conferenceOverride)
+    const hadInvalidSourceRef = record.sourceRef !== undefined && !sourceRef
+    const isDirectSource = sourceRef?.kind === "direct_url"
+    const isMaterializedSource = sourceRef?.kind === "materialized_playlist_item"
+    const isFileSource = sourceRef?.kind === "file_stub"
+    const isLegacyFile =
+      !sourceRef &&
+      (record.kind === "file" ||
+        (!boundedString(record.url, MAX_URL_LENGTH) &&
+          Boolean(
+            boundedString(record.fileName, MAX_DISPLAY_LENGTH) ||
+              boundedString(record.name, MAX_DISPLAY_LENGTH)
+          )))
+    const isFileCompatible = isFileSource || isLegacyFile
+    const displayUrl = isDirectSource
+      ? sourceRef.url
+      : isMaterializedSource
+        ? boundedString(record.url, MAX_URL_LENGTH) || playlist?.sourceUrl || undefined
+        : isFileCompatible
+          ? undefined
+          : boundedString(record.url, MAX_URL_LENGTH)
+    const missingMaterializedAuthority =
+      playlistHasMaterializationCues(playlist) && !isMaterializedSource
+    const detectedType = detectedTypes.has(record.detectedType as DetectedMediaType)
+      ? (record.detectedType as DetectedMediaType)
+      : "unknown"
+    const size =
+      typeof record.size === "number" && Number.isFinite(record.size) && record.size >= 0
+        ? record.size
+        : undefined
+    const fileSize =
+      typeof record.fileSize === "number" && Number.isFinite(record.fileSize) && record.fileSize >= 0
+        ? record.fileSize
+        : size ?? 0
+    const fileStub = asRecord(record.fileStub)
+    const fileName =
+      boundedString(record.fileName, MAX_DISPLAY_LENGTH) ||
+      boundedString(record.name, MAX_DISPLAY_LENGTH)
+    const persistedLastModified =
+      typeof record.lastModified === "number" && Number.isFinite(record.lastModified)
+        ? record.lastModified
+        : undefined
+    const kind =
+      isDirectSource || isMaterializedSource
+        ? "url"
+        : isFileCompatible
+          ? "file"
+          : record.kind === "url" || record.kind === "file"
+            ? record.kind
+            : undefined
     const next: PersistedWizardQueueItem = {
-      id: String(item?.id || generateSessionId()),
-      kind: typeof item?.kind === "string" ? item.kind : undefined,
-      fileName:
-        typeof item?.fileName === "string" ? item.fileName : undefined,
-      name: typeof item?.name === "string" ? item.name : undefined,
-      key: typeof item?.key === "string" ? item.key : undefined,
-      size:
-        typeof item?.size === "number" && Number.isFinite(item.size)
-          ? item.size
-          : undefined,
-      type: typeof item?.type === "string" ? item.type : undefined,
-      lastModified:
-        typeof item?.lastModified === "number" &&
-        Number.isFinite(item.lastModified)
-          ? item.lastModified
-          : undefined,
-      url: typeof item?.url === "string" ? item.url : undefined,
-      detectedType: item?.detectedType || "unknown",
-      icon: item?.icon || "File",
-      fileSize:
-        typeof item?.fileSize === "number" && Number.isFinite(item.fileSize)
-          ? item.fileSize
-          : typeof item?.size === "number" && Number.isFinite(item.size)
-            ? item.size
-            : 0,
-      mimeType:
-        typeof item?.mimeType === "string"
-          ? item.mimeType
-          : typeof item?.type === "string"
-            ? item.type
-            : undefined,
-      validation: item?.validation || { valid: true },
-      playlist: item?.playlist,
-      conferenceOverride: item?.conferenceOverride,
+      id,
+      ...(sourceRef ? { sourceRef } : {}),
+      ...(kind ? { kind } : {}),
+      ...(isFileCompatible && fileName ? { fileName, name: fileName } : {}),
+      ...(isFileCompatible && boundedString(record.key, MAX_DISPLAY_LENGTH)
+        ? { key: record.key as string }
+        : {}),
+      ...(isFileCompatible && size !== undefined ? { size } : {}),
+      ...(isFileCompatible && boundedString(record.type, MAX_ID_LENGTH)
+        ? { type: record.type as string }
+        : {}),
+      ...(isFileCompatible && persistedLastModified !== undefined
+        ? { lastModified: persistedLastModified }
+        : {}),
+      ...(displayUrl ? { url: displayUrl } : {}),
+      detectedType,
+      icon: boundedString(record.icon, 64) || "File",
+      fileSize,
+      ...(boundedString(record.mimeType, MAX_ID_LENGTH)
+        ? { mimeType: record.mimeType as string }
+        : isFileCompatible && boundedString(record.type, MAX_ID_LENGTH)
+          ? { mimeType: record.type as string }
+          : {}),
+      validation: sanitizeValidation(
+        record.validation,
+        hadInvalidSourceRef || missingMaterializedAuthority || isFileCompatible
+      ),
+      ...(playlist ? { playlist } : {}),
+      ...(playlistReview ? { playlistReview } : {}),
+      ...(conferenceOverride ? { conferenceOverride } : {}),
     }
-
-    if (item?.fileStub) {
+    if (isFileCompatible && fileStub) {
+      const key = boundedString(fileStub.key, MAX_DISPLAY_LENGTH)
+      const instanceId = canonicalId(fileStub.instanceId)
+      const lastModified =
+        typeof fileStub.lastModified === "number" && Number.isFinite(fileStub.lastModified)
+          ? fileStub.lastModified
+          : undefined
       next.fileStub = {
-        key: item.fileStub.key,
-        instanceId: item.fileStub.instanceId,
-        lastModified:
-          typeof item.fileStub.lastModified === "number" &&
-          Number.isFinite(item.fileStub.lastModified)
-            ? item.fileStub.lastModified
-            : undefined,
+        ...(key ? { key } : {}),
+        ...(instanceId ? { instanceId } : {}),
+        ...(lastModified !== undefined ? { lastModified } : {}),
       }
     }
-
-    return next
+    sanitized.push(next)
+  }
+  if (queueItems.length > MAX_PERSISTED_QUEUE_SOURCE_ITEMS) {
+    const baseId = "quick-ingest-persistence-overflow"
+    let overflowId = baseId
+    let suffix = 1
+    while (seenIds.has(overflowId)) {
+      overflowId = `${baseId}-${suffix}`
+      suffix += 1
+    }
+    sanitized.push({
+      id: overflowId,
+      kind: "file",
+      fileName: "Incomplete restored draft",
+      detectedType: "unknown",
+      icon: "File",
+      fileSize: 0,
+      validation: {
+        valid: false,
+        errors: [PERSISTED_QUEUE_OVERFLOW_ERROR],
+      },
+    })
+  }
+  const queuedOccurrenceIds = new Set(sanitized.map((item) => item.id))
+  return sanitized.map((item) => {
+    const review = item.playlistReview
+    if (!review) return item
+    const nextReview = { ...review }
+    let changed = false
+    if (
+      nextReview.duplicatePolicy &&
+      nextReview.allowedDuplicatePolicies &&
+      !nextReview.allowedDuplicatePolicies.includes(nextReview.duplicatePolicy)
+    ) {
+      delete nextReview.duplicatePolicy
+      changed = true
+    }
+    if (nextReview.allowedDuplicatePolicies?.length === 0) {
+      delete nextReview.allowedDuplicatePolicies
+      changed = true
+    }
+    const duplicateTarget = nextReview.duplicateEvidence?.duplicateOfOccurrenceId
+    if (
+      nextReview.duplicateEvidence?.kind === "in_run" &&
+      (!duplicateTarget || duplicateTarget === item.id || !queuedOccurrenceIds.has(duplicateTarget))
+    ) {
+      delete nextReview.duplicateEvidence
+      delete nextReview.duplicatePolicy
+      changed = true
+    }
+    return changed ? { ...item, playlistReview: nextReview } : item
   })
 }
 

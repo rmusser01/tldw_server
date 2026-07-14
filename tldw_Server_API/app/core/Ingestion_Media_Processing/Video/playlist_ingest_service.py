@@ -735,7 +735,11 @@ class PlaylistIngestService:
                     )
                 )
                 continue
-            target_matches = (
+            target_omitted = (
+                validated_override.existing_media_id is None
+                and validated_override.duplicate_of_occurrence_id is None
+            )
+            target_matches = target_omitted or (
                 current_evidence.kind == "library"
                 and validated_override.existing_media_id == current_evidence.existing_media_id
                 and validated_override.duplicate_of_occurrence_id is None
