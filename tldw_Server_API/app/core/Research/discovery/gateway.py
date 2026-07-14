@@ -3,16 +3,21 @@
 from __future__ import annotations
 
 import ipaddress
+import re
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from typing import Literal, TypeAlias
-from urllib.parse import quote, urlencode
+from urllib.parse import quote_from_bytes
 
 from tldw_Server_API.app.core.Research.discovery.contracts import (
     AccessRoute,
     CredentialRequirement,
     DispatchIntent,
+    ExactOrigin,
+    QueryPair,
+    RouteLimits,
+    RoutePolicy,
     canonical_policy_digest,
 )
 from tldw_Server_API.app.core.Security.http_hop import (
@@ -38,7 +43,18 @@ _ERROR_MESSAGES: dict[GatewayErrorCode, str] = {
     "hop_failed": "Discovery gateway hop failed",
     "invalid_hop_response": "Discovery gateway hop response rejected",
 }
+_HEADER_NAME_PATTERN = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+\Z")
 _MAX_CONTENT_TYPE_BYTES = 256
+_MAX_RETRY_AFTER_BYTES = 128
+_MIN_FINAL_HEADER_BLOCK_BYTES = len(b"HTTP/1.0 200\n\n")
+_DENIED_IPV6_TRANSITION_NETWORKS = (
+    ipaddress.ip_network("::/96"),
+    ipaddress.ip_network("::ffff:0:0/96"),
+    ipaddress.ip_network("64:ff9b::/96"),
+    ipaddress.ip_network("64:ff9b:1::/48"),
+    ipaddress.ip_network("2001::/32"),
+    ipaddress.ip_network("2002::/16"),
+)
 
 
 class DiscoveryGatewayError(Exception):
@@ -47,6 +63,10 @@ class DiscoveryGatewayError(Exception):
     __slots__ = ("code", "retryable")
 
     def __init__(self, code: GatewayErrorCode, *, retryable: bool = False) -> None:
+        if code not in _ERROR_MESSAGES:
+            raise ValueError("Unsupported discovery gateway error code")
+        if type(retryable) is not bool:
+            raise TypeError("retryable must be a boolean")
         self.code = code
         self.retryable = retryable
         super().__init__(_ERROR_MESSAGES[code])
@@ -85,35 +105,46 @@ class DiscoveryGatewayResponse:
     headers: tuple[tuple[str, str], ...]
     body: bytes
     trace: DiscoveryGatewayTrace
+    redirect_location: str | None = field(repr=False)
+    retry_after: str | None = field(repr=False)
+
+
+@dataclass(frozen=True, slots=True)
+class _BindingSnapshot:
+    route_id: str
+    policy_digest: str
+    scheme: str
+    host: str
+    port: int
+    method: str
+    path: str
+    query_pairs: tuple[tuple[str, str], ...]
+    query_keys: tuple[str, ...]
+    timeout_ms: int
+    max_response_bytes: int
+    http_limits: HTTPHopLimits
+
+
+@dataclass(frozen=True, slots=True)
+class _ResponseSnapshot:
+    status_code: int
+    headers: tuple[tuple[str, str], ...]
+    body: bytes
+    resolved_ips: tuple[str, ...]
+    connected_ip: str
+    response_header_bytes: int
+    wire_bytes: int
+    redirect_location: str | None
+    retry_after: str | None
 
 
 def _reject(code: GatewayErrorCode) -> DiscoveryGatewayError:
     return DiscoveryGatewayError(code)
 
 
-def _validate_binding(route: AccessRoute, intent: DispatchIntent) -> None:
-    if not isinstance(route, AccessRoute) or not isinstance(intent, DispatchIntent):
-        raise _reject("request_rejected")
-    try:
-        digest = canonical_policy_digest(route.policy)
-    except (TypeError, ValueError):
-        raise _reject("request_rejected") from None
-    if (
-        route.route_id != intent.route_id
-        or route.policy.policy_digest != digest
-        or intent.policy_digest != digest
-        or route.credential_requirement is not CredentialRequirement.NONE
-        or intent.method not in route.policy.methods
-        or intent.path not in route.policy.paths
-        or intent.limits != route.policy.limits
-        or any(pair.name not in route.policy.allowed_query_keys for pair in intent.query_pairs)
-    ):
-        raise _reject("request_rejected")
-
-
-def _hop_limits(intent: DispatchIntent) -> HTTPHopLimits:
-    timeout_seconds = intent.limits.timeout_ms / 1000
-    response_bytes = intent.limits.max_response_bytes
+def _hop_limits(limits: RouteLimits) -> HTTPHopLimits:
+    timeout_seconds = limits.timeout_ms / 1000
+    response_bytes = limits.max_response_bytes
     return HTTPHopLimits(
         dns_timeout_seconds=timeout_seconds,
         connect_timeout_seconds=timeout_seconds,
@@ -126,28 +157,146 @@ def _hop_limits(intent: DispatchIntent) -> HTTPHopLimits:
     )
 
 
-def _build_request(
-    route: AccessRoute,
-    intent: DispatchIntent,
-) -> NormalizedHTTPHopRequest | None:
-    query = urlencode(
-        tuple((pair.name, pair.value) for pair in intent.query_pairs),
-        doseq=False,
-        quote_via=quote,
-    )
-    target = intent.path if not query else f"{intent.path}?{query}"
+def _snapshot_binding(route: object, intent: object) -> _BindingSnapshot | None:
+    """Copy and validate every field used after the policy check."""
+    try:
+        if type(route) is not AccessRoute or type(intent) is not DispatchIntent:
+            return None
+        policy = route.policy
+        origin = policy.origin
+        if (
+            type(policy) is not RoutePolicy
+            or type(origin) is not ExactOrigin
+            or type(policy.limits) is not RouteLimits
+            or type(intent.limits) is not RouteLimits
+            or type(route.route_id) is not str
+            or type(intent.route_id) is not str
+            or type(policy.policy_version) is not str
+            or type(policy.policy_digest) is not str
+            or type(intent.policy_digest) is not str
+            or type(origin.scheme) is not str
+            or type(origin.host) is not str
+            or type(origin.port) is not int
+            or type(intent.method) is not str
+            or type(intent.path) is not str
+            or type(policy.methods) is not tuple
+            or type(policy.paths) is not tuple
+            or type(intent.query_pairs) is not tuple
+            or type(policy.allowed_query_keys) is not tuple
+            or any(type(value) is not str for value in policy.methods)
+            or any(type(value) is not str for value in policy.paths)
+            or any(type(value) is not str for value in policy.allowed_query_keys)
+            or any(
+                type(getattr(limits, name)) is not int
+                for limits in (policy.limits, intent.limits)
+                for name in (
+                    "max_pages",
+                    "max_redirects",
+                    "max_retries",
+                    "timeout_ms",
+                    "max_response_bytes",
+                    "max_results",
+                )
+            )
+        ):
+            return None
+        digest = canonical_policy_digest(policy)
+        if (
+            route.route_id != intent.route_id
+            or policy.policy_digest != digest
+            or intent.policy_digest != digest
+            or route.credential_requirement is not CredentialRequirement.NONE
+            or intent.method not in policy.methods
+            or intent.path not in policy.paths
+            or intent.limits != policy.limits
+            or len(intent.query_pairs) > len(policy.allowed_query_keys)
+        ):
+            return None
+
+        allowed_query_keys = set(policy.allowed_query_keys)
+        query_pairs: list[tuple[str, str]] = []
+        query_keys: list[str] = []
+        seen: set[str] = set()
+        for pair in intent.query_pairs:
+            if type(pair) is not QueryPair or type(pair.name) is not str or type(pair.value) is not str:
+                return None
+            if pair.name not in allowed_query_keys or pair.name in seen:
+                return None
+            seen.add(pair.name)
+            query_pairs.append((pair.name, pair.value))
+            query_keys.append(pair.name)
+
+        http_limits = _hop_limits(intent.limits)
+        return _BindingSnapshot(
+            route_id=route.route_id,
+            policy_digest=digest,
+            scheme=origin.scheme,
+            host=origin.host,
+            port=origin.port,
+            method=intent.method,
+            path=intent.path,
+            query_pairs=tuple(query_pairs),
+            query_keys=tuple(query_keys),
+            timeout_ms=intent.limits.timeout_ms,
+            max_response_bytes=intent.limits.max_response_bytes,
+            http_limits=http_limits,
+        )
+    except Exception:  # noqa: BLE001 - hostile mutated contracts fail closed.
+        return None
+
+
+def _build_target(binding: _BindingSnapshot) -> str | None:
+    """Percent-encode a bounded target without constructing an oversized aggregate."""
+    limit = binding.http_limits.max_request_target_bytes
+    if len(binding.path) > limit:
+        return None
+    try:
+        path_bytes = binding.path.encode("ascii")
+    except UnicodeError:
+        return None
+    if len(path_bytes) > limit:
+        return None
+
+    parts: list[str] = []
+    total_bytes = len(path_bytes)
+    for name, value in binding.query_pairs:
+        if len(name) > limit or len(value) > limit:
+            return None
+        try:
+            name_bytes = name.encode("ascii")
+            value_bytes = value.encode("utf-8", errors="strict")
+        except UnicodeError:
+            return None
+        if len(name_bytes) > limit or len(value_bytes) > limit:
+            return None
+        encoded_name = quote_from_bytes(name_bytes, safe="")
+        encoded_value = quote_from_bytes(value_bytes, safe="")
+        separator_bytes = 1
+        pair_bytes = len(encoded_name) + 1 + len(encoded_value)
+        if pair_bytes > limit - total_bytes - separator_bytes:
+            return None
+        total_bytes += separator_bytes + pair_bytes
+        parts.append(f"{encoded_name}={encoded_value}")
+
+    return binding.path if not parts else f"{binding.path}?{'&'.join(parts)}"
+
+
+def _build_request(binding: _BindingSnapshot) -> NormalizedHTTPHopRequest | None:
+    target = _build_target(binding)
+    if target is None:
+        return None
     try:
         return NormalizedHTTPHopRequest(
-            scheme=route.policy.origin.scheme,
-            host=route.policy.origin.host,
-            port=route.policy.origin.port,
-            method=intent.method,
+            scheme=binding.scheme,
+            host=binding.host,
+            port=binding.port,
+            method=binding.method,
             target=target,
             headers=(),
             body=b"",
-            limits=_hop_limits(intent),
+            limits=replace(binding.http_limits),
         )
-    except (HTTPHopError, TypeError, ValueError):
+    except Exception:  # noqa: BLE001 - mutated scalar subclasses fail closed.
         return None
 
 
@@ -162,69 +311,205 @@ def _active(
         return False
 
 
-def _safe_headers(headers: tuple[tuple[str, str], ...]) -> tuple[tuple[str, str], ...]:
-    for name, value in headers:
-        if not isinstance(name, str) or not isinstance(value, str):
-            continue
-        if name.lower() != "content-type":
-            continue
-        normalized = value.strip()
-        if (
-            normalized
-            and len(normalized.encode("utf-8")) <= _MAX_CONTENT_TYPE_BYTES
-            and all(" " <= character <= "~" for character in normalized)
-        ):
-            return (("content-type", normalized),)
-    return ()
-
-
-def _valid_ip_evidence(response: HTTPHopResponse) -> bool:
+def _is_allowed_public_address(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     if (
-        not isinstance(response.resolved_ips, tuple)
-        or not response.resolved_ips
-        or not all(isinstance(address, str) for address in response.resolved_ips)
-        or not isinstance(response.connected_ip, str)
-        or response.connected_ip not in response.resolved_ips
+        not address.is_global
+        or address.is_multicast
+        or address.is_reserved
+        or address.is_unspecified
+        or address.is_loopback
+        or address.is_link_local
+        or address.is_private
     ):
         return False
-    try:
-        tuple(ipaddress.ip_address(address) for address in response.resolved_ips)
-        ipaddress.ip_address(response.connected_ip)
-    except (TypeError, ValueError):
-        return False
+    if isinstance(address, ipaddress.IPv6Address):
+        if address.ipv4_mapped is not None or address.is_site_local:
+            return False
+        if any(address in network for network in _DENIED_IPV6_TRANSITION_NETWORKS):
+            return False
     return True
 
 
-def _valid_headers(headers: object) -> bool:
-    return isinstance(headers, tuple) and all(
-        isinstance(header, tuple) and len(header) == 2 and all(isinstance(value, str) for value in header)
-        for header in headers
-    )
+def _valid_ip_evidence(resolved_ips: object, connected_ip: object) -> bool:
+    if (
+        type(resolved_ips) is not tuple
+        or not resolved_ips
+        or type(connected_ip) is not str
+        or connected_ip not in resolved_ips
+    ):
+        return False
+    seen: set[str] = set()
+    for raw_address in resolved_ips:
+        if type(raw_address) is not str or not raw_address or len(raw_address) > 45 or "%" in raw_address:
+            return False
+        try:
+            address = ipaddress.ip_address(raw_address)
+        except ValueError:
+            return False
+        canonical = address.compressed
+        if raw_address != canonical or canonical in seen or not _is_allowed_public_address(address):
+            return False
+        seen.add(canonical)
+    return True
 
 
-def _valid_response(response: object, limits: HTTPHopLimits) -> bool:
-    return bool(
-        isinstance(response, HTTPHopResponse)
-        and isinstance(response.status_code, int)
-        and not isinstance(response.status_code, bool)
-        and 100 <= response.status_code <= 599
-        and _valid_headers(response.headers)
-        and isinstance(response.body, bytes)
-        and len(response.body) <= limits.max_parser_input_bytes
-        and isinstance(response.response_header_bytes, int)
-        and not isinstance(response.response_header_bytes, bool)
-        and 0 <= response.response_header_bytes <= limits.max_response_header_bytes
-        and isinstance(response.wire_bytes, int)
-        and not isinstance(response.wire_bytes, bool)
-        and 0 <= response.wire_bytes <= limits.max_wire_bytes
-        and _valid_ip_evidence(response)
-    )
+def _visible_ascii(value: str, max_bytes: int) -> str | None:
+    if len(value) > max_bytes:
+        return None
+    normalized = value.strip(" \t")
+    if not normalized or len(normalized) > max_bytes:
+        return None
+    if not normalized.isascii() or any(not " " <= character <= "~" for character in normalized):
+        return None
+    return normalized
 
 
-def _requested_host(route: AccessRoute) -> str:
-    origin = route.policy.origin
-    default_port = 443 if origin.scheme == "https" else 80
-    return origin.host if origin.port == default_port else f"{origin.host}:{origin.port}"
+def _snapshot_headers(
+    headers: object,
+    *,
+    limits: HTTPHopLimits,
+    response_header_bytes: int,
+) -> tuple[tuple[tuple[str, str], ...], str | None, str | None] | None:
+    if type(headers) is not tuple or len(headers) > limits.max_response_headers:
+        return None
+
+    minimum_wire_bytes = _MIN_FINAL_HEADER_BLOCK_BYTES
+    content_types: list[str] = []
+    locations: list[str] = []
+    retry_afters: list[str] = []
+    for pair in headers:
+        if type(pair) is not tuple or len(pair) != 2:
+            return None
+        name, value = pair
+        if type(name) is not str or type(value) is not str:
+            return None
+        if len(name) > limits.max_response_header_bytes or len(value) > limits.max_response_header_bytes:
+            return None
+        try:
+            name_bytes = name.encode("ascii")
+            value_bytes = value.encode("latin-1")
+        except UnicodeError:
+            return None
+        if not name_bytes or _HEADER_NAME_PATTERN.fullmatch(name) is None:
+            return None
+        if any(ord(character) < 32 and character != "\t" or ord(character) == 127 for character in value):
+            return None
+        minimum_wire_bytes += len(name_bytes) + 1 + len(value_bytes) + 1
+        if minimum_wire_bytes > response_header_bytes or minimum_wire_bytes > limits.max_response_header_bytes:
+            return None
+
+        normalized_name = name.lower()
+        if normalized_name == "content-type":
+            content_types.append(value)
+        elif normalized_name == "location":
+            locations.append(value)
+        elif normalized_name == "retry-after":
+            retry_afters.append(value)
+
+    if len(content_types) > 1 or len(locations) > 1 or len(retry_afters) > 1:
+        return None
+
+    safe_headers: tuple[tuple[str, str], ...] = ()
+    if content_types:
+        content_type = _visible_ascii(content_types[0], _MAX_CONTENT_TYPE_BYTES)
+        if content_type is not None:
+            safe_headers = (("content-type", content_type),)
+
+    redirect_location = None
+    if locations:
+        redirect_location = _visible_ascii(locations[0], limits.max_request_target_bytes)
+        if redirect_location is None:
+            return None
+
+    retry_after = None
+    if retry_afters:
+        retry_after = _visible_ascii(retry_afters[0], _MAX_RETRY_AFTER_BYTES)
+        if retry_after is None:
+            return None
+
+    return safe_headers, redirect_location, retry_after
+
+
+def _valid_body_wire_evidence(
+    *,
+    method: str,
+    status_code: int,
+    body: bytes,
+    wire_bytes: int,
+    headers: tuple[tuple[str, str], ...],
+) -> bool:
+    if method == "HEAD" or status_code in {204, 304}:
+        return not body and wire_bytes == 0
+    if status_code == 205:
+        if body:
+            return False
+        if wire_bytes == 0:
+            return True
+        transfer_encodings = tuple(
+            value.strip().lower() for name, value in headers if name.lower() == "transfer-encoding"
+        )
+        return wire_bytes == 5 and transfer_encodings == ("chunked",)
+    return not body or wire_bytes > 0
+
+
+def _snapshot_response(response: object, limits: HTTPHopLimits, method: str) -> _ResponseSnapshot | None:
+    try:
+        if type(response) is not HTTPHopResponse:
+            return None
+        if (
+            type(response.status_code) is not int
+            or not 200 <= response.status_code <= 599
+            or type(response.body) is not bytes
+            or len(response.body) > limits.max_parser_input_bytes
+            or type(response.response_header_bytes) is not int
+            or not _MIN_FINAL_HEADER_BLOCK_BYTES <= response.response_header_bytes <= limits.max_response_header_bytes
+            or type(response.wire_bytes) is not int
+            or not 0 <= response.wire_bytes <= limits.max_wire_bytes
+            or not _valid_ip_evidence(response.resolved_ips, response.connected_ip)
+        ):
+            return None
+        metadata = _snapshot_headers(
+            response.headers,
+            limits=limits,
+            response_header_bytes=response.response_header_bytes,
+        )
+        if metadata is None:
+            return None
+        if not _valid_body_wire_evidence(
+            method=method,
+            status_code=response.status_code,
+            body=response.body,
+            wire_bytes=response.wire_bytes,
+            headers=response.headers,
+        ):
+            return None
+        safe_headers, redirect_location, retry_after = metadata
+        return _ResponseSnapshot(
+            status_code=response.status_code,
+            headers=safe_headers,
+            body=response.body,
+            resolved_ips=response.resolved_ips,
+            connected_ip=response.connected_ip,
+            response_header_bytes=response.response_header_bytes,
+            wire_bytes=response.wire_bytes,
+            redirect_location=redirect_location,
+            retry_after=retry_after,
+        )
+    except Exception:  # noqa: BLE001 - hostile injected responses fail closed.
+        return None
+
+
+def _requested_host(binding: _BindingSnapshot) -> str:
+    default_port = 443 if binding.scheme == "https" else 80
+    return binding.host if binding.port == default_port else f"{binding.host}:{binding.port}"
+
+
+def _safe_retryable(error: HTTPHopError) -> bool:
+    try:
+        value = error.retryable
+    except Exception:  # noqa: BLE001 - never retain hostile provider state.
+        return False
+    return type(value) is bool and value is True
 
 
 async def dispatch_once(
@@ -235,41 +520,47 @@ async def dispatch_once(
     one_hop: OneHop = request_http_hop,
 ) -> DiscoveryGatewayResponse:
     """Validate and perform exactly one credential-free physical HTTP hop."""
-    _validate_binding(route, intent)
-    request = _build_request(route, intent)
+    binding = _snapshot_binding(route, intent)
+    if binding is None:
+        raise _reject("request_rejected")
+    request = _build_request(binding)
     if request is None:
         raise _reject("request_rejected")
-    if not _active(is_policy_active, route.route_id, intent.policy_digest):
+    if not _active(is_policy_active, binding.route_id, binding.policy_digest):
         raise _reject("policy_inactive")
+    if _snapshot_binding(route, intent) != binding:
+        raise _reject("request_rejected")
 
     started_at = time.monotonic()
     mapped_error: DiscoveryGatewayError | None = None
-    response: HTTPHopResponse | None = None
+    raw_response: HTTPHopResponse | None = None
     try:
-        response = await one_hop(request)
+        raw_response = await one_hop(request)
     except HTTPHopError as error:
-        mapped_error = DiscoveryGatewayError("hop_failed", retryable=error.retryable)
+        mapped_error = DiscoveryGatewayError("hop_failed", retryable=_safe_retryable(error))
     except Exception:  # noqa: BLE001 - never expose unexpected provider detail.
         mapped_error = DiscoveryGatewayError("hop_failed")
     elapsed_ms = max(0, int((time.monotonic() - started_at) * 1000))
     if mapped_error is not None:
         raise mapped_error
-    if not _valid_response(response, request.limits) or response is None:
+
+    response = _snapshot_response(raw_response, binding.http_limits, binding.method)
+    if response is None:
         raise _reject("invalid_hop_response")
 
     trace = DiscoveryGatewayTrace(
-        route_id=route.route_id,
-        policy_digest=intent.policy_digest,
-        scheme=route.policy.origin.scheme,
-        requested_host=_requested_host(route),
-        tls_server_name=(route.policy.origin.host if route.policy.origin.scheme == "https" else None),
-        port=route.policy.origin.port,
-        method=intent.method,
-        path=intent.path,
-        query_keys=tuple(pair.name for pair in intent.query_pairs),
-        timeout_ms=intent.limits.timeout_ms,
-        max_response_bytes=intent.limits.max_response_bytes,
-        http_limits=request.limits,
+        route_id=binding.route_id,
+        policy_digest=binding.policy_digest,
+        scheme=binding.scheme,
+        requested_host=_requested_host(binding),
+        tls_server_name=(binding.host if binding.scheme == "https" else None),
+        port=binding.port,
+        method=binding.method,
+        path=binding.path,
+        query_keys=binding.query_keys,
+        timeout_ms=binding.timeout_ms,
+        max_response_bytes=binding.max_response_bytes,
+        http_limits=binding.http_limits,
         status_code=response.status_code,
         resolved_ips=response.resolved_ips,
         connected_ip=response.connected_ip,
@@ -280,9 +571,11 @@ async def dispatch_once(
     )
     return DiscoveryGatewayResponse(
         status_code=response.status_code,
-        headers=_safe_headers(response.headers),
+        headers=response.headers,
         body=response.body,
         trace=trace,
+        redirect_location=response.redirect_location,
+        retry_after=response.retry_after,
     )
 
 
