@@ -8,10 +8,7 @@ import type { ChatScope } from '@/types/chat-scope'
 import { toChatScopeParams } from '@/types/chat-scope'
 import { normalizeChatRole } from '@/utils/normalize-chat-role'
 import { parseRagStreamLine } from '@/services/rag/stream-contract'
-import {
-  getStructuredPublicRagProviderError,
-  getValidatedHttpStatus,
-} from '@/services/rag/provider-error-contract'
+import { sanitizeRagProviderFailure } from '@/services/rag/provider-error-contract'
 import type {
   ChatCompletionRequestOptions,
   ChatCompletionStreamOptions,
@@ -29,12 +26,6 @@ import type {
 } from '../TldwApiClient'
 
 const CHAT_MESSAGES_CACHE_TTL_MS = 60 * 1000
-
-const isConnectionErrorMessage = (message: string): boolean =>
-  /network|offline|failed to fetch|connection|unreachable/i.test(message)
-
-const isTimeoutErrorMessage = (message: string): boolean =>
-  /timeout|timed out|etimedout/i.test(message)
 
 const isSavedDegradedCharacterPersistError = (error: unknown): boolean => {
   const candidate = error as
@@ -67,45 +58,16 @@ const isSavedDegradedCharacterPersistError = (error: unknown): boolean => {
 const buildSanitizedRagSearchError = (
   error: unknown
 ): Error & { status?: number; code?: string } => {
-  const status = getValidatedHttpStatus(error)
-  const providerError = getStructuredPublicRagProviderError(error)
-  const rawMessage =
-    error instanceof Error
-      ? error.message
-      : typeof error === "string"
-        ? error
-        : ""
-
-  let message = "RAG search failed."
-  if (providerError) {
-    message = providerError.message
-  } else if (isConnectionErrorMessage(rawMessage)) {
-    message = "Cannot reach server. Check your connection and try again."
-  } else if (isTimeoutErrorMessage(rawMessage) || status === 408) {
-    message = "RAG search timed out. Try again."
-  } else if (status === 400 || status === 422) {
-    message = "RAG search request is invalid."
-  } else if (status === 401) {
-    message = "RAG search failed. Authentication is required."
-  } else if (status === 403) {
-    message = "RAG search failed. Access was denied."
-  } else if (status === 404) {
-    message = "RAG search endpoint is unavailable."
-  } else if (status === 429) {
-    message = "RAG search is rate limited. Please wait and try again."
-  } else if (typeof status === "number" && status >= 500) {
-    message = "RAG search failed due to a server error."
-  }
-
-  const sanitizedError = new Error(message) as Error & {
+  const sanitized = sanitizeRagProviderFailure(error)
+  const sanitizedError = new Error(sanitized.message) as Error & {
     status?: number
     code?: string
   }
-  if (typeof status === "number") {
-    sanitizedError.status = status
+  if (typeof sanitized.status === "number") {
+    sanitizedError.status = sanitized.status
   }
-  if (providerError) {
-    sanitizedError.code = providerError.code
+  if (sanitized.code) {
+    sanitizedError.code = sanitized.code
   }
   return sanitizedError
 }
@@ -307,7 +269,8 @@ export const chatRagMethods = {
         headers: { 'Content-Type': 'application/json' },
         body: { query: normalizedQuery, ...rest },
         timeoutMs,
-        abortSignal: signal
+        abortSignal: signal,
+        sanitizeRagProviderError: true
       })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error ?? '')

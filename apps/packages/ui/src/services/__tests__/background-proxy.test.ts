@@ -105,6 +105,285 @@ describe("background proxy fallback safety", () => {
     }
   })
 
+  it.each([
+    {
+      transport: "extension direct detail",
+      source: "background",
+      expectsEvent: true,
+      status: 503,
+      code: "credential_store_unavailable",
+      safeMessage: "Provider credential storage is temporarily unavailable.",
+      responseError: "Failed to fetch RAW_ERROR_SENTINEL",
+      responseData: {
+        detail: {
+          error_code: "credential_store_unavailable",
+          message: "RAW_BODY_SENTINEL",
+          api_key: "RAW_KEY_SENTINEL",
+          debug_path: "/RAW_PATH_SENTINEL/provider.json"
+        },
+        raw_body: "RAW_RESPONSE_SENTINEL"
+      }
+    },
+    {
+      transport: "direct fallback nested detail",
+      source: "direct",
+      expectsEvent: true,
+      status: 502,
+      code: "provider_authentication_failed",
+      safeMessage:
+        "The selected provider credentials could not be authenticated.",
+      responseError: "Failed to fetch RAW_ERROR_SENTINEL",
+      responseData: {
+        details: {
+          detail: {
+            error_code: "provider_authentication_failed",
+            message: "RAW_BODY_SENTINEL",
+            api_key: "RAW_KEY_SENTINEL",
+            debug_path: "/RAW_PATH_SENTINEL/provider.json"
+          }
+        },
+        raw_body: "RAW_RESPONSE_SENTINEL"
+      }
+    },
+    {
+      transport: "extension malformed detail",
+      source: "background",
+      expectsEvent: false,
+      status: 503,
+      code: undefined,
+      safeMessage: "RAG search failed due to a server error.",
+      responseError: "Provider failed RAW_ERROR_SENTINEL",
+      responseData: {
+        detail: {
+          error_code: "RAW_CODE_SENTINEL",
+          message: "RAW_BODY_SENTINEL",
+          api_key: "RAW_KEY_SENTINEL",
+          debug_path: "/RAW_PATH_SENTINEL/provider.json"
+        },
+        raw_body: "RAW_RESPONSE_SENTINEL"
+      }
+    }
+  ])(
+    "sanitizes RAG provider diagnostics at the $transport transport boundary",
+    async ({
+      source,
+      expectsEvent,
+      status,
+      code,
+      safeMessage,
+      responseError,
+      responseData
+    }) => {
+      const warnSpy = vi
+        .spyOn(console, "warn")
+        .mockImplementation(() => undefined)
+      const eventSpy = vi.fn()
+      const eventName = "tldw:backend-unreachable"
+      window.addEventListener(eventName, eventSpy as EventListener)
+
+      const failedResponse = {
+        ok: false,
+        status,
+        error: responseError,
+        data: responseData
+      }
+      if (source === "background") {
+        mocks.sendMessage.mockResolvedValue(failedResponse)
+      } else {
+        mocks.sendMessage.mockRejectedValue(
+          new Error(
+            "Could not establish connection. Receiving end does not exist."
+          )
+        )
+        mocks.tldwRequest.mockResolvedValue(failedResponse)
+      }
+
+      let finalError: unknown
+      let transportError: unknown
+      let warningDiagnostics = ""
+      try {
+        const [{ bgRequest }, { chatRagMethods }] = await Promise.all([
+          importProxy(),
+          import("@/services/tldw/domains/chat-rag")
+        ])
+        await chatRagMethods.ragSearch.call(
+          {
+            normalizeRagQuery: (query: string) => query,
+            requestWithCurrentConfig: async (
+              init: Parameters<typeof bgRequest>[0]
+            ) => {
+              try {
+                return await bgRequest(init)
+              } catch (error) {
+                transportError = error
+                throw error
+              }
+            }
+          } as any,
+          "test query",
+          { signal: new AbortController().signal }
+        )
+      } catch (error) {
+        finalError = error
+      } finally {
+        warningDiagnostics = JSON.stringify(warnSpy.mock.calls)
+        window.removeEventListener(eventName, eventSpy as EventListener)
+        warnSpy.mockRestore()
+      }
+
+      expect(finalError).toMatchObject({
+        message: safeMessage,
+        status
+      })
+      expect((finalError as { code?: string } | undefined)?.code).toBe(code)
+      expect(transportError).toMatchObject({ status })
+      expect((transportError as { code?: string } | undefined)?.code).toBe(code)
+      expect((transportError as Error).message).toContain(safeMessage)
+      if (code) {
+        expect(
+          (transportError as { details?: unknown }).details
+        ).toEqual({
+          detail: {
+            error_code: code,
+            message: safeMessage
+          }
+        })
+      } else {
+        expect(
+          (transportError as { details?: unknown } | undefined)?.details
+        ).toBeUndefined()
+      }
+      expect(eventSpy).toHaveBeenCalledTimes(expectsEvent ? 1 : 0)
+      if (expectsEvent) {
+        expect(
+          (eventSpy.mock.calls[0]?.[0] as CustomEvent).detail
+        ).toMatchObject({ status, code, message: safeMessage, source })
+      }
+
+      const storageDiagnostics = JSON.stringify(mocks.storageSet.mock.calls)
+      const eventDiagnostics = JSON.stringify(eventSpy.mock.calls)
+      const finalDiagnostics = JSON.stringify({
+        message: (finalError as Error | undefined)?.message,
+        status: (finalError as { status?: number } | undefined)?.status,
+        code: (finalError as { code?: string } | undefined)?.code
+      })
+      const transportDiagnostics = JSON.stringify({
+        message: (transportError as Error | undefined)?.message,
+        status: (transportError as { status?: number } | undefined)?.status,
+        code: (transportError as { code?: string } | undefined)?.code,
+        details: (transportError as { details?: unknown } | undefined)?.details
+      })
+      const allDiagnostics = [
+        warningDiagnostics,
+        storageDiagnostics,
+        eventDiagnostics,
+        transportDiagnostics,
+        finalDiagnostics
+      ].join("\n")
+
+      if (code) {
+        expect(warningDiagnostics).toContain(code)
+      }
+      expect(warningDiagnostics).toContain(String(status))
+      expect(storageDiagnostics).toContain("__tldwRequestErrors")
+      expect(storageDiagnostics).toContain("__tldwLastRequestError")
+      if (code) {
+        expect(storageDiagnostics).toContain(code)
+      }
+      expect(storageDiagnostics).toContain(String(status))
+      expect(allDiagnostics).toContain(safeMessage)
+      expect(allDiagnostics).not.toMatch(
+        /RAW_(?:BODY|CODE|ERROR|KEY|PATH|RESPONSE)_SENTINEL/
+      )
+    }
+  )
+
+  it("keeps concurrent RAG provider failures isolated at the transport boundary", async () => {
+    const warnSpy = vi
+      .spyOn(console, "warn")
+      .mockImplementation(() => undefined)
+    const failures = {
+      alpha: {
+        ok: false,
+        status: 401,
+        error: "RAW_ERROR_ALPHA_SENTINEL",
+        data: {
+          detail: {
+            error_code: "missing_provider_credentials",
+            message: "RAW_BODY_ALPHA_SENTINEL",
+            api_key: "RAW_KEY_ALPHA_SENTINEL"
+          }
+        }
+      },
+      beta: {
+        ok: false,
+        status: 503,
+        error: "RAW_ERROR_BETA_SENTINEL",
+        data: {
+          details: {
+            detail: {
+              error_code: "provider_unavailable",
+              message: "RAW_BODY_BETA_SENTINEL",
+              debug_path: "/RAW_PATH_BETA_SENTINEL/provider.json"
+            }
+          }
+        }
+      }
+    } as const
+    mocks.sendMessage.mockImplementation(async (request: any) => {
+      await Promise.resolve()
+      return failures[request.payload.body.query as keyof typeof failures]
+    })
+
+    let warningDiagnostics = ""
+    let errors: Array<Error & { code?: string; status?: number }> = []
+    try {
+      const [{ bgRequest }, { chatRagMethods }] = await Promise.all([
+        importProxy(),
+        import("@/services/tldw/domains/chat-rag")
+      ])
+      const client = {
+        normalizeRagQuery: (query: string) => query,
+        requestWithCurrentConfig: bgRequest
+      } as any
+      errors = await Promise.all(
+        ["alpha", "beta"].map((query) =>
+          chatRagMethods.ragSearch
+            .call(client, query, { signal: new AbortController().signal })
+            .catch((error) => error)
+        )
+      )
+    } finally {
+      warningDiagnostics = JSON.stringify(warnSpy.mock.calls)
+      warnSpy.mockRestore()
+    }
+
+    expect(mocks.sendMessage).toHaveBeenCalledTimes(2)
+    expect(errors[0]).toMatchObject({
+      status: 401,
+      code: "missing_provider_credentials",
+      message: "The selected provider credentials are not configured."
+    })
+    expect(errors[1]).toMatchObject({
+      status: 503,
+      code: "provider_unavailable",
+      message: "The selected provider is currently unavailable."
+    })
+
+    const diagnostics = [
+      warningDiagnostics,
+      JSON.stringify(mocks.storageSet.mock.calls),
+      JSON.stringify(
+        errors.map(({ message, code, status }) => ({ message, code, status }))
+      )
+    ].join("\n")
+    expect(diagnostics).toContain("missing_provider_credentials")
+    expect(diagnostics).toContain("provider_unavailable")
+    expect(diagnostics).not.toMatch(
+      /RAW_(?:BODY|ERROR|KEY|PATH)_(?:ALPHA|BETA)_SENTINEL/
+    )
+  })
+
   it("keeps auth enabled for same-origin absolute URLs in background requests", async () => {
     mocks.sendMessage.mockResolvedValue({ ok: true, status: 200, data: { ok: true } })
     mocks.storageGet.mockImplementation(async (key: string) => {

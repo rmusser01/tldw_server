@@ -22,6 +22,10 @@ import {
   BACKEND_UNREACHABLE_EVENT,
   type BackendUnreachableDetail
 } from "@/services/request-events"
+import {
+  asValidatedHttpStatus,
+  sanitizeRagProviderFailure
+} from "@/services/rag/provider-error-contract"
 import type {
   AllowedMethodFor,
   AllowedPath,
@@ -347,17 +351,21 @@ const shouldNotifyBackendUnavailable = (entry: {
   return BACKEND_UNREACHABLE_PATTERN.test(String(entry.error || ""))
 }
 
-const notifyBackendUnavailable = (entry: {
-  method: string
-  path: string
-  status?: number
-  error?: string
-  source: "background" | "direct"
-}) => {
+const notifyBackendUnavailable = (
+  entry: {
+    method: string
+    path: string
+    status?: number
+    code?: string
+    error?: string
+    source: "background" | "direct"
+  },
+  eligible?: boolean
+) => {
   if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") {
     return
   }
-  if (!shouldNotifyBackendUnavailable(entry)) return
+  if (!(eligible ?? shouldNotifyBackendUnavailable(entry))) return
   const now = Date.now()
   if (now - lastBackendUnreachableEventAt < BACKEND_UNREACHABLE_EVENT_THROTTLE_MS) {
     return
@@ -368,6 +376,7 @@ const notifyBackendUnavailable = (entry: {
     method: entry.method,
     path: entry.path,
     status: entry.status,
+    code: entry.code,
     message: String(entry.error || "Network error"),
     source: entry.source,
     timestamp: now
@@ -399,6 +408,7 @@ export interface BgRequestInit<
   preferDirect?: boolean
   suppressBackendUnavailableEvent?: boolean
   expectedStatuses?: number[]
+  sanitizeRagProviderError?: boolean
 }
 
 // In-flight coalescing for idempotent GET requests: when several callers issue
@@ -539,6 +549,7 @@ export async function bgRequest<
     !init.responseType &&
     !init.preferDirect &&
     !init.suppressBackendUnavailableEvent &&
+    !init.sanitizeRagProviderError &&
     !init.expectedStatuses?.length
   if (!coalescable) {
     return bgRequestImpl<T, P, M>(init)
@@ -630,7 +641,8 @@ async function bgRequestImpl<
     returnResponse,
     preferDirect = false,
     suppressBackendUnavailableEvent = false,
-    expectedStatuses
+    expectedStatuses,
+    sanitizeRagProviderError = false
   } = init
   const path = normalizeKnownPathQuirks(rawPath)
   const expectedStatusSet = normalizeExpectedStatuses(expectedStatuses)
@@ -653,6 +665,7 @@ async function bgRequestImpl<
     method: string
     path: string
     status?: number
+    code?: string
     error?: string
     source: "background" | "direct"
   }) => {
@@ -674,7 +687,8 @@ async function bgRequestImpl<
   const buildRequestError = (
     msg: string,
     status?: number,
-    details?: unknown
+    details?: unknown,
+    code?: string
   ): (Error & { status?: number; code?: string; details?: unknown }) => {
     if (isAbortErrorMessage(msg)) {
       return createAbortError(msg, status, details)
@@ -685,6 +699,9 @@ async function bgRequestImpl<
       details?: unknown
     }
     error.status = status
+    if (code) {
+      error.code = code
+    }
     if (typeof details !== "undefined") {
       error.details = sanitizeResponseData(details)
     }
@@ -711,6 +728,102 @@ async function bgRequestImpl<
     status?: number
     data?: unknown
     headers?: Record<string, string>
+  }
+  type NormalizedRequestFailure = {
+    message: string
+    status?: number
+    code?: string
+    details?: unknown
+  }
+  const handleFailedResponse = async (
+    resp: RuntimeResponsePayload,
+    source: "background" | "direct"
+  ): Promise<{
+    error: Error & { status?: number; code?: string; details?: unknown }
+    response: RuntimeResponsePayload
+  }> => {
+    const rawMessage = formatErrorMessage(
+      resp?.error,
+      `Request failed: ${resp?.status}`
+    )
+    const eligibleForBackendUnavailableEvent = shouldNotifyBackendUnavailable({
+      method: String(method),
+      path: String(path),
+      status: resp?.status,
+      error: rawMessage
+    })
+    const sanitized: NormalizedRequestFailure = sanitizeRagProviderError
+      ? isAbortErrorMessage(rawMessage)
+        ? {
+            message: "Aborted",
+            status: asValidatedHttpStatus(resp?.status)
+          }
+        : sanitizeRagProviderFailure({
+            status: resp?.status,
+            error: rawMessage,
+            data: resp?.data
+          })
+      : {
+          message: rawMessage,
+          status: resp?.status,
+          details: resp?.data
+        }
+    const diagnosticEntry = {
+      method: String(method),
+      path: String(path),
+      status: sanitized.status,
+      code: sanitized.code,
+      error: sanitized.message,
+      source
+    }
+
+    if (
+      !isAbortErrorMessage(sanitized.message) &&
+      !isExpectedStatus(resp?.status)
+    ) {
+      if (sanitized.code) {
+        console.warn(
+          "[tldw:request]",
+          method,
+          path,
+          sanitized.status,
+          sanitized.message,
+          sanitized.code
+        )
+      } else {
+        console.warn(
+          "[tldw:request]",
+          method,
+          path,
+          sanitized.status,
+          sanitized.message
+        )
+      }
+      await recordRequestError(diagnosticEntry)
+      if (!suppressBackendUnavailableEvent) {
+        notifyBackendUnavailable(
+          diagnosticEntry,
+          eligibleForBackendUnavailableEvent
+        )
+      }
+    }
+
+    return {
+      error: buildRequestError(
+        sanitized.message,
+        sanitized.status,
+        sanitized.details,
+        sanitized.code
+      ),
+      response: sanitizeRagProviderError
+        ? {
+            ...resp,
+            error: sanitized.message,
+            status: sanitized.status,
+            data: sanitized.details
+          }
+        : resp
+    }
   }
   const requestDirectArrayBufferFallback = async () => {
     const storage = createSafeStorage({ area: "local" })
@@ -781,33 +894,11 @@ async function bgRequestImpl<
       createDirectRuntime(storage)
     )
     if (!resp?.ok) {
-      const msg = formatErrorMessage(
-        resp?.error,
-        `Request failed: ${resp?.status}`
-      )
-      if (!isAbortErrorMessage(msg) && !isExpectedStatus(resp?.status)) {
-        console.warn("[tldw:request]", method, path, resp?.status, msg)
-        await recordRequestError({
-          method: String(method),
-          path: String(path),
-          status: resp?.status,
-          error: msg,
-          source: "direct"
-        })
-        if (!suppressBackendUnavailableEvent) {
-          notifyBackendUnavailable({
-            method: String(method),
-            path: String(path),
-            status: resp?.status,
-            error: msg,
-            source: "direct"
-          })
-        }
-      }
-      const error = buildRequestError(msg, resp?.status, resp?.data)
+      const failure = await handleFailedResponse(resp, "direct")
       if (!returnResponse) {
-        throw error
+        throw failure.error
       }
+      return failure.response as T
     }
     return (returnResponse ? resp : resp.data) as T
   }
@@ -845,33 +936,11 @@ async function bgRequestImpl<
           throw new Error(`Background request failed (${method} ${path})`)
         }
         if (!resp.ok) {
-          const msg = formatErrorMessage(
-            resp?.error,
-            `Request failed: ${resp?.status}`
-          )
-          if (!isAbortErrorMessage(msg) && !isExpectedStatus(resp?.status)) {
-            console.warn("[tldw:request]", method, path, resp?.status, msg)
-            await recordRequestError({
-              method: String(method),
-              path: String(path),
-              status: resp?.status,
-              error: msg,
-              source: "background"
-            })
-            if (!suppressBackendUnavailableEvent) {
-              notifyBackendUnavailable({
-                method: String(method),
-                path: String(path),
-                status: resp?.status,
-                error: msg,
-                source: "background"
-              })
-            }
-          }
-          const error = buildRequestError(msg, resp?.status, resp?.data)
+          const failure = await handleFailedResponse(resp, "background")
           if (!returnResponse) {
-            throw markNoFallbackError(error)
+            throw markNoFallbackError(failure.error)
           }
+          return await resolveArrayBufferResponse(failure.response)
         }
         return await resolveArrayBufferResponse(resp as RuntimeResponsePayload)
       }
@@ -919,33 +988,11 @@ async function bgRequestImpl<
         throw new Error(`Background request failed (${method} ${path})`)
       }
       if (!resp.ok) {
-        const msg = formatErrorMessage(
-          resp?.error,
-          `Request failed: ${resp?.status}`
-        )
-        if (!isAbortErrorMessage(msg) && !isExpectedStatus(resp?.status)) {
-          console.warn("[tldw:request]", method, path, resp?.status, msg)
-          await recordRequestError({
-            method: String(method),
-            path: String(path),
-            status: resp?.status,
-            error: msg,
-            source: "background"
-          })
-          if (!suppressBackendUnavailableEvent) {
-            notifyBackendUnavailable({
-              method: String(method),
-              path: String(path),
-              status: resp?.status,
-              error: msg,
-              source: "background"
-            })
-          }
-        }
-        const error = buildRequestError(msg, resp?.status, resp?.data)
+        const failure = await handleFailedResponse(resp, "background")
         if (!returnResponse) {
-          throw markNoFallbackError(error)
+          throw markNoFallbackError(failure.error)
         }
+        return await resolveArrayBufferResponse(failure.response)
       }
       return await resolveArrayBufferResponse(resp as RuntimeResponsePayload)
     }
@@ -981,33 +1028,11 @@ async function bgRequestImpl<
     createDirectRuntime(storage)
   )
   if (!resp?.ok) {
-    const msg = formatErrorMessage(
-      resp?.error,
-      `Request failed: ${resp?.status}`
-    )
-    if (!isAbortErrorMessage(msg) && !isExpectedStatus(resp?.status)) {
-      console.warn("[tldw:request]", method, path, resp?.status, msg)
-      await recordRequestError({
-        method: String(method),
-        path: String(path),
-        status: resp?.status,
-        error: msg,
-        source: "direct"
-      })
-      if (!suppressBackendUnavailableEvent) {
-        notifyBackendUnavailable({
-          method: String(method),
-          path: String(path),
-          status: resp?.status,
-          error: msg,
-          source: "direct"
-        })
-      }
-    }
-    const error = buildRequestError(msg, resp?.status, resp?.data)
+    const failure = await handleFailedResponse(resp, "direct")
     if (!returnResponse) {
-      throw error
+      throw failure.error
     }
+    return failure.response as T
   }
   return (returnResponse ? resp : resp.data) as T
 }

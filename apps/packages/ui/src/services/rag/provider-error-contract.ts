@@ -24,6 +24,18 @@ type PublicRagProviderError = {
   message: string
 }
 
+export type SanitizedRagProviderFailure = {
+  message: string
+  status?: number
+  code?: PublicRagProviderErrorCode
+  details?: {
+    detail: {
+      error_code: PublicRagProviderErrorCode
+      message: string
+    }
+  }
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value)
 
@@ -84,4 +96,79 @@ export const getStructuredPublicRagProviderError = (
     code,
     message: PUBLIC_RAG_PROVIDER_ERROR_MESSAGES[code],
   }
+}
+
+const getStructuredProviderErrorFromFailure = (
+  error: unknown
+): PublicRagProviderError | null => {
+  const direct = getStructuredPublicRagProviderError(error)
+  if (direct || !isRecord(error)) return direct
+
+  return (
+    getStructuredPublicRagProviderError(error.data) ??
+    getStructuredPublicRagProviderError({ details: error.data })
+  )
+}
+
+const getFailureMessage = (error: unknown): string => {
+  if (error instanceof Error) return error.message
+  if (typeof error === "string") return error
+  if (!isRecord(error)) return ""
+  if (typeof error.message === "string") return error.message
+  return typeof error.error === "string" ? error.error : ""
+}
+
+const isConnectionFailure = (message: string): boolean =>
+  /network|offline|failed to fetch|connection|unreachable/i.test(message)
+
+const isTimeoutFailure = (message: string): boolean =>
+  /timeout|timed out|etimedout/i.test(message)
+
+/**
+ * Reduces an arbitrary RAG provider failure to client-owned, bounded fields.
+ * Raw provider text is inspected only for broad network/timeout classification
+ * and is never included in the returned diagnostic payload.
+ */
+export const sanitizeRagProviderFailure = (
+  error: unknown
+): SanitizedRagProviderFailure => {
+  const status = getValidatedHttpStatus(error)
+  const providerError = getStructuredProviderErrorFromFailure(error)
+  const rawMessage = getFailureMessage(error)
+
+  let message = "RAG search failed."
+  if (providerError) {
+    message = providerError.message
+  } else if (isConnectionFailure(rawMessage)) {
+    message = "Cannot reach server. Check your connection and try again."
+  } else if (isTimeoutFailure(rawMessage) || status === 408) {
+    message = "RAG search timed out. Try again."
+  } else if (status === 400 || status === 422) {
+    message = "RAG search request is invalid."
+  } else if (status === 401) {
+    message = "RAG search failed. Authentication is required."
+  } else if (status === 403) {
+    message = "RAG search failed. Access was denied."
+  } else if (status === 404) {
+    message = "RAG search endpoint is unavailable."
+  } else if (status === 429) {
+    message = "RAG search is rate limited. Please wait and try again."
+  } else if (typeof status === "number" && status >= 500) {
+    message = "RAG search failed due to a server error."
+  }
+
+  const sanitized: SanitizedRagProviderFailure = { message }
+  if (typeof status === "number") {
+    sanitized.status = status
+  }
+  if (providerError) {
+    sanitized.code = providerError.code
+    sanitized.details = {
+      detail: {
+        error_code: providerError.code,
+        message: providerError.message,
+      },
+    }
+  }
+  return sanitized
 }
