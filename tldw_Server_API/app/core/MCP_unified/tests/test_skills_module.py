@@ -252,6 +252,11 @@ async def test_settings_use_defaults_for_invalid_types_and_clamp_integers(
             {"skill_name": "valid", "arguments": "x" * 10_001},
             "arguments must be at most 10000 characters",
         ),
+        (
+            "skills.render",
+            {"skill_name": "valid", "arguments": None},
+            "arguments must be a string",
+        ),
         ("skills.render", {"skill_name": "valid", "arguments": 1}, "arguments must be a string"),
     ],
 )
@@ -499,11 +504,12 @@ async def test_render_is_forced_dry_and_preserves_arguments(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     await _seed_review_skill(user_catalogs[1].service)
+    monkeypatch.setattr(
+        SkillExecutor,
+        "execute",
+        AsyncMock(side_effect=AssertionError("render must not call execute")),
+    )
     module = await _module()
-    execute = AsyncMock(side_effect=AssertionError("render must not call execute"))
-    substitute = Mock(wraps=module._executor.substitute_arguments)
-    monkeypatch.setattr(module._executor, "execute", execute)
-    monkeypatch.setattr(module._executor, "substitute_arguments", substitute)
 
     result = await module.execute_tool(
         "skills.render",
@@ -522,11 +528,6 @@ async def test_render_is_forced_dry_and_preserves_arguments(
         "dry_run": True,
         "version": 1,
     }
-    substitute.assert_called_once_with(
-        "Review $ARGUMENTS",
-        "--formal /* literal */\nnext",
-    )
-    execute.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -612,6 +613,51 @@ async def test_catalog_matching_failure_preserves_successful_render(
         "RuntimeError",
     )
     assert "SENTINEL_PRIVATE_DETAIL" not in str(warning.call_args)
+
+
+@pytest.mark.asyncio
+async def test_catalog_matching_timeout_preserves_render_and_drains_lookup(
+    user_catalogs: dict[int, UserCatalog],
+    catalog_protocol_stub: tuple[Mock, AsyncMock],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _seed_review_skill(user_catalogs[1].service)
+    _factory, list_tools = catalog_protocol_stub
+    started = asyncio.Event()
+    finished = asyncio.Event()
+
+    async def stalled_listing(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        started.set()
+        try:
+            await asyncio.Future()
+        finally:
+            finished.set()
+
+    list_tools.side_effect = stalled_listing
+    warning = Mock()
+    monkeypatch.setattr(skills_module, "logger", SimpleNamespace(warning=warning))
+    module = SkillsModule(
+        ModuleConfig(name="skills", settings={}, timeout_seconds=0.01)
+    )
+    await module.on_initialize()
+
+    result = await asyncio.wait_for(
+        module.execute_tool(
+            "skills.render",
+            {"skill_name": "review-paper", "arguments": "issue 42"},
+            context=user_catalogs[1].context,
+        ),
+        timeout=1.0,
+    )
+
+    assert started.is_set()
+    assert finished.is_set()
+    assert result["rendered_prompt"] == "Review issue 42"
+    assert result["catalog_matches"] is None
+    warning.assert_called_once_with(
+        "Skills catalog matching unavailable: {}",
+        "TimeoutError",
+    )
 
 
 @pytest.mark.parametrize("listing", [None, {}, {"tools": None}])

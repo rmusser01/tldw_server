@@ -19,7 +19,8 @@ Extend MCP `skills.render` with one additive field:
 The field contains unique base tool names from the Skill's existing
 `declared_tools` that exactly match the embedded MCP catalog with
 `canExecute: true`. It is `[]` when matching completes with no result and
-`null` when the whole catalog lookup is unavailable.
+`null` when the whole catalog lookup is unavailable or exceeds its bounded
+deadline.
 
 This is advisory catalog matching, not an authorization verdict. It does not
 execute a model or tool, predict whether a future call will succeed, or add a
@@ -155,7 +156,8 @@ Malformed descriptors are ignored. A malformed top-level response or non-list
 4. The request-scoped service lifecycle closes the Skills database.
 5. No valid declaration strings returns `catalog_matches: []` immediately.
 6. Otherwise, instantiate the existing protocol and call
-   `_handle_tools_list({}, context)` once with the same `RequestContext`.
+   `_handle_tools_list({}, context)` once with the same `RequestContext`,
+   bounded by the smaller of the Skills module timeout and two seconds.
 7. Validate the top-level result, match eligible descriptors, and append
    `catalog_matches`.
 8. A whole-lookup exception returns `catalog_matches: null` without changing
@@ -218,6 +220,8 @@ production file is required.
 - No matches return `[]` after exactly one catalog read.
 - Whole lookup and malformed-envelope failures return `null` while preserving
   the rendered prompt.
+- A catalog timeout cancels and drains the lookup task, returns `null`, and
+  preserves the rendered prompt.
 - A simulated partial catalog is treated as best effort and does not claim
   completeness.
 - Internal matching does not require permission to call `mcp.tools.list` and
@@ -238,9 +242,9 @@ production file is required.
    database closes.
 3. Matches are unique exact catalog names with `canExecute is True`, ordered by
    first declaration; command restrictions match only by valid base name.
-4. No match or no valid declaration produces `[]`; whole lookup or malformed
-   top-level response produces `null`; partial module results are documented as
-   best effort.
+4. No match or no valid declaration produces `[]`; whole lookup failure,
+   timeout, or malformed top-level response produces `null`; partial module
+   results are documented as best effort.
 5. Render uses argument substitution directly, preserves its output limit, and
    cannot enter model or tool execution.
 6. No REST/UI change, new public tool, gateway route/snapshot, generic policy

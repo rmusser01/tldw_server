@@ -31,6 +31,7 @@ MAX_QUERY_CHARS = 200
 MAX_ARGUMENT_CHARS = 10_000
 MAX_SKILL_NAME_CHARS = 64
 HARD_MAX_RENDERED_SKILL_CHARS = 100_000
+CATALOG_LOOKUP_TIMEOUT_CAP_SECONDS = 2.0
 
 T = TypeVar("T")
 ServiceOperation = Callable[[SkillsService], Awaitable[T]]
@@ -373,8 +374,8 @@ class SkillsModule(BaseModule):
             "version": skill_data.get("version"),
         }
 
-    @staticmethod
     async def _resolve_catalog_matches(
+        self,
         declarations: list[str],
         context: Any,
     ) -> list[str] | None:
@@ -386,12 +387,19 @@ class SkillsModule(BaseModule):
         if not valid_declarations:
             return []
         try:
+            timeout_seconds = min(
+                float(self.config.timeout_seconds),
+                CATALOG_LOOKUP_TIMEOUT_CAP_SECONDS,
+            )
             listing_task = asyncio.create_task(
                 MCPProtocol()._handle_tools_list({}, context)
             )
             try:
-                listing = await asyncio.shield(listing_task)
-            except asyncio.CancelledError:
+                listing = await asyncio.wait_for(
+                    asyncio.shield(listing_task),
+                    timeout=timeout_seconds,
+                )
+            except (asyncio.CancelledError, asyncio.TimeoutError):
                 listing_task.cancel()
                 await asyncio.gather(listing_task, return_exceptions=True)
                 raise
