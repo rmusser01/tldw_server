@@ -18,7 +18,7 @@ documentation:
 modified_files:
 - tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py
 - tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_original_storage.py
-updated_date: 2026-07-05 00:25
+updated_date: 2026-07-10 06:10
 ---
 
 ## Description
@@ -48,12 +48,14 @@ Remediate AUDIT-2026-06-27-MEDIA-003 by adding compensating cleanup when permane
 - Current-dev refresh: rebased `codex/audit-media-original-cleanup-2026-07-04` onto `origin/dev` `09d9ec901e1d4548f7924f1c6bcefa963fadd9bd`; merge-base matches `origin/dev`.
 - Current-dev validation: `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_original_storage.py -q` passed with 16 tests; `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py -f json -o /tmp/bandit_media_original_cleanup_origin_dev_09d9ec.json` reported 0 findings over 5627 LOC; `git diff --check HEAD~1..HEAD` passed.
 2026-07-04 latest-dev refresh: rebased and validated PR #2612 on origin/dev 6b727b221e55646eba663a03571e38302f7fafc2. Tested head ab46b4e66ba1. Verification: python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_original_storage.py -q => 16 passed, 41 warnings; bandit -r tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py => 0 findings over 5627 LOC; git diff --check HEAD~1..HEAD => clean.
+2026-07-09: origin/dev now contains a different active TASK-12145. This media cleanup record is superseded by unique TASK-12947 and archived before the current-dev rebase.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Hardened media original-file cleanup behavior and storage edge-case coverage. Final refresh validated against origin/dev 6b727b221e55646eba663a03571e38302f7fafc2 with focused tests passing, Bandit clean on touched production scope, and whitespace check clean.
+Superseded by TASK-12947 after the latest-dev refresh exposed an active task ID collision.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

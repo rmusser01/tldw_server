@@ -323,8 +323,9 @@ async def test_original_storage_deletes_blob_when_media_file_registration_fails(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_original_storage_deletes_blob_for_generic_registration_failure(monkeypatch, fake_storage):
+async def test_generic_registration_failure_is_not_masked_by_cleanup_failure(monkeypatch, fake_storage):
     storage = fake_storage
+    storage.delete_error = Exception("generic cleanup failure")
     db = _FailingMediaFileDB(error=Exception("generic registration failure"))
 
     async def fake_save_uploaded_files(_files, temp_dir, **_kwargs):
