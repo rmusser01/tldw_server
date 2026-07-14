@@ -200,7 +200,9 @@ export const WorkspaceChatPanel = ({
     onRuntimeStateChange?.({
       backendAvailable: chatBackendAvailable,
       streaming,
+      sendError,
       selectedModelLabel: selectedModel || "No model selected",
+      hasModelSelected: Boolean(selectedModel),
       selectedPersonaLabel: runtimeSelectedPersonaLabel,
       assistantSource,
       workspaceAssistantDegradedReason:
@@ -215,6 +217,7 @@ export const WorkspaceChatPanel = ({
     onRuntimeStateChange,
     runtimeSelectedPersonaLabel,
     selectedModel,
+    sendError,
     streaming
   ])
 

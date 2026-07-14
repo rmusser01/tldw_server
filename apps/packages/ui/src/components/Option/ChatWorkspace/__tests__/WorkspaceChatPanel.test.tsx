@@ -119,6 +119,7 @@ describe("WorkspaceChatPanel", () => {
     chatHookState.value.streaming = false
     chatHookState.value.isLoading = false
     chatHookState.value.isProcessing = false
+    chatHookState.value.selectedModel = "gpt-test"
     chatHookState.value.selectedAssistant = {
       kind: "persona",
       id: "p1",
@@ -455,6 +456,34 @@ describe("WorkspaceChatPanel", () => {
     expect(onClearStagedSources).not.toHaveBeenCalled()
   })
 
+  it("reports failed sends through runtime state", async () => {
+    chatHookState.onSubmit.mockResolvedValueOnce({
+      status: "failed",
+      errorMessage: "network"
+    })
+    const onRuntimeStateChange = vi.fn()
+
+    render(
+      <WorkspaceChatPanel
+        stagedSources={staged}
+        onClearStagedSources={vi.fn()}
+        backendAvailable
+        workspaceId="workspace-1"
+        onRuntimeStateChange={onRuntimeStateChange}
+      />
+    )
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Chat workspace message" }), {
+      target: { value: "Keep this draft" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Send with staged context" }))
+
+    await screen.findByText("network")
+    expect(onRuntimeStateChange).toHaveBeenCalledWith(
+      expect.objectContaining({ sendError: "network" })
+    )
+  })
+
   it("preserves draft and staged context without an error when submit is skipped", async () => {
     chatHookState.onSubmit.mockResolvedValueOnce({
       status: "skipped",
@@ -546,8 +575,31 @@ describe("WorkspaceChatPanel", () => {
       expect.objectContaining({
         streaming: false,
         selectedModelLabel: "gpt-test",
+        hasModelSelected: true,
         selectedPersonaLabel: "Analyst",
         assistantSource: "explicit"
+      })
+    )
+  })
+
+  it("reports missing model selection without relying on display text", () => {
+    chatHookState.value.selectedModel = ""
+    const onRuntimeStateChange = vi.fn()
+
+    render(
+      <WorkspaceChatPanel
+        stagedSources={staged}
+        onClearStagedSources={vi.fn()}
+        backendAvailable
+        workspaceId="workspace-1"
+        onRuntimeStateChange={onRuntimeStateChange}
+      />
+    )
+
+    expect(onRuntimeStateChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        selectedModelLabel: "No model selected",
+        hasModelSelected: false
       })
     )
   })

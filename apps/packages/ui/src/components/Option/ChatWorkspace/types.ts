@@ -28,7 +28,9 @@ export type ChatWorkspaceAssistantSource =
 export type ChatWorkspaceRuntimeState = {
   backendAvailable: boolean
   streaming: boolean
+  sendError?: string | null
   selectedModelLabel: string
+  hasModelSelected: boolean
   selectedPersonaLabel: string | null
   assistantSource: ChatWorkspaceAssistantSource
   workspaceAssistantDegradedReason?: WorkspaceAssistantDefaultDegradedReason | null

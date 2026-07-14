@@ -26,7 +26,9 @@ const createInitialRuntimeState = (
 ): ChatWorkspaceRuntimeState => ({
   backendAvailable,
   streaming: false,
+  sendError: null,
   selectedModelLabel: "No model selected",
+  hasModelSelected: false,
   selectedPersonaLabel: null,
   assistantSource:
     effectiveAssistantDefault?.status === "unavailable" ? "unavailable" : "none",
@@ -38,6 +40,7 @@ const createInitialRuntimeState = (
 
 export const ChatWorkspacePage = () => {
   const rawWorkspaceId = useWorkspaceStore((state) => state.workspaceId)
+  const storeHydrated = useWorkspaceStore((state) => state.storeHydrated)
   const workspaceName = useWorkspaceStore((state) => state.workspaceName)
   const sources = useWorkspaceStore((state) => state.sources)
   const effectiveAssistantDefault = useWorkspaceStore(
@@ -57,7 +60,7 @@ export const ChatWorkspacePage = () => {
     () => normalizeWorkspaceId(rawWorkspaceId),
     [rawWorkspaceId]
   )
-  const workspaceReady = workspaceId !== null
+  const workspaceReady = storeHydrated && workspaceId !== null
 
   const [workspaceContext, setWorkspaceContext] =
     React.useState<WorkspaceContextState>(() => ({
@@ -167,6 +170,7 @@ export const ChatWorkspacePage = () => {
       <h1 className="sr-only">Chat Workspace</h1>
       <ChatWorkspaceConsole
         workspaceId={workspaceId}
+        workspaceReady={workspaceReady}
         workspaceName={scopeLabel}
         sources={sources}
         sourcesLoading={sourcesLoading}
@@ -174,11 +178,13 @@ export const ChatWorkspacePage = () => {
         browsedSourceId={browsedSourceId}
         stagedSources={stagedSources}
         selectedModelLabel={runtimeState.selectedModelLabel}
+        hasModelSelected={runtimeState.hasModelSelected}
         selectedPersonaLabel={runtimeState.selectedPersonaLabel}
         assistantSource={runtimeState.assistantSource}
         workspaceAssistantDegradedReason={
           runtimeState.workspaceAssistantDegradedReason
         }
+        sendError={runtimeState.sendError}
         effectiveAssistantDefault={effectiveAssistantDefault}
         backendAvailable={backendAvailable}
         chatBackendAvailable={backendAvailable && workspaceReady}

@@ -33,6 +33,13 @@ type BackendFixture = {
   ragSearches: CapturedRequest[]
 }
 
+type ConnectionStoreWindow = Window & {
+  __tldw_useConnectionStore?: {
+    getState: () => { state: Record<string, unknown> }
+    setState: (value: { state: Record<string, unknown> }) => void
+  }
+}
+
 const CORS_HEADERS = {
   "access-control-allow-origin": "*",
   "access-control-allow-headers": "*",
@@ -658,9 +665,10 @@ test.describe("Chat Workspace live-backend smoke coverage", () => {
   })
 
   test("shows stop generation while the workspace stream is active", async ({ page }) => {
+    const streamDelayMs = 1_000
     const fixture = await installBackendFixture(page, {
       mode: "streaming",
-      streamDelayMs: 4_000
+      streamDelayMs
     })
     await seedChatWorkspaceState(page)
     await openSeededChatWorkspace(page)
@@ -671,6 +679,14 @@ test.describe("Chat Workspace live-backend smoke coverage", () => {
 
     const stopButton = page.getByRole("button", { name: "Stop generating" })
     await expect(stopButton).toBeVisible()
+    await expect(
+      page.getByLabel("Chat workspace status").getByText("Streaming")
+    ).toBeVisible()
+    await expect(
+      page
+        .getByRole("complementary", { name: "Chat workspace inspector" })
+        .getByText("Streaming")
+    ).toBeVisible()
     await expect.poll(() => fixture.chatCreates.length).toBeGreaterThan(0)
     expect(fixture.chatCreates[0]?.body).toMatchObject({
       scope_type: "workspace",
@@ -681,6 +697,73 @@ test.describe("Chat Workspace live-backend smoke coverage", () => {
       stream: true,
       conversation_id: "workspace-chat-smoke-server-1"
     })
+
+    await stopButton.click()
+    await expect(stopButton).toBeHidden()
+    await expect(page.getByText("streamed workspace reply")).toHaveCount(0)
+    await page.waitForTimeout(streamDelayMs + 250)
+    await expect(page.getByText("streamed workspace reply")).toHaveCount(0)
+    await expect(
+      page.getByLabel("Chat workspace status").getByText("Streaming")
+    ).toHaveCount(0)
+    await expect(
+      page
+        .getByRole("complementary", { name: "Chat workspace inspector" })
+        .getByText("Streaming")
+    ).toHaveCount(0)
+  })
+
+  test("switches active streaming rails to offline recovery state", async ({ page }) => {
+    await installBackendFixture(page, {
+      mode: "streaming",
+      streamDelayMs: 4_000
+    })
+    await seedChatWorkspaceState(page)
+    await openSeededChatWorkspace(page)
+
+    await page
+      .getByLabel("Chat workspace message")
+      .fill("Show offline recovery while streaming")
+    await page.getByRole("button", { name: "Send message" }).click()
+
+    const statusStrip = page.getByLabel("Chat workspace status")
+    const inspector = page.getByRole("complementary", {
+      name: "Chat workspace inspector"
+    })
+    const stopButton = page.getByRole("button", { name: "Stop generating" })
+
+    await expect(stopButton).toBeVisible()
+    await expect(statusStrip.getByText("Streaming")).toBeVisible()
+    await expect(inspector.getByText("Streaming")).toBeVisible()
+    await page.waitForFunction(
+      () =>
+        typeof (window as ConnectionStoreWindow).__tldw_useConnectionStore
+          ?.getState === "function"
+    )
+    await page.evaluate(() => {
+      const store = (window as ConnectionStoreWindow).__tldw_useConnectionStore
+      if (!store) throw new Error("Connection store did not initialize")
+      const current = store.getState().state
+      store.setState({
+        state: {
+          ...current,
+          phase: "error",
+          isConnected: false,
+          isChecking: false,
+          errorKind: "unreachable",
+          consecutiveFailures: 3,
+          lastError: "offline",
+          lastStatusCode: 0,
+          lastCheckedAt: Date.now()
+        }
+      })
+    })
+
+    await expect(statusStrip.getByText("Server unavailable")).toBeVisible()
+    await expect(statusStrip.getByText("Reconnect server")).toBeVisible()
+    await expect(inspector.getByText("Server unavailable")).toBeVisible()
+    await expect(statusStrip.getByText("Streaming")).toHaveCount(0)
+    await expect(inspector.getByText("Streaming")).toHaveCount(0)
 
     await stopButton.click()
     await expect(stopButton).toBeHidden()
@@ -709,6 +792,14 @@ test.describe("Chat Workspace live-backend smoke coverage", () => {
 
     await expect(
       page.getByRole("alert").filter({ hasText: "Stream completion failed" })
+    ).toBeVisible()
+    await expect(
+      page.getByLabel("Chat workspace status").getByText("Send failed")
+    ).toBeVisible()
+    await expect(
+      page
+        .getByRole("complementary", { name: "Chat workspace inspector" })
+        .getByText("Draft and staged context were preserved for retry.")
     ).toBeVisible()
     await expect(page.getByLabel("Chat workspace message")).toHaveValue(draft)
     await expect(
