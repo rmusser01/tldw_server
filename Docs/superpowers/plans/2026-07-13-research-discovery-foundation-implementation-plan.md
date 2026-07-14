@@ -20,7 +20,7 @@
 - Freeze independent ceilings for route attempts, physical dispatches, pages per route, redirects, retries, aggregate wall time, and returned results. A failure or post-dispatch cancellation still consumes its dispatch budget; only a definitely unused pre-dispatch reservation may be released.
 - Cursors are untrusted provider data. Reconstruct the next request from an approved route template, enforce the same origin and query schema, reject absolute cursor URLs, and stop at the declared page and aggregate deadlines.
 - Retrying requires an idempotent method plus an explicitly retryable outcome; otherwise fail without a second dispatch. Duplicate-work risk is reported rather than hidden.
-- The OpenAlex V2 route is `api_key` gated under current provider policy. It may be fixture-tested but is unavailable by default without an explicit future credential reference.
+- The OpenAlex V2 route is `api_key` gated under current provider policy. TASK-12968.2 keeps its foundation declaration secret-free and typed unavailable/skipped, with zero executable attempts, physical reservations, or gateway calls. Do not add a secret-reference field or positive credentialed branch; authenticated OpenAlex enablement belongs to a separately authorized future program. V1 behavior is unchanged by this plan.
 - Keep the first implementation boring: immutable values, explicit functions, injected dependencies, and an in-memory journal. Durable attempt persistence belongs to TASK-12968.4.
 
 ## Execution Preflight
@@ -111,7 +111,8 @@ git diff --check
 - [ ] Start with failing constructor tests for frozen, slots-based dataclasses and validated catalog IDs, route references, policy digests, exact origins, query modes, typed source predicates, and credential requirements.
 - [ ] Add an additive route-independent V2 document identity; assert existing `build_fingerprint`, `stable_result_id`, serialized V1 result IDs, and Deep Research evidence IDs remain byte-for-byte unchanged.
 - [ ] Build a V2 registry for the eight existing targets without mutating `default_source_catalog()`. Record exact routes/backends and make legacy `site_hosts` descriptive only.
-- [ ] Mark OpenAlex's V2 API route credentialed/unavailable by default; never inherit the stale V1 `requires_credentials=False` claim.
+- [ ] Mark OpenAlex's V2 API route credentialed and typed unavailable/skipped, carry no secret material or secret-reference interface in the foundation registry, and never inherit the stale V1 `requires_credentials=False` claim. Leave V1 unchanged.
+- [ ] Start with an OpenAlex V2 selection regression: the planner returns a typed unavailable/skipped outcome, emits zero executable attempts and zero physical reservations, and a recording gateway observes zero calls. Do not add a positive credentialed branch; authenticated enablement is deferred to a separately authorized future program.
 - [ ] Reconcile all eight existing targets (arXiv, PubMed, Semantic Scholar, Zenodo, OpenAlex, OSF, Figshare, and Crossref) against the frozen ledger's target, route, backend, credential, query-mode, and source-predicate declarations. The Crossref Metadata Search seed row resolves to the existing stable `crossref` product ID; do not create a parallel `crossref_metadata_search` runtime identity.
 - [ ] Compile explicit V2 selections into stable ordered attempts with selection reasons, route fallback order, policy/catalog versions, and declared physical reservations.
 - [ ] Coalesce only requests whose backend, normalized query, filters, policy, and source predicates are actually compatible. Preserve requested-target attribution separately from backend identity.

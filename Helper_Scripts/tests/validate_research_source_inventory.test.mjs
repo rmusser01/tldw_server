@@ -997,7 +997,33 @@ test("the authoritative CLI composes schema and semantic validation", (t) => {
   );
   const openAlex = rowsById.get("sourclip-2026-07-13-0088");
   assert.equal(openAlex.resolution, "credentialed_out_of_scope");
+  assert.equal(openAlex.resolution_code, "credential_required_no_public_route");
+  assert.ok(openAlex.route_candidates.every(
+    (route) => route.credential_requirement !== "none",
+  ));
   assert.equal(openAlex.route_candidates[0].credential_requirement, "api_key");
+  assert.match(openAlex.resolution_reason, /free API key is still a credential/i);
+  const officialEvidence = new Map(
+    openAlex.evidence
+      .filter((entry) => entry.kind === "resolution_review")
+      .map((entry) => [entry.reference, entry.claim]),
+  );
+  const authenticationClaim = officialEvidence.get(
+    "https://developers.openalex.org/api-reference/authentication",
+  ) ?? "";
+  assert.match(authenticationClaim, /anonymous (?:trial|demo) budget/i);
+  const pricingAnnouncementClaim = officialEvidence.get(
+    "https://blog.openalex.org/openalex-api-new-features-and-usage-based-pricing/",
+  ) ?? "";
+  assert.match(pricingAnnouncementClaim, /2026-02-24/);
+  assert.match(
+    pricingAnnouncementClaim,
+    /no-key calls.*demo.*unsuitable for production/i,
+  );
+  const overviewClaim = officialEvidence.get(
+    "https://developers.openalex.org/api-reference/introduction",
+  ) ?? "";
+  assert.match(overviewClaim, /api_key.*required/i);
   assert.deepEqual(
     rowsById.get("sourclip-2026-07-13-0202").canonical_targets,
     ["crossref"],

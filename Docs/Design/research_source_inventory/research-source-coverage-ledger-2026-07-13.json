@@ -4,7 +4,7 @@
   "manifest_items_sha256": "cef8c83a2f6cf0640d88e6300f54205363654d800927263c2d918060e6a28339",
   "closure_policy_version": "credentialless-public-v2",
   "generated_at_utc": "2026-07-14T14:21:40Z",
-  "rows_sha256": "bf1aaed001ec8f480e088dc50a7281ac2048d4a9ae5b2220966b07bf055daf39",
+  "rows_sha256": "cd48707690c211d4c2517e03fe21261994f21de59a90dc081d806a2b9efb8cd1",
   "rows": [
     {
       "inventory_id": "sourclip-2026-07-13-0001",
@@ -5999,7 +5999,7 @@
       "source_snapshot_sha256": "a67f3e4c3b811f56948a323bba2cf776b95cfb4bad8f7b1c0fa47f7b80f57227",
       "resolution": "credentialed_out_of_scope",
       "resolution_code": "credential_required_no_public_route",
-      "resolution_reason": "OpenAlex now requires a free API key for production API search. Anonymous demo calls are not suitable for the credentialless discovery contract, so the existing adapter moves to the authenticated follow-up.",
+      "resolution_reason": "OpenAlex requires an API key for production API search. Its 2026-02-24 pricing announcement describes anonymous no-key calls as demo-only; a free API key is still a credential under credentialless-public-v2, so this route remains in the authenticated follow-up.",
       "review_status": "reviewed",
       "route_kinds": [
         "direct"
@@ -6016,7 +6016,7 @@
           "source_constraint": "native_corpus",
           "source_constraint_predicate": null,
           "attribution_basis": "native_response",
-          "coverage_notes": "OpenAlex now requires a free API key for production API search. Anonymous demo calls are not suitable for the credentialless discovery contract, so the existing adapter moves to the authenticated follow-up.",
+          "coverage_notes": "OpenAlex requires an API key for production API search. Its 2026-02-24 pricing announcement describes anonymous no-key calls as demo-only; a free API key is still a credential under credentialless-public-v2, so this route remains in the authenticated follow-up.",
           "evidence_reference": "https://developers.openalex.org/api-reference/authentication"
         }
       ],
@@ -6042,19 +6042,19 @@
           "route_kind": "direct",
           "finding": "credential_required",
           "evidence_reference": "https://developers.openalex.org/api-reference/authentication",
-          "notes": "OpenAlex now requires a free API key for production API search. Anonymous demo calls are not suitable for the credentialless discovery contract, so the existing adapter moves to the authenticated follow-up."
+          "notes": "OpenAlex requires an API key for production API search. Its 2026-02-24 pricing announcement describes anonymous no-key calls as demo-only; a free API key is still a credential under credentialless-public-v2, so this route remains in the authenticated follow-up."
         },
         {
           "route_kind": "aggregator",
           "finding": "not_source_faithful",
           "evidence_reference": "https://developers.openalex.org/api-reference/authentication",
-          "notes": "No faithful credentialless aggregator route was identified during the reviewed inventory pass. OpenAlex now requires a free API key for production API search. Anonymous demo calls are not suitable for the credentialless discovery contract, so the existing adapter moves to the authenticated follow-up."
+          "notes": "No faithful credentialless aggregator route was identified during the reviewed inventory pass. OpenAlex requires an API key for production API search, and its 2026-02-24 pricing announcement describes anonymous no-key calls as demo-only. A free API key is still a credential under credentialless-public-v2."
         },
         {
           "route_kind": "site_search",
           "finding": "not_identified",
           "evidence_reference": "https://developers.openalex.org/api-reference/authentication",
-          "notes": "No faithful credentialless site_search route was identified during the reviewed inventory pass. OpenAlex now requires a free API key for production API search. Anonymous demo calls are not suitable for the credentialless discovery contract, so the existing adapter moves to the authenticated follow-up."
+          "notes": "No faithful credentialless site_search route was identified during the reviewed inventory pass. OpenAlex requires an API key for production API search, and its 2026-02-24 pricing announcement describes anonymous no-key calls as demo-only. A free API key is still a credential under credentialless-public-v2."
         }
       ],
       "closure_approval": null,
@@ -6070,7 +6070,19 @@
           "kind": "resolution_review",
           "reference_type": "https_url",
           "reference": "https://developers.openalex.org/api-reference/authentication",
-          "claim": "OpenAlex now requires a free API key for production API search. Anonymous demo calls are not suitable for the credentialless discovery contract, so the existing adapter moves to the authenticated follow-up."
+          "claim": "OpenAlex authentication and pricing documentation provides only a small anonymous demo budget and a larger free-key daily allowance; a free API key is still a credential under credentialless-public-v2."
+        },
+        {
+          "kind": "resolution_review",
+          "reference_type": "https_url",
+          "reference": "https://developers.openalex.org/api-reference/introduction",
+          "claim": "The OpenAlex API overview identifies api_key as required for API requests."
+        },
+        {
+          "kind": "resolution_review",
+          "reference_type": "https_url",
+          "reference": "https://blog.openalex.org/openalex-api-new-features-and-usage-based-pricing/",
+          "claim": "The official 2026-02-24 announcement requires an API key for production use and limits no-key calls to demo use unsuitable for production."
         }
       ],
       "ownership": {

@@ -74,8 +74,8 @@
   "required_source_blockers": [],
   "digests": {
     "manifest": "6715db5a499abb13a3095c5153566323afd037db5ce0ff77ade7b629d5137c1e",
-    "ledger": "cbcb560ef7706372a6e0d199be8e3166ad4b8407e0d3e3c0265282563d6c5fd3",
-    "ledger_rows": "bf1aaed001ec8f480e088dc50a7281ac2048d4a9ae5b2220966b07bf055daf39",
+    "ledger": "9ed48e61e14298c079fc7371b1c709d027bfefa716a06084869635dc8ce63c10",
+    "ledger_rows": "cd48707690c211d4c2517e03fe21261994f21de59a90dc081d806a2b9efb8cd1",
     "schema": "ac85c7889ce84d25b8ddf9473c8fa1a8db43da848c683f1dbc1dce91a3375f29",
     "validator": "ca2d1abc6dede0f152c2b57488dcf09afb1ade7a31509795fc482e75b0aade75",
     "schema_validator": "d07f65f3b4dd5c3a07454798c85e32c08f009f9d7c1d78487dcc9c414b504792"
