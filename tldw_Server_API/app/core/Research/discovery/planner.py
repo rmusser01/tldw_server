@@ -11,9 +11,11 @@ from .contracts import (
     AccessRoute,
     BudgetCeilings,
     CredentialRequirement,
+    DeferredNumericCSVQueryBinding,
     DiscoveryPlan,
     DispatchAllowance,
     DispatchIntent,
+    JSONBodyPair,
     OperationKind,
     PlannedBudgetAllowance,
     PlannedDispatchGroup,
@@ -210,7 +212,6 @@ def _build_intents(
         )
         summary_pairs = (
             QueryPair("db", "pubmed"),
-            QueryPair("id", "{esearch_ids}"),
             QueryPair("retmode", "json"),
         )
         return (
@@ -220,6 +221,14 @@ def _build_intents(
                 OperationKind.CONDITIONAL_SUMMARY,
                 route.policy.paths[1],
                 summary_pairs,
+                query_bindings=(
+                    DeferredNumericCSVQueryBinding(
+                        binding_id="pubmed_esearch_ids",
+                        query_name="id",
+                        max_items=limit,
+                        max_item_chars=16,
+                    ),
+                ),
             ),
         )
 
@@ -245,7 +254,6 @@ def _build_intents(
             QueryPair("size", str(limit)),
         ),
         "figshare_public_api": (
-            QueryPair("search_for", normalized_query),
             QueryPair("page", "1"),
             QueryPair("page_size", str(limit)),
         ),
@@ -261,7 +269,18 @@ def _build_intents(
         pairs = (QueryPair(query_key, normalized_query),)
         if "limit" in route.policy.allowed_query_keys:
             pairs += (QueryPair("limit", str(limit)),)
-    return (_intent(route, OperationKind.SEARCH, route.policy.paths[0], pairs),)
+    json_body_pairs = (
+        (JSONBodyPair("search_for", normalized_query),) if route.backend_id == "figshare_public_api" else ()
+    )
+    return (
+        _intent(
+            route,
+            OperationKind.SEARCH,
+            route.policy.paths[0],
+            pairs,
+            json_body_pairs=json_body_pairs,
+        ),
+    )
 
 
 def _intent(
@@ -269,10 +288,20 @@ def _intent(
     operation_kind: OperationKind,
     path: str,
     query_pairs: tuple[QueryPair, ...],
+    *,
+    json_body_pairs: tuple[JSONBodyPair, ...] = (),
+    query_bindings: tuple[DeferredNumericCSVQueryBinding, ...] = (),
 ) -> DispatchIntent:
     allowed = set(route.policy.allowed_query_keys)
-    if any(pair.name not in allowed for pair in query_pairs):
+    if any(pair.name not in allowed for pair in query_pairs) or any(
+        binding.query_name not in allowed for binding in query_bindings
+    ):
         raise PlanningError(f"intent_query_not_allowed:{route.route_id}")
+    allowed_body = set(route.policy.allowed_json_body_keys)
+    if any(pair.name not in allowed_body for pair in json_body_pairs):
+        raise PlanningError(f"intent_json_body_not_allowed:{route.route_id}")
+    if json_body_pairs and route.policy.methods[0] != "POST":
+        raise PlanningError(f"intent_json_body_requires_post:{route.route_id}")
     return DispatchIntent(
         route_id=route.route_id,
         policy_digest=route.policy.policy_digest,
@@ -281,6 +310,8 @@ def _intent(
         path=path,
         query_pairs=query_pairs,
         limits=route.policy.limits,
+        json_body_pairs=json_body_pairs,
+        query_bindings=query_bindings,
     )
 
 

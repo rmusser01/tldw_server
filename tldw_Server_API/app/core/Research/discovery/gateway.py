@@ -3,18 +3,21 @@
 from __future__ import annotations
 
 import ipaddress
+import json
 import re
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from typing import Literal, TypeAlias
-from urllib.parse import quote_from_bytes
+from urllib.parse import parse_qsl, quote_from_bytes, urljoin, urlsplit
 
 from tldw_Server_API.app.core.Research.discovery.contracts import (
     AccessRoute,
     CredentialRequirement,
     DispatchIntent,
     ExactOrigin,
+    JSONBodyPair,
+    OperationKind,
     QueryPair,
     RouteLimits,
     RoutePolicy,
@@ -44,6 +47,7 @@ _ERROR_MESSAGES: dict[GatewayErrorCode, str] = {
     "invalid_hop_response": "Discovery gateway hop response rejected",
 }
 _HEADER_NAME_PATTERN = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+\Z")
+_BAD_PERCENT_ESCAPE = re.compile(r"%(?![0-9A-Fa-f]{2})")
 _MAX_CONTENT_TYPE_BYTES = 256
 _MAX_RETRY_AFTER_BYTES = 128
 _MIN_FINAL_HEADER_BLOCK_BYTES = len(b"HTTP/1.0 200\n\n")
@@ -117,11 +121,16 @@ class _BindingSnapshot:
     host: str
     port: int
     method: str
+    operation_kind: OperationKind
     path: str
+    allowed_paths: tuple[str, ...]
+    allowed_query_keys: tuple[str, ...]
     query_pairs: tuple[tuple[str, str], ...]
     query_keys: tuple[str, ...]
+    json_body_pairs: tuple[tuple[str, str], ...]
     timeout_ms: int
     max_response_bytes: int
+    route_limits: RouteLimits
     http_limits: HTTPHopLimits
 
 
@@ -154,6 +163,7 @@ def _hop_limits(limits: RouteLimits) -> HTTPHopLimits:
         max_wire_bytes=response_bytes,
         max_decompressed_bytes=response_bytes,
         max_parser_input_bytes=response_bytes,
+        max_request_body_bytes=limits.max_request_body_bytes,
     )
 
 
@@ -178,14 +188,20 @@ def _snapshot_binding(route: object, intent: object) -> _BindingSnapshot | None:
             or type(origin.host) is not str
             or type(origin.port) is not int
             or type(intent.method) is not str
+            or type(intent.operation_kind) is not OperationKind
             or type(intent.path) is not str
             or type(policy.methods) is not tuple
             or type(policy.paths) is not tuple
             or type(intent.query_pairs) is not tuple
+            or type(intent.json_body_pairs) is not tuple
+            or type(intent.query_bindings) is not tuple
             or type(policy.allowed_query_keys) is not tuple
+            or type(policy.allowed_json_body_keys) is not tuple
+            or (policy.pagination_query_key is not None and type(policy.pagination_query_key) is not str)
             or any(type(value) is not str for value in policy.methods)
             or any(type(value) is not str for value in policy.paths)
             or any(type(value) is not str for value in policy.allowed_query_keys)
+            or any(type(value) is not str for value in policy.allowed_json_body_keys)
             or any(
                 type(getattr(limits, name)) is not int
                 for limits in (policy.limits, intent.limits)
@@ -196,6 +212,7 @@ def _snapshot_binding(route: object, intent: object) -> _BindingSnapshot | None:
                     "timeout_ms",
                     "max_response_bytes",
                     "max_results",
+                    "max_request_body_bytes",
                 )
             )
         ):
@@ -210,6 +227,14 @@ def _snapshot_binding(route: object, intent: object) -> _BindingSnapshot | None:
             or intent.path not in policy.paths
             or intent.limits != policy.limits
             or len(intent.query_pairs) > len(policy.allowed_query_keys)
+            or len(intent.json_body_pairs) > len(policy.allowed_json_body_keys)
+            or bool(intent.query_bindings)
+            or (bool(intent.json_body_pairs) and intent.method != "POST")
+            or (bool(policy.allowed_json_body_keys) and "POST" not in policy.methods)
+            or bool(set(policy.allowed_query_keys).intersection(policy.allowed_json_body_keys))
+            or (
+                policy.pagination_query_key is not None and policy.pagination_query_key not in policy.allowed_query_keys
+            )
         ):
             return None
 
@@ -226,6 +251,17 @@ def _snapshot_binding(route: object, intent: object) -> _BindingSnapshot | None:
             query_pairs.append((pair.name, pair.value))
             query_keys.append(pair.name)
 
+        allowed_json_body_keys = set(policy.allowed_json_body_keys)
+        json_body_pairs: list[tuple[str, str]] = []
+        seen_body_keys: set[str] = set()
+        for pair in intent.json_body_pairs:
+            if type(pair) is not JSONBodyPair or type(pair.name) is not str or type(pair.value) is not str:
+                return None
+            if pair.name not in allowed_json_body_keys or pair.name in seen_body_keys:
+                return None
+            seen_body_keys.add(pair.name)
+            json_body_pairs.append((pair.name, pair.value))
+
         http_limits = _hop_limits(intent.limits)
         return _BindingSnapshot(
             route_id=route.route_id,
@@ -234,11 +270,16 @@ def _snapshot_binding(route: object, intent: object) -> _BindingSnapshot | None:
             host=origin.host,
             port=origin.port,
             method=intent.method,
+            operation_kind=intent.operation_kind,
             path=intent.path,
+            allowed_paths=policy.paths,
+            allowed_query_keys=policy.allowed_query_keys,
             query_pairs=tuple(query_pairs),
             query_keys=tuple(query_keys),
+            json_body_pairs=tuple(json_body_pairs),
             timeout_ms=intent.limits.timeout_ms,
             max_response_bytes=intent.limits.max_response_bytes,
+            route_limits=replace(intent.limits),
             http_limits=http_limits,
         )
     except Exception:  # noqa: BLE001 - hostile mutated contracts fail closed.
@@ -285,6 +326,28 @@ def _build_request(binding: _BindingSnapshot) -> NormalizedHTTPHopRequest | None
     target = _build_target(binding)
     if target is None:
         return None
+    headers: tuple[tuple[str, str], ...] = ()
+    body = b""
+    if binding.json_body_pairs:
+        if binding.method != "POST":
+            return None
+        if (
+            sum(len(name) + len(value) for name, value in binding.json_body_pairs)
+            > binding.http_limits.max_request_body_bytes
+        ):
+            return None
+        try:
+            body = json.dumps(
+                dict(binding.json_body_pairs),
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8", errors="strict")
+        except (TypeError, ValueError, UnicodeError):
+            return None
+        if len(body) > binding.http_limits.max_request_body_bytes:
+            return None
+        headers = (("content-type", "application/json"),)
     try:
         return NormalizedHTTPHopRequest(
             scheme=binding.scheme,
@@ -292,12 +355,79 @@ def _build_request(binding: _BindingSnapshot) -> NormalizedHTTPHopRequest | None
             port=binding.port,
             method=binding.method,
             target=target,
-            headers=(),
-            body=b"",
+            headers=headers,
+            body=body,
             limits=replace(binding.http_limits),
         )
     except Exception:  # noqa: BLE001 - mutated scalar subclasses fail closed.
         return None
+
+
+def reconstruct_redirect_intent(
+    route: AccessRoute,
+    prior_intent: DispatchIntent,
+    location: str,
+) -> DispatchIntent | None:
+    """Rebuild one same-origin redirect as policy-bound declarative work."""
+    binding = _snapshot_binding(route, prior_intent)
+    if (
+        binding is None
+        or type(location) is not str
+        or binding.method not in {"GET", "HEAD"}
+        or binding.json_body_pairs
+        or not location
+        or len(location) > binding.http_limits.max_request_target_bytes
+        or location != location.strip(" \t")
+        or not location.isascii()
+        or any(not " " <= character <= "~" for character in location)
+    ):
+        return None
+    try:
+        parsed = urlsplit(location)
+        if parsed.fragment or parsed.username is not None or parsed.password is not None:
+            return None
+        if parsed.scheme or parsed.netloc:
+            if not parsed.scheme or not parsed.netloc:
+                return None
+            default_port = 443 if parsed.scheme == "https" else 80
+            if (
+                parsed.scheme != binding.scheme
+                or parsed.hostname != binding.host
+                or (parsed.port or default_port) != binding.port
+            ):
+                return None
+            resolved = parsed
+        else:
+            resolved = urlsplit(urljoin(binding.path, location))
+            if resolved.scheme or resolved.netloc or resolved.fragment:
+                return None
+        if resolved.path not in binding.allowed_paths or _BAD_PERCENT_ESCAPE.search(resolved.query):
+            return None
+        raw_pairs = parse_qsl(
+            resolved.query,
+            keep_blank_values=True,
+            strict_parsing=True,
+            encoding="utf-8",
+            errors="strict",
+            max_num_fields=len(binding.allowed_query_keys),
+            separator="&",
+        )
+        names = tuple(name for name, _value in raw_pairs)
+        if len(set(names)) != len(names) or any(name not in binding.allowed_query_keys for name in names):
+            return None
+        pairs = tuple(QueryPair(name, value) for name, value in raw_pairs)
+        redirected = DispatchIntent(
+            route_id=binding.route_id,
+            policy_digest=binding.policy_digest,
+            operation_kind=binding.operation_kind,
+            method=binding.method,
+            path=resolved.path,
+            query_pairs=pairs,
+            limits=replace(binding.route_limits),
+        )
+    except (TypeError, ValueError, UnicodeError):
+        return None
+    return redirected
 
 
 def _active(
@@ -584,4 +714,5 @@ __all__ = [
     "DiscoveryGatewayResponse",
     "DiscoveryGatewayTrace",
     "dispatch_once",
+    "reconstruct_redirect_intent",
 ]

@@ -19,6 +19,7 @@ from tldw_Server_API.app.core.Research.discovery.contracts import (
     BudgetCeilings,
     CredentialRequirement,
     CredentialStatus,
+    DeferredNumericCSVQueryBinding,
     DiscoveryOutcomeIdentity,
     DiscoveryPlan,
     DiscoveryProvenanceV2,
@@ -26,6 +27,7 @@ from tldw_Server_API.app.core.Research.discovery.contracts import (
     DispatchIntent,
     ExactOrigin,
     ExecutionMode,
+    JSONBodyPair,
     OperationKind,
     PlannedBudgetAllowance,
     PlannedDispatchGroup,
@@ -447,6 +449,123 @@ def test_route_policy_computes_and_revalidates_canonical_digest() -> None:
         _policy(digest="0" * 64)
 
 
+def test_request_shape_rules_are_bound_into_the_policy_digest() -> None:
+    base = _policy()
+    pagination = RoutePolicy(
+        policy_version=base.policy_version,
+        origin=base.origin,
+        methods=base.methods,
+        paths=base.paths,
+        allowed_query_keys=("query", "page"),
+        limits=base.limits,
+        pagination_query_key="page",
+    )
+    json_body = RoutePolicy(
+        policy_version=base.policy_version,
+        origin=base.origin,
+        methods=("POST",),
+        paths=base.paths,
+        allowed_query_keys=base.allowed_query_keys,
+        limits=base.limits,
+        allowed_json_body_keys=("search_for",),
+    )
+
+    assert len({base.policy_digest, pagination.policy_digest, json_body.policy_digest}) == 3
+    with pytest.raises(ValueError, match="pagination"):
+        replace(base, pagination_query_key="page", policy_digest="")
+
+
+@pytest.mark.parametrize(
+    "changes",
+    (
+        {"allowed_json_body_keys": ("query",)},
+        {"allowed_json_body_keys": ("search_for",)},
+    ),
+    ids=("query-body-key-overlap", "get-authorizes-json-body"),
+)
+def test_policy_rejects_ambiguous_or_non_post_json_body_channels(changes: dict[str, object]) -> None:
+    with pytest.raises(ValueError, match="json_body"):
+        replace(_policy(), policy_digest="", **changes)
+
+
+def test_dispatch_intent_models_bounded_json_and_deferred_numeric_csv_input() -> None:
+    policy = RoutePolicy(
+        policy_version="policy-v1",
+        origin=ExactOrigin("https", "api.example.test", 443),
+        methods=("POST",),
+        paths=("/works",),
+        allowed_query_keys=("page", "id"),
+        limits=RouteLimits(1, 0, 0, 1_000, 4_096, 25, max_request_body_bytes=512),
+        pagination_query_key="page",
+        allowed_json_body_keys=("search_for",),
+    )
+    body_pair = JSONBodyPair("search_for", "test")
+    binding = DeferredNumericCSVQueryBinding(
+        binding_id="search_result_ids",
+        query_name="id",
+        max_items=25,
+        max_item_chars=16,
+    )
+    intent = DispatchIntent(
+        route_id="example_api_direct",
+        policy_digest=policy.policy_digest,
+        operation_kind=OperationKind.CONDITIONAL_SUMMARY,
+        method="POST",
+        path="/works",
+        query_pairs=(QueryPair("page", "1"),),
+        limits=policy.limits,
+        json_body_pairs=(body_pair,),
+        query_bindings=(binding,),
+    )
+
+    assert intent.json_body_pairs == (body_pair,)
+    assert intent.query_bindings == (binding,)
+    assert intent.limits.max_request_body_bytes == 512
+    for value in (body_pair, binding):
+        assert is_dataclass(value)
+        assert value.__dataclass_params__.frozen is True
+        assert not hasattr(value, "__dict__")
+
+
+@pytest.mark.parametrize(
+    ("changes", "expected"),
+    [
+        (
+            {"json_body_pairs": (JSONBodyPair("search_for", "a"), JSONBodyPair("search_for", "b"))},
+            "duplicate_json_body",
+        ),
+        (
+            {
+                "query_bindings": (
+                    DeferredNumericCSVQueryBinding("first_ids", "id", 10, 16),
+                    DeferredNumericCSVQueryBinding("second_ids", "id", 10, 16),
+                )
+            },
+            "duplicate_query_binding",
+        ),
+        (
+            {"query_bindings": (DeferredNumericCSVQueryBinding("result_ids", "query", 10, 16),)},
+            "binding_query_conflict",
+        ),
+    ],
+)
+def test_dispatch_intent_rejects_ambiguous_body_and_binding_shapes(
+    changes: dict[str, object],
+    expected: str,
+) -> None:
+    with pytest.raises(ValueError, match=expected):
+        DispatchIntent(
+            route_id="example_api_direct",
+            policy_digest=_policy().policy_digest,
+            operation_kind=OperationKind.SEARCH,
+            method="GET",
+            path="/works",
+            query_pairs=(QueryPair("query", "test"),),
+            limits=_policy().limits,
+            **changes,
+        )
+
+
 def test_query_modes_predicates_and_credentials_are_typed() -> None:
     with pytest.raises(TypeError, match="query_mode"):
         AccessRoute(
@@ -543,6 +662,8 @@ def test_dispatch_intent_is_descriptive_and_cannot_account_or_dispatch() -> None
         "path",
         "query_pairs",
         "limits",
+        "json_body_pairs",
+        "query_bindings",
     ]
     assert not any(hasattr(intent, name) for name in ("dispatch", "reserve", "debit", "release"))
     assert not any(callable(getattr(intent, field.name)) for field in fields(intent))
@@ -554,6 +675,7 @@ def test_dispatch_intent_is_descriptive_and_cannot_account_or_dispatch() -> None
         lambda: DispatchAllowance(-1, 0, 0, 0),
         lambda: BudgetCeilings(1, -1, 1, 0, 0, 1_000, 1),
         lambda: RouteLimits(0, 0, 0, 1_000, 4_096, 1),
+        lambda: RouteLimits(1, 0, 0, 1_000, 4_096, 1, max_request_body_bytes=True),
     ],
 )
 def test_budget_and_allowance_values_reject_negative_or_impossible_limits(constructor: object) -> None:

@@ -15,8 +15,10 @@ from tldw_Server_API.app.core.Research.discovery.contracts import (
     BudgetCeilings,
     CredentialRequirement,
     CredentialStatus,
+    DeferredNumericCSVQueryBinding,
     ExactOrigin,
     ExecutionMode,
+    JSONBodyPair,
     PlannedDispatchGroup,
     PredicateOperator,
     QueryMode,
@@ -309,7 +311,33 @@ def test_pubmed_declares_two_possible_dispatches_without_runtime_accounting() ->
         "/entrez/eutils/esearch.fcgi",
         "/entrez/eutils/esummary.fcgi",
     ]
+    summary = group.intents[1]
+    assert summary.query_pairs == (QueryPair("db", "pubmed"), QueryPair("retmode", "json"))
+    assert summary.query_bindings == (
+        DeferredNumericCSVQueryBinding(
+            binding_id="pubmed_esearch_ids",
+            query_name="id",
+            max_items=25,
+            max_item_chars=16,
+        ),
+    )
+    assert "{esearch_ids}" not in canonical_plan_bytes(plan).decode("utf-8")
     assert not any(hasattr(group.allowance, name) for name in ("reservation", "reserved", "debit", "release"))
+
+
+def test_figshare_plan_uses_official_query_and_json_body_shape() -> None:
+    plan = compile_discovery_plan(
+        _request(("figshare",), query="Causal Inference", result_limit=25),
+        registry=foundation_registry(),
+        readiness=foundation_readiness(ExecutionMode.SYNTHETIC),
+        budget=_budget(),
+    )
+    intent = plan.dispatch_groups[0].intents[0]
+
+    assert intent.method == "POST"
+    assert intent.query_pairs == (QueryPair("page", "1"), QueryPair("page_size", "25"))
+    assert intent.json_body_pairs == (JSONBodyPair("search_for", "causal inference"),)
+    assert intent.query_bindings == ()
 
 
 def test_plan_bytes_and_attempt_ids_are_deterministic_after_input_normalization() -> None:

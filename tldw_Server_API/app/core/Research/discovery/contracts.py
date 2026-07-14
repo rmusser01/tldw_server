@@ -127,6 +127,37 @@ class QueryPair:
 
 
 @dataclass(frozen=True, slots=True)
+class JSONBodyPair:
+    """One immutable string key/value pair for a bounded JSON request body."""
+
+    name: str
+    value: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.name, str) or not _QUERY_NAME_RE.fullmatch(self.name):
+            raise ValueError("invalid_json_body_pair_name")
+        if not isinstance(self.value, str) or "\x00" in self.value:
+            raise ValueError("invalid_json_body_pair_value")
+
+
+@dataclass(frozen=True, slots=True)
+class DeferredNumericCSVQueryBinding:
+    """One bounded numeric-CSV query value produced by an earlier operation."""
+
+    binding_id: str
+    query_name: str
+    max_items: int
+    max_item_chars: int
+
+    def __post_init__(self) -> None:
+        _validate_identifier("binding_id", self.binding_id)
+        if not isinstance(self.query_name, str) or not _QUERY_NAME_RE.fullmatch(self.query_name):
+            raise ValueError("invalid_binding_query_name")
+        _require_positive_int("binding_max_items", self.max_items)
+        _require_positive_int("binding_max_item_chars", self.max_item_chars)
+
+
+@dataclass(frozen=True, slots=True)
 class ExactOrigin:
     """A normalized route transport origin."""
 
@@ -158,6 +189,7 @@ class RouteLimits:
     timeout_ms: int
     max_response_bytes: int
     max_results: int
+    max_request_body_bytes: int = 16 * 1024
 
     def __post_init__(self) -> None:
         _require_positive_int("max_pages", self.max_pages)
@@ -166,6 +198,7 @@ class RouteLimits:
         _require_positive_int("timeout_ms", self.timeout_ms)
         _require_positive_int("max_response_bytes", self.max_response_bytes)
         _require_positive_int("max_results", self.max_results)
+        _require_positive_int("max_request_body_bytes", self.max_request_body_bytes)
 
 
 @dataclass(frozen=True, slots=True)
@@ -244,6 +277,8 @@ class RoutePolicy:
     paths: tuple[str, ...]
     allowed_query_keys: tuple[str, ...]
     limits: RouteLimits
+    pagination_query_key: str | None = None
+    allowed_json_body_keys: tuple[str, ...] = ()
     policy_digest: str = ""
 
     def __post_init__(self) -> None:
@@ -253,6 +288,7 @@ class RoutePolicy:
         _require_tuple("methods", self.methods)
         _require_tuple("paths", self.paths)
         _require_tuple("allowed_query_keys", self.allowed_query_keys)
+        _require_tuple("allowed_json_body_keys", self.allowed_json_body_keys)
         if not self.methods or any(
             not isinstance(method, str) or method != method.upper() or not method.isalpha() for method in self.methods
         ):
@@ -267,6 +303,18 @@ class RoutePolicy:
             raise ValueError("invalid_policy_query_key")
         if len(set(self.allowed_query_keys)) != len(self.allowed_query_keys):
             raise ValueError("duplicate_policy_query_key")
+        if any(not isinstance(key, str) or not _QUERY_NAME_RE.fullmatch(key) for key in self.allowed_json_body_keys):
+            raise ValueError("invalid_policy_json_body_key")
+        if len(set(self.allowed_json_body_keys)) != len(self.allowed_json_body_keys):
+            raise ValueError("duplicate_policy_json_body_key")
+        if set(self.allowed_query_keys).intersection(self.allowed_json_body_keys):
+            raise ValueError("json_body_key_channel_overlap")
+        if self.allowed_json_body_keys and "POST" not in self.methods:
+            raise ValueError("json_body_requires_post_method")
+        if self.pagination_query_key is not None and (
+            not isinstance(self.pagination_query_key, str) or self.pagination_query_key not in self.allowed_query_keys
+        ):
+            raise ValueError("invalid_pagination_query_key")
         if not isinstance(self.limits, RouteLimits):
             raise TypeError("limits_must_be_route_limits")
 
@@ -436,6 +484,8 @@ class DispatchIntent:
     path: str
     query_pairs: tuple[QueryPair, ...]
     limits: RouteLimits
+    json_body_pairs: tuple[JSONBodyPair, ...] = ()
+    query_bindings: tuple[DeferredNumericCSVQueryBinding, ...] = ()
 
     def __post_init__(self) -> None:
         _validate_identifier("route_id", self.route_id)
@@ -450,6 +500,21 @@ class DispatchIntent:
             raise TypeError("query_pairs_must_be_typed")
         if not isinstance(self.limits, RouteLimits):
             raise TypeError("limits_must_be_route_limits")
+        _require_tuple("json_body_pairs", self.json_body_pairs)
+        if any(not isinstance(pair, JSONBodyPair) for pair in self.json_body_pairs):
+            raise TypeError("json_body_pairs_must_be_typed")
+        body_names = tuple(pair.name for pair in self.json_body_pairs)
+        if len(set(body_names)) != len(body_names):
+            raise ValueError("duplicate_json_body_pair_name")
+        _require_tuple("query_bindings", self.query_bindings)
+        if any(not isinstance(binding, DeferredNumericCSVQueryBinding) for binding in self.query_bindings):
+            raise TypeError("query_bindings_must_be_typed")
+        binding_ids = tuple(binding.binding_id for binding in self.query_bindings)
+        binding_names = tuple(binding.query_name for binding in self.query_bindings)
+        if len(set(binding_ids)) != len(binding_ids) or len(set(binding_names)) != len(binding_names):
+            raise ValueError("duplicate_query_binding")
+        if set(binding_names).intersection(pair.name for pair in self.query_pairs):
+            raise ValueError("binding_query_conflict")
 
 
 @dataclass(frozen=True, slots=True)
@@ -756,10 +821,12 @@ def canonical_policy_digest(policy: RoutePolicy) -> str:
     """Hash only immutable route-policy content."""
     payload = {
         "allowed_query_keys": policy.allowed_query_keys,
+        "allowed_json_body_keys": policy.allowed_json_body_keys,
         "limits": asdict(policy.limits),
         "methods": policy.methods,
         "origin": asdict(policy.origin),
         "paths": policy.paths,
+        "pagination_query_key": policy.pagination_query_key,
         "policy_version": policy.policy_version,
     }
     return hashlib.sha256(_canonical_json_bytes(payload)).hexdigest()

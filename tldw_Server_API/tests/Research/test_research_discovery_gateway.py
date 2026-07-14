@@ -9,8 +9,10 @@ import pytest
 from tldw_Server_API.app.core.Research.discovery.contracts import (
     AccessRoute,
     CredentialRequirement,
+    DeferredNumericCSVQueryBinding,
     DispatchIntent,
     ExactOrigin,
+    JSONBodyPair,
     OperationKind,
     QueryMode,
     QueryPair,
@@ -23,7 +25,9 @@ from tldw_Server_API.app.core.Research.discovery.gateway import (
     DiscoveryGatewayError,
     DiscoveryGatewayResponse,
     dispatch_once,
+    reconstruct_redirect_intent,
 )
+from tldw_Server_API.app.core.Research.discovery.registry import foundation_registry
 from tldw_Server_API.app.core.Security.http_hop import (
     HTTPHopError,
     HTTPHopLimits,
@@ -49,6 +53,7 @@ def _route_and_intent() -> tuple[AccessRoute, DispatchIntent]:
         paths=("/search",),
         allowed_query_keys=("q", "page"),
         limits=limits,
+        pagination_query_key="page",
     )
     route = AccessRoute(
         route_id="example.search",
@@ -77,6 +82,28 @@ def _route_and_intent() -> tuple[AccessRoute, DispatchIntent]:
         limits=limits,
     )
     return route, intent
+
+
+def _post_route_and_intent() -> tuple[AccessRoute, DispatchIntent]:
+    route, intent = _route_and_intent()
+    limits = replace(intent.limits, max_request_body_bytes=128)
+    policy = replace(
+        route.policy,
+        methods=("POST",),
+        limits=limits,
+        allowed_json_body_keys=("search_for", "order_direction"),
+        policy_digest="",
+    )
+    return replace(route, policy=policy), replace(
+        intent,
+        policy_digest=policy.policy_digest,
+        method="POST",
+        limits=limits,
+        json_body_pairs=(
+            JSONBodyPair("order_direction", "desc"),
+            JSONBodyPair("search_for", "quantum mechanics"),
+        ),
+    )
 
 
 def _hop_response(
@@ -134,12 +161,179 @@ async def test_dispatch_once_emits_one_credential_free_normalized_hop() -> None:
                 max_wire_bytes=64,
                 max_decompressed_bytes=64,
                 max_parser_input_bytes=64,
+                max_request_body_bytes=16 * 1024,
             ),
         )
     ]
     assert isinstance(response, DiscoveryGatewayResponse)
     assert response.status_code == 200
     assert response.body == b'{"ok":true}'
+
+
+@pytest.mark.asyncio
+async def test_post_json_body_is_minified_sorted_bounded_and_explicit() -> None:
+    route, intent = _post_route_and_intent()
+    calls: list[NormalizedHTTPHopRequest] = []
+
+    async def one_hop(request: NormalizedHTTPHopRequest) -> HTTPHopResponse:
+        calls.append(request)
+        return _hop_response()
+
+    response = await dispatch_once(
+        route,
+        intent,
+        is_policy_active=lambda _route_id, _digest: True,
+        one_hop=one_hop,
+    )
+
+    assert len(calls) == 1
+    assert calls[0].method == "POST"
+    assert calls[0].target == "/search?q=quantum%20mechanics&page=1"
+    assert calls[0].headers == (("content-type", "application/json"),)
+    assert calls[0].body == b'{"order_direction":"desc","search_for":"quantum mechanics"}'
+    assert calls[0].limits.max_request_body_bytes == 128
+    assert response.trace.query_keys == ("q", "page")
+    assert "quantum mechanics" not in repr(asdict(response.trace))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "case",
+    ("unresolved-binding", "oversized", "unicode", "undeclared-key", "get-with-body"),
+)
+async def test_invalid_json_request_shape_rejects_before_hop(case: str) -> None:
+    route, intent = _post_route_and_intent()
+    if case == "unresolved-binding":
+        policy = replace(route.policy, allowed_query_keys=("q", "page", "id"), policy_digest="")
+        route = replace(route, policy=policy)
+        intent = replace(
+            intent,
+            policy_digest=policy.policy_digest,
+            query_bindings=(DeferredNumericCSVQueryBinding("result_ids", "id", 5, 16),),
+        )
+    elif case == "oversized":
+        limits = replace(intent.limits, max_request_body_bytes=16)
+        policy = replace(route.policy, limits=limits, policy_digest="")
+        route = replace(route, policy=policy)
+        intent = replace(intent, policy_digest=policy.policy_digest, limits=limits)
+    elif case == "unicode":
+        intent = replace(intent, json_body_pairs=(JSONBodyPair("search_for", "\ud800secret-body"),))
+    elif case == "undeclared-key":
+        intent = replace(intent, json_body_pairs=(JSONBodyPair("token", "secret-body"),))
+    else:
+        policy = replace(route.policy, methods=("GET", "POST"), policy_digest="")
+        route = replace(route, policy=policy)
+        intent = replace(intent, policy_digest=policy.policy_digest, method="GET")
+    calls = 0
+
+    async def one_hop(request: NormalizedHTTPHopRequest) -> HTTPHopResponse:
+        nonlocal calls
+        calls += 1
+        return _hop_response()
+
+    with pytest.raises(DiscoveryGatewayError) as caught:
+        await dispatch_once(
+            route,
+            intent,
+            is_policy_active=lambda _route_id, _digest: True,
+            one_hop=one_hop,
+        )
+
+    assert caught.value.code == "request_rejected"
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    assert "secret-body" not in repr(caught.value)
+    assert calls == 0
+
+
+@pytest.mark.asyncio
+async def test_policy_callback_body_mutation_rejects_before_hop() -> None:
+    route, intent = _post_route_and_intent()
+    calls = 0
+
+    def mutate_body(_route_id: str, _digest: str) -> bool:
+        object.__setattr__(intent, "json_body_pairs", (JSONBodyPair("search_for", "mutated-secret"),))
+        return True
+
+    async def one_hop(request: NormalizedHTTPHopRequest) -> HTTPHopResponse:
+        nonlocal calls
+        calls += 1
+        return _hop_response()
+
+    with pytest.raises(DiscoveryGatewayError) as caught:
+        await dispatch_once(route, intent, is_policy_active=mutate_body, one_hop=one_hop)
+
+    assert caught.value.code == "request_rejected"
+    assert calls == 0
+
+
+@pytest.mark.asyncio
+async def test_hostile_json_scalar_subclass_rejects_before_hop() -> None:
+    class HostileString(str):
+        pass
+
+    route, intent = _post_route_and_intent()
+    intent = replace(
+        intent,
+        json_body_pairs=(JSONBodyPair("search_for", HostileString("secret-body")),),
+    )
+    calls = 0
+
+    async def one_hop(request: NormalizedHTTPHopRequest) -> HTTPHopResponse:
+        nonlocal calls
+        calls += 1
+        return _hop_response()
+
+    with pytest.raises(DiscoveryGatewayError) as caught:
+        await dispatch_once(
+            route,
+            intent,
+            is_policy_active=lambda _route_id, _digest: True,
+            one_hop=one_hop,
+        )
+
+    assert caught.value.code == "request_rejected"
+    assert "secret-body" not in repr(caught.value)
+    assert calls == 0
+
+
+@pytest.mark.asyncio
+async def test_unresolved_pubmed_summary_binding_rejects_before_hop() -> None:
+    route = foundation_registry().get_route("pubmed_ncbi_eutils_pubmed_direct")
+    intent = DispatchIntent(
+        route_id=route.route_id,
+        policy_digest=route.policy.policy_digest,
+        operation_kind=OperationKind.CONDITIONAL_SUMMARY,
+        method="GET",
+        path="/entrez/eutils/esummary.fcgi",
+        query_pairs=(QueryPair("db", "pubmed"), QueryPair("retmode", "json")),
+        limits=route.policy.limits,
+        query_bindings=(
+            DeferredNumericCSVQueryBinding(
+                binding_id="pubmed_esearch_ids",
+                query_name="id",
+                max_items=25,
+                max_item_chars=16,
+            ),
+        ),
+    )
+    calls = 0
+
+    async def one_hop(request: NormalizedHTTPHopRequest) -> HTTPHopResponse:
+        nonlocal calls
+        calls += 1
+        return _hop_response()
+
+    with pytest.raises(DiscoveryGatewayError) as caught:
+        await dispatch_once(
+            route,
+            intent,
+            is_policy_active=lambda _route_id, _digest: True,
+            one_hop=one_hop,
+        )
+
+    assert caught.value.code == "request_rejected"
+    assert calls == 0
 
 
 @pytest.mark.asyncio
@@ -876,3 +1070,78 @@ async def test_raising_retryable_accessor_maps_to_nonretryable_safe_error() -> N
     assert caught.value.retryable is False
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
+
+
+@pytest.mark.parametrize(
+    ("location", "expected_pairs"),
+    (
+        (
+            "/search?page=2&q=next%20term",
+            (QueryPair("page", "2"), QueryPair("q", "next term")),
+        ),
+        (
+            "https://api.example.test:443/search?q=next&page=2",
+            (QueryPair("q", "next"), QueryPair("page", "2")),
+        ),
+        (
+            "?q=next&page=2",
+            (QueryPair("q", "next"), QueryPair("page", "2")),
+        ),
+    ),
+)
+def test_redirect_intent_reconstruction_accepts_only_bound_same_origin_shape(
+    location: str,
+    expected_pairs: tuple[QueryPair, ...],
+) -> None:
+    route, intent = _route_and_intent()
+
+    redirected = reconstruct_redirect_intent(route, intent, location)
+
+    assert redirected is not None
+    assert redirected.route_id == intent.route_id
+    assert redirected.policy_digest == intent.policy_digest
+    assert redirected.operation_kind is intent.operation_kind
+    assert redirected.method == "GET"
+    assert redirected.path == "/search"
+    assert redirected.query_pairs == expected_pairs
+    assert redirected.json_body_pairs == ()
+    assert redirected.query_bindings == ()
+    assert redirected.limits == intent.limits
+
+
+@pytest.mark.parametrize(
+    "location",
+    (
+        "https://attacker.example/search?q=x",
+        "http://api.example.test/search?q=x",
+        "https://api.example.test:444/search?q=x",
+        "https://user@api.example.test/search?q=x",
+        "//attacker.example/search?q=x",
+        "/other?q=x",
+        "/search?q=first&q=second",
+        "/search?token=secret",
+        "/search?q=%ZZ",
+        "/search?q=x#fragment",
+        "/search?missing-equals",
+        "/search?q=" + "x" * 9_000,
+    ),
+)
+def test_redirect_intent_reconstruction_rejects_ambiguous_or_unbound_locations(location: str) -> None:
+    route, intent = _route_and_intent()
+
+    assert reconstruct_redirect_intent(route, intent, location) is None
+
+
+def test_redirect_intent_reconstruction_rejects_body_and_unresolved_binding_state() -> None:
+    post_route, post_intent = _post_route_and_intent()
+    route, intent = _route_and_intent()
+    binding_policy = replace(route.policy, allowed_query_keys=("q", "page", "id"), policy_digest="")
+    route = replace(route, policy=binding_policy)
+    unresolved = replace(
+        intent,
+        policy_digest=binding_policy.policy_digest,
+        query_bindings=(DeferredNumericCSVQueryBinding("result_ids", "id", 5, 16),),
+    )
+
+    assert reconstruct_redirect_intent(post_route, post_intent, "/search?page=2") is None
+    assert reconstruct_redirect_intent(route, unresolved, "/search?page=2") is None

@@ -104,6 +104,17 @@ _EXPECTED_ORIGINS_AND_PATHS = {
     "crossref": ("https", "api.crossref.org", 443, ("/works",)),
 }
 
+_EXPECTED_PAGINATION_KEYS = {
+    "openalex": "page",
+    "semantic_scholar": "offset",
+    "crossref": "offset",
+    "arxiv": "start",
+    "pubmed": "retstart",
+    "zenodo": "page",
+    "figshare": "page",
+    "osf": "page",
+}
+
 
 def _ledger_rows() -> dict[str, dict[str, object]]:
     payload = json.loads(_LEDGER_PATH.read_text(encoding="utf-8"))
@@ -153,6 +164,23 @@ def test_foundation_route_policies_bind_exact_normalized_origins_and_paths() -> 
         assert actual == expected
         assert route.policy.policy_digest
         assert route.query_modes == (QueryMode.STRUCTURED_QUERY,)
+
+
+def test_foundation_routes_declare_exact_pagination_and_figshare_body_shape() -> None:
+    registry = foundation_registry()
+
+    actual = {
+        source_id: registry.get_route(
+            registry.get_source(source_id).route_references[0].route_id
+        ).policy.pagination_query_key
+        for source_id in _EXPECTED_PAGINATION_KEYS
+    }
+    figshare = registry.get_route("figshare_figshare_public_api_direct").policy
+
+    assert actual == _EXPECTED_PAGINATION_KEYS
+    assert figshare.methods == ("POST",)
+    assert figshare.allowed_query_keys == ("page", "page_size")
+    assert figshare.allowed_json_body_keys == ("search_for", "order", "order_direction")
 
 
 def test_crossref_seed_alias_resolves_to_stable_product_identity() -> None:

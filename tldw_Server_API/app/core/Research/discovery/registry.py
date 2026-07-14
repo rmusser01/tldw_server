@@ -292,6 +292,7 @@ def _foundation_routes() -> tuple[AccessRoute, ...]:
             methods=("GET",),
             paths=("/works",),
             query_keys=("search", "filter", "sort", "page", "per-page"),
+            pagination_query_key="page",
             credential_requirement=CredentialRequirement.API_KEY,
         ),
         _route(
@@ -302,6 +303,7 @@ def _foundation_routes() -> tuple[AccessRoute, ...]:
             methods=("GET",),
             paths=("/graph/v1/paper/search",),
             query_keys=("query", "offset", "limit", "fields", "fieldsOfStudy", "year"),
+            pagination_query_key="offset",
         ),
         _route(
             route_id="crossref_metadata_search_crossref_api_direct",
@@ -311,6 +313,7 @@ def _foundation_routes() -> tuple[AccessRoute, ...]:
             methods=("GET",),
             paths=("/works",),
             query_keys=("query", "query.title", "query.author", "filter", "offset", "rows", "select", "sort"),
+            pagination_query_key="offset",
         ),
         _route(
             route_id="arxiv_arxiv_api_direct",
@@ -320,6 +323,7 @@ def _foundation_routes() -> tuple[AccessRoute, ...]:
             methods=("GET",),
             paths=("/api/query",),
             query_keys=("search_query", "start", "max_results", "sortBy", "sortOrder"),
+            pagination_query_key="start",
         ),
         _route(
             route_id="pubmed_ncbi_eutils_pubmed_direct",
@@ -329,6 +333,7 @@ def _foundation_routes() -> tuple[AccessRoute, ...]:
             methods=("GET",),
             paths=("/entrez/eutils/esearch.fcgi", "/entrez/eutils/esummary.fcgi"),
             query_keys=("db", "term", "retstart", "retmax", "retmode", "sort", "datetype", "mindate", "maxdate", "id"),
+            pagination_query_key="retstart",
             max_physical_dispatches=2,
         ),
         _route(
@@ -339,6 +344,7 @@ def _foundation_routes() -> tuple[AccessRoute, ...]:
             methods=("GET",),
             paths=("/api/records",),
             query_keys=("q", "page", "size", "sort"),
+            pagination_query_key="page",
         ),
         _route(
             route_id="figshare_figshare_public_api_direct",
@@ -347,7 +353,9 @@ def _foundation_routes() -> tuple[AccessRoute, ...]:
             host="api.figshare.com",
             methods=("POST",),
             paths=("/v2/articles/search",),
-            query_keys=("search_for", "page", "page_size", "order", "order_direction"),
+            query_keys=("page", "page_size"),
+            pagination_query_key="page",
+            json_body_keys=("search_for", "order", "order_direction"),
         ),
         _route(
             route_id="open_science_framework_osf_api_direct",
@@ -357,6 +365,7 @@ def _foundation_routes() -> tuple[AccessRoute, ...]:
             methods=("GET",),
             paths=("/v2/preprints/",),
             query_keys=("q", "page", "page[size]", "filter", "sort"),
+            pagination_query_key="page",
         ),
     )
 
@@ -395,6 +404,8 @@ def _route(
     methods: tuple[str, ...],
     paths: tuple[str, ...],
     query_keys: tuple[str, ...],
+    pagination_query_key: str,
+    json_body_keys: tuple[str, ...] = (),
     credential_requirement: CredentialRequirement = CredentialRequirement.NONE,
     max_physical_dispatches: int = 1,
 ) -> AccessRoute:
@@ -416,6 +427,8 @@ def _route(
             methods=methods,
             paths=paths,
             allowed_query_keys=query_keys,
+            pagination_query_key=pagination_query_key,
+            allowed_json_body_keys=json_body_keys,
             limits=RouteLimits(
                 max_pages=1,
                 max_redirects=0,
