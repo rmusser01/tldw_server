@@ -1116,6 +1116,12 @@ def _sanitize_provider_stream_call(
 
             return async_iterator()
 
+        if not hasattr(stream, "__iter__"):
+            # Preserve invalid return values so execute_streaming_call can reject
+            # them before creating a 200 streaming response. Wrapping these in a
+            # generator would defer the TypeError until after response start.
+            return stream
+
         def sync_iterator():
             try:
                 for chunk in stream:

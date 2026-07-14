@@ -75,3 +75,37 @@ async def test_connection_pool_transport_errors_count_single_failure(monkeypatch
 
     stats = pool.get_stats()
     assert stats["failed_requests"] == 1
+
+
+@pytest.mark.asyncio
+async def test_credential_scoped_failures_do_not_open_shared_breaker(monkeypatch):
+    pool = ConnectionPool(provider="openai", retry_attempts=1)
+    calls = []
+
+    async def _fake_afetch(**kwargs):
+        authorization = (kwargs.get("headers") or {}).get("Authorization")
+        calls.append(authorization)
+        if authorization == "Bearer invalid-key":
+            return _DummyResponse(status_code=401, text="invalid credential")
+        return _DummyResponse(status_code=200)
+
+    monkeypatch.setattr(pool_mod, "afetch", _fake_afetch)
+
+    for _ in range(5):
+        with pytest.raises(NetworkError):
+            await pool.request(
+                "POST",
+                "https://api.openai.com/v1/embeddings",
+                headers={"Authorization": "Bearer invalid-key"},
+                bypass_circuit_breaker=True,
+            )
+
+    result = await pool.request(
+        "POST",
+        "https://api.openai.com/v1/embeddings",
+        headers={"Authorization": "Bearer valid-key"},
+        bypass_circuit_breaker=True,
+    )
+
+    assert result == {"ok": True}
+    assert calls == ["Bearer invalid-key"] * 5 + ["Bearer valid-key"]

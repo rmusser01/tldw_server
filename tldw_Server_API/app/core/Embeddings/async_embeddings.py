@@ -291,6 +291,7 @@ class AsyncOpenAIProvider(AsyncEmbeddingProvider):
                     and isinstance(base_url_override, str)
                     and bool(base_url_override.strip())
                 ),
+                bypass_circuit_breaker=credentials_resolved is True,
             )
             if isinstance(data, dict) and "error" in data:
                 status = "failure"
@@ -391,6 +392,7 @@ class AsyncHuggingFaceProvider(AsyncEmbeddingProvider):
                     and isinstance(base_url_override, str)
                     and bool(base_url_override.strip())
                 ),
+                bypass_circuit_breaker=credentials_resolved is True,
             )
             # Usage is already recorded in check_rate_limit_async
             if credentials_resolved is True and isinstance(data, dict) and "error" in data:
@@ -475,6 +477,7 @@ class AsyncLocalAPIProvider(AsyncEmbeddingProvider):
                     and isinstance(base_url_override, str)
                     and bool(base_url_override.strip())
                 ),
+                bypass_circuit_breaker=credentials_resolved is True,
             )
             return _normalize_embedding_response(data)
         except _ASYNC_EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
@@ -732,6 +735,7 @@ class AsyncEmbeddingService:
         actual_model = model
         provider_config = self._get_provider_config(provider)
         explicit_credentials = credentials_resolved is True
+        cache_enabled = use_cache and not explicit_credentials
         effective_base_url = base_url_override if explicit_credentials else None
         if (
             not explicit_credentials
@@ -765,7 +769,7 @@ class AsyncEmbeddingService:
             cache_key = f"{cache_key}:{hashlib.sha256(effective_base_url.encode('utf-8')).hexdigest()}"
 
         # Check cache
-        if use_cache:
+        if cache_enabled:
             cached_embedding = await self.cache.get_async(cache_key)
             if cached_embedding is not None:
                 self.metrics.log_cache_hit(model)
@@ -822,7 +826,7 @@ class AsyncEmbeddingService:
             await on_provider_success()
 
         # Cache the result
-        if use_cache:
+        if cache_enabled:
             cache_key = f"{actual_provider}:{actual_model}:{text_hash}"
             actual_base_url = effective_base_url if explicit_credentials else None
             actual_provider_config = self._get_provider_config(actual_provider)

@@ -114,8 +114,25 @@ class ConnectionPool:
         data: Optional[Any] = None,
         params: Optional[dict[str, str]] = None,
         sensitive_observability: bool = False,
+        bypass_circuit_breaker: bool = False,
     ) -> dict[str, Any]:
-        """Make an HTTP request using the connection pool with circuit breaker protection."""
+        """Make an HTTP request through the pool.
+
+        Credential-scoped requests bypass the provider-global circuit breaker so
+        one tenant's invalid or unavailable credential cannot deny service to
+        other tenants. Connection limits, retry policy, and failure statistics
+        still apply through ``_request_impl``.
+        """
+        if bypass_circuit_breaker is True:
+            return await self._request_impl(
+                method,
+                url,
+                headers=headers,
+                json_data=json_data,
+                data=data,
+                params=params,
+                sensitive_observability=sensitive_observability,
+            )
         return await self._breaker.call_async(
             self._request_impl,
             method,

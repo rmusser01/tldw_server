@@ -1,10 +1,10 @@
 ---
 id: TASK-12963
 title: Consolidate provider credential runtime for Chat and Knowledge QA
-status: Done
+status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-14 02:28'
+updated_date: '2026-07-14 03:26'
 labels: []
 dependencies: []
 references:
@@ -84,6 +84,10 @@ Completed; integration plan removed after final verification. Design: Docs/super
 2026-07-13: Draft PR #2727 opened: https://github.com/rmusser01/tldw_server/pull/2727. The PR remains draft and must receive a requester-authored Change summary explaining what changed and why before it is marked ready or merged.
 
 2026-07-13: PR #2727 rebased cleanly onto latest origin/dev at ceb0b9fcd3 (four new commits, all Chat Workspace/frontend). Range-diff confirmed all 73 provider-credential commits replayed exactly with no altered or dropped patches. Post-rebase verification: focused backend credential/RAG integration 255 passed, 2 expected skips; affected Knowledge QA plus new Chat Workspace UI matrix 142 passed; frontend TypeScript typecheck passed; git diff check clean. Existing Bandit result remains applicable because the feature patches are byte-for-byte identical and the new base commits contain no Python changes. Branch was 0 commits behind origin/dev before final tracking-note commit; the two unrelated untracked watchlist templates remain untouched.
+
+2026-07-13: Post-rebase production-safety expansion found one stale Chat stream-disconnect integration fixture: it mocked provider dispatch but supplied no provider credential, so the intentional fail-closed runtime returned 503 before the mock. Reopened to update the fixture with an explicit fake OpenAI server credential and rerun the affected/full gates.
+
+2026-07-13: Post-rebase production-safety review found and fixed three runtime risks: explicit/BYOK embedding requests could share a provider-global cache across credentials, their auth failures could open the provider-global circuit breaker across tenants, and invalid non-stream provider objects could be generator-wrapped into a 200 stream instead of failing before headers. Explicit credentials now bypass shared embedding cache/breaker while retaining pooled HTTP/retry/stats behavior; server-configured traffic retains existing cache/breaker behavior; invalid stream objects fail with 502. Stale Chat/embedding fixtures were aligned with fail-closed sanitized contracts. Verification before the next dev refresh: full Chat 837 passed/31 skipped; full Embeddings 444 passed/36 skipped with pinned random/Hypothesis seeds; RAG_NEW+AuthNZ_Unit+http_client 1794 passed/7 skipped plus one known order-polluted prompt-loader assertion that passed isolated with the same seed; loopback Chat integrations 2 passed outside sandbox; py_compile and git diff checks passed; Bandit 0 findings/0 errors across 7421 production LOC; fatal Ruff findings match HEAD baseline exactly. origin/dev advanced to db0cfb6611 with backlog-only commits, so final rebase and focused post-rebase verification remain pending.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

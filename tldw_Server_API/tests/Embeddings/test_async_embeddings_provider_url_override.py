@@ -104,6 +104,7 @@ async def test_runtime_endpoint_marks_provider_pool_request_sensitive(
 
     assert result == pytest.approx([0.1])
     assert captured[0]["sensitive_observability"] is True
+    assert captured[0]["bypass_circuit_breaker"] is True
 
 
 @pytest.mark.asyncio
@@ -264,49 +265,43 @@ async def test_configured_endpoint_cache_key_uses_only_stable_digest(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_runtime_endpoint_cache_key_uses_digest_and_segregates_endpoints(monkeypatch):
+async def test_runtime_credentials_bypass_shared_embedding_cache(monkeypatch):
     service = AsyncEmbeddingService(config=_fallback_config())
     service.cache = SharedMemoryCache()
-    dispatched_endpoints: list[str] = []
+    dispatched_credentials: list[tuple[str, str]] = []
 
     async def provider_success(**kwargs):
-        endpoint = kwargs["base_url_override"]
-        dispatched_endpoints.append(endpoint)
-        return [1.0 if "runtime-a" in endpoint else 2.0]
+        dispatched_credentials.append(
+            (kwargs["api_key_override"], kwargs["base_url_override"])
+        )
+        return [float(len(dispatched_credentials))]
 
     monkeypatch.setattr(service.providers["openai"], "create_embedding", provider_success)
-    endpoint_a = "https://runtime-a.private/secret/path?tenant=one"
-    endpoint_b = "https://runtime-b.private/secret/path?tenant=two"
+    endpoint = "https://runtime.private/secret/path"
 
     first = await service.create_embedding(
         "same text",
         provider="openai",
-        api_key_override="runtime-key",
-        base_url_override=endpoint_a,
+        api_key_override="runtime-key-a",
+        base_url_override=endpoint,
         credentials_resolved=True,
     )
     second = await service.create_embedding(
         "same text",
         provider="openai",
-        api_key_override="runtime-key",
-        base_url_override=endpoint_b,
+        api_key_override="runtime-key-b",
+        base_url_override=endpoint,
         credentials_resolved=True,
     )
 
     assert first == [1.0]
     assert second == [2.0]
-    assert dispatched_endpoints == [endpoint_a, endpoint_b]
-    assert service.cache.get_keys[0] != service.cache.get_keys[1]
-    assert service.cache.get_keys == service.cache.set_keys
-    rendered_keys = repr(service.cache.get_keys)
-    for sensitive_fragment in (
-        "runtime-a.private",
-        "runtime-b.private",
-        "secret/path",
-        "tenant=one",
-        "tenant=two",
-    ):
-        assert sensitive_fragment not in rendered_keys
+    assert dispatched_credentials == [
+        ("runtime-key-a", endpoint),
+        ("runtime-key-b", endpoint),
+    ]
+    assert service.cache.get_keys == []
+    assert service.cache.set_keys == []
 
 
 @pytest.mark.asyncio
@@ -540,8 +535,6 @@ async def test_provider_success_callback_does_not_run_for_cache_hit(monkeypatch)
         "hello",
         provider="openai",
         use_cache=True,
-        api_key_override="runtime-key",
-        credentials_resolved=True,
         on_provider_success=record_success,
     )
 
