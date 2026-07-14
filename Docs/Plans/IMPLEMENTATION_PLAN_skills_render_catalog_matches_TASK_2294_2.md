@@ -360,7 +360,7 @@ Expected: all module tests pass. Do not add a factory abstraction, cache, status
 
 **Tests**: Failure and lifecycle tests in `test_skills_module.py`.
 
-**Status**: In Progress
+**Status**: Complete
 
 ### Task 3.1: Bound the post-render lookup
 
@@ -373,7 +373,7 @@ Expected: all module tests pass. Do not add a factory abstraction, cache, status
 - Refines: `SkillsModule._resolve_catalog_matches(...)`.
 - Preserves: the successful render when catalog discovery is unavailable.
 
-- [ ] **Step 1: Add failing resilience tests**
+- [x] **Step 1: Add failing resilience tests**
 
 For `RuntimeError("SENTINEL_PRIVATE_DETAIL")`, replace `skills_module.logger`
 with `SimpleNamespace(warning=warning)` and assert:
@@ -423,7 +423,7 @@ async def test_catalog_matching_propagates_suppressed_cancellation(
         await task
 ```
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 ```bash
 source ../../.venv/bin/activate
@@ -432,7 +432,7 @@ python -m pytest -q tldw_Server_API/app/core/MCP_unified/tests/test_skills_modul
 
 Expected: lookup exceptions escape and suppressed cancellation returns normally.
 
-- [ ] **Step 3: Implement the bounded wrapper**
+- [x] **Step 3: Implement the bounded wrapper**
 
 Replace the resolver body with:
 
@@ -457,7 +457,7 @@ Replace the resolver body with:
 
 Do not catch `BaseException`, log `str(exc)`, retry, or retain protocol state.
 
-- [ ] **Step 4: Document the field**
+- [x] **Step 4: Document the field**
 
 Add after the existing `declared_tools` bullet:
 
@@ -470,7 +470,7 @@ Add after the existing `declared_tools` bullet:
   time.
 ```
 
-- [ ] **Step 5: Verify green and commit**
+- [x] **Step 5: Verify green and commit**
 
 ```bash
 source ../../.venv/bin/activate
@@ -491,7 +491,7 @@ Expected: all module tests pass, including cleanup and cancellation.
 
 **Tests**: Skills module, dynamic registration, gateway policy regression, and package boundary.
 
-**Status**: Not Started
+**Status**: In Progress
 
 ### Task 4.1: Verify and close the implementation record
 
