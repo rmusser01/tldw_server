@@ -616,6 +616,40 @@ async def test_render_with_no_declarations_skips_catalog_lookup(
 
 
 @pytest.mark.asyncio
+async def test_render_with_only_malformed_declarations_skips_catalog_lookup(
+    user_catalogs: dict[int, UserCatalog],
+    monkeypatch: pytest.MonkeyPatch,
+    catalog_protocol_stub: tuple[Mock, AsyncMock],
+) -> None:
+    await _seed_review_skill(user_catalogs[1].service)
+    original_get_skill = SkillsService.get_skill
+
+    async def malformed_only_get_skill(
+        self: SkillsService,
+        name: str,
+        *,
+        enforce_integrity: bool = True,
+    ) -> dict[str, Any]:
+        skill = await original_get_skill(self, name, enforce_integrity=enforce_integrity)
+        skill["allowed_tools"] = ["Bash("]
+        return skill
+
+    monkeypatch.setattr(SkillsService, "get_skill", malformed_only_get_skill)
+    factory, list_tools = catalog_protocol_stub
+    module = await _module()
+
+    result = await module.execute_tool(
+        "skills.render",
+        {"skill_name": "review-paper"},
+        context=user_catalogs[1].context,
+    )
+
+    assert result["catalog_matches"] == []
+    factory.assert_not_called()
+    list_tools.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_render_ignores_non_string_and_blank_parsed_declarations(
     user_catalogs: dict[int, UserCatalog],
     monkeypatch: pytest.MonkeyPatch,

@@ -378,10 +378,15 @@ class SkillsModule(BaseModule):
         declarations: list[str],
         context: Any,
     ) -> list[str] | None:
-        if not declarations:
+        valid_declarations = [
+            declaration
+            for declaration in declarations
+            if _declaration_base_name(declaration) is not None
+        ]
+        if not valid_declarations:
             return []
         listing = await MCPProtocol()._handle_tools_list({}, context)
-        return _catalog_matches_from_listing(declarations, listing)
+        return _catalog_matches_from_listing(valid_declarations, listing)
 
     @staticmethod
     def _format_metadata(metadata: SkillMetadata) -> dict[str, Any]:
