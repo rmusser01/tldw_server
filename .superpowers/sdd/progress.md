@@ -66,3 +66,13 @@
 - GREEN: the complete focused and legacy compatibility suite collected 263 tests and passed all 263. Ruff, Black, compileall, Python 3.10 grammar parsing, Python 3.12 AST parsing, Bandit (zero findings across 1,513 production LOC), and `git diff --check` passed.
 - Runtime matrix limits: no `python3.10` executable is installed locally. Python 3.12.11 is installed, but its environment lacks pytest/httpcore, so the focused suite ran only under the project Python 3.11.13 virtual environment. No dependencies were installed solely for this compatibility check.
 - Final adversarial reviews found no remaining security, correctness, handoff, or simplification issues after the logger-level, SNI, concurrent-failure, task-cleanup, test-marker, and OpenAlex prerequisite corrections.
+
+## 2026-07-14 — TASK-12968.7 OpenAlex credential evidence hardening
+
+- Task 1 complete (implementation range `7a09dcf186..9a19be77dc`; independent spec/quality review clean with no Critical, Important, or Minor findings).
+- RED: the authoritative Node inventory suite reported 17 passed / 1 failed because the frozen OpenAlex reason did not state that a free API key is still a credential.
+- GREEN: the OpenAlex row now records substantive authentication, API-overview, and dated 2026-02-24 pricing evidence while remaining `credentialed_out_of_scope` with an `api_key` route. Derived rows/ledger digests changed; all other frozen counts and digests remained stable.
+- TASK-12968.2's contract is explicitly V2-only: OpenAlex is typed unavailable/skipped with zero executable attempts, physical reservations, or gateway calls. V1 remains unchanged, and no secret-reference interface or credentialed branch was added.
+- Fresh controller verification: Node inventory suite 18/18; schema plus legacy-selection pytest 22/22; authoritative validator `errors=[]`, exact report equality, 191 mapped / 35 credentialed; `git diff --check` passed. Five pytest warnings are existing environment/config warnings.
+- Bandit not applicable because no production Python code changed. No live OpenAlex request was made; authenticated enablement remains deferred.
+- TASK-12968.7 finalized Done with 5/5 acceptance criteria and 6/6 DoD items checked; final-summary markers normalized under the approved narrow repair.

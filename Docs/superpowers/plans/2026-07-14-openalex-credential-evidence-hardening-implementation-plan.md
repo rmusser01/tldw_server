@@ -138,11 +138,13 @@ python -m pytest -q Helper_Scripts/tests/test_research_source_inventory_schema.p
 
 **Tests:** `git diff --check`; Bandit documented as not applicable because no production Python code is touched.
 
-**Status:** In Progress
+**Status:** Complete
 
 - [x] Run `git diff --check` and review the complete diff for unrelated changes or count drift.
-- [ ] Request independent spec and quality review; resolve every Critical or Important finding and re-review.
-- [ ] Mark all four stages Complete, append TASK-12968.7 verification/review evidence to `.superpowers/sdd/progress.md`, and finalize the task through Backlog.md CLI.
+- [x] Request independent spec and quality review; resolve every Critical or Important finding and re-review.
+- [x] Mark all four stages Complete, append TASK-12968.7 verification/review evidence to `.superpowers/sdd/progress.md`, and finalize the task through Backlog.md CLI.
 - [x] Commit the reviewable unit with `docs(research): harden OpenAlex credential evidence`.
 
-**Local review evidence (2026-07-14):** `git diff --check` passed. The complete diff changes only OpenAlex evidence/reasoning, derived digests, exact semantic assertions, the V2-only fail-closed handoff, and controller-created task/plan tracking. Counts remain 191 mapped / 35 credentialed; no runtime, credential-loading, secret, schema, or production Python code changed. Bandit is not applicable. Independent review and Backlog finalization remain with the controller.
+**Review/finalization evidence (2026-07-14):** Independent task review found the implementation spec compliant and approved its quality with no Critical, Important, or Minor findings. The controller independently reran the Node inventory suite (18/18), schema plus legacy-selection pytest suite (22/22), and authoritative validator (`errors=[]`, 191 mapped / 35 credentialed, exact checked-in report). TASK-12968.7 is Done with all acceptance and DoD items checked; duplicate CLI final-summary end markers were removed under the approved narrow tracking repair.
+
+**Local review evidence (2026-07-14):** `git diff --check` passed. The complete diff changes only OpenAlex evidence/reasoning, derived digests, exact semantic assertions, the V2-only fail-closed handoff, and controller-created task/plan tracking. Counts remain 191 mapped / 35 credentialed; no runtime, credential-loading, secret, schema, or production Python code changed. Bandit is not applicable. Independent review and Backlog finalization completed as recorded above.
