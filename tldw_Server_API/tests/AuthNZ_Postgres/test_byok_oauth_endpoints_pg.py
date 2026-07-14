@@ -3,6 +3,7 @@ import json
 import sys
 import types
 import uuid
+from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -397,3 +398,48 @@ async def test_openai_oauth_endpoints_postgres(test_db_pool, monkeypatch):
     assert "provider_oauth_refreshed" in audit_actions
     assert "provider_oauth_disconnected" in audit_actions
     assert "provider_oauth_refresh_failed" in audit_actions
+
+    from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import (
+        AuthnzUserProviderSecretsRepo,
+    )
+
+    repo = AuthnzUserProviderSecretsRepo(test_db_pool)
+    active_row = await repo.fetch_secret_for_user(user_id, "openai")
+    assert active_row is not None
+    expected_blob = str(active_row["encrypted_blob"])
+    touched_at = datetime.now(timezone.utc)
+    await repo.touch_last_used(user_id, "openai", touched_at)
+
+    cas_at = touched_at + timedelta(seconds=1)
+    replacement_blob = f"{expected_blob}-cas"
+    assert await repo.update_secret_if_active_and_unchanged(
+        user_id=user_id,
+        provider="oai",
+        encrypted_blob=replacement_blob,
+        expected_encrypted_blob=expected_blob,
+        key_hint="cas",
+        metadata=None,
+        updated_at=cas_at,
+        updated_by=user_id,
+    )
+    assert not await repo.update_secret_if_active_and_unchanged(
+        user_id=user_id,
+        provider="openai",
+        encrypted_blob="stale-write",
+        expected_encrypted_blob=expected_blob,
+        key_hint="cas",
+        metadata=None,
+        updated_at=cas_at + timedelta(seconds=1),
+        updated_by=user_id,
+    )
+    assert await repo.delete_secret(user_id, "openai", revoked_by=user_id)
+    assert not await repo.update_secret_if_active_and_unchanged(
+        user_id=user_id,
+        provider="openai",
+        encrypted_blob="revoked-write",
+        expected_encrypted_blob=replacement_blob,
+        key_hint="cas",
+        metadata=None,
+        updated_at=cas_at + timedelta(seconds=2),
+        updated_by=user_id,
+    )

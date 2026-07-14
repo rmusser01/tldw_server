@@ -1,8 +1,10 @@
+import asyncio
 import base64
 import json
 import sys
 import types
 import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -159,8 +161,13 @@ async def test_byok_endpoints_sqlite(tmp_path, monkeypatch):
         active_org_id=org_id,
         active_team_id=team_id,
     )
+    org_only_token = await _issue_access_token(
+        state["user"],
+        active_org_id=org_id,
+    )
     admin_token = await _issue_access_token(state["admin"])
     user_headers = _auth_headers(user_token)
+    org_only_headers = _auth_headers(org_only_token)
     admin_headers = _auth_headers(admin_token)
 
     with TestClient(app) as client:
@@ -184,7 +191,7 @@ async def test_byok_endpoints_sqlite(tmp_path, monkeypatch):
 
         r = client.post(
             "/api/v1/users/keys",
-            json={"provider": "openai", "api_key": "sk-user-openai-1234"},
+            json={"provider": "oai", "api_key": "sk-user-openai-1234"},
             headers=user_headers,
         )
         assert r.status_code == 200, r.text
@@ -282,6 +289,15 @@ async def test_byok_endpoints_sqlite(tmp_path, monkeypatch):
         assert items["anthropic"]["source"] == "org"
         assert items["anthropic"]["has_key"] is False
         assert items["openrouter"]["source"] == "team"
+
+        org_only_listing = client.get(
+            "/api/v1/users/keys",
+            headers=org_only_headers,
+        )
+        assert org_only_listing.status_code == 200
+        org_only_items = {item["provider"]: item for item in org_only_listing.json()["items"]}
+        assert org_only_items["anthropic"]["source"] == "org"
+        assert org_only_items["openrouter"]["source"] != "team"
 
         admin_list = client.get(f"/api/v1/admin/keys/users/{user_id}", headers=admin_headers)
         assert admin_list.status_code == 200
@@ -587,6 +603,177 @@ async def test_openai_oauth_endpoints_sqlite(tmp_path, monkeypatch):
     assert "provider_oauth_refreshed" in audit_actions
     assert "provider_oauth_disconnected" in audit_actions
     assert "provider_oauth_refresh_failed" in audit_actions
+
+
+@pytest.mark.asyncio
+@pytest.mark.concurrent
+async def test_openai_oauth_refresh_disconnect_race_preserves_revocation_sqlite(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("OPENAI_OAUTH_ENABLED", "1")
+    monkeypatch.setenv("OPENAI_OAUTH_CLIENT_ID", "oauth-client-id")
+    monkeypatch.setenv("OPENAI_OAUTH_CLIENT_SECRET", "oauth-client-secret")
+    monkeypatch.setenv("OPENAI_OAUTH_AUTH_URL", "https://oauth.example.com/authorize")
+    monkeypatch.setenv("OPENAI_OAUTH_TOKEN_URL", "https://oauth.example.com/token")
+    monkeypatch.setenv(
+        "OPENAI_OAUTH_REDIRECT_URI",
+        "https://app.example.com/api/v1/users/keys/openai/oauth/callback",
+    )
+    state = await _setup_byok_sqlite(tmp_path, monkeypatch)
+    user_id = int(state["user"]["id"])
+
+    from fastapi import HTTPException
+    from starlette.requests import Request
+
+    from tldw_Server_API.app.api.v1.endpoints import user_keys as user_keys_endpoints
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+    from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import (
+        AuthnzUserProviderSecretsRepo,
+    )
+    from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
+        decrypt_byok_payload,
+        dumps_envelope,
+        encrypt_byok_payload,
+        loads_envelope,
+    )
+
+    repo = AuthnzUserProviderSecretsRepo(state["pool"])
+    now = datetime.now(timezone.utc)
+    original_payload = {
+        "credential_version": 2,
+        "active_auth_source": "oauth",
+        "credentials": {
+            "oauth": {
+                "access_token": "stale-access-token",
+                "refresh_token": "refresh-token-race",
+                "expires_at": (now + timedelta(seconds=30)).isoformat(),
+            }
+        },
+    }
+    await repo.upsert_secret(
+        user_id=user_id,
+        provider="openai",
+        encrypted_blob=dumps_envelope(encrypt_byok_payload(original_payload)),
+        key_hint="oauth",
+        metadata=None,
+        updated_at=now,
+        created_by=user_id,
+        updated_by=user_id,
+    )
+
+    token_request_started = asyncio.Event()
+    release_token_response = asyncio.Event()
+    issued_token = "issued-token-must-not-be-stored"
+
+    async def _token_exchange(**_kwargs):
+        token_request_started.set()
+        await release_token_response.wait()
+        return {"access_token": issued_token, "expires_in": 3600}
+
+    async def _get_user_repo():
+        return repo
+
+    async def _ignore_audit_event(**_kwargs):
+        return None
+
+    monkeypatch.setattr(user_keys_endpoints, "_get_user_repo", _get_user_repo)
+    monkeypatch.setattr(user_keys_endpoints, "_openai_oauth_token_exchange", _token_exchange)
+    monkeypatch.setattr(
+        user_keys_endpoints,
+        "_emit_openai_oauth_audit_event",
+        _ignore_audit_event,
+    )
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/v1/users/keys/openai/oauth/refresh",
+            "headers": [],
+        }
+    )
+    refresh_task = asyncio.create_task(
+        user_keys_endpoints.refresh_openai_oauth(
+            request,
+            AuthPrincipal(kind="user", user_id=user_id),
+        )
+    )
+    token_started_waiter = asyncio.create_task(token_request_started.wait())
+    completed, _pending = await asyncio.wait(
+        {refresh_task, token_started_waiter},
+        return_when=asyncio.FIRST_COMPLETED,
+    )
+    assert token_started_waiter in completed
+    assert await repo.delete_secret(user_id, "openai", revoked_by=user_id)
+    release_token_response.set()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await refresh_task
+
+    assert exc_info.value.status_code == 404
+    stored_row = await repo.fetch_secret_for_user(user_id, "openai", include_revoked=True)
+    assert stored_row is not None
+    assert stored_row["revoked_at"] is not None
+    stored_payload = decrypt_byok_payload(loads_envelope(stored_row["encrypted_blob"]))
+    assert stored_payload == original_payload
+    assert issued_token not in json.dumps(stored_payload)
+
+
+@pytest.mark.asyncio
+async def test_legacy_user_alias_row_can_be_touched_and_revoked_sqlite(
+    tmp_path,
+    monkeypatch,
+):
+    state = await _setup_byok_sqlite(tmp_path, monkeypatch)
+    user_id = int(state["user"]["id"])
+    pool = state["pool"]
+
+    from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import (
+        AuthnzUserProviderSecretsRepo,
+    )
+
+    created_at = datetime.now(timezone.utc)
+    await pool.execute(
+        """
+        INSERT INTO user_provider_secrets (
+            user_id, provider, encrypted_blob, key_hint, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            user_id,
+            "oai",
+            "legacy-encrypted-blob",
+            "legacy",
+            created_at.isoformat(),
+            created_at.isoformat(),
+        ),
+    )
+    repo = AuthnzUserProviderSecretsRepo(pool)
+
+    legacy_row = await repo.fetch_secret_for_user(user_id, "openai")
+    assert legacy_row is not None
+    assert legacy_row["provider"] == "oai"
+
+    used_at = created_at + timedelta(seconds=1)
+    await repo.touch_last_used(user_id, "openai", used_at)
+    touched_row = await pool.fetchone(
+        "SELECT last_used_at FROM user_provider_secrets WHERE user_id = ? AND provider = ?",
+        (user_id, "oai"),
+    )
+    assert touched_row is not None
+    assert touched_row["last_used_at"] == used_at.isoformat()
+
+    assert await repo.delete_secret(user_id, "openai", revoked_by=user_id)
+    assert await repo.fetch_secret_for_user(user_id, "openai") is None
+    revoked_row = await repo.fetch_secret_for_user(
+        user_id,
+        "openai",
+        include_revoked=True,
+    )
+    assert revoked_row is not None
+    assert revoked_row["provider"] == "oai"
+    assert revoked_row["revoked_at"] is not None
 
 
 @pytest.mark.asyncio

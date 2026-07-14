@@ -44,7 +44,7 @@ async def test_resolve_byok_credentials_invalid_fields_raise_typed_failure(monke
     row = {"encrypted_blob": dumps_envelope(envelope), "last_used_at": None}
 
     class _FakeUserRepo:
-        async def fetch_secret_for_user(self, user_id: int, provider: str):
+        async def fetch_secret_for_user(self, user_id: int, provider: str, **_kwargs):
             return row
 
     async def _fake_get_user_repo():
@@ -68,6 +68,84 @@ async def test_resolve_byok_credentials_invalid_fields_raise_typed_failure(monke
 
 
 @pytest.mark.asyncio
+async def test_resolve_byok_credentials_alias_conflict_fails_closed(monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+    from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
+        ProviderCredentialAliasConflictError,
+    )
+
+    class _FakeUserRepo:
+        async def fetch_secret_for_user(self, user_id: int, provider: str, **_kwargs):
+            raise ProviderCredentialAliasConflictError("legacy alias rows conflict")
+
+    async def _fake_get_user_repo():
+        return _FakeUserRepo()
+
+    fallback_calls: list[str] = []
+    monkeypatch.setattr(byok_runtime, "_get_user_repo", _fake_get_user_repo)
+    monkeypatch.setattr(byok_runtime, "is_byok_enabled", lambda: True)
+    monkeypatch.setattr(byok_runtime, "is_provider_allowlisted", lambda _provider: True)
+
+    with pytest.raises(byok_runtime.ByokResolutionError) as exc_info:
+        await byok_runtime.resolve_byok_credentials(
+            "oai",
+            user_id=1,
+            fallback_resolver=lambda provider: fallback_calls.append(provider) or "server-key",
+        )
+
+    assert exc_info.value.code == "invalid_provider_credentials"
+    assert exc_info.value.provider == "openai"
+    assert fallback_calls == []
+    assert "legacy alias rows conflict" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_revoked_user_credential_blocks_shared_and_server_fallback(monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+
+    revoked_row = {
+        "provider": "openai",
+        "encrypted_blob": "revoked-blob",
+        "revoked_at": datetime.now(timezone.utc),
+    }
+
+    class _FakeUserRepo:
+        async def fetch_secret_for_user(
+            self,
+            user_id: int,
+            provider: str,
+            *,
+            include_revoked: bool = False,
+        ):
+            return revoked_row if include_revoked else None
+
+    async def _fake_get_user_repo():
+        return _FakeUserRepo()
+
+    async def _shared_lookup_must_not_run():
+        raise AssertionError("revoked user credential must block shared fallback")
+
+    fallback_calls: list[str] = []
+    monkeypatch.setattr(byok_runtime, "_get_user_repo", _fake_get_user_repo)
+    monkeypatch.setattr(byok_runtime, "_get_org_repo", _shared_lookup_must_not_run)
+    monkeypatch.setattr(byok_runtime, "is_byok_enabled", lambda: True)
+    monkeypatch.setattr(byok_runtime, "is_provider_allowlisted", lambda _provider: True)
+
+    with pytest.raises(byok_runtime.ByokResolutionError) as exc_info:
+        await byok_runtime.resolve_byok_credentials(
+            "oai",
+            user_id=1,
+            team_ids=[7],
+            org_ids=[9],
+            fallback_resolver=lambda provider: fallback_calls.append(provider) or "server-key",
+        )
+
+    assert exc_info.value.code == "invalid_provider_credentials"
+    assert exc_info.value.provider == "openai"
+    assert fallback_calls == []
+
+
+@pytest.mark.asyncio
 async def test_resolve_byok_credentials_v2_oauth_active_uses_access_token(monkeypatch):
     from tldw_Server_API.app.core.AuthNZ import byok_runtime
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -86,7 +164,7 @@ async def test_resolve_byok_credentials_v2_oauth_active_uses_access_token(monkey
     row = _encrypted_row(payload)
 
     class _FakeUserRepo:
-        async def fetch_secret_for_user(self, user_id: int, provider: str):
+        async def fetch_secret_for_user(self, user_id: int, provider: str, **_kwargs):
             return row
 
     async def _fake_get_user_repo():
@@ -122,7 +200,7 @@ async def test_resolve_byok_credentials_v2_missing_oauth_token_falls_back_to_api
     row = _encrypted_row(payload)
 
     class _FakeUserRepo:
-        async def fetch_secret_for_user(self, user_id: int, provider: str):
+        async def fetch_secret_for_user(self, user_id: int, provider: str, **_kwargs):
             return row
 
     async def _fake_get_user_repo():
@@ -169,26 +247,27 @@ async def test_resolve_byok_credentials_v2_oauth_refresh_success_updates_payload
     row["key_hint"] = "oauth"
 
     class _FakeUserRepo:
-        async def fetch_secret_for_user(self, user_id: int, provider: str):
+        async def fetch_secret_for_user(self, user_id: int, provider: str, **_kwargs):
             return row
 
-        async def upsert_secret(
+        async def update_secret_if_active_and_unchanged(
             self,
             *,
             user_id: int,
             provider: str,
             encrypted_blob: str,
+            expected_encrypted_blob: str,
             key_hint: str | None,
             metadata,
             updated_at: datetime,
-            created_by: int | None = None,
             updated_by: int | None = None,
         ):
+            assert row["encrypted_blob"] == expected_encrypted_blob
             row["encrypted_blob"] = encrypted_blob
             row["key_hint"] = key_hint
             row["metadata"] = metadata
             row["updated_at"] = updated_at
-            return {"updated_at": updated_at}
+            return True
 
     class _FakeResponse:
         status_code = 200
@@ -258,26 +337,27 @@ async def test_resolve_byok_credentials_v2_oauth_refresh_failure_falls_back_to_a
     row["key_hint"] = "oauth"
 
     class _FakeUserRepo:
-        async def fetch_secret_for_user(self, user_id: int, provider: str):
+        async def fetch_secret_for_user(self, user_id: int, provider: str, **_kwargs):
             return row
 
-        async def upsert_secret(
+        async def update_secret_if_active_and_unchanged(
             self,
             *,
             user_id: int,
             provider: str,
             encrypted_blob: str,
+            expected_encrypted_blob: str,
             key_hint: str | None,
             metadata,
             updated_at: datetime,
-            created_by: int | None = None,
             updated_by: int | None = None,
         ):
+            assert row["encrypted_blob"] == expected_encrypted_blob
             row["encrypted_blob"] = encrypted_blob
             row["key_hint"] = key_hint
             row["metadata"] = metadata
             row["updated_at"] = updated_at
-            return {"updated_at": updated_at}
+            return True
 
     class _FakeResponse:
         status_code = 400
@@ -339,7 +419,7 @@ async def test_resolve_byok_credentials_v2_oauth_refresh_failure_without_api_key
     row["key_hint"] = "oauth"
 
     class _FakeUserRepo:
-        async def fetch_secret_for_user(self, user_id: int, provider: str):
+        async def fetch_secret_for_user(self, user_id: int, provider: str, **_kwargs):
             return row
 
     class _FakeResponse:
@@ -376,7 +456,7 @@ async def test_decrypt_failure_does_not_advance_to_server_default(monkeypatch):
     from tldw_Server_API.app.core.AuthNZ import byok_runtime
 
     class _FakeUserRepo:
-        async def fetch_secret_for_user(self, user_id: int, provider: str):
+        async def fetch_secret_for_user(self, user_id: int, provider: str, **_kwargs):
             return {"encrypted_blob": "not-an-envelope", "last_used_at": None}
 
     async def _fake_get_user_repo():
@@ -446,7 +526,7 @@ async def test_shared_repository_outage_does_not_advance_precedence(
     from tldw_Server_API.app.core.AuthNZ import byok_runtime
 
     class _FakeUserRepo:
-        async def fetch_secret_for_user(self, user_id: int, provider: str):
+        async def fetch_secret_for_user(self, user_id: int, provider: str, **_kwargs):
             return None
 
     class _FakeSharedRepo:
@@ -485,7 +565,7 @@ async def test_membership_lookup_outage_raises_sanitized_typed_failure(monkeypat
     from tldw_Server_API.app.core.AuthNZ import byok_runtime
 
     class _FakeUserRepo:
-        async def fetch_secret_for_user(self, user_id: int, provider: str):
+        async def fetch_secret_for_user(self, user_id: int, provider: str, **_kwargs):
             return None
 
     async def _fake_get_user_repo():
@@ -526,7 +606,7 @@ async def test_invalid_active_scope_raises_revoked_failure(
     from tldw_Server_API.app.core.AuthNZ import byok_runtime
 
     class _FakeUserRepo:
-        async def fetch_secret_for_user(self, user_id: int, provider: str):
+        async def fetch_secret_for_user(self, user_id: int, provider: str, **_kwargs):
             return None
 
     async def _fake_get_user_repo():
@@ -751,7 +831,7 @@ async def test_sqlite_errors_respect_operational_boundary(
     from tldw_Server_API.app.core.AuthNZ import byok_runtime
 
     class _AbsentUserRepo:
-        async def fetch_secret_for_user(self, user_id: int, provider: str):
+        async def fetch_secret_for_user(self, user_id: int, provider: str, **_kwargs):
             return None
 
     async def _get_user_repo():
@@ -805,7 +885,7 @@ async def test_authnz_database_errors_respect_operational_boundary(
         return exception_type()
 
     class _AbsentUserRepo:
-        async def fetch_secret_for_user(self, user_id: int, provider: str):
+        async def fetch_secret_for_user(self, user_id: int, provider: str, **_kwargs):
             return None
 
     async def _get_user_repo():
@@ -955,7 +1035,7 @@ async def test_present_non_dict_credential_fields_fail_closed(
     row = _encrypted_row(payload)
 
     class _FakeUserRepo:
-        async def fetch_secret_for_user(self, user_id: int, provider: str):
+        async def fetch_secret_for_user(self, user_id: int, provider: str, **_kwargs):
             return row if scope == "user" else None
 
     class _FakeSharedRepo:
@@ -1035,12 +1115,13 @@ async def test_openai_oauth_transport_errors_use_api_key_or_fail_typed(
     row["key_hint"] = "oauth"
 
     class _FakeUserRepo:
-        async def fetch_secret_for_user(self, user_id: int, provider: str):
+        async def fetch_secret_for_user(self, user_id: int, provider: str, **_kwargs):
             return row
 
-        async def upsert_secret(self, **kwargs):
+        async def update_secret_if_active_and_unchanged(self, **kwargs):
+            assert row["encrypted_blob"] == kwargs["expected_encrypted_blob"]
             row["encrypted_blob"] = kwargs["encrypted_blob"]
-            return {"updated_at": kwargs["updated_at"]}
+            return True
 
     async def _get_user_repo():
         return _FakeUserRepo()
@@ -1101,7 +1182,7 @@ async def test_openai_oauth_reload_missing_after_lock_fails_without_resurrection
     calls = {"fetch": 0, "http": 0, "upsert": 0, "touch": 0, "fallback": 0}
 
     class _FakeUserRepo:
-        async def fetch_secret_for_user(self, user_id: int, provider: str):
+        async def fetch_secret_for_user(self, user_id: int, provider: str, **_kwargs):
             calls["fetch"] += 1
             if calls["fetch"] == 1:
                 initial_fetch_complete.set()
@@ -1172,3 +1253,95 @@ async def test_openai_oauth_reload_missing_after_lock_fails_without_resurrection
         "touch": 0,
         "fallback": 0,
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.concurrent
+async def test_openai_oauth_refresh_cas_discards_token_after_revocation(monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+
+    issued_token = "issued-token-must-not-be-stored"
+    monkeypatch.setenv("BYOK_ENCRYPTION_KEY", _b64_key(b"k"))
+    monkeypatch.setenv("OPENAI_OAUTH_ENABLED", "true")
+    monkeypatch.setenv("OPENAI_OAUTH_CLIENT_ID", "client-id")
+    monkeypatch.setenv("OPENAI_OAUTH_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("OPENAI_OAUTH_TOKEN_URL", "https://oauth.example/token")
+    monkeypatch.setenv("OPENAI_OAUTH_REFRESH_SKEW_SECONDS", "120")
+    reset_settings()
+
+    row = _encrypted_row(
+        {
+            "credential_version": 2,
+            "active_auth_source": "oauth",
+            "credentials": {
+                "oauth": {
+                    "access_token": "stale-access-token",
+                    "refresh_token": "refresh-token-race",
+                    "expires_at": (datetime.now(timezone.utc) + timedelta(seconds=30)).isoformat(),
+                }
+            },
+        }
+    )
+    row.update({"metadata": None, "key_hint": "oauth", "revoked_at": None})
+    original_blob = row["encrypted_blob"]
+    token_request_started = asyncio.Event()
+    release_token_response = asyncio.Event()
+
+    class _FakeUserRepo:
+        async def fetch_secret_for_user(self, user_id: int, provider: str, **_kwargs):
+            return row if row["revoked_at"] is None else None
+
+        async def delete_secret(self, user_id: int, provider: str):
+            row["revoked_at"] = datetime.now(timezone.utc)
+            return True
+
+        async def upsert_secret(self, **kwargs):
+            row["encrypted_blob"] = kwargs["encrypted_blob"]
+            row["revoked_at"] = None
+            return {"updated_at": kwargs["updated_at"]}
+
+        async def update_secret_if_active_and_unchanged(self, **kwargs):
+            if row["revoked_at"] is not None:
+                return False
+            if row["encrypted_blob"] != kwargs["expected_encrypted_blob"]:
+                return False
+            row["encrypted_blob"] = kwargs["encrypted_blob"]
+            return True
+
+    repo = _FakeUserRepo()
+
+    class _FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"access_token": issued_token, "expires_in": 3600}
+
+        async def aclose(self):
+            return None
+
+    async def _get_user_repo():
+        return repo
+
+    async def _http_afetch(*_args, **_kwargs):
+        token_request_started.set()
+        await release_token_response.wait()
+        return _FakeResponse()
+
+    monkeypatch.setattr(byok_runtime, "_get_user_repo", _get_user_repo)
+    monkeypatch.setattr(byok_runtime, "_http_afetch", _http_afetch)
+    monkeypatch.setattr(byok_runtime, "is_byok_enabled", lambda: True)
+    monkeypatch.setattr(byok_runtime, "is_provider_allowlisted", lambda _provider: True)
+
+    resolution_task = asyncio.create_task(byok_runtime.resolve_byok_credentials("openai", user_id=1))
+    await token_request_started.wait()
+    await repo.delete_secret(1, "openai")
+    release_token_response.set()
+
+    with pytest.raises(byok_runtime.ByokResolutionError) as exc_info:
+        await resolution_task
+
+    assert exc_info.value.code == "invalid_provider_credentials"
+    assert row["revoked_at"] is not None
+    assert row["encrypted_blob"] == original_blob
+    assert issued_token not in str(exc_info.value)

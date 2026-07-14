@@ -39,6 +39,7 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditEventType,
 )
 from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
+    derive_trusted_credential_scope,
     is_byok_enabled,
     is_provider_allowlisted,
     is_trusted_base_url_request,
@@ -66,8 +67,8 @@ from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
     encrypt_byok_payload,
     key_hint_for_api_key,
     loads_envelope,
-    normalize_provider_name,
 )
+from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
 from tldw_Server_API.app.core.http_client import RetryPolicy as _RetryPolicy
 from tldw_Server_API.app.core.http_client import afetch as _http_afetch
@@ -720,7 +721,7 @@ async def upsert_user_provider_key(
     principal: AuthPrincipal = Depends(get_auth_principal),
 ) -> UserProviderKeyResponse:
     _require_byok_enabled()
-    provider_norm = normalize_provider_name(payload.provider)
+    provider_norm = canonical_provider_name(payload.provider)
     if not is_provider_allowlisted(provider_norm):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -851,25 +852,10 @@ async def list_user_provider_keys(
             _OPENAI_PROVIDER,
         )
 
-    memberships = await list_memberships_for_user(user_id)
-    team_ids = sorted({m.get("team_id") for m in memberships if m.get("team_id") is not None})
-    org_ids = sorted({m.get("org_id") for m in memberships if m.get("org_id") is not None})
-
-    def _filter_scopes(ids: list[int], active_id: Any) -> list[int]:
-        if not ids:
-            return []
-        if active_id is None:
-            return ids if len(ids) == 1 else []
-        try:
-            active = int(active_id)
-        except (TypeError, ValueError):
-            return []
-        return [active] if active in ids else []
-
-    active_team_id = getattr(request.state, "active_team_id", None)
-    active_org_id = getattr(request.state, "active_org_id", None)
-    team_scope_ids = _filter_scopes(team_ids, active_team_id)
-    org_scope_ids = _filter_scopes(org_ids, active_org_id)
+    _, team_scope_ids, org_scope_ids, _ = derive_trusted_credential_scope(
+        request,
+        principal,
+    )
 
     shared_keys: dict[str, dict[str, Any]] = {}
     shared_sources: dict[str, str] = {}
@@ -960,7 +946,7 @@ async def test_user_provider_key(
     principal: AuthPrincipal = Depends(get_auth_principal),
 ) -> ProviderKeyTestResponse:
     _require_byok_enabled()
-    provider_norm = normalize_provider_name(payload.provider)
+    provider_norm = canonical_provider_name(payload.provider)
     if not is_provider_allowlisted(provider_norm):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -1576,16 +1562,27 @@ async def refresh_openai_oauth(
                 detail="BYOK encryption is not configured",
             ) from exc
 
-        updated_row = await user_repo.upsert_secret(
+        updated = await user_repo.update_secret_if_active_and_unchanged(
             user_id=user_id,
             provider=_OPENAI_PROVIDER,
             encrypted_blob=dumps_envelope(envelope),
+            expected_encrypted_blob=str(row.get("encrypted_blob") or ""),
             key_hint=key_hint,
             metadata=metadata_to_store,
             updated_at=now,
-            created_by=user_id,
             updated_by=user_id,
         )
+        if not updated:
+            latest_row = await user_repo.fetch_secret_for_user(user_id, _OPENAI_PROVIDER)
+            if not latest_row or not _v2_payload_oauth_refresh_token(_extract_payload_from_row(latest_row)):
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="OAuth credential not found",
+                )
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="OAuth credential changed during refresh",
+            )
         refresh_outcome = "success"
         await _emit_openai_oauth_audit_event(
             user_id=user_id,
@@ -1600,7 +1597,7 @@ async def refresh_openai_oauth(
         return OpenAIOAuthRefreshResponse(
             provider=_OPENAI_PROVIDER,
             status="refreshed",
-            updated_at=updated_row.get("updated_at") or now,
+            updated_at=now,
             expires_at=expires_at,
         )
     except HTTPException as exc:
@@ -1806,7 +1803,7 @@ async def delete_user_provider_key(
 ) -> Response:
     _require_byok_enabled()
     user_id = _principal_user_id(principal)
-    provider_norm = normalize_provider_name(provider)
+    provider_norm = canonical_provider_name(provider)
     repo = await _get_user_repo()
     deleted = await repo.delete_secret(
         user_id,

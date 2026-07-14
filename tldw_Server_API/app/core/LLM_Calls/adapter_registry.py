@@ -17,12 +17,12 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.custom_openai_providers import (
-    custom_openai_aliases,
     custom_openai_provider_name,
     iter_custom_openai_provider_numbers,
 )
 from tldw_Server_API.app.core.Infrastructure.provider_registry import ProviderRegistryBase
 
+from .provider_identity import PROVIDER_ALIASES
 from .providers.base import ChatProvider
 from .providers.custom_openai_adapter import make_custom_openai_adapter_class
 
@@ -80,37 +80,7 @@ class ChatProviderRegistry:
         }
     )
 
-    DEFAULT_ALIASES: dict[str, tuple[str, ...]] = {
-        "openai": ("oai",),
-        "bedrock": ("aws-bedrock", "amazon-bedrock"),
-        "custom-openai-api": (
-            "custom_openai_api",
-            "custom-openai",
-            "openai-compatible",
-            "customopenai",
-        ),
-        "custom-openai-api-2": (
-            "custom_openai_api_2",
-            "custom-openai-2",
-            "openai-compatible-2",
-            "customopenai2",
-        ),
-        "novita": ("novita-ai",),
-        "poe": ("poe-api",),
-        "together": ("together-ai", "togetherai"),
-        "llama.cpp": ("llama-cpp", "llama_cpp", "llamacpp"),
-        "kobold": ("kobold-cpp", "kobold_cpp", "koboldcpp"),
-        "ooba": ("oobabooga", "text-generation-webui", "text_generation_webui"),
-        "tabbyapi": ("tabby-api", "tabby_api", "tabby"),
-        "local-llm": ("local_llm",),
-        "zai": ("z-ai", "z.ai"),
-    }
-    DEFAULT_ALIASES.update(
-        {
-            custom_openai_provider_name(number): custom_openai_aliases(number)
-            for number in iter_custom_openai_provider_numbers(start=3)
-        }
-    )
+    DEFAULT_ALIASES: dict[str, tuple[str, ...]] = dict(PROVIDER_ALIASES)
 
     @staticmethod
     def _parse_optional_bool(value: Any) -> bool | None:

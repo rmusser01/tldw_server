@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import status
 from loguru import logger
+from starlette.requests import Request
 from starlette.responses import StreamingResponse
 
 from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
@@ -42,6 +43,55 @@ from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import DEFAULT_CHARACTER_NAME
 
 _CHAT_USER_SECRET = "sk-chat-user-secret-must-not-leak"
+
+
+def _chat_scope_request(*, active_team_id=None, active_org_id=None):
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/v1/chat/completions",
+            "headers": [],
+            "query_string": b"",
+        }
+    )
+    request.state.auth = SimpleNamespace(
+        principal=SimpleNamespace(
+            user_id=42,
+            team_ids=[7],
+            org_ids=[11],
+            active_team_id=active_team_id,
+            active_org_id=active_org_id,
+        )
+    )
+    return request
+
+
+def test_chat_trusted_scope_does_not_infer_singleton_team_ahead_of_active_org():
+    request = _chat_scope_request(active_org_id=11)
+
+    _user_id, team_ids, org_ids, _trusted = chat_endpoint._trusted_credential_runtime_scope(
+        request,
+        SimpleNamespace(id=42, id_int=42),
+    )
+
+    assert team_ids == []
+    assert org_ids == [11]
+
+
+@pytest.mark.parametrize("kind", ["team", "org"])
+@pytest.mark.parametrize("active_id", ["malformed", 99])
+def test_chat_trusted_scope_rejects_invalid_active_id(kind, active_id):
+    request = _chat_scope_request(active_team_id=7, active_org_id=11)
+    setattr(request.state.auth.principal, f"active_{kind}_id", active_id)
+
+    with pytest.raises(ByokResolutionError) as exc_info:
+        chat_endpoint._trusted_credential_runtime_scope(
+            request,
+            SimpleNamespace(id=42, id_int=42),
+        )
+
+    assert exc_info.value.code == "credential_scope_revoked"
 
 
 def _real_credential_runtime_type(resolver):

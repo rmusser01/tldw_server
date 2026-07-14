@@ -14,6 +14,10 @@ def normalize_provider_name(provider: str) -> str:
     return (provider or "").strip().lower()
 
 
+class ProviderCredentialAliasConflictError(ValueError):
+    """Raised when more than one legacy alias row exists for one provider."""
+
+
 def normalize_secret_owner_scope_type(scope_type: str) -> str:
     normalized = (scope_type or "").strip().lower()
     if normalized in {"user", "users"}:

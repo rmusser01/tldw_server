@@ -233,7 +233,7 @@ from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
     record_byok_missing_credentials,
 )
 from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
-    is_trusted_base_url_principal,
+    derive_trusted_credential_scope,
 )
 from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     ProviderCallCredentials,
@@ -963,45 +963,7 @@ def _provider_credential_http_exception_for_code(code: str) -> HTTPException:
     )
 
 
-def _trusted_credential_runtime_scope(
-    request: Request,
-    current_user: User | None,
-) -> tuple[int | None, list[int], list[int], bool]:
-    """Derive the execution credential scope only from authenticated server state."""
-    request_state = getattr(request, "state", None)
-    auth_context = getattr(request_state, "auth", None)
-    principal = getattr(auth_context, "principal", None)
-
-    user_id = getattr(principal, "user_id", None)
-    if user_id is None:
-        user_id = getattr(current_user, "id_int", None)
-    if user_id is None:
-        try:
-            user_id = int(getattr(current_user, "id", None))
-        except (TypeError, ValueError):
-            user_id = None
-
-    def scoped_ids(kind: str) -> list[int]:
-        values = getattr(principal, f"{kind}_ids", None)
-        if values is None:
-            values = getattr(request_state, f"{kind}_ids", None)
-        members = sorted({int(value) for value in (values or ()) if value is not None})
-        active = getattr(principal, f"active_{kind}_id", None)
-        if active is None:
-            active = getattr(request_state, f"active_{kind}_id", None)
-        if active is None:
-            return members
-        active_id = int(active)
-        if active_id not in members:
-            raise ByokResolutionError("credential_scope_revoked", "credential_scope")
-        return [active_id]
-
-    return (
-        user_id,
-        scoped_ids("team"),
-        scoped_ids("org"),
-        is_trusted_base_url_principal(principal),
-    )
+_trusted_credential_runtime_scope = derive_trusted_credential_scope
 
 
 def _attach_credential_runtime_cleanup(

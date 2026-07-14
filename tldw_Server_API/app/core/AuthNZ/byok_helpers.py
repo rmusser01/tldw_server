@@ -9,7 +9,7 @@ from tldw_Server_API.app.core.AuthNZ.principal_model import (
     is_single_user_principal,
 )
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
-from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import normalize_provider_name
+from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.config import load_and_log_configs
 from tldw_Server_API.app.core.custom_openai_providers import iter_custom_openai_provider_names
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import get_byok_credential_policy
@@ -73,7 +73,7 @@ def _legacy_user_has_platform_admin_claims(user: dict[str, Any] | None) -> bool:
 def resolve_byok_base_url_allowlist() -> set[str]:
     settings = get_settings()
     raw = getattr(settings, "BYOK_ALLOWED_BASE_URL_PROVIDERS", []) or []
-    allowed = {normalize_provider_name(p) for p in raw if str(p).strip()}
+    allowed = {canonical_provider_name(p) for p in raw if str(p).strip()}
     return allowed
 
 
@@ -89,12 +89,12 @@ def is_byok_enabled() -> bool:
 def resolve_byok_allowlist() -> set[str]:
     settings = get_settings()
     raw = getattr(settings, "BYOK_ALLOWED_PROVIDERS", []) or []
-    allowed = {normalize_provider_name(p) for p in raw if str(p).strip()}
+    allowed = {canonical_provider_name(p) for p in raw if str(p).strip()}
     return allowed or set(DEFAULT_BYOK_ALLOWED_PROVIDERS)
 
 
 def is_provider_allowlisted(provider: str) -> bool:
-    provider_norm = normalize_provider_name(provider)
+    provider_norm = canonical_provider_name(provider)
     return provider_norm in resolve_byok_allowlist()
 
 
@@ -109,7 +109,7 @@ def validate_credential_fields(
     if not isinstance(credential_fields, dict):
         raise ValueError("credential_fields must be an object")
 
-    provider_norm = normalize_provider_name(provider)
+    provider_norm = canonical_provider_name(provider)
     allowed_keys, required_keys = get_byok_credential_policy(provider_norm)
     if allow_base_url and provider_norm in resolve_byok_base_url_allowlist():
         allowed_keys.add("base_url")
@@ -159,6 +159,57 @@ def is_trusted_base_url_request(
     return False
 
 
+def derive_trusted_credential_scope(
+    request: Any,
+    current_user: Any,
+) -> tuple[int | None, list[int], list[int], bool]:
+    """Derive user and explicit active workspace IDs from authenticated state."""
+    request_state = getattr(request, "state", None)
+    auth_context = getattr(request_state, "auth", None)
+    principal = getattr(auth_context, "principal", None)
+    if principal is None and isinstance(current_user, AuthPrincipal):
+        principal = current_user
+
+    user_id_raw = getattr(principal, "user_id", None)
+    if user_id_raw is None:
+        user_id_raw = getattr(current_user, "id_int", None)
+    if user_id_raw is None:
+        user_id_raw = getattr(current_user, "id", None)
+    try:
+        user_id = int(user_id_raw) if user_id_raw is not None else None
+    except (TypeError, ValueError):
+        user_id = None
+
+    def scope_ids(kind: str) -> list[int]:
+        values = getattr(principal, f"{kind}_ids", None)
+        if values is None:
+            values = getattr(request_state, f"{kind}_ids", None)
+        active = getattr(principal, f"active_{kind}_id", None)
+        if active is None:
+            active = getattr(request_state, f"active_{kind}_id", None)
+        if active is None:
+            return []
+        try:
+            members = {int(value) for value in (values or ()) if value is not None}
+            active_id = int(active)
+        except (TypeError, ValueError):
+            from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+
+            raise ByokResolutionError("credential_scope_revoked", "credential_scope") from None
+        if active_id not in members:
+            from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+
+            raise ByokResolutionError("credential_scope_revoked", "credential_scope")
+        return [active_id]
+
+    return (
+        user_id,
+        scope_ids("team"),
+        scope_ids("org"),
+        is_trusted_base_url_principal(principal),
+    )
+
+
 def validate_base_url_override(base_url: Any) -> str:
     if not isinstance(base_url, str):
         raise ValueError("base_url must be a string")
@@ -182,7 +233,7 @@ def _provider_env_key(provider: str) -> str:
 
 
 def resolve_server_default_key(provider: str) -> str | None:
-    provider_norm = normalize_provider_name(provider)
+    provider_norm = canonical_provider_name(provider)
     try:
         from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import get_llm_provider_override
 

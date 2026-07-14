@@ -21,6 +21,9 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     ProviderCredentialRuntime,
     reject_provider_call_credentials,
 )
+from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import (
+    AuthnzUserProviderSecretsRepo,
+)
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.RAG.rag_service.checkpoint import (
     CheckpointData,
@@ -64,8 +67,18 @@ def _runtime(resolver, **overrides) -> ProviderCredentialRuntime:
     )
 
 
+@pytest.mark.parametrize(
+    ("alias", "canonical"),
+    [
+        ("oai", "openai"),
+        ("openai-compatible", "custom-openai-api"),
+    ],
+)
 @pytest.mark.asyncio
-async def test_aliases_share_one_lookup_and_forward_only_trusted_scope() -> None:
+async def test_aliases_share_one_lookup_and_forward_only_trusted_scope(
+    alias: str,
+    canonical: str,
+) -> None:
     calls: list[tuple[str, dict[str, Any]]] = []
     fallback = lambda _provider: "server-key"  # noqa: E731
 
@@ -74,13 +87,13 @@ async def test_aliases_share_one_lookup_and_forward_only_trusted_scope() -> None
         return _resolution(provider)
 
     runtime = _runtime(resolver, fallback_resolver=fallback)
-    first = await runtime.resolve("  OpenAI  ")
-    second = await runtime.resolve("openai")
+    first = await runtime.resolve(alias)
+    second = await runtime.resolve(canonical)
 
-    assert first.provider == "openai"
-    assert second.provider == "openai"
+    assert first.provider == canonical
+    assert second.provider == canonical
     assert len(calls) == 1
-    assert calls[0][0] == "openai"
+    assert calls[0][0] == canonical
     assert calls[0][1] == {
         "user_id": 41,
         "team_ids": [7],
@@ -90,6 +103,91 @@ async def test_aliases_share_one_lookup_and_forward_only_trusted_scope() -> None
         "trusted_base_url_override": True,
     }
     await runtime.close()
+
+
+class _ExactSecretLookupPool:
+    pool = None
+
+    def __init__(self, rows: dict[str, dict[str, Any]]) -> None:
+        self.rows = rows
+        self.lookups: list[str] = []
+
+    async def fetchone(self, query: str, params: tuple[int, str]):
+        provider = params[1]
+        self.lookups.append(provider)
+        row = self.rows.get(provider)
+        if row is not None and "revoked_at IS NULL" in query and row.get("revoked_at") is not None:
+            return None
+        return row
+
+
+@pytest.mark.asyncio
+async def test_user_secret_lookup_prefers_canonical_row_over_legacy_aliases() -> None:
+    pool = _ExactSecretLookupPool(
+        {
+            "custom-openai-api": {"provider": "custom-openai-api", "encrypted_blob": "canonical"},
+            "openai-compatible": {"provider": "openai-compatible", "encrypted_blob": "legacy"},
+        }
+    )
+    repo = AuthnzUserProviderSecretsRepo(pool)
+
+    row = await repo.fetch_secret_for_user(41, "openai-compatible")
+
+    assert row is not None
+    assert row["encrypted_blob"] == "canonical"
+    assert pool.lookups == ["custom-openai-api"]
+
+
+@pytest.mark.asyncio
+async def test_user_secret_lookup_reads_one_legacy_alias_row() -> None:
+    pool = _ExactSecretLookupPool({"openai-compatible": {"provider": "openai-compatible", "encrypted_blob": "legacy"}})
+    repo = AuthnzUserProviderSecretsRepo(pool)
+
+    row = await repo.fetch_secret_for_user(41, "custom-openai-api")
+
+    assert row is not None
+    assert row["provider"] == "openai-compatible"
+    assert row["encrypted_blob"] == "legacy"
+
+
+@pytest.mark.asyncio
+async def test_user_secret_lookup_rejects_multiple_legacy_alias_rows() -> None:
+    pool = _ExactSecretLookupPool(
+        {
+            "custom-openai": {"provider": "custom-openai", "encrypted_blob": "legacy-one"},
+            "openai-compatible": {"provider": "openai-compatible", "encrypted_blob": "legacy-two"},
+        }
+    )
+    repo = AuthnzUserProviderSecretsRepo(pool)
+
+    with pytest.raises(ValueError, match="conflicting legacy provider credentials"):
+        await repo.fetch_secret_for_user(41, "custom-openai-api")
+
+
+@pytest.mark.asyncio
+async def test_revoked_canonical_user_secret_blocks_active_legacy_alias() -> None:
+    pool = _ExactSecretLookupPool(
+        {
+            "openai": {
+                "provider": "openai",
+                "encrypted_blob": "revoked-canonical",
+                "revoked_at": "2026-07-13T00:00:00+00:00",
+            },
+            "oai": {
+                "provider": "oai",
+                "encrypted_blob": "active-legacy",
+                "revoked_at": None,
+            },
+        }
+    )
+    repo = AuthnzUserProviderSecretsRepo(pool)
+
+    assert await repo.fetch_secret_for_user(41, "openai") is None
+    revoked_row = await repo.fetch_secret_for_user(41, "openai", include_revoked=True)
+
+    assert revoked_row is not None
+    assert revoked_row["encrypted_blob"] == "revoked-canonical"
+    assert pool.lookups == ["openai", "openai"]
 
 
 @pytest.mark.asyncio
@@ -343,6 +441,7 @@ async def test_concurrent_mark_used_callers_share_persistence_and_wait_for_compl
 
 
 @pytest.mark.asyncio
+@pytest.mark.concurrent
 async def test_cancelled_mark_used_waiter_drains_persistence_once() -> None:
     touch_started = asyncio.Event()
     release_touch = asyncio.Event()
@@ -418,6 +517,95 @@ async def test_close_owns_and_drains_inflight_usage_persistence() -> None:
     assert touch_completed.is_set()
     assert entry.used is True
     assert runtime._usage_tasks == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.concurrent
+async def test_repeated_cancellation_abandons_noncooperative_usage_task(monkeypatch) -> None:
+    from tldw_Server_API.app.core.AuthNZ import provider_credential_runtime as runtime_module
+
+    monkeypatch.setattr(runtime_module, "USAGE_TASK_DRAIN_TIMEOUT_SECONDS", 0.01, raising=False)
+    touch_started = asyncio.Event()
+    touch_cancelled = asyncio.Event()
+    release_touch = asyncio.Event()
+
+    async def touch() -> None:
+        touch_started.set()
+        try:
+            await release_touch.wait()
+        except asyncio.CancelledError:
+            touch_cancelled.set()
+            await release_touch.wait()
+
+    async def resolver(provider: str, **_kwargs) -> ResolvedByokCredentials:
+        return _resolution(provider, touch=touch)
+
+    runtime = _runtime(resolver)
+    handle = await runtime.resolve("openai")
+    waiter = asyncio.create_task(runtime.mark_used(handle))
+    await touch_started.wait()
+    usage_task = next(iter(runtime._usage_tasks.values()))
+
+    waiter.cancel()
+    await asyncio.sleep(0)
+    waiter.cancel()
+    completed, _pending = await asyncio.wait({waiter}, timeout=0.2)
+    try:
+        assert waiter in completed
+        with pytest.raises(asyncio.CancelledError):
+            await waiter
+        assert touch_cancelled.is_set()
+        assert runtime._usage_tasks == {}
+    finally:
+        release_touch.set()
+        await asyncio.gather(usage_task, waiter, return_exceptions=True)
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.concurrent
+async def test_close_abandons_noncooperative_usage_and_scrubs_references(monkeypatch) -> None:
+    from tldw_Server_API.app.core.AuthNZ import provider_credential_runtime as runtime_module
+
+    monkeypatch.setattr(runtime_module, "USAGE_TASK_DRAIN_TIMEOUT_SECONDS", 0.01, raising=False)
+    touch_started = asyncio.Event()
+    touch_cancelled = asyncio.Event()
+    release_touch = asyncio.Event()
+
+    async def touch() -> None:
+        touch_started.set()
+        try:
+            await release_touch.wait()
+        except asyncio.CancelledError:
+            touch_cancelled.set()
+            await release_touch.wait()
+
+    async def resolver(provider: str, **_kwargs) -> ResolvedByokCredentials:
+        return _resolution(provider, touch=touch)
+
+    runtime = _runtime(resolver)
+    original_identity = runtime._identity
+    handle = await runtime.resolve("openai")
+    usage_waiter = asyncio.create_task(runtime.mark_used(handle))
+    await touch_started.wait()
+    usage_task = next(iter(runtime._usage_tasks.values()))
+    close_waiter = asyncio.create_task(runtime.close())
+
+    completed, _pending = await asyncio.wait({close_waiter}, timeout=0.2)
+    try:
+        assert close_waiter in completed
+        await close_waiter
+        assert touch_cancelled.is_set()
+        assert runtime._usage_tasks == {}
+        assert runtime._cache == {}
+        assert runtime._identity is not original_identity
+        assert runtime._user_id is None
+        assert runtime._team_ids == []
+        assert runtime._org_ids == []
+        assert runtime._fallback_resolver("openai") is None
+    finally:
+        release_touch.set()
+        await asyncio.gather(usage_task, usage_waiter, close_waiter, return_exceptions=True)
 
 
 @pytest.mark.asyncio

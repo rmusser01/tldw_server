@@ -45,13 +45,14 @@ from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import (
 )
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
+    ProviderCredentialAliasConflictError,
     decrypt_byok_payload,
     dumps_envelope,
     encrypt_byok_payload,
     key_hint_for_api_key,
     loads_envelope,
-    normalize_provider_name,
 )
+from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.config import loaded_config_data
 from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_provider_number,
@@ -258,7 +259,7 @@ def _can_use_base_url_override(
     )
     if not trusted:
         return False
-    provider_norm = normalize_provider_name(provider)
+    provider_norm = canonical_provider_name(provider)
     return provider_norm in resolve_byok_base_url_allowlist()
 
 
@@ -310,7 +311,7 @@ class ByokResolutionError(Exception):
         if code not in _BYOK_RESOLUTION_ERROR_CODES:
             raise ValueError("Unsupported BYOK resolution error code")
         self.code = code
-        self.provider = normalize_provider_name(provider)
+        self.provider = canonical_provider_name(provider)
         super().__init__(f"{self.code}: {self.provider}")
 
 
@@ -384,7 +385,7 @@ def _record_byok_resolution(resolved: ResolvedByokCredentials, *, byok_enabled: 
 
 def record_byok_missing_credentials(provider: str, *, operation: str) -> None:
     """Emit a counter entry for missing provider credentials."""
-    provider_norm = normalize_provider_name(provider)
+    provider_norm = canonical_provider_name(provider)
     try:
         allowlisted = is_provider_allowlisted(provider_norm)
     except _BYOK_RUNTIME_NONCRITICAL_EXCEPTIONS:
@@ -460,7 +461,7 @@ def _build_app_config(provider: str, credential_fields: dict[str, Any]) -> dict[
         base_cfg = loaded_config_data
     except _BYOK_RUNTIME_NONCRITICAL_EXCEPTIONS:
         base_cfg = None
-    provider_norm = normalize_provider_name(provider)
+    provider_norm = canonical_provider_name(provider)
     section = PROVIDER_APP_CONFIG_KEYS.get(provider_norm) or _LOCAL_PROVIDER_APP_CONFIG_KEYS.get(provider_norm)
     custom_number = custom_openai_provider_number(provider_norm)
     if section is None and custom_number is not None:
@@ -950,16 +951,20 @@ async def _persist_user_payload_update(
 
     metadata_to_store = _parse_metadata_value(row.get("metadata"))
     try:
-        await repo.upsert_secret(
+        updated = await repo.update_secret_if_active_and_unchanged(
             user_id=user_id,
             provider=provider,
             encrypted_blob=dumps_envelope(envelope),
+            expected_encrypted_blob=str(row.get("encrypted_blob") or ""),
             key_hint=key_hint or None,
             metadata=metadata_to_store,
             updated_at=updated_at,
-            created_by=user_id,
             updated_by=user_id,
         )
+        if not updated:
+            raise ByokResolutionError("invalid_provider_credentials", provider)
+    except ByokResolutionError:
+        raise
     except Exception as exc:
         if not _is_credential_store_unavailable(exc):
             raise
@@ -1191,7 +1196,7 @@ async def resolve_byok_credentials(
     force_oauth_refresh: bool = False,
     trusted_base_url_override: bool | None = None,
 ) -> ResolvedByokCredentials:
-    provider_norm = normalize_provider_name(provider)
+    provider_norm = canonical_provider_name(provider)
     byok_enabled = is_byok_enabled()
     allowlisted = is_provider_allowlisted(provider_norm)
     allow_base_url = _can_use_base_url_override(
@@ -1214,6 +1219,18 @@ async def resolve_byok_credentials(
     try:
         user_repo = await _get_user_repo()
         user_row = await user_repo.fetch_secret_for_user(int(user_id), provider_norm)
+        if user_row is None:
+            revoked_user_row = await user_repo.fetch_secret_for_user(
+                int(user_id),
+                provider_norm,
+                include_revoked=True,
+            )
+            if revoked_user_row is not None:
+                raise ByokResolutionError("invalid_provider_credentials", provider_norm)
+    except ByokResolutionError:
+        raise
+    except ProviderCredentialAliasConflictError:
+        raise ByokResolutionError("invalid_provider_credentials", provider_norm) from None
     except Exception as exc:
         if not _is_credential_store_unavailable(exc):
             raise

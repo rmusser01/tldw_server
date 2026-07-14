@@ -80,6 +80,35 @@ def _user() -> Any:
     return SimpleNamespace(id=42, id_int=42, username="rag-user")
 
 
+def test_trusted_scope_does_not_infer_singleton_team_ahead_of_active_org() -> None:
+    request = _request()
+    principal = request.state.auth.principal
+    principal.team_ids = [7]
+    principal.org_ids = [11]
+    principal.active_team_id = None
+    principal.active_org_id = 11
+
+    _user_id, team_ids, org_ids, _trusted = rag_endpoint._trusted_credential_runtime_scope(
+        request,
+        _user(),
+    )
+
+    assert team_ids == []
+    assert org_ids == [11]
+
+
+@pytest.mark.parametrize("kind", ["team", "org"])
+@pytest.mark.parametrize("active_id", ["malformed", 99])
+def test_rag_trusted_scope_rejects_invalid_active_id(kind: str, active_id: Any) -> None:
+    request = _request()
+    setattr(request.state.auth.principal, f"active_{kind}_id", active_id)
+
+    with pytest.raises(ByokResolutionError) as exc_info:
+        rag_endpoint._trusted_credential_runtime_scope(request, _user())
+
+    assert exc_info.value.code == "credential_scope_revoked"
+
+
 def _db(path: str) -> Any:
     return SimpleNamespace(db_path=path, db_path_str=path)
 

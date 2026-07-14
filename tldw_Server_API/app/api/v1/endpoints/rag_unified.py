@@ -52,7 +52,10 @@ from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import (
     UnifiedRAGRequest,
     UnifiedRAGResponse,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_helpers import is_trusted_base_url_principal
+from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
+    derive_trusted_credential_scope,
+    is_trusted_base_url_principal,
+)
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_READ
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
@@ -128,45 +131,7 @@ _PUBLIC_RAG_STREAM_DIAGNOSTIC = "RAG processing diagnostic omitted"
 _RAG_PROVIDER_FAILURES = (ByokResolutionError, ChatAPIError)
 
 
-def _trusted_credential_runtime_scope(
-    request: Request,
-    current_user: Optional[User],
-) -> tuple[int | None, list[int], list[int], bool]:
-    """Derive an execution credential scope only from authenticated server state."""
-    request_state = getattr(request, "state", None)
-    auth_context = getattr(request_state, "auth", None)
-    principal = getattr(auth_context, "principal", None)
-
-    user_id = getattr(principal, "user_id", None)
-    if user_id is None:
-        user_id = getattr(current_user, "id_int", None)
-    if user_id is None:
-        try:
-            user_id = int(getattr(current_user, "id", None))
-        except (TypeError, ValueError):
-            user_id = None
-
-    def scoped_ids(kind: str) -> list[int]:
-        values = getattr(principal, f"{kind}_ids", None)
-        if values is None:
-            values = getattr(request_state, f"{kind}_ids", None)
-        members = sorted({int(value) for value in (values or ()) if value is not None})
-        active = getattr(principal, f"active_{kind}_id", None)
-        if active is None:
-            active = getattr(request_state, f"active_{kind}_id", None)
-        if active is None:
-            return members
-        active_id = int(active)
-        if active_id not in members:
-            raise ByokResolutionError("credential_scope_revoked", "credential_scope")
-        return [active_id]
-
-    return (
-        user_id,
-        scoped_ids("team"),
-        scoped_ids("org"),
-        is_trusted_base_url_principal(principal),
-    )
+_trusted_credential_runtime_scope = derive_trusted_credential_scope
 
 
 def _build_credential_runtime(

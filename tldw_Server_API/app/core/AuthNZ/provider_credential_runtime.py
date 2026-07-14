@@ -13,12 +13,11 @@ from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
     ResolvedByokCredentials,
     resolve_byok_credentials,
 )
-from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
-    normalize_provider_name,
-)
+from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 
 _Resolver = Callable[..., Awaitable[ResolvedByokCredentials]]
 _FallbackResolver = Callable[[str], str | None]
+USAGE_TASK_DRAIN_TIMEOUT_SECONDS = 0.25
 
 
 def _serialization_error() -> TypeError:
@@ -239,7 +238,7 @@ class ProviderCredentialRuntime:
     ) -> ProviderCallCredentials:
         """Return explicit credentials for a normalized provider."""
         self._ensure_open()
-        provider_norm = normalize_provider_name(provider)
+        provider_norm = canonical_provider_name(provider)
         if force_refresh:
             return await self._refresh(provider_norm)
 
@@ -380,7 +379,7 @@ class ProviderCredentialRuntime:
             valid = (
                 isinstance(resolution, ResolvedByokCredentials)
                 and resolution.status in {ByokResolutionStatus.RESOLVED, ByokResolutionStatus.ABSENT}
-                and normalize_provider_name(resolution.provider) == provider
+                and canonical_provider_name(resolution.provider) == provider
             )
         except Exception:  # noqa: BLE001 - malformed resolver objects fail validation
             valid = False
@@ -416,16 +415,42 @@ class ProviderCredentialRuntime:
         try:
             await asyncio.shield(task)
         except asyncio.CancelledError:
-            while not task.done():
-                try:
-                    await asyncio.shield(task)
-                except asyncio.CancelledError:
-                    continue
-                except Exception:  # noqa: BLE001 - caller cancellation remains authoritative
-                    break
+            await self._drain_usage_tasks({task})
             if self._closed:
                 raise RuntimeError("Provider credential runtime is closed") from None
             raise
+
+    async def _drain_usage_tasks(self, tasks: set[asyncio.Task[None]]) -> None:
+        """Wait briefly for usage writes, then cancel and release owned references."""
+
+        pending = {task for task in tasks if not task.done()}
+        if not pending:
+            return
+
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + max(0.0, float(USAGE_TASK_DRAIN_TIMEOUT_SECONDS))
+        while pending:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                break
+            try:
+                _done, pending = await asyncio.wait(pending, timeout=remaining)
+            except asyncio.CancelledError:
+                # Caller cancellation stays authoritative, but cannot restart the deadline.
+                continue
+
+        if not pending:
+            return
+
+        for task in pending:
+            task.cancel()
+        for entry, owned_task in tuple(self._usage_tasks.items()):
+            if owned_task in pending:
+                self._usage_tasks.pop(entry, None)
+        try:
+            await asyncio.sleep(0)
+        except asyncio.CancelledError:
+            pass
 
     async def _await_owned(self, task: asyncio.Task[_ResolvedEntry]) -> _ResolvedEntry:
         try:
@@ -489,7 +514,7 @@ class ProviderCredentialRuntime:
         if cancellable_tasks:
             await asyncio.gather(*cancellable_tasks, return_exceptions=True)
         if usage_tasks:
-            await asyncio.gather(*usage_tasks, return_exceptions=True)
+            await self._drain_usage_tasks(usage_tasks)
 
         self._cache.clear()
         self._inflight.clear()
