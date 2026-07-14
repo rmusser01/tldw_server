@@ -14,6 +14,45 @@ describe("Knowledge QA error message mapping", () => {
     )
   })
 
+  it("uses client-owned provider copy and ignores the error message", () => {
+    const sentinel = "sk-provider-secret-/Users/private/provider.log"
+    const error = Object.assign(new Error(sentinel), {
+      code: "invalid_provider_credentials",
+      status: 503,
+    })
+
+    const message = mapKnowledgeQaSearchErrorMessage(error)
+
+    expect(message).toBe("The selected provider credentials are invalid.")
+    expect(message).not.toContain(sentinel)
+  })
+
+  it.each([
+    [502, "RAG search failed due to a server error."],
+    [503, "RAG search failed due to a server error."],
+    [429, "RAG search is rate limited. Please wait and try again."],
+  ])("uses status-safe copy for HTTP %i", (status, expected) => {
+    const sentinel = "sk-provider-secret-/Users/private/provider.log"
+    const error = Object.assign(new Error(sentinel), { status })
+
+    const message = mapKnowledgeQaSearchErrorMessage(error)
+
+    expect(message).toBe(expected)
+    expect(message).not.toContain(sentinel)
+  })
+
+  it("does not return unknown raw error text", () => {
+    const sentinel = "sk-provider-secret-/Users/private/provider.log"
+
+    const message = mapKnowledgeQaSearchErrorMessage(
+      new Error(sentinel),
+      "Search failed"
+    )
+
+    expect(message).toBe("Search failed")
+    expect(message).not.toContain(sentinel)
+  })
+
   it("maps export failures to chatbook-specific messaging", () => {
     expect(mapKnowledgeQaExportErrorMessage(new Error("404 not found"))).toBe(
       "Chatbook export failed. Thread was not found."

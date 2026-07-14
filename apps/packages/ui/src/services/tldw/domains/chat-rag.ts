@@ -8,6 +8,10 @@ import type { ChatScope } from '@/types/chat-scope'
 import { toChatScopeParams } from '@/types/chat-scope'
 import { normalizeChatRole } from '@/utils/normalize-chat-role'
 import { parseRagStreamLine } from '@/services/rag/stream-contract'
+import {
+  getStructuredPublicRagProviderError,
+  getValidatedHttpStatus,
+} from '@/services/rag/provider-error-contract'
 import type {
   ChatCompletionRequestOptions,
   ChatCompletionStreamOptions,
@@ -63,15 +67,19 @@ const isSavedDegradedCharacterPersistError = (error: unknown): boolean => {
 const buildSanitizedRagSearchError = (
   error: unknown
 ): Error & { status?: number; code?: string } => {
-  const status =
-    (error as { status?: number; response?: { status?: number }; statusCode?: number } | null)
-      ?.status ??
-    (error as { response?: { status?: number } } | null)?.response?.status ??
-    (error as { statusCode?: number } | null)?.statusCode
-  const rawMessage = error instanceof Error ? error.message : String(error ?? "")
+  const status = getValidatedHttpStatus(error)
+  const providerError = getStructuredPublicRagProviderError(error)
+  const rawMessage =
+    error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : ""
 
   let message = "RAG search failed."
-  if (isConnectionErrorMessage(rawMessage)) {
+  if (providerError) {
+    message = providerError.message
+  } else if (isConnectionErrorMessage(rawMessage)) {
     message = "Cannot reach server. Check your connection and try again."
   } else if (isTimeoutErrorMessage(rawMessage) || status === 408) {
     message = "RAG search timed out. Try again."
@@ -95,6 +103,9 @@ const buildSanitizedRagSearchError = (
   }
   if (typeof status === "number") {
     sanitizedError.status = status
+  }
+  if (providerError) {
+    sanitizedError.code = providerError.code
   }
   return sanitizedError
 }

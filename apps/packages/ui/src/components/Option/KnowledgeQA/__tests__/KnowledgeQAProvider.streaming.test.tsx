@@ -73,6 +73,7 @@ describe("KnowledgeQAProvider streaming search", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()
+    sessionStorage.clear()
     latestContext = null
     mockTldwClient.normalizeRagQuery.mockImplementation((query: string) => query)
     trackMetricMock.mockResolvedValue(undefined)
@@ -477,6 +478,152 @@ describe("KnowledgeQAProvider streaming search", () => {
       "Search failed:",
       "provider_authentication_failed"
     )
+    consoleError.mockRestore()
+  })
+
+  it.each([
+    [
+      502,
+      "provider_unavailable",
+      "The selected provider is currently unavailable.",
+    ],
+    [
+      503,
+      "credential_store_unavailable",
+      "Provider credential storage is temporarily unavailable.",
+    ],
+  ])(
+    "stops after certified stream fallback and sanitized HTTP %i failure",
+    async (status, code, expectedMessage) => {
+      const sentinel = `sk-nonstream-${status}-/Users/private/provider.log`
+      const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+      localStorage.setItem("tldwConfig", "keep-api-key-config")
+      localStorage.setItem("access_token", "keep-access-token")
+      sessionStorage.setItem("tldwManualSessionApiKey", "keep-session-api-key")
+      ragSearchStreamMock.mockImplementation(async function* () {
+        yield preDispatchTransportError
+      })
+      ragSearchMock.mockRejectedValue(
+        Object.assign(new Error(sentinel), { code, status })
+      )
+
+      render(
+        <KnowledgeQAProvider>
+          <ContextProbe />
+        </KnowledgeQAProvider>
+      )
+
+      await waitFor(() => expect(latestContext).not.toBeNull())
+      await act(async () => {
+        await latestContext!.selectThread(`local-nonstream-${status}`)
+      })
+      act(() => {
+        latestContext!.setQuery(`provider failure ${status}`)
+      })
+
+      await act(async () => {
+        await latestContext!.search()
+      })
+
+      expect(ragSearchStreamMock).toHaveBeenCalledTimes(1)
+      expect(ragSearchMock).toHaveBeenCalledTimes(1)
+      expect(latestContext!.error).toBe(expectedMessage)
+      expect(localStorage.getItem("tldwConfig")).toBe("keep-api-key-config")
+      expect(localStorage.getItem("access_token")).toBe("keep-access-token")
+      expect(sessionStorage.getItem("tldwManualSessionApiKey")).toBe(
+        "keep-session-api-key"
+      )
+      expect(consoleError).toHaveBeenCalledTimes(1)
+      const logged = JSON.stringify(consoleError.mock.calls)
+      expect(logged).toContain(code)
+      expect(logged).not.toContain(sentinel)
+      consoleError.mockRestore()
+    }
+  )
+
+  it("sanitizes an unknown terminal stream error without replay", async () => {
+    const sentinel = "sk-stream-secret-/Users/private/provider.log"
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+    ragSearchStreamMock.mockImplementation(async function* () {
+      yield {
+        schema_version: 1,
+        type: "error",
+        code: "unknown_provider_failure",
+        status_code: 502,
+        upstream_dispatched: true,
+        output_emitted: false,
+        allow_non_stream_fallback: false,
+        message: sentinel,
+      }
+    })
+
+    render(
+      <KnowledgeQAProvider>
+        <ContextProbe />
+      </KnowledgeQAProvider>
+    )
+
+    await waitFor(() => expect(latestContext).not.toBeNull())
+    await act(async () => {
+      await latestContext!.selectThread("local-unknown-stream-error")
+    })
+    act(() => {
+      latestContext!.setQuery("unknown stream failure")
+    })
+
+    await act(async () => {
+      await latestContext!.search()
+    })
+
+    expect(ragSearchStreamMock).toHaveBeenCalledTimes(1)
+    expect(ragSearchMock).not.toHaveBeenCalled()
+    expect(latestContext!.error).toBe(
+      "The selected provider is currently unavailable."
+    )
+    const logged = JSON.stringify(consoleError.mock.calls)
+    expect(logged).toContain("provider_unavailable")
+    expect(logged).not.toContain("unknown_provider_failure")
+    expect(logged).not.toContain(sentinel)
+    consoleError.mockRestore()
+  })
+
+  it("sanitizes an unknown non-stream error after certified fallback", async () => {
+    const sentinel = "sk-nonstream-secret-/Users/private/provider.log"
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+    ragSearchStreamMock.mockImplementation(async function* () {
+      yield preDispatchTransportError
+    })
+    ragSearchMock.mockRejectedValue(
+      Object.assign(new Error(sentinel), {
+        code: "unknown_provider_failure",
+        status: 503,
+      })
+    )
+
+    render(
+      <KnowledgeQAProvider>
+        <ContextProbe />
+      </KnowledgeQAProvider>
+    )
+
+    await waitFor(() => expect(latestContext).not.toBeNull())
+    await act(async () => {
+      await latestContext!.selectThread("local-unknown-nonstream-error")
+    })
+    act(() => {
+      latestContext!.setQuery("unknown non-stream failure")
+    })
+
+    await act(async () => {
+      await latestContext!.search()
+    })
+
+    expect(ragSearchStreamMock).toHaveBeenCalledTimes(1)
+    expect(ragSearchMock).toHaveBeenCalledTimes(1)
+    expect(latestContext!.error).toBe("RAG search failed due to a server error.")
+    const logged = JSON.stringify(consoleError.mock.calls)
+    expect(logged).not.toContain("unknown_provider_failure")
+    expect(logged).not.toContain(sentinel)
     consoleError.mockRestore()
   })
 

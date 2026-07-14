@@ -50,7 +50,10 @@ import { useAntdMessage } from "@/hooks/useAntdMessage"
 import { KNOWLEDGE_QA_KEYWORD } from "./constants"
 import { trackKnowledgeQaSearchMetric } from "@/utils/knowledge-qa-search-metrics"
 import { persistKnowledgeQaHistory } from "./historyStorage"
-import { mapKnowledgeQaSearchErrorMessage } from "./errorMessages"
+import {
+  getKnowledgeQaSearchErrorLogCode,
+  mapKnowledgeQaSearchErrorMessage,
+} from "./errorMessages"
 import { truncateAnswerPreview } from "./historyUtils"
 import {
   EMPTY_SOURCE_HEALTH_STATE,
@@ -2680,9 +2683,7 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
         }
         console.error(
           "Search failed:",
-          error instanceof RagTerminalStreamError
-            ? error.event?.code ?? error.name
-            : error
+          getKnowledgeQaSearchErrorLogCode(error)
         )
         const errorMessage = mapKnowledgeQaSearchErrorMessage(error, "Search failed")
         dispatch({
