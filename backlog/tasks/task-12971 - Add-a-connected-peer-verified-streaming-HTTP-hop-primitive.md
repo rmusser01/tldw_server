@@ -4,7 +4,7 @@ title: Add a connected-peer-verified streaming HTTP hop primitive
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-14 15:26'
+updated_date: '2026-07-14 15:52'
 labels:
   - security
   - http-client
@@ -57,6 +57,8 @@ Adversarial plan review found that HTTPcore's internal h11 limit is per incomple
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 2026-07-14 Stage 1 complete: added immutable normalized request/limit/error contracts, strict canonical host/target/header validation, complete-set DNS/IP denial (including mapped, NAT64, 6to4, Teredo, site-local, scoped, private, reserved, and malformed answers), an off-event-loop bounded resolver adapter with legacy compatibility, and direct HTTPcore/certifi dependency floors. Verification: 115 focused and adjacent tests passed; Ruff, Black, compileall, and git diff --check passed. Two adversarial review rounds were resolved and the final re-review reported no actionable findings. Stage 2 validated-peer transport remains in progress.
+
+2026-07-14 Stage 2 complete: added a one-use HTTPcore backend/pool that dials only the first validated literal address, verifies peer IP and port before HTTP bytes and again after TLS, preserves the route Host/SNI, uses a fresh certifi-only TLS context with cached SSL evidence, forces HTTP/1.1, blocks UDS/retry/second-dial paths, rejects 101 upgrades, and returns redirects without following them. Verification: 127 contract/transport tests and 71 legacy compatibility tests passed; Ruff, Black, compileall, and git diff --check passed. Two independent review/fix rounds ended clean. Authoritative raw/header/decompression counters and the public one-argument entrypoint remain Stage 3 work.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

@@ -30,6 +30,18 @@
 | Stage | Status | RED evidence | GREEN evidence | Review |
 | --- | --- | --- | --- | --- |
 | 1. Contracts/dependency/DNS | Complete | Import/collection failure: missing `Security.http_hop` | 115 focused/adjacent tests passed; static checks passed | Two review/fix rounds; final clean verdict |
-| 2. Validated peer transport | Not Started | Pending | Pending | Pending |
+| 2. Validated peer transport | Complete | 32/32 failed: missing `_execute_http_hop` | 127 contract/transport tests and 71 compatibility tests passed; static checks passed | Two review/fix rounds; final clean verdicts |
 | 3. Bounded response streaming | Not Started | Pending | Pending | Pending |
 | 4. Isolation/concurrency/finalization | Not Started | Pending | Pending | Pending |
+
+## 2026-07-14 — Stage 2 validated-peer transport
+
+- RED: all 32 initial deterministic HTTPcore fake-backend cases failed because `_execute_http_hop` did not exist.
+- GREEN: 127 contract/transport tests passed after additions from self-review and independent review; 71 legacy MCP docs-fetcher, HTTP-client, and egress compatibility tests also passed.
+- Added a one-use pinned backend that dials only the first validated address, verifies exact peer IP and port before writes, and blocks HTTPcore's independent connection-reassignment path from creating a second dial.
+- Preserved the route host in HTTPcore's origin for SNI and emitted exact DNS/IPv4/bracketed-IPv6 Host authorities on default and alternate ports.
+- Added a fresh certifi-only TLS context, required the approved SNI and cached SSL-object evidence, reverified the post-TLS peer, forced HTTP/1.1, rejected `101` upgrades, and kept redirects as ordinary responses.
+- Added deterministic cleanup/cancellation/timeout coverage for TCP, TLS, and response reads; transport errors remain sanitized and retry-free.
+- Review fixes added controlled `Accept-Encoding: identity`, TLS timeout mapping, SSL evidence validation, raw-HTTP SSL metadata masking, expanded/scoped peer cases, explicit request framing, and a one-use dial guard.
+- Stage 3 intentionally owns authoritative aggregate header/raw-wire/decompressed/parser counters and the public one-argument entrypoint; Stage 2's execution seam remains module-private until those invariants are installed.
+- Final independent spec and security re-reviews: clean, with no remaining actionable Stage 2 findings.

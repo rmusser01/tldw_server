@@ -116,9 +116,9 @@ The public function accepts exactly one pre-parsed request object rather than a 
 
 **Success criteria:** A fresh HTTPcore pool performs at most one connection/request with `retries=0`, `http1=True`, `http2=False`, and no proxy; the delegate backend receives the selected IP and approved port; absent/malformed/mismatched peer IP **or port** closes the stream and fails before HTTP bytes; HTTPS `start_tls()` requires the approved hostname; redirect responses are returned and never followed. TLS uses a new `ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)` loaded only from the explicit certifi path, with hostname checking, certificate verification, TLS 1.2+, and no client certificate or key logging.
 
-**Tests:** HTTP and HTTPS fake-stream tests, alternate ports, IPv4/IPv6 peer tuple normalization, absent/malformed/mismatched/wrong-port peer metadata, rebinding to a private or different public peer, original-host SNI, exact DNS/IPv4/bracketed-IPv6 Host headers on default/alternate ports, one request line despite multiple legal stream writes, redirect destination untouched, connect/TLS cleanup, and zero retry sleeps.
+**Tests:** HTTP and HTTPS fake-stream tests, alternate ports, IPv4/IPv6 peer tuple normalization, absent/malformed/mismatched/wrong-port peer metadata, rebinding to a private or different public peer, original-host SNI, exact DNS/IPv4/bracketed-IPv6 Host headers on default/alternate ports, one request line despite multiple legal stream writes, redirect destination untouched, `101` rejection, connect/TLS/read cancellation cleanup, and zero retry sleeps.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### TDD tasks
 
@@ -129,11 +129,11 @@ The public function accepts exactly one pre-parsed request object rather than a 
    - dial only the already-validated selected IP;
    - verify `server_addr` immediately and after TLS wrapping;
    - reject Unix sockets and any retry sleep path;
-   - cap individual network reads to the smaller of a small fixed chunk and the applicable remaining header/wire ceiling plus one;
+   - cap individual network reads to a small fixed chunk; Stage 3 applies the remaining header/wire ceiling plus one once header-boundary state exists;
    - expose no proxy, UDS, client certificate, or externally supplied SSL-context parameters.
-4. Build request framing internally. Reject caller `Host`, `Content-Length`, `Transfer-Encoding`, `Proxy-Authorization`, `Connection`, `Proxy-Connection`, `TE`, `Trailer`, `Upgrade`, `Keep-Alive`, `Expect`, and `Accept-Encoding`; cap target bytes, caller header count/bytes, and body bytes before constructing the HTTPcore request. Emit an explicit correctly bracketed Host header, controlled `Connection: close`, supported content-encoding negotiation, and generated body framing.
+4. Build request framing internally. Reject caller `Host`, `Content-Length`, `Transfer-Encoding`, `Proxy-Authorization`, `Connection`, `Proxy-Connection`, `TE`, `Trailer`, `Upgrade`, `Keep-Alive`, `Expect`, and `Accept-Encoding`; cap target bytes, caller header count/bytes, and body bytes before constructing the HTTPcore request. Emit an explicit correctly bracketed Host header, controlled `Connection: close`, controlled `Accept-Encoding: identity` until Stage 3 installs bounded decoders, and generated body framing.
 5. Build an environment-independent TLS client context directly with the explicit certifi CA path; do not call `ssl.create_default_context()`, accept an external SSL context, load a client certificate, or enable key logging.
-6. Implement the one-use HTTPcore pool call with per-operation timeout extensions and guaranteed pool/response close on success, error, timeout, and cancellation. Persist the peer verified by the stream wrapper as response evidence; do not add a redundant post-response peer lookup.
+6. Implement the one-use HTTPcore backend and pool call with per-operation timeout extensions and guaranteed pool/response close on success, error, timeout, and cancellation. The one-use backend must fail closed if HTTPcore's separate `ConnectionNotAvailable` reassignment loop attempts another physical dial. Persist the peer verified by the stream wrapper as response evidence; do not add a redundant post-response peer lookup.
 7. Run GREEN plus the legacy MCP docs-fetcher tests and focused existing egress/http-client security tests to prove compatibility.
 
 ### Commit
@@ -154,7 +154,7 @@ The public function accepts exactly one pre-parsed request object rather than a 
 
 1. Add failing streaming tests in `tldw_Server_API/tests/Security/test_http_hop_streaming.py`; generate compressed payloads in memory and use event barriers for timeout/cancellation cases.
 2. Run RED and record the exact failure count.
-3. Implement a narrow raw-stream response guard—not a second HTTP body parser—that scans complete header blocks only far enough to distinguish informational from final status. Count every status line, reason phrase, header line, terminator, and informational block cumulatively; fail before forwarding overflow bytes to HTTPcore. Continue enforcing the raw wire ceiling after the final header terminator, including transfer framing and trailers.
+3. Implement a narrow raw-stream response guard—not a second HTTP body parser—that scans complete header blocks only far enough to distinguish informational from final status. Count every status line, reason phrase, header line, terminator, and informational block cumulatively; request at most the smaller of the fixed read chunk and the applicable remaining ceiling plus one, and fail before forwarding overflow bytes to HTTPcore. Continue enforcing the raw wire ceiling after the final header terminator, including transfer framing and trailers.
 4. Normalize/count the final headers returned by HTTPcore and apply encoded `Content-Length` preflight without logging or returning header values in errors.
 5. Iterate `response.aiter_stream()` once for content decoding; do not use that post-transfer stream as the raw wire counter.
 6. Implement bounded identity/gzip/zlib-deflate decoders with `zlib.decompressobj(...).decompress(..., max_length=remaining + 1)`, bounded `flush(remaining + 1)`, `unconsumed_tail` handling, explicit EOF/unused/trailing-data checks, and no unbounded `zlib.decompress` call.
