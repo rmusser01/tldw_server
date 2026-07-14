@@ -1,10 +1,10 @@
 ---
 id: TASK-12963
 title: Consolidate provider credential runtime for Chat and Knowledge QA
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-07-14 03:26'
+updated_date: '2026-07-14 03:30'
 labels: []
 dependencies: []
 references:
@@ -88,12 +88,14 @@ Completed; integration plan removed after final verification. Design: Docs/super
 2026-07-13: Post-rebase production-safety expansion found one stale Chat stream-disconnect integration fixture: it mocked provider dispatch but supplied no provider credential, so the intentional fail-closed runtime returned 503 before the mock. Reopened to update the fixture with an explicit fake OpenAI server credential and rerun the affected/full gates.
 
 2026-07-13: Post-rebase production-safety review found and fixed three runtime risks: explicit/BYOK embedding requests could share a provider-global cache across credentials, their auth failures could open the provider-global circuit breaker across tenants, and invalid non-stream provider objects could be generator-wrapped into a 200 stream instead of failing before headers. Explicit credentials now bypass shared embedding cache/breaker while retaining pooled HTTP/retry/stats behavior; server-configured traffic retains existing cache/breaker behavior; invalid stream objects fail with 502. Stale Chat/embedding fixtures were aligned with fail-closed sanitized contracts. Verification before the next dev refresh: full Chat 837 passed/31 skipped; full Embeddings 444 passed/36 skipped with pinned random/Hypothesis seeds; RAG_NEW+AuthNZ_Unit+http_client 1794 passed/7 skipped plus one known order-polluted prompt-loader assertion that passed isolated with the same seed; loopback Chat integrations 2 passed outside sandbox; py_compile and git diff checks passed; Bandit 0 findings/0 errors across 7421 production LOC; fatal Ruff findings match HEAD baseline exactly. origin/dev advanced to db0cfb6611 with backlog-only commits, so final rebase and focused post-rebase verification remain pending.
+
+2026-07-13: Final rebase completed onto origin/dev db0cfb6611. The two incoming commits were backlog-only and had no runtime/test overlap. Range-diff confirmed all 75 feature patches replayed exactly; origin/dev is an ancestor and the branch is 0 commits behind. Final post-rebase high-risk matrix: 192 passed, 17 expected skips across provider runtime/BYOK, Chat error and streaming behavior, loopback Chat integration, explicit embedding cache/breaker isolation, and RAG credential convenience paths. Final committed-tree py_compile passed; full-range git diff check passed; Bandit reported 0 findings and 0 scan errors across 7421 production LOC. Only the two unrelated untracked watchlist templates remain untouched.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Integrated the reviewed server-only provider credential runtime onto the latest origin/dev while preserving current development behavior at overlapping RAG and frontend stream boundaries. Chat and all provider-backed RAG paths, including hosted query embeddings, share one execution-scoped credential policy with user/team/org/server precedence; invalid credentials, store failures, and revoked scopes fail closed. Credentials remain non-serializable and excluded from client/cache/checkpoint state, semantic cache remains retrieval-only, and terminal stream failures cannot trigger unsafe replay. Final current-dev verification passed: backend 240 passed/1 documented skip, frontend 95 passed, HTTP client 112 passed, Chromium workflow 1 passed, TypeScript and Python compilation passed, Bandit found 0 issues with no baseline delta, and final integration review found no unresolved issues. The credential task was renumbered to TASK-12963 without modifying the existing TASK-12112 microphone task. The two unrelated untracked watchlist templates were not touched. A human-authored PR Change summary is still required before merge.
+Rebased the server-only shared provider credential runtime onto current origin/dev and verified the final graph. The production-safety review additionally prevents explicit/BYOK embedding requests from sharing the global embedding cache or poisoning the provider-global circuit breaker, while preserving existing cache/breaker behavior for server-configured traffic; invalid provider stream objects now fail before headers with 502. Full pre-final-rebase verification passed for Chat (837 passed/31 skipped) and Embeddings (444 passed/36 skipped); RAG_NEW, AuthNZ_Unit, and HTTP produced 1794 passed/7 skipped with one known order-polluted prompt-loader assertion passing isolated under the same seed. Final post-rebase matrix passed 192/17, range-diff proved all 75 patches equivalent, compilation and full-range diff checks passed, and Bandit found 0 issues. PR: https://github.com/rmusser01/tldw_server/pull/2727
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
