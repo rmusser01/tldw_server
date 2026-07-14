@@ -2,7 +2,7 @@
 
 **Goal:** Rebase the completed shared provider credential runtime onto current `origin/dev` without carrying unrelated source-branch commits, repair the Backlog task ID collision, and revalidate the integrated result.
 
-**Backlog:** `TASK-12112` until the target-branch-safe replacement ID is allocated.
+**Backlog:** `TASK-12963`
 
 ## Stage 1: Preserve and prepare
 
@@ -12,7 +12,7 @@
 
 **Tests:** Git branch/status/provenance checks.
 
-**Status:** In Progress
+**Status:** Complete
 
 ## Stage 2: Replay onto current dev
 
@@ -22,17 +22,17 @@
 
 **Tests:** Diff/provenance audit, `git diff --check`, focused tests for every conflicted production file.
 
-**Status:** Not Started
+**Status:** Complete
 
 ## Stage 3: Repair task identity
 
-**Goal:** Replace colliding `TASK-12112` with the next target-branch-safe Backlog ID and update durable references.
+**Goal:** Replace colliding `TASK-12112` with target-branch-safe `TASK-12963` and update durable references.
 
 **Success Criteria:** Exactly one credential-runtime task exists under its new ID, target branch's existing `TASK-12112` remains untouched, and the design/task references agree.
 
 **Tests:** Backlog CLI view/search plus repository reference scan.
 
-**Status:** Not Started
+**Status:** Complete
 
 ## Stage 4: Integrated verification
 
@@ -42,7 +42,7 @@
 
 **Tests:** Recorded in the Backlog task, including known skips and baseline-only warnings.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ## Stage 5: Finalize
 

@@ -1,6 +1,6 @@
 # Shared Provider Credential Runtime Design
 
-**Backlog task:** TASK-12112
+**Backlog task:** TASK-12963
 
 ## Problem
 
@@ -318,7 +318,7 @@ Use TDD and deterministic synchronization primitives.
 - Existing persisted RAG caches remain readable for documents; cached answers are deliberately ignored.
 - Other BYOK consumers can migrate to the generic runtime incrementally without changing the credential store.
 
-Implementation is split into dependency-ordered, reviewable subplans under TASK-12112:
+Implementation is split into dependency-ordered, reviewable subplans under TASK-12963:
 
 1. Shared runtime and adapter boundary: typed resolution outcomes, safe handles, scoped configuration, explicit fallback marker, and deterministic unit/security tests.
 2. Chat migration: router, selected provider, permitted health failover, OAuth refresh, streaming lifecycle, and status mapping.

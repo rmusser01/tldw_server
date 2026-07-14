@@ -1,10 +1,10 @@
 ---
-id: TASK-12112
+id: TASK-12963
 title: Consolidate provider credential runtime for Chat and Knowledge QA
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-14 01:25'
+updated_date: '2026-07-14 01:52'
 labels: []
 dependencies: []
 documentation:
