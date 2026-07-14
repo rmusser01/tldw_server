@@ -123,7 +123,6 @@ class _BindingSnapshot:
     method: str
     operation_kind: OperationKind
     path: str
-    allowed_paths: tuple[str, ...]
     allowed_query_keys: tuple[str, ...]
     query_pairs: tuple[tuple[str, str], ...]
     query_keys: tuple[str, ...]
@@ -245,11 +244,12 @@ def _snapshot_binding(route: object, intent: object) -> _BindingSnapshot | None:
         for pair in intent.query_pairs:
             if type(pair) is not QueryPair or type(pair.name) is not str or type(pair.value) is not str:
                 return None
-            if pair.name not in allowed_query_keys or pair.name in seen:
+            validated_pair = QueryPair(pair.name, pair.value)
+            if validated_pair.name not in allowed_query_keys or validated_pair.name in seen:
                 return None
-            seen.add(pair.name)
-            query_pairs.append((pair.name, pair.value))
-            query_keys.append(pair.name)
+            seen.add(validated_pair.name)
+            query_pairs.append((validated_pair.name, validated_pair.value))
+            query_keys.append(validated_pair.name)
 
         allowed_json_body_keys = set(policy.allowed_json_body_keys)
         json_body_pairs: list[tuple[str, str]] = []
@@ -257,10 +257,11 @@ def _snapshot_binding(route: object, intent: object) -> _BindingSnapshot | None:
         for pair in intent.json_body_pairs:
             if type(pair) is not JSONBodyPair or type(pair.name) is not str or type(pair.value) is not str:
                 return None
-            if pair.name not in allowed_json_body_keys or pair.name in seen_body_keys:
+            validated_pair = JSONBodyPair(pair.name, pair.value)
+            if validated_pair.name not in allowed_json_body_keys or validated_pair.name in seen_body_keys:
                 return None
-            seen_body_keys.add(pair.name)
-            json_body_pairs.append((pair.name, pair.value))
+            seen_body_keys.add(validated_pair.name)
+            json_body_pairs.append((validated_pair.name, validated_pair.value))
 
         http_limits = _hop_limits(intent.limits)
         return _BindingSnapshot(
@@ -272,7 +273,6 @@ def _snapshot_binding(route: object, intent: object) -> _BindingSnapshot | None:
             method=intent.method,
             operation_kind=intent.operation_kind,
             path=intent.path,
-            allowed_paths=policy.paths,
             allowed_query_keys=policy.allowed_query_keys,
             query_pairs=tuple(query_pairs),
             query_keys=tuple(query_keys),
@@ -376,6 +376,7 @@ def reconstruct_redirect_intent(
         or binding.method not in {"GET", "HEAD"}
         or binding.json_body_pairs
         or not location
+        or "#" in location
         or len(location) > binding.http_limits.max_request_target_bytes
         or location != location.strip(" \t")
         or not location.isascii()
@@ -390,18 +391,18 @@ def reconstruct_redirect_intent(
             if not parsed.scheme or not parsed.netloc:
                 return None
             default_port = 443 if parsed.scheme == "https" else 80
-            if (
-                parsed.scheme != binding.scheme
-                or parsed.hostname != binding.host
-                or (parsed.port or default_port) != binding.port
-            ):
+            if parsed.netloc.endswith(":"):
+                return None
+            parsed_port = parsed.port
+            effective_port = default_port if parsed_port is None else parsed_port
+            if parsed.scheme != binding.scheme or parsed.hostname != binding.host or effective_port != binding.port:
                 return None
             resolved = parsed
         else:
             resolved = urlsplit(urljoin(binding.path, location))
             if resolved.scheme or resolved.netloc or resolved.fragment:
                 return None
-        if resolved.path not in binding.allowed_paths or _BAD_PERCENT_ESCAPE.search(resolved.query):
+        if resolved.path != binding.path or _BAD_PERCENT_ESCAPE.search(resolved.query):
             return None
         raw_pairs = parse_qsl(
             resolved.query,
@@ -414,6 +415,8 @@ def reconstruct_redirect_intent(
         )
         names = tuple(name for name, _value in raw_pairs)
         if len(set(names)) != len(names) or any(name not in binding.allowed_query_keys for name in names):
+            return None
+        if frozenset(raw_pairs) != frozenset(binding.query_pairs):
             return None
         pairs = tuple(QueryPair(name, value) for name, value in raw_pairs)
         redirected = DispatchIntent(

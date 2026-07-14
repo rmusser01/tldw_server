@@ -20,6 +20,7 @@ from tldw_Server_API.app.core.Research.discovery.contracts import (
     RouteLimits,
     RoutePolicy,
     SourceConstraint,
+    canonical_policy_digest,
 )
 from tldw_Server_API.app.core.Research.discovery.gateway import (
     DiscoveryGatewayError,
@@ -294,6 +295,51 @@ async def test_hostile_json_scalar_subclass_rejects_before_hop() -> None:
 
     assert caught.value.code == "request_rejected"
     assert "secret-body" not in repr(caught.value)
+    assert calls == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("channel", "field", "value"),
+    (
+        ("query", "value", "secret\x00query"),
+        ("json", "value", "secret\x00body"),
+        ("query", "name", "bad?query"),
+        ("json", "name", "bad?body"),
+    ),
+)
+async def test_mutated_request_pairs_are_revalidated_before_hop(
+    channel: str,
+    field: str,
+    value: str,
+) -> None:
+    route, intent = _post_route_and_intent() if channel == "json" else _route_and_intent()
+    pair = intent.json_body_pairs[-1] if channel == "json" else intent.query_pairs[0]
+    object.__setattr__(pair, field, value)
+    if field == "name":
+        policy_field = "allowed_json_body_keys" if channel == "json" else "allowed_query_keys"
+        policy_values = (value, "order_direction") if channel == "json" else (value, "page")
+        object.__setattr__(route.policy, policy_field, policy_values)
+        digest = canonical_policy_digest(route.policy)
+        object.__setattr__(route.policy, "policy_digest", digest)
+        object.__setattr__(intent, "policy_digest", digest)
+    calls = 0
+
+    async def one_hop(request: NormalizedHTTPHopRequest) -> HTTPHopResponse:
+        nonlocal calls
+        calls += 1
+        return _hop_response()
+
+    with pytest.raises(DiscoveryGatewayError) as caught:
+        await dispatch_once(
+            route,
+            intent,
+            is_policy_active=lambda _route_id, _digest: True,
+            one_hop=one_hop,
+        )
+
+    assert caught.value.code == "request_rejected"
+    assert "secret" not in repr(caught.value)
     assert calls == 0
 
 
@@ -1076,16 +1122,16 @@ async def test_raising_retryable_accessor_maps_to_nonretryable_safe_error() -> N
     ("location", "expected_pairs"),
     (
         (
-            "/search?page=2&q=next%20term",
-            (QueryPair("page", "2"), QueryPair("q", "next term")),
+            "/search?page=1&q=quantum%20mechanics",
+            (QueryPair("page", "1"), QueryPair("q", "quantum mechanics")),
         ),
         (
-            "https://api.example.test:443/search?q=next&page=2",
-            (QueryPair("q", "next"), QueryPair("page", "2")),
+            "https://api.example.test:443/search?q=quantum%20mechanics&page=1",
+            (QueryPair("q", "quantum mechanics"), QueryPair("page", "1")),
         ),
         (
-            "?q=next&page=2",
-            (QueryPair("q", "next"), QueryPair("page", "2")),
+            "?%71=quantum+mechanics&page=%31",
+            (QueryPair("q", "quantum mechanics"), QueryPair("page", "1")),
         ),
     ),
 )
@@ -1109,25 +1155,67 @@ def test_redirect_intent_reconstruction_accepts_only_bound_same_origin_shape(
     assert redirected.limits == intent.limits
 
 
+def test_redirect_intent_reconstruction_preserves_a_planned_blank_value() -> None:
+    route, intent = _route_and_intent()
+    intent = replace(
+        intent,
+        query_pairs=(QueryPair("q", ""), QueryPair("page", "1")),
+    )
+
+    redirected = reconstruct_redirect_intent(route, intent, "/search?page=1&q=")
+
+    assert redirected is not None
+    assert redirected.query_pairs == (QueryPair("page", "1"), QueryPair("q", ""))
+
+
 @pytest.mark.parametrize(
     "location",
     (
-        "https://attacker.example/search?q=x",
-        "http://api.example.test/search?q=x",
-        "https://api.example.test:444/search?q=x",
-        "https://user@api.example.test/search?q=x",
-        "//attacker.example/search?q=x",
-        "/other?q=x",
-        "/search?q=first&q=second",
+        "https://attacker.example/search?q=quantum%20mechanics&page=1",
+        "http://api.example.test/search?q=quantum%20mechanics&page=1",
+        "https://api.example.test:444/search?q=quantum%20mechanics&page=1",
+        "https://api.example.test:0/search?q=quantum%20mechanics&page=1",
+        "https://api.example.test:/search?q=quantum%20mechanics&page=1",
+        "https://user@api.example.test/search?q=quantum%20mechanics&page=1",
+        "//attacker.example/search?q=quantum%20mechanics&page=1",
+        "/other?q=quantum%20mechanics&page=1",
+        "/search?q=quantum%20mechanics&q=quantum%20mechanics&page=1",
         "/search?token=secret",
         "/search?q=%ZZ",
-        "/search?q=x#fragment",
+        "/search?q=quantum%20mechanics&page=1#fragment",
+        "/search?q=quantum%20mechanics&page=1#",
+        "/search?#",
         "/search?missing-equals",
         "/search?q=" + "x" * 9_000,
     ),
 )
 def test_redirect_intent_reconstruction_rejects_ambiguous_or_unbound_locations(location: str) -> None:
     route, intent = _route_and_intent()
+
+    assert reconstruct_redirect_intent(route, intent, location) is None
+
+
+@pytest.mark.parametrize(
+    "location",
+    (
+        "/search?q=changed&page=1",
+        "/search?q=quantum%20mechanics&page=2",
+        "/search?page=1",
+        "/search?q=&page=1",
+        "/search?q=quantum%20mechanics&page=1&sort=relevance",
+        "/summary?q=quantum%20mechanics&page=1",
+    ),
+)
+def test_redirect_intent_reconstruction_rejects_semantic_request_mutation(location: str) -> None:
+    route, intent = _route_and_intent()
+    policy = replace(
+        route.policy,
+        paths=("/search", "/summary"),
+        allowed_query_keys=("q", "page", "sort"),
+        policy_digest="",
+    )
+    route = replace(route, policy=policy, max_physical_dispatches=3)
+    intent = replace(intent, policy_digest=policy.policy_digest)
 
     assert reconstruct_redirect_intent(route, intent, location) is None
 
