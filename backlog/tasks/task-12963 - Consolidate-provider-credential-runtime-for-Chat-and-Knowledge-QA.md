@@ -4,9 +4,11 @@ title: Consolidate provider credential runtime for Chat and Knowledge QA
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-07-14 02:06'
+updated_date: '2026-07-14 02:15'
 labels: []
 dependencies: []
+references:
+  - 'https://github.com/rmusser01/tldw_server/pull/2727'
 documentation:
   - >-
     Docs/superpowers/specs/2026-07-12-shared-provider-credential-runtime-design.md
@@ -78,6 +80,8 @@ Completed; integration plan removed after final verification. Design: Docs/super
 2026-07-14: Integration cleanup approved. Preserve the completed source branch, replay only provider-credential-runtime commits onto current origin/dev, renumber this task because TASK-12112 collides on the target branch, resolve target overlap, and rerun the full verification gate.
 
 2026-07-13: Current-dev integration complete on codex/provider-credential-runtime-dev. Replayed the 70 provider-credential commits onto origin/dev at 8dbeb383ac, preserving current-dev RAG diagnostic sanitization, response-acquisition stream semantics, origin-bound frontend credential handling, and safe/idempotent-only replay after background handoff. Corrected one stale Retry-After test fixture to include the current origin-bound manual credential metadata; production fail-closed credential behavior was unchanged. Final integrated verification: backend gate 240 passed and 1 documented TestClient streaming skip; affected frontend matrix 95 passed; full HTTP client suite 112 passed; Chromium Knowledge QA credential/no-fallback workflow 1 passed; frontend TypeScript typecheck passed; all changed Python files py_compile clean; git diff check clean. Ruff E9/F821 found only two ChatBadRequestError findings reproduced identically on origin/dev. Bandit scanned the changed production Python scope with 0 findings on both integrated (50,914 LOC) and origin/dev baseline (45,056 LOC), 0 scan errors. Final range-diff/conflict review found no unresolved Critical or Important issues. Latest origin/dev ancestry rechecked at completion: 0 behind. The two unrelated untracked watchlist templates remain untouched.
+
+2026-07-13: Draft PR #2727 opened: https://github.com/rmusser01/tldw_server/pull/2727. The PR remains draft and must receive a requester-authored Change summary explaining what changed and why before it is marked ready or merged.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
