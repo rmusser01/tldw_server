@@ -16,6 +16,7 @@ import { normalizeWorkspaceId } from "./workspaceIdentity"
 
 export type ChatWorkspaceConsoleProps = {
   workspaceId?: string | null
+  workspaceReady: boolean
   workspaceName: string
   sources: WorkspaceSource[]
   sourcesLoading?: boolean
@@ -43,6 +44,7 @@ export type ChatWorkspaceConsoleProps = {
 
 export const ChatWorkspaceConsole = ({
   workspaceId,
+  workspaceReady,
   workspaceName,
   sources,
   sourcesLoading,
@@ -66,7 +68,6 @@ export const ChatWorkspaceConsole = ({
   onRuntimeStateChange
 }: ChatWorkspaceConsoleProps) => {
   const normalizedWorkspaceId = normalizeWorkspaceId(workspaceId)
-  const workspaceReady = normalizedWorkspaceId !== null
   const stagedSourceIds = stagedSources.map((source) => source.sourceId)
   const inspectorSources = stagedSources.map((source) => ({
     sourceId: source.sourceId,

@@ -71,9 +71,9 @@
 **Goal:** Address the final PR review findings with one readiness source of truth and browser-level offline transition evidence.
 **Success Criteria:** A persisted workspace ID cannot bypass store hydration, chat sending and both rails share the same readiness boolean, and active streaming rails switch coherently to server-unavailable state.
 **Tests:** `ChatWorkspacePage.test.tsx` and `apps/tldw-frontend/e2e/smoke/chat-workspace-live-backend.spec.ts`.
-**Status:** In Progress
+**Status:** Complete
 
-- [ ] Add a failing page regression for a non-empty workspace ID while `storeHydrated` is false.
-- [ ] Derive readiness in `ChatWorkspacePage` from `storeHydrated` plus normalized workspace identity and pass it through `ChatWorkspaceConsole`.
-- [ ] Add a browser transition from active streaming to an unreachable connection and assert both rails suppress stale streaming state.
-- [ ] Re-run focused tests, TypeScript, lint/diff checks, and record verification in TASK-12135.
+- [x] Add a failing page regression for a non-empty workspace ID while `storeHydrated` is false.
+- [x] Derive readiness in `ChatWorkspacePage` from `storeHydrated` plus normalized workspace identity and pass it through `ChatWorkspaceConsole`.
+- [x] Add a browser transition from active streaming to an unreachable connection and assert both rails suppress stale streaming state.
+- [x] Re-run focused tests, TypeScript, lint/diff checks, and record verification in TASK-12135.
