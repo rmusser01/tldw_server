@@ -1,17 +1,16 @@
 ---
 id: TASK-12963
 title: Consolidate provider credential runtime for Chat and Knowledge QA
-status: Done
+status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-14 03:30'
+updated_date: 2026-07-14 03:30
 labels: []
 dependencies: []
 references:
-  - 'https://github.com/rmusser01/tldw_server/pull/2727'
+- https://github.com/rmusser01/tldw_server/pull/2727
 documentation:
-  - >-
-    Docs/superpowers/specs/2026-07-12-shared-provider-credential-runtime-design.md
+- Docs/superpowers/specs/2026-07-12-shared-provider-credential-runtime-design.md
 ---
 
 ## Description
@@ -33,7 +32,7 @@ Design and implement a shared execution-scoped provider credential runtime used 
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Completed; integration plan removed after final verification. Design: Docs/superpowers/specs/2026-07-12-shared-provider-credential-runtime-design.md
+Docs/superpowers/plans/2026-07-13-provider-credential-runtime-production-hardening-implementation-plan.md — five stages covering canonical identity/scope and concurrency-safe lifetime, adapter-boundary compatibility, authorization-sensitive caches, bounded/sanitized streaming plus frontend parity, and the final regression/security/review gate.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
