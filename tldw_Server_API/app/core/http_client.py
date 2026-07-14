@@ -55,6 +55,17 @@ except ImportError:  # pragma: no cover
     _OTEL_AVAILABLE = False
     _otel_trace = None  # type: ignore
 
+try:  # Optional OpenTelemetry HTTP auto-instrumentation suppression
+    from opentelemetry import context as _otel_context  # type: ignore
+except ImportError:  # pragma: no cover
+    _otel_context = None  # type: ignore
+
+_OTEL_HTTP_SUPPRESSION_KEY = getattr(
+    _otel_context,
+    "_SUPPRESS_HTTP_INSTRUMENTATION_KEY",
+    None,
+)
+
 from tldw_Server_API.app.core.exceptions import (  # noqa: E402
     DownloadError,
     EgressPolicyError,
@@ -171,7 +182,7 @@ class _SensitiveHTTPLogFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         if not _SENSITIVE_HTTP_LOG_CONTEXT.get():
             return True
-        return not record.name.startswith(("httpx", "httpcore"))
+        return not record.name.startswith(("httpx", "httpcore", "aiohttp"))
 
 
 _SENSITIVE_HTTP_LOG_FILTER = _SensitiveHTTPLogFilter()
@@ -179,9 +190,16 @@ _SENSITIVE_HTTP_LOG_FILTER = _SensitiveHTTPLogFilter()
 
 def _install_sensitive_http_log_filter() -> None:
     """Install the context-aware filter on active stdlib logging handlers."""
-    loggers = [logging.getLogger(), logging.getLogger("httpx"), logging.getLogger("httpcore")]
+    loggers = [
+        logging.getLogger(),
+        logging.getLogger("httpx"),
+        logging.getLogger("httpcore"),
+        logging.getLogger("aiohttp"),
+    ]
     for name, candidate in list(logging.Logger.manager.loggerDict.items()):
-        if isinstance(candidate, logging.Logger) and name.startswith(("httpx", "httpcore")):
+        if isinstance(candidate, logging.Logger) and name.startswith(
+            ("httpx", "httpcore", "aiohttp")
+        ):
             loggers.append(candidate)
     for log in loggers:
         if _SENSITIVE_HTTP_LOG_FILTER not in log.filters:
@@ -189,6 +207,21 @@ def _install_sensitive_http_log_filter() -> None:
         for handler in log.handlers:
             if _SENSITIVE_HTTP_LOG_FILTER not in handler.filters:
                 handler.addFilter(_SENSITIVE_HTTP_LOG_FILTER)
+
+
+@contextmanager
+def _suppress_otel_http_auto_instrumentation() -> Iterator[None]:
+    """Suppress standard OTel HTTP client spans in the current request context."""
+    if _otel_context is None or _OTEL_HTTP_SUPPRESSION_KEY is None:
+        yield
+        return
+    token = _otel_context.attach(
+        _otel_context.set_value(_OTEL_HTTP_SUPPRESSION_KEY, True)
+    )
+    try:
+        yield
+    finally:
+        _otel_context.detach(token)
 
 
 def _with_sensitive_http_log_context(
@@ -202,7 +235,25 @@ def _with_sensitive_http_log_context(
         _install_sensitive_http_log_filter()
         token = _SENSITIVE_HTTP_LOG_CONTEXT.set(True)
         try:
-            return function(*args, **kwargs)
+            with _suppress_otel_http_auto_instrumentation():
+                return function(*args, **kwargs)
+        finally:
+            _SENSITIVE_HTTP_LOG_CONTEXT.reset(token)
+
+    return wrapped
+
+
+def _with_sensitive_http_log_context_async(function: Callable[..., Any]) -> Callable[..., Any]:
+    """Keep sensitive third-party log filtering active across an awaited request."""
+    @wraps(function)
+    async def wrapped(*args: Any, **kwargs: Any) -> Any:
+        if kwargs.get("sensitive_observability") is not True:
+            return await function(*args, **kwargs)
+        _install_sensitive_http_log_filter()
+        token = _SENSITIVE_HTTP_LOG_CONTEXT.set(True)
+        try:
+            with _suppress_otel_http_auto_instrumentation():
+                return await function(*args, **kwargs)
         finally:
             _SENSITIVE_HTTP_LOG_CONTEXT.reset(token)
 
@@ -513,6 +564,7 @@ class TransportAdapter(Protocol):
         cert_pinning: dict[str, set[str]] | None = None,
         verify: bool | str | ssl.SSLContext | None = None,
         configured_endpoint: ConfiguredEndpointScope | None = None,
+        sensitive_observability: bool = False,
     ) -> AsyncResponseLike: ...
 
     async def stream_bytes(
@@ -611,6 +663,7 @@ class HttpxAdapter:
         cert_pinning: dict[str, set[str]] | None = None,
         verify: bool | str | ssl.SSLContext | None = None,
         configured_endpoint: ConfiguredEndpointScope | None = None,
+        sensitive_observability: bool = False,
     ) -> httpx.Response:
         return await _afetch_httpx(
             method=method,
@@ -629,6 +682,7 @@ class HttpxAdapter:
             cert_pinning=cert_pinning,
             verify=verify,
             configured_endpoint=configured_endpoint,
+            sensitive_observability=sensitive_observability,
         )
 
     async def stream_bytes(
@@ -721,6 +775,7 @@ class AiohttpAdapter:
         cert_pinning: dict[str, set[str]] | None = None,
         verify: bool | str | ssl.SSLContext | None = None,
         configured_endpoint: ConfiguredEndpointScope | None = None,
+        sensitive_observability: bool = False,
     ) -> AsyncResponseLike:
         return await _afetch_aiohttp(
             method=method,
@@ -739,6 +794,7 @@ class AiohttpAdapter:
             cert_pinning=cert_pinning,
             verify=verify,
             configured_endpoint=configured_endpoint,
+            sensitive_observability=sensitive_observability,
         )
 
     async def stream_bytes(
@@ -1219,12 +1275,14 @@ async def _avalidate_egress_or_raise(
     *,
     dns_pin_cache: dict[str, tuple[str, ...]] | None = None,
     configured_endpoint: ConfiguredEndpointScope | None = None,
+    sensitive_observability: bool = False,
 ) -> None:
     await asyncio.to_thread(
         _validate_egress_or_raise,
         url,
         dns_pin_cache=dns_pin_cache,
         configured_endpoint=configured_endpoint,
+        sensitive_observability=sensitive_observability,
     )
 
 
@@ -2546,6 +2604,7 @@ async def _afetch_httpx(
     cert_pinning: dict[str, set[str]] | None = None,
     verify: bool | str | ssl.SSLContext | None = None,
     configured_endpoint: ConfiguredEndpointScope | None = None,
+    sensitive_observability: bool = False,
 ) -> httpx.Response:
     """Async httpx request with retries and egress enforcement.
 
@@ -2562,6 +2621,7 @@ async def _afetch_httpx(
         url,
         dns_pin_cache=dns_pin_cache,
         configured_endpoint=configured_endpoint,
+        sensitive_observability=sensitive_observability,
     )
     _validate_proxies_or_raise(proxies)
 
@@ -2570,7 +2630,8 @@ async def _afetch_httpx(
     t0 = time.time()
     last_exc: Exception | None = None
     tm = get_tracing_manager()
-    host_attr = _parse_host_from_url(url)
+    observability_url = _SENSITIVE_OBSERVABILITY_URL if sensitive_observability else url
+    host_attr = _parse_host_from_url(observability_url)
     method_upper = str(method).upper()
     _head_disable_h2_tried = False
     _head_get_range_tried = False
@@ -2585,7 +2646,8 @@ async def _afetch_httpx(
         try:
             with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                 logger.debug(
-                    f"afetch _do_once: method={method_upper} url={_sanitize_url_for_logs(target_url)}"
+                    f"afetch _do_once: method={method_upper} "
+                    f"url={_sanitize_url_for_logs(observability_url)}"
                 )
             req_headers = _sanitize_accept_encoding_for_backend(req_headers, "httpx")
         except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
@@ -2609,6 +2671,7 @@ async def _afetch_httpx(
                                 accepted_resolved_ips=_accepted_ips_for_url(
                                     dns_pin_cache, target_url
                                 ),
+                                sensitive_observability=sensitive_observability,
                             )
             except EgressPolicyError:
                 raise
@@ -2640,7 +2703,10 @@ async def _afetch_httpx(
             # can distinguish 4xx/5xx responses from transport failures. All
             # other exceptions are normalized into a NetworkError reason.
             with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
-                logger.debug(f"afetch _do_once: caught exception {e!r}")
+                logger.debug(
+                    "afetch _do_once: caught exception {}",
+                    type(e).__name__,
+                )
             try:
                 _hx = _resolve_httpx()
                 if _hx is not None and isinstance(e, getattr(_hx, "HTTPStatusError", Exception)):
@@ -2673,7 +2739,7 @@ async def _afetch_httpx(
             attributes={
                 "http.method": method.upper(),
                 "net.host.name": host_attr,
-                "url.full": _sanitize_url_for_logs(url),
+                "url.full": _sanitize_url_for_logs(observability_url),
             },
         ):
             for attempt in range(1, attempts + 1):
@@ -2687,6 +2753,7 @@ async def _afetch_httpx(
                         cur_url,
                         dns_pin_cache=dns_pin_cache,
                         configured_endpoint=configured_endpoint,
+                        sensitive_observability=sensitive_observability,
                     )
                     resp, reason = await _do_once(ac, cur_url)
                     if resp is None:
@@ -2711,12 +2778,14 @@ async def _afetch_httpx(
                                         cur_url,
                                         dns_pin_cache=dns_pin_cache,
                                         configured_endpoint=configured_endpoint,
+                                        sensitive_observability=sensitive_observability,
                                     )
                                     _check_cert_pins_for_url(
                                         cur_url,
                                         cert_pinning or _get_client_cert_pins(ac),
                                         configured_endpoint=configured_endpoint,
                                         dns_pin_cache=dns_pin_cache,
+                                        sensitive_observability=sensitive_observability,
                                     )
                                     req_headers = _inject_trace_headers(headers)
                                     req_headers = _strip_sensitive_headers_for_cross_origin(
@@ -2752,7 +2821,7 @@ async def _afetch_httpx(
                                         tm.set_attributes({"http.status_code": int(r2.status_code)})
                                     _log_outbound_request(
                                         method="GET",
-                                        url=r2.request.url if hasattr(r2.request, "url") else cur_url,
+                                        url=observability_url,
                                         status_code=int(r2.status_code),
                                         start_time=t0,
                                         attempt=attempt,
@@ -2804,14 +2873,21 @@ async def _afetch_httpx(
                             if resp.status_code < 400:
                                 # metrics for success
                                 try:
-                                    host = _parse_host_from_url(str(resp.request.url))
+                                    response_observability_url = (
+                                        observability_url
+                                        if sensitive_observability
+                                        else _get_response_url(resp, cur_url)
+                                    )
+                                    response_host = _parse_host_from_url(
+                                        response_observability_url
+                                    )
                                     get_metrics_registry().increment(
-                                        "http_client_requests_total", 1, labels={"method": method.upper(), "host": host, "status": str(resp.status_code)}
+                                        "http_client_requests_total", 1, labels={"method": method.upper(), "host": response_host, "status": str(resp.status_code)}
                                     )
                                     get_metrics_registry().observe(
                                         "http_client_request_duration_seconds",
                                         time.time() - t0,
-                                        labels={"method": method.upper(), "host": host},
+                                        labels={"method": method.upper(), "host": response_host},
                                     )
                                 except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
                                     pass
@@ -2819,7 +2895,7 @@ async def _afetch_httpx(
                                     tm.set_attributes({"http.status_code": int(resp.status_code)})
                                 _log_outbound_request(
                                     method=method,
-                                    url=resp.request.url,
+                                    url=response_observability_url,
                                     status_code=int(resp.status_code),
                                     start_time=t0,
                                     attempt=attempt,
@@ -2831,7 +2907,7 @@ async def _afetch_httpx(
                             if not should or attempt == attempts:
                                 _log_outbound_request(
                                     method=method,
-                                    url=resp.request.url,
+                                    url=observability_url,
                                     status_code=int(resp.status_code),
                                     start_time=t0,
                                     attempt=attempt,
@@ -2840,7 +2916,6 @@ async def _afetch_httpx(
                                 return resp
                             reason = rsn
                             try:
-                                host = _parse_host_from_url(str(resp.request.url))
                                 get_metrics_registry().increment("http_client_retries_total", 1, labels={"reason": reason})
                             except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
                                 pass
@@ -2852,7 +2927,7 @@ async def _afetch_httpx(
                                 delay = _decorrelated_jitter_sleep(sleep_s, retry.backoff_base_ms, retry.backoff_cap_s)
                             logger.debug(
                                 f"afetch retry attempt={attempt} reason={reason} delay={delay:.3f}s "
-                                f"url={_sanitize_url_for_logs(cur_url)}"
+                                f"url={_sanitize_url_for_logs(observability_url)}"
                             )
                             with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                                 tm.add_event("http.retry", {"attempt": attempt, "reason": reason})
@@ -2867,7 +2942,7 @@ async def _afetch_httpx(
                     if not should or attempt == attempts:
                         _log_outbound_request(
                             method=method,
-                            url=cur_url,
+                            url=observability_url,
                             status_code=0,
                             start_time=t0,
                             attempt=attempt,
@@ -2880,7 +2955,7 @@ async def _afetch_httpx(
                     delay = _decorrelated_jitter_sleep(sleep_s, retry.backoff_base_ms, retry.backoff_cap_s)
                     logger.debug(
                         f"afetch network retry attempt={attempt} reason={rsn} delay={delay:.3f}s "
-                        f"url={_sanitize_url_for_logs(cur_url)}"
+                        f"url={_sanitize_url_for_logs(observability_url)}"
                     )
                     with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                         tm.add_event("http.retry", {"attempt": attempt, "reason": rsn})
@@ -2891,7 +2966,7 @@ async def _afetch_httpx(
         # If we exit loop without return, attempts exhausted
         _log_outbound_request(
             method=method,
-            url=url,
+            url=observability_url,
             status_code=0,
             start_time=t0,
             attempt=attempts,
@@ -2923,6 +2998,7 @@ async def _afetch_aiohttp(
     cert_pinning: dict[str, set[str]] | None = None,
     verify: Any | None = None,
     configured_endpoint: ConfiguredEndpointScope | None = None,
+    sensitive_observability: bool = False,
 ) -> _AiohttpResponse:
     """Async aiohttp request with retries and egress enforcement.
 
@@ -2939,6 +3015,7 @@ async def _afetch_aiohttp(
         url,
         dns_pin_cache=dns_pin_cache,
         configured_endpoint=configured_endpoint,
+        sensitive_observability=sensitive_observability,
     )
     _validate_proxies_or_raise(proxies)
 
@@ -2947,7 +3024,8 @@ async def _afetch_aiohttp(
     t0 = time.time()
     last_exc: Exception | None = None
     tm = get_tracing_manager()
-    host_attr = _parse_host_from_url(url)
+    observability_url = _SENSITIVE_OBSERVABILITY_URL if sensitive_observability else url
+    host_attr = _parse_host_from_url(observability_url)
     method_upper = str(method).upper()
     _head_get_range_tried = False
 
@@ -2987,6 +3065,7 @@ async def _afetch_aiohttp(
                             accepted_resolved_ips=_accepted_ips_for_url(
                                 dns_pin_cache, target_url
                             ),
+                            sensitive_observability=sensitive_observability,
                         )
             except EgressPolicyError:
                 raise
@@ -3030,7 +3109,7 @@ async def _afetch_aiohttp(
         attributes={
             "http.method": method.upper(),
             "net.host.name": host_attr,
-            "url.full": _sanitize_url_for_logs(url),
+            "url.full": _sanitize_url_for_logs(observability_url),
         },
     ):
         for attempt in range(1, attempts + 1):
@@ -3043,6 +3122,7 @@ async def _afetch_aiohttp(
                     cur_url,
                     dns_pin_cache=dns_pin_cache,
                     configured_endpoint=configured_endpoint,
+                    sensitive_observability=sensitive_observability,
                 )
                 resp, reason = await _do_once(session, cur_url)
                 if resp is None:
@@ -3053,12 +3133,14 @@ async def _afetch_aiohttp(
                                 cur_url,
                                 dns_pin_cache=dns_pin_cache,
                                 configured_endpoint=configured_endpoint,
+                                sensitive_observability=sensitive_observability,
                             )
                             _check_cert_pins_for_url(
                                 cur_url,
                                 cert_pinning or _get_client_cert_pins(session),
                                 configured_endpoint=configured_endpoint,
                                 dns_pin_cache=dns_pin_cache,
+                                sensitive_observability=sensitive_observability,
                             )
                             req_headers = _inject_trace_headers(headers)
                             req_headers = _strip_sensitive_headers_for_cross_origin(
@@ -3088,7 +3170,7 @@ async def _afetch_aiohttp(
                                 tm.set_attributes({"http.status_code": int(r2_wrap.status_code)})
                             _log_outbound_request(
                                 method="GET",
-                                url=_get_response_url(r2_wrap, cur_url),
+                                url=observability_url,
                                 status_code=int(r2_wrap.status_code),
                                 start_time=t0,
                                 attempt=attempt,
@@ -3129,16 +3211,21 @@ async def _afetch_aiohttp(
                 # final response
                 if resp.status_code < 400:
                     try:
-                        host = _parse_host_from_url(_get_response_url(resp, cur_url))
+                        response_observability_url = (
+                            observability_url
+                            if sensitive_observability
+                            else _get_response_url(resp, cur_url)
+                        )
+                        response_host = _parse_host_from_url(response_observability_url)
                         get_metrics_registry().increment(
                             "http_client_requests_total",
                             1,
-                            labels={"method": method.upper(), "host": host, "status": str(resp.status_code)},
+                            labels={"method": method.upper(), "host": response_host, "status": str(resp.status_code)},
                         )
                         get_metrics_registry().observe(
                             "http_client_request_duration_seconds",
                             time.time() - t0,
-                            labels={"method": method.upper(), "host": host},
+                            labels={"method": method.upper(), "host": response_host},
                         )
                     except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
                         pass
@@ -3146,7 +3233,7 @@ async def _afetch_aiohttp(
                         tm.set_attributes({"http.status_code": int(resp.status_code)})
                     _log_outbound_request(
                         method=method,
-                        url=_get_response_url(resp, cur_url),
+                        url=response_observability_url,
                         status_code=int(resp.status_code),
                         start_time=t0,
                         attempt=attempt,
@@ -3158,7 +3245,7 @@ async def _afetch_aiohttp(
                 if not should or attempt == attempts:
                     _log_outbound_request(
                         method=method,
-                        url=_get_response_url(resp, cur_url),
+                        url=observability_url,
                         status_code=int(resp.status_code),
                         start_time=t0,
                         attempt=attempt,
@@ -3167,7 +3254,6 @@ async def _afetch_aiohttp(
                     return resp
                 reason = rsn
                 try:
-                    host = _parse_host_from_url(_get_response_url(resp, cur_url))
                     get_metrics_registry().increment("http_client_retries_total", 1, labels={"reason": reason})
                 except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
                     pass
@@ -3178,7 +3264,7 @@ async def _afetch_aiohttp(
                     delay = _decorrelated_jitter_sleep(sleep_s, retry.backoff_base_ms, retry.backoff_cap_s)
                 logger.debug(
                     f"afetch retry attempt={attempt} reason={reason} delay={delay:.3f}s "
-                    f"url={_sanitize_url_for_logs(cur_url)}"
+                    f"url={_sanitize_url_for_logs(observability_url)}"
                 )
                 with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                     tm.add_event("http.retry", {"attempt": attempt, "reason": reason})
@@ -3191,7 +3277,7 @@ async def _afetch_aiohttp(
                 if not should or attempt == attempts:
                     _log_outbound_request(
                         method=method,
-                        url=cur_url,
+                        url=observability_url,
                         status_code=0,
                         start_time=t0,
                         attempt=attempt,
@@ -3204,7 +3290,7 @@ async def _afetch_aiohttp(
                 delay = _decorrelated_jitter_sleep(sleep_s, retry.backoff_base_ms, retry.backoff_cap_s)
                 logger.debug(
                     f"afetch network retry attempt={attempt} reason={rsn} delay={delay:.3f}s "
-                    f"url={_sanitize_url_for_logs(cur_url)}"
+                    f"url={_sanitize_url_for_logs(observability_url)}"
                 )
                 with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                     tm.add_event("http.retry", {"attempt": attempt, "reason": rsn})
@@ -3214,7 +3300,7 @@ async def _afetch_aiohttp(
 
     _log_outbound_request(
         method=method,
-        url=url,
+        url=observability_url,
         status_code=0,
         start_time=t0,
         attempt=attempts,
@@ -3224,6 +3310,7 @@ async def _afetch_aiohttp(
     raise RetryExhaustedError("All retry attempts exhausted")  # noqa: TRY003
 
 
+@_with_sensitive_http_log_context_async
 async def afetch(
     *,
     method: str,
@@ -3242,6 +3329,7 @@ async def afetch(
     cert_pinning: dict[str, set[str]] | None = None,
     verify: bool | str | ssl.SSLContext | None = None,
     configured_endpoint: ConfiguredEndpointScope | None = None,
+    sensitive_observability: bool = False,
 ) -> Any:
     if client is not None:
         adapter_name = "aiohttp" if _is_aiohttp_client(client) else "httpx"
@@ -3265,6 +3353,7 @@ async def afetch(
         cert_pinning=cert_pinning,
         verify=verify,
         configured_endpoint=configured_endpoint,
+        sensitive_observability=sensitive_observability,
     )
 
 
@@ -3574,7 +3663,12 @@ def _fetch_httpx_response(
                         continue
                     if resp.status_code < 400:
                         try:
-                            host = _parse_host_from_url(observability_url)
+                            response_observability_url = (
+                                observability_url
+                                if sensitive_observability
+                                else _get_response_url(resp, cur_url)
+                            )
+                            host = _parse_host_from_url(response_observability_url)
                             get_metrics_registry().increment(
                                 "http_client_requests_total", 1, labels={"method": method.upper(), "host": host, "status": str(resp.status_code)}
                             )
@@ -3589,7 +3683,7 @@ def _fetch_httpx_response(
                             tm.set_attributes({"http.status_code": int(resp.status_code)})
                         _log_outbound_request(
                             method=method,
-                            url=observability_url,
+                            url=response_observability_url,
                             status_code=int(resp.status_code),
                             start_time=t0,
                             attempt=attempt,

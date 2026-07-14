@@ -19,6 +19,25 @@ class _DummyResponse:
 
 
 @pytest.mark.asyncio
+async def test_connection_pool_propagates_sensitive_observability(monkeypatch):
+    pool = ConnectionPool(provider="test-provider", retry_attempts=1)
+    captured = []
+
+    async def _fake_afetch(**kwargs):
+        captured.append(kwargs)
+        return _DummyResponse(status_code=200)
+
+    monkeypatch.setattr(pool_mod, "afetch", _fake_afetch)
+
+    assert await pool.request(
+        "POST",
+        "https://runtime.private/secret/embeddings",
+        sensitive_observability=True,
+    ) == {"ok": True}
+    assert captured[0]["sensitive_observability"] is True
+
+
+@pytest.mark.asyncio
 async def test_connection_pool_http_error_counts_single_failure(monkeypatch):
     pool = ConnectionPool(provider="test-provider", retry_attempts=1)
 

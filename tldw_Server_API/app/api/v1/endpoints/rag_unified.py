@@ -7,7 +7,6 @@ All features are accessible through explicit parameters.
 
 import asyncio
 import hashlib
-import inspect
 import json
 import os
 import time
@@ -57,15 +56,19 @@ from tldw_Server_API.app.core.AuthNZ.byok_helpers import is_trusted_base_url_pri
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_READ
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import ProviderCredentialRuntime
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    ProviderCredentialRuntime,
+    reject_provider_call_credentials,
+)
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
 from tldw_Server_API.app.core.Chat.chat_service import resolve_provider_api_key
-from tldw_Server_API.app.core.config import get_config_value, settings
+from tldw_Server_API.app.core.config import get_config_value
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.Prompts_DB import PromptsDatabase
 from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
+from tldw_Server_API.app.core.RAG.rag_service import transport as rag_transport
 from tldw_Server_API.app.core.RAG.rag_service.agentic_chunker import (
     AgenticConfig,
     agentic_rag_pipeline,
@@ -85,11 +88,6 @@ from tldw_Server_API.app.core.RAG.rag_service.request_bundle import (
 from tldw_Server_API.app.core.RAG.rag_service.request_resolution import (
     ResolvedRAGRequest,
     resolve_rag_request,
-)
-from tldw_Server_API.app.core.RAG.rag_service import transport as rag_transport
-from tldw_Server_API.app.core.RAG.rag_service.retrieval_plan import (
-    RetrievalPlan,
-    build_retrieval_plan,
 )
 from tldw_Server_API.app.core.RAG.rag_service.response_mapping import (
     rag_result_from_unified_search_result,
@@ -476,6 +474,7 @@ def _checkpoint_safe_value(value: Any) -> Any:
 
 def _sanitize_checkpoint_config_for_persistence(config: dict[str, Any]) -> dict[str, Any]:
     """Drop runtime-only objects before persisting batch checkpoint config."""
+    reject_provider_call_credentials(config)
     sanitized: dict[str, Any] = {}
     for key, value in dict(config or {}).items():
         safe_value = _checkpoint_safe_value(value)
@@ -823,116 +822,130 @@ class AblationRequest(BaseModel):  # type: ignore[misc]
     dependencies=[Depends(check_rate_limit)]
 )
 async def rag_ablate(
+    request_raw: Request,
     request: AblationRequest,
     current_user: User = Depends(get_request_user),
     media_db: Any = Depends(get_media_db_for_user),
     chacha_db: CharactersRAGDB = Depends(get_chacha_db_for_user)
 ):
-    kanban_db_path = _resolve_kanban_db_path(current_user)
-    db_paths = {
-        "media_db_path": media_db.db_path if media_db else None,
-        "notes_db_path": chacha_db.db_path if chacha_db else None,
-        "character_db_path": chacha_db.db_path if chacha_db else None,
-        "kanban_db_path": kanban_db_path,
-    }
+    try:
+        credential_runtime = _build_credential_runtime(request_raw, current_user)
+    except _RAG_PROVIDER_FAILURES as exc:
+        raise _rag_provider_http_exception(exc) from exc
 
-    common = {
-        "query": request.query,
-        "sources": ["media_db"],
-        "media_db_path": db_paths["media_db_path"],
-        "notes_db_path": db_paths["notes_db_path"],
-        "character_db_path": db_paths["character_db_path"],
-        "kanban_db_path": db_paths["kanban_db_path"],
-        "media_db": media_db,
-        "chacha_db": chacha_db,
-        "search_mode": request.search_mode,
-        "top_k": request.top_k,
-        "min_score": 0.0,
-        "enable_generation": bool(request.with_answer),
-        "generation_model": None,
-        "max_generation_tokens": 300,
-    }
+    try:
+        kanban_db_path = _resolve_kanban_db_path(current_user)
+        db_paths = {
+            "media_db_path": media_db.db_path if media_db else None,
+            "notes_db_path": chacha_db.db_path if chacha_db else None,
+            "character_db_path": chacha_db.db_path if chacha_db else None,
+            "kanban_db_path": kanban_db_path,
+        }
 
-    runs = []
+        common = {
+            "query": request.query,
+            "sources": ["media_db"],
+            "media_db_path": db_paths["media_db_path"],
+            "notes_db_path": db_paths["notes_db_path"],
+            "character_db_path": db_paths["character_db_path"],
+            "kanban_db_path": db_paths["kanban_db_path"],
+            "media_db": media_db,
+            "chacha_db": chacha_db,
+            "search_mode": request.search_mode,
+            "top_k": request.top_k,
+            "min_score": 0.0,
+            "enable_generation": bool(request.with_answer),
+            "generation_model": None,
+            "max_generation_tokens": 300,
+            "credential_runtime": credential_runtime,
+        }
 
-    # 1) Baseline (no reranking)
-    r1 = await unified_rag_pipeline(
-        **common,
-        enable_reranking=False,
-    )
-    runs.append({
-        "label": "baseline",
-        "result": rag_result_to_response(rag_result_from_unified_search_result(r1))
-    })
+        runs = []
 
-    # 2) +rerank
-    r2 = await unified_rag_pipeline(
-        **common,
-        enable_reranking=True,
-        reranking_strategy=request.reranking_strategy,
-    )
-    runs.append({
-        "label": "+rerank",
-        "result": rag_result_to_response(rag_result_from_unified_search_result(r2))
-    })
-
-    # 3) agentic
-    a_cfg = AgenticConfig(
-        top_k_docs=request.agentic_top_k_docs,
-        window_chars=request.agentic_window_chars,
-        max_tokens_read=request.agentic_max_tokens_read,
-        max_tool_calls=6,
-        extractive_only=True,
-        quote_spans=True,
-        enable_tools=False,
-        debug_trace=False,
-    )
-    r3 = await agentic_rag_pipeline(
-        **common,
-        agentic=a_cfg,
-        enable_citations=False,
-    )
-    runs.append({
-        "label": "agentic",
-        "result": rag_result_to_response(rag_result_from_unified_search_result(r3))
-    })
-
-    # 4) agentic (strict): tools on, extractive only, small budget
-    a_cfg_strict = AgenticConfig(
-        top_k_docs=max(1, request.agentic_top_k_docs),
-        window_chars=max(600, int(request.agentic_window_chars / 2)),
-        max_tokens_read=max(1000, int(request.agentic_max_tokens_read / 2)),
-        max_tool_calls=4,
-        extractive_only=True,
-        quote_spans=True,
-        enable_tools=True,
-        time_budget_sec=5.0,
-        debug_trace=False,
-    )
-    r4 = await agentic_rag_pipeline(
-        **common,
-        agentic=a_cfg_strict,
-        enable_citations=False,
-    )
-    runs.append({
-        "label": "agentic_strict",
-        "result": rag_result_to_response(rag_result_from_unified_search_result(r4))
-    })
-
-    # Compact output for quick comparison
-    out = []
-    for item in runs:
-        res = item["result"]
-        first = (res.documents[0] if res.documents else None)
-        out.append({
-            "label": item["label"],
-            "total_time": res.total_time,
-            "cache_hit": res.cache_hit,
-            "doc_count": len(res.documents or []),
-            "first_doc_id": (first.get("id") if isinstance(first, dict) else getattr(first, 'id', None)) if first else None,
+        r1 = await unified_rag_pipeline(**common, enable_reranking=False)
+        runs.append({
+            "label": "baseline",
+            "result": rag_result_to_response(rag_result_from_unified_search_result(r1)),
         })
 
-    return {"summary": out, "runs": runs}
+        r2 = await unified_rag_pipeline(
+            **common,
+            enable_reranking=True,
+            reranking_strategy=request.reranking_strategy,
+        )
+        runs.append({
+            "label": "+rerank",
+            "result": rag_result_to_response(rag_result_from_unified_search_result(r2)),
+        })
+
+        a_cfg = AgenticConfig(
+            top_k_docs=request.agentic_top_k_docs,
+            window_chars=request.agentic_window_chars,
+            max_tokens_read=request.agentic_max_tokens_read,
+            max_tool_calls=6,
+            extractive_only=True,
+            quote_spans=True,
+            enable_tools=False,
+            debug_trace=False,
+        )
+        r3 = await agentic_rag_pipeline(
+            **common,
+            agentic=a_cfg,
+            enable_citations=False,
+        )
+        runs.append({
+            "label": "agentic",
+            "result": rag_result_to_response(rag_result_from_unified_search_result(r3)),
+        })
+
+        a_cfg_strict = AgenticConfig(
+            top_k_docs=max(1, request.agentic_top_k_docs),
+            window_chars=max(600, int(request.agentic_window_chars / 2)),
+            max_tokens_read=max(1000, int(request.agentic_max_tokens_read / 2)),
+            max_tool_calls=4,
+            extractive_only=True,
+            quote_spans=True,
+            enable_tools=True,
+            time_budget_sec=5.0,
+            debug_trace=False,
+        )
+        r4 = await agentic_rag_pipeline(
+            **common,
+            agentic=a_cfg_strict,
+            enable_citations=False,
+        )
+        runs.append({
+            "label": "agentic_strict",
+            "result": rag_result_to_response(rag_result_from_unified_search_result(r4)),
+        })
+
+        out = []
+        for item in runs:
+            res = item["result"]
+            first = res.documents[0] if res.documents else None
+            out.append({
+                "label": item["label"],
+                "total_time": res.total_time,
+                "cache_hit": res.cache_hit,
+                "doc_count": len(res.documents or []),
+                "first_doc_id": (
+                    first.get("id")
+                    if isinstance(first, dict)
+                    else getattr(first, "id", None)
+                ) if first else None,
+            })
+
+        return {"summary": out, "runs": runs}
+    except _RAG_PROVIDER_FAILURES as exc:
+        raise _rag_provider_http_exception(exc) from exc
+    except Exception as exc:  # noqa: BLE001 - convert unexpected endpoint failures
+        logger.error("RAG ablation failed")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="RAG ablation failed due to an internal error.",
+        ) from exc
+    finally:
+        await credential_runtime.close()
 
 
 @router.get(
@@ -1858,6 +1871,11 @@ async def simple_search_endpoint(
     Simple search for basic use cases.
     """
     try:
+        credential_runtime = _build_credential_runtime(request, current_user)
+    except _RAG_PROVIDER_FAILURES as exc:
+        raise _rag_provider_http_exception(exc) from exc
+
+    try:
         try:
             _qh = hashlib.md5((query or "").encode("utf-8"), usedforsecurity=False).hexdigest()[:8]
             logger.info(f"Simple search: query_hash={_qh} len={len(query or '')}")
@@ -1891,6 +1909,7 @@ async def simple_search_endpoint(
             character_db_path=(chacha_db.db_path if chacha_db else None),
             kanban_db_path=_resolve_kanban_db_path(current_user),
             user_id=_resolve_implicit_feedback_user_id(None, current_user),
+            credential_runtime=credential_runtime,
         )
 
         # Best-effort RAG query logging (counts as a single query).
@@ -1919,12 +1938,16 @@ async def simple_search_endpoint(
             "count": len(normalized_docs)
         }
 
+    except _RAG_PROVIDER_FAILURES as exc:
+        raise _rag_provider_http_exception(exc) from exc
     except Exception as e:  # noqa: BLE001 - surface as HTTP 500 with context
-        logger.error(f"Simple search error: {e}")
+        logger.error("Simple search failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Search failed due to an internal error."
         ) from e
+    finally:
+        await credential_runtime.close()
 
 
 @router.post(
@@ -2354,6 +2377,11 @@ async def advanced_search_endpoint(
     Advanced search with common features enabled.
     """
     try:
+        credential_runtime = _build_credential_runtime(request, current_user)
+    except _RAG_PROVIDER_FAILURES as exc:
+        raise _rag_provider_http_exception(exc) from exc
+
+    try:
         logger.info(f"Advanced search: query='{query}'")
         # Topic monitoring (non-blocking)
         try:
@@ -2384,17 +2412,22 @@ async def advanced_search_endpoint(
             with_answer=with_answer,
             media_db=media_db,
             chacha_db=chacha_db,
+            credential_runtime=credential_runtime,
             **db_paths
         )
 
         return rag_result_to_response(rag_result_from_unified_search_result(result))
 
+    except _RAG_PROVIDER_FAILURES as exc:
+        raise _rag_provider_http_exception(exc) from exc
     except Exception as e:  # noqa: BLE001 - surface as HTTP 500 with context
-        logger.error(f"Advanced search error: {e}")
+        logger.error("Advanced search failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Search failed due to an internal error."
         ) from e
+    finally:
+        await credential_runtime.close()
 
 
 @router.get(

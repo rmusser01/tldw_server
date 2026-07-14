@@ -8648,6 +8648,7 @@ async def simple_search(
     character_db_path: Optional[str] = None,
     kanban_db_path: Optional[str] = None,
     user_id: Optional[str] = None,
+    credential_runtime: Any = None,
 ) -> list[Document]:
     """
     Simple search wrapper for basic use cases.
@@ -8659,20 +8660,25 @@ async def simple_search(
     Returns:
         List of documents
     """
+    pipeline_kwargs = {
+        "query": query,
+        "top_k": top_k,
+        "expand_query": False,
+        "enable_cache": True,
+        "enable_reranking": True,
+        "sources": sources,
+        "media_db": media_db,
+        "chacha_db": chacha_db,
+        "media_db_path": media_db_path,
+        "notes_db_path": notes_db_path,
+        "character_db_path": character_db_path,
+        "kanban_db_path": kanban_db_path,
+        "user_id": user_id,
+    }
+    if credential_runtime is not None:
+        pipeline_kwargs["credential_runtime"] = credential_runtime
     result = await unified_rag_pipeline(
-        query=query,
-        top_k=top_k,
-        expand_query=False,
-        enable_cache=True,
-        enable_reranking=True,
-        sources=sources,
-        media_db=media_db,
-        chacha_db=chacha_db,
-        media_db_path=media_db_path,
-        notes_db_path=notes_db_path,
-        character_db_path=character_db_path,
-        kanban_db_path=kanban_db_path,
-        user_id=user_id,
+        **pipeline_kwargs,
     )
     if isinstance(result, UnifiedSearchResult):
         return result.documents

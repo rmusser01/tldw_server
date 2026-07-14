@@ -286,6 +286,11 @@ class AsyncOpenAIProvider(AsyncEmbeddingProvider):
                 url=self._resolve_url(base_url_override, credentials_resolved),
                 headers=headers,
                 json_data=payload,
+                sensitive_observability=(
+                    credentials_resolved is True
+                    and isinstance(base_url_override, str)
+                    and bool(base_url_override.strip())
+                ),
             )
             if isinstance(data, dict) and "error" in data:
                 status = "failure"
@@ -381,6 +386,11 @@ class AsyncHuggingFaceProvider(AsyncEmbeddingProvider):
                 url=url,
                 headers=headers,
                 json_data=payload,
+                sensitive_observability=(
+                    credentials_resolved is True
+                    and isinstance(base_url_override, str)
+                    and bool(base_url_override.strip())
+                ),
             )
             # Usage is already recorded in check_rate_limit_async
             if credentials_resolved is True and isinstance(data, dict) and "error" in data:
@@ -460,6 +470,11 @@ class AsyncLocalAPIProvider(AsyncEmbeddingProvider):
                 url=base_url_override or self.api_url,
                 headers=headers,
                 json_data=payload,
+                sensitive_observability=(
+                    credentials_resolved is True
+                    and isinstance(base_url_override, str)
+                    and bool(base_url_override.strip())
+                ),
             )
             return _normalize_embedding_response(data)
         except _ASYNC_EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:

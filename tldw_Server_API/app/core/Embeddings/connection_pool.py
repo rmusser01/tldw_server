@@ -9,9 +9,9 @@ from typing import Any, Optional
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Infrastructure.circuit_breaker import CircuitBreaker
 from tldw_Server_API.app.core.exceptions import NetworkError, RetryExhaustedError
 from tldw_Server_API.app.core.http_client import RetryPolicy, afetch
+from tldw_Server_API.app.core.Infrastructure.circuit_breaker import CircuitBreaker
 
 
 class ConnectionPool:
@@ -112,7 +112,8 @@ class ConnectionPool:
         headers: Optional[dict[str, str]] = None,
         json_data: Optional[dict[str, Any]] = None,
         data: Optional[Any] = None,
-        params: Optional[dict[str, str]] = None
+        params: Optional[dict[str, str]] = None,
+        sensitive_observability: bool = False,
     ) -> dict[str, Any]:
         """Make an HTTP request using the connection pool with circuit breaker protection."""
         return await self._breaker.call_async(
@@ -123,6 +124,7 @@ class ConnectionPool:
             json_data=json_data,
             data=data,
             params=params,
+            sensitive_observability=sensitive_observability,
         )
 
     async def _request_impl(
@@ -133,6 +135,7 @@ class ConnectionPool:
         json_data: Optional[dict[str, Any]] = None,
         data: Optional[Any] = None,
         params: Optional[dict[str, str]] = None,
+        sensitive_observability: bool = False,
     ) -> dict[str, Any]:
         """
         Make an HTTP request using the connection pool.
@@ -168,6 +171,7 @@ class ConnectionPool:
                     params=params,
                     timeout=self.timeout_seconds,
                     retry=retry,
+                    sensitive_observability=sensitive_observability,
                 )
                 elapsed = time.time() - start_time
                 with self._lock:

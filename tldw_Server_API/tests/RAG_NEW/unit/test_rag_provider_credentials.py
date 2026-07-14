@@ -665,6 +665,26 @@ async def test_agentic_typed_failure_bypasses_raw_fallback(
     assert _RecordingRuntime.created[0].close_calls == 1  # nosec B101
 
 
+@pytest.mark.asyncio
+async def test_simple_wrapper_forwards_runtime_without_changing_legacy_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, Any]] = []
+
+    async def fake_pipeline(**kwargs: Any) -> UnifiedSearchResult:
+        calls.append(kwargs)
+        return UnifiedSearchResult(documents=[], query=kwargs["query"])
+
+    monkeypatch.setattr(unified_pipeline_module, "unified_rag_pipeline", fake_pipeline)
+    runtime = object()
+
+    await unified_pipeline_module.simple_search("runtime", credential_runtime=runtime)
+    await unified_pipeline_module.simple_search("legacy")
+
+    assert calls[0]["credential_runtime"] is runtime  # nosec B101
+    assert "credential_runtime" not in calls[1]  # nosec B101
+
+
 def test_pipeline_entry_points_expose_optional_runtime_keyword() -> None:
     agentic_parameter = inspect.signature(production_agentic_rag_pipeline).parameters["credential_runtime"]
     rag_parameter = inspect.signature(unified_rag_pipeline).parameters["credential_runtime"]

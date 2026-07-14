@@ -684,11 +684,11 @@ git commit -m "fix(knowledge): fail closed on terminal RAG stream errors"
 - Modify: `apps/packages/ui/src/services/rag/__tests__/stream-contract.test.ts`
 - Modify: `apps/tldw-frontend/e2e/workflows/knowledge-qa.spec.ts`
 
-- [ ] **Step 1: Write final failing integration tests**
+- [x] **Step 1: Write final failing integration tests**
 
 Run Chat and Knowledge QA with sentinel user credentials while monkeypatching server fallback to raise. Cover standard/streaming, distinct providers in one RAG request, OAuth refresh, invalid configured BYOK, store outage, revoked background scope, retrieval cache hit, and hosted query embedding. Capture Loguru, response bodies, checkpoint/cache files, and browser events and assert the sentinel never appears. Exercise invalid credentials and store failures through the real BYOK resolver, make revoked checkpoint authorization prove the runtime and provider boundary are never reached, and feed an unsafe extra terminal field through the browser parser so persistence assertions are non-vacuous. Add an adversarial shared-contract case proving provider/configuration errors cannot certify non-stream replay even when their booleans claim otherwise; only `stream_transport_unavailable` may carry the pre-dispatch replay certificate, and terminal parsing must return an allowlisted projection rather than retaining unknown fields.
 
-- [ ] **Step 2: Run focused cross-surface suites**
+- [x] **Step 2: Run focused cross-surface suites**
 
 ```bash
 source .venv/bin/activate
@@ -703,7 +703,7 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 3: Run frontend unit and E2E coverage**
+- [x] **Step 3: Run frontend unit and E2E coverage**
 
 ```bash
 bunx vitest run \
@@ -715,7 +715,7 @@ bunx playwright test apps/tldw-frontend/e2e/workflows/knowledge-qa.spec.ts --gre
 
 Expected: PASS.
 
-- [ ] **Step 4: Run security and repository gates**
+- [x] **Step 4: Run security and repository gates**
 
 ```bash
 source .venv/bin/activate
@@ -732,7 +732,7 @@ git diff --check
 
 Expected: Bandit exits 0 with no new findings in touched code; `git diff --check` has no output.
 
-- [ ] **Step 5: Run review skills and fix findings**
+- [x] **Step 5: Run review skills and fix findings**
 
 Use `@superpowers:requesting-code-review`, then rerun every affected focused suite after fixes. Stop and reassess after three failed attempts on the same issue.
 
@@ -746,6 +746,78 @@ Update `TASK-12112` with touched files, verification commands/results, Bandit ar
 git add tldw_Server_API apps/packages/ui apps/tldw-frontend backlog/tasks Docs
 git commit -m "test(rag): verify shared credential runtime end to end"
 ```
+
+### Task 13: Close final authenticated endpoint and async observability gaps
+
+**Files:**
+- Modify: `tldw_Server_API/app/api/v1/endpoints/rag_unified.py`
+- Modify: `tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py`
+- Modify: `tldw_Server_API/app/core/Embeddings/async_embeddings.py`
+- Modify: `tldw_Server_API/app/core/Embeddings/connection_pool.py`
+- Modify: `tldw_Server_API/app/core/http_client.py`
+- Modify: `tldw_Server_API/tests/RAG_NEW/integration/test_rag_ablate_api.py`
+- Create: `tldw_Server_API/tests/RAG_NEW/integration/test_rag_convenience_endpoint_credentials.py`
+- Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_rag_provider_credentials.py`
+- Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_rag_endpoint_contract_cleanup.py`
+- Modify: `tldw_Server_API/tests/Embeddings/test_async_embeddings_provider_url_override.py`
+- Modify: `tldw_Server_API/tests/Embeddings/test_connection_pool_failure_accounting.py`
+- Modify: `tldw_Server_API/tests/http_client/test_http_client_sensitive_observability.py`
+
+- [x] **Step 1: Write adversarial failing tests**
+
+Prove authenticated `/rag/ablate`, `/rag/simple`, and `/rag/advanced` each create
+one trusted request runtime, pass that exact runtime through every unified/agentic
+or convenience-wrapper call, never invoke server fallback after explicit BYOK
+resolution, map typed failures before broad exception handlers, and close exactly
+once on success and failure. Prove `simple_search` forwards the runtime to
+`unified_rag_pipeline`. Prove explicit runtime base-URL overrides for OpenAI,
+Hugging Face, and local API embeddings mark connection-pool requests as sensitive.
+At the async HTTP boundary prove the real endpoint is used for transport and egress
+while its host/path/query are absent from debug logs, structured outbound logs,
+retry logs, metrics, trace attributes/events, and concurrent public-request output
+for both httpx and aiohttp adapter paths. Prove request-scoped sensitive mode also
+suppresses OpenTelemetry HTTP client auto-instrumentation and third-party aiohttp
+logging without suppressing concurrent public requests. Prove direct, nested, and cyclic
+`ProviderCallCredentials` checkpoint payloads raise the credential serialization
+barrier rather than being silently dropped, while ordinary unsupported pipeline
+objects remain safely omitted.
+
+- [x] **Step 2: Verify red**
+
+Run the focused endpoint, embedding, connection-pool, HTTP observability, and
+checkpoint test files. Expected: FAIL because the three endpoints omit runtimes,
+the async transport lacks sensitive-observability propagation, and checkpoint
+sanitization does not invoke the credential persistence guard.
+
+- [x] **Step 3: Implement the minimal fail-closed wiring**
+
+Construct one request-owned runtime inside each missed authenticated endpoint,
+propagate it through all four ablation calls and the simple/advanced wrappers, map
+`_RAG_PROVIDER_FAILURES` with the existing bounded helper before broad handlers,
+and close in cancellation-safe `finally` blocks. Preserve legacy no-runtime wrapper
+callers. Extend `sensitive_observability` through `ConnectionPool`, `afetch`, both
+async transport adapters, egress/DNS/pinning validation, retry/outbound logs,
+metrics, tracing, and the async context-aware third-party log filter; use the real
+URL only for policy and transport and a fixed placeholder for every observable
+attribute. Suppress global OpenTelemetry HTTP client auto-instrumentation only in
+the sensitive request context and include aiohttp's stdlib loggers in the same
+context-aware filter, preserving concurrent public observability. Enable the flag
+only for explicit runtime credential base-URL overrides
+in OpenAI, Hugging Face, and local API embedding providers. Invoke
+`reject_provider_call_credentials` before checkpoint sanitation so nested/cyclic
+handles fail closed while non-secret runtime-only objects remain omitted.
+
+- [x] **Step 4: Verify green and security gates**
+
+Run the Step 2 files, the full Task 12 backend/frontend/browser matrix affected by
+endpoint/runtime behavior, Ruff/py_compile, Bandit on all touched production files,
+and `git diff --check`. Expected: all pass with zero new Bandit findings.
+
+- [x] **Step 5: Re-run independent whole-feature review**
+
+Regenerate the complete feature package from base `4f88741711`, re-dispatch the
+same final reviewer, fix all remaining Critical/Important findings, and require
+explicit specification and quality approval before Task 12 finalization.
 
 ## Release/integration rule
 

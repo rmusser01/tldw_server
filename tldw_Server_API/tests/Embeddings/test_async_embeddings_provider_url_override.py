@@ -65,6 +65,67 @@ class SharedMemoryCache:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("provider", "response_payload"),
+    [
+        (async_embeddings.AsyncOpenAIProvider(api_key="server-key"), {"data": [{"embedding": [0.1]}]}),
+        (async_embeddings.AsyncHuggingFaceProvider(api_key="server-key"), [[0.1]]),
+        (
+            async_embeddings.AsyncLocalAPIProvider(
+                api_url="https://configured.example/embeddings",
+                api_key="server-key",
+            ),
+            {"embeddings": [[0.1]]},
+        ),
+    ],
+    ids=("openai", "huggingface", "local-api"),
+)
+async def test_runtime_endpoint_marks_provider_pool_request_sensitive(
+    monkeypatch,
+    provider,
+    response_payload,
+):
+    captured = []
+    pool = provider.pool_manager.get_pool(provider.provider_name)
+
+    async def fake_request(**kwargs):
+        captured.append(kwargs)
+        return response_payload
+
+    monkeypatch.setattr(pool, "request", fake_request)
+
+    result = await provider.create_embedding(
+        "hello",
+        model="embedding-model",
+        api_key_override="runtime-key",
+        base_url_override="https://runtime.private/secret/embeddings?tenant=one",
+        credentials_resolved=True,
+    )
+
+    assert result == pytest.approx([0.1])
+    assert captured[0]["sensitive_observability"] is True
+
+
+@pytest.mark.asyncio
+async def test_configured_provider_endpoint_does_not_mark_pool_request_sensitive(monkeypatch):
+    provider = async_embeddings.AsyncOpenAIProvider(
+        api_key="server-key",
+        base_url="https://configured.example/v1",
+    )
+    captured = []
+    pool = provider.pool_manager.get_pool(provider.provider_name)
+
+    async def fake_request(**kwargs):
+        captured.append(kwargs)
+        return {"data": [{"embedding": [0.1]}]}
+
+    monkeypatch.setattr(pool, "request", fake_request)
+
+    assert await provider.create_embedding("hello") == [0.1]
+    assert captured[0].get("sensitive_observability", False) is False
+
+
+@pytest.mark.asyncio
 async def test_openai_api_url_override_only_when_explicit_provider(monkeypatch):
     config = EmbeddingsConfig(
         providers=[
