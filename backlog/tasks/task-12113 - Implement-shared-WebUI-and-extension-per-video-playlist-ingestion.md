@@ -4,7 +4,7 @@ title: Implement shared WebUI and extension per-video playlist ingestion
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-14 21:03'
+updated_date: '2026-07-14 21:05'
 labels:
   - webui
   - browser-extension
@@ -124,6 +124,8 @@ Eighth formal-review remediation completed test-first; Task 7 Step 5 and root-ow
 Ninth formal-review remediation completed test-first; Task 7 Step 5 and root-owned approval/commit remain open. Accepted RED: 1 failed / 3 passed / 84 skipped. An empty idempotent direct retry resolved only its selected occurrence while the summary and sibling remained running, but selected-only reconciliation retired whole-run g2 so stale g1 cancellation reached the backend. The minimal fix always releases the resolved retry reservation but retires whole-session authority only for an authoritative completed/cancelled/partial_failure summary under the matching generation CAS. Stale g1 now remains fenced with no POST while current g2 cancellation succeeds; interrupted/unavailable handling and Modal terminal CAS retirement are unchanged. GREEN: lifecycle controls 4/4; batch service 88/88; focused four-file 260/260. Broad gates: exact Task 7 96/96; services 136/136; Modal/context/store 217/217; extension runtime/background/handoff 104/104; standalone runtime 58/58; focused retry 181/181; expanded four-file 260/260. Repository-pinned ESLint with explicit frontend config passed all 23 dirty TypeScript files, and git diff --check passed. Full TypeScript remains skipped under the Task 1 three-attempt baseline cap; Bandit is N/A for TypeScript-only work. No Prettier, unpinned ESLint, staging, or commit action was taken.
 
 Task 7 final closeout approved. Both formal reviewers approved the exact ninth-pass diff with no actionable findings. Root verification is green: exact UI 96/96, services 136/136, Modal/context/store 217/217, and extension runtime/background/handoff 104/104. Repository-pinned ESLint with the explicit frontend config passed all 23 dirty TypeScript files, including untracked apps/packages/ui/src/components/Common/QuickIngest/file-bytes.ts, and git diff --check passed. Task 7 Step 5 is complete; TASK-12113 remains In Progress for Tasks 8 and 9. No production/test changes, staging, or commit were made during this documentation closeout.
+
+Task 7 implementation committed as cabc72f550. The previously recorded formal approvals and root verification apply to that exact Task 7 diff. TASK-12113 remains In Progress for Tasks 8 and 9.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
