@@ -188,7 +188,7 @@ git diff --check
 
 **Tests:** Unit, security, cancellation, revocation, and streaming-boundary tests with an injected fake one-hop primitive; focused integration tests against TASK-12971's local test server only.
 
-**Status:** In Progress
+**Status:** Complete
 
 ### Files
 
