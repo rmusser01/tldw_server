@@ -42,7 +42,9 @@ The five-stage TDD implementation plan passed independent plan review with no bl
 
 2026-07-15: Stage 1 complete. Added targeted initial options routing and an awaited pre-navigation preparation hook in the built-extension launcher. Focused Vitest verification passed 11/11 tests. Specification review passed. Code-quality review found one test-isolation issue; it was corrected with fresh launcher mocks and re-review passed with no remaining findings.
 
-2026-07-15: Stage 2 started. Building the deterministic packaged-extension bootstrap harness and beginner Skills journey.
+2026-07-15: Stage 2 complete. Added the packaged-extension beginner Skills journey with fail-closed API guarding, bounded/redacted diagnostics, direct-fetch fallback, exact bootstrap fixtures, seed/details/dry-run/run/chat assertions, and context cleanup. The strict browser run reproduced an MV3 CSP defect in the options theme bootstrap; the inline script was moved to a synchronous same-origin public script with a focused 3/3 unit regression. The full Skills Manager suite reproduced five timing-dependent row-action tests; each now waits for the existing `1 skill` readiness signal and the owning suite passes 81/81. Final verification: beginner Playwright 1/1, shell 1/1, CSP unit 3/3, diff check clean. Specification review passed. Code-quality review found one immediate seed-request race; polling was added, fresh Playwright passed, and re-review reported no remaining findings. The implementation plan was corrected to run extension and shared-UI Vitest files from their owning package roots because the original cross-root command silently skipped UI files.
+
+2026-07-15: Stage 3 started. Adding isolated power-user hash/filter/export and Trash contracts.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

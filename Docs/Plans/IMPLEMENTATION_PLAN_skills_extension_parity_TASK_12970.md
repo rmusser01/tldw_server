@@ -20,6 +20,9 @@
 - Modify `apps/extension/tests/e2e/utils/extension-build.test.ts`: prove preparation runs before navigation and defaults remain unchanged.
 - Modify `apps/tldw-frontend/e2e/utils/skills-fixtures.ts`: add exact extension bootstrap, model filtering, binary export, seed tracking, and list-recovery behavior.
 - Create `apps/extension/tests/e2e/skills.parity.spec.ts`: own the six packaged-extension contracts and local diagnostics harness.
+- Modify `apps/extension/entrypoints/options/index.html` and create `apps/packages/ui/src/public/theme-bootstrap.js`: replace the reproduced MV3-blocked inline options theme bootstrap with a synchronous same-origin script.
+- Create `apps/extension/tests/unit/options-theme-bootstrap.test.ts`: prevent executable inline script regressions in the options entrypoint.
+- Modify `apps/packages/ui/src/components/Option/Skills/__tests__/Manager.test.tsx`: use the existing list-ready assertion in row-action tests that proved timing-dependent in the full owning suite.
 - Modify `apps/extension/package.json`: add focused and strict one-worker Skills parity scripts with the deterministic mock origin.
 - Update `backlog/tasks/task-12970 - Certify-Skills-browser-extension-parity-and-fix-shell-specific-regressions.md` only through Backlog MCP/CLI: track plan, verification, findings, and final status.
 - Do not modify production UI files unless the built suite reproduces a product defect and a focused owning-boundary test fails first.
@@ -137,11 +140,15 @@
 
 **Tests:** One Playwright test named `completes bootstrap and the beginner journey` is written first and fails before fixture completion.
 
-**Status:** In Progress
+**Status:** Complete
 
 **Files:**
 - Create: `apps/extension/tests/e2e/skills.parity.spec.ts`
 - Modify: `apps/tldw-frontend/e2e/utils/skills-fixtures.ts`
+- Modify: `apps/extension/entrypoints/options/index.html`
+- Create: `apps/packages/ui/src/public/theme-bootstrap.js`
+- Create: `apps/extension/tests/unit/options-theme-bootstrap.test.ts`
+- Modify: `apps/packages/ui/src/components/Option/Skills/__tests__/Manager.test.tsx`
 
 - [ ] **Step 1: Create the local extension harness and failing beginner test**
 
@@ -220,7 +227,9 @@
   )
   ```
 
-  Keep the existing OpenAPI fixture. In `mockSkillsBeginnerApi()`, capture each seed request URL and expose `seedRequests` with `executeRequests`. Add only exact chat bootstrap responses demonstrated by the RED run to a local `mockChatHandoffBootstrap(page)` helper in `skills.parity.spec.ts`; do not pollute the shared Skills fixture, add a permissive API catch-all, or create a general chat fixture framework.
+Keep the existing OpenAPI fixture. In `mockSkillsBeginnerApi()`, capture each seed request URL and expose `seedRequests` with `executeRequests`. Add only exact chat bootstrap responses demonstrated by the RED run to a local `mockChatHandoffBootstrap(page)` helper in `skills.parity.spec.ts`; do not pollute the shared Skills fixture, add a permissive API catch-all, or create a general chat fixture framework.
+
+The strict browser diagnostics reproduced the options entrypoint's inline theme script being rejected by MV3 CSP. Add a failing source regression test, move that exact bootstrap to `/theme-bootstrap.js`, rebuild, and require the packaged beginner test to pass with no CSP exception. Do not broaden this fix to the sidepanel. The full Manager suite also reproduced five row-action test timeouts; add the existing `1 skill` list-ready assertion before those role queries rather than adding sleeps or global timeouts.
 
 - [ ] **Step 4: Run the beginner test and focused shared tests**
 
@@ -229,9 +238,15 @@
     bunx playwright test tests/e2e/skills.parity.spec.ts \
     --grep "bootstrap and the beginner" --workers=1 --reporter=line
 
+  bunx vitest run tests/unit/options-theme-bootstrap.test.ts --reporter=dot
+  ```
+
+  From `apps/packages/ui`:
+
+  ```bash
   bunx vitest run \
-    ../packages/ui/src/routes/__tests__/option-skills-shell.test.tsx \
-    ../packages/ui/src/components/Option/Skills/__tests__/Manager.test.tsx \
+    src/routes/__tests__/option-skills-shell.test.tsx \
+    src/components/Option/Skills/__tests__/Manager.test.tsx \
     --reporter=dot
   ```
 
@@ -255,7 +270,7 @@
 
 **Tests:** Add each Playwright test before adding its missing fixture behavior.
 
-**Status:** Not Started
+**Status:** In Progress
 
 **Files:**
 - Modify: `apps/extension/tests/e2e/skills.parity.spec.ts`
@@ -433,12 +448,20 @@
   ```bash
   bunx vitest run \
     tests/e2e/utils/extension-build.test.ts \
-    ../packages/ui/src/routes/__tests__/option-skills-shell.test.tsx \
-    ../packages/ui/src/components/Option/Skills/__tests__/skills-query-state.test.ts \
-    ../packages/ui/src/components/Option/Skills/__tests__/Manager.test.tsx \
-    ../packages/ui/src/components/Option/Skills/__tests__/SkillDetailsDrawer.test.tsx \
-    ../packages/ui/src/components/Option/Skills/__tests__/SkillPreview.test.tsx \
-    ../packages/ui/src/components/Option/Skills/__tests__/SkillDrawer.test.tsx \
+    tests/unit/options-theme-bootstrap.test.ts \
+    --reporter=dot
+  ```
+
+  From `apps/packages/ui`:
+
+  ```bash
+  bunx vitest run \
+    src/routes/__tests__/option-skills-shell.test.tsx \
+    src/components/Option/Skills/__tests__/skills-query-state.test.ts \
+    src/components/Option/Skills/__tests__/Manager.test.tsx \
+    src/components/Option/Skills/__tests__/SkillDetailsDrawer.test.tsx \
+    src/components/Option/Skills/__tests__/SkillPreview.test.tsx \
+    src/components/Option/Skills/__tests__/SkillDrawer.test.tsx \
     --reporter=dot
   ```
 
