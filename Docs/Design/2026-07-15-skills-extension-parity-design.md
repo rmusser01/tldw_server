@@ -15,9 +15,10 @@ hash router to `#/skills`, and exercises the highest-risk beginner, power-user,
 responsive, accessibility, persistence, and recovery seams.
 
 The task is verification-led. Production code changes are allowed only when a
-failure is reproduced in the built extension. It does not redesign Skills,
-change REST or MCP behavior, add telemetry, or create a second Skills fixture
-system.
+failure is reproduced in the built extension. A reproduced defect in shared UI
+code is in scope when it receives focused shared coverage; unrelated shared UI
+refactors are not. The task does not redesign Skills, change REST or MCP
+behavior, add telemetry, or create a second Skills fixture system.
 
 ## Current Evidence
 
@@ -75,8 +76,8 @@ In scope:
 - a focused extension Skills parity Playwright spec;
 - a strict package script that fails on test skips;
 - reuse of the existing platform-neutral WebUI Skills API fixtures;
-- production fixes only for extension-specific failures reproduced by the new
-  suite;
+- production fixes only for failures reproduced by the new extension suite,
+  including defects owned by shared UI code;
 - focused shared UI tests when a production fix changes shared behavior;
 - screenshots and browser diagnostics for review, not tracked product assets.
 
@@ -101,74 +102,130 @@ The suite will:
    than becoming conditional skips.
 2. Seed first-run completion and a synthetic single-user server configuration
    through the existing extension storage helper.
-3. Register deterministic health, OpenAPI capability, Skills, execution, and
-   failure routes using the existing WebUI Skills fixtures. Direct test-only
-   fixture reuse is preferred over copying or relocating the fixture library.
-4. Force the existing connection store into its connected state only after its
-   production bootstrap is present.
+3. Register deterministic `/api/v1/health/live`, OpenAPI capability, Skills,
+   execution, binary export, and failure routes using the existing WebUI Skills
+   fixtures. Extend those fixtures only for missing protocol behavior; do not
+   copy or relocate the fixture library.
+4. After launch, enable the same test-only direct-request fallback already used
+   by extension E2E so Playwright can intercept requests that would otherwise
+   originate in the background worker. Invoke the production connection
+   store's `checkOnce({ force: true })` after routes are installed and wait for
+   connected/capable state. This tests production bootstrap logic; it must not
+   patch the store to connected. The existing connection-state mutation seam
+   may be used only by the explicit unreachable-state recovery test.
 5. Navigate to `${optionsUrl}#/skills` and verify the route pathname/search state
    through the hash router.
 6. Capture unexpected page errors, console errors, failed requests, and failed
    API assertions. Only narrowly documented startup failures may be ignored.
-7. Close the persistent browser context in `finally` for every test.
+7. Launch a fresh persistent browser context with a fresh storage seed and fresh
+   mutable fixture state for every test. Close that context in `finally`; tests
+   must not depend on ordering or share seeded Skills, routes, drafts, history,
+   downloads, or connection state.
 
 Add package scripts parallel to the existing workspace-parity scripts:
 
 - `test:e2e:skills-parity` for focused local execution;
-- `test:e2e:skills-parity:strict` for JSON output plus the existing no-skips
-  assertion.
+- `test:e2e:skills-parity:strict`, which removes the prior
+  `.skills-parity-e2e-report.json`, runs Playwright with
+  `PLAYWRIGHT_JSON_OUTPUT_NAME=.skills-parity-e2e-report.json`, calls the
+  existing `scripts/assert-playwright-no-skips.mjs`, and copies the report to
+  `test-results/skills-parity-e2e-report.json`.
 
 No new Playwright configuration or launcher is required.
 
-## Workflow Coverage
+## Required Test Cases
 
-### Beginner contract
+The suite is capped at six deterministic tests. It does not duplicate every
+WebUI action variant.
+
+### 1. Bootstrap and beginner journey at 1280x900
 
 - Open `#/skills` through the built options shell.
 - Confirm the capability gate resolves to the Skills manager.
-- Start from the first-use empty state and seed built-in Skills.
+- Begin with no Skills and assert the first-use empty state. Activate the
+  `Seed built-ins` button, assert one `POST /api/v1/skills/seed?overwrite=false`
+  request, fulfill it with `{ seeded: ["summarize"], count: 1 }`, and assert the
+  `Built-in skills seeded` confirmation and `summarize` row appear.
 - Open one Skill's details and confirm its description and runtime disclosure.
 - Open Test run, enter arguments, and press Enter; verify this performs dry
   render only.
 - Use the explicit Run test control and verify the request is not dry-run.
-- Trigger Use in chat and verify the extension hash route becomes `/chat` with
-  the expected invocation handed to the shared chat state.
+- Trigger Use in chat and verify `window.location.hash` becomes `#/chat`, the
+  chat surface renders, and the visible `#textarea-message` composer contains
+  `/skill summarize`. The existing focused `SkillsManager` test remains
+  authoritative for the exact store call; the extension assertion verifies the
+  user-observable handoff rather than inspecting private Zustand state.
 
-### Power-user contract
+### 2. Hash-backed power-user state at 1280x900
 
 - Load a deterministic multi-page library.
-- Apply search, mode/tools/model filters, sorting, and a non-default page size.
-- Verify those constraints are encoded inside the extension hash URL.
+- Select exactly two visible Skills and trigger bulk export before narrowing the
+  library. Assert one `.zip` download completes and the selection count remains
+  truthful before and after export. Assert exactly two per-Skill
+  `GET /api/v1/skills/{name}/export` requests; the shared fixture must return
+  deterministic binary content and `content-disposition` filenames for each.
+  The manager combines those responses client-side into the single downloaded
+  archive.
+- Apply `q=target`, `mode=fork`, `tools=with-tools`,
+  `model=gpt-4.1-mini`, name
+  descending sort, and page size 20.
+- Verify the resulting hash search parameters exactly represent those values:
+  `#/skills?q=target&mode=fork&tools=with-tools&model=gpt-4.1-mini&sort=name&order=desc&pageSize=20`.
+- Assert the target fixture remains visible and the final list request contains
+  the same server-side query, filter, sort, order, and limit values.
 - Reload and verify the view is restored and the same API query is issued.
-- Exercise one row-management action and bounded multi-page selection/export.
-- Move one Skill to Trash, switch views, and restore it.
+- Browser Back and Forward must restore the prior and committed filter states.
 
-The contract tests platform seams rather than repeating every WebUI assertion.
-Existing component and WebUI tests remain authoritative for detailed action
-variants.
+### 3. Trash management at 1280x900
 
-### Responsive and accessibility contract
+- Using the deterministic Trash fixture, move `summarize` to Trash, assert the
+  immediate Undo action, enter the Trash view, restore the Skill, and assert it
+  returns to Library.
 
-- Set an extension-relevant compact viewport and assert no document-level
-  horizontal overflow.
-- Verify the primary toolbar, filters, row actions, details drawer, and test-run
-  dialog remain reachable.
-- Complete the principal workflow by keyboard.
-- Verify focus returns to the invoking control after closing the drawer and
-  dialog.
-- Assert persistent interactive controls have usable accessible names and the
-  loading/error states expose status or alert semantics.
+Existing component and WebUI tests remain authoritative for cross-page
+selection, permanent purge, and other detailed action variants.
 
-### Recovery contract
+### 4. Compact keyboard and focus contract at 390x844
 
-- Fail the initial Skills list request and verify the recovery surface exposes a
-  working retry without leaking raw secrets into primary copy.
-- Start a delayed request, change route/query scope, and verify its stale result
-  cannot replace the current view.
-- Begin a dirty create/import draft, reload the extension page, and verify the
-  session draft recovery prompt or restored draft appears.
-- Verify an unreachable connection state blocks mutation while preserving a
-  clear route back to connection recovery.
+- Set the viewport to 390x844 and assert
+  `document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1`.
+- Assert the `Skills` level-one heading, Search skills textbox, `Skills view`
+  radio group, New Skill button, and the target row's named details/test actions
+  are discoverable by role or accessible name.
+- Open details by keyboard, close with Escape, and assert focus returns to the
+  named details trigger.
+- Open Test run by keyboard, render once, close with Escape, and assert focus
+  returns to the named test trigger.
+- Re-run the overflow assertion while the details drawer and test dialog are
+  open.
+
+### 5. List failure, retry, and unreachable-state recovery
+
+- Hold the first `GET /api/v1/skills` response behind a deterministic gate and
+  assert the `Loading skills` `status` announcement before releasing it as HTTP
+  503. Return a valid list on retry. Assert the shared recovery callout and its
+  `Try again` action, and assert the row appears after retry.
+- Primary copy must not contain the seeded API key, absolute paths, or the raw
+  mocked response body.
+- In the same fresh context, use the existing connection-state test seam to set
+  the store unreachable. Assert the `Can't reach your tldw server right now.`
+  state with `Health & diagnostics` and `Open Settings` actions. Assert New
+  Skill, Seed built-ins, and Import actions are absent because the connection
+  gate does not render the manager while unreachable.
+
+### 6. Extension session draft recovery
+
+- Open New Skill, enter a unique valid name and instructions, and leave the
+  drawer dirty.
+- Reload `options.html#/skills`, reopen New Skill, and assert the existing
+  `tldw:skills:authoring-draft:v1:` session draft is reported as recovered with
+  the entered values intact.
+- Discard the recovered draft and assert a second reopen starts clean.
+
+Stale-result suppression, retained-construction cancellation, import-draft
+recovery, and every close-path confirmation remain covered by the existing
+shared Skills tests and WebUI UAT. They are not repeated here unless the built
+extension first reproduces a platform-specific failure.
 
 ## Failure and Diagnostic Rules
 
@@ -176,8 +233,10 @@ variants.
   deterministic suite.
 - Browser launch, missing build output, missing extension APIs, or absent Skills
   route support are test failures.
-- Expected mocked API failures must be asserted in the UI and excluded narrowly
-  from the request-failure collector by exact endpoint/status behavior.
+- Expected HTTP 503 from the recovery test is a fulfilled response and is not a
+  transport failure. If the client emits a console error, only the exact
+  `GET /api/v1/skills` failure in that test may be excluded; broad message or
+  network-error regexes are not allowed.
 - Unexpected page errors, console errors, and request failures fail the test and
   are reported with bounded URL/error context.
 - Tests must not log API keys, Skill content, filesystem paths, or raw private
@@ -219,18 +278,20 @@ documentation, and task record.
 
 1. The built extension options shell opens Skills through production routing,
    storage/auth bootstrap, and capability discovery.
-2. Deterministic beginner and power-user contracts exercise the identified
-   extension seams without a live backend.
+2. Six deterministic tests cover bootstrap/beginner, hash state/export, Trash,
+   compact keyboard/focus, list/unreachable recovery, and session draft
+   recovery without a live backend.
 3. Hash-backed state survives reload and Use in chat navigates through the
-   extension router with the expected invocation state.
+   extension router with `/skill summarize` visible in the chat composer.
 4. Compact-width, keyboard, focus-return, loading, and error semantics remain
    usable in the extension shell.
-5. Failure, cancellation, retry, stale-result, and draft-recovery behavior is
-   verified without lost user work or leaked sensitive diagnostics.
+5. Extension list failure/retry, unreachable state, and session draft recovery
+   are verified without lost user work or leaked sensitive diagnostics;
+   existing shared tests remain authoritative for cancellation and stale-result
+   suppression.
 6. The strict extension suite contains no skips and fails on unexpected browser
    or network errors.
 7. Any production change is tied to a reproduced extension failure and is
    covered at the narrowest owning boundary.
 8. Focused build, tests, type checks, diff hygiene, and applicable security
    checks pass or record an unchanged external baseline precisely.
-
