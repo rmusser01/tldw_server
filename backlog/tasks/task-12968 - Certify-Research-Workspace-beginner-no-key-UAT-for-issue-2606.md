@@ -1,7 +1,7 @@
 ---
 id: TASK-12968
 title: Certify Research Workspace beginner no-key UAT for issue 2606
-status: In Progress
+status: Done
 labels:
 - research-workspace
 - uat
@@ -22,6 +22,8 @@ modified_files:
 - Docs/Reviews/RESEARCH_WORKSPACE_LIVE_UAT_MATRIX_2026_05_25.md
 - Docs/Reviews/assets/2026-07-14-research-workspace-beginner-no-key-uat/README.md
 - Docs/Reviews/assets/2026-07-14-research-workspace-beginner-no-key-uat/run-beginner-uat.mjs
+- Docs/Reviews/assets/2026-07-14-research-workspace-beginner-no-key-uat/uat-diagnostic-gate.mjs
+- Docs/Reviews/assets/2026-07-14-research-workspace-beginner-no-key-uat/uat-diagnostic-gate.test.mjs
 - Docs/Reviews/assets/2026-07-14-research-workspace-beginner-no-key-uat/checkpoints.json
 - Docs/Reviews/assets/2026-07-14-research-workspace-beginner-no-key-uat/diagnostics.json
 - Docs/Reviews/assets/2026-07-14-research-workspace-beginner-no-key-uat/desktop-settled-workspace.png
@@ -40,11 +42,11 @@ modified_files:
 - apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/WorkspaceHeader.test.tsx
 - apps/packages/ui/src/components/Option/ResearchWorkspace/index.tsx
 - apps/packages/ui/src/store/__tests__/workspace.split-storage.test.ts
+- apps/packages/ui/src/store/__tests__/workspace.test.ts
 - apps/packages/ui/src/store/workspace-slices/workspace-list-slice.ts
 - apps/packages/ui/src/store/workspace.ts
 - apps/tldw-frontend/__tests__/components/layout/WebLayout.chat-scroll-contract.test.tsx
 - apps/tldw-frontend/components/layout/WebLayout.tsx
-- apps/packages/ui/src/store/__tests__/workspace.test.ts
 ---
 
 ## Description
@@ -71,19 +73,21 @@ Complete GitHub issue #2606 by certifying the beginner/no-key `/research-workspa
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Completed the beginner/no-key certification against an isolated live stack: FastAPI single-user backend on 127.0.0.1:18160 with a server-only key and disposable SQLite/user databases; advanced-mode Next.js WebUI on 127.0.0.1:18161 with NEXT_PUBLIC_X_API_KEY and NEXT_PUBLIC_API_BEARER explicitly empty; fresh Chrome 143.0.7499.193 profile on CDP 127.0.0.1:18162 with browser and component extensions disabled. The task-owned CDP runner passed 17/17 desktop/mobile checkpoints. Its manifest records exactly one active/saved workspace, no visible migration status, and zero migration API calls at desktop entry/final and mobile entry. Diagnostics record zero page errors, request failures, unexpected HTTP errors, credential-bearing requests, migration requests, global backend dialogs, or runtime overlays. Expected no-key warnings/guards and one Next development HMR warning remained scoped.
+Completed the beginner/no-key certification against an isolated live stack: FastAPI single-user backend on 127.0.0.1:18160 with a server-only key and disposable SQLite/user databases; advanced-mode Next.js WebUI on 127.0.0.1:18161 with NEXT_PUBLIC_X_API_KEY and NEXT_PUBLIC_API_BEARER explicitly empty; fresh Chrome 145.0.7632.6 profile on CDP 127.0.0.1:18162 with browser and component extensions disabled. The task-owned CDP runner passed 17/17 desktop/mobile checkpoints. Its manifest records exactly one active/saved workspace, no visible migration status, and zero migration API calls at desktop entry/final and mobile entry. Diagnostics record zero page errors, request failures, unexpected HTTP errors, credential-bearing requests, migration requests, global backend dialogs, or runtime overlays. Expected no-key warnings/guards and one Next development HMR warning remained scoped.
 
-Product fixes: always mount the shared TutorialRunner when global chrome is hidden; suppress the initial empty workspace persistence write in both split and monolithic modes; defer first-workspace initialization safely under StrictMode; scope fresh-initialization migration suppression to the exact workspace ID; replace the persistent tour-start notice with transient message feedback; compact the mobile header into bounded context/action rows; and update the stale AddSource partial-success regression to the current persistent row contract. Independent review found and the task fixed the monolithic empty-write gap, global marker overreach, and insufficient durable UAT assertions.
+Product fixes: always mount the shared TutorialRunner when global chrome is hidden; suppress the initial empty workspace persistence write in both split and monolithic modes; defer first-workspace initialization safely under StrictMode; scope fresh-initialization migration suppression to the exact workspace ID; replace the persistent tour-start notice with transient message feedback; compact the mobile header into bounded context/action rows; and update the stale AddSource partial-success regression to the current persistent row contract.
 
-Post-rebase review found that the matrix's zero-migration-traffic claim was stronger than the durable evidence because the external runner watched only direct backend-origin requests and the runner/manifests lived under /private/tmp. Evidence hardening now commits the exact runner, force-tracked JSON manifests, and representative screenshots under Docs/Reviews/assets/2026-07-14-research-workspace-beginner-no-key-uat/. Browser network events are captured at BrowserContext scope for direct backend /api/v1, same-origin /api/v1, and hosted /api/proxy request shapes. A browser-level CDP target observer fails on transient service workers or extension background pages. Dedicated disposable browser contexts emit unique start/end health sentinels that bracket the backend log without contaminating the desktop/mobile persona contexts. The definitive correlated segment contained 11 API access-log lines and zero workspace migration lines; browser diagnostics captured both sentinels, zero migration or credential-bearing requests, and zero context-level or CDP-level worker/background targets. An initial tee/PTTY log and later uncorrelated time-window evidence were discarded rather than used.
+Evidence hardening commits the exact runner, force-tracked JSON manifests, and representative screenshots under Docs/Reviews/assets/2026-07-14-research-workspace-beginner-no-key-uat/. Browser network events are captured at BrowserContext scope for direct backend /api/v1, same-origin /api/v1, and hosted /api/proxy request shapes. A browser-level CDP target observer fails on transient service workers or extension background pages. Dedicated disposable browser contexts emit unique start/end health sentinels that bracket the backend log without contaminating the desktop/mobile persona contexts. The final correlated segment contained 11 API access-log lines and zero workspace migration lines.
 
-Verification: focused shared UI suite passed 9 files / 164 tests; WebLayout suite passed 14/14; maintained real-backend UAT entry evidence passed 1/1 in 28.4s; targeted ESLint exited 0 with no errors (remaining warnings are existing and outside changed lines); artifact JSON assertions, byte-for-byte copy checks, secret scans, node --check, git diff --check, and the no-legacy-route addition check passed. The shared-UI TypeScript gate was attempted three times: the default 4 GB run exhausted memory, while the 8 GB run completed with 206 existing diagnostics across 26 unrelated files and zero diagnostics in task-owned files; full log is /private/tmp/task12968-research-workspace-uat/typescript-shared-ui.log. Whole-file Prettier remains blocked by existing formatting drift in touched legacy files; no broad unrelated reformat was applied. Bandit is not applicable because no Python files changed. No unresolved task-scope product gap required a follow-up. Task-owned processes were stopped, ports 18160/18161/18162 were free, and temporary untracked setup artifacts were removed.
+Independent pre-merge review found and the task fixed three additional issues: a suppressed empty hydration write no longer emits a false cross-tab BroadcastChannel update; mobile server workspace identity/context/recovery copy remains in the accessibility tree; and non-empty pageErrors, requestFailures, or httpErrors now fail the UAT run. Focused regressions cover split and monolithic broadcast suppression plus all three diagnostic buckets.
+
+Final verification: focused shared UI suite passed 9 files / 220 tests; WebLayout suite passed 14/14; diagnostic gate passed 4/4; the live CDP rerun passed 17/17 with Chrome 145.0.7632.6, 11 correlated API access-log lines, zero migration traffic, and clean diagnostic buckets. Targeted repository-pinned ESLint exited 0 with zero errors (16 pre-existing warnings outside changed lines); artifact byte-for-byte checks, node --check, git diff --check, and the removed-route probe passed. /workspace-playground returned HTTP 404 with no Location header. Bandit is not applicable because no Python files changed. Task-owned processes were stopped, ports 18160/18161/18162 were free, and temporary untracked setup artifacts were removed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Reopened after independent pre-merge review of PR #2731. Follow-up scope: prevent empty-hydration no-op broadcasts, retain server workspace context and recovery details in the mobile accessibility tree, make page/network diagnostic buckets gate UAT success, regenerate the live CDP evidence, and reconcile verification counts. The human-authored PR Change summary remains a requester-owned merge gate.
+Completed TASK-12968 and addressed every verified pre-merge review finding. Fresh beginner/no-key Research Workspace entry now creates exactly one workspace without false migration persistence or cross-tab broadcasts; the tour remains available on the shell-less route; mobile server workspace context remains accessible; and the committed CDP runner fails on runtime/network diagnostics. The authoritative rerun used Chrome 145.0.7632.6 and passed 17/17 checkpoints with zero page errors, request failures, HTTP errors, credential-bearing requests, background targets, or workspace migration calls. Final focused verification is 220 shared-UI tests, 14 WebLayout tests, and 4 diagnostic-gate tests. The earlier Chrome 143 and 164-test figures were intermediate runs and are superseded by this final record. Independent re-review found no Critical or Important issues. The requester-owned human Change summary remains the only PR policy gate.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
