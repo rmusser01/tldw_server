@@ -60,7 +60,7 @@ Before each stage commit:
 
 **Tests:** Constructor/digest tests in `test_research_discovery_contracts.py`, gateway request-rejection tests in `test_research_discovery_gateway.py`, and exact foundation compatibility in `test_research_discovery_v2_compatibility.py`.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Files
 
@@ -191,6 +191,15 @@ python -m pytest -q \
 
 `feat(research): add digest-bound discovery request policies`
 
+### Completion evidence
+
+- Implementation: `9f33dc647d2cde850d84b9f37881b69bbd06e65e`
+- Review hardening: `584075be1cb427b24db19d56380ae76f9517d802`
+- Focused final suite: 338 passed with four pre-existing warnings.
+- Exact foundation plan digest, canonical-byte SHA-256, length, and all eight foundation policy digests remained pinned.
+- Compileall, Ruff, Black, diff hygiene, and Bandit passed; Bandit reported zero findings.
+- Independent specification review and post-fix code-quality review both approved Stage 1 with no open Critical or Important findings.
+
 ## Task 2 / Stage 2: Add Typed Planner Selection and Accounted Path Pagination
 
 **Goal:** Compile exact typed general/DOI/interval requests into only compatible routes and let the sealed executor advance a validated details cursor in the path.
@@ -199,7 +208,7 @@ python -m pytest -q \
 
 **Tests:** Typed planner behavior in `test_research_discovery_planner.py`, cursor/accounting behavior in `test_research_discovery_executor.py`, and foundation-byte compatibility.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ### Files
 
