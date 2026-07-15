@@ -18370,6 +18370,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     workspace_id,
                     lock=True,
                 )
+                conflict = self._find_workspace_source_saved_view_name_with_conn(
+                    conn,
+                    owner_user_id,
+                    workspace_id,
+                    name_key,
+                )
+                if conflict is not None:
+                    self._raise_workspace_source_saved_view_name_conflict(conflict)
                 count_row = conn.execute(
                     "SELECT COUNT(*) AS total FROM workspace_source_saved_views "
                     "WHERE owner_user_id = ? AND workspace_id = ?",
@@ -18380,14 +18388,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         SOURCE_VIEW_LIMIT_REACHED,
                         {"limit": SOURCE_VIEW_MAX_COUNT},
                     )
-                conflict = self._find_workspace_source_saved_view_name_with_conn(
-                    conn,
-                    owner_user_id,
-                    workspace_id,
-                    name_key,
-                )
-                if conflict is not None:
-                    self._raise_workspace_source_saved_view_name_conflict(conflict)
                 conn.execute(
                     """
                     INSERT INTO workspace_source_saved_views (

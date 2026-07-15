@@ -218,7 +218,7 @@ def test_every_operation_requires_active_workspace_owned_by_supplied_owner(
         owner_b.close_all_connections()
 
 
-def test_limit_is_100_per_owner_and_workspace(db: CharactersRAGDB) -> None:
+def test_limit_distinguishes_duplicate_from_new_name_at_capacity(db: CharactersRAGDB) -> None:
     now = "2026-01-01T00:00:00.000Z"
     rows = [
         (
@@ -246,6 +246,14 @@ def test_limit_is_100_per_owner_and_workspace(db: CharactersRAGDB) -> None:
         commit=True,
     )
 
+    with pytest.raises(CharactersRAGDBError) as duplicate_exc_info:
+        _create(db, name="VIEW 0")
+
+    _assert_saved_view_error(
+        duplicate_exc_info,
+        "source_view_name_exists",
+        {"view_id": rows[0][0], "version": 1},
+    )
     with pytest.raises(CharactersRAGDBError) as exc_info:
         _create(db, name="One too many")
 

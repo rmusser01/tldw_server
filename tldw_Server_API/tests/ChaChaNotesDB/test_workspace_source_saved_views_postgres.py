@@ -278,6 +278,11 @@ def test_postgres_concurrent_count_duplicate_and_rename_conflicts_have_safe_meta
         assert limit_conflict.code == "source_view_limit_reached"
         assert limit_conflict.metadata == {"limit": 100}
         assert len(db.list_workspace_source_saved_views(OWNER_A, workspace_id)) == 100
+
+        with pytest.raises(CharactersRAGDBError) as duplicate_at_capacity:
+            _create(db, workspace_id, name="STRASSE")
+        assert duplicate_at_capacity.value.code == "source_view_name_exists"
+        assert duplicate_at_capacity.value.metadata == {"view_id": winner["id"], "version": 1}
     finally:
         db.close_all_connections()
         backend.get_pool().close_all()
