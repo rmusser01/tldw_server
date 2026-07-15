@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .contracts import (
+    CREDENTIALED_ROUTE_SKIP_REASON,
     AccessRoute,
     BackendDefinition,
     CredentialRequirement,
@@ -189,7 +190,7 @@ def foundation_readiness(execution_mode: ExecutionMode) -> ReadinessOverlay:
                     route_id=route.route_id,
                     state=ReadinessState.CREDENTIALED_OUT_OF_SCOPE,
                     credential_status=CredentialStatus.OUT_OF_SCOPE,
-                    reason="credentialed_route_not_authorized_for_foundation",
+                    reason=CREDENTIALED_ROUTE_SKIP_REASON,
                 )
             )
     return ReadinessOverlay(

@@ -14,6 +14,7 @@ _IDENTIFIER_RE = re.compile(r"[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*\Z")
 _DIGEST_RE = re.compile(r"[0-9a-f]{64}\Z")
 _QUERY_NAME_RE = re.compile(r"[A-Za-z0-9_.\[\]-]+\Z")
 _MISSING = object()
+CREDENTIALED_ROUTE_SKIP_REASON = "credentialed_route_not_authorized_for_foundation"
 
 
 class RouteKind(str, Enum):
@@ -679,6 +680,7 @@ class DiscoveryPlan:
     dispatch_groups: tuple[PlannedDispatchGroup, ...]
     skipped: tuple[SkippedTarget, ...]
     ceilings: BudgetCeilings
+    plan_digest: str = ""
     allowance: PlannedBudgetAllowance = field(init=False)
 
     def __post_init__(self) -> None:
@@ -715,6 +717,11 @@ class DiscoveryPlan:
         violation = budget_ceiling_violation(allowance, self.ceilings)
         if violation is not None:
             raise ValueError(f"budget_exceeded:{violation}")
+        computed_digest = canonical_plan_digest(self)
+        if type(self.plan_digest) is not str or (self.plan_digest and self.plan_digest != computed_digest):
+            raise ValueError("plan_digest_mismatch")
+        if not self.plan_digest:
+            object.__setattr__(self, "plan_digest", computed_digest)
 
 
 def derive_plan_allowance(
@@ -760,6 +767,25 @@ def budget_ceiling_violation(
         ("returned_results", allowance.returned_results, ceilings.max_results),
     )
     return next((name for name, planned, ceiling in checks if planned > ceiling), None)
+
+
+def canonical_plan_digest(plan: DiscoveryPlan) -> str:
+    """Hash compiler-owned plan content, excluding live and derived budget state."""
+    if type(plan) is not DiscoveryPlan:
+        raise TypeError("plan_must_be_discovery_plan")
+    payload = {
+        "planner_version": plan.planner_version,
+        "catalog_version": plan.catalog_version,
+        "registry_version": plan.registry_version,
+        "readiness_version": plan.readiness_version,
+        "execution_mode": plan.execution_mode,
+        "normalized_query": plan.normalized_query,
+        "filters": tuple(asdict(item) for item in plan.filters),
+        "result_limit": plan.result_limit,
+        "dispatch_groups": tuple(asdict(group) for group in plan.dispatch_groups),
+        "skipped": tuple(asdict(target) for target in plan.skipped),
+    }
+    return hashlib.sha256(_canonical_json_bytes(payload)).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)

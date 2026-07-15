@@ -20,9 +20,11 @@ from types import MappingProxyType
 from typing import Any, Protocol, cast
 
 from .contracts import (
+    CREDENTIALED_ROUTE_SKIP_REASON,
     AccessRoute,
     AttributionMatch,
     BudgetCeilings,
+    CredentialRequirement,
     DeferredNumericCSVQueryBinding,
     DiscoveryPlan,
     DispatchAllowance,
@@ -51,6 +53,7 @@ from .gateway import (
     DiscoveryGatewayTrace,
     reconstruct_redirect_intent,
 )
+from .planner import expected_dispatch_group_id, expected_logical_attempt_id
 from .registry import DiscoveryRegistry
 
 PolicyActivityCheck = Callable[[str, str], bool]
@@ -832,6 +835,9 @@ def _rebuild_trusted_plan(plan: DiscoveryPlan) -> DiscoveryPlan:
         init_values = {
             field.name: _reconstruct_plan_value(getattr(copied, field.name)) for field in fields(copied) if field.init
         }
+        caller_plan_digest = init_values.get("plan_digest")
+        if type(caller_plan_digest) is not str or not caller_plan_digest:
+            raise ValueError("missing_plan_digest")
         live_ceilings = init_values["ceilings"]
         copied_allowance = _reconstruct_plan_value(copied.allowance)
         if type(live_ceilings) is not BudgetCeilings or type(copied_allowance) is not PlannedBudgetAllowance:
@@ -850,62 +856,122 @@ def _rebuild_trusted_plan(plan: DiscoveryPlan) -> DiscoveryPlan:
             init_values["ceilings"] = _covering_ceilings(live_ceilings, derived_allowance)
             trusted = DiscoveryPlan(**init_values)
             object.__setattr__(trusted, "ceilings", live_ceilings)
+        _validate_plan_identifiers(trusted)
     except Exception:  # noqa: BLE001 - invalid plan internals fail closed.
         raise DiscoveryExecutionError("plan_validation_failed") from None
     return trusted
 
 
-def _canonical_source_reference(
+def _validate_plan_identifiers(plan: DiscoveryPlan) -> None:
+    """Require every caller-supplied deterministic ID to match its payload."""
+    for group in plan.dispatch_groups:
+        group_id = expected_dispatch_group_id(group)
+        if group.dispatch_group_id != group_id:
+            raise ValueError("dispatch_group_id_mismatch")
+        if any(
+            attempt.logical_attempt_id != expected_logical_attempt_id(attempt, group_id)
+            for attempt in group.logical_attempts
+        ):
+            raise ValueError("logical_attempt_id_mismatch")
+
+
+def _canonical_source_link(
     registry: DiscoveryRegistry,
     source_id: object,
     route_id: object,
-) -> SourceRouteReference | None:
-    """Return one exact canonical source-route reference, if present."""
+) -> tuple[SourceRouteReference, tuple[int, str, int]] | None:
+    """Return one canonical source-route reference and its declared order."""
     if type(source_id) is not str or type(route_id) is not str:
         return None
     try:
         source = registry.get_source(source_id)
-        if type(source.catalog_source_id) is not str or source.catalog_source_id != source_id:
+        if (
+            type(source.catalog_source_id) is not str
+            or source.catalog_source_id != source_id
+            or type(source.priority) is not int
+            or type(source.route_references) is not tuple
+        ):
             return None
         references = tuple(
-            reference
-            for reference in source.route_references
+            (index, reference)
+            for index, reference in enumerate(source.route_references)
             if type(reference) is SourceRouteReference
             and type(reference.route_id) is str
             and reference.route_id == route_id
         )
     except Exception:  # noqa: BLE001 - mutated registry source data fails closed.
         return None
-    return references[0] if len(references) == 1 else None
+    if len(references) != 1:
+        return None
+    route_index, reference = references[0]
+    return reference, (source.priority, source.catalog_source_id, route_index)
 
 
 def _validate_plan_catalog_references(plan: DiscoveryPlan, registry: DiscoveryRegistry) -> None:
     """Bind all logical and skipped targets to current canonical catalog links."""
     try:
+        group_order: list[tuple[int, str, int]] = []
+        seen_source_routes: set[tuple[str, str]] = set()
         for group in plan.dispatch_groups:
             if type(group.logical_attempts) is not tuple:
                 raise ValueError("invalid_logical_attempts")
+            logical_order: list[tuple[int, str]] = []
+            group_candidates: list[tuple[int, str, int]] = []
             for attempt in group.logical_attempts:
-                reference = _canonical_source_reference(
+                link = _canonical_source_link(
                     registry,
                     attempt.catalog_source_id,
                     group.route_id,
                 )
+                if link is None:
+                    raise ValueError("logical_attempt_catalog_mismatch")
+                reference, order_key = link
                 if reference is None or _snapshot(reference.source_predicate) != _snapshot(attempt.source_predicate):
                     raise ValueError("logical_attempt_catalog_mismatch")
+                source_route = (attempt.catalog_source_id, group.route_id)
+                if source_route in seen_source_routes:
+                    raise ValueError("duplicate_source_route_target")
+                seen_source_routes.add(source_route)
+                logical_order.append(order_key[:2])
+                group_candidates.append(order_key)
+            if tuple(logical_order) != tuple(sorted(logical_order)):
+                raise ValueError("logical_attempt_order_mismatch")
+            group_order.append(min(group_candidates))
+        if tuple(group_order) != tuple(sorted(group_order)):
+            raise ValueError("dispatch_group_order_mismatch")
+        skipped_order: list[tuple[int, str, int]] = []
         for skipped in plan.skipped:
             if type(skipped) is not SkippedTarget:
                 raise ValueError("invalid_skipped_target")
-            reference = _canonical_source_reference(
+            link = _canonical_source_link(
                 registry,
                 skipped.requested_source_id,
                 skipped.route_id,
             )
-            if reference is None:
+            if link is None:
                 raise ValueError("skipped_target_catalog_mismatch")
             route = registry.get_route(skipped.route_id)
             if route.route_id != skipped.route_id:
                 raise ValueError("skipped_target_route_mismatch")
+            if route.credential_requirement is CredentialRequirement.NONE:
+                if skipped.status is not SkippedStatus.SKIPPED or skipped.code is not SkippedCode.ROUTE_NOT_READY:
+                    raise ValueError("credentialless_skipped_target_semantics_mismatch")
+            elif route.credential_requirement is CredentialRequirement.API_KEY:
+                if (
+                    skipped.status is not SkippedStatus.UNAVAILABLE
+                    or skipped.code is not SkippedCode.CREDENTIALED_OUT_OF_SCOPE
+                    or skipped.reason != CREDENTIALED_ROUTE_SKIP_REASON
+                ):
+                    raise ValueError("credentialed_skipped_target_semantics_mismatch")
+            else:
+                raise ValueError("invalid_route_credential_requirement")
+            source_route = (skipped.requested_source_id, skipped.route_id)
+            if source_route in seen_source_routes:
+                raise ValueError("duplicate_source_route_target")
+            seen_source_routes.add(source_route)
+            skipped_order.append(link[1])
+        if tuple(skipped_order) != tuple(sorted(skipped_order)):
+            raise ValueError("skipped_target_order_mismatch")
     except Exception:  # noqa: BLE001 - invalid catalog links fail closed.
         raise DiscoveryExecutionError("plan_validation_failed") from None
 

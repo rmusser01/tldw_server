@@ -8,6 +8,7 @@ import unicodedata
 from dataclasses import asdict, dataclass
 
 from .contracts import (
+    CREDENTIALED_ROUTE_SKIP_REASON,
     AccessRoute,
     BudgetCeilings,
     CredentialRequirement,
@@ -23,6 +24,7 @@ from .contracts import (
     QueryPair,
     ReadinessOverlay,
     ReadinessState,
+    RouteLimits,
     SkippedCode,
     SkippedStatus,
     SkippedTarget,
@@ -130,7 +132,7 @@ def compile_discovery_plan(
                         route_id=route.route_id,
                         status=SkippedStatus.UNAVAILABLE,
                         code=SkippedCode.CREDENTIALED_OUT_OF_SCOPE,
-                        reason="credentialed_route_not_authorized_for_foundation",
+                        reason=CREDENTIALED_ROUTE_SKIP_REASON,
                     )
                 )
                 continue
@@ -378,28 +380,107 @@ def _coalesce(logical: list[_LogicalAttempt]) -> tuple[PlannedDispatchGroup, ...
 
 
 def _dispatch_group_id(logical: _LogicalAttempt) -> str:
+    return _dispatch_group_id_from_parts(
+        adapter_id=logical.route.adapter_id,
+        adapter_version=logical.route.adapter_version,
+        allowance=logical.allowance,
+        backend_id=logical.route.backend_id,
+        fallback_order=logical.route.fallback_order,
+        filters=logical.filters,
+        intents=logical.intents,
+        limits=logical.route.policy.limits,
+        normalized_query=logical.normalized_query,
+        policy_digest=logical.route.policy.policy_digest,
+        route_id=logical.route.route_id,
+    )
+
+
+def expected_dispatch_group_id(group: PlannedDispatchGroup) -> str:
+    """Recompute one typed group's deterministic physical-work identity."""
+    if type(group) is not PlannedDispatchGroup:
+        raise TypeError("group_must_be_planned_dispatch_group")
+    return _dispatch_group_id_from_parts(
+        adapter_id=group.adapter_id,
+        adapter_version=group.adapter_version,
+        allowance=group.allowance,
+        backend_id=group.backend_id,
+        fallback_order=group.fallback_order,
+        filters=group.filters,
+        intents=group.intents,
+        limits=group.limits,
+        normalized_query=group.normalized_query,
+        policy_digest=group.policy_digest,
+        route_id=group.route_id,
+    )
+
+
+def _dispatch_group_id_from_parts(
+    *,
+    adapter_id: str,
+    adapter_version: str,
+    allowance: DispatchAllowance,
+    backend_id: str,
+    fallback_order: int,
+    filters: tuple[QueryPair, ...],
+    intents: tuple[DispatchIntent, ...],
+    limits: RouteLimits,
+    normalized_query: str,
+    policy_digest: str,
+    route_id: str,
+) -> str:
+    """Hash the canonical physical-work material used by planner and executor."""
     material = {
-        "adapter_id": logical.route.adapter_id,
-        "adapter_version": logical.route.adapter_version,
-        "allowance": asdict(logical.allowance),
-        "backend_id": logical.route.backend_id,
-        "fallback_order": logical.route.fallback_order,
-        "filters": [asdict(item) for item in logical.filters],
-        "intents": [asdict(item) for item in logical.intents],
-        "limits": asdict(logical.route.policy.limits),
-        "normalized_query": logical.normalized_query,
-        "policy_digest": logical.route.policy.policy_digest,
-        "route_id": logical.route.route_id,
+        "adapter_id": adapter_id,
+        "adapter_version": adapter_version,
+        "allowance": asdict(allowance),
+        "backend_id": backend_id,
+        "fallback_order": fallback_order,
+        "filters": [asdict(item) for item in filters],
+        "intents": [asdict(item) for item in intents],
+        "limits": asdict(limits),
+        "normalized_query": normalized_query,
+        "policy_digest": policy_digest,
+        "route_id": route_id,
     }
     return f"dispatch_group_v2_{hashlib.sha256(_canonical_json(material)).hexdigest()[:24]}"
 
 
 def _logical_attempt_id(logical: _LogicalAttempt, dispatch_group_id: str) -> str:
+    return _logical_attempt_id_from_parts(
+        catalog_source_id=logical.catalog_source_id,
+        dispatch_group_id=dispatch_group_id,
+        selection_reason=logical.selection_reason,
+        source_predicate=logical.source_predicate,
+    )
+
+
+def expected_logical_attempt_id(attempt: PlannedLogicalAttempt, expected_group_id: str) -> str:
+    """Recompute one typed logical attempt's deterministic attribution identity."""
+    if type(attempt) is not PlannedLogicalAttempt:
+        raise TypeError("attempt_must_be_planned_logical_attempt")
+    if type(expected_group_id) is not str or not expected_group_id:
+        raise TypeError("expected_group_id_must_be_nonempty_string")
+    return _logical_attempt_id_from_parts(
+        catalog_source_id=attempt.catalog_source_id,
+        dispatch_group_id=expected_group_id,
+        selection_reason=attempt.selection_reason,
+        source_predicate=attempt.source_predicate,
+    )
+
+
+def _logical_attempt_id_from_parts(
+    *,
+    catalog_source_id: str,
+    dispatch_group_id: str,
+    selection_reason: str,
+    source_predicate: SourcePredicate | None,
+) -> str:
+    """Hash the canonical logical-attribution material used at both boundaries."""
     material = {
-        "catalog_source_id": logical.catalog_source_id,
+        "catalog_source_id": catalog_source_id,
         "dispatch_group_id": dispatch_group_id,
-        "selection_reason": logical.selection_reason,
-        "source_predicate": asdict(logical.source_predicate) if logical.source_predicate is not None else None,
+        "selection_reason": selection_reason,
+        "source_predicate": asdict(source_predicate) if source_predicate is not None else None,
     }
     return f"logical_attempt_v2_{hashlib.sha256(_canonical_json(material)).hexdigest()[:24]}"
 

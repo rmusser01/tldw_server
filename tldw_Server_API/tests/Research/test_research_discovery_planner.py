@@ -35,6 +35,7 @@ from tldw_Server_API.app.core.Research.discovery.contracts import (
     SourceDefinition,
     SourcePredicate,
     SourceRouteReference,
+    canonical_plan_digest,
     evaluate_source_predicate,
 )
 from tldw_Server_API.app.core.Research.discovery.planner import (
@@ -42,6 +43,8 @@ from tldw_Server_API.app.core.Research.discovery.planner import (
     PlanningRequest,
     canonical_plan_bytes,
     compile_discovery_plan,
+    expected_dispatch_group_id,
+    expected_logical_attempt_id,
 )
 from tldw_Server_API.app.core.Research.discovery.registry import (
     DiscoveryRegistry,
@@ -367,6 +370,88 @@ def test_plan_bytes_and_attempt_ids_are_deterministic_after_input_normalization(
     assert tuple(group.dispatch_group_id for group in first.dispatch_groups) == tuple(
         group.dispatch_group_id for group in second.dispatch_groups
     )
+
+
+def test_compiled_plan_digest_is_deterministic_and_excludes_live_ceilings() -> None:
+    registry = foundation_registry()
+    readiness = foundation_readiness(ExecutionMode.SYNTHETIC)
+    first = compile_discovery_plan(
+        _request(("crossref", "semantic_scholar"), query="  Causal   Inference  "),
+        registry=registry,
+        readiness=readiness,
+        budget=_budget(),
+    )
+    second = compile_discovery_plan(
+        _request(("semantic_scholar", "crossref"), query="causal inference"),
+        registry=registry,
+        readiness=readiness,
+        budget=_budget(),
+    )
+    first_digest = first.plan_digest
+
+    assert isinstance(first_digest, str)
+    assert len(first_digest) == 64
+    assert first_digest == second.plan_digest
+    assert canonical_plan_digest(first) == first_digest
+    object.__setattr__(first.ceilings, "max_results", 1)
+    assert canonical_plan_digest(first) == first_digest
+
+
+def test_compiled_ids_equal_shared_typed_recomputation() -> None:
+    plan = compile_discovery_plan(
+        _request(_FOUNDATION_SOURCE_IDS),
+        registry=foundation_registry(),
+        readiness=foundation_readiness(ExecutionMode.SYNTHETIC),
+        budget=_budget(),
+    )
+    for group in plan.dispatch_groups:
+        recomputed_group_id = expected_dispatch_group_id(group)
+        assert group.dispatch_group_id == recomputed_group_id
+        assert all(
+            attempt.logical_attempt_id == expected_logical_attempt_id(attempt, recomputed_group_id)
+            for attempt in group.logical_attempts
+        )
+
+
+def test_shared_id_recomputation_changes_with_hashed_group_and_logical_material() -> None:
+    group = compile_discovery_plan(
+        _request(("figshare",), filters=(QueryPair("year", "2025"),)),
+        registry=foundation_registry(),
+        readiness=foundation_readiness(ExecutionMode.SYNTHETIC),
+        budget=_budget(),
+    ).dispatch_groups[0]
+    baseline_group_id = expected_dispatch_group_id(group)
+    intent = group.intents[0]
+    query_changed = replace(
+        group,
+        intents=(
+            replace(
+                intent,
+                query_pairs=(
+                    intent.query_pairs[0],
+                    replace(intent.query_pairs[1], value="24"),
+                ),
+            ),
+        ),
+    )
+    body_changed = replace(
+        group,
+        intents=(
+            replace(
+                intent,
+                json_body_pairs=(replace(intent.json_body_pairs[0], value="changed query"),),
+            ),
+        ),
+    )
+    filters_changed = replace(group, filters=(QueryPair("year", "2024"),))
+
+    assert expected_dispatch_group_id(query_changed) != baseline_group_id
+    assert expected_dispatch_group_id(body_changed) != baseline_group_id
+    assert expected_dispatch_group_id(filters_changed) != baseline_group_id
+
+    attempt = group.logical_attempts[0]
+    selection_changed = replace(attempt, selection_reason="explicitly changed selection")
+    assert expected_logical_attempt_id(selection_changed, baseline_group_id) != attempt.logical_attempt_id
 
 
 def test_canonical_predicate_values_produce_equal_plan_bytes_and_attempt_ids() -> None:

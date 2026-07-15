@@ -275,6 +275,9 @@ git diff --check
 - The controller-side impacted matrix passed 432/432 across executor, gateway, contracts, planner, registry reconciliation, and frozen legacy execution.
 - Compileall, Ruff, Black, Python 3.10 AST parsing, and diff hygiene passed. Bandit reported zero findings and zero errors across 1,882 touched production lines.
 - Independent final review reproduced the last duplicate-ID retry ordering defect after its fix and returned CLEAN with no remaining Critical, Important, or must-fix simplification findings.
+- Post-commit adversarial review found that valid-looking nested mutations, reordered work, duplicate source-route targets, and compiler-owned plan metadata could retain stale execution identity. The RED sequence reproduced 10 ID/payload/order bypasses, 2 duplicate-order bypasses, 2 cross-group/disjointness bypasses, and 14 plan-digest/skipped-semantics bypasses before production fixes.
+- Follow-up hardening now shares the planner's exact dispatch/logical ID recipes with the executor, binds compiler-owned plan content to a deterministic digest while preserving intentionally live runtime ceilings, enforces canonical planner order, rejects duplicate or executable/skipped source-route overlap, and validates credentialed versus credentialless skipped semantics before any journal, adapter, ID-factory, or gateway effect.
+- Final layered coverage passed 29/29 focused integrity regressions, 299/299 contract/planner/executor tests, and 469/469 impacted discovery tests. Compileall, Ruff, Black, Python 3.10 AST parsing, and diff hygiene passed; Bandit reported zero findings across 3,233 production lines. Two independent correctness/adversarial reviews returned no Critical or Important findings, and the final correctness review returned CLEAN with no Minor findings.
 
 ### Verify
 

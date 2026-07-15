@@ -12,9 +12,14 @@ import pytest
 from tldw_Server_API.app.core.Research.discovery import executor as executor_module
 from tldw_Server_API.app.core.Research.discovery.contracts import (
     BudgetCeilings,
+    CredentialStatus,
     ExecutionMode,
     OperationKind,
     PredicateOperator,
+    ReadinessState,
+    SkippedCode,
+    SkippedStatus,
+    SkippedTarget,
     SourceConstraint,
     SourcePredicate,
     SourceRouteReference,
@@ -38,6 +43,8 @@ from tldw_Server_API.app.core.Research.discovery.gateway import (
 from tldw_Server_API.app.core.Research.discovery.planner import (
     PlanningRequest,
     compile_discovery_plan,
+    expected_dispatch_group_id,
+    expected_logical_attempt_id,
 )
 from tldw_Server_API.app.core.Research.discovery.registry import (
     DiscoveryRegistry,
@@ -103,6 +110,42 @@ def _gateway_response(route, intent) -> DiscoveryGatewayResponse:
         redirect_location=None,
         retry_after=None,
     )
+
+
+async def _assert_plan_validation_precedes_effects(registry, plan) -> None:
+    journal = AttemptJournal(physical_ceiling=plan.ceilings.max_physical_dispatches)
+    calls: list[str] = []
+
+    async def should_not_run(*args, **kwargs):
+        calls.append("runtime")
+        raise AssertionError("must not run")
+
+    with pytest.raises(executor_module.DiscoveryExecutionError) as caught:
+        await execute_discovery_plan(
+            plan,
+            registry=registry,
+            adapters={group.adapter_id: should_not_run for group in plan.dispatch_groups},
+            gateway=should_not_run,
+            policy_is_active=lambda _route_id, _digest: True,
+            dispatch_id_factory=lambda: calls.append("id") or "must-not-reserve",
+            journal=journal,
+        )
+
+    assert caught.value.code == "plan_validation_failed"
+    assert calls == []
+    assert journal.records == ()
+    assert journal.accounting == DispatchAccounting(
+        physical_ceiling=plan.ceilings.max_physical_dispatches,
+        created=0,
+        debited=0,
+        released=0,
+        outstanding=0,
+    )
+
+
+def _replace_plan_with_fresh_digest(plan, **changes):
+    changes["plan_digest"] = ""
+    return replace(plan, **changes)
 
 
 def _foundation_plan(source_ids: tuple[str, ...], *, result_limit: int = 3):
@@ -4203,6 +4246,286 @@ async def test_pre_entry_plan_corruption_is_rejected_before_adapter_or_id(corrup
 
     assert caught.value.code == "plan_validation_failed"
     assert calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("payload_mutation", ("semantic_query", "figshare_body"))
+async def test_pre_entry_valid_payload_mutation_is_rejected_before_any_effect(payload_mutation: str) -> None:
+    if payload_mutation == "semantic_query":
+        registry, plan = _semantic_scholar_plan()
+        pair = plan.dispatch_groups[0].intents[0].query_pairs[0]
+    else:
+        registry, plan = _foundation_plan(("figshare",))
+        pair = plan.dispatch_groups[0].intents[0].json_body_pairs[0]
+    object.__setattr__(pair, "value", "valid but mutated request material")
+    plan = _replace_plan_with_fresh_digest(plan)
+    await _assert_plan_validation_precedes_effects(registry, plan)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "identity_mutation",
+    ("dispatch_group_id", "logical_attempt_id", "selection_reason"),
+)
+async def test_pre_entry_valid_identity_mutation_is_rejected_before_any_effect(identity_mutation: str) -> None:
+    registry, plan = _semantic_scholar_plan()
+    group = plan.dispatch_groups[0]
+    attempt = group.logical_attempts[0]
+    if identity_mutation == "dispatch_group_id":
+        object.__setattr__(group, "dispatch_group_id", "dispatch_group_v2_000000000000000000000000")
+    elif identity_mutation == "logical_attempt_id":
+        object.__setattr__(attempt, "logical_attempt_id", "logical_attempt_v2_000000000000000000000000")
+    else:
+        object.__setattr__(attempt, "selection_reason", "valid but mutated selection reason")
+    plan = _replace_plan_with_fresh_digest(plan)
+    await _assert_plan_validation_precedes_effects(registry, plan)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "plan_mutation",
+    (
+        "result_limit_cap_expansion",
+        "result_limit_cap_expansion_cleared_digest",
+        "planner_version",
+        "readiness_version",
+        "execution_mode",
+        "skipped_status",
+        "skipped_code",
+        "skipped_reason",
+    ),
+)
+async def test_pre_entry_compiler_owned_plan_mutation_is_rejected_before_any_effect(plan_mutation: str) -> None:
+    if plan_mutation.startswith("skipped_"):
+        registry, plan = _foundation_plan(("openalex", "semantic_scholar"), result_limit=1)
+        skipped = plan.skipped[0]
+        if plan_mutation == "skipped_status":
+            object.__setattr__(skipped, "status", SkippedStatus.SKIPPED)
+        elif plan_mutation == "skipped_code":
+            object.__setattr__(skipped, "code", SkippedCode.ROUTE_NOT_READY)
+        else:
+            object.__setattr__(skipped, "reason", "forged but valid reason")
+    else:
+        registry, plan = _foundation_plan(("semantic_scholar",), result_limit=1)
+        if plan_mutation.startswith("result_limit_cap_expansion"):
+            object.__setattr__(plan, "result_limit", 3)
+            object.__setattr__(plan.allowance, "returned_results", 3)
+            object.__setattr__(plan.ceilings, "max_results", 3)
+            if plan_mutation.endswith("cleared_digest"):
+                object.__setattr__(plan, "plan_digest", "")
+        elif plan_mutation == "planner_version":
+            object.__setattr__(plan, "planner_version", "forged-planner-v2")
+        elif plan_mutation == "readiness_version":
+            object.__setattr__(plan, "readiness_version", "forged-readiness-v2")
+        else:
+            assert plan_mutation == "execution_mode"
+            object.__setattr__(plan, "execution_mode", ExecutionMode.OFFLINE_FIXTURE)
+
+    await _assert_plan_validation_precedes_effects(registry, plan)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "semantic_forgery",
+    (
+        "credentialed_status",
+        "credentialed_code",
+        "credentialed_reason",
+        "credentialless_status",
+        "credentialless_code",
+    ),
+)
+async def test_pre_entry_skipped_route_semantics_are_rejected_before_any_effect(semantic_forgery: str) -> None:
+    registry = foundation_registry()
+    if semantic_forgery.startswith("credentialed_"):
+        plan = compile_discovery_plan(
+            PlanningRequest(("openalex",), "accounted execution", (), 1),
+            registry=registry,
+            readiness=foundation_readiness(ExecutionMode.SYNTHETIC),
+            budget=BudgetCeilings(0, 0, 0, 0, 0, 0, 0),
+        )
+    else:
+        route_id = registry.get_source("semantic_scholar").route_references[0].route_id
+        readiness = foundation_readiness(ExecutionMode.SYNTHETIC)
+        readiness = replace(
+            readiness,
+            routes=tuple(
+                (
+                    replace(
+                        entry,
+                        state=ReadinessState.DISABLED,
+                        credential_status=CredentialStatus.NOT_REQUIRED,
+                        reason="disabled for skipped semantics test",
+                    )
+                    if entry.route_id == route_id
+                    else entry
+                )
+                for entry in readiness.routes
+            ),
+        )
+        plan = compile_discovery_plan(
+            PlanningRequest(("semantic_scholar",), "accounted execution", (), 1),
+            registry=registry,
+            readiness=readiness,
+            budget=BudgetCeilings(0, 0, 0, 0, 0, 0, 0),
+        )
+    skipped = plan.skipped[0]
+    if semantic_forgery.endswith("status"):
+        forged = replace(
+            skipped,
+            status=SkippedStatus.SKIPPED if semantic_forgery.startswith("credentialed_") else SkippedStatus.UNAVAILABLE,
+        )
+    elif semantic_forgery.endswith("code"):
+        forged = replace(
+            skipped,
+            code=(
+                SkippedCode.ROUTE_NOT_READY
+                if semantic_forgery.startswith("credentialed_")
+                else SkippedCode.CREDENTIALED_OUT_OF_SCOPE
+            ),
+        )
+    else:
+        forged = replace(skipped, reason="forged credentialed reason")
+    plan = _replace_plan_with_fresh_digest(plan, skipped=(forged,))
+
+    await _assert_plan_validation_precedes_effects(registry, plan)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ordering_mutation", ("dispatch_groups", "logical_attempts", "skipped"))
+async def test_pre_entry_noncanonical_order_is_rejected_before_any_effect(ordering_mutation: str) -> None:
+    if ordering_mutation == "dispatch_groups":
+        registry, plan = _foundation_plan(("semantic_scholar", "crossref"))
+        object.__setattr__(plan, "dispatch_groups", tuple(reversed(plan.dispatch_groups)))
+    elif ordering_mutation == "logical_attempts":
+        registry, plan = _coalesced_semantic_scholar_plan()
+        group = plan.dispatch_groups[0]
+        object.__setattr__(group, "logical_attempts", tuple(reversed(group.logical_attempts)))
+    else:
+        registry = foundation_registry()
+        disabled_route_ids = {
+            registry.get_source(source_id).route_references[0].route_id
+            for source_id in ("semantic_scholar", "crossref")
+        }
+        readiness = foundation_readiness(ExecutionMode.SYNTHETIC)
+        readiness = replace(
+            readiness,
+            routes=tuple(
+                (
+                    replace(
+                        entry,
+                        state=ReadinessState.DISABLED,
+                        credential_status=CredentialStatus.NOT_REQUIRED,
+                        reason="disabled for deterministic ordering test",
+                    )
+                    if entry.route_id in disabled_route_ids
+                    else entry
+                )
+                for entry in readiness.routes
+            ),
+        )
+        plan = compile_discovery_plan(
+            PlanningRequest(("semantic_scholar", "crossref"), "accounted execution", (), 1),
+            registry=registry,
+            readiness=readiness,
+            budget=BudgetCeilings(0, 0, 0, 0, 0, 0, 0),
+        )
+        assert len(plan.skipped) == 2
+        object.__setattr__(plan, "skipped", tuple(reversed(plan.skipped)))
+    plan = _replace_plan_with_fresh_digest(plan)
+    await _assert_plan_validation_precedes_effects(registry, plan)
+
+
+@pytest.mark.asyncio
+async def test_pre_entry_duplicate_skipped_target_is_rejected_before_any_effect() -> None:
+    registry = foundation_registry()
+    plan = compile_discovery_plan(
+        PlanningRequest(("openalex",), "accounted execution", (), 1),
+        registry=registry,
+        readiness=foundation_readiness(ExecutionMode.SYNTHETIC),
+        budget=BudgetCeilings(0, 0, 0, 0, 0, 0, 0),
+    )
+    object.__setattr__(plan, "skipped", (plan.skipped[0], plan.skipped[0]))
+    plan = _replace_plan_with_fresh_digest(plan)
+    await _assert_plan_validation_precedes_effects(registry, plan)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("repeated_logical_index", "selection_reason"),
+    (
+        (0, "repeated minimum coalesced target"),
+        (1, "repeated nonminimum coalesced target"),
+    ),
+    ids=("minimum", "nonminimum"),
+)
+async def test_pre_entry_repeated_coalesced_target_is_rejected_before_any_effect(
+    repeated_logical_index: int,
+    selection_reason: str,
+) -> None:
+    registry, plan = _coalesced_semantic_scholar_plan()
+    first_group = plan.dispatch_groups[0]
+    repeated_attempt = first_group.logical_attempts[repeated_logical_index]
+    first_intent = first_group.intents[0]
+    second_intent = replace(
+        first_intent,
+        query_pairs=(
+            replace(first_intent.query_pairs[0], value="alternate accounted execution"),
+            *first_intent.query_pairs[1:],
+        ),
+    )
+    second_attempt = replace(
+        repeated_attempt,
+        logical_attempt_id="logical_attempt_v2_000000000000000000000000",
+        selection_reason=selection_reason,
+    )
+    second_group = replace(
+        first_group,
+        dispatch_group_id="dispatch_group_v2_000000000000000000000000",
+        logical_attempts=(second_attempt,),
+        intents=(second_intent,),
+    )
+    second_group_id = expected_dispatch_group_id(second_group)
+    second_attempt = replace(
+        second_attempt,
+        logical_attempt_id=expected_logical_attempt_id(second_attempt, second_group_id),
+    )
+    second_group = replace(
+        second_group,
+        dispatch_group_id=second_group_id,
+        logical_attempts=(second_attempt,),
+    )
+    plan = _replace_plan_with_fresh_digest(
+        plan,
+        dispatch_groups=(first_group, second_group),
+        ceilings=replace(
+            plan.ceilings,
+            max_route_attempts=3,
+            max_physical_dispatches=2,
+            max_wall_time_ms=40_000,
+        ),
+    )
+    await _assert_plan_validation_precedes_effects(registry, plan)
+
+
+@pytest.mark.asyncio
+async def test_pre_entry_executable_and_skipped_target_overlap_is_rejected_before_any_effect() -> None:
+    registry, plan = _semantic_scholar_plan()
+    group = plan.dispatch_groups[0]
+    attempt = group.logical_attempts[0]
+    plan = _replace_plan_with_fresh_digest(
+        plan,
+        skipped=(
+            SkippedTarget(
+                requested_source_id=attempt.catalog_source_id,
+                route_id=group.route_id,
+                status=SkippedStatus.SKIPPED,
+                code=SkippedCode.ROUTE_NOT_READY,
+                reason="duplicate executable target",
+            ),
+        ),
+    )
+    await _assert_plan_validation_precedes_effects(registry, plan)
 
 
 @pytest.mark.asyncio

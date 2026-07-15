@@ -45,6 +45,7 @@ from tldw_Server_API.app.core.Research.discovery.contracts import (
     SourceDefinition,
     SourcePredicate,
     SourceRouteReference,
+    canonical_plan_digest,
     canonical_policy_digest,
     evaluate_source_predicate,
     stable_document_id_v2,
@@ -869,6 +870,18 @@ def test_plan_derives_allowance_and_rejects_zero_budget_work_or_forged_aggregate
             ceilings=BudgetCeilings(0, 0, 0, 0, 0, 0, 0),
             allowance=PlannedBudgetAllowance(0, 0, 0, 0, 0, 0, 0),  # type: ignore[call-arg]
         )
+
+
+def test_plan_digest_is_canonical_and_rejects_nonmatching_caller_value() -> None:
+    plan = _plan()
+    plan_digest = plan.plan_digest
+
+    assert isinstance(plan_digest, str)
+    assert len(plan_digest) == 64
+    assert set(plan_digest) <= set("0123456789abcdef")
+    assert canonical_plan_digest(plan) == plan_digest
+    with pytest.raises(ValueError, match="plan_digest_mismatch"):
+        replace(plan, plan_digest="0" * 64)
 
 
 def test_v2_document_identity_is_route_independent_and_v1_identity_is_unchanged() -> None:
