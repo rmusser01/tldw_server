@@ -1065,6 +1065,7 @@ jobs:
           - name: research-websearch
             paths: >-
               tldw_Server_API/tests/Research
+              tldw_Server_API/tests/ResearchWorkspace
               tldw_Server_API/tests/WebSearch
           - name: media-audio
             paths: >-
@@ -1308,6 +1309,7 @@ jobs:
               tldw_Server_API/tests/Local_LLM
           - name: product-claims-core
             paths: >-
+              tldw_Server_API/tests/Claims/test_artifact_verification*.py
               tldw_Server_API/tests/Claims/test_claim_cluster_upsert_idempotency.py
               tldw_Server_API/tests/Claims/test_claim_embeddings_chroma.py
               tldw_Server_API/tests/Claims/test_claim_review_rule_assignment.py
@@ -2482,6 +2484,7 @@ jobs:
           - name: research-websearch
             paths: >-
               tldw_Server_API/tests/Research
+              tldw_Server_API/tests/ResearchWorkspace
               tldw_Server_API/tests/WebSearch
           - name: media-audio
             paths: >-
@@ -2725,6 +2728,7 @@ jobs:
               tldw_Server_API/tests/Local_LLM
           - name: product-claims-core
             paths: >-
+              tldw_Server_API/tests/Claims/test_artifact_verification*.py
               tldw_Server_API/tests/Claims/test_claim_cluster_upsert_idempotency.py
               tldw_Server_API/tests/Claims/test_claim_embeddings_chroma.py
               tldw_Server_API/tests/Claims/test_claim_review_rule_assignment.py
@@ -3770,6 +3774,7 @@ jobs:
           - name: research-websearch
             paths: >-
               tldw_Server_API/tests/Research
+              tldw_Server_API/tests/ResearchWorkspace
               tldw_Server_API/tests/WebSearch
           - name: media-audio
             paths: >-
@@ -4013,6 +4018,7 @@ jobs:
               tldw_Server_API/tests/Local_LLM
           - name: product-claims-core
             paths: >-
+              tldw_Server_API/tests/Claims/test_artifact_verification*.py
               tldw_Server_API/tests/Claims/test_claim_cluster_upsert_idempotency.py
               tldw_Server_API/tests/Claims/test_claim_embeddings_chroma.py
               tldw_Server_API/tests/Claims/test_claim_review_rule_assignment.py
@@ -4982,6 +4988,7 @@ jobs:
           - name: research-websearch
             paths: >-
               tldw_Server_API/tests/Research
+              tldw_Server_API/tests/ResearchWorkspace
               tldw_Server_API/tests/WebSearch
           - name: media-audio
             paths: >-
@@ -5225,6 +5232,7 @@ jobs:
               tldw_Server_API/tests/Local_LLM
           - name: product-claims-core
             paths: >-
+              tldw_Server_API/tests/Claims/test_artifact_verification*.py
               tldw_Server_API/tests/Claims/test_claim_cluster_upsert_idempotency.py
               tldw_Server_API/tests/Claims/test_claim_embeddings_chroma.py
               tldw_Server_API/tests/Claims/test_claim_review_rule_assignment.py
@@ -6195,6 +6203,7 @@ jobs:
           - name: research-websearch
             paths: >-
               tldw_Server_API/tests/Research
+              tldw_Server_API/tests/ResearchWorkspace
               tldw_Server_API/tests/WebSearch
           - name: media-audio
             paths: >-
@@ -6438,6 +6447,7 @@ jobs:
               tldw_Server_API/tests/Local_LLM
           - name: product-claims-core
             paths: >-
+              tldw_Server_API/tests/Claims/test_artifact_verification*.py
               tldw_Server_API/tests/Claims/test_claim_cluster_upsert_idempotency.py
               tldw_Server_API/tests/Claims/test_claim_embeddings_chroma.py
               tldw_Server_API/tests/Claims/test_claim_review_rule_assignment.py
