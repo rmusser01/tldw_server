@@ -1,10 +1,10 @@
 ---
 id: TASK-12142
 title: Implement Embeddings API inline workflow facade
-status: In Progress
+status: Done
 assignee: []
 created_date: 2026-07-04 01:19
-updated_date: 2026-07-15 00:25
+updated_date: 2026-07-15 00:35
 labels:
 - embeddings
 - implementation
@@ -13,6 +13,7 @@ dependencies: []
 references:
 - Docs/superpowers/specs/2026-07-03-embeddings-workflow-architecture-design.md
 - Docs/superpowers/plans/2026-07-03-embeddings-api-inline-workflow-facade-implementation-plan.md
+- https://github.com/rmusser01/tldw_server/pull/2733
 priority: high
 modified_files:
 - tldw_Server_API/app/core/Embeddings/workflow_types.py
@@ -63,10 +64,11 @@ Verification completed:
 Review note: Task 1 and Task 2 had subagent spec/quality review loops. The final Task 2 quality re-review and Task 3 review were performed locally because subagent usage limits were reached; validated findings were fixed before final verification.
 PR-readiness review on current origin/dev identified four validated follow-up areas to address before push: trace string value safety, immutable event metadata, explicit planning phase transitions, and ResourceGovernor commit/failure parity coverage. Applying fixes with test-first verification.
 PR-readiness review remediation completed. Trace contracts now use immutable snapshots, explicit planning-phase emission, field-specific metadata allowlists, fixed enum strings, aggregate-only execution data, generated and constructor-validated workflow ids, and no caller-controlled provider/model/cache/fallback/request/user/error/class/header identifiers. ResourceGovernor parity coverage now includes reserve/commit success, execute failure, and reservation denial. Independent final review found no remaining Critical or Important findings. Focused workflow tests: 38 passed; endpoint parity tests: 37 passed; targeted mypy and compile checks passed.
+Final rebased verification on origin/dev f05fe296db68ffccc411cc1c97bcdb5a123a9b03: 210 in-scope Embeddings tests passed; targeted workflow suite 38 passed; mypy reported no issues; compileall passed; Bandit errors/results were empty; git diff --check passed; branch is 0 behind and 14 commits ahead. The broader 218-test run produced 214 passed and 4 token-array failures. A detached untouched origin/dev worktree reproduced the same four failures exactly (400 Invalid token array input during tokenizer decoding before workflow execution), so they are recorded as an upstream baseline issue outside this PR. Draft PR: https://github.com/rmusser01/tldw_server/pull/2733
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented Stage 1 API inline workflow facade. Added workflow type contracts, bounded/no-op trace collectors, inline runner with safe trace metadata and failure preservation, and feature-flagged endpoint integration using a pre-execute ResourceGovernor reservation hook. Public response behavior remains covered by endpoint parity tests; no durable Jobs runner, schema changes, public trace exposure, or flag promotion were added.
+Implemented and reviewed Stage 1 of the Embeddings workflow architecture. Added immutable typed workflow contracts, bounded no-op/in-memory collectors, aggregate-only allowlisted trace metadata, generated and validated workflow IDs, an inline prepare/execute runner with failure preservation, explicit planning transitions, and feature-flagged endpoint integration that keeps ResourceGovernor reservation/commit ordering intact. Added endpoint parity coverage for success, execute failure, and reservation denial. Rebased onto current dev and opened draft PR #2733. No durable runner, schema change, public trace exposure, or flag promotion is included.
 <!-- SECTION:FINAL_SUMMARY:END -->
