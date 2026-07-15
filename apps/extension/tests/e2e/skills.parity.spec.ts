@@ -16,6 +16,7 @@ import { launchWithBuiltExtension } from "./utils/extension-build"
 const SKILLS_PARITY_SERVER_URL = "http://skills-parity.invalid"
 const SKILLS_PARITY_API_KEY = "skills-parity-test-key"
 const DEFAULT_VIEWPORT = { width: 1280, height: 900 }
+const COMPACT_VIEWPORT = { width: 390, height: 844 }
 const MAX_DIAGNOSTIC_LENGTH = 300
 
 type Diagnostics = {
@@ -162,6 +163,7 @@ async function mockChatHandoffBootstrap(page: Page): Promise<void> {
 
 async function launchSkillsParity<TApi>(
   mockApi: (page: Page) => Promise<TApi>,
+  viewport = DEFAULT_VIEWPORT,
 ): Promise<{
   api: TApi
   context: BrowserContext
@@ -185,7 +187,7 @@ async function launchSkillsParity<TApi>(
       optionsTarget: "/skills",
       prepareOptionsPage: async ({ context, page }) => {
         preparedContext = context
-        await page.setViewportSize(DEFAULT_VIEWPORT)
+        await page.setViewportSize(viewport)
         diagnostics = captureDiagnostics(page)
         await installUnexpectedApiGuard(page, diagnostics)
         await installDirectRequestFallback(context)
@@ -533,6 +535,118 @@ test.describe("Skills parity (extension)", () => {
 
       expect(api.operations).toEqual(["delete", "restore"])
       expect(api.state()).toBe("active")
+      expect(diagnostics.pageErrors).toEqual([])
+      expect(diagnostics.consoleErrors).toEqual([])
+      expect(diagnostics.requestFailures).toEqual([])
+      expect(diagnostics.unexpectedApiRequests).toEqual([])
+    } finally {
+      await extensionContext?.close()
+    }
+  })
+
+  test("covers compact keyboard and focus accessibility", async () => {
+    test.setTimeout(120_000)
+
+    let extensionContext: BrowserContext | undefined
+    const hasNoHorizontalOverflow = (page: Page) =>
+      page.evaluate(
+        () =>
+          document.documentElement.scrollWidth
+          <= document.documentElement.clientWidth + 1,
+      )
+    const expectMinimumTargetSize = async (
+      locator: ReturnType<Page["getByRole"]>,
+    ) => {
+      const box = await locator.boundingBox()
+      expect(box).not.toBeNull()
+      expect(box?.width).toBeGreaterThanOrEqual(24)
+      expect(box?.height).toBeGreaterThanOrEqual(24)
+    }
+
+    try {
+      const launch = await launchSkillsParity(
+        (page) => mockSkillsBeginnerApi(page, { seeded: true }),
+        COMPACT_VIEWPORT,
+      )
+      extensionContext = launch.context
+
+      const { api, diagnostics, page } = launch
+      const skillsHeading = page.getByRole("heading", { level: 1, name: "Skills" })
+      const search = page.getByRole("searchbox", { name: "Search skills" })
+      const skillsView = page.getByRole("radiogroup", { name: "Skills view" })
+      const newSkill = page.getByRole("button", { name: "New Skill" })
+      const viewSkill = page.getByRole("button", { name: "View summarize" })
+      const testRunSkill = page.getByRole("button", {
+        name: "Test run summarize",
+      })
+
+      await expect(skillsHeading).toBeVisible()
+      await expect(search).toBeVisible()
+      await expect(skillsView).toBeVisible()
+      await expect(newSkill).toBeVisible()
+      await expect(viewSkill).toBeVisible()
+      await expect(testRunSkill).toBeVisible()
+      expect(await hasNoHorizontalOverflow(page)).toBe(true)
+
+      await expectMinimumTargetSize(newSkill)
+      await expectMinimumTargetSize(viewSkill)
+      await expectMinimumTargetSize(testRunSkill)
+
+      await newSkill.focus()
+      await newSkill.press("Enter")
+      const newSkillDialog = page.getByRole("dialog", {
+        name: "New Skill: untitled",
+      })
+      await expect(newSkillDialog).toBeVisible()
+      expect(await hasNoHorizontalOverflow(page)).toBe(true)
+      await newSkillDialog.press("Escape")
+      await expect(newSkillDialog).toBeHidden()
+      await expect(newSkill).toBeFocused()
+      expect(await hasNoHorizontalOverflow(page)).toBe(true)
+
+      await viewSkill.focus()
+      await viewSkill.press("Enter")
+      const detailsDialog = page.getByRole("dialog", {
+        name: "Skill details: summarize",
+      })
+      await expect(detailsDialog).toBeVisible()
+      await expect(
+        detailsDialog.getByText("Summarize source material", { exact: true }),
+      ).toBeVisible()
+      expect(await hasNoHorizontalOverflow(page)).toBe(true)
+      await detailsDialog.press("Escape")
+      await expect(detailsDialog).toBeHidden()
+      await expect(viewSkill).toBeFocused()
+      expect(await hasNoHorizontalOverflow(page)).toBe(true)
+
+      await testRunSkill.focus()
+      await testRunSkill.press("Enter")
+      const testRunDialog = page.getByRole("dialog", {
+        name: "Test run: summarize",
+      })
+      await expect(testRunDialog).toBeVisible()
+      expect(await hasNoHorizontalOverflow(page)).toBe(true)
+
+      const args = "Compact keyboard dry render"
+      const argumentsInput = testRunDialog.getByPlaceholder(
+        "Enter test arguments...",
+      )
+      await argumentsInput.fill(args)
+      await argumentsInput.press("Enter")
+      await expect.poll(() => api.executeRequests.at(-1)).toEqual({
+        args,
+        dry_run: true,
+      })
+      await expect(
+        testRunDialog.getByText("Dry render", { exact: true }),
+      ).toBeVisible()
+      expect(await hasNoHorizontalOverflow(page)).toBe(true)
+
+      await testRunDialog.press("Escape")
+      await expect(testRunDialog).toBeHidden()
+      await expect(testRunSkill).toBeFocused()
+      expect(await hasNoHorizontalOverflow(page)).toBe(true)
+
       expect(diagnostics.pageErrors).toEqual([])
       expect(diagnostics.consoleErrors).toEqual([])
       expect(diagnostics.requestFailures).toEqual([])

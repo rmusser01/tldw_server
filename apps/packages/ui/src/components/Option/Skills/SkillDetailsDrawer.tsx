@@ -9,6 +9,7 @@ interface SkillDetailsDrawerProps {
   scopeKey: string | null
   skillName: string | null
   onClose: () => void
+  onAfterClose?: () => void
   onTest: (skillName: string) => void
   onEdit: (skillName: string) => void
   onUseInChat: (skillName: string) => void
@@ -25,6 +26,7 @@ export const SkillDetailsDrawer: React.FC<SkillDetailsDrawerProps> = ({
   scopeKey,
   skillName,
   onClose,
+  onAfterClose,
   onTest,
   onEdit,
   onUseInChat,
@@ -76,6 +78,9 @@ export const SkillDetailsDrawer: React.FC<SkillDetailsDrawerProps> = ({
       })}
       open={Boolean(skillName)}
       onClose={onClose}
+      afterOpenChange={(isOpen) => {
+        if (!isOpen) onAfterClose?.()
+      }}
       size={640}
       styles={{ wrapper: { maxWidth: "100vw" } }}
       destroyOnHidden

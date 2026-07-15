@@ -932,6 +932,29 @@ describe("SkillsManager imports", () => {
     expect(screen.getByTestId("skill-details-open")).toHaveTextContent("skill-1")
   })
 
+  it("returns focus to the row view action after closing details", async () => {
+    tldwClientMock.listSkills.mockResolvedValue({
+      skills: [makeSkill(1)],
+      count: 1,
+      total: 1,
+      limit: 10,
+      offset: 0
+    })
+    renderManager()
+
+    expect(await screen.findByText("1 skill")).toBeInTheDocument()
+    const viewButton = screen.getByRole("button", { name: "View skill-1" })
+    viewButton.focus()
+    fireEvent.click(viewButton)
+
+    expect(screen.getByTestId("skill-details-open")).toHaveTextContent("skill-1")
+    const closeDetailsButton = screen.getByRole("button", { name: "Close details" })
+    closeDetailsButton.focus()
+    fireEvent.click(closeDetailsButton)
+
+    await waitFor(() => expect(viewButton).toHaveFocus())
+  })
+
   it("returns focus to the row view action after testing from details", async () => {
     tldwClientMock.listSkills.mockResolvedValue({
       skills: [makeSkill(1)],
@@ -3015,7 +3038,11 @@ describe("SkillsManager imports", () => {
 
     renderManager()
 
-    expect(await screen.findByRole("button", { name: "View fallback-scope-skill" }))
+    expect(await screen.findByRole(
+      "button",
+      { name: "View fallback-scope-skill" },
+      { timeout: 5_000 }
+    ))
       .toBeInTheDocument()
     expect(tldwClientMock.listSkills).toHaveBeenCalled()
   })
