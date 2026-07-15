@@ -86,6 +86,7 @@ const controller = (
     createView: vi.fn(),
     confirmReplace: vi.fn(),
     dismissDuplicateConflict: vi.fn(),
+    dismissMutationFailure: vi.fn(),
     replaceView: vi.fn(),
     resetView: vi.fn(),
     deleteView: vi.fn(),
@@ -263,6 +264,20 @@ describe("SourceViewControls", () => {
     expect(
       screen.queryByRole("menuitem", { name: "Apply saved view Old view" })
     ).not.toBeInTheDocument()
+  })
+
+  it("disables list Retry while a saved-view mutation is in flight", () => {
+    const model = controller({
+      busy: true,
+      mutation: "replace",
+      listError: { message: "Offline", retryable: true }
+    })
+    render(<Harness model={model} />)
+
+    const retry = screen.getByRole("button", { name: "Retry saved views" })
+    expect(retry).toBeDisabled()
+    fireEvent.click(retry)
+    expect(model.retry).not.toHaveBeenCalled()
   })
 
   it("routes Enter and Space on row actions without applying the saved view", async () => {
@@ -486,6 +501,7 @@ describe("SourceViewControls", () => {
   it("dismisses duplicate replacement on Cancel so the next Save starts fresh", async () => {
     const user = userEvent.setup()
     const dismissDuplicateConflict = vi.fn()
+    const dismissMutationFailure = vi.fn()
     const duplicate = {
       viewId: "view-1",
       version: 2,
@@ -493,12 +509,18 @@ describe("SourceViewControls", () => {
       state: validView().state
     }
     const { rerender } = render(
-      <Harness model={controller({ dismissDuplicateConflict })} />
+      <Harness
+        model={controller({ dismissDuplicateConflict, dismissMutationFailure })}
+      />
     )
     await user.click(screen.getByRole("button", { name: "Save source view" }))
     rerender(
       <Harness
-        model={controller({ duplicateConflict: duplicate, dismissDuplicateConflict })}
+        model={controller({
+          duplicateConflict: duplicate,
+          dismissDuplicateConflict,
+          dismissMutationFailure
+        })}
       />
     )
     expect(
@@ -507,6 +529,7 @@ describe("SourceViewControls", () => {
 
     await user.click(screen.getByRole("button", { name: "Cancel" }))
     expect(dismissDuplicateConflict).toHaveBeenCalledTimes(1)
+    expect(dismissMutationFailure).not.toHaveBeenCalled()
 
     rerender(<Harness model={controller({ dismissDuplicateConflict })} />)
     await user.click(screen.getByRole("button", { name: "Save source view" }))
@@ -514,6 +537,30 @@ describe("SourceViewControls", () => {
       await screen.findByRole("dialog", { name: "Save source view" })
     ).toBeInTheDocument()
     expect(screen.queryByRole("dialog", { name: "Replace saved view?" })).not.toBeInTheDocument()
+  })
+
+  it("dismisses a failed saved-view mutation when its overlay is canceled", async () => {
+    const user = userEvent.setup()
+    const dismissMutationFailure = vi.fn()
+    const initial = controller({ dismissMutationFailure })
+    const { rerender } = render(<Harness model={initial} />)
+    await user.click(screen.getByRole("button", { name: "Save source view" }))
+    expect(
+      await screen.findByRole("dialog", { name: "Save source view" })
+    ).toBeInTheDocument()
+
+    rerender(
+      <Harness
+        model={controller({
+          dismissMutationFailure,
+          mutationError: { message: "Offline", retryable: true },
+          canRetryMutation: true
+        })}
+      />
+    )
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+
+    expect(dismissMutationFailure).toHaveBeenCalledTimes(1)
   })
 
   it.each([

@@ -520,6 +520,9 @@ export const SourceViewOverlayHost: React.FC<SourceViewOverlayHostProps> = ({
 
   const cancel = () => {
     if (duplicate) controller.dismissDuplicateConflict()
+    else if (controller.mutationError || controller.versionConflict) {
+      controller.dismissMutationFailure()
+    }
     close()
   }
 
@@ -586,7 +589,11 @@ export const SourceViewOverlayHost: React.FC<SourceViewOverlayHostProps> = ({
               className="flex items-center justify-between gap-3 rounded-md border border-error/30 bg-surface px-3 py-2 text-xs text-text shadow-card"
             >
               <span>{controller.listError.message}</span>
-              <Button size="small" onClick={() => void controller.retry()}>
+              <Button
+                size="small"
+                disabled={controller.busy}
+                onClick={() => void controller.retry()}
+              >
                 <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
                 Retry saved views
               </Button>

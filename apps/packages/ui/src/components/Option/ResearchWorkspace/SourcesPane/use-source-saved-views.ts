@@ -215,6 +215,7 @@ export const useSourceSavedViews = (
   const mountedRef = React.useRef(false);
   const lifecycleRef = React.useRef(0);
   const operationEpochRef = React.useRef(0);
+  const mutationInFlightRef = React.useRef(false);
   const hasAuthoritativeViewsRef = React.useRef(false);
   const identityPending = identityRef.current !== workspaceId;
   const renderGeneration =
@@ -255,6 +256,21 @@ export const useSourceSavedViews = (
     },
     [isGenerationCurrent],
   );
+
+  const beginMutation = React.useCallback(
+    (generation: number): OperationToken | null => {
+      const token = beginOperation(generation);
+      if (token) mutationInFlightRef.current = true;
+      return token;
+    },
+    [beginOperation],
+  );
+
+  const invalidateMutationRetries = React.useCallback(() => {
+    operationEpochRef.current += 1;
+    versionRetryRef.current = null;
+    mutationRetryRef.current = null;
+  }, []);
 
   const commitGeneration = React.useCallback(
     (
@@ -370,6 +386,7 @@ export const useSourceSavedViews = (
       mountedRef.current = false;
       lifecycleRef.current += 1;
       operationEpochRef.current += 1;
+      mutationInFlightRef.current = false;
       hasAuthoritativeViewsRef.current = false;
       versionRetryRef.current = null;
       mutationRetryRef.current = null;
@@ -382,6 +399,7 @@ export const useSourceSavedViews = (
       generationRef.current += 1;
     }
     operationEpochRef.current += 1;
+    mutationInFlightRef.current = false;
     hasAuthoritativeViewsRef.current = false;
     versionRetryRef.current = null;
     mutationRetryRef.current = null;
@@ -433,6 +451,7 @@ export const useSourceSavedViews = (
     if (
       workspaceId === null ||
       identityRef.current !== workspaceId ||
+      mutationInFlightRef.current ||
       !isGenerationCurrent(renderGeneration)
     ) {
       return;
@@ -501,7 +520,7 @@ export const useSourceSavedViews = (
       targetWorkspaceId: string,
       options: PatchOptions,
     ): Promise<void> => {
-      const token = beginOperation(generation);
+      const token = beginMutation(generation);
       if (!token) return;
       const needsReconciliation = !hasAuthoritativeViewsRef.current;
       commitOperation(token, (current) => ({
@@ -520,6 +539,7 @@ export const useSourceSavedViews = (
           { version: options.version, ...options.body },
         );
         if (!isOperationCurrent(token)) return;
+        mutationInFlightRef.current = false;
         if (!validResponse(response)) {
           throw new Error("The server returned an invalid saved view.");
         }
@@ -529,6 +549,7 @@ export const useSourceSavedViews = (
         }
       } catch (error) {
         if (!isOperationCurrent(token)) return;
+        mutationInFlightRef.current = false;
         const detail = parseConflictDetail(error);
         if (detail?.code === "source_view_version_conflict") {
           const refreshToken = await load(
@@ -577,7 +598,7 @@ export const useSourceSavedViews = (
       }
     },
     [
-      beginOperation,
+      beginMutation,
       commitOperation,
       isOperationCurrent,
       load,
@@ -614,7 +635,7 @@ export const useSourceSavedViews = (
       }
 
       const run = async () => {
-        const token = beginOperation(renderGeneration);
+        const token = beginMutation(renderGeneration);
         if (!token) return;
         const needsReconciliation = !hasAuthoritativeViewsRef.current;
         commitOperation(token, (current) => ({
@@ -638,6 +659,7 @@ export const useSourceSavedViews = (
             },
           );
           if (!isOperationCurrent(token)) return;
+          mutationInFlightRef.current = false;
           if (!validResponse(response)) {
             throw new Error("The server returned an invalid saved view.");
           }
@@ -652,6 +674,7 @@ export const useSourceSavedViews = (
           }
         } catch (error) {
           if (!isOperationCurrent(token)) return;
+          mutationInFlightRef.current = false;
           const detail = parseConflictDetail(error);
           if (detail?.code === "source_view_name_exists") {
             mutationRetryRef.current = null;
@@ -694,7 +717,7 @@ export const useSourceSavedViews = (
       await run();
     },
     [
-      beginOperation,
+      beginMutation,
       commitGeneration,
       commitOperation,
       currentState,
@@ -744,13 +767,34 @@ export const useSourceSavedViews = (
 
   const dismissDuplicateConflict = React.useCallback(() => {
     if (!isGenerationCurrent(renderGeneration)) return;
-    versionRetryRef.current = null;
+    invalidateMutationRetries();
     commitGeneration(renderGeneration, (current) => ({
       ...current,
       duplicateConflict: null,
       versionConflict: null,
+      mutationError: null,
     }));
-  }, [commitGeneration, isGenerationCurrent, renderGeneration]);
+  }, [
+    commitGeneration,
+    invalidateMutationRetries,
+    isGenerationCurrent,
+    renderGeneration,
+  ]);
+
+  const dismissMutationFailure = React.useCallback(() => {
+    if (!isGenerationCurrent(renderGeneration)) return;
+    invalidateMutationRetries();
+    commitGeneration(renderGeneration, (current) => ({
+      ...current,
+      versionConflict: null,
+      mutationError: null,
+    }));
+  }, [
+    commitGeneration,
+    invalidateMutationRetries,
+    isGenerationCurrent,
+    renderGeneration,
+  ]);
 
   const replaceView = React.useCallback(
     async (view: WorkspaceSourceSavedViewResponse) => {
@@ -774,7 +818,6 @@ export const useSourceSavedViews = (
         viewId: view.id,
         version: view.version,
         body: {
-          name: view.name,
           schema_version: SOURCE_SAVED_VIEW_SCHEMA_VERSION,
           state: serialized.state,
         },
@@ -847,7 +890,7 @@ export const useSourceSavedViews = (
       )
         return;
       const run = async () => {
-        const token = beginOperation(renderGeneration);
+        const token = beginMutation(renderGeneration);
         if (!token) return;
         const needsReconciliation = !hasAuthoritativeViewsRef.current;
         commitOperation(token, (current) => ({
@@ -860,6 +903,7 @@ export const useSourceSavedViews = (
         try {
           await tldwClient.deleteWorkspaceSourceView(workspaceId, view.id);
           if (!isOperationCurrent(token)) return;
+          mutationInFlightRef.current = false;
           versionRetryRef.current = null;
           mutationRetryRef.current = null;
           const committed = commitOperation(token, (current) => ({
@@ -881,6 +925,7 @@ export const useSourceSavedViews = (
           }
         } catch (error) {
           if (!isOperationCurrent(token)) return;
+          mutationInFlightRef.current = false;
           mutationRetryRef.current = { ...token, run };
           commitOperation(token, (current) => ({
             ...current,
@@ -892,7 +937,7 @@ export const useSourceSavedViews = (
       await run();
     },
     [
-      beginOperation,
+      beginMutation,
       commitOperation,
       isGenerationCurrent,
       isOperationCurrent,
@@ -966,6 +1011,7 @@ export const useSourceSavedViews = (
     createView,
     confirmReplace,
     dismissDuplicateConflict,
+    dismissMutationFailure,
     replaceView,
     resetView,
     deleteView,

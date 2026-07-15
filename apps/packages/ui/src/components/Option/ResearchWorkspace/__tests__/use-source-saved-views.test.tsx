@@ -353,6 +353,38 @@ describe("useSourceSavedViews", () => {
     expect(result.current.announcement).toBe("Saved view deleted.");
   });
 
+  it("does not start a list retry while a replacement is in flight", async () => {
+    const row = validView();
+    const replacement = deferred<ReturnType<typeof validView>>();
+    api.listWorkspaceSourceViews.mockResolvedValue({ items: [row] });
+    api.updateWorkspaceSourceView.mockReturnValue(replacement.promise);
+    const { result } = setup(
+      "ws-a",
+      localState({ typeFilters: ["pdf"] }),
+    );
+    await waitFor(() => expect(result.current.views).toHaveLength(1));
+
+    let pending!: Promise<void>;
+    act(() => {
+      pending = result.current.replaceView(result.current.views[0]!);
+    });
+    await act(async () => result.current.retry());
+
+    expect(api.listWorkspaceSourceViews).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      replacement.resolve(
+        validView({
+          version: 3,
+          state: wireState({ type_filters: ["pdf"] }),
+        }),
+      );
+      await pending;
+    });
+    expect(result.current.views[0]?.version).toBe(3);
+    expect(result.current.announcement).toBe("Saved view replaced.");
+  });
+
   it("applies a valid view and ignores an invalid view", async () => {
     const onApply = vi.fn();
     api.listWorkspaceSourceViews.mockResolvedValue({
@@ -533,6 +565,33 @@ describe("useSourceSavedViews", () => {
     expect(api.createWorkspaceSourceView).toHaveBeenCalledTimes(2);
     expect(api.updateWorkspaceSourceView).not.toHaveBeenCalled();
     expect(result.current.activeViewId).toBe("view-2");
+  });
+
+  it("dismisses a failed duplicate replacement and invalidates its retry", async () => {
+    api.createWorkspaceSourceView.mockRejectedValue({
+      status: 409,
+      details: {
+        detail: {
+          code: "source_view_name_exists",
+          view_id: "view-1",
+          version: 2,
+        },
+      },
+    });
+    api.updateWorkspaceSourceView.mockRejectedValue(new Error("offline"));
+    const { result } = setup();
+
+    await act(async () => result.current.createView("Duplicate"));
+    await act(async () => result.current.confirmReplace());
+    expect(result.current.canRetryMutation).toBe(true);
+
+    act(() => result.current.dismissDuplicateConflict());
+    await act(async () => result.current.retryMutation());
+
+    expect(result.current.duplicateConflict).toBeNull();
+    expect(result.current.mutationError).toBeNull();
+    expect(result.current.canRetryMutation).toBe(false);
+    expect(api.updateWorkspaceSourceView).toHaveBeenCalledTimes(1);
   });
 
   it("treats malformed duplicate detail as an ordinary retryable error", async () => {
@@ -731,6 +790,73 @@ describe("useSourceSavedViews", () => {
     expect(result.current.announcement).toBe("Saved view replaced.");
   });
 
+  it("dismisses an ordinary version conflict and invalidates its retry", async () => {
+    api.listWorkspaceSourceViews
+      .mockResolvedValueOnce({ items: [validView()] })
+      .mockResolvedValueOnce({ items: [validView({ version: 5 })] });
+    api.updateWorkspaceSourceView.mockRejectedValue({
+      status: 409,
+      details: {
+        detail: {
+          code: "source_view_version_conflict",
+          view_id: "view-1",
+          current_version: 5,
+        },
+      },
+    });
+    const { result } = setup();
+    await waitFor(() => expect(result.current.views).toHaveLength(1));
+
+    await act(async () => result.current.replaceView(result.current.views[0]!));
+    expect(result.current.canRetryVersion).toBe(true);
+
+    act(() => result.current.dismissMutationFailure());
+    await act(async () => result.current.retryVersionConflict());
+
+    expect(result.current.versionConflict).toBeNull();
+    expect(result.current.canRetryVersion).toBe(false);
+    expect(api.updateWorkspaceSourceView).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["create", "replace", "reset", "delete"] as const)(
+    "dismisses a failed %s mutation and invalidates its retry",
+    async (kind) => {
+      api.listWorkspaceSourceViews.mockResolvedValue({ items: [validView()] });
+      api.createWorkspaceSourceView.mockRejectedValue(new Error("offline"));
+      api.updateWorkspaceSourceView.mockRejectedValue(new Error("offline"));
+      api.deleteWorkspaceSourceView.mockRejectedValue(new Error("offline"));
+      const { result } = setup();
+      await waitFor(() => expect(result.current.views).toHaveLength(1));
+
+      await act(async () => {
+        if (kind === "create") await result.current.createView("Failed save");
+        if (kind === "replace") {
+          await result.current.replaceView(result.current.views[0]!);
+        }
+        if (kind === "reset") await result.current.resetView(invalidView());
+        if (kind === "delete") {
+          await result.current.deleteView(result.current.views[0]!);
+        }
+      });
+      expect(result.current.canRetryMutation).toBe(true);
+
+      act(() => result.current.dismissMutationFailure());
+      await act(async () => result.current.retryMutation());
+
+      expect(result.current.mutationError).toBeNull();
+      expect(result.current.canRetryMutation).toBe(false);
+      expect(api.createWorkspaceSourceView).toHaveBeenCalledTimes(
+        kind === "create" ? 1 : 0,
+      );
+      expect(api.updateWorkspaceSourceView).toHaveBeenCalledTimes(
+        kind === "replace" || kind === "reset" ? 1 : 0,
+      );
+      expect(api.deleteWorkspaceSourceView).toHaveBeenCalledTimes(
+        kind === "delete" ? 1 : 0,
+      );
+    },
+  );
+
   it("retries an ordinary mutation error but not a saved-view limit", async () => {
     api.createWorkspaceSourceView
       .mockRejectedValueOnce(new Error("offline"))
@@ -770,7 +896,6 @@ describe("useSourceSavedViews", () => {
 
     expect(api.updateWorkspaceSourceView).toHaveBeenCalledWith("ws-a", "view-1", {
       version: 2,
-      name: "Needs review",
       schema_version: 1,
       state: wireState({ type_filters: ["pdf"], sort: "name_desc" }),
     });
@@ -778,6 +903,61 @@ describe("useSourceSavedViews", () => {
     expect(result.current.activeSnapshot).toEqual(updated.state);
     expect(result.current.modified).toBe(false);
     expect(result.current.announcement).toBe("Saved view replaced.");
+  });
+
+  it("preserves a concurrent server rename across an ordinary replace retry", async () => {
+    const current = localState({ typeFilters: ["pdf"] });
+    const renamed = validView({ name: "Renamed concurrently", version: 5 });
+    api.listWorkspaceSourceViews
+      .mockResolvedValueOnce({ items: [validView()] })
+      .mockResolvedValueOnce({ items: [renamed] });
+    api.updateWorkspaceSourceView
+      .mockRejectedValueOnce({
+        status: 409,
+        details: {
+          detail: {
+            code: "source_view_version_conflict",
+            view_id: "view-1",
+            current_version: 5,
+          },
+        },
+      })
+      .mockResolvedValueOnce(
+        validView({
+          name: "Renamed concurrently",
+          version: 6,
+          state: wireState({ type_filters: ["pdf"] }),
+        }),
+      );
+    const { result } = setup("ws-a", current);
+    await waitFor(() => expect(result.current.views).toHaveLength(1));
+
+    await act(async () => result.current.replaceView(result.current.views[0]!));
+    expect(api.updateWorkspaceSourceView).toHaveBeenNthCalledWith(
+      1,
+      "ws-a",
+      "view-1",
+      {
+        version: 2,
+        schema_version: 1,
+        state: wireState({ type_filters: ["pdf"] }),
+      },
+    );
+    expect(result.current.views[0]?.name).toBe("Renamed concurrently");
+
+    await act(async () => result.current.retryVersionConflict());
+
+    expect(api.updateWorkspaceSourceView).toHaveBeenNthCalledWith(
+      2,
+      "ws-a",
+      "view-1",
+      {
+        version: 5,
+        schema_version: 1,
+        state: wireState({ type_filters: ["pdf"] }),
+      },
+    );
+    expect(result.current.views[0]?.name).toBe("Renamed concurrently");
   });
 
   it("resets an invalid row to canonical V1 defaults and preserves expanded", async () => {
