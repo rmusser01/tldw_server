@@ -3,6 +3,7 @@ import threading
 import pytest
 from fastapi import HTTPException
 
+from tldw_Server_API.app.core.exceptions import EgressPolicyError
 from tldw_Server_API.app.core.Security import egress
 from tldw_Server_API.app.core.Security.url_validation import assert_url_safe
 
@@ -42,6 +43,17 @@ def _always_public(host: str):
 
 
 class TestEgressPolicy:
+    @pytest.fixture(autouse=True)
+    def _scoped_policy_environment(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Keep scoped-policy cases independent of suite-level egress relaxations."""
+        monkeypatch.setenv(egress.BLOCK_PRIVATE_ENV, "true")
+        monkeypatch.setenv(egress.ALLOWED_PORTS_ENV, "80,443")
+        monkeypatch.setenv(egress.PROFILENAME, "permissive")
+        monkeypatch.delenv(egress.ALLOWLIST_ENV, raising=False)
+        monkeypatch.delenv(egress.DENYLIST_ENV, raising=False)
+        monkeypatch.delenv(egress.GLOBAL_ALLOWLIST_ENV, raising=False)
+        monkeypatch.delenv(egress.GLOBAL_DENYLIST_ENV, raising=False)
+
     def test_allowlist_enforces_exact_and_subdomain_matches(self, monkeypatch):
         monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWLIST", "example.com")
         monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "false")
@@ -118,6 +130,246 @@ class TestEgressPolicy:
 
         assert res.allowed is False
         assert "changed" in (res.reason or "").lower()
+
+    @pytest.mark.parametrize(
+        ("configured_url", "request_url", "resolved_ip"),
+        [
+            ("http://127.0.0.1:11434", "http://127.0.0.1:11434/api/tags", "127.0.0.1"),
+            ("http://llama.lan:11434", "http://llama.lan:11434/v1/models", "192.168.1.20"),
+            ("http://docker:11434", "http://docker:11434/v1/models", "127.0.0.11"),
+            ("http://overlay:11434", "http://overlay:11434/v1/models", "100.64.0.7"),
+            ("http://[fd12:3456::10]:11434", "http://[fd12:3456::10]:11434/v1/models", "fd12:3456::10"),
+            ("https://public.example:9443", "https://public.example:9443/v1/models", "8.8.8.8"),
+        ],
+    )
+    def test_configured_scope_allows_approved_addresses_on_its_exact_port(
+        self,
+        configured_url: str,
+        request_url: str,
+        resolved_ip: str,
+    ) -> None:
+        scope = egress.ConfiguredEndpointScope.from_url(configured_url)
+
+        result = egress.evaluate_url_policy(
+            request_url,
+            configured_endpoint=scope,
+            resolved_ips_override=[resolved_ip],
+        )
+
+        assert result == egress.URLPolicyResult(True, None, (resolved_ip,), None)
+
+    @pytest.mark.parametrize(
+        ("request_url", "reason_code"),
+        [
+            ("https://llama.lan:11434/v1/models", "origin_mismatch"),
+            ("http://other.lan:11434/v1/models", "origin_mismatch"),
+            ("http://llama.lan:11435/v1/models", "origin_mismatch"),
+            ("http://user:pass@llama.lan:11434/v1/models", "userinfo_not_allowed"),
+        ],
+    )
+    def test_configured_scope_rejects_origin_and_userinfo_mismatches(
+        self,
+        request_url: str,
+        reason_code: str,
+    ) -> None:
+        scope = egress.ConfiguredEndpointScope.from_url("http://llama.lan:11434")
+
+        result = egress.evaluate_url_policy(
+            request_url,
+            configured_endpoint=scope,
+            resolved_ips_override=["192.168.1.20"],
+        )
+
+        assert result.allowed is False
+        assert result.reason_code == reason_code
+
+    @pytest.mark.parametrize(
+        "resolved_ip",
+        [
+            "169.254.1.1",  # link-local
+            "224.0.0.1",  # multicast
+            "0.0.0.0",  # unspecified/current network
+            "192.0.2.1",  # documentation
+            "198.18.0.1",  # benchmarking
+            "192.88.99.1",  # deprecated 6to4 relay anycast
+            "64:ff9b::808:808",  # IPv4/IPv6 translation
+            "2001:3::1",  # AMT special-use range reported as global
+            "3fff::1",  # IPv6 documentation
+            "240.0.0.1",  # reserved
+            "::ffff:192.168.1.20",  # IPv4-mapped IPv6
+        ],
+    )
+    def test_configured_scope_rejects_nonordinary_special_use_addresses(
+        self,
+        resolved_ip: str,
+    ) -> None:
+        scope = egress.ConfiguredEndpointScope.from_url("http://llama.lan:11434")
+
+        result = egress.evaluate_url_policy(
+            "http://llama.lan:11434/v1/models",
+            configured_endpoint=scope,
+            resolved_ips_override=[resolved_ip],
+        )
+
+        assert result.allowed is False
+        assert result.reason_code == "address_forbidden"
+
+    @pytest.mark.parametrize(
+        "metadata_ip",
+        [
+            "169.254.169.254",
+            "169.254.170.2",
+            "169.254.170.23",
+            "100.100.100.200",
+            "168.63.129.16",
+            "fd00:ec2::254",
+        ],
+    )
+    def test_configured_scope_rejects_metadata_endpoints(self, metadata_ip: str) -> None:
+        scope = egress.ConfiguredEndpointScope.from_url("http://llama.lan:11434")
+
+        result = egress.evaluate_url_policy(
+            "http://llama.lan:11434/v1/models",
+            configured_endpoint=scope,
+            resolved_ips_override=[metadata_ip],
+        )
+
+        assert result.allowed is False
+        assert result.reason_code == "address_forbidden"
+
+    def test_configured_scope_rejects_mixed_dns_answers(self) -> None:
+        scope = egress.ConfiguredEndpointScope.from_url("http://llama.lan:11434")
+
+        result = egress.evaluate_url_policy(
+            "http://llama.lan:11434/v1/models",
+            configured_endpoint=scope,
+            resolved_ips_override=["192.168.1.20", "169.254.169.254"],
+        )
+
+        assert result.allowed is False
+        assert result.resolved_ips == ("192.168.1.20", "169.254.169.254")
+        assert result.reason_code == "address_forbidden"
+
+    def test_configured_scope_global_denylist_retains_precedence(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv(egress.GLOBAL_DENYLIST_ENV, "llama.lan")
+        scope = egress.ConfiguredEndpointScope.from_url("http://llama.lan:11434")
+
+        result = egress.evaluate_url_policy(
+            "http://llama.lan:11434/v1/models",
+            configured_endpoint=scope,
+            resolved_ips_override=["192.168.1.20"],
+        )
+
+        assert result.allowed is False
+        assert result.reason_code == "host_denied"
+
+    def test_configured_scope_satisfies_strict_profile_without_global_allowlist(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv(egress.PROFILENAME, "strict")
+        scope = egress.ConfiguredEndpointScope.from_url("http://llama.lan:11434")
+
+        result = egress.evaluate_url_policy(
+            "http://llama.lan:11434/v1/models",
+            configured_endpoint=scope,
+            resolved_ips_override=["192.168.1.20"],
+        )
+
+        assert result.allowed is True
+
+    def test_configured_scope_always_resolves_despite_private_block_relaxations(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv(egress.BLOCK_PRIVATE_ENV, "false")
+        monkeypatch.setenv("TESTING", "true")
+        monkeypatch.setattr(egress, "_resolve_host_ips", lambda _host: ["169.254.169.254"])
+        scope = egress.ConfiguredEndpointScope.from_url("http://llama.lan:11434")
+
+        result = egress.evaluate_url_policy(
+            "http://llama.lan:11434/v1/models",
+            configured_endpoint=scope,
+            block_private_override=False,
+        )
+
+        assert result.allowed is False
+        assert result.reason_code == "address_forbidden"
+
+    def test_configured_scope_rejects_unresolved_and_changed_dns(self) -> None:
+        scope = egress.ConfiguredEndpointScope.from_url("http://llama.lan:11434")
+
+        unresolved = egress.evaluate_url_policy(
+            "http://llama.lan:11434/v1/models",
+            configured_endpoint=scope,
+            resolved_ips_override=[],
+        )
+        changed = egress.evaluate_url_policy(
+            "http://llama.lan:11434/v1/models",
+            configured_endpoint=scope,
+            resolved_ips_override=["192.168.1.21"],
+            pinned_resolved_ips=["192.168.1.20"],
+        )
+
+        assert unresolved.reason_code == "dns_unresolved"
+        assert changed.reason_code == "dns_changed"
+
+    @pytest.mark.parametrize(
+        ("configured_url", "equivalent_url"),
+        [
+            ("https://b\u00fccher.example", "https://xn--bcher-kva.example.:443/v1/models"),
+            ("http://llama.lan", "http://llama.lan.:80/v1/models"),
+            (
+                "http://[fd12:3456:0:0:0:0:0:10]",
+                "http://[fd12:3456::10]:80/v1/models",
+            ),
+        ],
+    )
+    def test_configured_scope_matches_canonical_equivalent_origins(
+        self,
+        configured_url: str,
+        equivalent_url: str,
+    ) -> None:
+        scope = egress.ConfiguredEndpointScope.from_url(configured_url)
+
+        assert scope.matches(equivalent_url) is True
+
+    def test_url_policy_result_third_positional_argument_remains_resolved_ips(self) -> None:
+        result = egress.URLPolicyResult(True, None, ("192.168.1.20",))
+
+        assert result.resolved_ips == ("192.168.1.20",)
+        assert result.reason_code is None
+
+    @pytest.mark.parametrize(
+        ("url", "reason_code"),
+        [
+            ("http://example.com:bad", "invalid_url"),
+            ("file:///etc/passwd", "unsupported_scheme"),
+            ("https://user@example.com", "userinfo_not_allowed"),
+            ("https://example.com:9443", "port_not_allowed"),
+        ],
+    )
+    def test_unscoped_policy_failures_expose_stable_reason_codes(
+        self,
+        url: str,
+        reason_code: str,
+    ) -> None:
+        result = egress.evaluate_url_policy(url, resolved_ips_override=["8.8.8.8"])
+
+        assert result.allowed is False
+        assert result.reason_code == reason_code
+
+    def test_egress_policy_error_reason_code_is_optional(self) -> None:
+        legacy = EgressPolicyError("message")
+        coded = EgressPolicyError("message", reason_code="dns_unresolved")
+
+        assert str(legacy) == "message"
+        assert legacy.reason_code is None
+        assert str(coded) == "message"
+        assert coded.reason_code == "dns_unresolved"
 
     def test_resolve_host_ips_does_not_mutate_global_socket_timeout(self, monkeypatch):
         calls: list[object] = []

@@ -111,12 +111,63 @@ PRIVATE_RANGES = [
     ipaddress.ip_network("ff00::/8"),
 ]
 
+_METADATA_ADDRESSES = frozenset(
+    ipaddress.ip_address(raw)
+    for raw in (
+        "169.254.169.254",
+        "169.254.170.2",
+        "169.254.170.23",
+        "100.100.100.200",
+        "168.63.129.16",
+        "fd00:ec2::254",
+    )
+)
+_SCOPED_LOCAL_NETWORKS = (
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("100.64.0.0/10"),
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fc00::/7"),
+)
+_SCOPED_FORBIDDEN_SPECIAL_NETWORKS = (
+    ipaddress.ip_network("0.0.0.0/8"),
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("192.0.0.0/24"),
+    ipaddress.ip_network("192.0.2.0/24"),
+    ipaddress.ip_network("192.31.196.0/24"),
+    ipaddress.ip_network("192.52.193.0/24"),
+    ipaddress.ip_network("192.88.99.0/24"),
+    ipaddress.ip_network("192.175.48.0/24"),
+    ipaddress.ip_network("198.18.0.0/15"),
+    ipaddress.ip_network("198.51.100.0/24"),
+    ipaddress.ip_network("203.0.113.0/24"),
+    ipaddress.ip_network("224.0.0.0/4"),
+    ipaddress.ip_network("240.0.0.0/4"),
+    ipaddress.ip_network("255.255.255.255/32"),
+    ipaddress.ip_network("::/128"),
+    ipaddress.ip_network("::ffff:0:0/96"),
+    ipaddress.ip_network("64:ff9b::/96"),
+    ipaddress.ip_network("64:ff9b:1::/48"),
+    ipaddress.ip_network("100::/64"),
+    ipaddress.ip_network("2001::/23"),
+    ipaddress.ip_network("2001:db8::/32"),
+    ipaddress.ip_network("2002::/16"),
+    ipaddress.ip_network("2620:4f:8000::/48"),
+    ipaddress.ip_network("3fff::/20"),
+    ipaddress.ip_network("5f00::/16"),
+    ipaddress.ip_network("fe80::/10"),
+    ipaddress.ip_network("ff00::/8"),
+)
+
 
 @dataclass(frozen=True)
 class URLPolicyResult:
     allowed: bool
     reason: str | None = None
     resolved_ips: tuple[str, ...] = ()
+    reason_code: str | None = None
 
 
 def _normalize_hostname(host: str) -> str:
@@ -131,6 +182,57 @@ def _normalize_hostname(host: str) -> str:
     except UnicodeError:
         host = host.lower()
     return host.lower()
+
+
+def _canonical_origin(url: str) -> tuple[str, str, int]:
+    """Return the canonical HTTP(S) origin for a URL.
+
+    Host normalization deliberately matches the existing egress allow/deny-list
+    behavior: IDNA is converted to ASCII, case and a terminal DNS dot are
+    ignored, and bracketed IPv6 literals are represented without brackets.
+    """
+    try:
+        parsed = urlparse(url)
+        scheme = (parsed.scheme or "").lower()
+        if scheme not in DEFAULT_ALLOWED_SCHEMES:
+            raise ValueError("Unsupported URL scheme")
+        if parsed.username is not None or parsed.password is not None:
+            raise ValueError("URL userinfo is not allowed")
+        host = _normalize_hostname(parsed.hostname or "")
+        if not host:
+            raise ValueError("URL must include a hostname")
+        try:
+            host = str(ipaddress.ip_address(host))
+        except ValueError:
+            pass
+        port = parsed.port
+    except (TypeError, AttributeError, ValueError) as exc:
+        raise ValueError("Invalid URL origin") from exc
+    if port is None:
+        port = 443 if scheme == "https" else 80
+    return scheme, host, port
+
+
+@dataclass(frozen=True)
+class ConfiguredEndpointScope:
+    """Exact server-configured origin authorized for one local-provider call."""
+
+    scheme: str
+    host: str
+    port: int
+
+    @classmethod
+    def from_url(cls, url: str) -> ConfiguredEndpointScope:
+        """Create a scope from a trusted configured endpoint URL."""
+        scheme, host, port = _canonical_origin(url)
+        return cls(scheme=scheme, host=host, port=port)
+
+    def matches(self, url: str) -> bool:
+        """Return whether ``url`` has this scope's canonical exact origin."""
+        try:
+            return _canonical_origin(url) == (self.scheme, self.host, self.port)
+        except ValueError:
+            return False
 
 
 def _get_allowlist(env_value: str | None) -> list[str]:
@@ -364,6 +466,58 @@ def _resolve_and_check_private(host: str) -> tuple[bool, list[str]]:
     return True, ips
 
 
+def _resolve_host_or_literal(host: str) -> list[str]:
+    """Return a literal address or every DNS answer for a scoped hostname."""
+    try:
+        return [str(ipaddress.ip_address(host))]
+    except ValueError:
+        return _resolve_host_ips(host)
+
+
+def _is_approved_scoped_address(raw_ip: str) -> bool:
+    """Allow local-provider destinations only from explicit safe classes."""
+    try:
+        address = ipaddress.ip_address(raw_ip)
+    except ValueError:
+        return False
+
+    if address in _METADATA_ADDRESSES:
+        return False
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+        return False
+    if any(address in network for network in _SCOPED_LOCAL_NETWORKS):
+        return True
+    if any(address in network for network in _SCOPED_FORBIDDEN_SPECIAL_NETWORKS):
+        return False
+    if (
+        address.is_multicast
+        or address.is_link_local
+        or address.is_unspecified
+        or address.is_reserved
+        or address.is_private
+    ):
+        return False
+    return address.is_global
+
+
+def _normalize_scoped_resolved_ips(ips: Sequence[str] | None) -> tuple[str, ...]:
+    """Canonicalize and deduplicate scoped DNS answers without dropping errors."""
+    if not ips:
+        return ()
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw in ips:
+        text = str(raw).strip()
+        try:
+            value = str(ipaddress.ip_address(text))
+        except ValueError:
+            value = text
+        if value and value not in seen:
+            seen.add(value)
+            normalized.append(value)
+    return tuple(normalized)
+
+
 def _should_block_private_env(block_private_override: bool | None = None) -> bool:
     if block_private_override is not None:
         return block_private_override
@@ -379,20 +533,27 @@ def evaluate_url_policy(
     block_private_override: bool | None = None,
     resolved_ips_override: Sequence[str] | None = None,
     pinned_resolved_ips: Sequence[str] | None = None,
+    configured_endpoint: ConfiguredEndpointScope | None = None,
 ) -> URLPolicyResult:
     """Evaluate whether a URL passes the egress policy."""
     try:
         parsed = urlparse(url)
     except (TypeError, AttributeError, ValueError):
-        return URLPolicyResult(False, "Invalid URL")
+        return URLPolicyResult(False, "Invalid URL", reason_code="invalid_url")
 
     scheme = (parsed.scheme or "").lower()
     if scheme not in DEFAULT_ALLOWED_SCHEMES:
-        return URLPolicyResult(False, "Unsupported URL scheme")
+        return URLPolicyResult(False, "Unsupported URL scheme", reason_code="unsupported_scheme")
 
-    host = _normalize_hostname(parsed.hostname or "")
+    if parsed.username is not None or parsed.password is not None:
+        return URLPolicyResult(False, "URL userinfo is not allowed", reason_code="userinfo_not_allowed")
+
+    try:
+        host = _normalize_hostname(parsed.hostname or "")
+    except ValueError:
+        return URLPolicyResult(False, "Invalid URL", reason_code="invalid_url")
     if not host:
-        return URLPolicyResult(False, "URL must include a hostname")
+        return URLPolicyResult(False, "URL must include a hostname", reason_code="invalid_url")
 
     # Ports policy (defaults 80/443/8080; override via env)
     def _default_ports() -> list[int]:
@@ -414,11 +575,9 @@ def evaluate_url_policy(
     try:
         port = parsed.port
     except ValueError:
-        return URLPolicyResult(False, "Invalid URL port")
+        return URLPolicyResult(False, "Invalid URL port", reason_code="invalid_url")
     if port is None:
         port = 443 if scheme == "https" else 80
-    if allowed_ports and port not in allowed_ports:
-        return URLPolicyResult(False, f"Port not allowed: {port}")
 
     allowlist = list(allowlist) if allowlist is not None else None
     if allowlist is None:
@@ -448,41 +607,92 @@ def evaluate_url_policy(
                 denied = denied[1:]
             d = _normalize_hostname(denied)
             if host == d or host.endswith(f".{d}"):
-                return URLPolicyResult(False, "Host in denylist")
+                return URLPolicyResult(False, "Host in denylist", reason_code="host_denied")
 
-    if profile == "strict":
-        if not allowlist:
-            return URLPolicyResult(False, "No allowlist configured (strict)")
-        if not _host_matches_allowlist(host, allowlist):
-            return URLPolicyResult(False, "Host not in allowlist")
-    else:
-        # permissive/custom: if allowlist provided, enforce; else accept any public host
-        if allowlist and not _host_matches_allowlist(host, allowlist):
-            return URLPolicyResult(False, "Host not in allowlist")
+    if configured_endpoint is not None:
+        if not configured_endpoint.matches(url):
+            return URLPolicyResult(False, "URL origin does not match configured endpoint", reason_code="origin_mismatch")
+    elif allowed_ports and port not in allowed_ports:
+        return URLPolicyResult(False, f"Port not allowed: {port}", reason_code="port_not_allowed")
+
+    if configured_endpoint is None:
+        if profile == "strict":
+            if not allowlist:
+                return URLPolicyResult(False, "No allowlist configured (strict)", reason_code="host_denied")
+            if not _host_matches_allowlist(host, allowlist):
+                return URLPolicyResult(False, "Host not in allowlist", reason_code="host_denied")
+        else:
+            # permissive/custom: if allowlist provided, enforce; else accept any public host
+            if allowlist and not _host_matches_allowlist(host, allowlist):
+                return URLPolicyResult(False, "Host not in allowlist", reason_code="host_denied")
 
     resolved_ips: tuple[str, ...] = ()
-    if _should_block_private_env(block_private_override):
+    if configured_endpoint is not None:
+        raw_ips = (
+            list(resolved_ips_override)
+            if resolved_ips_override is not None
+            else _resolve_host_or_literal(host)
+        )
+        resolved_ips = _normalize_scoped_resolved_ips(raw_ips)
+        if not resolved_ips:
+            return URLPolicyResult(False, "Host could not be resolved", reason_code="dns_unresolved")
+        if any(not _is_approved_scoped_address(ip) for ip in resolved_ips):
+            return URLPolicyResult(
+                False,
+                "URL resolves to a forbidden address",
+                resolved_ips,
+                "address_forbidden",
+            )
+        pinned_ips = _normalize_scoped_resolved_ips(pinned_resolved_ips)
+        if pinned_ips and not _same_resolved_ip_set(resolved_ips, pinned_ips):
+            return URLPolicyResult(
+                False,
+                "DNS resolution changed since policy check",
+                resolved_ips,
+                "dns_changed",
+            )
+    elif _should_block_private_env(block_private_override):
         if resolved_ips_override is not None:
             resolved_ips = _normalize_resolved_ips(resolved_ips_override)
             if not resolved_ips:
-                return URLPolicyResult(False, "Host could not be resolved")
+                return URLPolicyResult(False, "Host could not be resolved", reason_code="dns_unresolved")
             if any(_is_private_ip(ip) for ip in resolved_ips):
-                return URLPolicyResult(False, "URL resolves to a private or reserved address", resolved_ips)
+                return URLPolicyResult(
+                    False,
+                    "URL resolves to a private or reserved address",
+                    resolved_ips,
+                    "address_forbidden",
+                )
         else:
             ok, ips = _resolve_and_check_private(host)
             resolved_ips = _normalize_resolved_ips(ips)
             if not ok:
                 if not resolved_ips:
-                    return URLPolicyResult(False, "Host could not be resolved")
-                return URLPolicyResult(False, "URL resolves to a private or reserved address", resolved_ips)
+                    return URLPolicyResult(False, "Host could not be resolved", reason_code="dns_unresolved")
+                return URLPolicyResult(
+                    False,
+                    "URL resolves to a private or reserved address",
+                    resolved_ips,
+                    "address_forbidden",
+                )
         pinned_ips = _normalize_resolved_ips(pinned_resolved_ips)
         if pinned_ips and not _same_resolved_ip_set(resolved_ips, pinned_ips):
-            return URLPolicyResult(False, "DNS resolution changed since policy check", resolved_ips)
+            return URLPolicyResult(
+                False,
+                "DNS resolution changed since policy check",
+                resolved_ips,
+                "dns_changed",
+            )
     else:
         resolved_ips = _normalize_resolved_ips(resolved_ips_override)
         pinned_ips = _normalize_resolved_ips(pinned_resolved_ips)
         if pinned_ips and resolved_ips and not _same_resolved_ip_set(resolved_ips, pinned_ips):
-            return URLPolicyResult(False, "DNS resolution changed since policy check", resolved_ips)
+            return URLPolicyResult(
+                False,
+                "DNS resolution changed since policy check",
+                resolved_ips,
+                "dns_changed",
+            )
 
     return URLPolicyResult(True, None, resolved_ips)
 

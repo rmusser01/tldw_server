@@ -1042,7 +1042,7 @@ def _validate_egress_or_raise(
             get_metrics_registry().increment(
                 "http_client_egress_denials_total", 1, labels={"reason": (reason or "denied")}
             )
-        raise EgressPolicyError(reason)
+        raise EgressPolicyError(reason, reason_code=getattr(res, "reason_code", None))
 
 
 async def _avalidate_egress_or_raise(

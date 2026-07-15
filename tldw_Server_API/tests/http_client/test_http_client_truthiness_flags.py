@@ -4,7 +4,6 @@ import pytest
 
 import tldw_Server_API.app.core.http_client as hc
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -114,3 +113,29 @@ def test_validate_egress_reuses_dns_pin_cache_for_same_host(monkeypatch):
 
     assert calls == [None, ("93.184.216.34", "93.184.216.35")]
     assert dns_pin_cache["example.com"] == ("93.184.216.34", "93.184.216.35")
+
+
+@pytest.mark.asyncio
+async def test_sync_and_async_validation_preserve_policy_reason_code(monkeypatch):
+    from tldw_Server_API.app.core.exceptions import EgressPolicyError
+    from tldw_Server_API.app.core.Security import egress as egress_mod
+
+    monkeypatch.setattr(
+        egress_mod,
+        "evaluate_url_policy",
+        lambda *_args, **_kwargs: types.SimpleNamespace(
+            allowed=False,
+            reason="Host could not be resolved",
+            reason_code="dns_unresolved",
+        ),
+    )
+
+    with pytest.raises(EgressPolicyError) as sync_error:
+        hc._validate_egress_or_raise("https://example.invalid")
+    with pytest.raises(EgressPolicyError) as async_error:
+        await hc._avalidate_egress_or_raise("https://example.invalid")
+
+    assert str(sync_error.value) == "Host could not be resolved"
+    assert sync_error.value.reason_code == "dns_unresolved"
+    assert str(async_error.value) == "Host could not be resolved"
+    assert async_error.value.reason_code == "dns_unresolved"

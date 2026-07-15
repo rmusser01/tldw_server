@@ -104,21 +104,21 @@
 
 **Tests:** Security evaluator and global-policy regression files.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 1.1: Write the failing policy matrix
 
-- [ ] Add parameterized tests with `WORKFLOWS_EGRESS_BLOCK_PRIVATE=true` and allowed ports `80,443` for loopback, RFC1918, IPv6 ULA, CGNAT, Docker DNS, and ordinary public unicast on the exact configured port.
-- [ ] Add denials for scheme/host/port mismatch, URL userinfo, global denylist matches, link-local, multicast, unspecified, documentation, benchmarking, translation, reserved, IPv4-mapped IPv6, and mixed DNS answers containing one forbidden address.
-- [ ] Test the complete metadata set: `169.254.169.254`, `169.254.170.2`, `169.254.170.23`, `100.100.100.200`, `168.63.129.16`, and `fd00:ec2::254`.
-- [ ] Test strict profile, DNS changes, trailing-dot/IDNA equivalence, default ports, bracketed IPv6, and the scoped branch ignoring test/global private-block overrides.
-- [ ] Assert `URLPolicyResult(True, None, resolved_ips)` retains its existing third positional argument and that all new failures expose stable `reason_code` values.
-- [ ] Add exception tests proving `EgressPolicyError("message")` remains valid and `EgressPolicyError("message", reason_code="dns_unresolved")` retains the code.
-- [ ] Run `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Security/test_egress.py tldw_Server_API/tests/Security/test_egress_global_env.py tldw_Server_API/tests/Security/test_egress_env_absent_defaults.py -q` and confirm the new tests fail for missing scope/classifier/code behavior.
+- [x] Add parameterized tests with `WORKFLOWS_EGRESS_BLOCK_PRIVATE=true` and allowed ports `80,443` for loopback, RFC1918, IPv6 ULA, CGNAT, Docker DNS, and ordinary public unicast on the exact configured port.
+- [x] Add denials for scheme/host/port mismatch, URL userinfo, global denylist matches, link-local, multicast, unspecified, documentation, benchmarking, translation, reserved, IPv4-mapped IPv6, and mixed DNS answers containing one forbidden address.
+- [x] Test the complete metadata set: `169.254.169.254`, `169.254.170.2`, `169.254.170.23`, `100.100.100.200`, `168.63.129.16`, and `fd00:ec2::254`.
+- [x] Test strict profile, DNS changes, trailing-dot/IDNA equivalence, default ports, bracketed IPv6, and the scoped branch ignoring test/global private-block overrides.
+- [x] Assert `URLPolicyResult(True, None, resolved_ips)` retains its existing third positional argument and that all new failures expose stable `reason_code` values.
+- [x] Add exception tests proving `EgressPolicyError("message")` remains valid and `EgressPolicyError("message", reason_code="dns_unresolved")` retains the code.
+- [x] Run `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Security/test_egress.py tldw_Server_API/tests/Security/test_egress_global_env.py tldw_Server_API/tests/Security/test_egress_env_absent_defaults.py -q` and confirm the new tests fail for missing scope/classifier/code behavior.
 
 ### Task 1.2: Implement the minimal evaluator extension
 
-- [ ] Add only this value object in `egress.py`:
+- [x] Add only this value object in `egress.py`:
 
   ```python
   @dataclass(frozen=True)
@@ -132,16 +132,16 @@
       def matches(self, url: str) -> bool: ...
   ```
 
-- [ ] Reuse one helper for scheme, IDNA hostname, trailing-dot, IPv6, and effective-port canonicalization.
-- [ ] Add `configured_endpoint: ConfiguredEndpointScope | None = None` to `evaluate_url_policy` and append `reason_code: str | None = None` after `URLPolicyResult.resolved_ips`.
-- [ ] Implement one scoped-address predicate: explicit metadata denial first; allow loopback/RFC1918/ULA/CGNAT; otherwise require `is_global` plus ordinary-unicast flags and no explicit special-use match. Do not use `is_global` alone; deny IPv4-mapped IPv6 and all remaining special-use classes.
-- [ ] Preserve no-scope behavior and global denylist precedence. Resolve every scoped hostname, reject any forbidden answer, and compare the accepted set with `pinned_resolved_ips`.
-- [ ] Add an optional `reason_code` attribute to `EgressPolicyError` and raise it from sync/async transport validation without changing sanitized messages.
+- [x] Reuse one helper for scheme, IDNA hostname, trailing-dot, IPv6, and effective-port canonicalization.
+- [x] Add `configured_endpoint: ConfiguredEndpointScope | None = None` to `evaluate_url_policy` and append `reason_code: str | None = None` after `URLPolicyResult.resolved_ips`.
+- [x] Implement one scoped-address predicate: explicit metadata denial first; allow loopback/RFC1918/ULA/CGNAT; otherwise require `is_global` plus ordinary-unicast flags and no explicit special-use match. Do not use `is_global` alone; deny IPv4-mapped IPv6 and all remaining special-use classes.
+- [x] Preserve no-scope behavior and global denylist precedence. Resolve every scoped hostname, reject any forbidden answer, and compare the accepted set with `pinned_resolved_ips`.
+- [x] Add an optional `reason_code` attribute to `EgressPolicyError` and raise it from sync/async transport validation without changing sanitized messages.
 
 ### Task 1.3: Verify and commit
 
-- [ ] Re-run the Stage 1 tests, `git diff --check`, and inspect the diff for any no-scope policy change.
-- [ ] Commit policy, exception, and tests with `fix(security): scope configured local provider egress (TASK-12972)`.
+- [x] Re-run the Stage 1 tests, `git diff --check`, and inspect the diff for any no-scope policy change.
+- [x] Commit policy, exception, and tests with `fix(security): scope configured local provider egress (TASK-12972)`.
 
 ---
 
