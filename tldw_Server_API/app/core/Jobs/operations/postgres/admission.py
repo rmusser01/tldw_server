@@ -26,6 +26,16 @@ try:
 except ImportError:  # pragma: no cover - optional dependency path
     _PG_ERRORS = ()
 
+
+_COUNTER_NONCRITICAL_ERRORS: tuple[type[BaseException], ...] = (
+    AttributeError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+    *_PG_ERRORS,
+)
+
+
 def _count_from_row(row: Any) -> int:
     if row is None:
         return 0
@@ -123,6 +133,29 @@ def _bump_counters(
             1 if is_scheduled else 0,
         ),
     )
+
+
+def _bump_counters_best_effort(
+    cur: Any,
+    *,
+    command: CreateJobCommand,
+    available_at: datetime | None,
+) -> None:
+    cur.execute("SAVEPOINT jobs_admission_counter_update")
+    try:
+        _bump_counters(cur, command=command, available_at=available_at)
+    except _COUNTER_NONCRITICAL_ERRORS as exc:
+        cur.execute("ROLLBACK TO SAVEPOINT jobs_admission_counter_update")
+        cur.execute("RELEASE SAVEPOINT jobs_admission_counter_update")
+        logger.warning(
+            "Non-critical Postgres jobs counter update failed for {}:{}:{}: {}",
+            command.domain,
+            command.queue,
+            command.job_type,
+            exc,
+        )
+    else:
+        cur.execute("RELEASE SAVEPOINT jobs_admission_counter_update")
 
 
 def _quota_rejection(
@@ -267,7 +300,7 @@ def create_job_admission(
                         "job_type": command.job_type,
                     }
                 if inserted and counters_enabled:
-                    _bump_counters(cur, command=command, available_at=available_at)
+                    _bump_counters_best_effort(cur, command=command, available_at=available_at)
                 event = _insert_created_event(
                     cur,
                     row=row,
@@ -296,7 +329,7 @@ def create_job_admission(
                     "job_type": command.job_type,
                 }
             if counters_enabled:
-                _bump_counters(cur, command=command, available_at=available_at)
+                _bump_counters_best_effort(cur, command=command, available_at=available_at)
             event = _insert_created_event(
                 cur,
                 row=row,
