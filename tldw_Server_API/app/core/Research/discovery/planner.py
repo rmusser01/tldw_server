@@ -81,6 +81,18 @@ class _LogicalAttempt:
     allowance: DispatchAllowance
 
 
+def _copy_source_predicate(predicate: SourcePredicate | None) -> SourcePredicate | None:
+    """Reconstruct one registry predicate for an independent logical attempt."""
+    if predicate is None:
+        return None
+    return SourcePredicate(
+        field_path=predicate.field_path,
+        operator=predicate.operator,
+        values=predicate.values,
+        case_sensitive=predicate.case_sensitive,
+    )
+
+
 def compile_discovery_plan(
     request: PlanningRequest,
     *,
@@ -141,7 +153,7 @@ def compile_discovery_plan(
                     route=route,
                     catalog_source_id=source.catalog_source_id,
                     selection_reason="explicit",
-                    source_predicate=references[route.route_id].source_predicate,
+                    source_predicate=_copy_source_predicate(references[route.route_id].source_predicate),
                     normalized_query=normalized_query,
                     filters=filters,
                     intents=intents,

@@ -434,6 +434,34 @@ def test_shared_backend_work_coalesces_distinct_attribution_predicates() -> None
     ]
 
 
+def test_compiled_predicates_are_isolated_from_registry_and_each_other() -> None:
+    registry, readiness = _aggregator_registry()
+    first_registry_predicate = registry.get_source("target_a").route_references[0].source_predicate
+    second_registry_predicate = registry.get_source("target_b").route_references[0].source_predicate
+    assert first_registry_predicate is not None
+    assert first_registry_predicate is second_registry_predicate
+
+    plan = compile_discovery_plan(
+        _request(("target_a", "target_b")),
+        registry=registry,
+        readiness=readiness,
+        budget=_budget(),
+    )
+    first_planned_predicate = plan.dispatch_groups[0].logical_attempts[0].source_predicate
+    second_planned_predicate = plan.dispatch_groups[0].logical_attempts[1].source_predicate
+
+    assert first_planned_predicate == first_registry_predicate
+    assert second_planned_predicate == first_registry_predicate
+    assert first_planned_predicate is not first_registry_predicate
+    assert second_planned_predicate is not first_registry_predicate
+    assert first_planned_predicate is not second_planned_predicate
+
+    object.__setattr__(first_planned_predicate, "values", ("attacker",))
+
+    assert first_registry_predicate.values == ("shared-index",)
+    assert second_planned_predicate.values == ("shared-index",)
+
+
 def test_coalescing_preserves_physical_and_per_target_logical_identity() -> None:
     registry, readiness = _aggregator_registry()
     single = compile_discovery_plan(

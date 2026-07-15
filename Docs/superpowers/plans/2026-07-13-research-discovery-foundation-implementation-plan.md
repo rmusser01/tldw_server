@@ -242,25 +242,39 @@ git diff --check
 
 **Success Criteria:** Adapters receive only an executor-owned `dispatch(intent)` capability bound to one planned attempt, never the raw gateway; every physical operation is journaled exactly once; allowances remain distinct from runtime reservations and debits; and scripted offline tests cover every state transition and budget dimension.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Files
 
+- Modify `tldw_Server_API/app/core/Research/discovery/contracts.py`.
+- Modify `tldw_Server_API/app/core/Research/discovery/registry.py`.
+- Modify `tldw_Server_API/app/core/Research/discovery/planner.py`.
+- Modify `tldw_Server_API/app/core/Research/discovery/gateway.py`.
 - Add `tldw_Server_API/app/core/Research/discovery/executor.py`.
+- Modify the focused V2 contract, planner, registry, and gateway tests for the corrected request contract.
 - Add `tldw_Server_API/tests/Research/test_research_discovery_executor.py`.
 
 ### Test-first steps
 
-- [ ] Use a scripted adapter to prove it can request work only by yielding a validated `DispatchIntent` to executor-owned `dispatch(intent)`; it cannot access the gateway directly.
-- [ ] Bind each dispatch capability to one planned `dispatch_group_id`, route ID, policy digest, and remaining allowance. Reject cross-group/cross-route intents and undeclared operation transitions; include a malicious scripted-adapter regression.
-- [ ] Add a minimal in-memory `AttemptJournal` with explicit `reserved`, `dispatching`, `succeeded`, `valid_empty`, `failed`, `timed_out`, `cancelled`, `skipped`, and `indeterminate_after_dispatch` transitions. Do not add durable storage.
-- [ ] Create a journal reservation only immediately before an initial, page, redirect, or retry dispatch; assign a fresh `dispatch_id`; debit on transition to `dispatching`; and release only a definitely unused pre-dispatch reservation. Unused planner allowance is not a journal transition.
-- [ ] Inject fail-closed `policy_is_active(route_id, digest)`, recompute and verify the canonical digest before dispatch, and recheck before committing candidates. Test tampered digests and revocation during the hop: accounting remains debited while candidate content is suppressed.
-- [ ] Reconstruct pagination from typed cursor fields into the approved route template. Reject absolute cursor URLs, cross-origin cursors, undeclared query keys, repeated cursors, and work beyond per-route page/redirect/retry ceilings or the aggregate deadline.
-- [ ] Permit retries only for explicitly retryable outcomes on idempotent methods. Debit failed dispatched work and surface possible duplicate work; never release or silently replay a dispatch that may have reached the provider.
-- [ ] Enforce route-attempt, physical-dispatch, page, redirect, retry, aggregate-wall-time, and returned-result budgets independently. Apply a deterministic result cap before candidate commit and report truncation.
-- [ ] Test cancellation before dispatch (reservation released), while dispatching with no definitive result (`indeterminate_after_dispatch`, debit retained), and after a definitive result (debit retained; late content suppressed if cancellation wins the commit boundary).
-- [ ] Add accounting invariants: used plus released plus outstanding equals reserved, every dispatching record has a unique ID, and no counter exceeds its ceiling.
+- [x] Close the pre-executor request-contract gaps found in review: declare one approved numeric pagination key in route policy, represent bounded canonical JSON request bodies for Figshare `POST`, and replace PubMed's literal ID placeholder with an explicit deferred numeric-CSV binding. Unresolved bindings must be rejected before the gateway hop.
+- [x] Keep URL parsing in the gateway exception boundary: add a pure typed redirect-intent reconstruction helper that accepts only relative or exact same-origin locations preserving the planned path and decoded query semantics. Executor and adapters may not import `urllib` or parse `Location` themselves.
+- [x] Use a scripted adapter to prove it can request work only by yielding a validated `DispatchIntent` to executor-owned `dispatch(intent)`; it cannot access the gateway directly.
+- [x] Bind each dispatch capability to one planned `dispatch_group_id`, route ID, policy digest, and remaining allowance. Reject cross-group/cross-route intents and undeclared operation transitions; include a malicious scripted-adapter regression.
+- [x] Add a minimal two-layer in-memory `AttemptJournal`: physical dispatch records own `reserved`, `dispatching`, `succeeded`, `failed`, `timed_out`, `cancelled`, `skipped`, and `indeterminate_after_dispatch` accounting, while per-logical-attempt outcomes also represent `valid_empty`. One coalesced hop may succeed physically while one target succeeds and another is valid-empty; it still receives exactly one physical debit. Do not add durable storage.
+- [x] Create a journal reservation only immediately before an initial, page, redirect, or retry dispatch; assign a fresh `dispatch_id`; debit on transition to `dispatching`; and release only a definitely unused pre-dispatch reservation. Unused planner allowance is not a journal transition.
+- [x] Inject fail-closed `policy_is_active(route_id, digest)`, recompute and verify the canonical digest before dispatch, and recheck before committing candidates. Test tampered digests and revocation during the hop: accounting remains debited while candidate content is suppressed.
+- [x] Reconstruct pagination from typed cursor fields into the approved route template. Reject absolute cursor URLs, cross-origin cursors, undeclared query keys, repeated cursors, and work beyond per-route page/redirect/retry ceilings or the aggregate deadline.
+- [x] Permit retries only for explicitly retryable outcomes on idempotent methods. Debit failed dispatched work and surface possible duplicate work; never release or silently replay a dispatch that may have reached the provider.
+- [x] Enforce route-attempt, physical-dispatch, page, redirect, retry, aggregate-wall-time, and returned-result budgets independently. Apply a deterministic result cap before candidate commit and report truncation.
+- [x] Test cancellation before dispatch (reservation released), while dispatching with no definitive result (`indeterminate_after_dispatch`, debit retained), and after a definitive result (debit retained; late content suppressed if cancellation wins the commit boundary).
+- [x] Add accounting invariants: cumulative reservations created equal debited plus released plus outstanding; released pre-dispatch capacity is reusable; debited plus outstanding never exceeds the live physical ceiling; every dispatching record has a unique ID; and no runtime counter exceeds its own ceiling.
+
+### Completion evidence
+
+- TDD closed pagination, deferred bindings, journal lineage, retries, redirects, aggregate deadlines, cancellation races, policy/clock callback mutation, and Python 3.10 timeout semantics. The final executor suite passed 193/193.
+- The controller-side impacted matrix passed 432/432 across executor, gateway, contracts, planner, registry reconciliation, and frozen legacy execution.
+- Compileall, Ruff, Black, Python 3.10 AST parsing, and diff hygiene passed. Bandit reported zero findings and zero errors across 1,882 touched production lines.
+- Independent final review reproduced the last duplicate-ID retry ordering defect after its fix and returned CLEAN with no remaining Critical, Important, or must-fix simplification findings.
 
 ### Verify
 
@@ -270,12 +284,29 @@ python -m pytest -q \
   tldw_Server_API/tests/Research/test_research_discovery_executor.py \
   tldw_Server_API/tests/Research/test_research_discovery_gateway.py \
   tldw_Server_API/tests/Research/test_research_discovery_contracts.py \
-  tldw_Server_API/tests/Research/test_research_discovery_planner.py
+  tldw_Server_API/tests/Research/test_research_discovery_planner.py \
+  tldw_Server_API/tests/Research/test_research_discovery_registry_reconciliation.py
 python -m compileall -q \
+  tldw_Server_API/app/core/Research/discovery/contracts.py \
+  tldw_Server_API/app/core/Research/discovery/registry.py \
+  tldw_Server_API/app/core/Research/discovery/planner.py \
+  tldw_Server_API/app/core/Research/discovery/gateway.py \
   tldw_Server_API/app/core/Research/discovery/executor.py \
   tldw_Server_API/tests/Research/test_research_discovery_executor.py
-ruff check tldw_Server_API/app/core/Research/discovery/executor.py tldw_Server_API/tests/Research/test_research_discovery_executor.py
-black --check tldw_Server_API/app/core/Research/discovery/executor.py tldw_Server_API/tests/Research/test_research_discovery_executor.py
+ruff check \
+  tldw_Server_API/app/core/Research/discovery/contracts.py \
+  tldw_Server_API/app/core/Research/discovery/registry.py \
+  tldw_Server_API/app/core/Research/discovery/planner.py \
+  tldw_Server_API/app/core/Research/discovery/gateway.py \
+  tldw_Server_API/app/core/Research/discovery/executor.py \
+  tldw_Server_API/tests/Research/test_research_discovery_executor.py
+black --check \
+  tldw_Server_API/app/core/Research/discovery/contracts.py \
+  tldw_Server_API/app/core/Research/discovery/registry.py \
+  tldw_Server_API/app/core/Research/discovery/planner.py \
+  tldw_Server_API/app/core/Research/discovery/gateway.py \
+  tldw_Server_API/app/core/Research/discovery/executor.py \
+  tldw_Server_API/tests/Research/test_research_discovery_executor.py
 git diff --check
 ```
 
