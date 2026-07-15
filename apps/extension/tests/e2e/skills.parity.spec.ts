@@ -782,6 +782,16 @@ test.describe("Skills parity (extension)", () => {
       expect(api.listRequestCount()).toBe(3)
 
       await forceSkillsConnectionState(page, "unreachable")
+      await page.evaluate(async () => {
+        const store = (window as Window & {
+          __tldw_useConnectionStore?: {
+            getState: () => { checkOnce?: () => Promise<void> }
+          }
+        }).__tldw_useConnectionStore
+        const checkOnce = store?.getState().checkOnce
+        if (!checkOnce) throw new Error("Connection check action is unavailable")
+        await checkOnce()
+      })
 
       await expect(
         page.getByRole("heading", {

@@ -35,9 +35,14 @@ const seededSkillResponse = {
   version: 1,
 }
 
+type TldwConnectionRootStore = {
+  state: Record<string, unknown>
+  checkOnce: (options?: { force?: boolean }) => Promise<void>
+}
+
 type TldwConnectionStore = {
-  getState: () => { state: Record<string, unknown> }
-  setState: (value: { state: Record<string, unknown> }) => void
+  getState: () => TldwConnectionRootStore
+  setState: (value: Partial<TldwConnectionRootStore>) => void
 }
 
 type TldwConnectionStoreWindow = Window & {
@@ -725,6 +730,8 @@ export async function forceSkillsConnectionState(
     const prev = store.getState().state
 
     if (targetState === "unreachable") {
+      // Keep the active poller from reconnecting this disposable test context.
+      store.setState({ checkOnce: async () => {} })
       store.setState({
         state: {
           ...prev,
