@@ -1749,7 +1749,7 @@ def _check_cert_pinning(
                 if ipaddress.ip_address(normalized_host).version == 6:
                     url_host = f"[{normalized_host}]"
             url = f"https://{url_host}"
-            if port not in (80, 443):
+            if port != 443:
                 url = f"https://{url_host}:{port}"
             validation_kwargs: dict[str, Any] = {}
             if configured_endpoint is not None:
@@ -2489,6 +2489,8 @@ async def _afetch_httpx(
                                         last_retry_delay_s=sleep_s,
                                     )
                                     return r2  # noqa: TRY300
+                                except EgressPolicyError:
+                                    raise
                                 except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
                                     pass
                         # network exception occurred (no HEAD fallback succeeded)
@@ -2804,6 +2806,8 @@ async def _afetch_aiohttp(
                                 last_retry_delay_s=sleep_s,
                             )
                             return r2_wrap  # noqa: TRY300
+                        except EgressPolicyError:
+                            raise
                         except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
                             pass
                     last_exc = NetworkError(reason)
@@ -3204,6 +3208,8 @@ def _fetch_httpx_response(
                                         last_retry_delay_s=sleep_s,
                                     )
                                     return r2  # noqa: TRY300
+                                except EgressPolicyError:
+                                    raise
                                 except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
                                     pass
                         should, rsn = _should_retry(method, None, NetworkError(reason), retry)
@@ -4789,6 +4795,7 @@ __all__ = [
     "fetch",
     "afetch_json",
     "fetch_json",
+    "stream_response",
     "astream_bytes",
     "astream_sse",
     "download",

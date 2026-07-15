@@ -207,7 +207,7 @@
 - [x] Run the Stage 1 suite and `git diff --check`.
 - [x] Commit transport and tests with `fix(http): propagate configured endpoint scope (TASK-12972)`.
 
-Verification used the repository virtual environment at `../../.venv` from the isolated worktree: 83 Stage 2 tests and 66 Stage 1 regressions passed. Ruff passed on the touched Python files (excluding pre-existing `TRY203`, `I001`, and `C420` findings), and `git diff --check` passed.
+Verification used the repository virtual environment at `../../.venv` from the isolated worktree: 88 Stage 2 tests and 66 Stage 1 regressions passed. Ruff passed on the touched Python files (excluding pre-existing `TRY203`, `I001`, and `C420` findings), and `git diff --check` passed. Post-review corrections cover the public stream export, explicit HTTPS port preservation during certificate-pin validation, and policy-error propagation from all three HEAD range fallbacks.
 
 ---
 

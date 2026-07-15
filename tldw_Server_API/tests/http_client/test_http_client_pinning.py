@@ -109,6 +109,37 @@ def test_tls_pinning_scoped_validation_uses_original_accepted_ips(monkeypatch):
     assert captured["dns_pin_cache"] == {"192.168.1.50": ("192.168.1.50",)}
 
 
+@requires_httpx
+def test_tls_pinning_scoped_validation_preserves_explicit_https_port_80(monkeypatch):
+    from tldw_Server_API.app.core import http_client as hc
+    from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
+
+    der = b"scoped-port-cert"
+    pin = hashlib.sha256(der).hexdigest()
+    _install_fake_tls(monkeypatch, der)
+    captured: dict[str, object] = {}
+
+    def fake_validate(url, **kwargs):
+        captured["url"] = url
+        captured.update(kwargs)
+
+    monkeypatch.setattr(hc, "_validate_egress_or_raise", fake_validate)
+    scope = ConfiguredEndpointScope.from_url("https://[2001:db8::1]:80")
+
+    hc._check_cert_pinning(
+        "2001:db8::1",
+        80,
+        {pin},
+        "1.2",
+        configured_endpoint=scope,
+        accepted_resolved_ips=("2001:db8::1",),
+    )
+
+    assert captured["url"] == "https://[2001:db8::1]:80"
+    assert captured["configured_endpoint"] is scope
+    assert captured["dns_pin_cache"] == {"2001:db8::1": ("2001:db8::1",)}
+
+
 @pytest.mark.parametrize("reason_code", ["origin_mismatch", "address_forbidden", "dns_changed"])
 def test_tls_pinning_preserves_nested_policy_reason(monkeypatch, reason_code):
     from tldw_Server_API.app.core import http_client as hc

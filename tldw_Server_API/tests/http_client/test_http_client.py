@@ -19,6 +19,12 @@ def _has_httpx():
 requires_httpx = pytest.mark.skipif(not _has_httpx(), reason="httpx not installed")
 
 
+def test_stream_response_is_public_export():
+    from tldw_Server_API.app.core import http_client as hc
+
+    assert "stream_response" in hc.__all__
+
+
 @requires_httpx
 def test_egress_denied_private_ip(monkeypatch):
     from tldw_Server_API.app.core.http_client import fetch_json
@@ -109,6 +115,95 @@ def test_scoped_fetch_retry_preserves_scope_and_initial_dns_pin(monkeypatch):
     assert len(validations) >= 3
     assert all(item[0] is scope for item in validations)
     assert all(item[1] == ("93.184.216.34",) for item in validations[1:])
+
+
+@requires_httpx
+@pytest.mark.asyncio
+async def test_async_httpx_head_range_fallback_preserves_egress_denial(monkeypatch):
+    from tldw_Server_API.app.core import http_client as hc
+    from tldw_Server_API.app.core.exceptions import EgressPolicyError
+
+    class DummyAsyncClient:
+        async def aclose(self):
+            return None
+
+    async def allow_egress(*_args, **_kwargs):
+        return None
+
+    async def deny_range_fallback(*, method, **_kwargs):
+        if method == "HEAD":
+            raise OSError("HEAD failed")
+        raise EgressPolicyError("pin denied", reason_code="tls_pin_mismatch")
+
+    monkeypatch.setattr(hc, "_avalidate_egress_or_raise", allow_egress)
+    monkeypatch.setattr(hc, "_httpx_arequest_io", deny_range_fallback)
+    monkeypatch.setattr(hc, "create_async_client", lambda **_kwargs: DummyAsyncClient())
+
+    with pytest.raises(EgressPolicyError) as exc:
+        await hc._afetch_httpx(
+            method="HEAD",
+            url="https://93.184.216.34/resource",
+            client=DummyAsyncClient(),
+            retry=hc.RetryPolicy(attempts=1),
+        )
+
+    assert exc.value.reason_code == "tls_pin_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_async_aiohttp_head_range_fallback_preserves_egress_denial(monkeypatch):
+    from tldw_Server_API.app.core import http_client as hc
+    from tldw_Server_API.app.core.exceptions import EgressPolicyError
+
+    async def allow_egress(*_args, **_kwargs):
+        return None
+
+    async def deny_range_fallback(*, method, **_kwargs):
+        if method == "HEAD":
+            raise OSError("HEAD failed")
+        raise EgressPolicyError("address denied", reason_code="address_forbidden")
+
+    monkeypatch.setattr(hc, "_avalidate_egress_or_raise", allow_egress)
+    monkeypatch.setattr(hc, "_aiohttp_request_io", deny_range_fallback)
+
+    with pytest.raises(EgressPolicyError) as exc:
+        await hc._afetch_aiohttp(
+            method="HEAD",
+            url="https://93.184.216.34/resource",
+            client=object(),
+            retry=hc.RetryPolicy(attempts=1),
+        )
+
+    assert exc.value.reason_code == "address_forbidden"
+
+
+@requires_httpx
+def test_sync_httpx_head_range_fallback_preserves_egress_denial(monkeypatch):
+    from tldw_Server_API.app.core import http_client as hc
+    from tldw_Server_API.app.core.exceptions import EgressPolicyError
+
+    class DummySyncClient:
+        def close(self):
+            return None
+
+    def deny_range_fallback(*, method, **_kwargs):
+        if method == "HEAD":
+            raise OSError("HEAD failed")
+        raise EgressPolicyError("origin denied", reason_code="origin_mismatch")
+
+    monkeypatch.setattr(hc, "_validate_egress_or_raise", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(hc, "_httpx_request_io", deny_range_fallback)
+    monkeypatch.setattr(hc, "create_client", lambda **_kwargs: DummySyncClient())
+
+    with pytest.raises(EgressPolicyError) as exc:
+        hc._fetch_httpx_response(
+            method="HEAD",
+            url="https://93.184.216.34/resource",
+            client=DummySyncClient(),
+            retry=hc.RetryPolicy(attempts=1),
+        )
+
+    assert exc.value.reason_code == "origin_mismatch"
 
 
 @requires_httpx
