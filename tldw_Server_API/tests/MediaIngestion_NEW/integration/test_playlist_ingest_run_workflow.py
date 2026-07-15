@@ -67,16 +67,19 @@ def _create_run(client: TestClient, *occurrence_ids: str) -> dict:
     response = client.post(
         "/api/v1/media/ingest/runs",
         json={
+            "client_request_id": f"workflow-run:{':'.join(occurrence_ids)}",
             "inputs": [
                 {
                     "input_kind": "direct_url",
                     "occurrence_id": occurrence_id,
                     "url": f"https://example.com/{occurrence_id}",
+                    "source_kind": "video",
                     "display_metadata": {"title": occurrence_id},
                 }
                 for occurrence_id in occurrence_ids
             ],
             "review_overrides": {},
+            "processing_options": {"media_type": "video"},
         },
     )
     assert response.status_code == 201, response.text

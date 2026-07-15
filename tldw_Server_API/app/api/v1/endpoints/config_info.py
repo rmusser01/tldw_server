@@ -20,13 +20,14 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from tldw_Server_API.app.core import config as config_mod
+from tldw_Server_API.app.core.config import settings as global_settings
 from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_api_key_env_keys,
     custom_openai_provider_number,
     iter_custom_openai_provider_names,
 )
-from tldw_Server_API.app.core.testing import env_flag_enabled, is_truthy
-from tldw_Server_API.app.services.worker_startup_policy import should_start_inprocess_worker
+from tldw_Server_API.app.core.testing import is_truthy
+from tldw_Server_API.app.services.worker_startup_policy import worker_path_enabled
 
 router = APIRouter()
 _DOCS_API_KEY_PLACEHOLDER = "YOUR_API_KEY"
@@ -148,10 +149,9 @@ def load_safe_config() -> dict:
         caps["hasMediaPlaylistIngestEvents"] = has_media_routes
         caps["hasMediaIngestWorker"] = bool(
             has_media_routes
-            and should_start_inprocess_worker(
+            and worker_path_enabled(
                 "MEDIA_INGEST_JOBS_WORKER_ENABLED",
                 "media",
-                sidecar_mode=env_flag_enabled("TLDW_WORKERS_SIDECAR_MODE"),
                 default_stable=True,
                 test_mode=False,
             )
@@ -779,7 +779,7 @@ async def validate_provider_key(body: ProviderValidateRequest, request: Request)
             valid=False,
             error=f"Validation timed out after {_VALIDATION_TIMEOUT_SECONDS}s",
         )
-    except Exception as exc:
+    except Exception:
         logger.warning("Provider validation failed")
         return ProviderValidateResponse(
             provider=provider,

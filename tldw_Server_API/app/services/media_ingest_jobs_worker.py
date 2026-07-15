@@ -26,6 +26,10 @@ from tldw_Server_API.app.core.DB_Management.media_db.api import (
 )
 from tldw_Server_API.app.core.DB_Management.media_db.dedupe_urls import media_dedupe_url_candidates
 from tldw_Server_API.app.core.DB_Management.media_db.errors import ConflictError
+from tldw_Server_API.app.core.DB_Management.playlist_ingest_store import (
+    PlaylistIngestStore,
+    PlaylistPreflightLeaseLostError,
+)
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
     apply_chunking_template_if_any,
     async_resolve_chunking_options_and_plan,
@@ -34,10 +38,6 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import
 from tldw_Server_API.app.core.Ingestion_Media_Processing.persistence import (
     process_batch_media,
     process_document_like_item,
-)
-from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
-    PlaylistIngestStore,
-    PlaylistPreflightLeaseLostError,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_preflight import (
     PlaylistPreflightData,

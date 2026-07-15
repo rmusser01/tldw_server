@@ -122,6 +122,56 @@ def _create_run(client: TestClient, *occurrence_ids: str) -> dict:
 
 
 @pytest.mark.parametrize(
+    ("path", "payload"),
+    [
+        (
+            "/api/v1/media/playlist-preflights",
+            {
+                "url": "https://www.youtube.com/playlist?list=PLdraining",
+                "max_items": 10,
+            },
+        ),
+        (
+            "/api/v1/media/ingest/runs",
+            {
+                "client_request_id": "draining-run",
+                "inputs": [
+                    {
+                        "input_kind": "direct_url",
+                        "occurrence_id": "occ-draining",
+                        "url": "https://example.com/draining",
+                    }
+                ],
+                "review_overrides": {},
+            },
+        ),
+        (
+            "/api/v1/media/ingest/runs/missing-run/retry",
+            {"occurrence_ids": ["occ-draining"]},
+        ),
+    ],
+)
+def test_playlist_work_creating_routes_reject_requests_while_draining(
+    preflight_api,
+    path,
+    payload,
+):
+    client, manager, _clock, _owner = preflight_api
+    from tldw_Server_API.app.services.app_lifecycle import get_or_create_lifecycle_state
+
+    state = get_or_create_lifecycle_state(client.app)
+    state.phase = "draining"
+    state.ready = False
+    state.draining = True
+
+    response = client.post(path, json=payload)
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["message"] == "Shutdown in progress"
+    assert manager.list_jobs(domain="media_ingest", limit=10) == []
+
+
+@pytest.mark.parametrize(
     "client_request_id",
     [pytest.param(None, id="missing"), pytest.param(" ", id="blank"), pytest.param("x" * 256, id="too-long")],
 )

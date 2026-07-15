@@ -2709,7 +2709,10 @@ def test_staging_path_accepts_native_platform_separator_form(tmp_path, monkeypat
     )
 
 
-@pytest.mark.skipif(os.name == "nt", reason="backslash is a separator on Windows")
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="TASK-12971: backslash is a path separator on Windows",
+)
 def test_posix_staging_filename_allows_nonseparator_backslash(tmp_path, monkeypatch):
     from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
 

@@ -33,7 +33,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.dedupe_urls import (
     normalize_media_dedupe_url,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.errors import ConflictError, InputError
-from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+from tldw_Server_API.app.core.DB_Management.playlist_ingest_store import (
     _PREFLIGHT_JOB_SENTINEL,
     MediaIngestRunItemRecord,
     MediaIngestRunRecord,
@@ -45,6 +45,18 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_s
     PlaylistPage,
     PlaylistPreflightCapacityError,
     PlaylistPreflightRecord,
+)
+from tldw_Server_API.app.core.exceptions import (
+    InvalidPlaylistUrlError,
+    PlaylistPreflightBusyError,
+    PlaylistPreflightIncompleteError,
+    PlaylistPreflightRequiredError,
+    PlaylistPreflightUnavailableError,
+    PlaylistRunPendingError,
+    PlaylistRunStatusUnavailableError,
+    PlaylistRunValidationError,
+    PlaylistSelectionError,
+    ReviewRequiredError,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_preflight import (
     PlaylistUrlClassification,
@@ -75,54 +87,6 @@ _WORKER_ERROR_MAP = {
     "playlist_private_or_auth_required": "playlist_private_or_auth_required",
     "playlist_not_found": "playlist_not_found",
 }
-
-
-class PlaylistPreflightBusyError(RuntimeError):
-    """Raised when no transactional preflight reservation is available."""
-
-
-class InvalidPlaylistUrlError(ValueError):
-    """Raised for input outside the trusted YouTube playlist boundary."""
-
-
-class PlaylistPreflightUnavailableError(RuntimeError):
-    """Raised when the resource cannot be durably bound to an internal job."""
-
-
-class PlaylistPreflightIncompleteError(RuntimeError):
-    """Raised when materialization is requested before a complete snapshot."""
-
-
-class PlaylistSelectionError(ValueError):
-    """Raised for an invalid server occurrence selection."""
-
-
-class PlaylistRunValidationError(ValueError):
-    """Raised with a stable code when a run request is invalid."""
-
-
-class PlaylistRunPendingError(PlaylistIngestConflictError):
-    """Raised when an existing run still has an ambiguous zero-job action."""
-
-    def __init__(self, run_id: str) -> None:
-        self.run_id = str(run_id)
-        super().__init__("duplicate_action_pending")
-
-
-class PlaylistRunStatusUnavailableError(PlaylistIngestConflictError):
-    """Raised when retry reconciliation cannot establish current owner media state."""
-
-
-class PlaylistPreflightRequiredError(PlaylistRunValidationError):
-    """Raised when a direct URL must first use playlist preflight."""
-
-
-class ReviewRequiredError(RuntimeError):
-    """Raised before persistence when refreshed duplicate evidence changed Review."""
-
-    def __init__(self, items: Sequence[ReviewRequiredItem]) -> None:
-        self.items = tuple(items)
-        super().__init__("review_required")
 
 
 @dataclass(frozen=True, slots=True)

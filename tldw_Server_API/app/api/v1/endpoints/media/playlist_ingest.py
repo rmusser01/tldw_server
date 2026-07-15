@@ -41,9 +41,17 @@ from tldw_Server_API.app.api.v1.schemas.media_playlist_ingest import (
     PlaylistPreflightSummaryResponse,
 )
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_CREATE, MEDIA_READ
-from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
+from tldw_Server_API.app.core.DB_Management.playlist_ingest_store import (
+    MediaIngestRunEventRecord,
+    MediaIngestRunItemRecord,
+    MediaIngestRunRecord,
+    PlaylistIngestStore,
+    PlaylistItemRecord,
+)
+from tldw_Server_API.app.core.exceptions import (
     InvalidPlaylistUrlError,
-    PlaylistIngestService,
+    PlaylistIngestConflictError,
+    PlaylistIngestNotFoundError,
     PlaylistPreflightBusyError,
     PlaylistPreflightIncompleteError,
     PlaylistPreflightRequiredError,
@@ -54,18 +62,11 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_s
     PlaylistSelectionError,
     ReviewRequiredError,
 )
-from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
-    MediaIngestRunEventRecord,
-    MediaIngestRunItemRecord,
-    MediaIngestRunRecord,
-    PlaylistIngestConflictError,
-    PlaylistIngestNotFoundError,
-    PlaylistIngestStore,
-    PlaylistItemRecord,
-)
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import PlaylistIngestService
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Streaming.streams import SSEStream
 from tldw_Server_API.app.core.testing import is_test_mode
+from tldw_Server_API.app.services.app_lifecycle import assert_may_start_work
 
 router = APIRouter()
 _MAX_RUN_EVENT_ID = 2**63 - 1
@@ -279,6 +280,8 @@ def create_playlist_preflight(
     current_user: User = Depends(get_request_user),
     job_manager: JobManager = Depends(get_job_manager),
 ) -> PlaylistPreflightAcceptedResponse:
+    """Validate and enqueue one owner-scoped asynchronous playlist preflight."""
+    assert_may_start_work(request_scope.app, "media.playlist.preflight.create")
     try:
         request = PlaylistPreflightCreateRequest.model_validate(payload)
     except ValidationError as exc:
@@ -451,6 +454,8 @@ def create_playlist_ingest_run(
     current_user: User = Depends(get_request_user),
     job_manager: JobManager = Depends(get_job_manager),
 ) -> PlaylistIngestRunCreateResponse:
+    """Create and reconcile one owner-scoped playlist ingest run."""
+    assert_may_start_work(request_scope.app, "media.playlist.ingest.run.create")
     try:
         request = PlaylistIngestRunCreateRequest.model_validate(payload)
     except ValidationError as exc:
@@ -581,10 +586,13 @@ def cancel_playlist_ingest_run(
 )
 def retry_playlist_ingest_run(
     run_id: str,
+    request_scope: Request,
     payload: Any = Body(...),
     current_user: User = Depends(get_request_user),
     job_manager: JobManager = Depends(get_job_manager),
 ) -> PlaylistIngestRunRetryResponse:
+    """Retry selected failed occurrences without accepting work during drain."""
+    assert_may_start_work(request_scope.app, "media.playlist.ingest.run.retry")
     try:
         request = PlaylistIngestRunRetryRequest.model_validate(payload)
     except ValidationError as exc:

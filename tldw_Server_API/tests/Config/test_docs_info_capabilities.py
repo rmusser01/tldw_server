@@ -264,7 +264,10 @@ def test_docs_info_media_ingest_job_capabilities_follow_independent_route(
     assert caps["mediaPlaylistIngestContractVersion"] != 2
 
 
-def test_docs_info_media_ingest_worker_capability_is_false_in_sidecar_mode(monkeypatch, tmp_path: Path) -> None:
+def test_docs_info_media_ingest_worker_capability_remains_available_in_sidecar_mode(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
     config_path = tmp_path / "config.txt"
     _write_minimal_config(config_path)
 
@@ -277,8 +280,8 @@ def test_docs_info_media_ingest_worker_capability_is_false_in_sidecar_mode(monke
 
     caps = safe_config["capabilities"]
 
-    assert caps["hasMediaIngestWorker"] is False
-    assert caps["mediaPlaylistIngestContractVersion"] != 2
+    assert caps["hasMediaIngestWorker"] is True
+    assert caps["mediaPlaylistIngestContractVersion"] == 2
 
 
 def test_docs_info_disables_voice_transport_when_audio_websocket_route_disabled(monkeypatch, tmp_path: Path) -> None:
