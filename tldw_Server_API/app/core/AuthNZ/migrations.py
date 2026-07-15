@@ -1243,6 +1243,43 @@ def migration_092_harden_profile_candidate_timestamps(
     logger.info("Migration 092: Hardened profile candidate timestamps")
 
 
+def migration_093_harmonize_users_write_columns(conn: sqlite3.Connection) -> None:
+    """Ensure legacy users tables satisfy the canonical UsersDB write contract."""
+    logger.info("Migration 093: START harmonize users write columns")
+
+    if not _sqlite_table_exists(conn, "users"):
+        logger.info("Migration 093: users table missing; skipping write-column harmonization")
+        return
+
+    columns = {
+        str(row[1])
+        for row in conn.execute("PRAGMA table_info(users)").fetchall()
+    }
+    required_columns = (
+        ("uuid", "ALTER TABLE users ADD COLUMN uuid TEXT"),
+        ("is_active", "ALTER TABLE users ADD COLUMN is_active INTEGER DEFAULT 1"),
+        ("is_superuser", "ALTER TABLE users ADD COLUMN is_superuser INTEGER DEFAULT 0"),
+        ("email_verified", "ALTER TABLE users ADD COLUMN email_verified INTEGER DEFAULT 0"),
+        ("is_verified", "ALTER TABLE users ADD COLUMN is_verified INTEGER DEFAULT 0"),
+        (
+            "storage_quota_mb",
+            "ALTER TABLE users ADD COLUMN storage_quota_mb INTEGER DEFAULT 5120",
+        ),
+        ("storage_used_mb", "ALTER TABLE users ADD COLUMN storage_used_mb INTEGER DEFAULT 0"),
+    )
+
+    for column_name, statement in required_columns:
+        if column_name not in columns:
+            conn.execute(statement)
+
+    conn.execute(
+        "UPDATE users SET uuid = lower(hex(randomblob(16))) WHERE uuid IS NULL OR uuid = ''"
+    )
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_uuid ON users(uuid)")
+    conn.commit()
+    logger.info("Migration 093: Harmonized users write columns")
+
+
 def rollback_086_drop_prototype_workspace_tables(conn: sqlite3.Connection) -> None:
     """Rollback migration 086 by dropping prototype workspace metadata tables."""
     conn.execute("DROP TABLE IF EXISTS prototype_promotion_requests")
@@ -5524,6 +5561,11 @@ def get_authnz_migrations() -> list[Migration]:
             92,
             "Harden profile candidate version timestamps",
             migration_092_harden_profile_candidate_timestamps,
+        ),
+        Migration(
+            93,
+            "Harmonize users write columns",
+            migration_093_harmonize_users_write_columns,
         ),
     ]
 

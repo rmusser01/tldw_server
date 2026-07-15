@@ -42,7 +42,7 @@ class AuthnzUsersRepo:
 
     async def _users_db(self) -> UsersDB:
         db = UsersDB(self.db_pool)
-        await db.initialize()
+        await db.initialize(ensure_schema=False)
         return db
 
     @staticmethod
@@ -151,16 +151,16 @@ class AuthnzUsersRepo:
 
         db = await self._users_db()
         try:
-            user_id = await db.create_user(
+            user = await db.create_user(
                 username=username,
                 email=email,
                 password_hash=password_hash,
                 role=role or settings.DEFAULT_USER_ROLE,
                 is_active=is_active,
                 is_verified=is_verified,
-                user_uuid=user_uuid,
+                uuid_value=user_uuid,
             )
-            return int(user_id)
+            return int(user["id"])
         except Exception as exc:
             logger.error(f"AuthnzUsersRepo.create_user failed: {exc}")
             raise

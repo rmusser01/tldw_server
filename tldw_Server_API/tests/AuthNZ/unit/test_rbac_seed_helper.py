@@ -3,7 +3,6 @@ from pathlib import Path
 
 import pytest
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -276,7 +275,7 @@ def _migrate_version_089_database(db_path: Path) -> None:
 
     manager = MigrationManager(db_path)
     migrations = get_authnz_migrations()
-    assert migrations[-1].version == 90
+    assert migrations[-1].version == 91
     for migration in migrations:
         manager.add_migration(migration)
 

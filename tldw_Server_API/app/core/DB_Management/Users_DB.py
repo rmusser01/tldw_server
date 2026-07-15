@@ -36,7 +36,6 @@ except ImportError:  # pragma: no cover
         pass
 #
 # 3rd-party imports
-
 from loguru import logger
 
 #
@@ -105,6 +104,7 @@ class UsersDB:
         """Initialize Users database handler"""
         self.db_pool = db_pool
         self._initialized = False
+        self._schema_ensured = False
         self.settings = get_settings()
 
     def _using_postgres_backend(self) -> bool:
@@ -155,17 +155,18 @@ class UsersDB:
             exception_type=type(error).__name__,
         ).error("UsersDB storage operation failed")
 
-    async def initialize(self):
-        """Initialize database connection and ensure tables exist"""
-        if self._initialized:
+    async def initialize(self, *, ensure_schema: bool = True) -> None:
+        """Initialize database access and optionally ensure users tables exist."""
+        if self._initialized and (not ensure_schema or self._schema_ensured):
             return
 
         # Get database pool
         if not self.db_pool:
             self.db_pool = await get_db_pool()
 
-        # Create users table if it doesn't exist
-        await self._create_tables()
+        if ensure_schema and not self._schema_ensured:
+            await self._create_tables()
+            self._schema_ensured = True
 
         self._initialized = True
         logger.info("UsersDB initialized")
@@ -303,9 +304,17 @@ class UsersDB:
                             await conn.execute("ALTER TABLE users ADD COLUMN metadata TEXT")
                         if "uuid" not in columns:
                             await conn.execute("ALTER TABLE users ADD COLUMN uuid TEXT")
+                        if "is_active" not in columns:
+                            await conn.execute(
+                                "ALTER TABLE users ADD COLUMN is_active INTEGER DEFAULT 1"
+                            )
                         if "is_superuser" not in columns:
                             await conn.execute(
                                 "ALTER TABLE users ADD COLUMN is_superuser INTEGER DEFAULT 0"
+                            )
+                        if "email_verified" not in columns:
+                            await conn.execute(
+                                "ALTER TABLE users ADD COLUMN email_verified INTEGER DEFAULT 0"
                             )
                         if "is_verified" not in columns:
                             await conn.execute(
