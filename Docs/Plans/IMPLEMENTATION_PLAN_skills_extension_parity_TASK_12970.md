@@ -347,7 +347,7 @@ The strict browser diagnostics reproduced the options entrypoint's inline theme 
 - Modify: `apps/tldw-frontend/e2e/utils/skills-fixtures.ts`
 - Conditional only if a product defect is reproduced: the narrow owning shared UI file and its focused test.
 
-- [ ] **Step 1: Add the compact keyboard/focus test**
+- [x] **Step 1: Add the compact keyboard/focus test**
 
   Launch with `{ width: 390, height: 844 }` before initial navigation and `mockSkillsBeginnerApi(page, { seeded: true })`. Assert roles/names, no document overflow initially and with each overlay open, 24-by-24 minimum target boxes for New Skill/details/test actions, keyboard activation, Escape closure, and focus return for details and Test run.
 
@@ -359,7 +359,7 @@ The strict browser diagnostics reproduced the options entrypoint's inline theme 
 
   Expected: PASS. If it fails on product behavior, first add a focused failing shared component test before changing production code.
 
-- [ ] **Step 2: Write the failing list-recovery test and fixture contract**
+- [x] **Step 2: Write the failing list-recovery test and fixture contract**
 
   Add `mockSkillsListRecovery(page)` with fresh closure state:
 
@@ -372,7 +372,7 @@ The strict browser diagnostics reproduced the options entrypoint's inline theme 
 
   Return `releaseFirst()` and `listRequestCount()`. The test must assert `Loading skills` before release, exactly two requests before the alert, no secret/path/raw-body leakage, `Try again`, a third successful request, then force only the documented unreachable state and assert recovery actions plus absence of New/Seed/Import controls.
 
-- [ ] **Step 3: Run recovery RED, implement minimally, and confirm GREEN**
+- [x] **Step 3: Run recovery RED, implement minimally, and confirm GREEN**
 
   ```bash
   TLDW_E2E_SERVER_URL=http://skills-parity.invalid \
@@ -384,7 +384,7 @@ The strict browser diagnostics reproduced the options entrypoint's inline theme 
 
 - [ ] **Step 4: Add and run the session draft test**
 
-  Use a new unseeded beginner fixture context. Enter a unique valid name and instructions, reload the same `options.html#/skills` tab, reopen New Skill, assert the recovery alert and both values, click `Discard recovered draft`, close/reopen, and assert blank base values with no recovery alert.
+  Use a new unseeded beginner fixture context. Capture the initial built-in template baseline, enter a unique valid name and instructions, reload the same `options.html#/skills` tab, reopen New Skill, assert the recovery alert and both values, click `Discard recovered draft`, close/reopen, and assert the initial template baseline is restored with no recovery alert. Do not require empty fields where the authoring flow intentionally provides template defaults.
 
   ```bash
   TLDW_E2E_SERVER_URL=http://skills-parity.invalid \
