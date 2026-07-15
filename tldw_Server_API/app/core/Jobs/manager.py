@@ -1056,6 +1056,7 @@ class JobManager:
         """Validate one raw Jobs row against an exact caller-observed binding."""
         required = (
             "id",
+            "uuid",
             "owner_user_id",
             "domain",
             "queue",
@@ -1077,11 +1078,28 @@ class JobManager:
             raw_job,
             owner_user_id=str(expected_binding.get("owner_user_id") or ""),
         )
-        return bool(
-            normalized is not None
-            and all(normalized.get(key) == expected_binding.get(key) for key in required[:-1])
-            and normalized.get("payload") == dict(expected_payload)
-        )
+        if normalized is None or not all(
+            type(normalized.get(key)) is type(expected_binding.get(key))
+            and normalized.get(key) == expected_binding.get(key)
+            for key in required[:-1]
+        ):
+            return False
+        try:
+            normalized_payload = json.dumps(
+                normalized.get("payload"),
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+            expected_payload_json = json.dumps(
+                dict(expected_payload),
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+        except (TypeError, ValueError):
+            return False
+        return normalized_payload == expected_payload_json
 
     @staticmethod
     def _decode_archive_blob(value: Any) -> Any:

@@ -287,6 +287,47 @@ def run_conditional_cancel_binding_scenario(make_manager: ManagerFactory) -> Non
     assert unchanged is not None
     assert unchanged["status"] == "queued"
 
+    for occurrence_suffix, mismatched_attempt in (("bool", True), ("float", 1.0)):
+        occurrence_id = f"occ-type-{occurrence_suffix}"
+        type_job = jm.create_job(
+            domain="media_ingest",
+            queue="default",
+            job_type="media_ingest_item",
+            payload={"run_id": "run-1", "occurrence_id": occurrence_id, "attempt": 1},
+            owner_user_id="owner-1",
+            batch_group="batch-1",
+            idempotency_key=f"run-1:{occurrence_id}:1",
+        )
+        type_binding = jm.normalize_job_binding_view(type_job, owner_user_id="owner-1")
+        assert type_binding is not None
+        type_mismatched = dict(type_binding)
+        type_mismatched["payload"] = {
+            **type_binding["payload"],
+            "attempt": mismatched_attempt,
+        }
+        assert jm.cancel_job(int(type_job["id"]), expected_binding=type_mismatched) is False
+        unchanged = jm.get_job(int(type_job["id"]))
+        assert unchanged is not None
+        assert unchanged["status"] == "queued"
+
+    uuid_job = jm.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="media_ingest_item",
+        payload={"run_id": "run-1", "occurrence_id": "occ-uuid", "attempt": 1},
+        owner_user_id="owner-1",
+        batch_group="batch-1",
+        idempotency_key="run-1:occ-uuid:1",
+    )
+    uuid_binding = jm.normalize_job_binding_view(uuid_job, owner_user_id="owner-1")
+    assert uuid_binding is not None
+    uuid_mismatched = dict(uuid_binding)
+    uuid_mismatched["uuid"] = "replacement-job-uuid"
+    assert jm.cancel_job(int(uuid_job["id"]), expected_binding=uuid_mismatched) is False
+    unchanged = jm.get_job(int(uuid_job["id"]))
+    assert unchanged is not None
+    assert unchanged["status"] == "queued"
+
     assert jm.cancel_job(int(job["id"]), expected_binding=binding) is True
     cancelled = jm.get_job(int(job["id"]))
     assert cancelled is not None
