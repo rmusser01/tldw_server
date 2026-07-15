@@ -140,6 +140,22 @@ def test_playlist_collection_actions_are_cas_safe_on_postgres(
 
     backend = _pg_backend(db_name)
     db = CollectionsDatabase.from_backend(user_id="1", backend=backend)
+    expected_items = [
+        {
+            "occurrence_id": "pg-occ-one",
+            "source_url": "https://example.com/one",
+            "normalized_source_id": None,
+            "ordinal": 1,
+            "metadata": {"playlist_ingest_occurrence_id": "pg-occ-one"},
+        },
+        {
+            "occurrence_id": "pg-occ-two",
+            "source_url": "https://example.com/two",
+            "normalized_source_id": None,
+            "ordinal": 2,
+            "metadata": {"playlist_ingest_occurrence_id": "pg-occ-two"},
+        },
+    ]
     created = db.create_media_collection_with_items(
         name="Playlist CAS",
         kind="playlist_ingest",
@@ -147,10 +163,7 @@ def test_playlist_collection_actions_are_cas_safe_on_postgres(
             "playlist_ingest_run_id": "pg-run-cas",
         },
         playlist_ingest_initialization_token="pg-token-a",
-        items=[
-            {"source_url": "https://example.com/one", "ordinal": 1},
-            {"source_url": "https://example.com/two", "ordinal": 2},
-        ],
+        items=expected_items,
     )
 
     def resolve(media_id: int):
@@ -193,11 +206,15 @@ def test_playlist_collection_actions_are_cas_safe_on_postgres(
         initialization_token="pg-token-b",
         expected_initialization_token="pg-token-a",
         expected_item_ids=[item.id for item in created.items],
+        expected_items=expected_items,
     )
     assert claimed._playlist_ingest_initialization_token == "pg-token-b"
     assert "playlist_ingest_initialization_token" not in claimed.metadata
 
-    with pytest.raises(ValueError, match="media_collection_discard_mismatch"):
+    with pytest.raises(
+        ValueError,
+        match="media_collection_discard_ownership_transferred",
+    ):
         db.discard_media_collection(
             created.id,
             expected_item_ids=[item.id for item in created.items],

@@ -81,7 +81,13 @@ class _OwnerCollectionsDB:
             raise self.create_error
         collection_id = 700 + (100 * (len(self.create_calls) - 1))
         items = [
-            SimpleNamespace(id=collection_id + 1 + index, ordinal=item["ordinal"])
+            SimpleNamespace(
+                id=collection_id + 1 + index,
+                ordinal=item["ordinal"],
+                source_url=item["source_url"],
+                normalized_source_id=item.get("normalized_source_id"),
+                metadata=dict(item.get("metadata") or {}),
+            )
             for index, item in enumerate(kwargs["items"])
         ]
         self.items = {
@@ -132,6 +138,7 @@ class _OwnerCollectionsDB:
         run_id,
         initialization_token,
         expected_item_ids,
+        expected_items,
         expected_initialization_token=_UNSET_EXPECTED_TOKEN,
     ):
         collection = next(
@@ -153,6 +160,26 @@ class _OwnerCollectionsDB:
             )
         ):
             raise ValueError("media_collection_claim_mismatch")
+        actual_identity = [
+            (
+                item.ordinal,
+                item.source_url,
+                item.normalized_source_id,
+                item.metadata.get("playlist_ingest_occurrence_id"),
+            )
+            for item in collection.items
+        ]
+        expected_identity = [
+            (
+                item["ordinal"],
+                item["source_url"],
+                item.get("normalized_source_id"),
+                item["occurrence_id"],
+            )
+            for item in expected_items
+        ]
+        if actual_identity != expected_identity:
+            raise ValueError("media_collection_claim_plan_mismatch")
         collection._playlist_ingest_initialization_token = initialization_token
         return collection
 
@@ -217,12 +244,14 @@ class _OwnerCollectionsDB:
             raise self.discard_error
         collection = next((candidate for candidate in self.collections if candidate.id == collection_id), None)
         if collection is not None and expected_run_id is not None:
+            if collection.metadata.get("playlist_ingest_run_id") != expected_run_id:
+                raise ValueError("media_collection_discard_mismatch")
             if (
-                collection.metadata.get("playlist_ingest_run_id") != expected_run_id
-                or collection._playlist_ingest_initialization_token
+                collection._playlist_ingest_initialization_token
                 != expected_initialization_token
-                or {item.id for item in collection.items} != set(expected_item_ids)
             ):
+                raise ValueError("media_collection_discard_ownership_transferred")
+            if {item.id for item in collection.items} != set(expected_item_ids):
                 raise ValueError("media_collection_discard_mismatch")
         self.discard_calls.append(collection_id)
         if collection is not None:
@@ -639,7 +668,14 @@ def test_create_run_recovers_committed_unattached_collection_without_creating_an
         name=request.new_collection.name,
         kind="playlist_ingest",
         metadata={"playlist_ingest_run_id": abandoned.run_id},
-        items=[{"source_url": "https://example.com/abandoned-plan", "ordinal": 1}],
+        items=[
+            {
+                "source_url": "https://example.com/abandoned-plan",
+                "normalized_source_id": "url:https://example.com/abandoned-plan",
+                "ordinal": 1,
+                "metadata": {"playlist_ingest_occurrence_id": "occ-abandoned-plan"},
+            }
+        ],
     )
     store.test_clock.advance(timedelta(seconds=6))
 
@@ -710,7 +746,14 @@ def test_stale_recovered_initializer_cannot_reclaim_after_newer_collection_claim
         kind="playlist_ingest",
         metadata={"playlist_ingest_run_id": abandoned.run_id},
         playlist_ingest_initialization_token="original-collection-owner",
-        items=[{"source_url": "https://example.com/claim-cas", "ordinal": 1}],
+        items=[
+            {
+                "source_url": "https://example.com/claim-cas",
+                "normalized_source_id": "url:https://example.com/claim-cas",
+                "ordinal": 1,
+                "metadata": {"playlist_ingest_occurrence_id": "occ-claim-cas"},
+            }
+        ],
     )
     service._collections_db_factory = lambda _owner: collections_db
     resumer = PlaylistIngestService(manager, collections_db_factory=lambda _owner: collections_db)
@@ -807,6 +850,63 @@ def test_recovered_collection_item_mismatch_fails_without_discarding_user_plan(
             new_collection=request.new_collection,
         )
 
+    assert [collection.id for collection in collections_db.collections] == [committed.id]
+    assert collections_db.discard_calls == []
+
+
+def test_recovered_collection_source_replacement_fails_without_discarding_user_plan(
+    service_context,
+):
+    service, store, _manager, _media_db = service_context
+    from tldw_Server_API.app.api.v1.schemas.media_playlist_ingest import PlaylistIngestRunCreateRequest
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
+        PlaylistRunValidationError,
+        _request_fingerprint,
+    )
+
+    request = PlaylistIngestRunCreateRequest.model_validate(
+        {
+            "client_request_id": "recovered-replaced-plan-item",
+            "inputs": [_direct_input("occ-original", "https://example.com/original")],
+            "review_overrides": {},
+            "new_collection": {"name": "Replaced recovered plan item"},
+        }
+    )
+    abandoned = store.create_validated_run(
+        "owner-1",
+        items=[_validated_direct_manifest("occ-original", "https://example.com/original")],
+        client_request_id=request.client_request_id,
+        request_fingerprint=_request_fingerprint(request),
+        initialization_token="replaced-plan-owner",
+        initialization_lease_seconds=1,
+    )
+    collections_db = service.test_collections_db
+    committed = collections_db.create_media_collection_with_items(
+        name=request.new_collection.name,
+        kind="playlist_ingest",
+        metadata={"playlist_ingest_run_id": abandoned.run_id},
+        playlist_ingest_initialization_token="replaced-plan-owner",
+        items=[
+            {
+                "source_url": "https://attacker.example/replacement",
+                "normalized_source_id": "url:https://attacker.example/replacement",
+                "ordinal": 1,
+                "metadata": {"playlist_ingest_occurrence_id": "occ-original"},
+            }
+        ],
+    )
+    store.test_clock.advance(timedelta(seconds=2))
+
+    with pytest.raises(PlaylistRunValidationError, match="collection_planning_failed"):
+        service.create_run(
+            "owner-1",
+            client_request_id=request.client_request_id,
+            inputs=request.inputs,
+            review_overrides=request.review_overrides,
+            new_collection=request.new_collection,
+        )
+
+    assert store.get_run("owner-1", abandoned.run_id).collection_id is None
     assert [collection.id for collection in collections_db.collections] == [committed.id]
     assert collections_db.discard_calls == []
 
@@ -958,7 +1058,6 @@ def test_reclaimed_initializer_claims_visible_collection_before_stale_creator_cl
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
         PlaylistIngestService,
         PlaylistRunPendingError,
-        PlaylistRunValidationError,
     )
 
     monkeypatch.setenv("PLAYLIST_RUN_INITIALIZATION_LEASE_SECONDS", "1")
@@ -994,9 +1093,10 @@ def test_reclaimed_initializer_claims_visible_collection_before_stale_creator_cl
         store.test_clock.advance(timedelta(seconds=2))
         winner = pool.submit(resumer.create_run, "owner-1", **request).result(timeout=5)
         release_creator.set()
-        with pytest.raises((PlaylistRunPendingError, PlaylistRunValidationError)):
+        with pytest.raises(PlaylistRunPendingError) as pending:
             stale.result(timeout=5)
 
+    assert pending.value.run_id == run_id
     assert winner.collection_id == 700
     assert store.get_run("owner-1", run_id).collection_id == 700
     assert len(collections_db.collections) == 1

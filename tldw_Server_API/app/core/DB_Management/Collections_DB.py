@@ -71,6 +71,11 @@ _COLLECTIONS_NONCRITICAL_EXCEPTIONS = (
 )
 
 _PLAYLIST_INGEST_TOKEN_KEY = "playlist_ingest_initialization_token"  # nosec B105
+_PLAYLIST_INGEST_RUN_KEY = "playlist_ingest_run_id"
+_PLAYLIST_INGEST_OCCURRENCE_KEY = "playlist_ingest_occurrence_id"
+_PLAYLIST_INGEST_RESERVED_METADATA_KEYS = frozenset(
+    {_PLAYLIST_INGEST_RUN_KEY, _PLAYLIST_INGEST_TOKEN_KEY}
+)
 
 
 def _count_row_total(row: Any) -> int:
@@ -3247,7 +3252,7 @@ class CollectionsDatabase:
             raise ValueError("media_collection_kind_required")
         if metadata is not None and not isinstance(metadata, dict):
             raise ValueError("media_collection_metadata_must_be_object")
-        if metadata is not None and _PLAYLIST_INGEST_TOKEN_KEY in metadata:
+        if metadata is not None and _PLAYLIST_INGEST_RESERVED_METADATA_KEYS.intersection(metadata):
             raise ValueError("media_collection_metadata_reserved")
 
         now = _utcnow_iso()
@@ -3506,6 +3511,7 @@ class CollectionsDatabase:
         initialization_token: str,
         expected_initialization_token: str | None,
         expected_item_ids: Iterable[int],
+        expected_items: Iterable[dict[str, Any]],
     ) -> MediaCollectionRow:
         """Transfer cleanup ownership of an exact playlist plan under one lock."""
         if type(collection_id) is not int or collection_id < 1:
@@ -3533,6 +3539,37 @@ class CollectionsDatabase:
             or any(type(item_id) is not int or item_id < 1 for item_id in item_ids)
         ):
             raise ValueError("media_collection_claim_mismatch")
+        expected_plan = list(expected_items)
+        if len(expected_plan) > 500 or any(not isinstance(item, dict) for item in expected_plan):
+            raise ValueError("media_collection_claim_mismatch")
+        expected_identity: list[tuple[int, str, str | None, str]] = []
+        for item in expected_plan:
+            ordinal = item.get("ordinal")
+            source_url = item.get("source_url")
+            normalized_source_id = item.get("normalized_source_id")
+            occurrence_id = item.get("occurrence_id")
+            if (
+                type(ordinal) is not int
+                or ordinal < 1
+                or type(source_url) is not str
+                or not source_url
+                or source_url.strip() != source_url
+                or (
+                    normalized_source_id is not None
+                    and (
+                        type(normalized_source_id) is not str
+                        or not normalized_source_id
+                        or normalized_source_id.strip() != normalized_source_id
+                    )
+                )
+                or type(occurrence_id) is not str
+                or not occurrence_id
+                or len(occurrence_id) > 255
+            ):
+                raise ValueError("media_collection_claim_mismatch")
+            expected_identity.append(
+                (ordinal, source_url, normalized_source_id, occurrence_id)
+            )
 
         with self.transaction() as conn:
             lock = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
@@ -3577,6 +3614,19 @@ class CollectionsDatabase:
             ).rows
             if {int(row["id"]) for row in membership_rows} != set(item_ids):
                 raise ValueError("media_collection_claim_mismatch")
+            actual_identity = [
+                (
+                    int(row["ordinal"]),
+                    str(row["source_url"]),
+                    row.get("normalized_source_id"),
+                    self._json_loads_dict(row.get("metadata_json")).get(
+                        _PLAYLIST_INGEST_OCCURRENCE_KEY
+                    ),
+                )
+                for row in membership_rows
+            ]
+            if actual_identity != expected_identity:
+                raise ValueError("media_collection_claim_plan_mismatch")
 
             now = _utcnow_iso()
             updated = self.backend.execute(
@@ -3651,11 +3701,10 @@ class CollectionsDatabase:
             if not existing:
                 raise KeyError("media_collection_not_found")
             metadata = self._json_loads_dict(existing.get("metadata_json"))
-            if (
-                metadata.get("playlist_ingest_run_id") != expected_run_id
-                or existing.get(_PLAYLIST_INGEST_TOKEN_KEY) != expected_initialization_token
-            ):
+            if metadata.get(_PLAYLIST_INGEST_RUN_KEY) != expected_run_id:
                 raise ValueError("media_collection_discard_mismatch")
+            if existing.get(_PLAYLIST_INGEST_TOKEN_KEY) != expected_initialization_token:
+                raise ValueError("media_collection_discard_ownership_transferred")
             membership_rows = self.backend.execute(
                 """
                 SELECT id, status, media_id, content_item_id, latest_job_id,
@@ -3782,7 +3831,7 @@ class CollectionsDatabase:
         if metadata is not None:
             if not isinstance(metadata, dict):
                 raise ValueError("media_collection_metadata_must_be_object")
-            if _PLAYLIST_INGEST_TOKEN_KEY in metadata:
+            if _PLAYLIST_INGEST_RESERVED_METADATA_KEYS.intersection(metadata):
                 raise ValueError("media_collection_metadata_reserved")
             add_field("metadata_json", self._json_dumps_or_none(metadata))
         if default_tags is not None:

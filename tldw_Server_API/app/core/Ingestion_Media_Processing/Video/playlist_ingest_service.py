@@ -1342,6 +1342,7 @@ class PlaylistIngestService:
             planned_occurrences.append(occurrence_id)
             planned_items.append(
                 {
+                    "occurrence_id": occurrence_id,
                     "source_url": item.get("source_url") or f"urn:tldw:file-stub:{occurrence_id}",
                     "normalized_source_id": item.get("normalized_source_id"),
                     "source_kind": item.get("source_kind"),
@@ -1350,6 +1351,7 @@ class PlaylistIngestService:
                     "speaker": display.get("channel_or_uploader"),
                     "published_at": display.get("published_at"),
                     "duplicate_status": "existing" if item.get("action") != "ingest" else "unknown",
+                    "metadata": {"playlist_ingest_occurrence_id": occurrence_id},
                 }
             )
         self._renew_run_initialization_or_pending(
@@ -1410,6 +1412,11 @@ class PlaylistIngestService:
                         expected_run_id=run_id,
                         expected_initialization_token=initialization_token,
                     )
+                except ValueError as cleanup_exc:
+                    if str(cleanup_exc) != "media_collection_discard_ownership_transferred":
+                        raise PlaylistRunValidationError(
+                            "collection_planning_cleanup_failed"
+                        ) from cleanup_exc
                 except Exception as cleanup_exc:
                     raise PlaylistRunValidationError("collection_planning_cleanup_failed") from cleanup_exc
             raise
@@ -1421,7 +1428,14 @@ class PlaylistIngestService:
                     initialization_token=initialization_token,
                     expected_initialization_token=prior_initialization_token,
                     expected_item_ids=collection_item_ids,
+                    expected_items=planned_items,
                 )
+            except ValueError as claim_exc:
+                if str(claim_exc) == "media_collection_claim_plan_mismatch":
+                    raise PlaylistRunValidationError("collection_planning_failed") from claim_exc
+                raise PlaylistRunValidationError(
+                    "collection_planning_reconciliation_failed"
+                ) from claim_exc
             except Exception as claim_exc:
                 raise PlaylistRunValidationError(
                     "collection_planning_reconciliation_failed"

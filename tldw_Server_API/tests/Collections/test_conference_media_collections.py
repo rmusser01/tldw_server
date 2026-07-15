@@ -368,6 +368,15 @@ def test_create_media_collection_with_items_rolls_back_collection_and_membership
 def test_playlist_collection_claim_transfers_initialization_token_atomically(
     collections_db: CollectionsDatabase,
 ) -> None:
+    expected_items = [
+        {
+            "occurrence_id": "occ-one",
+            "source_url": "https://example.com/one",
+            "normalized_source_id": None,
+            "ordinal": 1,
+            "metadata": {"playlist_ingest_occurrence_id": "occ-one"},
+        }
+    ]
     created = collections_db.create_media_collection_with_items(
         name="Claimable plan",
         kind="playlist_ingest",
@@ -375,7 +384,7 @@ def test_playlist_collection_claim_transfers_initialization_token_atomically(
             "playlist_ingest_run_id": "run-claim",
         },
         playlist_ingest_initialization_token="token-a",
-        items=[{"source_url": "https://example.com/one", "ordinal": 1}],
+        items=expected_items,
     )
     item_ids = [item.id for item in created.items]
 
@@ -385,6 +394,7 @@ def test_playlist_collection_claim_transfers_initialization_token_atomically(
         initialization_token="token-b",
         expected_initialization_token="token-a",
         expected_item_ids=item_ids,
+        expected_items=expected_items,
     )
 
     assert claimed.metadata["playlist_ingest_run_id"] == "run-claim"
@@ -399,6 +409,25 @@ def test_playlist_collection_claim_transfers_initialization_token_atomically(
             initialization_token="token-stale",
             expected_initialization_token="token-a",
             expected_item_ids=item_ids,
+            expected_items=expected_items,
+        )
+    assert (
+        collections_db.get_media_collection(created.id)._playlist_ingest_initialization_token
+        == "token-b"
+    )
+
+    collections_db.backend.execute(
+        "UPDATE media_collection_items SET source_url = ? WHERE id = ? AND user_id = ?",
+        ("https://attacker.example/replacement", item_ids[0], collections_db.user_id),
+    )
+    with pytest.raises(ValueError, match="media_collection_claim_plan_mismatch"):
+        collections_db.claim_playlist_ingest_collection(
+            created.id,
+            run_id="run-claim",
+            initialization_token="token-c",
+            expected_initialization_token="token-b",
+            expected_item_ids=item_ids,
+            expected_items=expected_items,
         )
     assert (
         collections_db.get_media_collection(created.id)._playlist_ingest_initialization_token
@@ -412,12 +441,22 @@ def test_playlist_collection_claim_transfers_initialization_token_atomically(
             initialization_token="x" * 256,
             expected_initialization_token="token-b",
             expected_item_ids=item_ids,
+            expected_items=expected_items,
         )
 
 
 def test_playlist_collection_claim_rejects_owner_and_run_mismatch(
     collections_db: CollectionsDatabase,
 ) -> None:
+    expected_items = [
+        {
+            "occurrence_id": "occ-one",
+            "source_url": "https://example.com/one",
+            "normalized_source_id": None,
+            "ordinal": 1,
+            "metadata": {"playlist_ingest_occurrence_id": "occ-one"},
+        }
+    ]
     created = collections_db.create_media_collection_with_items(
         name="Owner-scoped plan",
         kind="playlist_ingest",
@@ -425,7 +464,7 @@ def test_playlist_collection_claim_rejects_owner_and_run_mismatch(
             "playlist_ingest_run_id": "run-owner",
         },
         playlist_ingest_initialization_token="token-owner",
-        items=[{"source_url": "https://example.com/one", "ordinal": 1}],
+        items=expected_items,
     )
     item_ids = [item.id for item in created.items]
 
@@ -436,6 +475,7 @@ def test_playlist_collection_claim_rejects_owner_and_run_mismatch(
             initialization_token="token-b",
             expected_initialization_token="token-owner",
             expected_item_ids=item_ids,
+            expected_items=expected_items,
         )
 
     other_owner = CollectionsDatabase.from_backend(user_id="other-owner", backend=collections_db.backend)
@@ -446,6 +486,7 @@ def test_playlist_collection_claim_rejects_owner_and_run_mismatch(
             initialization_token="token-b",
             expected_initialization_token="token-owner",
             expected_item_ids=item_ids,
+            expected_items=expected_items,
         )
 
 
@@ -462,7 +503,10 @@ def test_discard_media_collection_rejects_wrong_ownership_token(
         items=[{"source_url": "https://example.com/one", "ordinal": 1}],
     )
 
-    with pytest.raises(ValueError, match="media_collection_discard_mismatch"):
+    with pytest.raises(
+        ValueError,
+        match="media_collection_discard_ownership_transferred",
+    ):
         collections_db.discard_media_collection(
             created.id,
             expected_item_ids=[created.items[0].id],
@@ -835,10 +879,12 @@ def test_playlist_collection_authority_is_reserved_and_redacted_from_clients(
     )
     from tldw_Server_API.app.api.v1.endpoints.media import collections as media_collections
 
-    created = collections_db.create_media_collection(
+    created = collections_db.create_media_collection_with_items(
         name="Legacy playlist plan",
         kind="playlist_ingest",
         metadata={"playlist_ingest_run_id": "run-private-token"},
+        playlist_ingest_initialization_token="private-owner-token",
+        items=[],
     )
     collections_db.backend.execute(
         "UPDATE media_collections SET metadata_json = ? WHERE id = ? AND user_id = ?",
@@ -866,9 +912,24 @@ def test_playlist_collection_authority_is_reserved_and_redacted_from_clients(
         assert get_response.status_code == 200, get_response.text
         assert "playlist_ingest_initialization_token" not in get_response.json()["metadata"]
 
-        patch_response = client.patch(
-            f"/api/v1/media/collections/{created.id}",
-            json={"metadata": {"playlist_ingest_initialization_token": "attacker-token"}},
-            headers={"X-API-KEY": "test-api-key-12345"},
-        )
-        assert patch_response.status_code == 422, patch_response.text
+        for reserved_key in (
+            "playlist_ingest_initialization_token",
+            "playlist_ingest_run_id",
+        ):
+            create_response = client.post(
+                "/api/v1/media/collections",
+                json={
+                    "name": "Client marker injection",
+                    "kind": "playlist_ingest",
+                    "metadata": {reserved_key: "attacker-value"},
+                },
+                headers={"X-API-KEY": "test-api-key-12345"},
+            )
+            assert create_response.status_code == 422, create_response.text
+
+            patch_response = client.patch(
+                f"/api/v1/media/collections/{created.id}",
+                json={"metadata": {reserved_key: "attacker-value"}},
+                headers={"X-API-KEY": "test-api-key-12345"},
+            )
+            assert patch_response.status_code == 422, patch_response.text
