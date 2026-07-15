@@ -266,6 +266,7 @@ const MAX_DIRECT_QUICK_INGEST_RETRY_RESERVATIONS = 64;
 const DIRECT_QUICK_INGEST_RETRY_RESERVATION_TTL_MS = 24 * 60 * 60 * 1_000;
 let lastQuickIngestRuntimeHealthCheckAt = 0;
 let quickIngestRuntimeMessagingUsable: boolean | null = null;
+let fallbackIdentitySequence = 0;
 
 const DIRECT_QUICK_INGEST_SESSION_PREFIX = "qi-direct-";
 const DIRECT_QUICK_INGEST_TRANSPORT = { preferDirect: true } as const;
@@ -333,7 +334,8 @@ const buildDirectSessionSuffix = (): string => {
   } catch {
     // Fall through to timestamp suffix below.
   }
-  return Date.now().toString(36).slice(-8);
+  fallbackIdentitySequence += 1;
+  return `${Date.now().toString(36).slice(-8)}-${fallbackIdentitySequence.toString(36)}`;
 };
 
 const createOpaqueExtensionIdentity = (
@@ -832,6 +834,9 @@ const runVersion2QuickIngestBatch = async (
     return { ok: false, error: "Missing playlist ingest run request." };
   }
   const sessionId = String(input.__quickIngestSessionId || "").trim();
+  if (!sessionId) {
+    return { ok: false, error: "Missing quick ingest session id." };
+  }
   if (isDirectQuickIngestSessionId(sessionId)) {
     ensureDirectCancellation(sessionId);
   }

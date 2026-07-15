@@ -37,6 +37,37 @@ import {
 import { DUPLICATE_SKIP_MESSAGE } from "@/components/Common/QuickIngest/constants"
 import { createQuickIngestSessionRuntime } from "@/entries/shared/quick-ingest-session-runtime"
 
+const terminalRunResponse = (runId: string) => ({
+  contract_version: 2,
+  run_id: runId,
+  status: "completed",
+  version: 1,
+  status_url: `/api/v1/media/ingest/runs/${runId}`,
+  items_url: `/api/v1/media/ingest/runs/${runId}/items`,
+  events_url: `/api/v1/media/ingest/runs/${runId}/events/stream`,
+  processing_occurrences: [],
+})
+
+const version2RunRequest = (
+  sessionId: string,
+  occurrenceId: string,
+): Parameters<typeof submitQuickIngestBatch>[0] => ({
+  entries: [],
+  files: [],
+  storeRemote: true,
+  processOnly: false,
+  __quickIngestSessionId: sessionId,
+  pendingRunRequest: {
+    inputs: [
+      {
+        inputKind: "direct_url",
+        occurrenceId,
+        url: `https://example.com/${occurrenceId}`,
+      },
+    ],
+  },
+})
+
 describe("submitQuickIngestBatch", () => {
   beforeEach(() => {
     __resetQuickIngestRuntimeHealthForTests()
@@ -126,6 +157,7 @@ describe("submitQuickIngestBatch", () => {
       files: [],
       storeRemote: true,
       processOnly: false,
+      __quickIngestSessionId: "qi-direct-v2-authority",
       common: {
         perform_analysis: true,
         perform_chunking: false,
@@ -355,35 +387,10 @@ describe("submitQuickIngestBatch", () => {
 
   it("reuses the durable session identity after an ambiguous run-create failure", async () => {
     const sessionId = "qi-direct-ambiguous-create"
-    const request = {
-      entries: [],
-      files: [],
-      storeRemote: true,
-      processOnly: false,
-      __quickIngestSessionId: sessionId,
-      pendingRunRequest: {
-        inputs: [
-          {
-            inputKind: "direct_url",
-            occurrenceId: "occ-ambiguous-create",
-            url: "https://example.com/ambiguous-create",
-          },
-        ],
-      },
-    } as any
+    const request = version2RunRequest(sessionId, "occ-ambiguous-create")
     mocks.bgRequest
       .mockRejectedValueOnce(new TypeError("Failed to fetch"))
-      .mockResolvedValueOnce({
-        contract_version: 2,
-        run_id: "run-ambiguous-create",
-        status: "completed",
-        version: 1,
-        status_url: "/api/v1/media/ingest/runs/run-ambiguous-create",
-        items_url: "/api/v1/media/ingest/runs/run-ambiguous-create/items",
-        events_url:
-          "/api/v1/media/ingest/runs/run-ambiguous-create/events/stream",
-        processing_occurrences: [],
-      })
+      .mockResolvedValueOnce(terminalRunResponse("run-ambiguous-create"))
 
     await expect(submitQuickIngestBatch(request)).rejects.toMatchObject({
       message: expect.any(String),
@@ -401,6 +408,50 @@ describe("submitQuickIngestBatch", () => {
     expect(createBodies).toEqual([
       expect.objectContaining({ client_request_id: sessionId }),
       expect.objectContaining({ client_request_id: sessionId }),
+    ])
+  })
+
+  it.each(["", "   "])(
+    "rejects a missing durable session identity before run creation (%j)",
+    async (__quickIngestSessionId) => {
+      const onTrackingMetadata = vi.fn()
+      const shouldStop = vi.fn()
+      const request = {
+        ...version2RunRequest(__quickIngestSessionId, "occ-missing-session"),
+        __quickIngestShouldStop: shouldStop,
+        onTrackingMetadata,
+      }
+
+      await expect(submitQuickIngestBatch(request)).resolves.toEqual({
+        ok: false,
+        error: "Missing quick ingest session id.",
+      })
+      expect(mocks.bgRequest).not.toHaveBeenCalled()
+      expect(mocks.bgUpload).not.toHaveBeenCalled()
+      expect(shouldStop).not.toHaveBeenCalled()
+      expect(onTrackingMetadata).not.toHaveBeenCalled()
+    },
+  )
+
+  it("keeps distinct durable sessions distinct at run creation", async () => {
+    mocks.bgRequest
+      .mockResolvedValueOnce(terminalRunResponse("run-session-a"))
+      .mockResolvedValueOnce(terminalRunResponse("run-session-b"))
+
+    await submitQuickIngestBatch(
+      version2RunRequest("qi-direct-session-a", "occ-session-a"),
+    )
+    await submitQuickIngestBatch(
+      version2RunRequest("qi-direct-session-b", "occ-session-b"),
+    )
+
+    const clientRequestIds = mocks.bgRequest.mock.calls
+      .map(([call]) => call)
+      .filter((call) => call.path === "/api/v1/media/ingest/runs")
+      .map((call) => call.body.client_request_id)
+    expect(clientRequestIds).toEqual([
+      "qi-direct-session-a",
+      "qi-direct-session-b",
     ])
   })
 
@@ -422,6 +473,7 @@ describe("submitQuickIngestBatch", () => {
       files: [],
       storeRemote: true,
       processOnly: false,
+      __quickIngestSessionId: "qi-direct-v2-terminal",
       pendingRunRequest: {
         inputs: [
           {
@@ -535,6 +587,7 @@ describe("submitQuickIngestBatch", () => {
       files: [],
       storeRemote: true,
       processOnly: false,
+      __quickIngestSessionId: "qi-direct-v2-mixed",
       pendingRunRequest: {
         inputs: [
           {
@@ -607,6 +660,7 @@ describe("submitQuickIngestBatch", () => {
       files: [],
       storeRemote: true,
       processOnly: false,
+      __quickIngestSessionId: "qi-direct-v2-rate-limited",
       pendingRunRequest: {
         inputs: occurrences.map((occurrence) => ({
           inputKind: "direct_url",
@@ -703,6 +757,7 @@ describe("submitQuickIngestBatch", () => {
       files: [],
       storeRemote: true,
       processOnly: false,
+      __quickIngestSessionId: "qi-direct-v2-partial",
       pendingRunRequest: {
         inputs: occurrences.map((occurrence) => ({
           inputKind: "direct_url",
@@ -807,6 +862,7 @@ describe("submitQuickIngestBatch", () => {
       files: [],
       storeRemote: true,
       processOnly: false,
+      __quickIngestSessionId: "qi-direct-v2-cleanup-failure",
       pendingRunRequest: {
         inputs: occurrences.map((occurrence) => ({
           inputKind: "direct_url",
@@ -875,6 +931,7 @@ describe("submitQuickIngestBatch", () => {
       files: [],
       storeRemote: true,
       processOnly: false,
+      __quickIngestSessionId: "qi-direct-v2-first-cleanup-failure",
       pendingRunRequest: {
         inputs: [
           {
@@ -979,6 +1036,7 @@ describe("submitQuickIngestBatch", () => {
       files: [],
       storeRemote: true,
       processOnly: false,
+      __quickIngestSessionId: "qi-direct-v2-omitted-file",
       pendingRunRequest: {
         inputs: [
           {
@@ -3425,6 +3483,46 @@ describe("submitQuickIngestBatch", () => {
         })
       })
     )
+  })
+
+  it("keeps fallback identities unique without Web Crypto at a fixed time", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_800_000_000_000)
+    vi.stubGlobal("crypto", undefined)
+    const input: Parameters<typeof startQuickIngestSession>[0] = {
+      entries: [],
+      files: [],
+      storeRemote: true,
+      processOnly: false,
+    }
+
+    try {
+      const firstDirect = await startQuickIngestSession(input)
+      const secondDirect = await startQuickIngestSession(input)
+
+      expect(firstDirect.sessionId).toMatch(/^qi-direct-/)
+      expect(secondDirect.sessionId).not.toBe(firstDirect.sessionId)
+
+      __resetQuickIngestRuntimeHealthForTests()
+      mocks.runtimeId = "ext-fallback-identities"
+      mocks.sendMessage.mockImplementation(async (message: any) => {
+        if (message.type === "tldw:ping") return { ok: true, pong: true }
+        if (message.type === "tldw:quick-ingest/start") {
+          return { ok: true, sessionId: message.sessionId }
+        }
+        return { ok: false }
+      })
+      const firstExtension = await startQuickIngestSession(input)
+      const secondExtension = await startQuickIngestSession(input)
+      const starts = mocks.sendMessage.mock.calls
+        .map(([message]) => message)
+        .filter((message) => message.type === "tldw:quick-ingest/start")
+
+      expect(secondExtension.sessionId).not.toBe(firstExtension.sessionId)
+      expect(starts[1].attemptToken).not.toBe(starts[0].attemptToken)
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it("routes mv3 extension sessions through the durable background runtime", async () => {
