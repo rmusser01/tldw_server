@@ -264,6 +264,35 @@ def run_cancel_terminal_noop_scenario(make_manager: ManagerFactory) -> None:
     assert stored_again["status"] == "cancelled"
 
 
+def run_conditional_cancel_binding_scenario(make_manager: ManagerFactory) -> None:
+    """Verify cancellation mutates only the exact expected Jobs binding."""
+
+    jm = make_manager()
+    job = jm.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="media_ingest_item",
+        payload={"run_id": "run-1", "occurrence_id": "occ-1", "attempt": 1},
+        owner_user_id="owner-1",
+        batch_group="batch-1",
+        idempotency_key="run-1:occ-1:1",
+    )
+    binding = jm.normalize_job_binding_view(job, owner_user_id="owner-1")
+    assert binding is not None
+    mismatched = dict(binding)
+    mismatched["payload"] = {**binding["payload"], "occurrence_id": "occ-other"}
+
+    assert jm.cancel_job(int(job["id"]), expected_binding=mismatched) is False
+    unchanged = jm.get_job(int(job["id"]))
+    assert unchanged is not None
+    assert unchanged["status"] == "queued"
+
+    assert jm.cancel_job(int(job["id"]), expected_binding=binding) is True
+    cancelled = jm.get_job(int(job["id"]))
+    assert cancelled is not None
+    assert cancelled["status"] == "cancelled"
+
+
 def run_events_outbox_create_complete_scenario(make_manager: ManagerFactory) -> None:
     """Verify create and complete emit exactly one durable outbox event each."""
 

@@ -1107,6 +1107,7 @@ class PlaylistIngestService:
                         self._jobs.cancel_job(
                             int(item.job_id),
                             reason="playlist_run_cancellation_retry",
+                            expected_binding=binding,
                         )
                     except Exception:  # noqa: BLE001 - the durable request is retried on later reconciliation
                         logger.warning(
@@ -1139,7 +1140,7 @@ class PlaylistIngestService:
             retryable = False
             outcome = None
             if binding is None or not isinstance(job, Mapping):
-                state = "status_unavailable"
+                state = "cancellation_requested" if item.state == "cancellation_requested" else "status_unavailable"
             else:
                 raw_progress = job.get("progress_percent")
                 if type(raw_progress) in {int, float} and 0 <= float(raw_progress) <= 100:
@@ -1244,7 +1245,11 @@ class PlaylistIngestService:
                     )
                     if binding is None:
                         continue
-                    self._jobs.cancel_job(job_id, reason=reason)
+                    self._jobs.cancel_job(
+                        job_id,
+                        reason=reason,
+                        expected_binding=binding,
+                    )
                 except Exception:  # noqa: BLE001 - the next reconciliation retries status observation
                     logger.warning(
                         "Playlist occurrence cancellation could not confirm Jobs state for run {} item {}",

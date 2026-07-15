@@ -1097,11 +1097,20 @@ def test_run_reconciliation_retries_transient_job_cancellation_failure(
     original_cancel_job = manager.cancel_job
     attempts: list[tuple[int, str | None]] = []
 
-    def transient_cancel_failure(cancel_job_id: int, *, reason: str | None = None) -> bool:
+    def transient_cancel_failure(
+        cancel_job_id: int,
+        *,
+        reason: str | None = None,
+        expected_binding=None,
+    ) -> bool:
         attempts.append((cancel_job_id, reason))
         if len(attempts) <= 2:
             raise RuntimeError("transient Jobs write failure")
-        return original_cancel_job(cancel_job_id, reason=reason)
+        return original_cancel_job(
+            cancel_job_id,
+            reason=reason,
+            expected_binding=expected_binding,
+        )
 
     monkeypatch.setattr(manager, "cancel_job", transient_cancel_failure)
 
@@ -1137,6 +1146,126 @@ def test_run_reconciliation_retries_transient_job_cancellation_failure(
     assert item["outcome"] == "cancelled"
 
 
+def test_run_reconciliation_preserves_cancellation_request_when_status_read_fails(
+    preflight_api,
+    monkeypatch,
+):
+    client, manager, _clock, _owner = preflight_api
+    _install_endpoint_media_db(monkeypatch)
+    created = _create_run(client, "occ-cancel-read-failure")
+    submitted = _submit_run_occurrences(client, created["run_id"], "occ-cancel-read-failure")
+    job_id = int(submitted["submissions"][0]["job_id"])
+    original_cancel_job = manager.cancel_job
+
+    def fail_cancel_job(
+        _job_id: int,
+        *,
+        reason: str | None = None,
+        expected_binding=None,
+    ) -> bool:
+        del reason
+        del expected_binding
+        raise RuntimeError("transient Jobs write failure")
+
+    monkeypatch.setattr(manager, "cancel_job", fail_cancel_job)
+    cancelled = client.post(
+        f"{created['status_url']}/cancel",
+        json={"occurrence_ids": ["occ-cancel-read-failure"]},
+    )
+    assert cancelled.status_code == 200, cancelled.text
+    monkeypatch.setattr(manager, "cancel_job", original_cancel_job)
+
+    original_get_job = manager.get_job_or_archived
+    status_reads = 0
+
+    def fail_first_status_read(*args, **kwargs):
+        nonlocal status_reads
+        status_reads += 1
+        if status_reads == 1:
+            raise RuntimeError("transient Jobs read failure")
+        return original_get_job(*args, **kwargs)
+
+    monkeypatch.setattr(manager, "get_job_or_archived", fail_first_status_read)
+
+    first = client.get(created["status_url"])
+
+    assert first.status_code == 200, first.text
+    with manager._connect() as connection:
+        first_state = connection.execute(
+            """
+            SELECT state, outcome FROM media_ingest_run_items
+            WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
+            """,
+            ("1", created["run_id"], "occ-cancel-read-failure"),
+        ).fetchone()
+    assert tuple(first_state) == ("cancellation_requested", None)
+    assert manager.get_job(job_id)["status"] == "queued"
+
+    second = client.get(created["status_url"])
+
+    assert second.status_code == 200, second.text
+    assert manager.get_job(job_id)["status"] == "cancelled"
+    with manager._connect() as connection:
+        second_state = connection.execute(
+            """
+            SELECT state, outcome FROM media_ingest_run_items
+            WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
+            """,
+            ("1", created["run_id"], "occ-cancel-read-failure"),
+        ).fetchone()
+    assert tuple(second_state) == ("terminal", "cancelled")
+
+
+def test_run_cancel_atomically_rejects_binding_changed_after_validation(
+    preflight_api,
+    monkeypatch,
+):
+    client, manager, _clock, _owner = preflight_api
+    _install_endpoint_media_db(monkeypatch)
+    created = _create_run(client, "occ-binding-race")
+    submitted = _submit_run_occurrences(client, created["run_id"], "occ-binding-race")
+    job_id = int(submitted["submissions"][0]["job_id"])
+    original_cancel_job = manager.cancel_job
+    expected_bindings: list[object] = []
+
+    def mutate_before_cancel(
+        cancel_job_id: int,
+        *,
+        reason: str | None = None,
+        expected_binding=None,
+    ) -> bool:
+        expected_bindings.append(expected_binding)
+        job = manager.get_job(cancel_job_id)
+        payload = dict(job["payload"])
+        payload["occurrence_id"] = "occ-reassigned"
+        with manager._connect() as connection:
+            connection.execute(
+                "UPDATE jobs SET payload = ? WHERE id = ?",
+                (json.dumps(payload), cancel_job_id),
+            )
+        if expected_binding is None:
+            return original_cancel_job(cancel_job_id, reason=reason)
+        return original_cancel_job(
+            cancel_job_id,
+            reason=reason,
+            expected_binding=expected_binding,
+        )
+
+    monkeypatch.setattr(manager, "cancel_job", mutate_before_cancel)
+
+    response = client.post(
+        f"{created['status_url']}/cancel",
+        json={"occurrence_ids": ["occ-binding-race"]},
+    )
+
+    assert response.status_code == 200, response.text
+    assert expected_bindings and expected_bindings[0] is not None
+    assert manager.get_job(job_id)["status"] == "queued"
+    item = client.get(created["items_url"]).json()["items"][0]
+    assert item["state"] == "cancellation_requested"
+    assert item["outcome"] is None
+
+
 def test_run_cancel_does_not_cancel_job_with_mismatched_payload_binding(
     preflight_api,
     monkeypatch,
@@ -1166,7 +1295,7 @@ def test_run_cancel_does_not_cancel_job_with_mismatched_payload_binding(
     assert response.status_code == 200, response.text
     assert manager.get_job(job_id)["status"] == "queued"
     item = client.get(created["items_url"]).json()["items"][0]
-    assert item["state"] == "status_unavailable"
+    assert item["state"] == "cancellation_requested"
     assert item["outcome"] is None
 
 
@@ -1214,7 +1343,7 @@ def test_run_cancel_does_not_cancel_cross_owner_job_from_corrupt_stored_id(
     assert response.status_code == 200, response.text
     assert manager.get_job(other_job_id)["status"] == "queued"
     current = client.get(created["items_url"]).json()["items"][0]
-    assert current["state"] == "status_unavailable"
+    assert current["state"] == "cancellation_requested"
     assert current["outcome"] is None
 
 

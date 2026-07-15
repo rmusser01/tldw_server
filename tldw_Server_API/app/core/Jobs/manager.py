@@ -1048,6 +1048,41 @@ class JobManager:
             "payload": dict(payload),
         }
 
+    def _job_matches_expected_binding(
+        self,
+        job: object,
+        expected_binding: Mapping[str, Any],
+    ) -> bool:
+        """Validate one raw Jobs row against an exact caller-observed binding."""
+        required = (
+            "id",
+            "owner_user_id",
+            "domain",
+            "queue",
+            "job_type",
+            "batch_group",
+            "idempotency_key",
+            "payload",
+        )
+        if any(key not in expected_binding for key in required):
+            return False
+        expected_payload = expected_binding.get("payload")
+        if not isinstance(expected_payload, Mapping):
+            return False
+        try:
+            raw_job = dict(job)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return False
+        normalized = self.normalize_job_binding_view(
+            raw_job,
+            owner_user_id=str(expected_binding.get("owner_user_id") or ""),
+        )
+        return bool(
+            normalized is not None
+            and all(normalized.get(key) == expected_binding.get(key) for key in required[:-1])
+            and normalized.get("payload") == dict(expected_payload)
+        )
+
     @staticmethod
     def _decode_archive_blob(value: Any) -> Any:
         """Decode compressed archive payload/result values."""
@@ -4828,9 +4863,17 @@ class JobManager:
         finally:
             conn.close()
 
-    def cancel_job(self, job_id: int, *, reason: str | None = None) -> bool:
+    def cancel_job(
+        self,
+        job_id: int,
+        *,
+        reason: str | None = None,
+        expected_binding: Mapping[str, Any] | None = None,
+    ) -> bool:
         """Request cancellation or cancel queued jobs immediately.
 
+        When ``expected_binding`` is supplied, the binding is validated under
+        the same transaction lock as the status mutation.
         Emits gauge updates on successful cancellation for the job's domain/queue/job_type.
         """
         conn = self._connect()
@@ -4842,6 +4885,11 @@ class JobManager:
                         if _test_mode:
                             with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                                 logger.info(f"[JM TEST MUT] cancel_job enter job_id={job_id} backend=pg")
+                        if expected_binding is not None:
+                            # FOR UPDATE keeps the validated binding stable through the existing mutation.
+                            cur.execute("SELECT * FROM jobs WHERE id = %s FOR UPDATE", (int(job_id),))
+                            if not self._job_matches_expected_binding(cur.fetchone(), expected_binding):
+                                return False
                         # Capture grouping keys for gauges
                         try:
                             cur.execute("SELECT domain, queue, job_type, uuid FROM jobs WHERE id = %s", (int(job_id),))
@@ -4987,6 +5035,15 @@ class JobManager:
                     if _test_mode:
                         with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                             logger.info(f"[JM TEST MUT] cancel_job enter job_id={job_id} backend=sqlite")
+                    if expected_binding is not None:
+                        # A reserved writer lock keeps the validated binding stable until commit.
+                        conn.execute("BEGIN IMMEDIATE")
+                        guarded_row = conn.execute(
+                            "SELECT * FROM jobs WHERE id = ?",
+                            (int(job_id),),
+                        ).fetchone()
+                        if not self._job_matches_expected_binding(guarded_row, expected_binding):
+                            return False
                     # Capture grouping keys for gauges
                     try:
                         row0 = conn.execute(
