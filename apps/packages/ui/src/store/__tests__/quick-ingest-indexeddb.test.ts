@@ -478,6 +478,43 @@ describe("quick ingest IndexedDB persistence", () => {
     expect(statuses.at(-1)).toBe(expectedStatus)
   })
 
+  it("reports a queued write failure through the durability barrier", async () => {
+    const database = new MemoryQuickIngestDatabase()
+    const failure = new DOMException("blocked", "SecurityError")
+    database.quickIngestSessions.putFailure = failure
+    const { persistence } = await createPersistence({ database })
+
+    const writeResult = Promise.resolve(
+      persistence.storage.setItem(
+        STORAGE_KEY,
+        envelope("flush-write-failure", "processing", 500)
+      )
+    ).catch((error) => error)
+
+    await expect(persistence.flush()).rejects.toBe(failure)
+    expect(await writeResult).toBe(failure)
+  })
+
+  it("reports the same queued write failure to every durability waiter", async () => {
+    const database = new MemoryQuickIngestDatabase()
+    const failure = new DOMException("blocked", "SecurityError")
+    database.quickIngestSessions.putFailure = failure
+    const { persistence } = await createPersistence({ database })
+
+    const writeResult = Promise.resolve(
+      persistence.storage.setItem(
+        STORAGE_KEY,
+        envelope("shared-flush-failure", "processing", 500)
+      )
+    ).catch((error) => error)
+    const firstWaiter = persistence.flush()
+    const secondWaiter = persistence.flush()
+
+    await expect(firstWaiter).rejects.toBe(failure)
+    await expect(secondWaiter).rejects.toBe(failure)
+    expect(await writeResult).toBe(failure)
+  })
+
   it("publishes and rethrows a read failure after initialization", async () => {
     const database = new MemoryQuickIngestDatabase()
     const { persistence } = await createPersistence({ database })

@@ -1004,20 +1004,33 @@ describe("QuickIngestWizardModal session runtime", () => {
   })
 
   it("forwards persistence recovery and submission ownership state to Review", async () => {
-    useQuickIngestSessionStore.setState({
-      session: {
-        ...createEmptyQuickIngestSession(),
-        currentStep: 3,
-      },
-      persistenceStatus: "unavailable",
-      isSubmissionOwner: false,
-    } as never)
+    const { db } = await import("@/db/dexie/schema")
+    const put = vi.mocked(db.quickIngestSessions.put)
+    put.mockRejectedValue(new DOMException("blocked", "SecurityError"))
 
-    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    try {
+      useQuickIngestSessionStore.setState({
+        session: {
+          ...createEmptyQuickIngestSession(),
+          currentStep: 3,
+        },
+        isSubmissionOwner: false,
+      } as never)
+      useQuickIngestSessionStore.getState().upsertSession({ currentStep: 3 })
+      await waitFor(() =>
+        expect(useQuickIngestSessionStore.getState().persistenceStatus).toBe(
+          "unavailable"
+        )
+      )
 
-    const review = await screen.findByTestId("wizard-review")
-    expect(review).toHaveAttribute("data-persistence-status", "unavailable")
-    expect(review).toHaveAttribute("data-submission-owner", "false")
+      render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+
+      const review = await screen.findByTestId("wizard-review")
+      expect(review).toHaveAttribute("data-persistence-status", "unavailable")
+      expect(review).toHaveAttribute("data-submission-owner", "false")
+    } finally {
+      put.mockResolvedValue(undefined)
+    }
   })
 
   it.each([
@@ -4686,7 +4699,7 @@ describe("QuickIngestWizardModal session runtime", () => {
           icon: "Film",
           fileSize: 0,
           validation: { valid: true },
-        } as any,
+        },
       ],
       processingState: {
         status: "running",
@@ -4716,6 +4729,81 @@ describe("QuickIngestWizardModal session runtime", () => {
     })
     expect(mocks.startQuickIngestSession).not.toHaveBeenCalled()
     expect(mocks.submitQuickIngestBatch).not.toHaveBeenCalled()
+  })
+
+  it("restarts persisted run reattachment after Strict Mode effect cleanup", async () => {
+    mocks.reattachQuickIngestSession.mockResolvedValue({
+      lifecycle: "processing",
+      jobs: [
+        {
+          jobId: 77,
+          status: "running",
+          lifecycleState: "running",
+          progressPercent: 45,
+          progressMessage: "Processing Talk 1",
+          sourceItemId: "occ-strict-reattach",
+        },
+      ],
+      errorMessage: null,
+    })
+    useQuickIngestSessionStore.getState().upsertSession({
+      ...createEmptyQuickIngestSession(),
+      lifecycle: "processing",
+      currentStep: 4,
+      queueItems: [
+        {
+          id: "occ-strict-reattach",
+          kind: "url",
+          url: "https://example.com/strict-reattach",
+          detectedType: "video",
+          icon: "Film",
+          fileSize: 0,
+          validation: { valid: true },
+        },
+      ],
+      processingState: {
+        status: "running",
+        perItemProgress: [
+          {
+            id: "occ-strict-reattach",
+            status: "queued",
+            progressPercent: 0,
+            currentStage: "Queued",
+            estimatedRemaining: 0,
+          },
+        ],
+        elapsed: 2,
+        estimatedRemaining: 0,
+      },
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "qi-direct-strict-reattach",
+        submissionState: "acknowledged",
+        runId: "run-strict-reattach",
+        jobIds: [77],
+        submittedItemIds: ["occ-strict-reattach"],
+        startedAt: Date.now(),
+      },
+    })
+
+    render(
+      <React.StrictMode>
+        <QuickIngestWizardModal open onClose={vi.fn()} />
+      </React.StrictMode>
+    )
+
+    await waitFor(() => {
+      expect(
+        useQuickIngestSessionStore.getState().session?.processingState
+          .perItemProgress[0]
+      ).toMatchObject({
+        id: "occ-strict-reattach",
+        status: "processing",
+        lifecycleState: "running",
+        progressPercent: 45,
+      })
+    })
+    expect(mocks.reattachQuickIngestSession).toHaveBeenCalledTimes(2)
   })
 
   it("reattaches persisted direct-ingest jobs after refresh", async () => {

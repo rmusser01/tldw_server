@@ -232,7 +232,7 @@ Verification before commit: Task 4 was implemented through focused RED/GREEN cyc
 
 **Tests:** Run client tests, ambiguous retry, dynamic events, extension runtime tests.
 
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 5: Implement the shared run client and bounded submission
 
@@ -333,7 +333,7 @@ Task 6 final formal specification and code-quality re-reviews approved the sixth
 
 **Tests:** Component lifecycle tests, Dexie migration/quota/cleanup tests, multi-tab tests.
 
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 7: Update processing, cancellation, retry, and result groups
 
@@ -447,25 +447,25 @@ git commit -m "feat: persist quick ingest runs in indexeddb (TASK-12113)"
 
 **Tests:** Vitest focused gate, Playwright journey, axe/keyboard/virtual-list tests, no fan-out structural assertions.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 9: Add final browser journeys and verification
 
-- [ ] **Step 1: Add deterministic browser fixtures and failing E2E**
+- [x] **Step 1: Add deterministic browser fixtures and failing E2E**
 
 Mock the version-2 API with the existing 34-item conference fixture. Test paste → inspect → complete preview → select → materialize → Review → run → progress → reload/reattach → results. Add an extension-level integration test for active-tab seed and background recreation. Do not hit live YouTube in required CI.
 
-- [ ] **Step 2: Run the browser test and verify RED**
+- [x] **Step 2: Run the browser test and verify RED**
 
 Run: `cd apps/tldw-frontend && bunx playwright test e2e/workflows/quick-ingest-playlist.spec.ts --project=chromium --reporter=line`
 
 Expected: FAIL until route mocks and final UI wiring are complete.
 
-- [ ] **Step 3: Complete route mocks, copy, and accessibility details**
+- [x] **Step 3: Complete route mocks, copy, and accessibility details**
 
 Add English Quick Ingest strings for typed errors/actions. Verify live-region summary deduplication, virtual row position metadata, keyboard selection/focus recovery, no-referrer thumbnail opt-in, bounded mounted rows for 500 items, bounded chunk requests, and zero per-item status polling.
 
-- [ ] **Step 4: Run the focused frontend gate**
+- [x] **Step 4: Run the focused frontend gate**
 
 Run: `cd apps/tldw-frontend && bunx vitest run ../packages/ui/src/services/tldw/__tests__/playlist-ingest.test.ts ../packages/ui/src/services/__tests__/quick-ingest-batch.test.ts ../packages/ui/src/services/__tests__/quick-ingest-session-reattach.test.ts ../packages/ui/src/store/__tests__/quick-ingest-session.test.ts ../packages/ui/src/store/__tests__/quick-ingest-indexeddb.test.ts ../packages/ui/src/components/Common/QuickIngest/__tests__ ../packages/ui/src/entries/shared/__tests__/quick-ingest-session-runtime.test.ts --maxWorkers=1 --no-file-parallelism`
 
@@ -477,7 +477,7 @@ Run: `cd apps/tldw-frontend && bunx playwright test e2e/workflows/quick-ingest-p
 
 Expected: all commands exit 0.
 
-- [ ] **Step 5: Verify diff, update task, and commit**
+- [x] **Step 5: Verify diff, update task, and commit**
 
 Run: `git diff --check`
 
@@ -487,3 +487,9 @@ Record test counts, browser result, accessibility assertions, and any explicit s
 git add apps/packages/ui apps/tldw-frontend/e2e backlog/tasks
 git commit -m "test: verify shared playlist ingest experience (TASK-12113)"
 ```
+
+Task 9 completed with deterministic cross-client coverage and root-owned review hardening. The Chromium journey uses a dedicated 34-item version-2 fixture and verifies two-page inspection, virtual-list first/last position evidence, selection/materialization, one bounded 31-occurrence submission, authoritative Running/45% progress, durable reload reattachment without resubmission, 30 completed plus one failed terminal outcome, zero per-item polls, zero eager thumbnail requests, and zero serious/critical axe findings. The extension integration control preserves the typed active-tab playlist seed and reattaches all 34 occurrence identities after worker recreation. Typed English playlist copy uses native ICU variables; thumbnails are explicit opt-in, lazy, no-referrer, and cosmetic on failure; the drop zone has one interactive browse control; and primary Add styling applies only while enabled.
+
+Final review added two test-first reliability fixes beyond the journey itself: persisted run-marker publication now waits for its IndexedDB write and propagates durability failures, and React Strict Mode cleanup releases only its own reattachment signature so the replacement effect can resume a persisted run. The shared v15 Dexie test double now includes `quickIngestSessions`, and the virtual-list browser assertion scrolls and checks visibility atomically. Fresh release gates pass 23 files / 695 Vitest tests with zero unhandled failures and Chromium Playwright 1/1. Repository-pinned ESLint passes the full touched TypeScript/TSX scope with no errors (known Next pages-directory informational output only); configured Prettier checks pass for the new/touched configured files; tracked and new-file whitespace checks are clean; the temporary `antd` symlink is restored exactly. Full frontend TypeScript remains skipped under the documented Task 1 three-attempt repository-baseline cap. Bandit is not applicable to this TypeScript-only task.
+
+The final pre-commit audit found and fixed one additional concurrency defect in the durability barrier: two callers waiting on the same failed queued IndexedDB write could receive different results because the first waiter consumed a shared error slot. The accepted RED was 1 failed / 40 passed; the minimal fix makes every waiter share the latest operation promise while retaining failure-tolerant queue sequencing. Focused GREEN passed 41/41, and the adjacent IndexedDB/session gate passed 77/77. Repository-pinned ESLint and whitespace checks pass for the two remediation files; the temporary `antd` symlink is restored exactly.

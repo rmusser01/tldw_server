@@ -78,6 +78,7 @@ if (typeof window !== 'undefined') {
         audiobookProjects: mockTable,
         audiobookChapterAssets: mockTable,
         ttsClips: mockTable,
+        quickIngestSessions: mockTable,
         transaction: vi.fn().mockImplementation(async (_mode, _tables, cb) => cb()),
       },
       PageAssistDexieDB: vi.fn(),
@@ -90,9 +91,8 @@ if (typeof window !== 'undefined') {
   // Mock React Query with graceful fallback for tests that don't mount QueryClientProvider.
   // When provider is present, preserve real hook behavior to avoid diverging package-ui tests.
   vi.doMock('@tanstack/react-query', async () => {
-    const actual = await vi.importActual<typeof import('@tanstack/react-query')>(
-      '@tanstack/react-query'
-    );
+    const actual =
+      await vi.importActual<typeof import('@tanstack/react-query')>('@tanstack/react-query');
     const actualHooks = actual as typeof import('@tanstack/react-query');
 
     return {

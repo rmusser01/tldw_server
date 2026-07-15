@@ -87,7 +87,7 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
       return
     }
     if (disabled || hasAutoFocusedRef.current) return
-    dropZoneRef.current?.focus()
+    dropZoneRef.current?.querySelector<HTMLButtonElement>("button")?.focus()
     hasAutoFocusedRef.current = true
   }, [autoFocus, disabled])
 
@@ -234,25 +234,18 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
     }
   }, [disabled])
 
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (event.currentTarget !== event.target) return
-    if (event.key !== "Enter" && event.key !== " ") return
-    event.preventDefault()
-    handleBrowseClick(event)
-  }
-
   // Determine visual state
   const getStateStyles = () => {
     if (disabled) {
       return "border-border bg-surface2 opacity-50 cursor-not-allowed"
     }
     if (isDragging && isDragReject) {
-      return "border-danger/50 bg-danger/10 cursor-pointer"
+      return "border-danger/50 bg-danger/10"
     }
     if (isDragging) {
-      return "border-primary bg-primary/5 cursor-pointer"
+      return "border-primary bg-primary/5"
     }
-    return "border-border bg-surface2 hover:border-primary/50 cursor-pointer"
+    return "border-border bg-surface2 hover:border-primary/50"
   }
 
   const releaseLabel =
@@ -281,17 +274,14 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      onClick={handleBrowseClick}
-      onKeyDown={handleKeyDown}
       className={`mt-3 w-full rounded-md border border-dashed px-4 py-4 text-center transition-colors ${getStateStyles()} ${className || ""}`}
       data-testid="qi-file-dropzone"
-      role="button"
+      role="group"
       aria-label={qi(
         "dropzoneAriaLabel",
-        "File upload zone. Drag and drop files or press Enter to browse."
+        "File upload zone. Drag and drop files or use Browse files."
       )}
       aria-disabled={disabled}
-      tabIndex={disabled ? -1 : 0}
     >
       <div className="flex flex-col gap-2 items-center justify-center">
         {/* Icon based on state */}

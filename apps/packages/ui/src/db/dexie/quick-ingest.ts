@@ -37,6 +37,8 @@ type LegacyStorage = Pick<Storage, "getItem" | "removeItem">
 
 export type QuickIngestIndexedDbStorage = {
   storage: StateStorage
+  /** Wait for queued storage work and reject when its latest operation failed. */
+  flush: () => Promise<void>
   initialize: () => Promise<void>
   cleanupExpired: () => Promise<void>
   commitReviewHandoff: (
@@ -191,6 +193,7 @@ export const createQuickIngestIndexedDbStorage = (
   let initialization: Promise<void> | null = null
   let currentRecordId: string | null = null
   let storageTail: Promise<void> = Promise.resolve()
+  let latestStorageResult: Promise<void> = Promise.resolve()
 
   const publishStatus = (next: QuickIngestPersistenceStatus) => {
     status = next
@@ -218,12 +221,12 @@ export const createQuickIngestIndexedDbStorage = (
 
   const enqueueStorage = <T>(operation: () => Promise<T>): Promise<T> => {
     const result = storageTail.then(operation, operation)
-    storageTail = result.then(
-      () => undefined,
-      () => undefined
-    )
+    latestStorageResult = result.then(() => undefined)
+    storageTail = latestStorageResult.catch(() => undefined)
     return result
   }
+
+  const flushStorage = (): Promise<void> => latestStorageResult
 
   const deleteExpired = async (includeProcessing: boolean): Promise<void> => {
     await runWrite(async () => {
@@ -490,6 +493,7 @@ export const createQuickIngestIndexedDbStorage = (
 
   return {
     storage,
+    flush: flushStorage,
     initialize,
     cleanupExpired: async () => {
       try {

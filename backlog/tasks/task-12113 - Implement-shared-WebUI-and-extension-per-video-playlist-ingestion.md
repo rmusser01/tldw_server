@@ -1,7 +1,7 @@
 ---
 id: TASK-12113
 title: Implement shared WebUI and extension per-video playlist ingestion
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
 updated_date: 2026-07-14 21:05
@@ -30,11 +30,11 @@ Execute the approved shared-frontend implementation plan after the backend versi
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Complete all nine tasks and five stages in the approved shared-frontend plan using test-first red/green/refactor cycles.
-- [ ] #2 Route every playlist entry path through mandatory fail-closed inspection and show every selected occurrence with bounded pagination and virtualization.
-- [ ] #3 Use one shared WebUI/extension run controller and occurrence-aware queue/status/results model, with durable IndexedDB recovery and visible failure states.
-- [ ] #4 Pass focused Vitest suites, TypeScript/lint gates, deterministic Playwright browser journeys, accessibility checks, and extension parity tests.
-- [ ] #5 Complete per-task specification and code-quality reviews, then a final implementation review; record verification and final summary.
+- [x] #1 Complete all nine tasks and five stages in the approved shared-frontend plan using test-first red/green/refactor cycles.
+- [x] #2 Route every playlist entry path through mandatory fail-closed inspection and show every selected occurrence with bounded pagination and virtualization.
+- [x] #3 Use one shared WebUI/extension run controller and occurrence-aware queue/status/results model, with durable IndexedDB recovery and visible failure states.
+- [x] #4 Pass focused Vitest suites, TypeScript/lint gates, deterministic Playwright browser journeys, accessibility checks, and extension parity tests.
+- [x] #5 Complete per-task specification and code-quality reviews, then a final implementation review; record verification and final summary.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -134,7 +134,7 @@ Task 8 implementation and implementation-agent verification completed test-first
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented the approved shared WebUI/browser-extension YouTube playlist ingestion design across all five stages and nine tasks. Playlist links now go through fail-closed version-2 inspection, expose the complete virtualized per-video snapshot, materialize selected server occurrence identities, preserve them through Review and one shared bounded run, show authoritative per-item processing/results, and recover durably through IndexedDB and extension runtime recreation. Task 9 closes the plan with deterministic 34-item WebUI and extension parity journeys, accessible typed copy and controls, explicit privacy-preserving thumbnail loading, reload reattachment, no duplicate submission, and no per-item polling fan-out. Final review additionally hardened Strict Mode reattachment and failed run-marker persistence. Verification is recorded in Implementation Notes: 695/695 broad focused Vitest and 1/1 Chromium Playwright passed; lint/format/whitespace gates are clean. Full frontend TSC is the documented repository-baseline skip; Bandit is not applicable to this TypeScript-only closeout.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
@@ -143,12 +143,12 @@ Task 8 implementation and implementation-agent verification completed test-first
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
 
 ## Implementation Notes
@@ -167,4 +167,9 @@ Task 8 final code-quality re-review found one remaining Important hydration issu
 Task 8 final side-panel hydration remediation completed test-first on attempt 1/3. RED: missing hydration-safe hook and singleton retain behavior (1 failed / 7 passed across the utility control, zero unhandled; hook suite also failed to load as expected). GREEN: 4 files / 22 tests / zero unhandled covering delayed persisted-draft hydration, exact playlist detail and open-option replay, once-only singleton consumption, competing-host claim, unmount/rejection lifecycle, form contract, QuickIngestButton resume, and utility behavior. The durable Step-3 draft retains its queue and deep preset; no pre-hydration draft is created. Relevant store/Modal hydration controls pass 3/3 with 215 skipped. Repository-pinned explicit-config ESLint passes seven touched TS/TSX files; whitespace checks are clean; the antd symlink is restored exactly. Two unused duplicate side-panel callbacks/selectors were removed. No schema, dependency, backend, extension-runtime, staging, commit, or full-TSC change. Non-blocking pre-existing follow-up: the WebLayout debug side-panel route can co-mount global and local immediate-open hosts after hydration; normal WebUI and production extension ownership are separate. Keep Task 8 Step 5 blocked pending same-reviewer approval and fresh root full gates.
 Task 8 final closeout reviews and fresh root verification are green. The same specification reviewer and same code-quality reviewer both APPROVED the exact post-Step-4a working tree with no Critical, Important, or Minor findings. Fresh root gates: persistence/context 135/135; full QuickIngestWizardModal 184/184; Results/pending-open 26/26; side-panel/pending-open 22/22; existing Dexie helper/migrations 10/10. All exited 0 with no unhandled test failures. Repository-pinned explicit-config ESLint passes all 22 dirty TypeScript/TSX files with zero errors (known Next pages-directory informational output only). Tracked git diff --check is clean; all five intended untracked files have empty whitespace diagnostics under git diff --no-index --check; the antd symlink is restored exactly. Full frontend TSC remains skipped under the documented Task 1 three-attempt baseline cap; Bandit is N/A for TypeScript-only work. Task 8 is ready for the root implementation commit; Task 9 remains after Task 8. The internal-QA debug side-panel dual-host issue is non-blocking and excluded from production WebUI/extension ownership.
 Task 8 implementation committed successfully as e97cc15b8b: feat: persist quick ingest runs in indexeddb (TASK-12113). The commit contains the exact 26-file staged set reviewed and verified above; git diff --cached --check was clean, and both protected watchlist templates remained untracked/excluded. Task 8 Step 5 is complete. TASK-12113 remains In Progress for Task 9 deterministic browser journeys/final integration review.
+Task 9 implementation has started after user confirmation. Read-only review found the existing 34-item browser fixture exercises only the legacy playlist contract, while version-2 pagination/materialization/run reattachment is covered only below the browser boundary. Task 9 will add a dedicated deterministic version-2 Playwright journey, a focused extension active-tab/worker-recreation integration control, explicit thumbnail opt-in with no-referrer loading, and English typed playlist action/error strings. Existing virtualization, position semantics, keyboard focus recovery, bounded 500-row rendering, bounded submission chunks, and zero per-item polling are already unit-tested and will be asserted at the journey boundary without duplicating their implementations. Full frontend TSC remains intentionally skipped under the documented Task 1 three-attempt baseline cap.
+Task 9 browser journey reached the repository three-attempt stop and was reassessed before further work. Attempt 1 failed closed because the deterministic docs-info fixture omitted the authoritative mediaPlaylistIngestContractVersion flag; the fixture was corrected to version 2. Attempts 2 and 3 waited for the row-3 checkbox. The final accessibility snapshot showed rows 1-10 were mounted, but every checkbox was named `Select playlist item 1: Talk 1`. Root cause: the newly added English locale used `{{ordinal}}`/`{{title}}`; ICUWithInterpolation pre-interpolates that source and i18next-icu caches the first compiled key value, so repeated calls reuse row 1. Repository alternatives reviewed: existing mustache JSON through the interpolation bridge, native ICU `{variable}` messages, and static translated prefixes assembled in the component. The minimal/supported direction is native ICU syntax for all new dynamic playlist copy, with a real-i18n regression proving sequential values remain distinct. This also prevents selected-count/action copy from latching its first value. Browser retries remain paused until that lower-level regression is green.
+Final pre-commit review found one concurrent durability-waiter defect: the first flush caller consumed the shared IndexedDB failure, allowing a second waiter on the same write to resolve. Test-first remediation replaced the consumable error slot with a shared latest-operation promise while preserving failure-tolerant queue sequencing. RED: 1 failed / 40 passed. GREEN: focused IndexedDB 41/41; adjacent IndexedDB/session 77/77 after formatting. Repository-pinned ESLint and Prettier pass for the two remediation files, and the temporary antd symlink is restored exactly.
+Task 9 final cross-client release gate is complete. The deterministic 34-item version-2 WebUI journey verifies two inspection pages, virtual first/last row evidence, 31 selected materializations, one bounded run submission, authoritative Running/45% progress, durable reload reattachment without resubmission, 30 completed plus one processing failure, zero per-item polls, zero eager thumbnail requests, and no serious/critical axe violations. The extension integration control preserves the typed active-tab playlist seed and reattaches all 34 occurrence identities after worker recreation. Final broad focused Vitest: 23 files / 695 tests passed with zero unhandled failures; Chromium Playwright: 1/1 passed; full touched-scope repository-pinned ESLint, configured Prettier, and whitespace checks pass. Full frontend TSC remains skipped under the documented Task 1 three-attempt repository-baseline cap; Bandit is not applicable to this TypeScript-only closeout.
+Verification-record correction for the final durability-waiter remediation: the fresh post-restoration gate is IndexedDB/session 77/77 plus repository-pinned ESLint and whitespace checks. The earlier sentence claiming a two-file Prettier pass referred to an incorrect frontend formatter invocation whose mechanical changes were fully discarded; no formatter-only diff remains. The broader Task 9 configured Prettier result for its intended configured files is unchanged.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->

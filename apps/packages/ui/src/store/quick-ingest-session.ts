@@ -159,7 +159,9 @@ type QuickIngestSessionState = QuickIngestSessionPersistedState & {
   upsertSession: (next: Partial<QuickIngestSessionRecord>) => void
   showSession: () => void
   hideSession: () => void
-  markProcessingTracking: (tracking: PersistedQuickIngestTracking) => void
+  markProcessingTracking: (
+    tracking: PersistedQuickIngestTracking
+  ) => Promise<void>
   clearProcessingTracking: () => void
   commitReviewHandoff: (
     next: Partial<QuickIngestSessionRecord>
@@ -1605,7 +1607,7 @@ export const createQuickIngestSessionStore = (options: {
               updatedAt: Date.now(),
             }
           }),
-        markProcessingTracking: (tracking) =>
+        markProcessingTracking: async (tracking) => {
           withSessionUpdate(set, (current) => {
             const base = current || createEmptyQuickIngestSession()
             return {
@@ -1618,7 +1620,9 @@ export const createQuickIngestSessionStore = (options: {
               }),
               updatedAt: Date.now(),
             }
-          }),
+          })
+          await persistence.flush()
+        },
         clearProcessingTracking: () =>
           withSessionUpdate(set, (current) => {
             if (!current) return current

@@ -218,6 +218,35 @@ describe("PlaylistPreflightPanel v2 virtualization", () => {
     expect(document.querySelector("img")).toBeNull();
   });
 
+  it("loads thumbnails only on request without a referrer and treats failures as cosmetic", () => {
+    const thumbnailUrl = "https://i.ytimg.com/vi/video-1/hqdefault.jpg";
+    renderPanel(
+      candidate([
+        item(1, {
+          displayMetadata: {
+            title: "Video 1",
+            thumbnailUrl,
+          },
+        }),
+      ]),
+    );
+
+    expect(screen.queryByRole("img", { name: "Thumbnail for Video 1" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Load thumbnail for Video 1" }));
+
+    const thumbnail = screen.getByRole("img", { name: "Thumbnail for Video 1" });
+    expect(thumbnail).toHaveAttribute("src", thumbnailUrl);
+    expect(thumbnail).toHaveAttribute("loading", "lazy");
+    expect(thumbnail).toHaveAttribute("referrerpolicy", "no-referrer");
+
+    fireEvent.error(thumbnail);
+
+    expect(screen.queryByRole("img", { name: "Thumbnail for Video 1" })).toBeNull();
+    expect(screen.getByText("Thumbnail unavailable")).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Select playlist item 1: Video 1" })).toBeEnabled();
+  });
+
   it("classifies only confirmed statuses as duplicates and only exact new rows in filters", () => {
     const rows = [
       item(1),

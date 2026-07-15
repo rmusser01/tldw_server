@@ -73,6 +73,39 @@ describe("PlaylistPreflightPanel", () => {
     expect(
       duplicateSummary.closest('[data-ds-component="Badge"]'),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Add 0 videos" })).toBeDisabled();
+    const addButton = screen.getByRole("button", { name: "Add 0 videos" });
+    expect(addButton).toBeDisabled();
+    expect(addButton).not.toHaveClass(
+      "!border-primaryStrong",
+      "!bg-primaryStrong",
+      "!text-white",
+    );
+  });
+
+  it("uses the high-contrast primary style only when Add is available", () => {
+    const candidate = buildCandidate();
+    candidate.selectedOccurrenceIds = new Set(["occ-1"]);
+    candidate.summary!.summary.selectedCount = 1;
+
+    render(
+      <PlaylistPreflightPanel
+        candidate={candidate}
+        onCancel={vi.fn()}
+        onRetry={vi.fn()}
+        onRemove={vi.fn()}
+        onRefresh={vi.fn()}
+        onSelectionChange={vi.fn()}
+        onSelectionBatchChange={vi.fn()}
+        onAdd={vi.fn()}
+      />,
+    );
+
+    const addButton = screen.getByRole("button", { name: "Add 1 video" });
+    expect(addButton).toBeEnabled();
+    expect(addButton).toHaveClass(
+      "!border-primaryStrong",
+      "!bg-primaryStrong",
+      "!text-white",
+    );
   });
 });

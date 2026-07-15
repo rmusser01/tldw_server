@@ -26,9 +26,7 @@ import { FileDropZone } from "../QueueTab/FileDropZone"
 
 describe("FileDropZone acceptance", () => {
   it("only autofocuses once when disabled state clears", () => {
-    const focusSpy = vi
-      .spyOn(HTMLElement.prototype, "focus")
-      .mockImplementation(() => undefined)
+    const focusSpy = vi.spyOn(HTMLElement.prototype, "focus")
     const { rerender } = render(
       <FileDropZone
         autoFocus
@@ -64,7 +62,23 @@ describe("FileDropZone acceptance", () => {
     )
 
     expect(focusSpy).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole("button", { name: "Browse files" })).toHaveFocus()
     focusSpy.mockRestore()
+  })
+
+  it("uses the browse button as the only interactive upload control", () => {
+    render(
+      <FileDropZone
+        onFilesAdded={vi.fn()}
+        onFilesRejected={vi.fn()}
+      />
+    )
+
+    const dropZone = screen.getByTestId("qi-file-dropzone")
+    expect(dropZone).toHaveAttribute("role", "group")
+    expect(dropZone).not.toHaveAttribute("tabindex")
+    expect(screen.getAllByRole("button")).toHaveLength(1)
+    expect(screen.getByRole("button", { name: "Browse files" })).toBeEnabled()
   })
 
   it("accepts mkv uploads even when the browser does not provide a MIME type", async () => {

@@ -199,6 +199,12 @@ export const PlaylistPreflightPanel: React.FC<PlaylistPreflightPanelProps> = ({
   onSelectionBatchChange,
 }) => {
   const [filter, setFilter] = useState<PlaylistFilter>("all");
+  const [requestedThumbnails, setRequestedThumbnails] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [failedThumbnails, setFailedThumbnails] = useState<Set<string>>(
+    () => new Set(),
+  );
   const scrollParentRef = useRef<HTMLDivElement | null>(null);
   const rowRefs = useRef(new Map<string, HTMLElement>());
   const listOwnsFocusRef = useRef(false);
@@ -522,6 +528,10 @@ export const PlaylistPreflightPanel: React.FC<PlaylistPreflightPanelProps> = ({
                 const duration = formatDuration(
                   item.displayMetadata.durationSeconds,
                 );
+                const thumbnailUrl = item.displayMetadata.thumbnailUrl;
+                const thumbnailKey = thumbnailUrl
+                  ? `${item.occurrenceId}\u0000${thumbnailUrl}`
+                  : null;
                 const secondary = [
                   item.displayMetadata.playlistTitle,
                   item.displayMetadata.channelOrUploader,
@@ -591,12 +601,64 @@ export const PlaylistPreflightPanel: React.FC<PlaylistPreflightPanelProps> = ({
                       <Typography.Text className="block truncate text-[11px] text-text-muted">
                         {secondary.join(" • ")}
                       </Typography.Text>
-                      {item.sourceUrl && (
+                      {(item.sourceUrl || thumbnailUrl) && (
                         <details className="text-[11px] text-text-muted">
                           <summary>
                             {qi("playlistPreflight.itemDetails", "Details")}
                           </summary>
-                          <span>{item.sourceUrl}</span>
+                          {item.sourceUrl && <span className="block">{item.sourceUrl}</span>}
+                          {thumbnailUrl && thumbnailKey && (
+                            <div className="mt-1">
+                              {!requestedThumbnails.has(thumbnailKey) ? (
+                                <button
+                                  type="button"
+                                  className="text-primary underline-offset-2 hover:underline"
+                                  aria-label={qi(
+                                    "playlistPreflight.loadThumbnailAria",
+                                    "Load thumbnail for {{title}}",
+                                    { title },
+                                  )}
+                                  onClick={() => {
+                                    setRequestedThumbnails((current) =>
+                                      new Set(current).add(thumbnailKey),
+                                    );
+                                  }}
+                                >
+                                  {qi(
+                                    "playlistPreflight.loadThumbnail",
+                                    "Load thumbnail",
+                                  )}
+                                </button>
+                              ) : failedThumbnails.has(thumbnailKey) ? (
+                                <span>
+                                  {qi(
+                                    "playlistPreflight.thumbnailUnavailable",
+                                    "Thumbnail unavailable",
+                                  )}
+                                </span>
+                              ) : (
+                                // This component also runs in the browser extension,
+                                // where Next.js Image is unavailable.
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img
+                                  src={thumbnailUrl}
+                                  alt={qi(
+                                    "playlistPreflight.thumbnailAlt",
+                                    "Thumbnail for {{title}}",
+                                    { title },
+                                  )}
+                                  loading="lazy"
+                                  referrerPolicy="no-referrer"
+                                  className="mt-1 max-h-32 rounded object-contain"
+                                  onError={() => {
+                                    setFailedThumbnails((current) =>
+                                      new Set(current).add(thumbnailKey),
+                                    );
+                                  }}
+                                />
+                              )}
+                            </div>
+                          )}
                         </details>
                       )}
                     </div>
@@ -619,6 +681,11 @@ export const PlaylistPreflightPanel: React.FC<PlaylistPreflightPanelProps> = ({
             <Button
               size="small"
               type="primary"
+              className={
+                onAdd && selectedCount > 0 && !isAdding
+                  ? "!border-primaryStrong !bg-primaryStrong !text-white hover:!border-primaryStrong hover:!bg-primaryStrong"
+                  : undefined
+              }
               onClick={onAdd}
               loading={isAdding}
               disabled={!onAdd || selectedCount === 0 || isAdding}

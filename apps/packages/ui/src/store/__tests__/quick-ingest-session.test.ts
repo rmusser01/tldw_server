@@ -20,6 +20,8 @@ const createControlledPersistence = () => {
   let nextWriteGate: Promise<void> | null = null
   let delayNextRead = false
   let acquireResult = true
+  let writeTail: Promise<void> = Promise.resolve()
+  let pendingWriteFailure: unknown = null
   const writeAttempts: string[] = []
   const listeners = new Set<(next: TestPersistenceStatus) => void>()
 
@@ -52,10 +54,21 @@ const createControlledPersistence = () => {
       }
       return value
     },
-    setItem: async (_key, next) => {
-      writeAttempts.push(next)
-      await awaitNextWrite()
-      value = next
+    setItem: (_key, next) => {
+      const write = (async () => {
+        writeAttempts.push(next)
+        await awaitNextWrite()
+        value = next
+      })()
+      writeTail = write.then(
+        () => {
+          pendingWriteFailure = null
+        },
+        (error) => {
+          pendingWriteFailure = error
+        }
+      )
+      return write
     },
     removeItem: async () => {
       value = null
@@ -69,6 +82,12 @@ const createControlledPersistence = () => {
       publishStatus("ready")
     }),
     cleanupExpired: vi.fn(async () => {}),
+    flush: vi.fn(async () => {
+      await writeTail
+      const failure = pendingWriteFailure
+      pendingWriteFailure = null
+      if (failure) throw failure
+    }),
     commitReviewHandoff: vi.fn(async (expected: string, next: string) => {
       writeAttempts.push(next)
       await awaitNextWrite()
@@ -1085,17 +1104,18 @@ describe("quick ingest session store", () => {
     expect(persistence.acquireSubmissionLease).toHaveBeenCalledTimes(2)
   })
 
-  it("merges persisted tracking metadata across direct-session updates", () => {
-    const store = createQuickIngestSessionStore()
+  it("merges persisted tracking metadata across direct-session updates", async () => {
+    const persistence = createControlledPersistence()
+    const store = createStoreWithPersistence(persistence)
 
-    store.getState().markProcessingTracking({
+    await store.getState().markProcessingTracking({
       mode: "webui-direct",
       sessionId: "qi-direct-merge",
       itemIds: ["url-1", "file-1"],
       startedAt: 1700000000000,
     } as never)
 
-    store.getState().markProcessingTracking({
+    await store.getState().markProcessingTracking({
       mode: "webui-direct",
       sessionId: "qi-direct-merge",
       batchId: "batch-1",
@@ -1103,7 +1123,7 @@ describe("quick ingest session store", () => {
       jobIds: [77],
     } as any)
 
-    store.getState().markProcessingTracking({
+    await store.getState().markProcessingTracking({
       mode: "webui-direct",
       sessionId: "qi-direct-merge",
       batchId: "batch-2",
@@ -1122,10 +1142,11 @@ describe("quick ingest session store", () => {
     })
   })
 
-  it("clears completed run tracking when the session returns to draft", () => {
-    const store = createQuickIngestSessionStore()
+  it("clears completed run tracking when the session returns to draft", async () => {
+    const persistence = createControlledPersistence()
+    const store = createStoreWithPersistence(persistence)
 
-    store.getState().markProcessingTracking({
+    await store.getState().markProcessingTracking({
       mode: "webui-direct",
       sessionId: "qi-direct-completed",
       batchId: "batch-1",
@@ -1140,15 +1161,16 @@ describe("quick ingest session store", () => {
     expect(store.getState().session?.tracking).toBeUndefined()
   })
 
-  it("deduplicates cumulative job IDs before applying the 500-ID persistence bound", () => {
-    const store = createQuickIngestSessionStore()
+  it("deduplicates cumulative job IDs before applying the 500-ID persistence bound", async () => {
+    const persistence = createControlledPersistence()
+    const store = createStoreWithPersistence(persistence)
 
-    store.getState().markProcessingTracking({
+    await store.getState().markProcessingTracking({
       mode: "webui-direct",
       sessionId: "qi-cumulative-jobs",
       jobIds: Array.from({ length: 250 }, (_, index) => index + 1),
     })
-    store.getState().markProcessingTracking({
+    await store.getState().markProcessingTracking({
       mode: "webui-direct",
       sessionId: "qi-cumulative-jobs",
       jobIds: Array.from({ length: 500 }, (_, index) => index + 1),
@@ -1213,6 +1235,69 @@ describe("quick ingest session store", () => {
       submissionState: "creating_run",
       runId: undefined,
     })
+  })
+
+  it("does not resolve run tracking publication before its durable write", async () => {
+    const persistence = createControlledPersistence()
+    const store = createStoreWithPersistence(persistence)
+    store.getState().createDraftSession()
+    await flushPersistence()
+
+    let releaseWrite!: () => void
+    persistence.blockNextWrite(
+      new Promise<void>((resolve) => {
+        releaseWrite = resolve
+      })
+    )
+
+    let resolved = false
+    const publication = Promise.resolve(
+      store.getState().markProcessingTracking({
+        mode: "webui-direct",
+        sessionId: "qi-direct-durable-run-marker",
+        submissionState: "run_created",
+        submissionOccurrenceIds: ["occ-durable-run-marker"],
+        runId: "run-durable-marker",
+      })
+    ).then(() => {
+      resolved = true
+    })
+
+    await Promise.resolve()
+    const resolvedBeforeWrite = resolved
+    releaseWrite()
+    await publication
+    await persistence.flush()
+
+    expect(resolvedBeforeWrite).toBe(false)
+    expect(JSON.parse(persistence.value || "null")?.state?.session).toMatchObject({
+      lifecycle: "processing",
+      tracking: {
+        submissionState: "run_created",
+        runId: "run-durable-marker",
+      },
+    })
+  })
+
+  it("rejects run tracking publication when its durable write fails", async () => {
+    const persistence = createControlledPersistence()
+    const store = createStoreWithPersistence(persistence)
+    store.getState().createDraftSession()
+    await flushPersistence()
+
+    const failure = new DOMException("blocked", "SecurityError")
+    persistence.failNextWrite(failure)
+
+    await expect(
+      store.getState().markProcessingTracking({
+        mode: "webui-direct",
+        sessionId: "qi-direct-failed-run-marker",
+        submissionState: "run_created",
+        submissionOccurrenceIds: ["occ-failed-run-marker"],
+        runId: "run-failed-marker",
+      })
+    ).rejects.toBe(failure)
+    expect(store.getState().persistenceStatus).toBe("unavailable")
   })
 
   it("bounds dedicated submission occurrence recovery identities", async () => {

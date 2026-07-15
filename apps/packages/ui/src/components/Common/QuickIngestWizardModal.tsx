@@ -1277,7 +1277,9 @@ type WizardModalContentProps = {
   onClose: () => void
   autoProcessQueued?: boolean
   session: QuickIngestSessionRecord
-  markProcessingTracking: (tracking: PersistedQuickIngestTracking) => void
+  markProcessingTracking: (
+    tracking: PersistedQuickIngestTracking
+  ) => Promise<void>
   commitReviewHandoff: (state: IngestWizardState) => Promise<boolean>
   commitProcessingHandoff: (
     state: IngestWizardState,
@@ -1604,7 +1606,8 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     if (!persistedReattachSignature || !persistedTracking) return
     if (runSubmissionInFlight && persistedTracking.runId) return
     if (activeReattachSignatureRef.current === persistedReattachSignature) return
-    activeReattachSignatureRef.current = persistedReattachSignature
+    const reattachSignature = persistedReattachSignature
+    activeReattachSignatureRef.current = reattachSignature
 
     const startedAt = persistedTracking.startedAt
     if (typeof startedAt === "number" && Number.isFinite(startedAt)) {
@@ -1714,6 +1717,9 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
 
     return () => {
       cancelled = true
+      if (activeReattachSignatureRef.current === reattachSignature) {
+        activeReattachSignatureRef.current = ""
+      }
       if (persistedReattachTimerRef.current != null) {
         window.clearTimeout(persistedReattachTimerRef.current)
         persistedReattachTimerRef.current = null
@@ -1873,7 +1879,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
           ...(runtimeGeneration ? { generation: runtimeGeneration } : {}),
         }
         persistedTrackingRef.current = nextTracking
-        markProcessingTracking(nextTracking)
+        void markProcessingTracking(nextTracking).catch(() => undefined)
       }
       if (message.type === "tldw:quick-ingest/progress") {
         const rawResult = message.payload?.result
@@ -2308,7 +2314,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
             }
             if (!attemptIsCurrent()) return
             persistedTrackingRef.current = indeterminateTracking
-            markProcessingTracking(indeterminateTracking)
+            await markProcessingTracking(indeterminateTracking)
             if (!attemptIsCurrent()) return
             if (preAuthorityCancelAllRef.current) {
               void cancelQuickIngestSession({
@@ -2362,7 +2368,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
           }
           if (!attemptIsCurrent()) return
           persistedTrackingRef.current = initialTracking
-          markProcessingTracking(initialTracking)
+          await markProcessingTracking(initialTracking)
           if (!attemptIsCurrent()) return
         }
 
@@ -2409,7 +2415,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
           __quickIngestShouldStop: () => preAuthorityCancelAllRef.current,
           __quickIngestIsOccurrenceCancelled: (occurrenceId) =>
             preAuthorityCancelledOccurrenceIdsRef.current.has(occurrenceId),
-          onTrackingMetadata: (tracking) => {
+          onTrackingMetadata: async (tracking) => {
             if (!attemptIsCurrent()) return
             const nextTracking: PersistedQuickIngestTracking = {
               ...persistedTrackingRef.current,
@@ -2420,7 +2426,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
             }
             if (!attemptIsCurrent()) return
             persistedTrackingRef.current = nextTracking
-            markProcessingTracking(nextTracking)
+            await markProcessingTracking(nextTracking)
           },
         })
         if (!attemptIsCurrent()) return
@@ -3255,7 +3261,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
           activeReattachSignatureRef.current =
             buildPersistedReattachSignature(retryTracking)
         }
-        markProcessingTracking(retryTracking)
+        await markProcessingTracking(retryTracking)
         const snapshot = await reattachQuickIngestSession(retryTracking)
         if (!isMountedRef.current) return
         const perItemProgress = buildProgressFromReattachedJobs(
@@ -3591,8 +3597,10 @@ const QuickIngestWizardSession: React.FC<QuickIngestWizardSessionProps> = ({
   }, [sessionId])
 
   const markSessionProcessingTracking = useCallback(
-    (tracking: PersistedQuickIngestTracking) => {
-      useQuickIngestSessionStore.getState().markProcessingTracking(tracking)
+    async (tracking: PersistedQuickIngestTracking) => {
+      await useQuickIngestSessionStore
+        .getState()
+        .markProcessingTracking(tracking)
       refreshSessionRef()
     },
     [refreshSessionRef]
