@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-15
 
-**Status:** Human-approved design; pending independent spec review
+**Status:** Human-approved design; first-review corrections applied, pending second independent spec review
 
 **Backlog:** TASK-12115
 
@@ -132,7 +132,7 @@ Submitting the form:
 - uses “Stop waiting” unless Jobs provides genuine cancellation for the queued/running state;
 - opens the created HTML project after the job reports its `presentation_id`.
 
-Retrying with the same idempotency key must return the existing job or result instead of creating a duplicate presentation.
+The client creates a cryptographically random 16–200 character idempotency key for each deliberate submission and sends it in the `Idempotency-Key` header. It retains that key for transport retries, unknown submission outcomes, and resuming a stopped poll. Retrying the same canonical request with the same key returns the existing job or result instead of creating a duplicate presentation. Reusing the key with a different canonical request returns a conflict. After a known terminal generation failure, **Try again** preserves the form values but creates a new key because it is a deliberate new model attempt.
 
 ### HTML workspace
 
@@ -150,7 +150,7 @@ The primary controls are:
 
 The editor reuses the repository's lazy Monaco dependency and textarea fallback. It uses value/text APIs only; source is never inserted through `dangerouslySetInnerHTML`, Markdown rendering, error markup, or list snippets.
 
-Editing immediately marks the project dirty, destroys any running interactive iframe, and updates the sanitized static preview after a bounded idle delay. The UI may retain the last valid static preview when the current buffer is temporarily malformed, but it must visibly mark the preview stale.
+Editing immediately marks the project dirty, destroys any running interactive iframe, and updates the sanitized static preview after a bounded idle delay. The UI may retain the last valid static preview when the current buffer is temporarily malformed, but it must visibly mark the preview stale. Local size/preflight checks improve responsiveness but are not authoritative for save or execution.
 
 Save states are user-facing and announced through `aria-live`: `Saved`, `Saving`, `Not saved`, and `Conflict`. A capped session recovery draft is retained per presentation and cleared only after the matching source revision saves successfully. A navigation/unload warning protects unsaved work.
 
@@ -234,20 +234,20 @@ A mode-aware Slides generation service is the single orchestration boundary for 
 - provider timeout and output-token ceilings;
 - mode dispatch to the existing structured generator or the standalone HTML generator;
 - deterministic validation and normalization;
-- atomic persistence and job result metadata.
+- atomic Slides persistence plus crash-reconciled Jobs result metadata.
 
 REST and background workers use this service rather than duplicating normalization or persistence rules. Existing per-source structured REST routes remain compatibility wrappers with their current synchronous response shape. They may delegate internally, but omission of the new mode must execute the existing structured behavior.
 
 ### Unified generation request
 
-The new asynchronous endpoint accepts a discriminated source union:
+`POST /api/v1/slides/generations` is the single new asynchronous submission route. It requires the `Idempotency-Key` header and accepts a discriminated source union:
 
 ```json
 {
   "generation_mode": "standalone_html",
   "source": {
     "kind": "prompt",
-    "content": "..."
+    "prompt": "..."
   },
   "title_hint": "Optional title",
   "provider": "configured-provider",
@@ -262,14 +262,26 @@ The new asynchronous endpoint accepts a discriminated source union:
 }
 ```
 
-The other source variants reuse the ownership and selection semantics of the current routes:
+The exact source variants reuse the field names, ownership, and selection semantics of the current routes:
 
-- `chat`: a chat ID and optional bounded message selection;
-- `media`: one or more owned media IDs;
-- `notes`: one or more owned note IDs;
-- `rag`: a bounded query and bounded retrieval count.
+- `prompt`: `{ "kind": "prompt", "prompt": "..." }`;
+- `chat`: `{ "kind": "chat", "conversation_id": "..." }`;
+- `media`: `{ "kind": "media", "media_id": 123 }`;
+- `notes`: `{ "kind": "notes", "note_ids": ["..."] }`;
+- `rag`: `{ "kind": "rag", "query": "...", "top_k": 8 }`.
 
-The endpoint returns `202 Accepted` with the Jobs identifier and links/identifiers needed to query its state. It does not return generated HTML in the submission response or Jobs summary.
+The endpoint returns `202 Accepted`:
+
+```json
+{
+  "job_id": "job-uuid",
+  "status": "queued",
+  "status_url": "/api/v1/slides/generations/job-uuid",
+  "presentation_id": null
+}
+```
+
+`GET /api/v1/slides/generations/{job_id}` is owner-scoped and returns `job_id`, one of `queued | running | completed | failed | cancelled`, optional bounded progress text, and—only when applicable—`presentation_id`, `content_kind`, `error_code`, and a safe error message. It does not return generated HTML.
 
 The job result contains bounded metadata such as `presentation_id`, `content_kind`, document byte count, slide count, and validation status. The client fetches the authenticated presentation detail after completion.
 
@@ -283,13 +295,44 @@ Standalone HTML generation is available only when:
 
 Custom OpenAI-compatible URLs and user-provided provider overrides do not bypass this check. Provider calls use the existing abstraction, run without blocking the FastAPI event loop, and have a server-enforced timeout and maximum output-token budget.
 
-### Job atomicity
+### Crash-safe idempotency and worker correlation
 
-Generation produces no presentation record until the model output passes validation. Persistence creates the presentation, initial version metadata, derived search text, provenance, and job result in the appropriate transactions. A failed or stopped client poll does not create a second presentation on retry with the same idempotency key.
+Slides and Jobs use separate persistence stores, so the design does not rely on a cross-database transaction.
+
+At submission, the server canonicalizes the validated request and stores its SHA-256 request digest in the Jobs payload. Because the Jobs unique index is scoped by domain, queue, job type, and key rather than owner, the server derives the internal Jobs key as `slides:v1:` plus the hexadecimal SHA-256 of the canonical owner ID, a NUL separator, and the client key. The raw client key is not accepted as the global Jobs key. The fixed scope is `domain=slides`, `queue=slides`, and `job_type=presentation.generate`.
+
+When an existing idempotency record is found, the endpoint compares the stored owner and request digest:
+
+- same owner and digest: return the existing job/result;
+- same owner but different digest: return `409 generation_idempotency_conflict`;
+- a different owner cannot collide because owner identity participates in the derived internal key and is rechecked on lookup.
+
+Every generated presentation stores the immutable originating Jobs UUID as `generation_job_id`, protected by a unique index within the owner's Slides database. The worker algorithm is:
+
+1. Look up a presentation by the current Jobs UUID and return it if already committed.
+2. Resolve sources, call the model, and validate output.
+3. Insert the presentation, initial entity version, derived search text, provenance, and `generation_job_id` in one Slides transaction.
+4. Complete the Jobs result with the committed presentation ID.
+
+If the worker crashes after step 3 but before step 4, retry finds the committed presentation in step 1 and completes the same job. Concurrent retries resolve a unique-index race by fetching the winning row. A failed or stopped client poll therefore cannot create another job or presentation when it reuses the same key and request.
 
 ## Standalone HTML Validation
 
-The same pure validator is used after generation, before save, before interactive preview derivation, and before saved-document export where applicable. The editor may download a malformed current draft for recovery, but it cannot save or execute it.
+One pure Python backend validator is authoritative after generation, before persistence/import, on every HTML save, through draft validation, and before saved-document export where applicable. The browser has a separate local preflight and sanitizer for responsiveness; it is never authoritative for persistence or interactive execution.
+
+`POST /api/v1/slides/presentations/{presentation_id}/validate-html` accepts the current authenticated editor buffer without saving it. It applies the authoritative backend validator and returns only:
+
+```json
+{
+  "valid": true,
+  "html_sha256": "...",
+  "html_bytes": 12345,
+  "slide_count": 10,
+  "diagnostics": []
+}
+```
+
+Diagnostics are bounded safe codes and locations. The source is never echoed. **Run interactive preview** is enabled only after a successful validation response whose digest still matches the current buffer. Editing invalidates that result. The editor may download a malformed current draft for recovery, but it cannot save or execute it.
 
 Default hard limits are:
 
@@ -338,6 +381,7 @@ The presentation record gains:
 - `html_document TEXT NULL`
 - `html_sha256 TEXT NULL`
 - `html_bytes INTEGER NULL`
+- `generation_job_id TEXT NULL`
 
 The existing `slides` column remains non-null.
 
@@ -348,7 +392,7 @@ The canonical invariant is:
 
 `slides_text` remains the canonical derived FTS source for both kinds. Clients can never supply it.
 
-All create, replace, patch, restore, duplicate, import, REST, MCP, and worker paths enforce the invariant through one domain service. Partial updates first merge with the current record, then validate the complete candidate inside the optimistic-concurrency operation. Omitting `content_kind` preserves the current kind; it never converts an HTML project into an empty structured project.
+All create, replace, patch, restore, duplicate, import, REST, MCP, and worker paths enforce the invariant through one domain service. Partial updates first merge with the current record, then validate the complete candidate inside the optimistic-concurrency operation. Omitting `content_kind` preserves the current kind; it never converts an HTML project into an empty structured project. A partial unique index on nonnull `generation_job_id` provides worker retry deduplication. User duplication creates a new presentation with a null generation job ID.
 
 Content kind cannot change in v1. A request that attempts to change it returns `409 content_kind_immutable`.
 
@@ -366,6 +410,8 @@ HTML search indexes only the bounded visible text derived by the server. Raw mar
 
 ### Version snapshots
 
+`presentation.version` is the entity revision used by ETags. It advances on every accepted mutation that changes any canonical mutable field, including title, provenance, Studio metadata, or HTML source. A snapshot is a complete entity snapshot for that revision; v1 does not introduce a separate content-blob version model.
+
 New snapshots include:
 
 - `snapshot_schema_version`
@@ -376,27 +422,45 @@ New snapshots include:
 
 Snapshots without a content kind are interpreted as `structured_slides`. Restore validates the snapshot against the current kind and content policy before one atomic update. A mismatched/corrupt kind is rejected rather than converted.
 
-To bound full-document amplification, HTML saves that do not change the SHA-256 digest create no new content version. Standalone HTML retains the newest 25 content snapshots per presentation by default; retention is configurable downward. Retention cleanup occurs only after a successful new snapshot and never removes the current content.
+The SHA-256 digest is an optimization for comparing HTML source, not the entity-version definition. A merged update that is byte-for-byte and metadata-for-metadata identical is a no-op and creates neither a new entity revision nor a snapshot. If HTML is unchanged but title, provenance, or another canonical field changes, the entity version advances and a complete snapshot is created.
+
+To bound full-document amplification, standalone HTML retains the newest 25 entity snapshots per presentation by default; retention is configurable downward. Retention cleanup occurs only after a successful new snapshot and never removes the current entity. Full-document duplication inside those bounded snapshots is accepted for v1 instead of introducing delta storage.
 
 ## API Contracts
 
 ### Capabilities
 
-Capabilities expose a supported-kind list rather than only a coarse Slides boolean, conceptually:
+Capabilities separate persistence/editor support from generation availability. A temporary model or configuration problem must never make already-saved HTML projects inaccessible. The contract is conceptually:
 
 ```json
 {
-  "presentation_content_kinds": ["structured_slides", "standalone_html"],
-  "standalone_html": {
-    "generation_enabled": true,
-    "interactive_preview_policy": "explicit_best_effort",
-    "max_document_bytes": 1048576,
-    "max_slides": 30
+  "presentation_content_kinds": {
+    "structured_slides": {
+      "read": true,
+      "edit": true
+    },
+    "standalone_html": {
+      "read": true,
+      "edit": true,
+      "export_attachment": true,
+      "interactive_preview_policy": "explicit_best_effort",
+      "max_document_bytes": 1048576,
+      "max_slides": 30
+    }
+  },
+  "presentation_generation_modes": {
+    "structured_slides": {
+      "enabled": true
+    },
+    "standalone_html": {
+      "enabled": false,
+      "reason": "no_allowed_model"
+    }
   }
 }
 ```
 
-`standalone_html` is absent from the supported list when the feature is disabled or no allowed model is usable. The frontend does not infer support from the presence of unrelated Slides routes.
+Servers implementing this schema advertise `standalone_html` read/edit/export support even when generation is disabled. The creation form checks `presentation_generation_modes.standalone_html.enabled`; list, detail, editor, validation, versions, and attachment download check the content-kind capability. The frontend does not infer either axis from unrelated Slides routes.
 
 ### Presentation response
 
@@ -443,7 +507,7 @@ Both responses use a sanitized filename and:
 - `Referrer-Policy: no-referrer`
 - `Cross-Origin-Resource-Policy: same-origin`
 
-Saved-version downloads include ETag and Last-Modified. No route serves stored HTML inline as `text/html`.
+Saved-version downloads include ETag and Last-Modified. No route serves stored HTML inline as `text/html`. Before download, the UI states that the file contains executable code and that opening it locally occurs outside Presentation Studio's sandbox and CSP wrapper.
 
 ## Preview Security Contract
 
@@ -457,7 +521,26 @@ The automatic preview:
 4. serializes content into an application-built wrapper whose charset and CSP precede every untrusted byte;
 5. renders the result in a sandboxed iframe.
 
-The application must not inject a CSP into an arbitrary model string with a regular expression.
+The static iframe is created through `srcdoc` with an empty sandbox attribute (`sandbox=""`), `referrerPolicy="no-referrer"`, the same deny-all Permissions Policy used by the interactive iframe, a fixed title, and no `allow-*` capability. Its application-built wrapper enforces:
+
+```text
+default-src 'none';
+script-src 'none';
+style-src 'unsafe-inline';
+img-src data:;
+font-src data:;
+connect-src 'none';
+media-src 'none';
+worker-src 'none';
+frame-src 'none';
+child-src 'none';
+object-src 'none';
+manifest-src 'none';
+base-uri 'none';
+form-action 'none'
+```
+
+Only sanitizer-approved capped raster/font data URIs may remain. The application must not inject a CSP into an arbitrary model string with a regular expression. Static preview never calls the backend validation endpoint merely to repaint; the backend remains authoritative when the user saves or requests interactive Run.
 
 ### Interactive preview pipeline
 
@@ -472,10 +555,9 @@ The outer iframe uses exactly:
 - a restrictive Permissions Policy/`allow` value denying camera, microphone, geolocation, clipboard, display capture, payment, USB, serial, HID, Bluetooth, MIDI, sensors, and fullscreen
 - a fixed title and bounded 16:9 viewport
 
-The enforced baseline CSP is conceptually:
+The iframe attribute, not a model-supplied or meta CSP `sandbox` directive, enforces sandboxing. The application-owned meta CSP is the first policy element in the `srcdoc` wrapper and is conceptually:
 
 ```text
-sandbox allow-scripts;
 default-src 'none';
 script-src 'unsafe-inline';
 style-src 'unsafe-inline';
@@ -506,15 +588,23 @@ The CSP blocks ordinary fetch, image, media, worker, and frame egress, but a scr
 
 The MCP Slides module currently duplicates REST generation, persistence, restore, and export behavior. This feature must not add another independent implementation.
 
-The shared domain service becomes authoritative for content invariants, summary mapping, update/restore, operation guards, and export dispatch. In v1:
+The shared domain service becomes authoritative for content invariants, summary mapping, update/restore, operation guards, and export dispatch. V1 behavior is mandatory:
 
-- MCP list/get may return bounded HTML metadata and an `html_available` indicator;
-- MCP does not return a full HTML document or unrestricted base64 payload;
-- MCP structured generation remains supported;
-- MCP HTML generation and attachment transfer are advertised as unsupported;
-- any MCP mutation or export that assumes structured slides rejects an HTML record with the same stable content-kind error as REST.
+- MCP list and search results always include `content_kind`. HTML summaries include `html_bytes`, derived slide count, and `html_available: true`; they never include source.
+- MCP get preserves the current structured response for structured records. For HTML it returns the same bounded metadata plus provenance/version fields and omits `html_document`.
+- MCP structured generation remains supported.
+- MCP HTML generation, source retrieval, source mutation, restore, and attachment transfer return a typed unsupported tool result whose data includes `code: operation_not_supported_for_content_kind`, `operation`, and `content_kind`.
+- Any remaining MCP mutation or export that assumes structured slides performs the same guard before touching persistence.
 
 A later artifact/resource-handle design may expose HTML through MCP without embedding large executable documents in tool results.
+
+The shared WebUI/extension API types also always preserve `content_kind`. In extension runtime contexts:
+
+- list/search include HTML records and their bounded metadata rather than filtering or coercing them to empty structured decks;
+- selecting an HTML record shows its title, kind, provenance summary, and an **Open in WebUI** handoff;
+- the extension does not request `html_document`, mount the HTML workspace, create a preview iframe, or expose Run;
+- an unknown future content kind uses the same metadata-only handoff/read-only fallback;
+- structured records retain their existing extension behavior.
 
 ## Error Handling
 
@@ -559,7 +649,7 @@ Record only safe metadata:
 
 Never log source material, full HTML, JavaScript, notes, prompts, API keys, or download bodies. Existing auth, per-user isolation, rate limiting, and Jobs ownership checks apply.
 
-The feature capability is disabled by default until configured. Startup validates the provider/model allowlist and packaged prompt asset. Invalid configuration keeps the structured Slides capability available while omitting `standalone_html` and logging a safe administrator-facing reason.
+Standalone HTML **generation** is disabled by default until configured. Startup validates the provider/model allowlist and packaged prompt asset. Invalid generation configuration keeps structured generation and standalone HTML read/edit/export available, advertises the HTML generation mode as disabled with a safe reason code, and logs a safe administrator-facing reason.
 
 ## Testing Strategy
 
@@ -573,7 +663,7 @@ The feature capability is disabled by default until configured. Startup validate
 - HTML parser limits, malformed/truncated documents, URL/CSS/data-URI rejection, title/search extraction, and digest calculation;
 - generated source never appears in logs or error messages;
 - property/fuzz cases for parser limits and invariant preservation;
-- no-op digest saves and version retention.
+- exact no-op saves, metadata-only revisions with unchanged HTML, and version retention.
 
 ### Database and migration tests
 
@@ -589,8 +679,11 @@ The feature capability is disabled by default until configured. Startup validate
 
 - successful HTML generation from prompt, chat, media, notes, and RAG with mocked LLMs;
 - model allowlist, feature capability, ownership, size, timeout, and idempotency behavior;
+- same-key/same-digest replay, same-key/different-digest conflict, cross-owner isolation, and crash recovery after the presentation commit but before Jobs completion;
 - failed validation creates no presentation;
 - job result contains metadata rather than HTML;
+- draft validation returns a digest-bound verdict without persistence or source echo;
+- saved HTML remains readable/editable/exportable while HTML generation is disabled;
 - all structured-only operations reject HTML before dispatch;
 - render workers independently recheck content kind;
 - saved and draft download headers/content;
@@ -606,6 +699,7 @@ The feature capability is disabled by default until configured. Startup validate
 - dirty/save/error/conflict/recovery behavior;
 - editing invalidates interactive consent and destroys the active preview;
 - static preview sanitization and current-buffer download request;
+- static iframe's empty sandbox/CSP and interactive Run's authoritative current-digest validation;
 - keyboard access, labels, focus behavior, `aria-live`, and reduced motion.
 
 ### Adversarial browser tests
