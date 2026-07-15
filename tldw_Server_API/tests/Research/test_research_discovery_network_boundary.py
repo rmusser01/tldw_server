@@ -8,6 +8,7 @@ import builtins
 import hashlib
 import http.client
 import importlib
+import json
 import socket
 
 # Imported only so the runtime test can patch process entry points.
@@ -43,6 +44,9 @@ from tldw_Server_API.app.core.Research.discovery.gateway import (
     DiscoveryGatewayTrace,
 )
 from tldw_Server_API.app.core.Research.discovery.planner import (
+    DateIntervalQuery,
+    GeneralFreeTextQuery,
+    IdentifierLookupQuery,
     PlanningRequest,
     compile_discovery_plan,
 )
@@ -59,6 +63,7 @@ _REPO_ROOT = Path(__file__).parents[3]
 _DISCOVERY_ROOT = Path(__file__).parents[2] / "app" / "core" / "Research" / "discovery"
 _FIXTURE_ROOT = Path(__file__).parents[1] / "fixtures" / "research_discovery_gateway_adapters"
 _ADAPTER_MODULE_NAME = "tldw_Server_API.app.core.Research.discovery.gateway_adapters"
+_FAMILY_MODULE_NAME = "tldw_Server_API.app.core.Research.discovery.biorxiv_medrxiv"
 _HTTP_HOP_MODULE = "tldw_Server_API.app.core.Security.http_hop"
 _RECORDED_FIXTURES = {
     ("semantic_scholar_v2", "foundation-v2"): ("semantic_scholar_success.json",),
@@ -72,6 +77,28 @@ _RECORDED_FIXTURES = {
     ("figshare_v2", "foundation-v2"): ("figshare_success.json",),
     ("osf_v2", "foundation-v2"): ("osf_success.json",),
 }
+_FAMILY_RECORDED_FIXTURES = {
+    ("biorxiv_europe_pmc_search_aggregator", "europe_pmc_preprint_v2", "europe-pmc-preprint-v2"): (
+        "europe_pmc_biorxiv_success.json",
+    ),
+    ("medrxiv_europe_pmc_search_aggregator", "europe_pmc_preprint_v2", "europe-pmc-preprint-v2"): (
+        "europe_pmc_medrxiv_success.json",
+    ),
+    ("biorxiv_details_lookup_direct", "biorxiv_details_v2", "biorxiv-details-v2"): (
+        "biorxiv_details_doi_success.json",
+    ),
+    ("medrxiv_details_lookup_direct", "biorxiv_details_v2", "biorxiv-details-v2"): (
+        "medrxiv_details_doi_success.json",
+    ),
+    ("biorxiv_details_interval_direct", "biorxiv_details_v2", "biorxiv-details-v2"): (
+        "biorxiv_details_interval_page_1.json",
+        "biorxiv_details_interval_page_2.json",
+    ),
+    ("medrxiv_details_interval_direct", "biorxiv_details_v2", "biorxiv-details-v2"): (
+        "biorxiv_details_interval_page_1.json",
+        "biorxiv_details_interval_page_2.json",
+    ),
+}
 _V2_ROOT_MODULES = frozenset(
     {
         "contracts.py",
@@ -82,11 +109,13 @@ _V2_ROOT_MODULES = frozenset(
         "gateway.py",
     }
 )
+_FAMILY_ROOT_MODULES = frozenset({"biorxiv_medrxiv.py"})
 _EXPECTED_LOCAL_CLOSURE = _V2_ROOT_MODULES | {
     "identity.py",
     "catalog.py",
     "models.py",
 }
+_EXPECTED_FAMILY_LOCAL_CLOSURE = _EXPECTED_LOCAL_CLOSURE | _FAMILY_ROOT_MODULES
 _IMPORT_BOOTSTRAP_PATHS = {
     relative_path: _REPO_ROOT / relative_path
     for relative_path in (
@@ -102,10 +131,10 @@ _IMPORT_BOOTSTRAP_PATHS = {
 _EXPECTED_IMPORT_DIGESTS = {
     "contracts.py": "795b84090cafaa034f2a12af4e6f3b3c6ddbb9ebb3f1607db1ae714cbd8d4ea5",
     "registry.py": "56ffcb107d482f12c2c2477f563b571e716ba73d0937e1a632c89a59b6c1b797",
-    "planner.py": "f336d46cff187fd8cc7211a695381d267119ea6355832f79448aae070c4f70b6",
-    "executor.py": "fe278b31cd51d12649bc43e9ac9c35425acec3e1b11a7f8770018ffa49b58f41",
+    "planner.py": "f9b97beef319784481918a64d25ccad69a4d5a784f4f7e646856d70617d8ee9c",
+    "executor.py": "adb372ce8329a5fc80ddb30237c08e6f1164911e4e1d0097f3a6122dc7708216",
     "gateway_adapters.py": "ea8c72d2b9fe6ea818249606c2ae6c43a2e50620566e620cf895f89937fc6b95",
-    "gateway.py": "8920262b8556a7f3ba611d21fc3de16f11002f218e4ced782b5dd21cefc58e5a",
+    "gateway.py": "d3978650819bcce93a6880d217b6b6688d8c7fd3dd398faef440b03e088062b4",
     "identity.py": "233069fec1e798085a85b14bc1d887a585e22b8a6a6ddaa7dd90001f65b2668d",
     "catalog.py": "2aed2f8efc153fb962668b00c1c3d0f2d51eea78ca03e9c181d30c02d2f7e8e8",
     "models.py": "b3e92240a262c80ac8dc8ab26185ac94565e63dbbd12b5fdfd4b970680263e3c",
@@ -118,12 +147,12 @@ _EXPECTED_IMPORT_DIGESTS = {
     "tldw_Server_API/app/core/Security/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
 }
 _EXPECTED_AST_DIGESTS = {
-    "contracts.py": "db0c60425b6701cc4ba21c3d695b257b58860067a21fe8628ce727f7cc67a022",
+    "contracts.py": "c1902b635f746f0e8eee4eb496a6319117b9162e68bce287853fdd3813e441ca",
     "registry.py": "260df2717fcf7cdd91a926dda694bf0517611f0d6378049448581637b4a3def3",
-    "planner.py": "0d1d8915a2de7cc02b59d561279f1fb0dbe44e42e0234c826bedc10b955b38e2",
-    "executor.py": "9d173f33fe35aa1ce5d771d145090699488b99c53f89c7ba0056367f294933bf",
+    "planner.py": "624bb0fb001d068e94bc29b26dc835f63410dcedd4d6748b8da97129c4d92342",
+    "executor.py": "04db380c056c461eacb76549bda87cc2668745a09737448903189122a0a5bcb6",
     "gateway_adapters.py": "2edc3b14b1a478a911aca78775705bc942a30f43790e103d96d6b9e2729382fa",
-    "gateway.py": "76c021b0845ffc8e1a3905fdc822d5f3744c82cb83f29cdac4cb59f6c6c78237",
+    "gateway.py": "f1a55ba9a36fb667a13ccd5426c6e0b5a04894bb5de7a33bbd0f60d7a7e7fc06",
     "identity.py": "f59640d8f793fd3ebd11df49d333f73ebee9e59efb549393116bee2a241f5f06",
     "catalog.py": "6f89e526a0cee3f934fc04da6adc5698800842e9f798ac45e35847d859e08ba6",
     "models.py": "7f6e2b159cf9c42af917a79f24ae2ebd5b4a62c84f81b71766a9d4108f2f57fc",
@@ -135,6 +164,75 @@ _EXPECTED_AST_DIGESTS = {
     "tldw_Server_API/app/core/Research/discovery/__init__.py": "c1c1e9c13c89d64312d5ca46709fc4046bd644cd450460e33b50f380d9dc7622",
     "tldw_Server_API/app/core/Security/__init__.py": "3543b4693a36a1098850b8bc928887694ed59a6deb7d3dfd0339de01f55a77b6",
 }
+_EXPECTED_FAMILY_RAW_DIGESTS = {
+    "biorxiv_medrxiv.py": "9964d093525cd25e80a8ad5725d39de0081f34de5f06370e88dd733e967c02ea",
+}
+_EXPECTED_FAMILY_IMPORT_DIGESTS = {
+    "biorxiv_medrxiv.py": "32bfd0a86b35eeb7017f6035b391061dce15931de2071f33b0a8d64b49c11123",
+}
+_EXPECTED_FAMILY_AST_DIGESTS = {
+    "biorxiv_medrxiv.py": "685b4d3523ac44763c2882cdd041f6799b24d1b49037b2feb669d08ebad2a0d3",
+}
+_EXPECTED_FAMILY_LOCAL_IMPORTS = {
+    "contracts": {
+        "MAX_PAGINATION_CURSOR",
+        "AccessRoute",
+        "BackendDefinition",
+        "BoundedDecimalQueryValuePolicy",
+        "BoundedTextQueryValuePolicy",
+        "CredentialRequirement",
+        "CredentialStatus",
+        "DiscoveryOutcomeIdentity",
+        "ExactOrigin",
+        "ExactQueryValuePolicy",
+        "ExecutionMode",
+        "LiteralTermsQueryValuePolicy",
+        "OperationKind",
+        "PathSlot",
+        "PathSlotKind",
+        "PathTemplate",
+        "PlannedDispatchGroup",
+        "PredicateOperator",
+        "QueryMode",
+        "ReadinessOverlay",
+        "ReadinessState",
+        "RouteKind",
+        "RouteLimits",
+        "RoutePolicy",
+        "RouteReadiness",
+        "SourceConstraint",
+        "SourceDefinition",
+        "SourcePredicate",
+        "SourceRouteReference",
+    },
+    "executor": {
+        "BoundDispatch",
+        "DiscoveryAdapter",
+        "DiscoveryAdapterError",
+        "DiscoveryAdapterResult",
+        "DiscoveryCandidate",
+        "NumericCursor",
+    },
+    "gateway_adapters": {
+        "MonotonicClock",
+        "_ParseDeadlineExceeded",
+        "_ParseGuard",
+        "_ParseLimitExceeded",
+        "_ParsingProfile",
+        "_PayloadInvalid",
+        "_base_record",
+        "_canonical_decimal_text",
+        "_checked_response",
+        "_optional_text",
+        "_raise_adapter_error",
+        "_require_dict",
+        "_require_list",
+        "_required_text",
+        "_strict_json",
+    },
+    "identity": {"build_fingerprint"},
+    "registry": {"DiscoveryRegistry", "foundation_readiness", "foundation_registry"},
+}
 _EXPECTED_GATEWAY_IMPORTS = {
     "executor.py": {
         "DiscoveryGatewayError",
@@ -143,6 +241,7 @@ _EXPECTED_GATEWAY_IMPORTS = {
         "reconstruct_redirect_intent",
     },
     "gateway_adapters.py": {"DiscoveryGatewayResponse"},
+    "biorxiv_medrxiv.py": set(),
 }
 _EXPECTED_IDENTITY_IMPORTS = {
     "executor.py": {"build_fingerprint"},
@@ -152,6 +251,7 @@ _EXPECTED_IDENTITY_IMPORTS = {
         "has_unsafe_url_material",
         "normalize_doi",
     },
+    "biorxiv_medrxiv.py": {"build_fingerprint"},
 }
 _EXPECTED_HTTP_HOP_IMPORTS = {
     "HTTPHopError",
@@ -181,13 +281,26 @@ _EXPECTED_IMPORTED_ATTRIBUTE_PATHS = {
         ".contracts.CredentialRequirement.NONE",
         ".contracts.OperationKind.CONDITIONAL_SUMMARY",
         ".contracts.OperationKind.SEARCH",
+        ".contracts.PathSlotKind.DATE",
+        ".contracts.PathSlotKind.DOI_REGISTRANT",
+        ".contracts.PathSlotKind.DOI_SUFFIX",
+        ".contracts.PathSlotKind.UINT",
+        ".contracts.QueryMode.CATEGORY_BROWSE",
+        ".contracts.QueryMode.DATE_INTERVAL",
+        ".contracts.QueryMode.GENERAL_FREE_TEXT",
+        ".contracts.QueryMode.IDENTIFIER_LOOKUP",
+        ".contracts.QueryMode.STRUCTURED_QUERY",
         ".contracts.ReadinessState.READY",
         ".contracts.SkippedCode.CREDENTIALED_OUT_OF_SCOPE",
+        ".contracts.SkippedCode.QUERY_MODE_NOT_SUPPORTED",
         ".contracts.SkippedCode.ROUTE_NOT_READY",
         ".contracts.SkippedStatus.SKIPPED",
         ".contracts.SkippedStatus.UNAVAILABLE",
+        "datetime.date.fromisoformat",
         "hashlib.sha256",
         "json.dumps",
+        "re.compile",
+        "unicodedata.category",
         "unicodedata.normalize",
     },
     "executor.py": {
@@ -195,7 +308,9 @@ _EXPECTED_IMPORTED_ATTRIBUTE_PATHS = {
         ".contracts.CredentialRequirement.API_KEY",
         ".contracts.CredentialRequirement.NONE",
         ".contracts.OperationKind.SEARCH",
+        ".contracts.PathSlotKind.UINT",
         ".contracts.SkippedCode.CREDENTIALED_OUT_OF_SCOPE",
+        ".contracts.SkippedCode.QUERY_MODE_NOT_SUPPORTED",
         ".contracts.SkippedCode.ROUTE_NOT_READY",
         ".contracts.SkippedStatus.SKIPPED",
         ".contracts.SkippedStatus.UNAVAILABLE",
@@ -231,6 +346,7 @@ _EXPECTED_IMPORTED_ATTRIBUTE_PATHS = {
         "xml.etree.ElementTree.TreeBuilder",
     },
     "gateway.py": {
+        "datetime.date.fromisoformat",
         "ipaddress.IPv4Address",
         "ipaddress.IPv6Address",
         "ipaddress.ip_address",
@@ -239,6 +355,11 @@ _EXPECTED_IMPORTED_ATTRIBUTE_PATHS = {
         "re.compile",
         "time.monotonic",
         "tldw_Server_API.app.core.Research.discovery.contracts.CredentialRequirement.NONE",
+        "tldw_Server_API.app.core.Research.discovery.contracts.PathSlotKind.DATE",
+        "tldw_Server_API.app.core.Research.discovery.contracts.PathSlotKind.DOI_REGISTRANT",
+        "tldw_Server_API.app.core.Research.discovery.contracts.PathSlotKind.DOI_SUFFIX",
+        "tldw_Server_API.app.core.Research.discovery.contracts.PathSlotKind.UINT",
+        "unicodedata.normalize",
     },
     "identity.py": {
         "hashlib.sha256",
@@ -246,6 +367,31 @@ _EXPECTED_IMPORTED_ATTRIBUTE_PATHS = {
         "re.IGNORECASE",
         "re.compile",
         "re.sub",
+    },
+    "biorxiv_medrxiv.py": {
+        ".contracts.CredentialRequirement.NONE",
+        ".contracts.CredentialStatus.NOT_REQUIRED",
+        ".contracts.DiscoveryOutcomeIdentity.from_fingerprint",
+        ".contracts.OperationKind.SEARCH",
+        ".contracts.PathSlotKind.DATE",
+        ".contracts.PathSlotKind.DOI_REGISTRANT",
+        ".contracts.PathSlotKind.DOI_SUFFIX",
+        ".contracts.PathSlotKind.UINT",
+        ".contracts.PredicateOperator.EQUALS_ANY",
+        ".contracts.QueryMode.CATEGORY_BROWSE",
+        ".contracts.QueryMode.DATE_INTERVAL",
+        ".contracts.QueryMode.GENERAL_FREE_TEXT",
+        ".contracts.QueryMode.IDENTIFIER_LOOKUP",
+        ".contracts.ReadinessState.READY",
+        ".contracts.RouteKind.AGGREGATOR",
+        ".contracts.RouteKind.DIRECT",
+        ".contracts.SourceConstraint.NATIVE_CORPUS",
+        ".contracts.SourceConstraint.PROVIDER_SOURCE_FILTER",
+        "datetime.date.fromisoformat",
+        "re.ASCII",
+        "re.compile",
+        "time.monotonic",
+        "unicodedata.normalize",
     },
     "catalog.py": set(),
     "models.py": set(),
@@ -275,8 +421,16 @@ _FORBIDDEN_EFFECT_ATTRIBUTES = {
     "__subclasses__",
     "HTTPConnection",
     "HTTPSConnection",
+    "ClientSession",
+    "CookieJar",
+    "PoolManager",
+    "Session",
     "afetch",
     "afetch_json",
+    "browser",
+    "chromium",
+    "cookiejar",
+    "cookies",
     "create_connection",
     "create_datagram_endpoint",
     "create_server",
@@ -286,21 +440,30 @@ _FORBIDDEN_EFFECT_ATTRIBUTES = {
     "environ",
     "fetch",
     "fetch_json",
+    "firefox",
+    "get_cookie",
     "getenv",
     "getaddrinfo",
     "gethostbyaddr",
     "gethostbyname",
     "gethostbyname_ex",
     "getnameinfo",
+    "goto",
+    "keyring",
+    "launch",
     "modules",
+    "new_context",
+    "new_page",
     "open",
     "open_connection",
     "open_unix_connection",
     "popen",
+    "putenv",
     "read_bytes",
     "read_text",
     "request_http_hop",
     "run",
+    "set_cookie",
     "sleep",
     "sock_connect",
     "sock_accept",
@@ -314,7 +477,9 @@ _FORBIDDEN_EFFECT_ATTRIBUTES = {
     "start_server",
     "start_unix_server",
     "system",
+    "unsetenv",
     "urlopen",
+    "webkit",
 }
 _ALLOWED_ASYNCIO_ATTRIBUTES = {
     "CancelledError",
@@ -323,6 +488,37 @@ _ALLOWED_ASYNCIO_ATTRIBUTES = {
     "create_task",
     "current_task",
     "wait",
+}
+_FAMILY_FORBIDDEN_IMPORT_FRAGMENTS = (
+    "aiohttp",
+    "authnz",
+    "browser",
+    "config",
+    "cookie",
+    "credential",
+    "db_management",
+    "http.client",
+    "http_client",
+    "httpx",
+    "ingestion_media_processing",
+    "keyring",
+    "playwright",
+    "requests",
+    "security.http_hop",
+    "selenium",
+    "socket",
+    "subprocess",
+    "third_party",
+    "urllib.request",
+    "urllib3",
+    "web_scraping",
+)
+_FAMILY_FORBIDDEN_EXACT_IMPORTS = {
+    ".gateway",
+    ".oa",
+    "tldw_Server_API.app.core.Media",
+    "tldw_Server_API.app.core.Research.discovery.gateway",
+    "tldw_Server_API.app.core.Research.discovery.oa",
 }
 
 
@@ -378,6 +574,10 @@ def _adapter_module():
     return importlib.import_module(_ADAPTER_MODULE_NAME)
 
 
+def _family_module():
+    return importlib.import_module(_FAMILY_MODULE_NAME)
+
+
 def _canonical_import_digest(tree: ast.AST) -> str:
     """Hash exact imports and imported symbols while intentionally ignoring aliases."""
     imports = []
@@ -403,11 +603,21 @@ def _frozen_digest_violations(
 ) -> list[str]:
     """Return drift from one reviewed import and executable-syntax snapshot."""
     violations = []
+    expected_import_digest = _EXPECTED_FAMILY_IMPORT_DIGESTS.get(
+        module_key,
+        _EXPECTED_IMPORT_DIGESTS.get(module_key),
+    )
+    expected_ast_digest = _EXPECTED_FAMILY_AST_DIGESTS.get(
+        module_key,
+        _EXPECTED_AST_DIGESTS.get(module_key),
+    )
+    if expected_import_digest is None or expected_ast_digest is None:
+        raise KeyError(module_key)
     import_digest = _canonical_import_digest(tree)
-    if check_import_digest and import_digest != _EXPECTED_IMPORT_DIGESTS[module_key]:
+    if check_import_digest and import_digest != expected_import_digest:
         violations.append(f"{module_key}:import_digest:{import_digest}")
     ast_digest = _semantic_ast_digest(tree)
-    if ast_digest != _EXPECTED_AST_DIGESTS[module_key]:
+    if ast_digest != expected_ast_digest:
         violations.append(f"{module_key}:ast_digest:{ast_digest}")
     return violations
 
@@ -415,18 +625,41 @@ def _frozen_digest_violations(
 def _boundary_violations(source: str, filename: str, *, check_import_digest: bool = True) -> list[str]:
     """Return direct import and effect seams outside one file's frozen allowlist."""
     tree = ast.parse(source, filename=filename)
-    violations = _frozen_digest_violations(
-        tree,
-        filename,
-        check_import_digest=check_import_digest,
+    violations = []
+    violations.extend(
+        _frozen_digest_violations(
+            tree,
+            filename,
+            check_import_digest=check_import_digest,
+        )
     )
     parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
     import_bindings = _import_bindings(tree)
     asyncio_aliases = {name for name, qualified_path in import_bindings.items() if qualified_path == "asyncio"}
+    if filename == "biorxiv_medrxiv.py":
+        local_imports = {
+            node.module: {alias.name for alias in node.names}
+            for node in tree.body
+            if isinstance(node, ast.ImportFrom) and node.level == 1 and node.module is not None
+        }
+        if local_imports != _EXPECTED_FAMILY_LOCAL_IMPORTS:
+            violations.append(f"{filename}:family_local_imports:{local_imports}")
     for node in ast.walk(tree):
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             if any(alias.name == "*" for alias in node.names):
                 violations.append(f"{filename}:{node.lineno}:star_import")
+            if filename == "biorxiv_medrxiv.py":
+                imported_modules = (
+                    tuple(alias.name for alias in node.names)
+                    if isinstance(node, ast.Import)
+                    else (f"{'.' * node.level}{node.module or ''}",)
+                )
+                for imported_module in imported_modules:
+                    folded_module = imported_module.casefold()
+                    if imported_module in _FAMILY_FORBIDDEN_EXACT_IMPORTS or any(
+                        fragment in folded_module for fragment in _FAMILY_FORBIDDEN_IMPORT_FRAGMENTS
+                    ):
+                        violations.append(f"{filename}:{node.lineno}:forbidden_import:{imported_module}")
             if isinstance(node, ast.ImportFrom) and node.level == 1 and node.module == "gateway":
                 imported = {alias.name for alias in node.names}
                 if imported != _EXPECTED_GATEWAY_IMPORTS.get(filename, set()):
@@ -518,6 +751,74 @@ def _foundation_plan(
     return registry, plan
 
 
+def _family_plan(route_id: str):
+    module = _family_module()
+    source_id = route_id.split("_", 1)[0]
+    if route_id.endswith("europe_pmc_search_aggregator"):
+        query = GeneralFreeTextQuery("bounded family discovery")
+        result_limit = 100
+        max_pages = max_dispatches = 1
+    elif route_id.endswith("details_lookup_direct"):
+        query = IdentifierLookupQuery(f"10.5555/{source_id}.details.synthetic")
+        result_limit = 30
+        max_pages = max_dispatches = 1
+    else:
+        query = DateIntervalQuery("2026-06-01", "2026-06-02", "neuroscience")
+        result_limit = 120
+        max_pages = max_dispatches = 4
+    registry = module.biorxiv_medrxiv_shadow_registry()
+    plan = compile_discovery_plan(
+        PlanningRequest((source_id,), query, (), result_limit),
+        registry=registry,
+        readiness=module.biorxiv_medrxiv_shadow_readiness(ExecutionMode.OFFLINE_FIXTURE),
+        budget=BudgetCeilings(
+            max_route_attempts=1,
+            max_physical_dispatches=max_dispatches,
+            max_pages_per_route=max_pages,
+            max_redirects=0,
+            max_retries=0,
+            max_wall_time_ms=20_000 * max_dispatches,
+            max_results=result_limit,
+        ),
+    )
+    return registry, plan
+
+
+def _derived_medrxiv_interval_body(body: bytes) -> bytes:
+    payload = json.loads(body)
+    for item in payload["collection"]:
+        item["server"] = "medRxiv"
+        item["doi"] = item["doi"].replace("biorxiv", "medrxiv")
+        item["title"] = item["title"].replace("interval", "medRxiv interval")
+        item["abstract"] = item["abstract"].replace("interval", "medRxiv interval")
+        item["authors"] = item["authors"].replace("Example", "MedExample")
+        if item["published"] != "NA":
+            item["published"] = item["published"].replace("interval", "medrxiv.interval")
+    return json.dumps(payload, separators=(",", ":")).encode()
+
+
+def _family_fixture_bodies() -> dict[tuple[str, str, str], tuple[bytes, ...]]:
+    bodies = {
+        identity: tuple((_FIXTURE_ROOT / filename).read_bytes() for filename in filenames)
+        for identity, filenames in _FAMILY_RECORDED_FIXTURES.items()
+    }
+    medrxiv_interval = next(identity for identity in bodies if identity[0] == "medrxiv_details_interval_direct")
+    bodies[medrxiv_interval] = tuple(_derived_medrxiv_interval_body(body) for body in bodies[medrxiv_interval])
+    return bodies
+
+
+def _family_boundary_route_ids(registry, readiness) -> tuple[set[str], set[str], set[str]]:
+    foundation_route_ids = {route.route_id for route in foundation_registry().routes}
+    registry_route_ids = {route.route_id for route in registry.routes if route.route_id not in foundation_route_ids}
+    readiness_route_ids = {entry.route_id for entry in readiness.routes if entry.route_id not in foundation_route_ids}
+    ready_route_ids = {
+        entry.route_id
+        for entry in readiness.routes
+        if entry.state is ReadinessState.READY and entry.route_id not in foundation_route_ids
+    }
+    return registry_route_ids, readiness_route_ids, ready_route_ids
+
+
 def _response(route, intent, body: bytes, *, status_code: int = 200) -> DiscoveryGatewayResponse:
     content_type = "application/atom+xml; charset=utf-8" if route.adapter_id == "arxiv_v2" else "application/json"
     origin = route.policy.origin
@@ -581,18 +882,30 @@ def _install_runtime_tripwires(monkeypatch: pytest.MonkeyPatch) -> None:
 
     original_import = builtins.__import__
     blocked_import_fragments = (
+        "aiohttp",
+        "browser",
+        "cookie",
+        "credential",
+        "http.client",
+        "httpx",
+        "keyring",
+        "playwright",
+        "requests",
+        "selenium",
+        "socket",
+        "subprocess",
         "tldw_server_api.app.core.authnz",
         "tldw_server_api.app.core.config",
         "tldw_server_api.app.core.db_management",
         "tldw_server_api.app.core.http_client",
         "tldw_server_api.app.core.ingestion_media_processing",
+        "tldw_server_api.app.core.media",
         "tldw_server_api.app.core.research.discovery.oa",
         "tldw_server_api.app.core.security.http_hop",
         "tldw_server_api.app.core.third_party",
         "tldw_server_api.app.core.web_scraping",
-        "keyring",
-        "playwright",
-        "selenium",
+        "urllib.request",
+        "urllib3",
     )
 
     def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
@@ -1058,3 +1371,217 @@ async def test_ambiguous_only_aggregator_result_is_unattributed_valid_empty() ->
     )
     assert len(result.usage.physical_records) == 1
     assert result.usage.accounting.debited == 1
+
+
+def test_biorxiv_medrxiv_family_has_a_separate_closed_boundary_contract() -> None:
+    assert frozenset({"biorxiv_medrxiv.py"}) == _FAMILY_ROOT_MODULES
+    assert _local_dependency_closure(_FAMILY_ROOT_MODULES) == _EXPECTED_FAMILY_LOCAL_CLOSURE
+    assert set(_EXPECTED_FAMILY_RAW_DIGESTS) == _FAMILY_ROOT_MODULES
+    assert set(_EXPECTED_FAMILY_IMPORT_DIGESTS) == _FAMILY_ROOT_MODULES
+    assert set(_EXPECTED_FAMILY_AST_DIGESTS) == _FAMILY_ROOT_MODULES
+
+    violations = []
+    http_hop_consumers = []
+    for filename in sorted(_EXPECTED_FAMILY_LOCAL_CLOSURE):
+        module_path = _DISCOVERY_ROOT / filename
+        raw_source = module_path.read_bytes()
+        if filename in _EXPECTED_FAMILY_RAW_DIGESTS:
+            assert hashlib.sha256(raw_source).hexdigest() == _EXPECTED_FAMILY_RAW_DIGESTS[filename]
+        source = raw_source.decode("utf-8")
+        violations.extend(_boundary_violations(source, filename))
+        tree = ast.parse(source, filename=filename)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module == _HTTP_HOP_MODULE:
+                http_hop_consumers.append(filename)
+
+    assert violations == []
+    assert http_hop_consumers == ["gateway.py"]
+
+
+@pytest.mark.parametrize(
+    "probe",
+    (
+        "import socket\nsocket.create_connection(('example.test', 443))",
+        "import http.client\nhttp.client.HTTPSConnection('example.test')",
+        "import urllib.request\nurllib.request.urlopen('https://example.test')",
+        "from .gateway import dispatch_once\ndispatch_once(None)",
+        "import subprocess\nsubprocess.run(['curl', 'https://example.test'])",
+        "import webbrowser\nwebbrowser.open('https://example.test')",
+        "import http.cookiejar\nhttp.cookiejar.CookieJar()",
+        "import keyring\nkeyring.get_password('service', 'user')",
+        "import tldw_Server_API.app.core.config",
+        "import tldw_Server_API.app.core.AuthNZ",
+        "import tldw_Server_API.app.core.DB_Management",
+        "import tldw_Server_API.app.core.Web_Scraping",
+        "import tldw_Server_API.app.core.Media",
+        "import tldw_Server_API.app.core.Research.discovery.oa",
+        "import tldw_Server_API.app.core.Security.http_hop",
+        "import tldw_Server_API.app.core.Third_Party.BioRxiv",
+        "import urllib.request\nurllib.request.urlopen(record['url'])",
+    ),
+)
+def test_family_boundary_scanner_rejects_every_deferred_effect_class(probe: str) -> None:
+    filename = "biorxiv_medrxiv.py"
+    source = (_DISCOVERY_ROOT / filename).read_text(encoding="utf-8") + f"\n{probe}\n"
+
+    violations = _boundary_violations(source, filename, check_import_digest=False)
+
+    assert any("forbidden_import" in violation for violation in violations), violations
+
+
+def test_ready_family_routes_factories_recordings_and_plans_are_exactly_equal() -> None:
+    module = _family_module()
+    registry = module.biorxiv_medrxiv_shadow_registry()
+    readiness = module.biorxiv_medrxiv_shadow_readiness(ExecutionMode.OFFLINE_FIXTURE)
+    family_route_identities = set(_FAMILY_RECORDED_FIXTURES)
+    recorded_family_route_ids = {identity[0] for identity in family_route_identities}
+    registry_family_route_ids, readiness_family_route_ids, ready_route_ids = _family_boundary_route_ids(
+        registry,
+        readiness,
+    )
+    assert registry_family_route_ids == recorded_family_route_ids
+    assert readiness_family_route_ids == recorded_family_route_ids
+    assert ready_route_ids == recorded_family_route_ids
+
+    ready_routes = tuple(route for route in registry.routes if route.route_id in ready_route_ids)
+    registry_route_identities = {(route.route_id, route.adapter_id, route.adapter_version) for route in ready_routes}
+    registry_adapter_identities = {(route.adapter_id, route.adapter_version) for route in ready_routes}
+    factory = module.biorxiv_medrxiv_gateway_adapters()
+    factory_identities = set()
+    for adapter_id in factory:
+        versions = {route.adapter_version for route in ready_routes if route.adapter_id == adapter_id}
+        assert len(versions) == 1
+        factory_identities.add((adapter_id, versions.pop()))
+    plan_identities = set()
+    for route_id in registry_family_route_ids:
+        _registry, plan = _family_plan(route_id)
+        assert len(plan.dispatch_groups) == 1
+        assert plan.dispatch_groups[0].route_id == route_id
+        plan_identities.add((plan.dispatch_groups[0].adapter_id, plan.dispatch_groups[0].adapter_version))
+
+    assert registry_route_identities == family_route_identities
+    assert registry_adapter_identities == factory_identities == plan_identities
+    assert registry_adapter_identities == set(module._FAMILY_PARSING_PROFILES)
+    assert set(factory) == {adapter_id for adapter_id, _version in registry_adapter_identities}
+    assert {adapter.__module__ for adapter in factory.values()} == {_FAMILY_MODULE_NAME}
+    assert all(route.credential_requirement is CredentialRequirement.NONE for route in ready_routes)
+    assert all(route.policy.limits.max_redirects == 0 for route in ready_routes)
+
+
+def test_unrecorded_ready_family_route_cannot_hide_behind_shared_adapter_identity() -> None:
+    module = _family_module()
+    registry = module.biorxiv_medrxiv_shadow_registry()
+    readiness = module.biorxiv_medrxiv_shadow_readiness(ExecutionMode.OFFLINE_FIXTURE)
+    extra_route_id = "biorxiv_unrecorded_ready_direct"
+    extra_route = replace(registry.get_route("biorxiv_details_lookup_direct"), route_id=extra_route_id)
+    extra_readiness = replace(
+        next(entry for entry in readiness.routes if entry.route_id == "biorxiv_details_lookup_direct"),
+        route_id=extra_route_id,
+    )
+    biorxiv_source = registry.get_source("biorxiv")
+    mutated_source = replace(
+        biorxiv_source,
+        route_references=biorxiv_source.route_references + (SourceRouteReference(extra_route_id, None),),
+    )
+    mutated_registry = replace(
+        registry,
+        sources=tuple(mutated_source if source is biorxiv_source else source for source in registry.sources),
+        routes=registry.routes + (extra_route,),
+    )
+    mutated_readiness = replace(readiness, routes=readiness.routes + (extra_readiness,))
+    registry_route_ids, readiness_route_ids, ready_route_ids = _family_boundary_route_ids(
+        mutated_registry,
+        mutated_readiness,
+    )
+    recorded_route_ids = {identity[0] for identity in _FAMILY_RECORDED_FIXTURES}
+
+    assert registry_route_ids - recorded_route_ids == {extra_route_id}
+    assert readiness_route_ids - recorded_route_ids == {extra_route_id}
+    assert ready_route_ids - recorded_route_ids == {extra_route_id}
+
+
+@pytest.mark.asyncio
+async def test_all_six_family_routes_use_only_accounted_executor_gateway_dispatches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _family_module()
+    adapters = module.biorxiv_medrxiv_gateway_adapters(monotonic_clock=lambda: 0.0)
+    fixture_bodies = _family_fixture_bodies()
+    planned = {identity: _family_plan(identity[0]) for identity in _FAMILY_RECORDED_FIXTURES}
+    expected_dispatches = sum(len(bodies) for bodies in fixture_bodies.values())
+    dispatch_ids = iter(f"family-dispatch-{index}" for index in range(1, expected_dispatches + 1))
+    gateway_calls: list[tuple[str, str]] = []
+    executions = {}
+    _install_runtime_tripwires(monkeypatch)
+
+    for identity, bodies in fixture_bodies.items():
+        route_id, _adapter_id, _adapter_version = identity
+        registry, plan = planned[identity]
+        remaining = list(bodies)
+
+        async def gateway(
+            route,
+            intent,
+            *,
+            is_policy_active,
+            expected_route_id=route_id,
+            responses=remaining,
+        ):
+            assert is_policy_active(route.route_id, route.policy.policy_digest)
+            assert route.route_id == expected_route_id
+            gateway_calls.append((route.route_id, intent.path))
+            return _response(route, intent, responses.pop(0))
+
+        execution = await execute_discovery_plan(
+            plan,
+            registry=registry,
+            adapters=adapters,
+            gateway=gateway,
+            policy_is_active=lambda _route_id, _digest: True,
+            dispatch_id_factory=lambda: next(dispatch_ids),
+            monotonic_clock=lambda: 0.0,
+        )
+        executions[route_id] = execution
+        assert remaining == []
+        assert tuple(outcome.state for outcome in execution.logical_outcomes) == (LogicalOutcomeState.SUCCEEDED,)
+        assert execution.usage.pages == len(bodies)
+        assert len(execution.usage.physical_records) == len(bodies)
+        assert execution.usage.accounting.created == len(bodies)
+        assert execution.usage.accounting.debited == len(bodies)
+        assert execution.candidates
+        assert "example.invalid" not in repr(execution)
+        assert "fixture-secret" not in repr(execution)
+
+    expected_paths = {
+        "biorxiv_europe_pmc_search_aggregator": ["/europepmc/webservices/rest/search"],
+        "medrxiv_europe_pmc_search_aggregator": ["/europepmc/webservices/rest/search"],
+        "biorxiv_details_lookup_direct": ["/details/biorxiv/10.5555/biorxiv.details.synthetic/na/json"],
+        "medrxiv_details_lookup_direct": ["/details/medrxiv/10.5555/medrxiv.details.synthetic/na/json"],
+        "biorxiv_details_interval_direct": [
+            "/details/biorxiv/2026-06-01/2026-06-02/0/json",
+            "/details/biorxiv/2026-06-01/2026-06-02/1/json",
+        ],
+        "medrxiv_details_interval_direct": [
+            "/details/medrxiv/2026-06-01/2026-06-02/0/json",
+            "/details/medrxiv/2026-06-01/2026-06-02/1/json",
+        ],
+    }
+    observed_paths = {
+        route_id: [path for observed_route_id, path in gateway_calls if observed_route_id == route_id]
+        for route_id in expected_paths
+    }
+
+    assert observed_paths == expected_paths
+    assert len(gateway_calls) == expected_dispatches == 8
+    assert Counter(route_id for route_id, _path in gateway_calls) == Counter(
+        {
+            "biorxiv_europe_pmc_search_aggregator": 1,
+            "medrxiv_europe_pmc_search_aggregator": 1,
+            "biorxiv_details_lookup_direct": 1,
+            "medrxiv_details_lookup_direct": 1,
+            "biorxiv_details_interval_direct": 2,
+            "medrxiv_details_interval_direct": 2,
+        }
+    )
+    assert executions["biorxiv_details_interval_direct"].usage.accounting.debited == 2
+    assert executions["medrxiv_details_interval_direct"].usage.accounting.debited == 2

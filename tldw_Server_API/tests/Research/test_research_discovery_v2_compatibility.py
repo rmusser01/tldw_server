@@ -77,7 +77,15 @@ _FOUNDATION_SOURCE_IDS = (
 )
 _V2_PRODUCTION_MODULES = tuple(
     f"tldw_Server_API.app.core.Research.discovery.{module_name}"
-    for module_name in ("contracts", "registry", "planner", "executor", "gateway", "gateway_adapters")
+    for module_name in (
+        "biorxiv_medrxiv",
+        "contracts",
+        "registry",
+        "planner",
+        "executor",
+        "gateway",
+        "gateway_adapters",
+    )
 )
 
 
@@ -768,7 +776,15 @@ jobs = importlib.import_module("tldw_Server_API.app.core.Research.jobs")
 after = sorted(name for name in sys.modules if name == prefix or name.startswith(prefix + "."))
 forbidden = tuple(
     f"{prefix}.{name}"
-    for name in ("contracts", "registry", "planner", "executor", "gateway", "gateway_adapters")
+    for name in (
+        "biorxiv_medrxiv",
+        "contracts",
+        "registry",
+        "planner",
+        "executor",
+        "gateway",
+        "gateway_adapters",
+    )
 )
 print(json.dumps({
     "adapter_names": service.adapter_names,
@@ -844,6 +860,7 @@ def test_standalone_endpoint_calls_each_v1_source_once_and_never_executes_v2(
     from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_db_pool
     from tldw_Server_API.app.api.v1.endpoints import research_discovery as endpoint
     from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
+    from tldw_Server_API.app.core.Research.discovery import biorxiv_medrxiv as family_module
     from tldw_Server_API.app.core.Research.discovery import executor as executor_module
     from tldw_Server_API.app.core.Research.discovery import gateway as gateway_module
     from tldw_Server_API.app.core.Research.discovery import gateway_adapters as gateway_adapters_module
@@ -870,13 +887,39 @@ def test_standalone_endpoint_calls_each_v1_source_once_and_never_executes_v2(
         v2_calls.append("dispatch")
         raise AssertionError("V2 gateway must remain disabled")
 
-    def forbidden_factory(*_args, **_kwargs):
-        v2_calls.append("factory")
+    def forbidden_foundation_factory(*_args, **_kwargs):
+        v2_calls.append("foundation_factory")
         raise AssertionError("V2 adapters must remain disabled")
+
+    def forbidden_family_factory(name: str):
+        def forbidden(*_args, **_kwargs):
+            v2_calls.append(name)
+            raise AssertionError("bioRxiv/medRxiv shadow factories must remain disabled")
+
+        return forbidden
 
     monkeypatch.setattr(executor_module, "execute_discovery_plan", forbidden_execute)
     monkeypatch.setattr(gateway_module, "dispatch_once", forbidden_dispatch)
-    monkeypatch.setattr(gateway_adapters_module, "foundation_gateway_adapters", forbidden_factory)
+    monkeypatch.setattr(
+        gateway_adapters_module,
+        "foundation_gateway_adapters",
+        forbidden_foundation_factory,
+    )
+    monkeypatch.setattr(
+        family_module,
+        "biorxiv_medrxiv_shadow_registry",
+        forbidden_family_factory("family_registry"),
+    )
+    monkeypatch.setattr(
+        family_module,
+        "biorxiv_medrxiv_shadow_readiness",
+        forbidden_family_factory("family_readiness"),
+    )
+    monkeypatch.setattr(
+        family_module,
+        "biorxiv_medrxiv_gateway_adapters",
+        forbidden_family_factory("family_adapters"),
+    )
 
     app = FastAPI()
     app.include_router(endpoint.router, prefix="/api/v1/research")

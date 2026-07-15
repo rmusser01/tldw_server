@@ -14,11 +14,13 @@ from tldw_Server_API.app.core.Research.discovery.contracts import (
     CredentialRequirement,
     CredentialStatus,
     ExecutionMode,
+    PredicateOperator,
     QueryMode,
     ReadinessState,
     RouteKind,
     SourceConstraint,
     SourceDefinition,
+    SourcePredicate,
     SourceRouteReference,
 )
 from tldw_Server_API.app.core.Research.discovery.registry import (
@@ -115,10 +117,21 @@ _EXPECTED_PAGINATION_KEYS = {
     "osf": "page",
 }
 
+_EXPECTED_FAMILY_LEDGER_ROWS = {
+    "biorxiv": ("sourclip-2026-07-13-0021", "bioRxiv"),
+    "medrxiv": ("sourclip-2026-07-13-0022", "medRxiv"),
+}
+
 
 def _ledger_rows() -> dict[str, dict[str, object]]:
     payload = json.loads(_LEDGER_PATH.read_text(encoding="utf-8"))
     wanted_inventory_ids = {values[0] for values in _EXPECTED_LEDGER_ROUTES.values()}
+    return {row["inventory_id"]: row for row in payload["rows"] if row["inventory_id"] in wanted_inventory_ids}
+
+
+def _family_ledger_rows() -> dict[str, dict[str, object]]:
+    payload = json.loads(_LEDGER_PATH.read_text(encoding="utf-8"))
+    wanted_inventory_ids = {values[0] for values in _EXPECTED_FAMILY_LEDGER_ROWS.values()}
     return {row["inventory_id"]: row for row in payload["rows"] if row["inventory_id"] in wanted_inventory_ids}
 
 
@@ -185,6 +198,88 @@ def test_biorxiv_medrxiv_shadow_registry_is_strictly_additive_to_foundation() ->
     assert shadow.routes[:8] == foundation.routes
     assert shadow.backends[:8] == foundation.backends
     assert tuple(source.catalog_source_id for source in shadow.sources[8:]) == ("biorxiv", "medrxiv")
+
+
+def test_biorxiv_medrxiv_ledger_rows_bind_exact_shadow_routes_and_readiness() -> None:
+    from tldw_Server_API.app.core.Research.discovery.biorxiv_medrxiv import (
+        biorxiv_medrxiv_shadow_readiness,
+        biorxiv_medrxiv_shadow_registry,
+    )
+
+    registry = biorxiv_medrxiv_shadow_registry()
+    ledger_rows = _family_ledger_rows()
+    expected_inventory_ids = {values[0] for values in _EXPECTED_FAMILY_LEDGER_ROWS.values()}
+
+    assert set(ledger_rows) == expected_inventory_ids
+    for source_id, (inventory_id, publisher) in _EXPECTED_FAMILY_LEDGER_ROWS.items():
+        source = registry.get_source(source_id)
+        row = ledger_rows[inventory_id]
+        expected_route_ids = (
+            f"{source_id}_europe_pmc_search_aggregator",
+            f"{source_id}_details_lookup_direct",
+            f"{source_id}_details_interval_direct",
+        )
+        candidates = {candidate["route_candidate_id"]: candidate for candidate in row["route_candidates"]}
+        references = {reference.route_id: reference for reference in source.route_references}
+
+        assert row["canonical_targets"] == [source_id]
+        assert row["implementation_state"] == "implemented"
+        assert row["fixture_state"] == "passed"
+        assert row["live_state"] == "not_run"
+        assert tuple(candidates) == expected_route_ids
+        assert tuple(references) == expected_route_ids
+
+        for route_id in expected_route_ids:
+            route = registry.get_route(route_id)
+            candidate = candidates[route_id]
+
+            assert route.backend_id == candidate["planned_backend_id"]
+            assert route.route_kind.value == candidate["route_kind"]
+            assert route.credential_requirement.value == candidate["credential_requirement"] == "none"
+            assert tuple(mode.value for mode in route.query_modes) == tuple(candidate["query_modes"])
+            assert route.source_constraint.value == candidate["source_constraint"]
+            if route_id.endswith("europe_pmc_search_aggregator"):
+                assert route.backend_id == "europe_pmc_rest_api"
+                assert route.query_modes == (QueryMode.GENERAL_FREE_TEXT,)
+                assert route.route_kind is RouteKind.AGGREGATOR
+                assert route.source_constraint is SourceConstraint.PROVIDER_SOURCE_FILTER
+                assert route.attribution_basis == "provider_publisher"
+                assert candidate["attribution_basis"] == "provider_source_field"
+                assert candidate["source_constraint_predicate"] == {
+                    "provider_field": "bookOrReportDetails.publisher",
+                    "operator": "equals",
+                    "values": [publisher],
+                }
+                assert references[route_id].source_predicate == SourcePredicate(
+                    ("source_platform",),
+                    PredicateOperator.EQUALS_ANY,
+                    (source_id,),
+                    case_sensitive=False,
+                )
+            else:
+                assert route.backend_id == "biorxiv_details_api"
+                assert route.route_kind is RouteKind.DIRECT
+                assert route.source_constraint is SourceConstraint.NATIVE_CORPUS
+                assert route.attribution_basis == candidate["attribution_basis"] == "native_response"
+                assert references[route_id].source_predicate is candidate["source_constraint_predicate"] is None
+
+    family_route_ids = {
+        route_id
+        for source_id in _EXPECTED_FAMILY_LEDGER_ROWS
+        for route_id in (
+            f"{source_id}_europe_pmc_search_aggregator",
+            f"{source_id}_details_lookup_direct",
+            f"{source_id}_details_interval_direct",
+        )
+    }
+    for mode in (ExecutionMode.OFFLINE_FIXTURE, ExecutionMode.SYNTHETIC):
+        readiness = biorxiv_medrxiv_shadow_readiness(mode)
+        family_entries = {entry.route_id: entry for entry in readiness.routes if entry.route_id in family_route_ids}
+
+        assert set(family_entries) == family_route_ids
+        assert all(entry.state is ReadinessState.READY for entry in family_entries.values())
+        assert all(entry.credential_status is CredentialStatus.NOT_REQUIRED for entry in family_entries.values())
+        assert {entry.reason for entry in family_entries.values()} == {f"{mode.value}_ready"}
 
 
 def test_foundation_routes_declare_exact_pagination_and_figshare_body_shape() -> None:
