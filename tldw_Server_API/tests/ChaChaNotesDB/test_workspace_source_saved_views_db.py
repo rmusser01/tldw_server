@@ -1,3 +1,5 @@
+"""SQLite persistence tests for workspace source saved views."""
+
 from __future__ import annotations
 
 import sqlite3
@@ -14,6 +16,8 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDBError,
     InputError,
 )
+
+pytestmark = pytest.mark.unit
 
 OWNER_A = "owner-a"
 OWNER_B = "owner-b"

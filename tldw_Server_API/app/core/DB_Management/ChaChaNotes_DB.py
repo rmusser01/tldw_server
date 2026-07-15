@@ -333,7 +333,7 @@ SOURCE_VIEW_NOT_FOUND = "source_view_not_found"
 class WorkspaceSourceSavedViewConflictError(ConflictError):
     """Saved-view conflict with a stable code and non-sensitive metadata."""
 
-    def __init__(self, code: str, metadata: Mapping[str, Any]):
+    def __init__(self, code: str, metadata: Mapping[str, Any]) -> None:
         super().__init__("Workspace source saved view conflict.")
         self.code = code
         self.metadata = dict(metadata)
@@ -344,7 +344,7 @@ class WorkspaceSourceSavedViewNotFoundError(CharactersRAGDBError):
 
     code = SOURCE_VIEW_NOT_FOUND
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("Workspace source saved view not found.")
         self.metadata: dict[str, Any] = {}
 

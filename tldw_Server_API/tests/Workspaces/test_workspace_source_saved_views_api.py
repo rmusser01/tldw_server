@@ -30,6 +30,8 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     WorkspaceSourceSavedViewConflictError,
 )
 
+pytestmark = pytest.mark.integration
+
 RESPONSE_KEYS = {
     "id",
     "workspace_id",

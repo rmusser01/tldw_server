@@ -116,6 +116,26 @@ describe("source-list-view", () => {
     expect(filterSources(sources, state).map((source) => source.id)).toEqual(["s3"])
   })
 
+  it("treats missing and unrecognized lifecycle values as unknown", () => {
+    const state: SourceListViewState = {
+      ...baseViewState,
+      lifecycleStateFilters: ["unknown"]
+    }
+    const unknownSources: WorkspaceSource[] = [
+      { ...sources[0], id: "missing-lifecycle", statusDetails: {} },
+      {
+        ...sources[1],
+        id: "future-lifecycle",
+        statusDetails: { lifecycleState: "future_state" }
+      }
+    ]
+
+    expect(filterSources(unknownSources, state).map((source) => source.id)).toEqual([
+      "missing-lifecycle",
+      "future-lifecycle"
+    ])
+  })
+
   it("provides needs-review and unreviewed filter presets", () => {
     expect(SOURCE_REVIEW_FILTER_PRESETS.needsReview).toEqual({
       reviewStateFilters: ["needs_review"]

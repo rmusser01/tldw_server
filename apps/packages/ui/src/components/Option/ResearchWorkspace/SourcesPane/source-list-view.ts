@@ -5,7 +5,10 @@ import type {
   WorkspaceSourceStatus,
   WorkspaceSourceType
 } from "@/types/workspace"
-import type { WorkspaceSourceSavedViewSort } from "@/types/workspace-source-saved-view"
+import {
+  WORKSPACE_SOURCE_SAVED_VIEW_LIFECYCLE_STATE_FILTERS,
+  type WorkspaceSourceSavedViewSort
+} from "@/types/workspace-source-saved-view"
 
 export type SourceListSortOption = WorkspaceSourceSavedViewSort
 
@@ -144,11 +147,15 @@ export const filterSources = (
       return false
     }
 
+    const rawLifecycleState = source.statusDetails?.lifecycleState
+    const lifecycleState = WORKSPACE_SOURCE_SAVED_VIEW_LIFECYCLE_STATE_FILTERS.includes(
+      rawLifecycleState as WorkspaceSourceLifecycleState
+    )
+      ? (rawLifecycleState as WorkspaceSourceLifecycleState)
+      : "unknown"
     if (
       viewState.lifecycleStateFilters.length > 0 &&
-      !viewState.lifecycleStateFilters.includes(
-        source.statusDetails?.lifecycleState as WorkspaceSourceLifecycleState
-      )
+      !viewState.lifecycleStateFilters.includes(lifecycleState)
     ) {
       return false
     }

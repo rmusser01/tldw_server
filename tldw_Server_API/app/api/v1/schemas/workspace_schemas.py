@@ -193,6 +193,7 @@ class WorkspaceSourceSavedViewStateV1(BaseModel):
     def _canonicalize_types(
         cls, value: list[WorkspaceSourceSavedViewType]
     ) -> list[WorkspaceSourceSavedViewType]:
+        """Return type filters in canonical wire order without duplicates."""
         return [item for item in _SOURCE_VIEW_TYPES if item in value]
 
     @field_validator("status_filters")
@@ -200,6 +201,7 @@ class WorkspaceSourceSavedViewStateV1(BaseModel):
     def _canonicalize_statuses(
         cls, value: list[WorkspaceSourceSavedViewStatus]
     ) -> list[WorkspaceSourceSavedViewStatus]:
+        """Return status filters in canonical wire order without duplicates."""
         return [item for item in _SOURCE_VIEW_STATUSES if item in value]
 
     @field_validator("review_state_filters")
@@ -207,6 +209,7 @@ class WorkspaceSourceSavedViewStateV1(BaseModel):
     def _canonicalize_review_states(
         cls, value: list[WorkspaceSourceSavedViewReviewState]
     ) -> list[WorkspaceSourceSavedViewReviewState]:
+        """Return review-state filters in canonical wire order without duplicates."""
         return [item for item in _SOURCE_VIEW_REVIEW_STATES if item in value]
 
     @field_validator("lifecycle_state_filters")
@@ -214,11 +217,13 @@ class WorkspaceSourceSavedViewStateV1(BaseModel):
     def _canonicalize_lifecycle_states(
         cls, value: list[WorkspaceSourceSavedViewLifecycleState]
     ) -> list[WorkspaceSourceSavedViewLifecycleState]:
+        """Return lifecycle filters in canonical wire order without duplicates."""
         return [item for item in _SOURCE_VIEW_LIFECYCLE_STATES if item in value]
 
     @field_validator("date_from", "date_to")
     @classmethod
     def _validate_calendar_date(cls, value: str | None) -> str | None:
+        """Require an exact ISO calendar date when a bound is present."""
         if value is None:
             return None
         try:
@@ -240,6 +245,7 @@ class WorkspaceSourceSavedViewStateV1(BaseModel):
     )
     @classmethod
     def _validate_nonnegative_number(cls, value: Any) -> float | None:
+        """Normalize finite nonnegative JSON numbers for persisted filters."""
         if value is None:
             return None
         if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -254,6 +260,7 @@ class WorkspaceSourceSavedViewStateV1(BaseModel):
 
     @model_validator(mode="after")
     def _validate_ranges(self) -> WorkspaceSourceSavedViewStateV1:
+        """Require every persisted lower bound to precede its upper bound."""
         if self.date_from is not None and self.date_to is not None and self.date_from > self.date_to:
             raise ValueError("date_from must be less than or equal to date_to")
         for minimum, maximum in (
@@ -280,6 +287,7 @@ class WorkspaceSourceSavedViewCreateRequest(BaseModel):
     @field_validator("name", mode="before")
     @classmethod
     def _trim_name(cls, value: Any) -> Any:
+        """Trim saved-view display names before length validation."""
         return value.strip() if isinstance(value, str) else value
 
 
@@ -299,6 +307,7 @@ class WorkspaceSourceSavedViewRenamePatch(_WorkspaceSourceSavedViewPatchBase):
     @field_validator("name", mode="before")
     @classmethod
     def _trim_name(cls, value: Any) -> Any:
+        """Trim saved-view display names before length validation."""
         return value.strip() if isinstance(value, str) else value
 
 
@@ -319,6 +328,7 @@ class WorkspaceSourceSavedViewCombinedPatch(_WorkspaceSourceSavedViewPatchBase):
     @field_validator("name", mode="before")
     @classmethod
     def _trim_name(cls, value: Any) -> Any:
+        """Trim saved-view display names before length validation."""
         return value.strip() if isinstance(value, str) else value
 
 
