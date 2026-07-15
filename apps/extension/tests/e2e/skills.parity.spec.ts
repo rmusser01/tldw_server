@@ -848,13 +848,19 @@ test.describe("Skills parity (extension)", () => {
         name: "New Skill",
         exact: true,
       })
+      const emptyStateHeading = page.getByRole("heading", {
+        name: "Start with a reusable skill",
+        exact: true,
+      })
       const recoveryNotice = "Recovered your unsaved draft from this session."
+      const draftStoragePrefix = "tldw:skills:authoring-draft:v1:"
       const customName = "session-draft-recovery-check"
       const customInstructions =
         "Recover this session-only draft and organize $ARGUMENTS into verified notes."
 
       await expect.poll(() => page.evaluate(() => window.location.hash)).toBe("#/skills")
       await expect(skillsHeading).toBeVisible()
+      await expect(emptyStateHeading).toBeVisible()
       await expect(newSkill).toBeVisible()
       await newSkill.click()
 
@@ -862,6 +868,9 @@ test.describe("Skills parity (extension)", () => {
         name: /^New Skill: /,
       })
       await expect(initialDialog).toBeVisible()
+      await expect(
+        initialDialog.getByText(recoveryNotice, { exact: true }),
+      ).toHaveCount(0)
       const initialNameInput = initialDialog.getByRole("textbox", {
         name: "Name",
         exact: true,
@@ -870,6 +879,11 @@ test.describe("Skills parity (extension)", () => {
         name: "Instructions",
         exact: true,
       })
+
+      await expect(initialNameInput).toHaveValue("summarizer-skill")
+      await expect(initialInstructionsInput).toHaveValue(
+        /Summarize the following source material\./,
+      )
       const initialName = await initialNameInput.inputValue()
       const initialInstructions = await initialInstructionsInput.inputValue()
 
@@ -880,11 +894,48 @@ test.describe("Skills parity (extension)", () => {
       await initialInstructionsInput.fill(customInstructions)
       await expect(initialNameInput).toHaveValue(customName)
       await expect(initialInstructionsInput).toHaveValue(customInstructions)
+      await expect
+        .poll(() =>
+          page.evaluate(
+            ({ prefix, name, instructions }) => {
+              for (let index = 0; index < sessionStorage.length; index += 1) {
+                const key = sessionStorage.key(index)
+                if (!key?.startsWith(prefix)) continue
+                try {
+                  const stored = JSON.parse(
+                    sessionStorage.getItem(key) ?? "null",
+                  ) as {
+                    values?: {
+                      name?: unknown
+                      instructions?: unknown
+                    }
+                  } | null
+                  if (
+                    stored?.values?.name === name
+                    && stored.values.instructions === instructions
+                  ) {
+                    return key
+                  }
+                } catch {
+                  continue
+                }
+              }
+              return null
+            },
+            {
+              prefix: draftStoragePrefix,
+              name: customName,
+              instructions: customInstructions,
+            },
+          ),
+        )
+        .toMatch(/^tldw:skills:authoring-draft:v1:/)
 
       await page.reload({ waitUntil: "domcontentloaded" })
 
       await expect.poll(() => page.evaluate(() => window.location.hash)).toBe("#/skills")
       await expect(skillsHeading).toBeVisible()
+      await expect(emptyStateHeading).toBeVisible()
       await expect(newSkill).toBeVisible()
       await newSkill.click()
 
@@ -918,6 +969,17 @@ test.describe("Skills parity (extension)", () => {
       await expect(recoveredNotice).toBeHidden()
       await expect(recoveredNameInput).toHaveValue(initialName)
       await expect(recoveredInstructionsInput).toHaveValue(initialInstructions)
+      await expect
+        .poll(() =>
+          page.evaluate((prefix) => {
+            let matchingKeys = 0
+            for (let index = 0; index < sessionStorage.length; index += 1) {
+              if (sessionStorage.key(index)?.startsWith(prefix)) matchingKeys += 1
+            }
+            return matchingKeys
+          }, draftStoragePrefix),
+        )
+        .toBe(0)
 
       await recoveredDialog.getByRole("button", {
         name: "Cancel",
