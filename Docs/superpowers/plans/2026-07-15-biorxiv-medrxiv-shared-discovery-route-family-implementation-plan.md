@@ -372,7 +372,7 @@ python -m pytest -q \
 
 **Tests:** Expand the focused family suite with distinct valid details fixtures and derived failure cases.
 
-**Status:** In Progress
+**Status:** Complete
 
 ### Files
 
@@ -386,19 +386,19 @@ python -m pytest -q \
 
 ### Test-first steps
 
-- [ ] Write RED DOI success tests for both server routes and exact concrete paths with two DOI segments. Reject an encoded DOI slash as one segment and all multi-slash identifiers.
-- [ ] Write RED interval/category success tests for exact dates, optional canonical category query, initial cursor `0`, and page two requested with `NumericCursor(current + count)` rather than a hard-coded page size.
-- [ ] Validate HTTP/MIME through `_checked_response` and JSON through `_strict_json`. Require `messages` to contain one usable status record with success status, expected exact mixed-case server label (`bioRxiv` or `medRxiv`), and bounded canonical numeric strings or integers.
-- [ ] DOI lookup must bind every collection item to the exact canonical requested DOI. Missing/different DOI or server is malformed/ambiguous and commits no partial candidates.
-- [ ] Interval responses must echo the exact requested interval, optional category, and current cursor; require `count == len(collection)`, `cursor + count <= total`, dates inside the inclusive interval, and category equality after canonical normalization.
-- [ ] Treat a zero-count page with remaining `total`, repeated/non-progress cursor, decreasing/inconsistent total, or inconsistent termination as malformed. The route attempt remains atomic across pages.
-- [ ] Normalize bounded title, authors, abstract/snippet, DOI, date, numeric version, license, category, publication linkage, provider IDs, source platform, and synthesized DOI landing URL. Drop raw provider URLs, `jatsxml`, full-text/PDF fields, payload echoes, and unknown fields; keep `pdf_url=None`.
-- [ ] For multiple records with one DOI, retain the highest numeric version deterministically. If the same version has conflicting retained metadata, fail the route instead of choosing one.
-- [ ] Add derived tests for application-level error under HTTP 200; string/integer count variants; requested DOI, interval, category, cursor, count, result date, result category, server, and total mismatches; invalid versions; empty interval; malformed JSON/schema; rate limit; timeout; cancellation; and later-page failure suppressing earlier-page candidates.
-- [ ] Change the four details readiness entries from the Stage 3 fixture-pending `DISABLED` state to `READY` only after their adapter tests pass, then assert every ready shadow route resolves to exactly one registered adapter.
-- [ ] Before enabling the medRxiv interval route, derive its valid payload deterministically from the checked-in bioRxiv interval fixture by changing only the exact response server label and medRxiv-specific item fields, then execute the real medRxiv interval plan end-to-end and assert its path, response binding, attribution, candidate, and accounting. Do not mark it ready based only on the bioRxiv route.
-- [ ] Add link tripwires proving DOI/JATS/full-text/PDF/provider links are never dereferenced and no Media/legacy helper is imported.
-- [ ] Execute both details modes through `execute_discovery_plan(...)` and assert physical dispatch/page counts, unique dispatch IDs, cursor lineage, cancellation behavior, valid-empty outcomes, and independent partial failure beside another selected source.
+- [x] Write RED DOI success tests for both server routes and exact concrete paths with two DOI segments. Reject an encoded DOI slash as one segment and all multi-slash identifiers.
+- [x] Write RED interval/category success tests for exact dates, optional canonical category query, initial cursor `0`, and page two requested with `NumericCursor(current + count)` rather than a hard-coded page size.
+- [x] Validate HTTP/MIME through `_checked_response` and JSON through `_strict_json`. Require `messages` to contain one usable status record with the official success/valid-empty status shape, enforce the exact mixed-case server label (`bioRxiv` or `medRxiv`) on every collection item, and accept only bounded canonical numeric strings or integers.
+- [x] DOI lookup must bind every collection item to the exact canonical requested DOI. Missing/different DOI or server is malformed/ambiguous and commits no partial candidates.
+- [x] Interval responses must echo the exact requested interval, optional category, and current cursor; require `count == len(collection)`, `cursor + count <= total`, dates inside the inclusive interval, and category equality after canonical normalization.
+- [x] Treat a zero-count page with remaining `total`, repeated/non-progress cursor, decreasing/inconsistent total, or inconsistent termination as malformed. The route attempt remains atomic across pages.
+- [x] Normalize bounded title, authors, abstract/snippet, DOI, date, numeric version, license, category, publication linkage, provider IDs, source platform, and synthesized DOI landing URL. Drop raw provider URLs, `jatsxml`, full-text/PDF fields, payload echoes, and unknown fields; keep `pdf_url=None`.
+- [x] For multiple records with one DOI, retain the highest numeric version deterministically. If the same version has conflicting retained metadata, fail the route instead of choosing one.
+- [x] Add derived tests for application-level error under HTTP 200; string/integer count variants; requested DOI, interval, category, cursor, count, result date, result category, server, and total mismatches; invalid versions; empty interval; malformed JSON/schema; rate limit; timeout; cancellation; and later-page failure suppressing earlier-page candidates.
+- [x] Change the four details readiness entries from the Stage 3 fixture-pending `DISABLED` state to `READY` only after their adapter tests pass, then assert every ready shadow route resolves to exactly one registered adapter.
+- [x] Before enabling the medRxiv interval route, derive its valid payload deterministically from the checked-in bioRxiv interval fixture by changing only the exact response server label and medRxiv-specific item fields, then execute the real medRxiv interval plan end-to-end and assert its path, response binding, attribution, candidate, and accounting. Do not mark it ready based only on the bioRxiv route.
+- [x] Add link tripwires proving DOI/JATS/full-text/PDF/provider links are never dereferenced and no Media/legacy helper is imported.
+- [x] Execute both details modes through `execute_discovery_plan(...)` and assert physical dispatch/page counts, unique dispatch IDs, cursor lineage, cancellation behavior, valid-empty outcomes, and independent partial failure beside another selected source.
 
 ### Focused RED/GREEN command
 
@@ -415,6 +415,12 @@ python -m pytest -q \
 
 `feat(research): add bioRxiv details discovery routes`
 
+- Implementation: `30c11bb18107c444f907903c2d32fbab3415c902`; review fixes: `d878ebcfc2298cbc34def4b8fcb46ee85d37e19a` and `1e2f6fc3223ca9d705ffeab7e2730e066efdaa87`.
+- Final exact four-suite gate: 871 passed with four pre-existing warnings; final family suite: 269 passed with four pre-existing warnings.
+- Ruff, Black, Python byte-compilation, all five fixture JSON validations, diff hygiene, and Bandit passed; Bandit reported zero findings and zero errors.
+- Independent specification, security/correctness, and maintainability reviews found no open Critical, Important, or Minor findings after fixes for exact DOI-domain/identity preservation, bounded multi-slash publication linkage, `all` category wildcard semantics, and request-versus-retained Unicode category normalization.
+- All six shadow family routes now resolve to exactly two registered adapters and are ready in both fixture modes. Production Search and Deep Research consumers remain unchanged.
+
 ## Task 5 / Stage 5: Close the Boundary, Reconcile Inventory, and Verify
 
 **Goal:** Prove the new family has no alternate effect path, update the authoritative source ledger from the invalid native-search assumption to the implemented shadow routes, and finish with reproducible full-suite/security evidence.
@@ -423,7 +429,7 @@ python -m pytest -q \
 
 **Tests:** Network-boundary suite, inventory semantic tests, Python schema tests, registry reconciliation, legacy compatibility, full Research regression, static quality gates, and Bandit.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ### Files
 
