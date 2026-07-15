@@ -63,6 +63,28 @@ class _FailJobCountersConnection:
         return getattr(self._inner, name)
 
 
+class _FailQuotaSelectConnection:
+    """Connection wrapper that fails quota count queries before insert."""
+
+    def __init__(self, inner: sqlite3.Connection):
+        self._inner = inner
+
+    def __enter__(self) -> "_FailQuotaSelectConnection":
+        self._inner.__enter__()
+        return self
+
+    def __exit__(self, exc_type: type[BaseException] | None, exc: BaseException | None, tb: Any) -> bool | None:
+        return self._inner.__exit__(exc_type, exc, tb)
+
+    def execute(self, sql: str, params: tuple[Any, ...] = ()) -> sqlite3.Cursor:
+        if "SELECT COUNT(*) FROM jobs WHERE domain=?" in str(sql):
+            raise sqlite3.OperationalError("quota read failed")
+        return self._inner.execute(sql, params)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+
 def _open_jobs_db(tmp_path: Path, name: str = "jobs.db") -> tuple[Path, sqlite3.Connection]:
     db_path = ensure_jobs_tables(tmp_path / name)
     conn = sqlite3.connect(db_path)
@@ -303,3 +325,26 @@ def test_sqlite_admission_rolls_back_job_when_created_event_insert_fails(tmp_pat
         ).fetchone()[0]
     assert count == 0
     assert counter_count == 0
+
+
+def test_sqlite_admission_rolls_back_when_quota_query_fails(tmp_path: Path) -> None:
+    db_path, inner = _open_jobs_db(tmp_path)
+    wrapped = _FailQuotaSelectConnection(inner)
+
+    with pytest.raises(sqlite3.OperationalError, match="quota read failed"):
+        create_job_admission(
+            wrapped,
+            command=_command(job_type="quota-fail"),
+            uuid_value="uuid-quota-fail",
+            now=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            max_queued_quota=1,
+            submits_per_minute_quota=0,
+            counters_enabled=False,
+        )
+
+    with sqlite3.connect(db_path) as conn:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM jobs WHERE domain = ? AND queue = ? AND job_type = ?",
+            ("admission", "default", "quota-fail"),
+        ).fetchone()[0]
+    assert count == 0

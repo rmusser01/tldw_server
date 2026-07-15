@@ -169,37 +169,27 @@ def _quota_rejection(
     if not command.owner_user_id:
         return None
 
-    try:
-        if max_queued_quota:
-            cur.execute(
-                "SELECT COUNT(*) AS c FROM jobs WHERE domain=%s AND owner_user_id=%s AND status='queued'",
-                (command.domain, command.owner_user_id),
-            )
-            if _count_from_row(cur.fetchone()) >= max_queued_quota:
-                return AdmissionResult.rejected(
-                    AdmissionRejectionReason.QUOTA_EXCEEDED,
-                    message=_MAX_QUEUED_MESSAGE,
-                )
-
-        if submits_per_minute_quota:
-            cur.execute(
-                "SELECT COUNT(*) AS c FROM jobs WHERE domain=%s AND owner_user_id=%s AND created_at >= (%s - interval '60 seconds')",
-                (command.domain, command.owner_user_id, now),
-            )
-            if _count_from_row(cur.fetchone()) >= submits_per_minute_quota:
-                return AdmissionResult.rejected(
-                    AdmissionRejectionReason.QUOTA_EXCEEDED,
-                    message=_SUBMITS_PER_MINUTE_MESSAGE,
-                )
-    except _PG_ERRORS as exc:
-        logger.warning(
-            "Postgres jobs quota check failed for {}:{}:{}; continuing without quota rejection: {}",
-            command.domain,
-            command.queue,
-            command.job_type,
-            exc,
+    if max_queued_quota:
+        cur.execute(
+            "SELECT COUNT(*) AS c FROM jobs WHERE domain=%s AND owner_user_id=%s AND status='queued'",
+            (command.domain, command.owner_user_id),
         )
-        return None
+        if _count_from_row(cur.fetchone()) >= max_queued_quota:
+            return AdmissionResult.rejected(
+                AdmissionRejectionReason.QUOTA_EXCEEDED,
+                message=_MAX_QUEUED_MESSAGE,
+            )
+
+    if submits_per_minute_quota:
+        cur.execute(
+            "SELECT COUNT(*) AS c FROM jobs WHERE domain=%s AND owner_user_id=%s AND created_at >= (%s - interval '60 seconds')",
+            (command.domain, command.owner_user_id, now),
+        )
+        if _count_from_row(cur.fetchone()) >= submits_per_minute_quota:
+            return AdmissionResult.rejected(
+                AdmissionRejectionReason.QUOTA_EXCEEDED,
+                message=_SUBMITS_PER_MINUTE_MESSAGE,
+            )
 
     return None
 
