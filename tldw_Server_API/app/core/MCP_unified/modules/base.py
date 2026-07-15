@@ -15,7 +15,6 @@ from enum import Enum
 from typing import Any, Optional, TypeVar
 
 from loguru import logger
-
 from mcp_unified.interfaces.path_scope import PathScopeCandidate
 
 from ..tool_observability import ensure_tool_definition_eval_metadata
@@ -95,6 +94,9 @@ class ModuleConfig:
     circuit_breaker_max_timeout: int = 300
     settings: dict[str, Any] = field(default_factory=dict)
     circuit_breaker_factory: Any | None = None
+    tool_catalog_handler: (
+        Callable[[dict[str, Any], Any], Awaitable[dict[str, Any]]] | None
+    ) = None
 
 
 @dataclass(frozen=True, slots=True)

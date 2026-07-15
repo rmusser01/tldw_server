@@ -117,6 +117,12 @@ restart TLDW Server, then verify the module moved from
 - `declared_tools` is declaration metadata only; it does not grant effective
   authorization or assert that a declared tool is available. Every later tool
   call remains subject to MCP catalog, RBAC, policy, hook, and argument checks.
+- `catalog_matches` is the unique subset of declared base names found with
+  `canExecute: true` in one best-effort embedded catalog read. `[]` means the
+  read completed with no match (or no declarations); `null` means matching was
+  unavailable or exceeded the smaller of the Skills module timeout and two
+  seconds. It is advisory and does not replace effective-profile, approval,
+  argument, path, credential, quota, or backend checks at tool-call time.
 - `supporting_files_omitted: true` means the rendered body may not be
   self-contained. It exposes no supporting-file names, paths, hashes, or
   content.

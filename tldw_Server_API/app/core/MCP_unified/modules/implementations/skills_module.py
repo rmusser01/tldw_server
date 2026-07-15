@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import traceback
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, TypeVar
@@ -30,6 +31,7 @@ MAX_QUERY_CHARS = 200
 MAX_ARGUMENT_CHARS = 10_000
 MAX_SKILL_NAME_CHARS = 64
 HARD_MAX_RENDERED_SKILL_CHARS = 100_000
+CATALOG_LOOKUP_TIMEOUT_CAP_SECONDS = 2.0
 
 T = TypeVar("T")
 ServiceOperation = Callable[[SkillsService], Awaitable[T]]
@@ -40,6 +42,64 @@ def _clamped_integer(value: Any, *, default: int, minimum: int, maximum: int) ->
     if isinstance(value, bool) or not isinstance(value, int):
         return default
     return max(minimum, min(value, maximum))
+
+
+def _declaration_base_name(declaration: str) -> str | None:
+    """Return the exact catalog name represented by one declaration."""
+    if "(" not in declaration:
+        return declaration
+    base_name, restriction = declaration.split("(", 1)
+    if (
+        not declaration.endswith(")")
+        or not base_name.strip()
+        or not restriction[:-1].strip()
+    ):
+        return None
+    return base_name.strip()
+
+
+def _catalog_matches_from_listing(
+    declarations: list[str],
+    listing: Any,
+) -> list[str] | None:
+    """Return unique declared names executable in a well-formed listing."""
+    if not isinstance(listing, dict):
+        return None
+    tools = listing.get("tools")
+    if not isinstance(tools, list):
+        return None
+    executable_names: set[str] = set()
+    for tool in tools:
+        if not isinstance(tool, dict):
+            continue
+        name = tool.get("name")
+        if (
+            isinstance(name, str)
+            and name.strip()
+            and tool.get("canExecute") is True
+        ):
+            executable_names.add(name)
+    matches: list[str] = []
+    seen: set[str] = set()
+    for declaration in declarations:
+        name = _declaration_base_name(declaration)
+        if name is None or name not in executable_names or name in seen:
+            continue
+        seen.add(name)
+        matches.append(name)
+    return matches
+
+
+def _safe_failure_frames(error: BaseException) -> list[dict[str, str | int]]:
+    """Return bounded traceback metadata without paths, source, or error text."""
+    return [
+        {
+            "file": Path(frame.filename).name[:128],
+            "function": frame.name[:128],
+            "line": frame.lineno,
+        }
+        for frame in traceback.extract_tb(error.__traceback__, limit=4)
+    ]
 
 
 class SkillsModule(BaseModule):
@@ -161,11 +221,16 @@ class SkillsModule(BaseModule):
                 lambda service: self._get_skill(service, args),
             )
         if tool_name == "skills.render":
-            return await self._run_with_service(
+            rendered = await self._run_with_service(
                 context,
                 tool_name,
                 lambda service: self._render_skill(service, args),
             )
+            rendered["catalog_matches"] = await self._resolve_catalog_matches(
+                rendered["declared_tools"],
+                context,
+            )
+            return rendered
         raise ValueError(f"Unknown tool: {tool_name}")
 
     def validate_tool_arguments(self, tool_name: str, arguments: dict[str, Any]) -> None:
@@ -289,27 +354,83 @@ class SkillsModule(BaseModule):
         ):
             raise SkillsMCPNotFoundError("skill_not_found")
 
-        result = await self._executor.execute(
-            skill_data,
-            args.get("arguments", ""),
-            context=None,
-            dry_run=True,
+        raw_declared_tools = skill_data.get("allowed_tools")
+        declared_tools = (
+            [
+                item.strip()
+                for item in raw_declared_tools
+                if isinstance(item, str) and item.strip()
+            ]
+            if isinstance(raw_declared_tools, list)
+            else []
         )
-        if len(result.rendered_prompt) > self._max_rendered_skill_chars:
+        rendered_prompt = self._executor.substitute_arguments(
+            skill_data.get("content", ""),
+            args.get("arguments", ""),
+        )
+        if len(rendered_prompt) > self._max_rendered_skill_chars:
             raise SkillsMCPRenderedTooLargeError(
                 f"rendered_skill_too_large: limit={self._max_rendered_skill_chars}"
             )
 
         return {
-            "skill_name": result.skill_name,
-            "rendered_prompt": result.rendered_prompt,
-            "declared_tools": list(result.allowed_tools),
-            "model_override": result.model_override,
-            "execution_mode": result.execution_mode,
+            "skill_name": skill_data.get("name", "unknown"),
+            "rendered_prompt": rendered_prompt,
+            "declared_tools": declared_tools,
+            "model_override": skill_data.get("model"),
+            "execution_mode": "fork"
+            if skill_data.get("context", "inline") == "fork"
+            else "inline",
             "supporting_files_omitted": bool(skill_data.get("supporting_files")),
             "dry_run": True,
             "version": skill_data.get("version"),
         }
+
+    async def _resolve_catalog_matches(
+        self,
+        declarations: list[str],
+        context: Any,
+    ) -> list[str] | None:
+        valid_declarations = [
+            declaration
+            for declaration in declarations
+            if _declaration_base_name(declaration) is not None
+        ]
+        if not valid_declarations:
+            return []
+        catalog_handler = self.config.tool_catalog_handler
+        if catalog_handler is None:
+            return None
+        try:
+            timeout_seconds = min(
+                float(self.config.timeout_seconds),
+                CATALOG_LOOKUP_TIMEOUT_CAP_SECONDS,
+            )
+            listing_task = asyncio.create_task(
+                catalog_handler({}, context)
+            )
+            try:
+                listing = await asyncio.wait_for(
+                    asyncio.shield(listing_task),
+                    timeout=timeout_seconds,
+                )
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                listing_task.cancel()
+                await asyncio.gather(listing_task, return_exceptions=True)
+                raise
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - advisory lookup fails closed
+            request_logger = getattr(context, "logger", logger)
+            request_logger.bind(
+                operation="skills.catalog_matches",
+                component="skills",
+                tool_name="skills.render",
+                error_type=exc.__class__.__name__,
+                failure_frames=_safe_failure_frames(exc),
+            ).warning("Skills catalog matching unavailable")
+            return None
+        return _catalog_matches_from_listing(valid_declarations, listing)
 
     @staticmethod
     def _format_metadata(metadata: SkillMetadata) -> dict[str, Any]:

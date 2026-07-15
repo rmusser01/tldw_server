@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from loguru import logger
@@ -24,7 +24,7 @@ from tldw_Server_API.app.core.MCP_unified.modules.implementations.skills_module 
 )
 from tldw_Server_API.app.core.MCP_unified.protocol_types import RequestContext
 from tldw_Server_API.app.core.Skills.exceptions import SkillNotFoundError
-from tldw_Server_API.app.core.Skills.skill_executor import SkillExecutionResult, SkillExecutor
+from tldw_Server_API.app.core.Skills.skill_executor import SkillExecutor
 from tldw_Server_API.app.core.Skills.skills_service import (
     SKILL_NAME_PATTERN,
     SkillMetadata,
@@ -32,6 +32,20 @@ from tldw_Server_API.app.core.Skills.skills_service import (
 )
 
 pytestmark = pytest.mark.unit
+
+
+async def _default_catalog_handler(
+    _arguments: dict[str, Any],
+    _context: Any,
+) -> dict[str, Any]:
+    return {"tools": [{"name": "rag.search", "canExecute": True}]}
+
+
+@pytest.fixture
+def catalog_handler() -> AsyncMock:
+    return AsyncMock(
+        return_value={"tools": [{"name": "rag.search", "canExecute": True}]}
+    )
 
 
 @dataclass
@@ -71,8 +85,18 @@ def user_catalogs(tmp_path: Path) -> dict[int, UserCatalog]:
         catalog.db.close_all_connections()
 
 
-async def _module(settings: dict[str, Any] | None = None) -> SkillsModule:
-    module = SkillsModule(ModuleConfig(name="skills", settings=settings or {}))
+async def _module(
+    settings: dict[str, Any] | None = None,
+    *,
+    tool_catalog_handler: Any = _default_catalog_handler,
+) -> SkillsModule:
+    module = SkillsModule(
+        ModuleConfig(
+            name="skills",
+            settings=settings or {},
+            tool_catalog_handler=tool_catalog_handler,
+        )
+    )
     await module.on_initialize()
     return module
 
@@ -238,6 +262,11 @@ async def test_settings_use_defaults_for_invalid_types_and_clamp_integers(
             "skills.render",
             {"skill_name": "valid", "arguments": "x" * 10_001},
             "arguments must be at most 10000 characters",
+        ),
+        (
+            "skills.render",
+            {"skill_name": "valid", "arguments": None},
+            "arguments must be a string",
         ),
         ("skills.render", {"skill_name": "valid", "arguments": 1}, "arguments must be a string"),
     ],
@@ -486,18 +515,12 @@ async def test_render_is_forced_dry_and_preserves_arguments(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     await _seed_review_skill(user_catalogs[1].service)
-    module = await _module()
-    execute = AsyncMock(
-        return_value=SkillExecutionResult(
-            skill_name="review-paper",
-            rendered_prompt="Review --formal /* literal */\nnext",
-            allowed_tools=["rag.search"],
-            model_override=None,
-            execution_mode="inline",
-            dry_run=True,
-        )
+    monkeypatch.setattr(
+        SkillExecutor,
+        "execute",
+        AsyncMock(side_effect=AssertionError("render must not call execute")),
     )
-    monkeypatch.setattr(module._executor, "execute", execute)
+    module = await _module()
 
     result = await module.execute_tool(
         "skills.render",
@@ -509,16 +532,436 @@ async def test_render_is_forced_dry_and_preserves_arguments(
         "skill_name": "review-paper",
         "rendered_prompt": "Review --formal /* literal */\nnext",
         "declared_tools": ["rag.search"],
+        "catalog_matches": ["rag.search"],
         "model_override": None,
         "execution_mode": "inline",
         "supporting_files_omitted": False,
         "dry_run": True,
         "version": 1,
     }
-    execute.assert_awaited_once()
-    call = execute.await_args
-    assert call.args[1] == "--formal /* literal */\nnext"
-    assert call.kwargs == {"context": None, "dry_run": True}
+
+
+@pytest.mark.asyncio
+async def test_render_uses_injected_catalog_handler(
+    user_catalogs: dict[int, UserCatalog],
+    catalog_handler: AsyncMock,
+) -> None:
+    await _seed_review_skill(user_catalogs[1].service)
+    used_injected_handler = asyncio.Event()
+
+    async def active_listing(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        used_injected_handler.set()
+        return {"tools": [{"name": "rag.search", "canExecute": True}]}
+
+    catalog_handler.side_effect = active_listing
+    module = await _module(tool_catalog_handler=catalog_handler)
+
+    result = await module.execute_tool(
+        "skills.render",
+        {"skill_name": "review-paper"},
+        context=user_catalogs[1].context,
+    )
+
+    assert used_injected_handler.is_set()
+    assert result["catalog_matches"] == ["rag.search"]
+
+
+@pytest.mark.asyncio
+async def test_render_matches_exact_catalog_and_preserves_declaration_order(
+    user_catalogs: dict[int, UserCatalog],
+    monkeypatch: pytest.MonkeyPatch,
+    catalog_handler: AsyncMock,
+) -> None:
+    await _seed_review_skill(user_catalogs[1].service)
+    original_get_skill = SkillsService.get_skill
+
+    async def declared_tools(
+        self: SkillsService,
+        name: str,
+        *,
+        enforce_integrity: bool = True,
+    ) -> dict[str, Any]:
+        skill = await original_get_skill(self, name, enforce_integrity=enforce_integrity)
+        skill["allowed_tools"] = [
+            " rag.search ",
+            "Bash(git *)",
+            "rag.search",
+            "Bash(",
+            "RAG.SEARCH",
+            "missing.tool",
+        ]
+        return skill
+
+    monkeypatch.setattr(SkillsService, "get_skill", declared_tools)
+    catalog_handler.return_value = {
+        "tools": [
+            {"name": "Bash", "canExecute": True},
+            {"name": "rag.search", "canExecute": True},
+            {"name": "missing.tool", "canExecute": False},
+            {"name": "undeclared.tool", "canExecute": True},
+            {"name": 7, "canExecute": True},
+            "malformed",
+        ]
+    }
+    module = await _module(tool_catalog_handler=catalog_handler)
+
+    result = await module.execute_tool(
+        "skills.render",
+        {"skill_name": "review-paper"},
+        context=user_catalogs[1].context,
+    )
+
+    assert result["catalog_matches"] == ["rag.search", "Bash"]
+    assert "undeclared.tool" not in result["catalog_matches"]
+    catalog_handler.assert_awaited_once_with({}, user_catalogs[1].context)
+
+
+@pytest.mark.asyncio
+async def test_catalog_matching_failure_preserves_successful_render(
+    user_catalogs: dict[int, UserCatalog],
+    catalog_handler: AsyncMock,
+) -> None:
+    await _seed_review_skill(user_catalogs[1].service)
+    catalog_handler.side_effect = RuntimeError("SENTINEL_PRIVATE_DETAIL")
+    request_logger = Mock()
+    warning_logger = Mock()
+    request_logger.bind.return_value = warning_logger
+    user_catalogs[1].context.logger = request_logger
+    module = await _module(tool_catalog_handler=catalog_handler)
+
+    result = await module.execute_tool(
+        "skills.render",
+        {"skill_name": "review-paper", "arguments": "issue 42"},
+        context=user_catalogs[1].context,
+    )
+
+    assert result["rendered_prompt"] == "Review issue 42"
+    assert result["catalog_matches"] is None
+    request_logger.bind.assert_called_once()
+    safe_context = request_logger.bind.call_args.kwargs
+    assert safe_context["operation"] == "skills.catalog_matches"
+    assert safe_context["component"] == "skills"
+    assert safe_context["tool_name"] == "skills.render"
+    assert safe_context["error_type"] == "RuntimeError"
+    assert safe_context["failure_frames"]
+    assert "SENTINEL_PRIVATE_DETAIL" not in str(safe_context)
+    warning_logger.warning.assert_called_once_with(
+        "Skills catalog matching unavailable"
+    )
+
+
+@pytest.mark.asyncio
+async def test_catalog_matching_without_injected_handler_fails_closed(
+    user_catalogs: dict[int, UserCatalog],
+) -> None:
+    await _seed_review_skill(user_catalogs[1].service)
+    module = await _module(tool_catalog_handler=None)
+
+    result = await module.execute_tool(
+        "skills.render",
+        {"skill_name": "review-paper", "arguments": "issue 42"},
+        context=user_catalogs[1].context,
+    )
+
+    assert result["rendered_prompt"] == "Review issue 42"
+    assert result["catalog_matches"] is None
+
+
+@pytest.mark.asyncio
+async def test_catalog_matching_timeout_preserves_render_and_drains_lookup(
+    user_catalogs: dict[int, UserCatalog],
+    catalog_handler: AsyncMock,
+) -> None:
+    await _seed_review_skill(user_catalogs[1].service)
+    started = asyncio.Event()
+    finished = asyncio.Event()
+
+    async def stalled_listing(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        started.set()
+        try:
+            await asyncio.Future()
+        finally:
+            finished.set()
+
+    catalog_handler.side_effect = stalled_listing
+    request_logger = Mock()
+    warning_logger = Mock()
+    request_logger.bind.return_value = warning_logger
+    user_catalogs[1].context.logger = request_logger
+    module = SkillsModule(
+        ModuleConfig(
+            name="skills",
+            settings={},
+            timeout_seconds=0.01,
+            tool_catalog_handler=catalog_handler,
+        )
+    )
+    await module.on_initialize()
+
+    result = await asyncio.wait_for(
+        module.execute_tool(
+            "skills.render",
+            {"skill_name": "review-paper", "arguments": "issue 42"},
+            context=user_catalogs[1].context,
+        ),
+        timeout=1.0,
+    )
+
+    assert started.is_set()
+    assert finished.is_set()
+    assert result["rendered_prompt"] == "Review issue 42"
+    assert result["catalog_matches"] is None
+    warning_logger.warning.assert_called_once_with(
+        "Skills catalog matching unavailable"
+    )
+
+
+@pytest.mark.parametrize("listing", [None, {}, {"tools": None}])
+@pytest.mark.asyncio
+async def test_catalog_matching_returns_none_for_malformed_envelope(
+    user_catalogs: dict[int, UserCatalog],
+    catalog_handler: AsyncMock,
+    listing: Any,
+) -> None:
+    await _seed_review_skill(user_catalogs[1].service)
+    catalog_handler.return_value = listing
+    module = await _module(tool_catalog_handler=catalog_handler)
+
+    result = await module.execute_tool(
+        "skills.render",
+        {"skill_name": "review-paper"},
+        context=user_catalogs[1].context,
+    )
+
+    assert result["catalog_matches"] is None
+
+
+@pytest.mark.asyncio
+async def test_catalog_matching_returns_partial_well_formed_matches(
+    user_catalogs: dict[int, UserCatalog],
+    catalog_handler: AsyncMock,
+) -> None:
+    await _seed_review_skill(user_catalogs[1].service)
+    catalog_handler.return_value = {
+        "tools": [{"name": "rag.search", "canExecute": True}]
+    }
+    module = await _module(tool_catalog_handler=catalog_handler)
+
+    result = await module.execute_tool(
+        "skills.render",
+        {"skill_name": "review-paper"},
+        context=user_catalogs[1].context,
+    )
+
+    assert result["catalog_matches"] == ["rag.search"]
+
+
+@pytest.mark.parametrize(
+    "descriptor",
+    [
+        {"name": "rag.search"},
+        {"name": "rag.search", "canExecute": None},
+        {"name": "rag.search", "canExecute": 1},
+        {"name": "rag.search", "canExecute": "true"},
+        {"canExecute": True},
+        {"name": None, "canExecute": True},
+        {"name": "   ", "canExecute": True},
+    ],
+)
+@pytest.mark.asyncio
+async def test_catalog_matching_rejects_non_executable_descriptors(
+    user_catalogs: dict[int, UserCatalog],
+    catalog_handler: AsyncMock,
+    descriptor: dict[str, Any],
+) -> None:
+    await _seed_review_skill(user_catalogs[1].service)
+    catalog_handler.return_value = {"tools": [descriptor]}
+    module = await _module(tool_catalog_handler=catalog_handler)
+
+    result = await module.execute_tool(
+        "skills.render",
+        {"skill_name": "review-paper"},
+        context=user_catalogs[1].context,
+    )
+
+    assert result["catalog_matches"] == []
+    catalog_handler.assert_awaited_once_with({}, user_catalogs[1].context)
+
+
+@pytest.mark.asyncio
+async def test_catalog_matching_does_not_require_python_311_task_api(
+    user_catalogs: dict[int, UserCatalog],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _seed_review_skill(user_catalogs[1].service)
+    module = await _module()
+
+    with monkeypatch.context() as compatibility:
+        compatibility.setattr(
+            skills_module.asyncio,
+            "current_task",
+            Mock(return_value=SimpleNamespace()),
+        )
+        result = await module.execute_tool(
+            "skills.render",
+            {"skill_name": "review-paper"},
+            context=user_catalogs[1].context,
+        )
+
+    assert result["catalog_matches"] == ["rag.search"]
+
+
+@pytest.mark.asyncio
+async def test_render_with_no_declarations_skips_catalog_lookup(
+    user_catalogs: dict[int, UserCatalog],
+    monkeypatch: pytest.MonkeyPatch,
+    catalog_handler: AsyncMock,
+) -> None:
+    await _seed_review_skill(user_catalogs[1].service)
+    original_get_skill = SkillsService.get_skill
+
+    async def no_declared_tools(
+        self: SkillsService,
+        name: str,
+        *,
+        enforce_integrity: bool = True,
+    ) -> dict[str, Any]:
+        skill = await original_get_skill(self, name, enforce_integrity=enforce_integrity)
+        skill["allowed_tools"] = []
+        return skill
+
+    monkeypatch.setattr(SkillsService, "get_skill", no_declared_tools)
+    module = await _module(tool_catalog_handler=catalog_handler)
+
+    result = await module.execute_tool(
+        "skills.render",
+        {"skill_name": "review-paper"},
+        context=user_catalogs[1].context,
+    )
+
+    assert result["catalog_matches"] == []
+    catalog_handler.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_render_with_only_malformed_declarations_skips_catalog_lookup(
+    user_catalogs: dict[int, UserCatalog],
+    monkeypatch: pytest.MonkeyPatch,
+    catalog_handler: AsyncMock,
+) -> None:
+    await _seed_review_skill(user_catalogs[1].service)
+    original_get_skill = SkillsService.get_skill
+
+    async def malformed_only_get_skill(
+        self: SkillsService,
+        name: str,
+        *,
+        enforce_integrity: bool = True,
+    ) -> dict[str, Any]:
+        skill = await original_get_skill(self, name, enforce_integrity=enforce_integrity)
+        skill["allowed_tools"] = ["Bash("]
+        return skill
+
+    monkeypatch.setattr(SkillsService, "get_skill", malformed_only_get_skill)
+    module = await _module(tool_catalog_handler=catalog_handler)
+
+    result = await module.execute_tool(
+        "skills.render",
+        {"skill_name": "review-paper"},
+        context=user_catalogs[1].context,
+    )
+
+    assert result["catalog_matches"] == []
+    catalog_handler.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_catalog_runs_after_database_close(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    catalog_handler: AsyncMock,
+) -> None:
+    TrackingDB.instances = []
+    ScenarioService.scenario = "render"
+    monkeypatch.setattr(skills_module, "CharactersRAGDB", TrackingDB)
+    monkeypatch.setattr(skills_module, "SkillsService", ScenarioService)
+    async def assert_database_closed(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        assert TrackingDB.instances[0].closed is True
+        return {"tools": [{"name": "rag.search", "canExecute": True}]}
+
+    catalog_handler.side_effect = assert_database_closed
+    module = await _module(tool_catalog_handler=catalog_handler)
+    context = RequestContext(
+        request_id="catalog-after-close",
+        user_id="1",
+        db_paths={"chacha": str(tmp_path / "ChaChaNotes.db")},
+    )
+
+    result = await module.execute_tool(
+        "skills.render",
+        {"skill_name": "review-paper"},
+        context=context,
+    )
+
+    assert result["catalog_matches"] == ["rag.search"]
+
+
+@pytest.mark.asyncio
+async def test_catalog_matching_propagates_suppressed_cancellation(
+    user_catalogs: dict[int, UserCatalog],
+    catalog_handler: AsyncMock,
+) -> None:
+    await _seed_review_skill(user_catalogs[1].service)
+    started = asyncio.Event()
+
+    async def suppress_cancellation(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        started.set()
+        try:
+            await asyncio.Future()
+        except asyncio.CancelledError:
+            return {"tools": []}
+
+    catalog_handler.side_effect = suppress_cancellation
+    module = await _module(tool_catalog_handler=catalog_handler)
+    task = asyncio.create_task(
+        module.execute_tool(
+            "skills.render",
+            {"skill_name": "review-paper"},
+            context=user_catalogs[1].context,
+        )
+    )
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+@pytest.mark.asyncio
+async def test_render_ignores_non_string_and_blank_parsed_declarations(
+    user_catalogs: dict[int, UserCatalog],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _seed_review_skill(user_catalogs[1].service)
+    original_get_skill = SkillsService.get_skill
+
+    async def legacy_get_skill(
+        self: SkillsService,
+        name: str,
+        *,
+        enforce_integrity: bool = True,
+    ) -> dict[str, Any]:
+        skill = await original_get_skill(self, name, enforce_integrity=enforce_integrity)
+        skill["allowed_tools"] = [" rag.search ", 7, None, " "]
+        return skill
+
+    monkeypatch.setattr(SkillsService, "get_skill", legacy_get_skill)
+    module = await _module()
+    result = await module.execute_tool(
+        "skills.render",
+        {"skill_name": "review-paper"},
+        context=user_catalogs[1].context,
+    )
+    assert result["declared_tools"] == ["rag.search"]
 
 
 @pytest.mark.asyncio
@@ -688,7 +1131,8 @@ async def test_render_rechecks_visibility_after_verified_load(
 
     monkeypatch.setattr(SkillsService, "get_skill", raced_get_skill)
     module = await _module()
-    monkeypatch.setattr(module._executor, "execute", AsyncMock())
+    substitute = Mock(wraps=module._executor.substitute_arguments)
+    monkeypatch.setattr(module._executor, "substitute_arguments", substitute)
 
     with pytest.raises(ValueError, match="^skill_not_found$"):
         await module.execute_tool(
@@ -696,7 +1140,7 @@ async def test_render_rechecks_visibility_after_verified_load(
             {"skill_name": "review-paper"},
             context=user_catalogs[1].context,
         )
-    module._executor.execute.assert_not_awaited()
+    substitute.assert_not_called()
 
 
 @pytest.mark.asyncio
