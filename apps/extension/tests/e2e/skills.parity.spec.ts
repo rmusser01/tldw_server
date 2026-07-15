@@ -2,13 +2,16 @@ import {
   expect,
   test,
   type BrowserContext,
+  type ConsoleMessage,
   type Page,
 } from "@playwright/test"
 import JSZip from "jszip"
 
 import {
+  forceSkillsConnectionState,
   mockPowerUserSkillsLibrary,
   mockSkillsBeginnerApi,
+  mockSkillsListRecovery,
   mockSkillsTrashWorkflow,
 } from "../../../tldw-frontend/e2e/utils/skills-fixtures"
 import { launchWithBuiltExtension } from "./utils/extension-build"
@@ -18,12 +21,22 @@ const SKILLS_PARITY_API_KEY = "skills-parity-test-key"
 const DEFAULT_VIEWPORT = { width: 1280, height: 900 }
 const COMPACT_VIEWPORT = { width: 390, height: 844 }
 const MAX_DIAGNOSTIC_LENGTH = 300
+const LIST_RECOVERY_ABSOLUTE_PATH = "/Users/skills-parity/private-list.log"
+const LIST_RECOVERY_RAW_BODY_MARKER = "RAW_SKILLS_LIST_503_BODY"
+const LIST_RECOVERY_503_CONSOLE_ERROR =
+  "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+const LIST_RECOVERY_REQUEST_URL =
+  `${SKILLS_PARITY_SERVER_URL}/api/v1/skills?limit=10&offset=0`
 
 type Diagnostics = {
   pageErrors: string[]
   consoleErrors: string[]
   requestFailures: string[]
   unexpectedApiRequests: string[]
+}
+
+type DiagnosticOptions = {
+  ignoreExpectedSkillsList503?: boolean
 }
 
 const boundDiagnostic = (value: unknown): string =>
@@ -47,7 +60,14 @@ const requestIdentifier = (method: string, rawUrl: string): string => {
   }
 }
 
-function captureDiagnostics(page: Page): Diagnostics {
+const isExpectedSkillsList503 = (message: ConsoleMessage): boolean =>
+  message.text() === LIST_RECOVERY_503_CONSOLE_ERROR
+  && message.location().url === LIST_RECOVERY_REQUEST_URL
+
+function captureDiagnostics(
+  page: Page,
+  options: DiagnosticOptions = {},
+): Diagnostics {
   const diagnostics: Diagnostics = {
     pageErrors: [],
     consoleErrors: [],
@@ -60,6 +80,10 @@ function captureDiagnostics(page: Page): Diagnostics {
   })
   page.on("console", (message) => {
     if (message.type() !== "error") return
+    if (
+      options.ignoreExpectedSkillsList503
+      && isExpectedSkillsList503(message)
+    ) return
     diagnostics.consoleErrors.push(boundDiagnostic(message.text()))
   })
   page.on("requestfailed", (request) => {
@@ -164,6 +188,7 @@ async function mockChatHandoffBootstrap(page: Page): Promise<void> {
 async function launchSkillsParity<TApi>(
   mockApi: (page: Page) => Promise<TApi>,
   viewport = DEFAULT_VIEWPORT,
+  diagnosticOptions: DiagnosticOptions = {},
 ): Promise<{
   api: TApi
   context: BrowserContext
@@ -188,7 +213,7 @@ async function launchSkillsParity<TApi>(
       prepareOptionsPage: async ({ context, page }) => {
         preparedContext = context
         await page.setViewportSize(viewport)
-        diagnostics = captureDiagnostics(page)
+        diagnostics = captureDiagnostics(page, diagnosticOptions)
         await installUnexpectedApiGuard(page, diagnostics)
         await installDirectRequestFallback(context)
         api = await mockApi(page)
@@ -669,6 +694,127 @@ test.describe("Skills parity (extension)", () => {
       expect(diagnostics.requestFailures).toEqual([])
       expect(diagnostics.unexpectedApiRequests).toEqual([])
     } finally {
+      await extensionContext?.close()
+    }
+  })
+
+  test("covers list retry and unreachable recovery", async () => {
+    test.setTimeout(120_000)
+
+    let extensionContext: BrowserContext | undefined
+    let releaseFirst: (() => void) | undefined
+
+    try {
+      const launch = await launchSkillsParity(
+        mockSkillsListRecovery,
+        DEFAULT_VIEWPORT,
+        { ignoreExpectedSkillsList503: true },
+      )
+      extensionContext = launch.context
+
+      const { api, diagnostics, page } = launch
+      releaseFirst = api.releaseFirst
+      const loadingStatus = page.getByRole("status").filter({
+        hasText: /^Loading skills$/,
+      })
+
+      await expect.poll(api.listRequestCount).toBe(1)
+      await expect(loadingStatus).toBeVisible()
+      expect(api.listRequestCount()).toBe(1)
+
+      releaseFirst()
+
+      await expect.poll(api.listRequestCount).toBe(2)
+      expect(api.listRequestCount()).toBe(2)
+
+      const listRecovery = page.getByTestId("skills-list-recovery-state")
+      const recoveryTitle = listRecovery.getByRole("heading", {
+        name: "Failed to load skills",
+        exact: true,
+      })
+      const recoveryMessage = listRecovery.getByText(
+        "The Skills list could not be loaded. Try again or open diagnostics.",
+        { exact: true },
+      )
+      const tryAgain = listRecovery.getByRole("button", {
+        name: "Try again",
+        exact: true,
+      })
+
+      await expect(listRecovery).toHaveAttribute("role", "alert")
+      await expect(recoveryTitle).toBeVisible()
+      await expect(recoveryMessage).toBeVisible()
+      await expect(tryAgain).toBeVisible()
+
+      const primaryCopy = [
+        await recoveryTitle.textContent(),
+        await recoveryMessage.textContent(),
+      ].join(" ")
+      expect(primaryCopy).not.toContain(SKILLS_PARITY_API_KEY)
+      expect(primaryCopy).not.toContain(LIST_RECOVERY_ABSOLUTE_PATH)
+      expect(primaryCopy).not.toMatch(/\/Users\//)
+      expect(primaryCopy).not.toContain(LIST_RECOVERY_RAW_BODY_MARKER)
+
+      await listRecovery.getByText("Diagnostics", { exact: true }).click()
+      const renderedDiagnostics = listRecovery.getByLabel("Diagnostics", {
+        exact: true,
+      })
+      await expect(renderedDiagnostics).toBeVisible()
+      await expect(renderedDiagnostics).toContainText(
+        "api_key=[redacted-secret]",
+      )
+      await expect(renderedDiagnostics).toContainText("[redacted-path]")
+      const renderedDiagnosticText = await renderedDiagnostics.textContent()
+      expect(renderedDiagnosticText).not.toContain(SKILLS_PARITY_API_KEY)
+      expect(renderedDiagnosticText).not.toContain(LIST_RECOVERY_ABSOLUTE_PATH)
+      expect(renderedDiagnosticText).not.toMatch(/\/Users\//)
+      expect(renderedDiagnosticText).not.toContain(LIST_RECOVERY_RAW_BODY_MARKER)
+
+      await tryAgain.click()
+
+      await expect.poll(api.listRequestCount).toBe(3)
+      expect(api.listRequestCount()).toBe(3)
+      await expect(
+        page.getByRole("row", {
+          name: /summarize.*Summarize source material/i,
+        }),
+      ).toBeVisible()
+      expect(api.listRequestCount()).toBe(3)
+
+      await forceSkillsConnectionState(page, "unreachable")
+
+      await expect(
+        page.getByRole("heading", {
+          name: "Can't reach your tldw server right now.",
+          exact: true,
+        }),
+      ).toBeVisible()
+      await expect(
+        page.getByRole("button", {
+          name: "Health & diagnostics",
+          exact: true,
+        }),
+      ).toBeVisible()
+      await expect(
+        page.getByRole("button", { name: "Open Settings", exact: true }),
+      ).toBeVisible()
+      await expect(
+        page.getByRole("button", { name: "New Skill", exact: true }),
+      ).toHaveCount(0)
+      await expect(
+        page.getByRole("button", { name: "Seed Built-ins", exact: true }),
+      ).toHaveCount(0)
+      await expect(
+        page.getByRole("button", { name: "Import", exact: true }),
+      ).toHaveCount(0)
+      expect(api.listRequestCount()).toBe(3)
+
+      expect(diagnostics.pageErrors).toEqual([])
+      expect(diagnostics.consoleErrors).toEqual([])
+      expect(diagnostics.requestFailures).toEqual([])
+      expect(diagnostics.unexpectedApiRequests).toEqual([])
+    } finally {
+      releaseFirst?.()
       await extensionContext?.close()
     }
   })

@@ -644,7 +644,74 @@ export async function mockSkillsSlowList(page: Page) {
   }
 }
 
-export async function forceSkillsConnectionState(page: Page) {
+export async function mockSkillsListRecovery(page: Page) {
+  let releaseFirst: () => void = () => {}
+  const firstRequestReleased = new Promise<void>((resolve) => {
+    releaseFirst = resolve
+  })
+  let listRequests = 0
+
+  await mockSkillsCapabilityRoutes(page)
+
+  await page.route(/\/api\/v1\/skills(?:\/)?(?:\?.*)?$/, async (route) => {
+    if (route.request().method() !== "GET") {
+      await fulfillJson(route, {}, 405)
+      return
+    }
+
+    listRequests += 1
+    if (listRequests === 1) {
+      await firstRequestReleased
+    }
+
+    if (listRequests <= 2) {
+      const apiKey = route.request().headers()["x-api-key"]
+      if (!apiKey) {
+        throw new Error("Expected the Skills list request to include x-api-key")
+      }
+      await fulfillJson(
+        route,
+        {
+          detail:
+            `api_key=${apiKey} path=/Users/skills-parity/private-list.log\n`
+            + "RAW_SKILLS_LIST_503_BODY",
+        },
+        503,
+      )
+      return
+    }
+
+    if (listRequests === 3) {
+      await fulfillJson(route, {
+        skills: [seededSkillSummary],
+        count: 1,
+        total: 1,
+        limit: 10,
+        offset: 0,
+      })
+      return
+    }
+
+    await fulfillJson(route, { detail: "Unexpected Skills list request" }, 500)
+  })
+
+  await page.route(/\/api\/v1\/skills\/context(?:\/)?(?:\?.*)?$/, async (route) => {
+    await fulfillJson(route, {
+      available_skills: [seededSkillSummary],
+      context_text: "/skill summarize [text]",
+    })
+  })
+
+  return {
+    releaseFirst,
+    listRequestCount: () => listRequests,
+  }
+}
+
+export async function forceSkillsConnectionState(
+  page: Page,
+  state: "connected" | "unreachable" = "connected",
+) {
   await page.waitForFunction(
     () =>
       typeof (window as TldwConnectionStoreWindow).__tldw_useConnectionStore
@@ -652,10 +719,24 @@ export async function forceSkillsConnectionState(page: Page) {
     null,
     { timeout: 15_000 }
   )
-  await page.evaluate(() => {
+  await page.evaluate((targetState) => {
     const store = (window as TldwConnectionStoreWindow).__tldw_useConnectionStore
     if (!store) throw new Error("Connection store is unavailable")
     const prev = store.getState().state
+
+    if (targetState === "unreachable") {
+      store.setState({
+        state: {
+          ...prev,
+          phase: "error",
+          isConnected: false,
+          isChecking: false,
+          errorKind: "unreachable",
+        },
+      })
+      return
+    }
+
     const now = Date.now()
     store.setState({
       state: {
@@ -675,5 +756,5 @@ export async function forceSkillsConnectionState(page: Page) {
         hasCompletedFirstRun: true,
       },
     })
-  })
+  }, state)
 }
