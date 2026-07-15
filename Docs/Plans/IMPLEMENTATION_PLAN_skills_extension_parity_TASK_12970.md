@@ -340,7 +340,7 @@ The strict browser diagnostics reproduced the options entrypoint's inline theme 
 
 **Tests:** Add and run each test separately before running the full file.
 
-**Status:** In Progress
+**Status:** Complete
 
 **Files:**
 - Modify: `apps/extension/tests/e2e/skills.parity.spec.ts`
@@ -382,7 +382,7 @@ The strict browser diagnostics reproduced the options entrypoint's inline theme 
 
   Expected RED: missing recovery fixture. After implementation, expected GREEN with request count exactly three and no broad diagnostic exclusions.
 
-- [ ] **Step 4: Add and run the session draft test**
+- [x] **Step 4: Add and run the session draft test**
 
   Use a new unseeded beginner fixture context. Capture the initial built-in template baseline, enter a unique valid name and instructions, reload the same `options.html#/skills` tab, reopen New Skill, assert the recovery alert and both values, click `Discard recovered draft`, close/reopen, and assert the initial template baseline is restored with no recovery alert. Do not require empty fields where the authoring flow intentionally provides template defaults.
 
@@ -394,7 +394,7 @@ The strict browser diagnostics reproduced the options entrypoint's inline theme 
 
   Expected: PASS, proving the context init script preserved deterministic routing across reload.
 
-- [ ] **Step 5: Run all six tests together**
+- [x] **Step 5: Run all six tests together**
 
   ```bash
   TLDW_E2E_SERVER_URL=http://skills-parity.invalid \
@@ -404,7 +404,7 @@ The strict browser diagnostics reproduced the options entrypoint's inline theme 
 
   Expected: 6 passed, 0 failed, 0 skipped. Do not loosen assertions to mask a product defect. For any reproduced product defect, add one narrow failing unit/integration test at the owning boundary, apply the minimal fix, rerun that test, then rerun this six-test contract.
 
-- [ ] **Step 6: Commit Stage 4**
+- [x] **Step 6: Commit Stage 4**
 
   ```bash
   git diff --check
@@ -423,7 +423,7 @@ The strict browser diagnostics reproduced the options entrypoint's inline theme 
 
 **Tests:** Package scripts plus full affected-scope verification.
 
-**Status:** Not Started
+**Status:** In Progress
 
 **Files:**
 - Modify: `apps/extension/package.json`
