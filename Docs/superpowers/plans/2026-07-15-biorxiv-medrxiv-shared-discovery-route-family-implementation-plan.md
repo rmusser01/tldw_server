@@ -208,7 +208,7 @@ python -m pytest -q \
 
 **Tests:** Typed planner behavior in `test_research_discovery_planner.py`, cursor/accounting behavior in `test_research_discovery_executor.py`, and foundation-byte compatibility.
 
-**Status:** In Progress
+**Status:** Complete
 
 ### Files
 
@@ -283,6 +283,15 @@ python -m pytest -q \
 
 `feat(research): add typed discovery query planning`
 
+### Completion evidence
+
+- Implementation: `293ef476d0540fd4fa2d10b64e7dba50fcded57d`
+- Review hardening: `794fb20b255c735fd1eb56be561feee056939066`
+- Focused final suite: 702 passed with four pre-existing warnings.
+- The unchanged foundation oracle retained its exact plan digest, canonical-byte SHA-256/length, and eight route-policy digests.
+- Compileall, Ruff, Black, diff hygiene, and Bandit passed; Bandit reported zero findings.
+- Independent specification review and post-fix code-quality review approved Stage 2 with no open Critical or Important findings.
+
 ## Task 3 / Stage 3: Build the Shadow Family and Europe PMC General Discovery
 
 **Goal:** Add the two stable catalog targets and source-constrained one-page general search without affecting the eight-source foundation.
@@ -291,7 +300,7 @@ python -m pytest -q \
 
 **Tests:** New focused family suite plus foundation registry/compatibility checks.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ### Files
 
