@@ -62,6 +62,7 @@ class _OwnerCollectionsDB:
         self.discard_calls: list[int] = []
         self.create_error: Exception | None = None
         self.create_commit_then_error_once: Exception | None = None
+        self.run_lookup_error: Exception | None = None
         self.resolve_error: Exception | None = None
         self.get_error: Exception | None = None
         self.restore_error: Exception | None = None
@@ -70,12 +71,17 @@ class _OwnerCollectionsDB:
         self.resolve_commit_then_error_once: Exception | None = None
         self.items: dict[int, SimpleNamespace] = {}
         self.last_collection = None
+        self.collections: list[SimpleNamespace] = []
 
     def create_media_collection_with_items(self, **kwargs):
         self.create_calls.append(kwargs)
         if self.create_error is not None:
             raise self.create_error
-        items = [SimpleNamespace(id=701 + index, ordinal=item["ordinal"]) for index, item in enumerate(kwargs["items"])]
+        collection_id = 700 + (100 * (len(self.create_calls) - 1))
+        items = [
+            SimpleNamespace(id=collection_id + 1 + index, ordinal=item["ordinal"])
+            for index, item in enumerate(kwargs["items"])
+        ]
         self.items = {
             item.id: SimpleNamespace(
                 id=item.id,
@@ -88,17 +94,31 @@ class _OwnerCollectionsDB:
             )
             for item in items
         }
-        self.last_collection = SimpleNamespace(id=700, items=items)
+        self.last_collection = SimpleNamespace(
+            id=collection_id,
+            items=items,
+            metadata=dict(kwargs.get("metadata") or {}),
+        )
+        self.collections.append(self.last_collection)
         if self.create_commit_then_error_once is not None:
             error = self.create_commit_then_error_once
             self.create_commit_then_error_once = None
             raise error
         return self.last_collection
 
-    def get_playlist_ingest_collection_for_run(self, _run_id):
-        if self.last_collection is None:
+    def get_playlist_ingest_collection_for_run(self, run_id):
+        if self.run_lookup_error is not None:
+            raise self.run_lookup_error
+        matches = [
+            collection
+            for collection in self.collections
+            if collection.metadata.get("playlist_ingest_run_id") == run_id
+        ]
+        if not matches:
             raise KeyError("media_collection_not_found")
-        return self.last_collection
+        if len(matches) != 1:
+            raise RuntimeError("playlist_ingest_collection_marker_ambiguous")
+        return matches[0]
 
     def resolve_media_collection_item(self, item_id, **kwargs):
         self.resolve_calls.append({"item_id": item_id, **kwargs})
@@ -525,6 +545,73 @@ def test_create_run_recovers_expired_initializer_from_persisted_manifest_without
     assert recovered.run_id == abandoned.run_id
     assert recovered.initialization_token is None
     assert media_db.lookup_calls == []
+
+
+def test_create_run_recovers_committed_unattached_collection_without_creating_another(service_context):
+    service, store, _manager, _media_db = service_context
+    from tldw_Server_API.app.api.v1.schemas.media_playlist_ingest import PlaylistIngestRunCreateRequest
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
+        _request_fingerprint,
+    )
+
+    request = PlaylistIngestRunCreateRequest.model_validate(
+        {
+            "client_request_id": "abandoned-collection-plan",
+            "inputs": [_direct_input("occ-abandoned-plan", "https://example.com/abandoned-plan")],
+            "review_overrides": {},
+            "new_collection": {"name": "Recovered collection"},
+        }
+    )
+    abandoned = store.create_validated_run(
+        "owner-1",
+        items=[_validated_direct_manifest("occ-abandoned-plan", "https://example.com/abandoned-plan")],
+        client_request_id=request.client_request_id,
+        request_fingerprint=_request_fingerprint(request),
+        initialization_token="abandoned-plan-token",
+        initialization_lease_seconds=5,
+    )
+    collections_db = service.test_collections_db
+    committed = collections_db.create_media_collection_with_items(
+        name=request.new_collection.name,
+        kind="playlist_ingest",
+        metadata={"playlist_ingest_run_id": abandoned.run_id},
+        items=[{"source_url": "https://example.com/abandoned-plan", "ordinal": 1}],
+    )
+    store.test_clock.advance(timedelta(seconds=6))
+
+    recovered = service.create_run(
+        "owner-1",
+        client_request_id=request.client_request_id,
+        inputs=request.inputs,
+        review_overrides=request.review_overrides,
+        new_collection=request.new_collection,
+    )
+
+    assert recovered.run_id == abandoned.run_id
+    assert recovered.collection_id == committed.id
+    assert len(collections_db.create_calls) == 1
+    assert len(collections_db.collections) == 1
+
+
+def test_create_run_ambiguous_collection_lookup_fails_closed_without_creating(service_context):
+    service, _store, _manager, _media_db = service_context
+    collections_db = service.test_collections_db
+    collections_db.run_lookup_error = RuntimeError("private duplicate marker detail")
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
+        PlaylistRunValidationError,
+    )
+
+    with pytest.raises(PlaylistRunValidationError) as exc_info:
+        service.create_run(
+            "owner-1",
+            inputs=[_direct_input("occ-ambiguous-plan", "https://example.com/ambiguous-plan")],
+            review_overrides={},
+            new_collection={"name": "Must not create"},
+        )
+
+    assert str(exc_info.value) == "collection_planning_reconciliation_failed"
+    assert collections_db.create_calls == []
 
 
 def test_create_run_concurrent_replay_has_one_initializer(service_context, monkeypatch):

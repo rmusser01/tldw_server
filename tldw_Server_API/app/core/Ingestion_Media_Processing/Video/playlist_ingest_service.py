@@ -1360,23 +1360,30 @@ class PlaylistIngestService:
         )
         created_new = False
         try:
-            collection = collections_db.create_media_collection_with_items(
-                name=collection_request.name,
-                kind="playlist_ingest",
-                description=collection_request.description,
-                source_url=collection_request.source_url,
-                metadata={"playlist_ingest_run_id": run_id},
-                default_tags=collection_request.default_tags,
-                items=planned_items,
-            )
-            created_new = True
-        except Exception as exc:  # noqa: BLE001 - reconcile a possible commit before deciding
+            collection = collections_db.get_playlist_ingest_collection_for_run(run_id)
+        except KeyError:
             try:
-                collection = collections_db.get_playlist_ingest_collection_for_run(run_id)
-            except KeyError:
-                raise PlaylistRunValidationError("collection_planning_failed") from exc
-            except Exception as reconciliation_exc:
-                raise PlaylistRunValidationError("collection_planning_reconciliation_failed") from reconciliation_exc
+                collection = collections_db.create_media_collection_with_items(
+                    name=collection_request.name,
+                    kind="playlist_ingest",
+                    description=collection_request.description,
+                    source_url=collection_request.source_url,
+                    metadata={"playlist_ingest_run_id": run_id},
+                    default_tags=collection_request.default_tags,
+                    items=planned_items,
+                )
+                created_new = True
+            except Exception as exc:  # noqa: BLE001 - reconcile a possible commit before deciding
+                try:
+                    collection = collections_db.get_playlist_ingest_collection_for_run(run_id)
+                except KeyError:
+                    raise PlaylistRunValidationError("collection_planning_failed") from exc
+                except Exception as reconciliation_exc:
+                    raise PlaylistRunValidationError(
+                        "collection_planning_reconciliation_failed"
+                    ) from reconciliation_exc
+        except Exception as reconciliation_exc:
+            raise PlaylistRunValidationError("collection_planning_reconciliation_failed") from reconciliation_exc
 
         collection_items = list(collection.items)
         collection_item_ids = [int(item.id) for item in collection_items]

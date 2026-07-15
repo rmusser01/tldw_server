@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.config import settings
+from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 
 pytestmark = pytest.mark.unit
@@ -304,6 +305,30 @@ def test_playlist_collection_can_be_reconciled_by_internal_run_marker(
 
     assert reconciled.id == created.id
     assert [item.id for item in reconciled.items] == [created.items[0].id]
+
+
+def test_playlist_collection_reconciliation_reports_missing_marker_as_not_found(
+    collections_db: CollectionsDatabase,
+) -> None:
+    with pytest.raises(KeyError, match="media_collection_not_found"):
+        collections_db.get_playlist_ingest_collection_for_run("missing-run")
+
+
+def test_playlist_collection_reconciliation_rejects_ambiguous_exact_markers(
+    collections_db: CollectionsDatabase,
+) -> None:
+    for name in ("First plan", "Second plan"):
+        collections_db.create_media_collection_with_items(
+            name=name,
+            kind="playlist_ingest",
+            metadata={"playlist_ingest_run_id": "duplicate-run"},
+            items=[{"source_url": "https://example.com/one", "ordinal": 1}],
+        )
+
+    with pytest.raises(DatabaseError) as exc_info:
+        collections_db.get_playlist_ingest_collection_for_run("duplicate-run")
+
+    assert str(exc_info.value) == "playlist_ingest_collection_marker_ambiguous"
 
 
 def test_create_media_collection_with_items_rolls_back_collection_and_memberships(

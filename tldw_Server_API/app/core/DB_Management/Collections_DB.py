@@ -3421,8 +3421,10 @@ class CollectionsDatabase:
             for row in rows
             if self._json_loads_dict(row.get("metadata_json")).get("playlist_ingest_run_id") == marker
         ]
-        if len(rows) != 1:
+        if not rows:
             raise KeyError("media_collection_not_found")
+        if len(rows) != 1:
+            raise DatabaseError("playlist_ingest_collection_marker_ambiguous")
         return self._row_to_media_collection(rows[0])
 
     def discard_media_collection(
