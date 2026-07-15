@@ -34,7 +34,7 @@
 
 **Tests:** Focused Vitest coverage in `extension-build.test.ts` fails first and then passes.
 
-**Status:** Not Started
+**Status:** In Progress
 
 **Files:**
 - Modify: `apps/extension/tests/e2e/utils/extension-build.test.ts`

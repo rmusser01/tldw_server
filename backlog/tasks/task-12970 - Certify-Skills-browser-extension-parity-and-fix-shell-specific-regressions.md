@@ -38,7 +38,9 @@ Exercise the merged /skills beginner, power-user, accessibility, responsive, per
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-The five-stage TDD implementation plan passed independent plan review with no blocking issues. The accepted advisory now requires explicit empty assertions for page errors, console errors, request failures, and unexpected API requests. The advisory to retain a deleted plan link was not adopted because repository guidance requires removing completed task plans; the link will be removed with the file during finalization.
+The five-stage TDD implementation plan passed independent plan review with no blocking issues. The accepted advisory requires explicit empty assertions for page errors, console errors, request failures, and unexpected API requests. The advisory to retain a deleted plan link was not adopted because repository guidance requires removing completed task plans; the link will be removed with the file during finalization.
+
+2026-07-15: Stage 1 started. Implementing the pre-navigation options-page preparation hook and targeted initial route in the built-extension launcher.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
