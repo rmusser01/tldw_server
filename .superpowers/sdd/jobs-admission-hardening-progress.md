@@ -6,5 +6,5 @@ Execution base: `7c7d591c6e3552ca4bdbf30bdd6bf79460221ece`
 
 Task 1: complete (commit b2a281c067, review approved; focused 4 passed with real PostgreSQL; Bandit 0 findings)
 Task 2: complete (commit 3eff8eb8c6, review approved; 16 passed with real PostgreSQL; Bandit 0 findings)
-Task 3: in progress
-Task 4: pending
+Task 3: complete (commit 41d603526c, review approved; 17 passed with real PostgreSQL; Bandit 0 findings)
+Task 4: in progress

@@ -421,7 +421,7 @@ git commit -m "fix(jobs): isolate optional postgres counter updates"
 - Consumes: `_quota_rejection(...) -> AdmissionResult | None`.
 - Produces: the same return type for successful queries; database errors propagate and roll back the admission transaction.
 
-- [ ] **Step 1: Add focused error-policy tests**
+- [x] **Step 1: Add focused error-policy tests**
 
 For PostgreSQL, call `_quota_rejection` with a cursor whose `execute` raises `psycopg.ProgrammingError("quota read failed")` and assert that exact error propagates. For SQLite, wrap a connection whose `execute` raises `sqlite3.OperationalError("quota read failed")` for the quota `SELECT` and assert propagation from `create_job_admission`; then assert no job row exists.
 
@@ -444,11 +444,11 @@ with pytest.raises(psycopg.ProgrammingError, match="quota read failed"):
     )
 ```
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Expected before the fix: PostgreSQL `_quota_rejection` returns `None` instead of raising; SQLite continues toward insertion instead of preserving a fail-closed boundary.
 
-- [ ] **Step 3: Remove fail-open exception suppression**
+- [x] **Step 3: Remove fail-open exception suppression**
 
 Keep the existing quota SQL and rejection messages, but remove the outer `try/except` blocks from both `_quota_rejection` implementations. Preserve these exact branches:
 
@@ -459,7 +459,7 @@ Keep the existing quota SQL and rejection messages, but remove the outer `try/ex
 
 Do not convert database failures into `AdmissionResult.rejected(QUOTA_EXCEEDED)`: a backend failure is not evidence that the user exceeded quota. Propagation provides fail-closed behavior without presenting a false policy result.
 
-- [ ] **Step 4: Verify quota errors and ordinary quota rejection**
+- [x] **Step 4: Verify quota errors and ordinary quota rejection**
 
 ```bash
 RUN_JOBS=1 python -m pytest \
@@ -472,7 +472,7 @@ RUN_JOBS=1 python -m pytest \
 
 Expected: all selected tests pass and PostgreSQL tests are executed.
 
-- [ ] **Step 5: Commit Task 3**
+- [x] **Step 5: Commit Task 3**
 
 ```bash
 git add tldw_Server_API/app/core/Jobs/operations/postgres/admission.py \
