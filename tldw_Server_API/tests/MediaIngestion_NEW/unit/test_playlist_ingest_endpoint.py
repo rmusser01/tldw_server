@@ -1085,6 +1085,58 @@ def test_run_occurrence_cancel_terminalizes_unsent_and_cancels_accepted_job(
     assert repeated.json()["version"] == response.json()["version"]
 
 
+def test_run_reconciliation_retries_transient_job_cancellation_failure(
+    preflight_api,
+    monkeypatch,
+):
+    client, manager, _clock, _owner = preflight_api
+    _install_endpoint_media_db(monkeypatch)
+    created = _create_run(client, "occ-retry-cancel")
+    submitted = _submit_run_occurrences(client, created["run_id"], "occ-retry-cancel")
+    job_id = int(submitted["submissions"][0]["job_id"])
+    original_cancel_job = manager.cancel_job
+    attempts: list[tuple[int, str | None]] = []
+
+    def transient_cancel_failure(cancel_job_id: int, *, reason: str | None = None) -> bool:
+        attempts.append((cancel_job_id, reason))
+        if len(attempts) <= 2:
+            raise RuntimeError("transient Jobs write failure")
+        return original_cancel_job(cancel_job_id, reason=reason)
+
+    monkeypatch.setattr(manager, "cancel_job", transient_cancel_failure)
+
+    response = client.post(
+        f"{created['status_url']}/cancel",
+        json={"occurrence_ids": ["occ-retry-cancel"], "reason": "user_removed"},
+    )
+
+    assert response.status_code == 200, response.text
+    with manager._connect() as connection:
+        row = connection.execute(
+            """
+            SELECT state, outcome FROM media_ingest_run_items
+            WHERE owner_user_id = ? AND run_id = ? AND occurrence_id = ?
+            """,
+            ("1", created["run_id"], "occ-retry-cancel"),
+        ).fetchone()
+    assert tuple(row) == ("cancellation_requested", None)
+    assert manager.get_job(job_id)["status"] == "queued"
+    assert attempts == [
+        (job_id, "user_removed"),
+        (job_id, "playlist_run_cancellation_retry"),
+    ]
+
+    summary = client.get(created["status_url"])
+
+    assert summary.status_code == 200, summary.text
+    assert attempts[-1] == (job_id, "playlist_run_cancellation_retry")
+    assert len(attempts) == 3
+    assert manager.get_job(job_id)["status"] == "cancelled"
+    item = client.get(created["items_url"]).json()["items"][0]
+    assert item["state"] == "terminal"
+    assert item["outcome"] == "cancelled"
+
+
 def test_run_cancel_does_not_cancel_job_with_mismatched_payload_binding(
     preflight_api,
     monkeypatch,

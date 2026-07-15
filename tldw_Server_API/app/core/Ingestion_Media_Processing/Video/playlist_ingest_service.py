@@ -1100,6 +1100,39 @@ class PlaylistIngestService:
             except Exception:  # noqa: BLE001 - a temporary status read failure is recoverable
                 job = None
                 binding = None
+            if binding is not None and isinstance(job, Mapping):
+                job_status = str(binding.get("status") or "").lower()
+                if item.state == "cancellation_requested" and job_status in {"queued", "processing"}:
+                    try:
+                        self._jobs.cancel_job(
+                            int(item.job_id),
+                            reason="playlist_run_cancellation_retry",
+                        )
+                    except Exception:  # noqa: BLE001 - the durable request is retried on later reconciliation
+                        logger.warning(
+                            "Playlist occurrence cancellation retry failed for run {} item {}",
+                            run.run_id,
+                            item.occurrence_id,
+                        )
+                    try:
+                        refreshed_job = self._jobs.get_job_or_archived(
+                            int(item.job_id),
+                            domain="media_ingest",
+                        )
+                        job = refreshed_job
+                        binding = self._exact_run_item_job_binding(
+                            owner,
+                            run.run_id,
+                            item,
+                            refreshed_job,
+                            expected_job_id=int(item.job_id),
+                        )
+                    except Exception:  # noqa: BLE001 - preserve the durable cancellation request on read failure
+                        logger.warning(
+                            "Playlist occurrence cancellation retry could not refresh run {} item {}",
+                            run.run_id,
+                            item.occurrence_id,
+                        )
             progress_percent = None
             progress_message = None
             media_id = None
