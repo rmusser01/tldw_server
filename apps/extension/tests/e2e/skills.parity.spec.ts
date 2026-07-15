@@ -200,7 +200,7 @@ test.describe("Skills parity (extension)", () => {
         exact: true,
       }).click()
 
-      expect(api?.seedRequests).toHaveLength(1)
+      await expect.poll(() => api?.seedRequests.length ?? 0).toBe(1)
       expect(api?.seedRequests[0]?.searchParams.get("overwrite")).toBe("false")
 
       const successConfirmation = page.getByRole("status").filter({
