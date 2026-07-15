@@ -57,6 +57,14 @@ async function mockSkillsCapabilityRoutes(page: Page) {
     await fulfillJson(route, { status: "healthy" })
   })
 
+  await page.route(/\/api\/v1\/health\/live(?:\?.*)?$/, async (route) => {
+    await fulfillJson(route, { status: "healthy" })
+  })
+
+  await page.route(/\/api\/v1\/rag\/health(?:\?.*)?$/, async (route) => {
+    await fulfillJson(route, { status: "healthy" })
+  })
+
   await page.route(/\/openapi\.json(?:\?.*)?$/, async (route) => {
     await fulfillJson(route, {
       openapi: "3.0.0",
@@ -83,6 +91,7 @@ export async function mockSkillsBeginnerApi(
   options: { seeded?: boolean } = {}
 ) {
   let seeded = Boolean(options.seeded)
+  const seedRequests: URL[] = []
   const executeRequests: Array<{ args?: string; dry_run?: boolean }> = []
 
   await mockSkillsCapabilityRoutes(page)
@@ -117,6 +126,7 @@ export async function mockSkillsBeginnerApi(
   })
 
   await page.route(/\/api\/v1\/skills\/seed(?:\/)?(?:\?.*)?$/, async (route) => {
+    seedRequests.push(new URL(route.request().url()))
     if (route.request().method() !== "POST") {
       await fulfillJson(route, {}, 405)
       return
@@ -154,7 +164,7 @@ export async function mockSkillsBeginnerApi(
     }
   )
 
-  return { executeRequests }
+  return { executeRequests, seedRequests }
 }
 
 export async function mockSkillsTrashWorkflow(page: Page) {

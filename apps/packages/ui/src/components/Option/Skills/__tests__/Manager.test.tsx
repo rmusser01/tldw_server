@@ -884,6 +884,7 @@ describe("SkillsManager imports", () => {
     })
     renderManager()
 
+    expect(await screen.findByText("1 skill")).toBeInTheDocument()
     expect(await screen.findByRole("button", { name: "View skill-1" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Use skill-1 in chat" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Copy invocation for skill-1" })).toBeInTheDocument()
@@ -908,6 +909,7 @@ describe("SkillsManager imports", () => {
     })
     renderManager()
 
+    expect(await screen.findByText("1 skill")).toBeInTheDocument()
     fireEvent.click(await screen.findByRole("button", { name: "Use skill-1 in chat" }))
 
     expect(setSelectedQuickPromptMock).toHaveBeenCalledWith("/skill skill-1")
@@ -924,6 +926,7 @@ describe("SkillsManager imports", () => {
     })
     renderManager()
 
+    expect(await screen.findByText("1 skill")).toBeInTheDocument()
     fireEvent.click(await screen.findByRole("button", { name: "View skill-1" }))
 
     expect(screen.getByTestId("skill-details-open")).toHaveTextContent("skill-1")
@@ -939,6 +942,7 @@ describe("SkillsManager imports", () => {
     })
     renderManager()
 
+    expect(await screen.findByText("1 skill")).toBeInTheDocument()
     const viewButton = await screen.findByRole("button", { name: "View skill-1" })
     viewButton.focus()
     fireEvent.click(viewButton)
@@ -971,6 +975,7 @@ describe("SkillsManager imports", () => {
     tldwClientMock.getSkill.mockResolvedValue(source)
     renderManager()
 
+    expect(await screen.findByText("1 skill")).toBeInTheDocument()
     fireEvent.click(await screen.findByRole("button", { name: "More actions for skill-1" }))
     fireEvent.click(await screen.findByRole("menuitem", { name: "Duplicate" }))
 
