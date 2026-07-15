@@ -88,6 +88,9 @@ Out of scope:
 - duplicating the full WebUI Skills suite in the extension;
 - moving or rewriting the existing fixture library solely for directory purity;
 - Firefox/Edge certification in this first package-level gate;
+- certification of the MV3 background-worker request relay; the deterministic
+  suite uses the existing direct-request fallback so Playwright can intercept
+  API traffic from the extension page;
 - telemetry, analytics, visual-regression infrastructure, or a new test harness;
 - unrelated extension build warnings or general bundle optimization.
 
@@ -98,25 +101,35 @@ existing `chromium-extension` Playwright project.
 
 The suite will:
 
-1. Use `launchWithBuiltExtension()` so launch/build failures fail the test rather
-   than becoming conditional skips.
+1. Extend the existing `launchWithBuiltExtension()` test helper with two optional
+   inputs rather than creating another launcher:
+   - `optionsTarget`, resolved by the existing extension-page URL helper so the
+     first navigation is directly to `#/skills` instead of the noisy options
+     home route;
+   - `prepareOptionsPage({ context, page })`, awaited after `newPage()` and
+     before the first `goto()` so tests can register routes and diagnostics.
+   Add a focused launcher unit test proving preparation completes before
+   navigation. Launch/build failures remain hard test failures.
 2. Seed first-run completion and a synthetic single-user server configuration
    through the existing extension storage helper.
-3. Register deterministic `/api/v1/health/live`, OpenAPI capability, Skills,
+3. In `prepareOptionsPage`, register diagnostics and deterministic
+   `/api/v1/health/live`, `/api/v1/rag/health`, OpenAPI capability, Skills,
    execution, binary export, and failure routes using the existing WebUI Skills
    fixtures. Extend those fixtures only for missing protocol behavior; do not
    copy or relocate the fixture library.
-4. After launch, enable the same test-only direct-request fallback already used
-   by extension E2E so Playwright can intercept requests that would otherwise
-   originate in the background worker. Invoke the production connection
-   store's `checkOnce({ force: true })` after routes are installed and wait for
-   connected/capable state. This tests production bootstrap logic; it must not
-   patch the store to connected. The existing connection-state mutation seam
-   may be used only by the explicit unreachable-state recovery test.
-5. Navigate to `${optionsUrl}#/skills` and verify the route pathname/search state
-   through the hash router.
+4. In the same preparation hook, install the existing test-only direct-request
+   fallback with `context.addInitScript()` before navigation. It must survive
+   reloads and make page-level Playwright routes authoritative for both safe and
+   unsafe Skills requests. The launcher's production `setConfigPartial()`,
+   `markFirstRunComplete()`, and `checkOnce()` sequence must reach
+   connected/capable state; primary tests must not patch the store to connected.
+   The existing connection-state mutation seam may be used only by the explicit
+   unreachable-state recovery test.
+5. Verify the initially loaded route is `${optionsUrl}#/skills` and inspect its
+   pathname/search state through the hash router.
 6. Capture unexpected page errors, console errors, failed requests, and failed
-   API assertions. Only narrowly documented startup failures may be ignored.
+   API assertions from before the first navigation. No generic startup-error
+   exemption is permitted.
 7. Launch a fresh persistent browser context with a fresh storage seed and fresh
    mutable fixture state for every test. Close that context in `finally`; tests
    must not depend on ordering or share seeded Skills, routes, drafts, history,
@@ -130,6 +143,12 @@ Add package scripts parallel to the existing workspace-parity scripts:
   `PLAYWRIGHT_JSON_OUTPUT_NAME=.skills-parity-e2e-report.json`, calls the
   existing `scripts/assert-playwright-no-skips.mjs`, and copies the report to
   `test-results/skills-parity-e2e-report.json`.
+
+Both scripts set `TLDW_E2E_SERVER_URL=http://skills-parity.invalid` so the
+existing global setup grants that deterministic mock origin host permission,
+and both run with `--workers=1`. One worker avoids six concurrent persistent
+Chromium contexts while preserving independent tests; do not use Playwright
+serial mode because a failure there would skip later tests.
 
 No new Playwright configuration or launcher is required.
 
@@ -167,20 +186,24 @@ WebUI action variant.
   The manager combines those responses client-side into the single downloaded
   archive.
 - Apply `q=target`, `mode=fork`, `tools=with-tools`,
-  `model=gpt-4.1-mini`, name
-  descending sort, and page size 20.
+  `model=gpt-4.1-mini`, name descending sort, and page size 20.
 - Verify the resulting hash search parameters exactly represent those values:
   `#/skills?q=target&mode=fork&tools=with-tools&model=gpt-4.1-mini&sort=name&order=desc&pageSize=20`.
 - Assert the target fixture remains visible and the final list request contains
-  the same server-side query, filter, sort, order, and limit values.
+  `q=target`, `context=fork`, `has_tools=true`, `model=gpt-4.1-mini`,
+  `sort=name`, `order=desc`, `limit=20`, and `offset=0`. The fixture must apply
+  the model filter rather than merely record it.
 - Reload and verify the view is restored and the same API query is issued.
-- Browser Back and Forward must restore the prior and committed filter states.
+- Commit one adjacent state by changing only the tools filter to
+  `without-tools`. Browser Back must restore the exact `with-tools` hash above
+  and the target row; Browser Forward must restore the corresponding
+  `tools=without-tools` hash and no target match.
 
 ### 3. Trash management at 1280x900
 
-- Using the deterministic Trash fixture, move `summarize` to Trash, assert the
-  immediate Undo action, enter the Trash view, restore the Skill, and assert it
-  returns to Library.
+- Using the deterministic Trash fixture, move `summarize` to Trash and assert
+  the immediate Undo action is visible without activating it. Enter the Trash
+  view, restore the Skill, and assert it returns to Library.
 
 Existing component and WebUI tests remain authoritative for cross-page
 selection, permanent purge, and other detailed action variants.
@@ -192,6 +215,8 @@ selection, permanent purge, and other detailed action variants.
 - Assert the `Skills` level-one heading, Search skills textbox, `Skills view`
   radio group, New Skill button, and the target row's named details/test actions
   are discoverable by role or accessible name.
+- Assert the New Skill, details, and test-run action bounding boxes are each at
+  least 24 by 24 CSS pixels, matching the WCAG 2.2 target-size minimum.
 - Open details by keyboard, close with Escape, and assert focus returns to the
   named details trigger.
 - Open Test run by keyboard, render once, close with Escape, and assert focus
@@ -203,8 +228,10 @@ selection, permanent purge, and other detailed action variants.
 
 - Hold the first `GET /api/v1/skills` response behind a deterministic gate and
   assert the `Loading skills` `status` announcement before releasing it as HTTP
-  503. Return a valid list on retry. Assert the shared recovery callout and its
-  `Try again` action, and assert the row appears after retry.
+  503. Return HTTP 503 from React Query's one automatic retry as well, then
+  assert exactly two failed list requests and the shared recovery callout with
+  its `Try again` action. Return a valid list only for the third request caused
+  by that action, and assert the row appears.
 - Primary copy must not contain the seeded API key, absolute paths, or the raw
   mocked response body.
 - In the same fresh context, use the existing connection-state test seam to set
@@ -239,8 +266,9 @@ extension first reproduces a platform-specific failure.
   network-error regexes are not allowed.
 - Unexpected page errors, console errors, and request failures fail the test and
   are reported with bounded URL/error context.
-- Tests must not log API keys, Skill content, filesystem paths, or raw private
-  response bodies.
+- Custom runtime diagnostics must not include API keys, Skill content,
+  server-provided absolute paths, or raw private response bodies. Normal
+  Playwright source locations and stack paths are not subject to this rule.
 - Browser contexts and delayed route handlers must be drained or closed during
   cleanup so cancellation does not leak across tests.
 
@@ -262,7 +290,11 @@ documentation, and task record.
 ## Verification
 
 - Production Chrome extension build succeeds.
+- Focused launcher tests prove `prepareOptionsPage` completes before the initial
+  targeted `goto()` and existing callers retain their current behavior.
 - Strict extension Skills parity suite passes with zero skipped tests.
+- The focused and strict scripts run with one worker and the deterministic mock
+  origin is present in the prepared extension manifest host permissions.
 - Existing WebUI Skills Playwright suite remains passing when shared test
   fixtures are touched.
 - Focused Skills route, query-state, manager, preview, and drawer tests pass for
@@ -295,3 +327,5 @@ documentation, and task record.
    covered at the narrowest owning boundary.
 8. Focused build, tests, type checks, diff hygiene, and applicable security
    checks pass or record an unchanged external baseline precisely.
+9. The suite's name and documentation do not claim to certify the MV3
+   background-worker relay; that transport remains covered by its owning tests.

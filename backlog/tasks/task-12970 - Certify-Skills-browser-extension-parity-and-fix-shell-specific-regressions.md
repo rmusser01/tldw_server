@@ -37,7 +37,7 @@ Exercise the merged /skills beginner, power-user, accessibility, responsive, per
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Three independent spec-review iterations resolved over-broad scope and ambiguous observables. The final design caps coverage at six isolated built-extension tests; reaches connected state through production checkOnce with a direct-request fallback seam rather than forcing connected state; defines exact seed, chat-composer, hash/query, two-request bulk export, Trash, 390x844 focus/overflow, loading/503 retry, unreachable-gate, and session-draft assertions; and leaves cancellation/stale-result detail with existing shared tests unless an extension-specific failure is reproduced.
+A final code-grounded audit corrected launch-order and reliability gaps before implementation. The design now prepares routes/diagnostics and a reload-persistent direct-request seam before the first targeted #/skills navigation; mocks core and RAG health; grants the deterministic mock origin through existing test host-permission setup; accounts for React Query's automatic retry; applies exact model/export/history/Trash/touch-target assertions; runs six independent contexts with one worker; narrows diagnostic redaction; and explicitly excludes MV3 background-relay certification.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
