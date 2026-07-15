@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, expectTypeOf, it, vi } from "vitest";
 
 import {
   PLAYLIST_INGEST_SUBMIT_CHUNK_SIZE,
@@ -14,7 +14,7 @@ import {
   submitPendingChunks,
   type ApiPlaylistPreflightSummaryResponse,
   type PlaylistIngestRunApi,
-  type PlaylistIngestRunCreateRequest,
+  type PlaylistIngestRunSubmissionRequest,
   type PlaylistIngestRunCreateResult,
   type PlaylistIngestRunItem,
   type PlaylistIngestRunSnapshot,
@@ -191,7 +191,8 @@ describe("playlist ingest run client", () => {
         items: [{ occurrenceId: "occ-1" }],
       },
     });
-    const request: PlaylistIngestRunCreateRequest = {
+    const request: PlaylistIngestRunSubmissionRequest = {
+      clientRequestId: "quick-ingest-session-1",
       inputs: [
         {
           inputKind: "materialized_playlist_item",
@@ -221,6 +222,12 @@ describe("playlist ingest run client", () => {
     await expect(getRun(api, "run-1")).resolves.toBe(summary);
     expect(api.createPlaylistIngestRun).toHaveBeenCalledWith(request);
     expect(api.getPlaylistIngestRun).toHaveBeenCalledWith("run-1");
+  });
+
+  it("requires the client request identity at the public create boundary", () => {
+    expectTypeOf<Parameters<typeof createRun>[1]>().toEqualTypeOf<
+      PlaylistIngestRunSubmissionRequest
+    >();
   });
 
   it("restarts opaque-cursor paging when run item versions change", async () => {

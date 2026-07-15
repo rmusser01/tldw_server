@@ -353,6 +353,57 @@ describe("submitQuickIngestBatch", () => {
     expect(events.at(-1)).toBe("track:acknowledged")
   })
 
+  it("reuses the durable session identity after an ambiguous run-create failure", async () => {
+    const sessionId = "qi-direct-ambiguous-create"
+    const request = {
+      entries: [],
+      files: [],
+      storeRemote: true,
+      processOnly: false,
+      __quickIngestSessionId: sessionId,
+      pendingRunRequest: {
+        inputs: [
+          {
+            inputKind: "direct_url",
+            occurrenceId: "occ-ambiguous-create",
+            url: "https://example.com/ambiguous-create",
+          },
+        ],
+      },
+    } as any
+    mocks.bgRequest
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce({
+        contract_version: 2,
+        run_id: "run-ambiguous-create",
+        status: "completed",
+        version: 1,
+        status_url: "/api/v1/media/ingest/runs/run-ambiguous-create",
+        items_url: "/api/v1/media/ingest/runs/run-ambiguous-create/items",
+        events_url:
+          "/api/v1/media/ingest/runs/run-ambiguous-create/events/stream",
+        processing_occurrences: [],
+      })
+
+    await expect(submitQuickIngestBatch(request)).rejects.toMatchObject({
+      message: expect.any(String),
+    })
+    await expect(submitQuickIngestBatch(request)).resolves.toMatchObject({
+      ok: true,
+      runId: "run-ambiguous-create",
+    })
+
+    const createBodies = mocks.bgRequest.mock.calls
+      .map(([call]) => call)
+      .filter((call) => call.path === "/api/v1/media/ingest/runs")
+      .map((call) => call.body)
+    expect(createBodies).toHaveLength(2)
+    expect(createBodies).toEqual([
+      expect.objectContaining({ client_request_id: sessionId }),
+      expect.objectContaining({ client_request_id: sessionId }),
+    ])
+  })
+
   it("tracks a run whose create response has only terminal occurrences", async () => {
     const onTrackingMetadata = vi.fn()
     mocks.bgRequest.mockResolvedValue({

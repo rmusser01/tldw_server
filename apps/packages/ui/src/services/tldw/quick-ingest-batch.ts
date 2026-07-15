@@ -60,6 +60,7 @@ import {
   type PlaylistIngestRunCreateResult,
   type PlaylistIngestRunRetryResult,
   type PlaylistIngestRunSnapshot,
+  type PlaylistIngestRunSubmissionRequest,
   type PlaylistProcessingOccurrence,
   type PlaylistReviewRequiredRecoveryItem,
 } from "@/services/tldw/playlist-ingest";
@@ -734,7 +735,7 @@ const compactRunMetadata = (
 const buildVersion2RunRequest = (
   input: QuickIngestBatchInput,
   pendingRunRequest: PlaylistIngestRunCreateRequest,
-): PlaylistIngestRunCreateRequest => {
+): PlaylistIngestRunSubmissionRequest => {
   const normalizedProcessingOptions = buildFields({
     rawType: "auto",
     common: input.common,
@@ -806,6 +807,7 @@ const buildVersion2RunRequest = (
 
   return {
     ...pendingRunRequest,
+    clientRequestId: String(input.__quickIngestSessionId || "").trim(),
     ...(Object.keys(processingOptions).length > 0 ? { processingOptions } : {}),
     ...(playlistSummaries.length > 0 ? { playlistSummaries } : {}),
     ...(collection

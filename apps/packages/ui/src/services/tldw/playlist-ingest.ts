@@ -184,6 +184,7 @@ export type ApiPlaylistNewCollection = {
 };
 
 export type ApiPlaylistIngestRunCreateRequest = {
+  client_request_id: string;
   inputs: ApiPlaylistRunInput[];
   review_overrides?: Record<string, ApiPlaylistReviewOverride>;
   processing_options?: Record<string, unknown>;
@@ -439,6 +440,11 @@ export type PlaylistIngestRunCreateRequest = {
     defaultTags?: string[];
   };
 };
+
+export type PlaylistIngestRunSubmissionRequest =
+  PlaylistIngestRunCreateRequest & {
+    clientRequestId: string;
+  };
 
 export type PlaylistPreflightCreateRequest = {
   url: string;
@@ -1254,9 +1260,10 @@ const toApiPlaylistReviewOverride = (
 };
 
 export const toApiPlaylistIngestRunCreateRequest = (
-  value: PlaylistIngestRunCreateRequest,
+  value: PlaylistIngestRunSubmissionRequest,
 ): ApiPlaylistIngestRunCreateRequest => {
   const result: ApiPlaylistIngestRunCreateRequest = {
+    client_request_id: value.clientRequestId,
     inputs: value.inputs.map(toApiPlaylistRunInput),
   };
   if (value.reviewOverrides !== undefined) {
@@ -1528,7 +1535,7 @@ export const PLAYLIST_INGEST_SUBMIT_CHUNK_SIZE = 50;
 
 export type PlaylistIngestRunApi = {
   createPlaylistIngestRun: (
-    payload: PlaylistIngestRunCreateRequest,
+    payload: PlaylistIngestRunSubmissionRequest,
     options?: PlaylistIngestRequestOptions,
   ) => Promise<PlaylistIngestRunCreateResult>;
   getPlaylistIngestRun: (
@@ -1565,7 +1572,7 @@ export type PlaylistIngestRunItemsSnapshot = {
 
 export const createRun = (
   api: PlaylistIngestRunApi,
-  payload: PlaylistIngestRunCreateRequest,
+  payload: PlaylistIngestRunSubmissionRequest,
   options?: PlaylistIngestRequestOptions,
 ): Promise<PlaylistIngestRunCreateResult> =>
   options === undefined

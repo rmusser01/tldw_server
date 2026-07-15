@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
   bgRequest: vi.fn(),
@@ -25,7 +25,11 @@ vi.mock("@/utils/safe-storage", () => ({
 }))
 
 import { TldwApiClient } from "@/services/tldw/TldwApiClient"
-import { parsePlaylistIngestRunStreamLine } from "@/services/tldw/playlist-ingest"
+import { mediaMethods } from "@/services/tldw/domains/media"
+import {
+  parsePlaylistIngestRunStreamLine,
+  type PlaylistIngestRunSubmissionRequest
+} from "@/services/tldw/playlist-ingest"
 
 describe("TldwApiClient media ingest contract", () => {
   beforeEach(() => {
@@ -522,6 +526,7 @@ describe("TldwApiClient media ingest contract", () => {
 
     const client = new TldwApiClient()
     const result = await client.createPlaylistIngestRun({
+      clientRequestId: "quick-ingest-session-1",
       inputs: [
         {
           inputKind: "materialized_playlist_item",
@@ -549,6 +554,7 @@ describe("TldwApiClient media ingest contract", () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: {
+        client_request_id: "quick-ingest-session-1",
         inputs: [
           {
             input_kind: "materialized_playlist_item",
@@ -583,6 +589,15 @@ describe("TldwApiClient media ingest contract", () => {
         })
       ]
     })
+  })
+
+  it("requires the client request identity at the public client transport", () => {
+    expectTypeOf<
+      Parameters<TldwApiClient["createPlaylistIngestRun"]>[0]
+    >().toEqualTypeOf<PlaylistIngestRunSubmissionRequest>()
+    expectTypeOf<
+      Parameters<typeof mediaMethods.createPlaylistIngestRun>[0]
+    >().toEqualTypeOf<PlaylistIngestRunSubmissionRequest>()
   })
 
   it("gets, pages, cancels, and retries a version-2 ingest run", async () => {
@@ -1007,7 +1022,10 @@ describe("TldwApiClient media ingest contract", () => {
 
     const client = new TldwApiClient()
     const error = await client
-      .createPlaylistIngestRun({ inputs: [] })
+      .createPlaylistIngestRun({
+        clientRequestId: "quick-ingest-review-required",
+        inputs: []
+      })
       .catch((caught: unknown) => caught)
 
     expect(error).toMatchObject({
@@ -1065,7 +1083,10 @@ describe("TldwApiClient media ingest contract", () => {
 
     const client = new TldwApiClient()
     const error = await client
-      .createPlaylistIngestRun({ inputs: [] })
+      .createPlaylistIngestRun({
+        clientRequestId: "quick-ingest-duplicate-pending",
+        inputs: []
+      })
       .catch((caught: unknown) => caught)
 
     expect((error as { recovery?: unknown }).recovery).toEqual({
@@ -1106,7 +1127,10 @@ describe("TldwApiClient media ingest contract", () => {
 
     const client = new TldwApiClient()
     const error = await client
-      .createPlaylistIngestRun({ inputs: [] })
+      .createPlaylistIngestRun({
+        clientRequestId: "quick-ingest-malformed-recovery",
+        inputs: []
+      })
       .catch((caught: unknown) => caught)
 
     expect(error).toMatchObject({

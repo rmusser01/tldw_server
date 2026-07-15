@@ -50,12 +50,12 @@ import {
   type PlaylistIngestPageParams,
   type PlaylistIngestRequestOptions,
   type PlaylistIngestRunCancelRequest,
-  type PlaylistIngestRunCreateRequest,
   type PlaylistIngestRunCreateResult,
   type PlaylistIngestRunItemsPage,
   type PlaylistIngestRunRetryResult,
   type PlaylistIngestRunStreamEvent,
   type PlaylistIngestRunSummary,
+  type PlaylistIngestRunSubmissionRequest,
   type PlaylistIngestStreamOptions,
   type PlaylistMaterialization,
   type PlaylistPreflightAccepted,
@@ -336,7 +336,7 @@ export const mediaMethods = {
   },
 
   async createPlaylistIngestRun(
-    payload: PlaylistIngestRunCreateRequest,
+    payload: PlaylistIngestRunSubmissionRequest,
     options?: PlaylistIngestRequestOptions
   ): Promise<PlaylistIngestRunCreateResult> {
     return withPlaylistIngestError(async () => {
