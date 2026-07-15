@@ -20,13 +20,20 @@ from urllib.parse import unquote, urlsplit
 from defusedxml.common import DefusedXmlException
 from defusedxml.ElementTree import DefusedXMLParser
 
-from .contracts import MAX_PAGINATION_CURSOR, DiscoveryOutcomeIdentity, PlannedDispatchGroup
+from .contracts import (
+    MAX_PAGINATION_CURSOR,
+    DeferredNumericCSVQueryBinding,
+    DiscoveryOutcomeIdentity,
+    OperationKind,
+    PlannedDispatchGroup,
+)
 from .executor import (
     BoundDispatch,
     DiscoveryAdapter,
     DiscoveryAdapterError,
     DiscoveryAdapterResult,
     DiscoveryCandidate,
+    NumericCSVBindingValues,
     NumericCursor,
 )
 from .gateway import DiscoveryGatewayResponse
@@ -69,6 +76,7 @@ _ADAPTER_IDS = (
     "figshare_v2",
     "osf_v2",
     "arxiv_v2",
+    "pubmed_v2",
 )
 _PARSING_PROFILES = MappingProxyType(
     {(adapter_id, "foundation-v2"): _FOUNDATION_PROFILE for adapter_id in _ADAPTER_IDS}
@@ -101,6 +109,12 @@ _ARXIV_ID_RE = re.compile(
 )
 _ARXIV_VERSION_RE = re.compile(r"v[1-9]\d*\Z", re.IGNORECASE | re.ASCII)
 _XML_ENCODING_RE = re.compile(r"\bencoding\s*=\s*(['\"])([^'\"]+)\1", re.IGNORECASE)
+_PUBMED_ID_RE = re.compile(r"[1-9][0-9]{0,15}\Z", re.ASCII)
+_PMCID_RE = re.compile(r"PMC[1-9][0-9]{0,15}\Z", re.ASCII)
+_PUBMED_BINDING_ID = "pubmed_esearch_ids"
+_NCBI_JSON_VERSION = "0.3"
+_MAX_PUBMED_AUTHORS_PER_RECORD = 1_024
+_MAX_PUBMED_ARTICLE_IDS_PER_RECORD = 64
 
 
 class _PayloadInvalid(Exception):
@@ -662,6 +676,134 @@ def _base_record(
     }
 
 
+def _canonical_decimal_text(
+    value: Any,
+    profile: _ParsingProfile,
+    *,
+    positive: bool = False,
+    maximum: int | None = None,
+) -> int:
+    """Parse one canonical ASCII decimal string within explicit bounds."""
+    if (
+        type(value) is not str
+        or not value
+        or len(value) > profile.max_numeric_token_chars
+        or not value.isascii()
+        or not value.isdecimal()
+    ):
+        raise _PayloadInvalid
+    parsed = int(value)
+    if str(parsed) != value or (positive and parsed <= 0) or (maximum is not None and parsed > maximum):
+        raise _PayloadInvalid
+    return parsed
+
+
+def _pubmed_id(value: Any, max_chars: int) -> tuple[str, int]:
+    """Return one canonical PMID string and its safe numeric binding value."""
+    if type(value) is not str or len(value) > max_chars or _PUBMED_ID_RE.fullmatch(value) is None:
+        raise _PayloadInvalid
+    return value, int(value)
+
+
+def _ncbi_json_root(payload: Any, expected_type: str) -> dict[str, Any]:
+    """Validate one versioned NCBI JSON envelope without exposing provider detail."""
+    root = _require_dict(payload)
+    if "error" in root:
+        if root.get("error") == "API rate limit exceeded":
+            raise DiscoveryAdapterError("provider_rate_limited")
+        raise DiscoveryAdapterError("provider_response_rejected")
+    header = _require_dict(root.get("header", _MISSING))
+    if header.get("type") != expected_type or header.get("version") != _NCBI_JSON_VERSION:
+        raise _PayloadInvalid
+    return root
+
+
+def _validate_ncbi_message_list(record: dict[str, Any], key: str) -> None:
+    """Validate one optional NCBI message-list object without exposing text."""
+    value = record.get(key, _MISSING)
+    if value is _MISSING:
+        return
+    messages = _require_dict(value)
+    for raw_values in messages.values():
+        values = _require_list(raw_values)
+        if any(type(item) is not str for item in values):
+            raise _PayloadInvalid
+
+
+def _pubmed_article_ids(
+    raw: Any,
+    expected_pmid: str,
+    guard: _ParseGuard,
+) -> tuple[str | None, str | None]:
+    """Extract canonical DOI and PMCID values from one PubMed DocSum."""
+    article_ids = _require_list(raw)
+    if len(article_ids) > _MAX_PUBMED_ARTICLE_IDS_PER_RECORD:
+        raise _ParseLimitExceeded
+    recognized: dict[str, str] = {}
+    for raw_identifier in _guarded_items(article_ids, guard):
+        identifier = _require_dict(raw_identifier)
+        id_type = _required_text(identifier, "idtype").casefold()
+        value = identifier.get("value", _MISSING)
+        if value is _MISSING:
+            value = identifier.get("id", _MISSING)
+        if type(value) is not str or not value:
+            raise _PayloadInvalid
+        if id_type not in {"pubmed", "doi", "pmc"}:
+            continue
+        if id_type in recognized:
+            raise _PayloadInvalid
+        recognized[id_type] = value
+
+    pubmed_value = recognized.get("pubmed")
+    if pubmed_value is None or _pubmed_id(pubmed_value, 16)[0] != expected_pmid:
+        raise _PayloadInvalid
+
+    raw_doi = recognized.get("doi")
+    doi = None if raw_doi is None else normalize_doi(raw_doi)
+    if raw_doi is not None and doi is None:
+        raise _PayloadInvalid
+
+    pmcid = recognized.get("pmc")
+    if pmcid is not None and _PMCID_RE.fullmatch(pmcid) is None:
+        raise _PayloadInvalid
+    return doi, pmcid
+
+
+def _pubmed_record(raw: Any, expected_pmid: str, guard: _ParseGuard) -> dict[str, Any]:
+    """Normalize one exact PubMed ESummary DocSum to the V2 record shape."""
+    record = _require_dict(raw)
+    if "error" in record:
+        raise DiscoveryAdapterError("provider_response_rejected")
+    uid = _required_text(record, "uid")
+    if _pubmed_id(uid, 16)[0] != expected_pmid:
+        raise _PayloadInvalid
+    title = _required_text(record, "title")
+    authors_raw = _require_list(record.get("authors", []))
+    if len(authors_raw) > _MAX_PUBMED_AUTHORS_PER_RECORD:
+        raise _ParseLimitExceeded
+    authors = tuple(_required_text(_require_dict(author), "name") for author in _guarded_items(authors_raw, guard))
+    doi, pmcid = _pubmed_article_ids(record.get("articleids", _MISSING), expected_pmid, guard)
+    provider_ids = {"pubmed_id": expected_pmid, "pmid": expected_pmid}
+    if doi is not None:
+        provider_ids["doi"] = doi
+    if pmcid is not None:
+        provider_ids["pmcid"] = pmcid
+    return _base_record(
+        title=title,
+        authors=authors,
+        abstract=None,
+        snippet=None,
+        doi=doi,
+        pmid=expected_pmid,
+        pmcid=pmcid,
+        arxiv_id=None,
+        url=f"https://pubmed.ncbi.nlm.nih.gov/{expected_pmid}/",
+        pdf_url=(None if pmcid is None else f"https://pmc.ncbi.nlm.nih.gov/articles/{pmcid}/pdf/"),
+        provider="pubmed",
+        provider_ids=provider_ids,
+    )
+
+
 def _direct_xml_children(element: ElementTree.Element, tag: str) -> tuple[ElementTree.Element, ...]:
     if type(element) is not ElementTree.Element:
         raise _PayloadInvalid
@@ -1196,6 +1338,227 @@ def _initial_page_and_size(group: PlannedDispatchGroup) -> tuple[int, int]:
     raise _PayloadInvalid
 
 
+def _trusted_pubmed_inputs(
+    group: object,
+) -> tuple[
+    PlannedDispatchGroup,
+    _ParsingProfile,
+    int,
+    int,
+    int,
+    DeferredNumericCSVQueryBinding,
+]:
+    """Validate the exact two-intent PubMed adapter contract before dispatch."""
+    if type(group) is not PlannedDispatchGroup or group.adapter_id != "pubmed_v2":
+        raise DiscoveryAdapterError("provider_payload_invalid")
+    profile = _PARSING_PROFILES.get((group.adapter_id, group.adapter_version))
+    if profile is None or type(group.intents) is not tuple or len(group.intents) != 2:
+        raise DiscoveryAdapterError("provider_payload_invalid")
+    search, summary = group.intents
+    limits = group.limits
+    if (
+        search.operation_kind is not OperationKind.SEARCH
+        or summary.operation_kind is not OperationKind.CONDITIONAL_SUMMARY
+        or search.method != "GET"
+        or summary.method != "GET"
+        or search.path != "/entrez/eutils/esearch.fcgi"
+        or summary.path != "/entrez/eutils/esummary.fcgi"
+        or search.json_body_pairs
+        or search.query_bindings
+        or summary.json_body_pairs
+        or type(limits.max_response_bytes) is not int
+        or limits.max_response_bytes <= 0
+        or type(limits.max_results) is not int
+        or limits.max_results <= 0
+        or type(limits.max_pages) is not int
+        or limits.max_pages != 1
+    ):
+        raise DiscoveryAdapterError("provider_payload_invalid")
+    search_pairs = tuple((pair.name, pair.value) for pair in search.query_pairs)
+    if (
+        len(search_pairs) != 6
+        or search_pairs[0] != ("db", "pubmed")
+        or search_pairs[1][0] != "term"
+        or type(search_pairs[1][1]) is not str
+        or not search_pairs[1][1]
+        or search_pairs[2][0] != "retstart"
+        or search_pairs[3][0] != "retmax"
+        or search_pairs[4:] != (("retmode", "json"), ("sort", "relevance"))
+        or tuple((pair.name, pair.value) for pair in summary.query_pairs) != (("db", "pubmed"), ("retmode", "json"))
+        or len(summary.query_bindings) != 1
+    ):
+        raise DiscoveryAdapterError("provider_payload_invalid")
+    binding = summary.query_bindings[0]
+    if (
+        type(binding) is not DeferredNumericCSVQueryBinding
+        or binding.binding_id != _PUBMED_BINDING_ID
+        or binding.query_name != "id"
+        or binding.max_item_chars != 16
+    ):
+        raise DiscoveryAdapterError("provider_payload_invalid")
+    try:
+        retstart = _canonical_decimal_text(search_pairs[2][1], profile, maximum=MAX_PAGINATION_CURSOR)
+        retmax = _canonical_decimal_text(
+            search_pairs[3][1],
+            profile,
+            positive=True,
+            maximum=min(profile.max_records, limits.max_results),
+        )
+        if retstart != 0 or binding.max_items != retmax:
+            raise _PayloadInvalid
+    except _PayloadInvalid as error:
+        _raise_adapter_error(error)
+    return (
+        group,
+        profile,
+        min(profile.max_input_bytes, limits.max_response_bytes),
+        retstart,
+        retmax,
+        binding,
+    )
+
+
+def _pubmed_esearch_ids(
+    payload: Any,
+    *,
+    profile: _ParsingProfile,
+    guard: _ParseGuard,
+    retstart: int,
+    retmax: int,
+    binding: DeferredNumericCSVQueryBinding,
+) -> tuple[tuple[str, int], ...]:
+    """Validate one ESearch page and return canonical PMID bindings."""
+    root = _ncbi_json_root(payload, "esearch")
+    result = _require_dict(root.get("esearchresult", _MISSING))
+    if "ERROR" in result:
+        raise DiscoveryAdapterError("provider_response_rejected")
+    count = _canonical_decimal_text(result.get("count", _MISSING), profile)
+    returned = _canonical_decimal_text(
+        result.get("retmax", _MISSING),
+        profile,
+        maximum=retmax,
+    )
+    returned_start = _canonical_decimal_text(
+        result.get("retstart", _MISSING),
+        profile,
+        maximum=MAX_PAGINATION_CURSOR,
+    )
+    raw_ids = _require_list(result.get("idlist", _MISSING))
+    _validate_ncbi_message_list(result, "errorlist")
+    _validate_ncbi_message_list(result, "warninglist")
+    if (
+        returned_start != retstart
+        or returned != len(raw_ids)
+        or returned_start + returned > count
+        or (count > 0 and returned == 0)
+        or len(raw_ids) > binding.max_items
+    ):
+        raise _PayloadInvalid
+    ids = tuple(_pubmed_id(value, binding.max_item_chars) for value in _guarded_items(raw_ids, guard))
+    if len({value for value, _number in ids}) != len(ids):
+        raise _PayloadInvalid
+    return ids
+
+
+def _pubmed_summary_records(
+    payload: Any,
+    *,
+    expected_ids: tuple[str, ...],
+    guard: _ParseGuard,
+) -> tuple[dict[str, Any], ...]:
+    """Validate one complete ESummary response in ESearch order."""
+    root = _ncbi_json_root(payload, "esummary")
+    result = _require_dict(root.get("result", _MISSING))
+    raw_uids = _require_list(result.get("uids", _MISSING))
+    if (
+        len(raw_uids) != len(expected_ids)
+        or any(type(uid) is not str for uid in raw_uids)
+        or set(raw_uids) != set(expected_ids)
+        or set(result) != {"uids", *expected_ids}
+    ):
+        raise _PayloadInvalid
+    records = []
+    for expected_id in expected_ids:
+        guard.checkpoint()
+        records.append(_pubmed_record(result.get(expected_id, _MISSING), expected_id, guard))
+    return tuple(records)
+
+
+async def _execute_pubmed_adapter(
+    group: object,
+    dispatch: BoundDispatch,
+    clock: MonotonicClock,
+) -> DiscoveryAdapterResult:
+    """Execute explicit ESearch then conditional ESummary through BoundDispatch."""
+    trusted_group, profile, max_input_bytes, retstart, retmax, binding = _trusted_pubmed_inputs(group)
+    search, summary = trusted_group.intents
+    search_response = _checked_response(await dispatch(search))
+    search_payload, search_guard = _strict_json(
+        search_response,
+        profile=profile,
+        max_input_bytes=max_input_bytes,
+        clock=clock,
+    )
+    try:
+        ids = _pubmed_esearch_ids(
+            search_payload,
+            profile=profile,
+            guard=search_guard,
+            retstart=retstart,
+            retmax=retmax,
+            binding=binding,
+        )
+        search_guard.checkpoint()
+    except (_PayloadInvalid, _ParseLimitExceeded, _ParseDeadlineExceeded) as error:
+        _raise_adapter_error(error)
+    except DiscoveryAdapterError:
+        raise
+    except (KeyError, TypeError, ValueError, OverflowError):
+        raise DiscoveryAdapterError("provider_payload_invalid") from None
+    if not ids:
+        return DiscoveryAdapterResult(candidates=())
+
+    expected_ids = tuple(value for value, _number in ids)
+    binding_values = NumericCSVBindingValues(
+        binding.binding_id,
+        tuple(number for _value, number in ids),
+    )
+    summary_response = _checked_response(await dispatch(summary, bindings=(binding_values,)))
+    summary_payload, summary_guard = _strict_json(
+        summary_response,
+        profile=profile,
+        max_input_bytes=max_input_bytes,
+        clock=clock,
+    )
+    try:
+        normalized_records = _pubmed_summary_records(
+            summary_payload,
+            expected_ids=expected_ids,
+            guard=summary_guard,
+        )
+        candidates: list[DiscoveryCandidate] = []
+        records_by_id: dict[str, dict[str, Any]] = {}
+        for normalized in normalized_records:
+            summary_guard.checkpoint()
+            fingerprint = build_fingerprint(normalized)
+            candidate_id = DiscoveryOutcomeIdentity.from_fingerprint(fingerprint).document_id
+            existing = records_by_id.get(candidate_id)
+            if existing is not None:
+                if existing != normalized:
+                    raise _PayloadInvalid
+                continue
+            records_by_id[candidate_id] = normalized
+            candidates.append(DiscoveryCandidate(candidate_id, normalized))
+        summary_guard.checkpoint()
+    except (_PayloadInvalid, _ParseLimitExceeded, _ParseDeadlineExceeded) as error:
+        _raise_adapter_error(error)
+    except DiscoveryAdapterError:
+        raise
+    except (KeyError, TypeError, ValueError, OverflowError):
+        raise DiscoveryAdapterError("provider_payload_invalid") from None
+    return DiscoveryAdapterResult(tuple(candidates))
+
+
 def _trusted_adapter_inputs(
     adapter_id: str,
     group: object,
@@ -1320,6 +1683,8 @@ async def _execute_adapter(
 
 def _adapter(adapter_id: str, clock: MonotonicClock) -> DiscoveryAdapter:
     async def execute(group: PlannedDispatchGroup, dispatch: BoundDispatch) -> DiscoveryAdapterResult:
+        if adapter_id == "pubmed_v2":
+            return await _execute_pubmed_adapter(group, dispatch, clock)
         return await _execute_adapter(adapter_id, group, dispatch, clock)
 
     return execute

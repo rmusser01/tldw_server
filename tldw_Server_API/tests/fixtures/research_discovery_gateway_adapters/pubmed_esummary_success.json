@@ -1,0 +1,67 @@
+{
+  "header": {
+    "type": "esummary",
+    "version": "0.3"
+  },
+  "result": {
+    "uids": [
+      "31415926",
+      "27182818"
+    ],
+    "31415926": {
+      "uid": "31415926",
+      "title": "Shared Discovery Record",
+      "authors": [
+        {
+          "name": "Ada Researcher",
+          "authtype": "Author",
+          "clusterid": ""
+        },
+        {
+          "name": "Grace Scientist",
+          "authtype": "Author",
+          "clusterid": ""
+        }
+      ],
+      "articleids": [
+        {
+          "idtype": "pubmed",
+          "value": "31415926"
+        },
+        {
+          "idtype": "doi",
+          "value": "10.5555/Shared.Discovery.2026"
+        },
+        {
+          "idtype": "pmc",
+          "value": "PMC3141592"
+        },
+        {
+          "idtype": "pii",
+          "value": "SANITIZED-PII"
+        }
+      ],
+      "pubdate": "2026 Jan",
+      "source": "Sanitized Journal"
+    },
+    "27182818": {
+      "uid": "27182818",
+      "title": "Second Bounded Record",
+      "authors": [
+        {
+          "name": "Lin Researcher",
+          "authtype": "Author",
+          "clusterid": ""
+        }
+      ],
+      "articleids": [
+        {
+          "idtype": "pubmed",
+          "value": "27182818"
+        }
+      ],
+      "pubdate": "2025 Dec",
+      "source": "Sanitized Journal"
+    }
+  }
+}

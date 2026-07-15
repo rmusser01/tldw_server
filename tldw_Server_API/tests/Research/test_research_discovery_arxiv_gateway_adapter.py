@@ -391,7 +391,7 @@ def test_arxiv_profile_and_factory_registration_are_exact_and_immutable() -> Non
         profile.max_records = 101
 
     adapters = module.foundation_gateway_adapters()
-    assert tuple(adapters)[-1] == _ADAPTER_ID
+    assert _ADAPTER_ID in adapters
     assert callable(adapters[_ADAPTER_ID])
     assert module._MAX_XML_ATTRIBUTES_PER_ELEMENT == 16
     assert module._MAX_ARXIV_FIELDS_PER_ENTRY == 512

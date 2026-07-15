@@ -606,7 +606,7 @@ def test_parse_profiles_are_private_exact_immutable_and_version_keyed() -> None:
     profiles = module._PARSING_PROFILES
 
     assert type(profiles) is MappingProxyType
-    expected_adapter_ids = _ADAPTER_IDS + ("arxiv_v2",)
+    expected_adapter_ids = _ADAPTER_IDS + ("arxiv_v2", "pubmed_v2")
     assert set(profiles) == {(adapter_id, "foundation-v2") for adapter_id in expected_adapter_ids}
     expected = (2_097_152, 100, 16, 50_000, 65_536, 32, 500)
     for profile in profiles.values():
@@ -625,9 +625,9 @@ def test_parse_profiles_are_private_exact_immutable_and_version_keyed() -> None:
         profiles[("extra_v2", "foundation-v2")] = next(iter(profiles.values()))
 
 
-def test_factory_exposes_exact_six_gateway_adapter_ids() -> None:
+def test_factory_exposes_exact_seven_gateway_adapter_ids() -> None:
     adapters = _gateway_adapters_module().foundation_gateway_adapters()
-    assert tuple(adapters) == _ADAPTER_IDS + ("arxiv_v2",)
+    assert tuple(adapters) == _ADAPTER_IDS + ("arxiv_v2", "pubmed_v2")
     assert all(callable(adapter) for adapter in adapters.values())
 
 

@@ -223,6 +223,7 @@ def _build_intents(
             QueryPair("retstart", "0"),
             QueryPair("retmax", str(limit)),
             QueryPair("retmode", "json"),
+            QueryPair("sort", "relevance"),
         )
         summary_pairs = (
             QueryPair("db", "pubmed"),

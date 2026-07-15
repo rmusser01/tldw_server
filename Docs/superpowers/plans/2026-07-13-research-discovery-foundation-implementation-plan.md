@@ -442,18 +442,33 @@ Run the Task 5 verify commands plus the focused executor, planner, and gateway s
 
 **Success Criteria:** ESearch and ESummary are separate intents, reservations, and dispatch IDs; an empty ESearch performs no second reservation or gateway call; and every limit/cancellation/error path is typed and deterministic.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Test-first steps
 
-- [ ] Start with failing fixtures for nonempty ESearch plus ESummary, empty ESearch, malformed ID lists, partial summaries, pagination, timeout, cancellation, and unsafe errors.
-- [ ] Prove the two-step path consumes at most the planner's two-dispatch allowance while creating journal reservations only immediately before actual calls.
-- [ ] Apply the XML/parser bounds and cursor rules from Task 6 to both operations.
-- [ ] Do not import the legacy PubMed wrapper or hide the second call inside an SDK/default transport.
+- [x] Start with failing fixtures for nonempty ESearch plus ESummary, empty ESearch, malformed ID lists, partial summaries, pagination metadata, timeout, cancellation, and unsafe errors.
+- [x] Prove the two-step path consumes at most the planner's two-dispatch allowance while creating journal reservations only immediately before actual calls.
+- [x] Apply the strict parser bounds and cursor-envelope rules from Task 6 to both JSON operations; the frozen PubMed route intentionally requests `retmode=json`, not XML.
+- [x] Do not import the legacy PubMed wrapper or hide the second call inside an SDK/default transport.
+
+### Production cutover gate (`TASK-12968.3`)
+
+- Keep PubMed V2 production-disabled until one shared per-origin limiter enforces NCBI's credentialless three-request-per-second ceiling across concurrent runs/processes; do not sleep inside the adapter. An API key raises the default ceiling to ten requests per second but belongs to a separately reviewed credentialed route ([NCBI E-utilities usage policy](https://www.ncbi.nlm.nih.gov/books/NBK25497/?report=reader)).
+- Register and send product-owned `tool` and `email` values before production use, and make the NCBI Disclaimer and Copyright notice evident to users as required by the same official usage policy.
+- Add a bounded long-query policy: NCBI recommends POST for queries longer than several hundred characters, while this foundation route intentionally permits only bounded GET requests. Do not silently truncate or add a hidden transport ([official E-utilities parameter reference](https://www.ncbi.nlm.nih.gov/sites/books/NBK25499/)).
+- Preserve the current explicit `sort=relevance`, maximum 100-ID ESummary GET, and two-dispatch ceiling. Any EFetch/abstract/full-text request is a separately planned physical operation, not an adapter-internal third call.
 
 ### Verify
 
 Run the Task 5 verify commands plus the focused executor, planner, registry-reconciliation, and gateway suites.
+
+### Completion evidence
+
+- Added five sanitized ESearch/ESummary fixtures and one exact offline gateway-only `pubmed_v2` adapter. ESearch and conditional ESummary are separate executor-owned dispatches with separately grounded numeric PMID bindings, reservations, and dispatch IDs; a valid empty ESearch performs no second reservation or gateway call.
+- RED-first coverage closed malformed and non-ASCII IDs, duplicate/cardinality/cursor conflicts, summary UID reordering and partial/per-record failures, bounded author/article-ID parsing, canonical DOI/PMID/PMCID identity, typed 429 and HTTP-200 rate-limit envelopes, fatal root/uppercase provider errors, cancellation/timeout accounting, and the no-EFetch/no-hidden-third-call boundary.
+- A live NCBI contract check exposed valid IDs accompanied by `errorlist.phrasesnotfound`; the reproduced RED now pins bounded ESearch diagnostic lists as nonfatal and discarded while malformed diagnostics and fatal `ERROR` envelopes still fail closed.
+- Final coverage passed 73/73 focused PubMed tests, 1,067/1,067 impacted discovery tests, and 1,586/1,586 full Research tests. Compileall, Ruff, Black, Python 3.10 AST parsing, and diff hygiene passed; Bandit reported zero findings in the touched production scope.
+- Independent adversarial and correctness re-reviews returned CLEAN after the diagnostic compatibility fix. V2 remains offline-only and production-disabled behind the explicit `TASK-12968.3` NCBI pacing, identity, long-query, and credential-route gates above.
 
 ### Commit
 
