@@ -808,30 +808,24 @@ export const SkillsManager: React.FC = () => {
     setDetailsSkill(null)
   }, [])
 
-  const restoreDetailsFocus = React.useCallback((clearWhenDone = true) => {
+  const restoreDetailsFocus = React.useCallback(() => {
     const returnTarget = detailsReturnFocusRef.current
-    const restored = restoreFocus(returnTarget)
-    if (clearWhenDone || restored) {
-      detailsReturnFocusRef.current = null
-    }
+    detailsReturnFocusRef.current = null
+    restoreFocus(returnTarget)
   }, [restoreFocus])
-
-  const handleDetailsAfterClose = React.useCallback(() => {
-    restoreDetailsFocus()
-  }, [restoreDetailsFocus])
 
   React.useEffect(() => {
     if (detailsSkill || !detailsReturnFocusRef.current) return
 
     if (typeof window !== "undefined" && window.requestAnimationFrame) {
       const animationFrame = window.requestAnimationFrame(() => {
-        restoreDetailsFocus(false)
+        restoreDetailsFocus()
       })
       return () => window.cancelAnimationFrame(animationFrame)
     }
 
     const timeout = globalThis.setTimeout(() => {
-      restoreDetailsFocus(false)
+      restoreDetailsFocus()
     }, 0)
     return () => globalThis.clearTimeout(timeout)
   }, [detailsSkill, restoreDetailsFocus])
@@ -3578,7 +3572,6 @@ export const SkillsManager: React.FC = () => {
         scopeKey={skillsQueryScope}
         skillName={detailsSkill}
         onClose={closeSkillDetails}
-        onAfterClose={handleDetailsAfterClose}
         onTest={(name) => {
           const returnTarget = getSkillActionElement("view", name)
           detailsReturnFocusRef.current = null

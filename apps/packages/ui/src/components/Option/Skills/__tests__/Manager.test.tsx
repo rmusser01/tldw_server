@@ -955,6 +955,50 @@ describe("SkillsManager imports", () => {
     await waitFor(() => expect(viewButton).toHaveFocus())
   })
 
+  it("keeps focus in reopened details when the close fallback is canceled", async () => {
+    const scheduledFrames = new Map<number, FrameRequestCallback>()
+    let nextFrameId = 1
+    const requestAnimationFrameSpy = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback) => {
+        const frameId = nextFrameId++
+        scheduledFrames.set(frameId, callback)
+        return frameId
+      })
+    const cancelAnimationFrameSpy = vi
+      .spyOn(window, "cancelAnimationFrame")
+      .mockImplementation((frameId) => {
+        scheduledFrames.delete(frameId)
+      })
+    tldwClientMock.listSkills.mockResolvedValue({
+      skills: [makeSkill(1)],
+      count: 1,
+      total: 1,
+      limit: 10,
+      offset: 0
+    })
+    renderManager()
+
+    expect(await screen.findByText("1 skill")).toBeInTheDocument()
+    const viewButton = screen.getByRole("button", { name: "View skill-1" })
+    fireEvent.click(viewButton)
+    fireEvent.click(screen.getByRole("button", { name: "Close details" }))
+
+    expect(requestAnimationFrameSpy).toHaveBeenCalledTimes(1)
+    fireEvent.click(viewButton)
+    const reopenedDetails = screen.getByRole("button", { name: "Close details" })
+    reopenedDetails.focus()
+
+    expect(cancelAnimationFrameSpy).toHaveBeenCalledWith(1)
+    act(() => {
+      for (const [frameId, callback] of scheduledFrames) {
+        scheduledFrames.delete(frameId)
+        callback(0)
+      }
+    })
+    expect(reopenedDetails).toHaveFocus()
+  })
+
   it("returns focus to the row view action after testing from details", async () => {
     tldwClientMock.listSkills.mockResolvedValue({
       skills: [makeSkill(1)],

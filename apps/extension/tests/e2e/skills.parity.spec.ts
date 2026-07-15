@@ -571,13 +571,30 @@ test.describe("Skills parity (extension)", () => {
       extensionContext = launch.context
 
       const { api, diagnostics, page } = launch
-      const skillsHeading = page.getByRole("heading", { level: 1, name: "Skills" })
-      const search = page.getByRole("searchbox", { name: "Search skills" })
-      const skillsView = page.getByRole("radiogroup", { name: "Skills view" })
-      const newSkill = page.getByRole("button", { name: "New Skill" })
-      const viewSkill = page.getByRole("button", { name: "View summarize" })
+      const skillsHeading = page.getByRole("heading", {
+        level: 1,
+        name: "Skills",
+        exact: true,
+      })
+      const search = page.getByRole("searchbox", {
+        name: "Search skills",
+        exact: true,
+      })
+      const skillsView = page.getByRole("radiogroup", {
+        name: "Skills view",
+        exact: true,
+      })
+      const newSkill = page.getByRole("button", {
+        name: "New Skill",
+        exact: true,
+      })
+      const viewSkill = page.getByRole("button", {
+        name: "View summarize",
+        exact: true,
+      })
       const testRunSkill = page.getByRole("button", {
         name: "Test run summarize",
+        exact: true,
       })
 
       await expect(skillsHeading).toBeVisible()
