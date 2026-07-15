@@ -57,13 +57,13 @@ quota concurrency: 2 created, expected 1
 **Goal:** Make secret rejection authoritative and isolate optional PostgreSQL counter failures.
 **Success Criteria:** Secret-bearing jobs are not inserted in reject mode; a counter failure does not abort job/event commit.
 **Tests:** Focused SQLite secret tests and real PostgreSQL counter fault injection.
-**Status:** In Progress
+**Status:** Complete
 
 ### Stage 2: Atomic Admission Quotas
 **Goal:** Serialize quota check plus insert only within the enabled owner/domain quota scope and fail closed on quota query errors.
 **Success Criteria:** Concurrent submissions cannot oversubscribe max-queued quotas; unrelated PostgreSQL scopes remain concurrent; quota-disabled SQLite admission retains its deferred transaction path.
 **Tests:** Deterministic delayed-insert concurrency tests on SQLite and PostgreSQL plus existing quota/parity suites.
-**Status:** Not Started
+**Status:** In Progress
 
 ### Stage 3: Acquisition Contract and Parity Safety Net
 **Goal:** Define the typed acquisition command and characterize acquisition before moving SQL.
@@ -302,7 +302,7 @@ git commit -m "fix(jobs): enforce secret rejection before admission"
 - Consumes: existing `_bump_counters(cur, command, available_at)`.
 - Produces: `_bump_counters_best_effort(...) -> None` with transaction recovery guaranteed before returning.
 
-- [ ] **Step 1: Add the real PostgreSQL fault-injection test**
+- [x] **Step 1: Add the real PostgreSQL fault-injection test**
 
 Use the existing `jobs_pg_dsn` fixture and monkeypatch `_bump_counters` to execute invalid SQL:
 
@@ -334,7 +334,7 @@ def test_counter_failure_rolls_back_to_savepoint_and_commits_job_event(jobs_pg_d
     assert [event["event_type"] for event in events] == ["job.created"]
 ```
 
-- [ ] **Step 2: Verify the real PostgreSQL test is red**
+- [x] **Step 2: Verify the real PostgreSQL test is red**
 
 Run:
 
@@ -346,7 +346,7 @@ RUN_JOBS=1 python -m pytest \
 
 Expected before the fix: `psycopg.errors.InFailedSqlTransaction` at `_insert_created_event`.
 
-- [ ] **Step 3: Wrap the optional counter statement in a savepoint**
+- [x] **Step 3: Wrap the optional counter statement in a savepoint**
 
 Implement the helper with a static, non-user-controlled savepoint name:
 
@@ -376,7 +376,7 @@ def _bump_counters_best_effort(
 
 If savepoint creation, rollback, or release itself fails, let that error propagate. Continuing without restoring transaction validity would repeat the original defect.
 
-- [ ] **Step 4: Update strict fake-cursor expectations**
+- [x] **Step 4: Update strict fake-cursor expectations**
 
 If the existing fake cursor rejects unknown statements, add exact handling for:
 
@@ -388,7 +388,7 @@ RELEASE SAVEPOINT jobs_admission_counter_update
 
 Do not turn the fake into an accept-all cursor; retain assertions for unexpected SQL.
 
-- [ ] **Step 5: Verify fault recovery and happy paths**
+- [x] **Step 5: Verify fault recovery and happy paths**
 
 ```bash
 RUN_JOBS=1 python -m pytest \
@@ -400,7 +400,7 @@ RUN_JOBS=1 python -m pytest \
 
 Expected: all selected tests pass with no PostgreSQL skips.
 
-- [ ] **Step 6: Commit Task 2**
+- [x] **Step 6: Commit Task 2**
 
 ```bash
 git add tldw_Server_API/app/core/Jobs/operations/postgres/admission.py \
