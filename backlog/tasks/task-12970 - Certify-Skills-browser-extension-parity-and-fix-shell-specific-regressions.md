@@ -15,6 +15,7 @@ references:
 - 'PR #2732'
 documentation:
 - Docs/Design/2026-07-15-skills-extension-parity-design.md
+- Docs/Plans/IMPLEMENTATION_PLAN_skills_extension_parity_TASK_12970.md
 ---
 
 ## Description
@@ -37,7 +38,7 @@ Exercise the merged /skills beginner, power-user, accessibility, responsive, per
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-A final code-grounded audit corrected launch-order and reliability gaps before implementation. The design now prepares routes/diagnostics and a reload-persistent direct-request seam before the first targeted #/skills navigation; mocks core and RAG health; grants the deterministic mock origin through existing test host-permission setup; accounts for React Query's automatic retry; applies exact model/export/history/Trash/touch-target assertions; runs six independent contexts with one worker; narrows diagnostic redaction; and explicitly excludes MV3 background-relay certification.
+The five-stage TDD implementation plan passed independent plan review with no blocking issues. The accepted advisory now requires explicit empty assertions for page errors, console errors, request failures, and unexpected API requests. The advisory to retain a deleted plan link was not adopted because repository guidance requires removing completed task plans; the link will be removed with the file during finalization.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
