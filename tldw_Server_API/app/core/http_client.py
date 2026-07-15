@@ -23,8 +23,8 @@ import socket  # noqa: E402
 import ssl  # noqa: E402
 import threading  # noqa: E402
 import time  # noqa: E402
-from collections.abc import AsyncIterator, Iterable  # noqa: E402
-from contextlib import asynccontextmanager, suppress  # noqa: E402
+from collections.abc import AsyncIterator, Iterable, Iterator  # noqa: E402
+from contextlib import asynccontextmanager, contextmanager, suppress  # noqa: E402
 from dataclasses import dataclass  # noqa: E402
 from datetime import datetime, timezone  # noqa: E402
 from email.utils import parsedate_to_datetime  # noqa: E402
@@ -66,6 +66,7 @@ from tldw_Server_API.app.core.Metrics import (  # noqa: E402
     get_metrics_registry,
 )
 from tldw_Server_API.app.core.Metrics.traces import get_tracing_manager  # noqa: E402
+from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope  # noqa: E402
 from tldw_Server_API.app.core.testing import (
     env_flag_enabled,
     is_explicit_pytest_runtime,
@@ -437,6 +438,7 @@ class TransportAdapter(Protocol):
         proxies: str | dict[str, str] | None = None,
         retry: RetryPolicy | None = None,
         cert_pinning: dict[str, set[str]] | None = None,
+        configured_endpoint: ConfiguredEndpointScope | None = None,
     ) -> SyncResponseLike: ...
 
     async def arequest(
@@ -457,6 +459,7 @@ class TransportAdapter(Protocol):
         retry: RetryPolicy | None = None,
         cert_pinning: dict[str, set[str]] | None = None,
         verify: bool | str | ssl.SSLContext | None = None,
+        configured_endpoint: ConfiguredEndpointScope | None = None,
     ) -> AsyncResponseLike: ...
 
     async def stream_bytes(
@@ -514,6 +517,7 @@ class HttpxAdapter:
         proxies: str | dict[str, str] | None = None,
         retry: RetryPolicy | None = None,
         cert_pinning: dict[str, set[str]] | None = None,
+        configured_endpoint: ConfiguredEndpointScope | None = None,
     ) -> httpx.Response:
         return _fetch_httpx_response(
             method=method,
@@ -530,6 +534,7 @@ class HttpxAdapter:
             proxies=proxies,
             retry=retry,
             cert_pinning=cert_pinning,
+            configured_endpoint=configured_endpoint,
         )
 
     async def arequest(
@@ -550,6 +555,7 @@ class HttpxAdapter:
         retry: RetryPolicy | None = None,
         cert_pinning: dict[str, set[str]] | None = None,
         verify: bool | str | ssl.SSLContext | None = None,
+        configured_endpoint: ConfiguredEndpointScope | None = None,
     ) -> httpx.Response:
         return await _afetch_httpx(
             method=method,
@@ -567,6 +573,7 @@ class HttpxAdapter:
             retry=retry,
             cert_pinning=cert_pinning,
             verify=verify,
+            configured_endpoint=configured_endpoint,
         )
 
     async def stream_bytes(
@@ -658,6 +665,7 @@ class AiohttpAdapter:
         retry: RetryPolicy | None = None,
         cert_pinning: dict[str, set[str]] | None = None,
         verify: bool | str | ssl.SSLContext | None = None,
+        configured_endpoint: ConfiguredEndpointScope | None = None,
     ) -> AsyncResponseLike:
         return await _afetch_aiohttp(
             method=method,
@@ -675,6 +683,7 @@ class AiohttpAdapter:
             retry=retry,
             cert_pinning=cert_pinning,
             verify=verify,
+            configured_endpoint=configured_endpoint,
         )
 
     async def stream_bytes(
@@ -949,10 +958,33 @@ def _parse_host_from_url(url: str) -> str:
 
 
 def _normalize_dns_pin_host(host: str) -> str:
-    out = (host or "").strip().lower().rstrip(".")
-    if "%" in out:
-        out = out.split("%", 1)[0]
-    return out
+    from tldw_Server_API.app.core.Security.egress import (
+        _canonical_ip_literal,
+        _normalize_hostname,
+    )
+
+    out = _normalize_hostname(host or "")
+    return _canonical_ip_literal(out) or out
+
+
+def _accepted_ips_for_url(
+    dns_pin_cache: dict[str, tuple[str, ...]],
+    url: str,
+) -> tuple[str, ...]:
+    return dns_pin_cache.get(_normalize_dns_pin_host(_parse_host_from_url(url)), ())
+
+
+def _pins_for_host(
+    pins_map: dict[str, set[str]] | None,
+    host: str,
+) -> set[str] | None:
+    if not pins_map:
+        return None
+    normalized_host = _normalize_dns_pin_host(host)
+    for pin_host, pins in pins_map.items():
+        if _normalize_dns_pin_host(pin_host) == normalized_host:
+            return pins
+    return None
 
 
 def _inject_trace_headers(headers: dict[str, str] | None) -> dict[str, str]:
@@ -983,6 +1015,7 @@ def _validate_egress_or_raise(
     url: str,
     *,
     dns_pin_cache: dict[str, tuple[str, ...]] | None = None,
+    configured_endpoint: ConfiguredEndpointScope | None = None,
 ) -> None:
     from urllib.parse import urlparse as _urlparse
 
@@ -1018,14 +1051,13 @@ def _validate_egress_or_raise(
     if dns_pin_cache is not None and cache_host:
         pinned_ips = dns_pin_cache.get(cache_host)
 
+    policy_kwargs: dict[str, Any] = {"block_private_override": block_override}
+    if configured_endpoint is not None:
+        policy_kwargs["configured_endpoint"] = configured_endpoint
     if pinned_ips:
-        res = evaluate_url_policy(
-            url,
-            block_private_override=block_override,
-            pinned_resolved_ips=pinned_ips,
-        )
-    else:
-        res = evaluate_url_policy(url, block_private_override=block_override)
+        policy_kwargs["pinned_resolved_ips"] = pinned_ips
+    res = evaluate_url_policy(url, **policy_kwargs)
+    if not pinned_ips:
         if dns_pin_cache is not None and cache_host:
             resolved_ips = tuple(
                 str(ip).strip()
@@ -1049,8 +1081,14 @@ async def _avalidate_egress_or_raise(
     url: str,
     *,
     dns_pin_cache: dict[str, tuple[str, ...]] | None = None,
+    configured_endpoint: ConfiguredEndpointScope | None = None,
 ) -> None:
-    await asyncio.to_thread(_validate_egress_or_raise, url, dns_pin_cache=dns_pin_cache)
+    await asyncio.to_thread(
+        _validate_egress_or_raise,
+        url,
+        dns_pin_cache=dns_pin_cache,
+        configured_endpoint=configured_endpoint,
+    )
 
 
 def _is_url_allowed(url: str) -> bool:
@@ -1655,7 +1693,9 @@ def _get_client_cert_pins(client: Any) -> dict[str, set[str]] | None:
             return None
         out: dict[str, set[str]] = {}
         for host, vals in pins.items():
-            out[str(host).lower()] = {str(v).lower() for v in (vals or set())}
+            out[_normalize_dns_pin_host(str(host))] = {
+                str(v).lower() for v in (vals or set())
+            }
         return out  # noqa: TRY300
     except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
         return None
@@ -1676,7 +1716,7 @@ def _parse_pins_from_env() -> dict[str, set[str]] | None:
             if "=" not in part:
                 continue
             host, pins_str = part.split("=", 1)
-            host = host.strip().lower()
+            host = _normalize_dns_pin_host(host)
             pins = {p.strip().lower() for p in pins_str.split("|") if p.strip()}
             if host and pins:
                 out[host] = pins
@@ -1685,7 +1725,15 @@ def _parse_pins_from_env() -> dict[str, set[str]] | None:
     return out or None
 
 
-def _check_cert_pinning(host: str, port: int, pins: set[str], min_ver: str | None) -> None:
+def _check_cert_pinning(
+    host: str,
+    port: int,
+    pins: set[str],
+    min_ver: str | None,
+    *,
+    configured_endpoint: ConfiguredEndpointScope | None = None,
+    accepted_resolved_ips: tuple[str, ...] = (),
+) -> None:
     if not host or not pins:
         return
     try:
@@ -1693,14 +1741,31 @@ def _check_cert_pinning(host: str, port: int, pins: set[str], min_ver: str | Non
         # against any future callers that might invoke pinning without having
         # already passed through the main egress checks.
         try:
-            url = f"https://{host}"
+            normalized_host = _normalize_dns_pin_host(host)
+            url_host = normalized_host
+            with suppress(ValueError):
+                import ipaddress
+
+                if ipaddress.ip_address(normalized_host).version == 6:
+                    url_host = f"[{normalized_host}]"
+            url = f"https://{url_host}"
             if port not in (80, 443):
-                url = f"https://{host}:{port}"
-            _validate_egress_or_raise(url)
+                url = f"https://{url_host}:{port}"
+            validation_kwargs: dict[str, Any] = {}
+            if configured_endpoint is not None:
+                validation_kwargs["configured_endpoint"] = configured_endpoint
+            if accepted_resolved_ips:
+                validation_kwargs["dns_pin_cache"] = {
+                    normalized_host: tuple(accepted_resolved_ips)
+                }
+            _validate_egress_or_raise(url, **validation_kwargs)
         except EgressPolicyError:
             raise
         except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
-            raise EgressPolicyError(f"TLS pinning egress check failed: {e}")  # noqa: B904, TRY003
+            raise EgressPolicyError(
+                f"TLS pinning egress check failed: {e}",
+                reason_code="tls_pin_error",
+            ) from e
 
         ctx = ssl.create_default_context(purpose=ssl.Purpose.SERVER_AUTH)
         try:
@@ -1711,14 +1776,23 @@ def _check_cert_pinning(host: str, port: int, pins: set[str], min_ver: str | Non
              ctx.wrap_socket(sock, server_hostname=host) as ssock:
             der = ssock.getpeercert(binary_form=True)
         if not der:
-            raise EgressPolicyError("TLS pinning: no certificate presented")  # noqa: TRY003, TRY301
+            raise EgressPolicyError(
+                "TLS pinning: no certificate presented",
+                reason_code="tls_pin_missing",
+            )
         fp = hashlib.sha256(der).hexdigest().lower()
         if fp not in pins:
-            raise EgressPolicyError("TLS pinning mismatch for host")  # noqa: TRY003, TRY301
+            raise EgressPolicyError(
+                "TLS pinning mismatch for host",
+                reason_code="tls_pin_mismatch",
+            )
     except EgressPolicyError:
         raise
     except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
-        raise EgressPolicyError(f"TLS pinning verification failed: {e}")  # noqa: B904, TRY003
+        raise EgressPolicyError(
+            f"TLS pinning verification failed: {e}",
+            reason_code="tls_pin_error",
+        ) from e
 
 
 # --------------------------------------------------------------------------------------
@@ -2220,6 +2294,7 @@ async def _afetch_httpx(
     retry: RetryPolicy | None = None,
     cert_pinning: dict[str, set[str]] | None = None,
     verify: bool | str | ssl.SSLContext | None = None,
+    configured_endpoint: ConfiguredEndpointScope | None = None,
 ) -> httpx.Response:
     """Async httpx request with retries and egress enforcement.
 
@@ -2232,7 +2307,11 @@ async def _afetch_httpx(
     retry = retry or RetryPolicy()
     _validate_retry_files_seekable(files, retry)
     dns_pin_cache: dict[str, tuple[str, ...]] = {}
-    await _avalidate_egress_or_raise(url, dns_pin_cache=dns_pin_cache)
+    await _avalidate_egress_or_raise(
+        url,
+        dns_pin_cache=dns_pin_cache,
+        configured_endpoint=configured_endpoint,
+    )
     _validate_proxies_or_raise(proxies)
 
     attempts = max(1, retry.attempts)
@@ -2268,8 +2347,20 @@ async def _afetch_httpx(
                     u = httpx.URL(target_url)
                     if u.scheme.lower() == "https":
                         host = (u.host or "").lower()
-                        if host in pins_map:
-                            _check_cert_pinning(host, int(u.port or 443), pins_map[host], TLS_MIN_VERSION)
+                        pins = _pins_for_host(pins_map, host)
+                        if pins:
+                            _check_cert_pinning(
+                                host,
+                                int(u.port or 443),
+                                pins,
+                                TLS_MIN_VERSION,
+                                configured_endpoint=configured_endpoint,
+                                accepted_resolved_ips=_accepted_ips_for_url(
+                                    dns_pin_cache, target_url
+                                ),
+                            )
+            except EgressPolicyError:
+                raise
             except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
                 return None, e.__class__.__name__
             r = await _httpx_arequest_io(
@@ -2287,6 +2378,8 @@ async def _afetch_httpx(
                 verify=verify,
             )
             return r, "ok"  # noqa: TRY300
+        except EgressPolicyError:
+            raise
         except _HTTPCLIENT_REQUEST_EXCEPTIONS as e:
             # Let callers see HTTPStatusError directly so that adapters/tests
             # can distinguish 4xx/5xx responses from transport failures. All
@@ -2335,7 +2428,11 @@ async def _afetch_httpx(
 
                 # Manual redirect handling inside each attempt
                 while True:
-                    await _avalidate_egress_or_raise(cur_url, dns_pin_cache=dns_pin_cache)
+                    await _avalidate_egress_or_raise(
+                        cur_url,
+                        dns_pin_cache=dns_pin_cache,
+                        configured_endpoint=configured_endpoint,
+                    )
                     resp, reason = await _do_once(ac, cur_url)
                     if resp is None:
                         # Special HEAD fallbacks: disable HTTP/2, then GET with Range 0-0
@@ -2553,6 +2650,7 @@ async def _afetch_aiohttp(
     retry: RetryPolicy | None = None,
     cert_pinning: dict[str, set[str]] | None = None,
     verify: Any | None = None,
+    configured_endpoint: ConfiguredEndpointScope | None = None,
 ) -> _AiohttpResponse:
     """Async aiohttp request with retries and egress enforcement.
 
@@ -2565,7 +2663,11 @@ async def _afetch_aiohttp(
     retry = retry or RetryPolicy()
     _validate_retry_files_seekable(files, retry)
     dns_pin_cache: dict[str, tuple[str, ...]] = {}
-    await _avalidate_egress_or_raise(url, dns_pin_cache=dns_pin_cache)
+    await _avalidate_egress_or_raise(
+        url,
+        dns_pin_cache=dns_pin_cache,
+        configured_endpoint=configured_endpoint,
+    )
     _validate_proxies_or_raise(proxies)
 
     attempts = max(1, retry.attempts)
@@ -2595,13 +2697,27 @@ async def _afetch_aiohttp(
                     if httpx is not None:
                         u = httpx.URL(target_url)
                         host = (u.host or "").lower()
-                        port = int(u.port or (443 if (u.scheme or "").lower() == "https" else 80))
+                        scheme = (u.scheme or "").lower()
+                        port = int(u.port or (443 if scheme == "https" else 80))
                     else:
                         parsed = urlparse(target_url)
                         host = (parsed.hostname or "").lower()
-                        port = parsed.port or (443 if (parsed.scheme or "").lower() == "https" else 80)
-                    if host in pins_map:
-                        _check_cert_pinning(host, port, pins_map[host], TLS_MIN_VERSION)
+                        scheme = (parsed.scheme or "").lower()
+                        port = parsed.port or (443 if scheme == "https" else 80)
+                    pins = _pins_for_host(pins_map, host) if scheme == "https" else None
+                    if pins:
+                        _check_cert_pinning(
+                            host,
+                            port,
+                            pins,
+                            TLS_MIN_VERSION,
+                            configured_endpoint=configured_endpoint,
+                            accepted_resolved_ips=_accepted_ips_for_url(
+                                dns_pin_cache, target_url
+                            ),
+                        )
+            except EgressPolicyError:
+                raise
             except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
                 return None, e.__class__.__name__
             resp = await _aiohttp_request_io(
@@ -2619,6 +2735,8 @@ async def _afetch_aiohttp(
                 ssl_override=ssl_override,
             )
             return resp, "ok"  # noqa: TRY300
+        except EgressPolicyError:
+            raise
         except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
             try:
                 if _is_dns_resolution_error(e):
@@ -2645,7 +2763,11 @@ async def _afetch_aiohttp(
             redirects = 0
 
             while True:
-                await _avalidate_egress_or_raise(cur_url, dns_pin_cache=dns_pin_cache)
+                await _avalidate_egress_or_raise(
+                    cur_url,
+                    dns_pin_cache=dns_pin_cache,
+                    configured_endpoint=configured_endpoint,
+                )
                 resp, reason = await _do_once(session, cur_url)
                 if resp is None:
                     if method_upper == "HEAD" and not _head_get_range_tried:
@@ -2826,6 +2948,7 @@ async def afetch(
     retry: RetryPolicy | None = None,
     cert_pinning: dict[str, set[str]] | None = None,
     verify: bool | str | ssl.SSLContext | None = None,
+    configured_endpoint: ConfiguredEndpointScope | None = None,
 ) -> Any:
     if client is not None:
         adapter_name = "aiohttp" if _is_aiohttp_client(client) else "httpx"
@@ -2848,6 +2971,7 @@ async def afetch(
         retry=retry,
         cert_pinning=cert_pinning,
         verify=verify,
+        configured_endpoint=configured_endpoint,
     )
 
 
@@ -2914,6 +3038,7 @@ def _fetch_httpx_response(
     proxies: str | dict[str, str] | None = None,
     retry: RetryPolicy | None = None,
     cert_pinning: dict[str, set[str]] | None = None,
+    configured_endpoint: ConfiguredEndpointScope | None = None,
 ) -> httpx.Response:
     """Sync httpx request with retries and egress enforcement.
 
@@ -2926,7 +3051,11 @@ def _fetch_httpx_response(
     retry = retry or RetryPolicy()
     _validate_retry_files_seekable(files, retry)
     dns_pin_cache: dict[str, tuple[str, ...]] = {}
-    _validate_egress_or_raise(url, dns_pin_cache=dns_pin_cache)
+    _validate_egress_or_raise(
+        url,
+        dns_pin_cache=dns_pin_cache,
+        configured_endpoint=configured_endpoint,
+    )
     _validate_proxies_or_raise(proxies)
 
     attempts = max(1, retry.attempts)
@@ -2955,8 +3084,20 @@ def _fetch_httpx_response(
                     u = httpx.URL(target_url)
                     if u.scheme.lower() == "https":
                         host = (u.host or "").lower()
-                        if host in pins_map:
-                            _check_cert_pinning(host, int(u.port or 443), pins_map[host], TLS_MIN_VERSION)
+                        pins = _pins_for_host(pins_map, host)
+                        if pins:
+                            _check_cert_pinning(
+                                host,
+                                int(u.port or 443),
+                                pins,
+                                TLS_MIN_VERSION,
+                                configured_endpoint=configured_endpoint,
+                                accepted_resolved_ips=_accepted_ips_for_url(
+                                    dns_pin_cache, target_url
+                                ),
+                            )
+            except EgressPolicyError:
+                raise
             except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
                 return None, e.__class__.__name__
             r = _httpx_request_io(
@@ -2973,6 +3114,8 @@ def _fetch_httpx_response(
                 follow_redirects=False,
             )
             return r, "ok"  # noqa: TRY300
+        except EgressPolicyError:
+            raise
         except _HTTPCLIENT_REQUEST_EXCEPTIONS as e:
             # Classify DNS resolution errors explicitly so that retry logic
             # can treat them as permanent failures.
@@ -3002,7 +3145,11 @@ def _fetch_httpx_response(
                 cur_url = url
                 redirects = 0
                 while True:
-                    _validate_egress_or_raise(cur_url, dns_pin_cache=dns_pin_cache)
+                    _validate_egress_or_raise(
+                        cur_url,
+                        dns_pin_cache=dns_pin_cache,
+                        configured_endpoint=configured_endpoint,
+                    )
                     resp, reason = _do_once(sc, cur_url)
                     if resp is None:
                         if method_upper == "HEAD":
@@ -3161,6 +3308,71 @@ def _fetch_httpx_response(
         raise RetryExhaustedError("All retry attempts exhausted")  # noqa: TRY003
     finally:
         if need_close:
+            with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+                sc.close()
+
+
+@contextmanager
+def stream_response(
+    *,
+    method: str,
+    url: str,
+    configured_endpoint: ConfiguredEndpointScope | None = None,
+    client: httpx.Client | None = None,
+    **kwargs: Any,
+) -> Iterator[httpx.Response]:
+    """Open one checked synchronous response stream without following redirects."""
+    if httpx is None:  # pragma: no cover
+        raise RuntimeError("httpx is not available")  # noqa: TRY003
+
+    options = dict(kwargs)
+    proxies = options.pop("proxies", None)
+    verify = options.pop("verify", None)
+    cert_pinning = options.pop("cert_pinning", None)
+    trust_env = options.pop("trust_env", DEFAULT_TRUST_ENV)
+    options.pop("allow_redirects", None)
+    options["follow_redirects"] = False
+    options["headers"] = _sanitize_accept_encoding_for_backend(
+        _inject_trace_headers(options.get("headers")),
+        "httpx",
+    )
+
+    dns_pin_cache: dict[str, tuple[str, ...]] = {}
+    _validate_egress_or_raise(
+        url,
+        dns_pin_cache=dns_pin_cache,
+        configured_endpoint=configured_endpoint,
+    )
+    _validate_proxies_or_raise(proxies)
+
+    owns_client = client is None
+    sc = client
+    if sc is None:
+        sc = create_client(
+            timeout=options.get("timeout"),
+            proxies=proxies,
+            trust_env=is_truthy(trust_env),
+            cert_pinning=cert_pinning,
+            verify=verify,
+        )
+    try:
+        pins_map = cert_pinning or _get_client_cert_pins(sc)
+        parsed = httpx.URL(url)
+        host = parsed.host or ""
+        pins = _pins_for_host(pins_map, host)
+        if parsed.scheme.lower() == "https" and pins:
+            _check_cert_pinning(
+                host,
+                int(parsed.port or 443),
+                pins,
+                TLS_MIN_VERSION,
+                configured_endpoint=configured_endpoint,
+                accepted_resolved_ips=_accepted_ips_for_url(dns_pin_cache, url),
+            )
+        with sc.stream(str(method).upper(), url, **options) as response:
+            yield response
+    finally:
+        if owns_client:
             with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                 sc.close()
 

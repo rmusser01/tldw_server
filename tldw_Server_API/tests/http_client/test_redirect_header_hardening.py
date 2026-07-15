@@ -244,6 +244,95 @@ class TestRedirectFlows:
         assert seen["/landed"].get("authorization") == "Bearer secret-token"
         assert seen["/landed"].get("x-api-key") == "sk-secret"
 
+    async def test_scoped_afetch_revalidates_same_origin_redirect(self, monkeypatch) -> None:
+        """A configured scope remains attached to each accepted path redirect."""
+        from types import SimpleNamespace
+
+        from tldw_Server_API.app.core import http_client as hc
+        from tldw_Server_API.app.core.Security import egress as egress_mod
+        from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
+
+        scope = ConfiguredEndpointScope.from_url(f"{ORIGIN_A}:11434")
+        validations: list[tuple[str, object, object]] = []
+
+        def fake_policy(url, *, configured_endpoint=None, pinned_resolved_ips=None, **_kwargs):
+            validations.append((url, configured_endpoint, pinned_resolved_ips))
+            return SimpleNamespace(
+                allowed=configured_endpoint is scope,
+                reason=None,
+                resolved_ips=("93.184.216.34",),
+                reason_code=None,
+            )
+
+        monkeypatch.setattr(egress_mod, "evaluate_url_policy", fake_policy)
+
+        calls: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            calls.append(str(request.url))
+            if request.url.path == "/start":
+                return httpx.Response(302, request=request, headers={"Location": "/next"})
+            return httpx.Response(200, request=request, text="ok")
+
+        client = hc.create_async_client(transport=httpx.MockTransport(handler))
+        try:
+            response = await hc.afetch(
+                method="GET",
+                url=f"{ORIGIN_A}:11434/start",
+                client=client,
+                configured_endpoint=scope,
+            )
+        finally:
+            await client.aclose()
+
+        assert response.status_code == 200
+        assert calls == [f"{ORIGIN_A}:11434/start", f"{ORIGIN_A}:11434/next"]
+        assert len(validations) >= 3
+        assert all(item[1] is scope for item in validations)
+        assert all(item[2] == ("93.184.216.34",) for item in validations[1:])
+
+    @pytest.mark.parametrize(
+        "location",
+        [
+            "http://93.184.216.35:11434/blocked",
+            "https://93.184.216.34:11434/blocked",
+            "http://93.184.216.34:11435/blocked",
+        ],
+    )
+    def test_scoped_fetch_denies_cross_origin_redirect_before_io(
+        self, monkeypatch, location: str
+    ) -> None:
+        """A configured request never sends a redirected hop outside its exact origin."""
+        from tldw_Server_API.app.core import http_client as hc
+        from tldw_Server_API.app.core.exceptions import EgressPolicyError
+        from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
+
+        scope = ConfiguredEndpointScope.from_url(f"{ORIGIN_A}:11434")
+        calls: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            calls.append(str(request.url))
+            return httpx.Response(
+                302,
+                request=request,
+                headers={"Location": location},
+            )
+
+        client = hc.create_client(transport=httpx.MockTransport(handler))
+        try:
+            with pytest.raises(EgressPolicyError) as exc:
+                hc.fetch(
+                    method="GET",
+                    url=f"{ORIGIN_A}:11434/start",
+                    client=client,
+                    configured_endpoint=scope,
+                )
+        finally:
+            client.close()
+
+        assert exc.value.reason_code == "origin_mismatch"
+        assert calls == [f"{ORIGIN_A}:11434/start"]
+
     def test_sync_fetch_strips_credentials_on_cross_origin_redirect(self) -> None:
         """The sync loop applies the same stripping as the async loop."""
         from tldw_Server_API.app.core.http_client import create_client, fetch

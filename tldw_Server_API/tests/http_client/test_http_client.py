@@ -1,6 +1,6 @@
 import asyncio
+import types
 from pathlib import Path
-from typing import Optional
 
 import pytest
 
@@ -56,6 +56,59 @@ async def test_retry_succeeds_on_third_attempt():
         assert calls["n"] == 3
     finally:
         await client.aclose()
+
+
+@requires_httpx
+def test_scoped_fetch_retry_preserves_scope_and_initial_dns_pin(monkeypatch):
+    import httpx
+
+    from tldw_Server_API.app.core import http_client as hc
+    from tldw_Server_API.app.core.Security import egress as egress_mod
+    from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
+
+    scope = ConfiguredEndpointScope.from_url("http://93.184.216.34:11434")
+    validations: list[tuple[object, object]] = []
+
+    def fake_policy(
+        _url: str,
+        *,
+        configured_endpoint=None,
+        pinned_resolved_ips=None,
+        **_kwargs,
+    ):
+        validations.append((configured_endpoint, pinned_resolved_ips))
+        return types.SimpleNamespace(
+            allowed=True,
+            reason=None,
+            reason_code=None,
+            resolved_ips=("93.184.216.34",),
+        )
+
+    monkeypatch.setattr(egress_mod, "evaluate_url_policy", fake_policy)
+    monkeypatch.setattr(hc.time, "sleep", lambda _delay: None)
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(500 if calls["n"] == 1 else 200, request=request)
+
+    client = hc.create_client(transport=httpx.MockTransport(handler))
+    try:
+        response = hc.fetch(
+            method="GET",
+            url="http://93.184.216.34:11434/retry",
+            client=client,
+            retry=hc.RetryPolicy(attempts=2),
+            configured_endpoint=scope,
+        )
+    finally:
+        client.close()
+
+    assert response.status_code == 200
+    assert calls["n"] == 2
+    assert len(validations) >= 3
+    assert all(item[0] is scope for item in validations)
+    assert all(item[1] == ("93.184.216.34",) for item in validations[1:])
 
 
 @requires_httpx

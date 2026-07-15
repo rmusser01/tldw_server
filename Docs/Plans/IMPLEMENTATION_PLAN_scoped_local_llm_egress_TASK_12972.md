@@ -153,28 +153,28 @@
 
 **Tests:** HTTP client request, adapter, redirect, pinning, timeout, and truthiness regressions.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 2.1: Write failing transport tests
 
-- [ ] Prove sync `fetch` and async `afetch` preserve the scope and `EgressPolicyError.reason_code` through initial and repeated validation.
-- [ ] Prove a same-origin path redirect is revalidated while cross-origin/scheme/port redirects are rejected before the redirected call.
-- [ ] Prove a synchronous checked stream accepts one approved LAN/nonstandard origin, disables redirects, rejects an origin mismatch before I/O, and closes only clients it owns.
-- [ ] Prove `_check_cert_pinning` receives the scope and original accepted IP set; a scoped HTTPS LAN origin must not be rejected by a nested unscoped validation.
-- [ ] Add explicit certificate denial cases for origin/address denial during the nested check, changed DNS, no certificate, pin mismatch, and socket/TLS failure. Assert `EgressPolicyError.reason_code` remains `origin_mismatch`/`address_forbidden`, `dns_changed`, `tls_pin_missing`, `tls_pin_mismatch`, or `tls_pin_error` rather than becoming `NetworkError`.
-- [ ] Prove both `fetch`/`afetch` and the new `stream_response` enforce configured certificate pins when pins are supplied.
-- [ ] Prove Unicode/punycode/trailing-dot host variants share one DNS-pin key.
-- [ ] Add no-scope regressions for port/private blocking, timeout behavior, falsey adapter flags, and existing adapter signatures.
-- [ ] Do not add scope tests for `astream_bytes` or `astream_sse`.
+- [x] Prove sync `fetch` and async `afetch` preserve the scope and `EgressPolicyError.reason_code` through initial and repeated validation.
+- [x] Prove a same-origin path redirect is revalidated while cross-origin/scheme/port redirects are rejected before the redirected call.
+- [x] Prove a synchronous checked stream accepts one approved LAN/nonstandard origin, disables redirects, rejects an origin mismatch before I/O, and closes only clients it owns.
+- [x] Prove `_check_cert_pinning` receives the scope and original accepted IP set; a scoped HTTPS LAN origin must not be rejected by a nested unscoped validation.
+- [x] Add explicit certificate denial cases for origin/address denial during the nested check, changed DNS, no certificate, pin mismatch, and socket/TLS failure. Assert `EgressPolicyError.reason_code` remains `origin_mismatch`/`address_forbidden`, `dns_changed`, `tls_pin_missing`, `tls_pin_mismatch`, or `tls_pin_error` rather than becoming `NetworkError`.
+- [x] Prove both `fetch`/`afetch` and the new `stream_response` enforce configured certificate pins when pins are supplied.
+- [x] Prove Unicode/punycode/trailing-dot host variants share one DNS-pin key.
+- [x] Add no-scope regressions for port/private blocking, timeout behavior, falsey adapter flags, and existing adapter signatures.
+- [x] Do not add scope tests for `astream_bytes` or `astream_sse`.
 
 ### Task 2.2: Implement the three entrypoints
 
-- [ ] Thread `configured_endpoint` through `_validate_egress_or_raise`, `_avalidate_egress_or_raise`, sync/async request adapters, public `fetch`, and public `afetch`.
-- [ ] Pass the original scope and accepted resolution set into every retry, redirect, DNS-pin, and `_check_cert_pinning` validation.
-- [ ] Add `configured_endpoint` and accepted-IP parameters to `_check_cert_pinning`; preserve URL-policy reason codes and assign typed `tls_pin_missing`, `tls_pin_mismatch`, or `tls_pin_error` codes to pin-specific failures.
-- [ ] In scoped request and stream paths, catch and re-raise `EgressPolicyError` before the existing broad noncritical/network catches. Do not collapse a certificate-policy failure into a retry reason string or `NetworkError`.
-- [ ] Normalize DNS-pin host keys with the same IDNA/trailing-dot helper used by `ConfiguredEndpointScope`.
-- [ ] Add one exported context manager:
+- [x] Thread `configured_endpoint` through `_validate_egress_or_raise`, `_avalidate_egress_or_raise`, sync/async request adapters, public `fetch`, and public `afetch`.
+- [x] Pass the original scope and accepted resolution set into every retry, redirect, DNS-pin, and `_check_cert_pinning` validation.
+- [x] Add `configured_endpoint` and accepted-IP parameters to `_check_cert_pinning`; preserve URL-policy reason codes and assign typed `tls_pin_missing`, `tls_pin_mismatch`, or `tls_pin_error` codes to pin-specific failures.
+- [x] In scoped request and stream paths, catch and re-raise `EgressPolicyError` before the existing broad noncritical/network catches. Do not collapse a certificate-policy failure into a retry reason string or `NetworkError`.
+- [x] Normalize DNS-pin host keys with the same IDNA/trailing-dot helper used by `ConfiguredEndpointScope`.
+- [x] Add one exported context manager:
 
   ```python
   @contextmanager
@@ -186,12 +186,12 @@
   ) -> Iterator[httpx.Response]: ...
   ```
 
-- [ ] Validate before I/O, set `follow_redirects=False`, enforce the same configured certificate-pin map as checked requests, preserve TLS/proxy/redaction/timeout behavior, and keep the response open for iteration.
-- [ ] Leave async stream protocols untouched.
+- [x] Validate before I/O, set `follow_redirects=False`, enforce the same configured certificate-pin map as checked requests, preserve TLS/proxy/redaction/timeout behavior, and keep the response open for iteration.
+- [x] Leave async stream protocols untouched.
 
 ### Task 2.3: Verify and commit
 
-- [ ] Run:
+- [x] Run:
 
   ```bash
   source .venv/bin/activate
@@ -204,8 +204,10 @@
     tldw_Server_API/tests/http_client/test_http_client_truthiness_flags.py -q
   ```
 
-- [ ] Run the Stage 1 suite and `git diff --check`.
-- [ ] Commit transport and tests with `fix(http): propagate configured endpoint scope (TASK-12972)`.
+- [x] Run the Stage 1 suite and `git diff --check`.
+- [x] Commit transport and tests with `fix(http): propagate configured endpoint scope (TASK-12972)`.
+
+Verification used the repository virtual environment at `../../.venv` from the isolated worktree: 83 Stage 2 tests and 66 Stage 1 regressions passed. Ruff passed on the touched Python files (excluding pre-existing `TRY203`, `I001`, and `C420` findings), and `git diff --check` passed.
 
 ---
 
