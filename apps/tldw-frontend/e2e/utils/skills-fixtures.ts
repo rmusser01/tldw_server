@@ -476,6 +476,7 @@ export async function mockPowerUserSkillsLibrary(page: Page) {
     deleteRequests,
     exportRequests,
     lastListUrl: () => listUrls.at(-1),
+    listRequestCount: () => listUrls.length,
   }
 }
 

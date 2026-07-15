@@ -4,6 +4,7 @@ import {
   type BrowserContext,
   type Page,
 } from "@playwright/test"
+import JSZip from "jszip"
 
 import {
   mockPowerUserSkillsLibrary,
@@ -364,7 +365,20 @@ test.describe("Skills parity (extension)", () => {
       ])
       await expect(exportButton).toBeEnabled()
       expect(downloadedFilenames).toEqual([download.suggestedFilename()])
-      expect(download.suggestedFilename()).toMatch(/\.zip$/)
+      expect(download.suggestedFilename()).toMatch(
+        /^skills-export-\d{4}-\d{2}-\d{2}\.zip$/,
+      )
+      expect(await download.failure()).toBeNull()
+      const downloadStream = await download.createReadStream()
+      const downloadChunks: Buffer[] = []
+      for await (const chunk of downloadStream) {
+        downloadChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+      }
+      const aggregateArchive = await JSZip.loadAsync(Buffer.concat(downloadChunks))
+      expect(Object.keys(aggregateArchive.files).sort()).toEqual([
+        "archive-helper-01.zip",
+        "archive-helper-02.zip",
+      ])
       await expect(page.getByText("2 selected", { exact: true })).toHaveCount(1)
 
       await expect(page.getByText("10 / page", { exact: true })).toBeVisible()
@@ -404,7 +418,12 @@ test.describe("Skills parity (extension)", () => {
       await expect.poll(() => page.evaluate(() => window.location.hash)).toBe(withToolsHash)
       await expect.poll(lastListQuery).toEqual(expectedListQuery)
 
+      const listRequestsBeforeReload = api.listRequestCount()
       await page.reload({ waitUntil: "domcontentloaded" })
+      await expect
+        .poll(() => api.listRequestCount())
+        .toBeGreaterThan(listRequestsBeforeReload)
+      await expect.poll(lastListQuery).toEqual(expectedListQuery)
       await expect.poll(() => page.evaluate(() => window.location.hash)).toBe(withToolsHash)
       await expect(page.getByPlaceholder("Search skills...")).toHaveValue("target")
       await expect(targetSkill).toBeVisible()
@@ -421,7 +440,6 @@ test.describe("Skills parity (extension)", () => {
       await page.getByRole("button", { name: "View options", exact: true }).click()
       await expect(page.getByTitle("Name (Z-A)", { exact: true })).toBeVisible()
       await page.getByRole("button", { name: "View options", exact: true }).click()
-      await expect.poll(lastListQuery).toEqual(expectedListQuery)
 
       await page.getByRole("button", { name: "Filters (3)", exact: true }).click()
       await page.getByLabel("Skill tools filter").click()
