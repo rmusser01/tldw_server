@@ -50,6 +50,10 @@ PLANNER_VERSION = "research-discovery-planner-v2-foundation"
 _DOI_REGISTRANT = re.compile(r"10\.[0-9]{4,9}\Z")
 _CANONICAL_DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}\Z")
 _RFC3986_UNRESERVED = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+_GENERAL_MAX_TERMS = 16
+_GENERAL_MAX_TERM_CHARS = 64
+_GENERAL_MAX_RAW_CHARS = _GENERAL_MAX_TERMS * _GENERAL_MAX_TERM_CHARS + _GENERAL_MAX_TERMS - 1
+_GENERAL_MAX_RAW_UTF8_BYTES = _GENERAL_MAX_TERMS * _GENERAL_MAX_TERM_CHARS * 4 + _GENERAL_MAX_TERMS - 1
 
 
 class PlanningError(ValueError):
@@ -289,17 +293,23 @@ def _normalize_planning_query(query: PlanningQuery) -> _NormalizedPlanningQuery:
     if type(query) is GeneralFreeTextQuery:
         if type(query.text) is not str:
             raise PlanningError("general_query_text_must_be_exact_string")
+        if len(query.text) > _GENERAL_MAX_RAW_CHARS:
+            raise PlanningError("general_query_input_limit_exceeded")
+        try:
+            raw_utf8_bytes = len(query.text.encode("utf-8"))
+        except UnicodeEncodeError:
+            raise PlanningError("general_query_contains_invalid_unicode") from None
+        if raw_utf8_bytes > _GENERAL_MAX_RAW_UTF8_BYTES:
+            raise PlanningError("general_query_input_limit_exceeded")
         if any(unicodedata.category(character).startswith("C") for character in query.text):
             raise PlanningError("general_query_contains_invalid_unicode")
         canonical = unicodedata.normalize("NFKC", query.text)
         terms = _unicode_alphanumeric_terms(canonical)
         if not terms:
             raise PlanningError("general_query_requires_term")
-        if len(terms) > 16 or any(len(term) > 64 for term in terms):
-            raise PlanningError("general_query_term_limit_exceeded")
         return _NormalizedPlanningQuery(
             QueryMode.GENERAL_FREE_TEXT,
-            " ".join(canonical.split()),
+            " ".join(terms),
             terms=terms,
         )
     if type(query) is IdentifierLookupQuery:
@@ -316,9 +326,11 @@ def _normalize_planning_query(query: PlanningQuery) -> _NormalizedPlanningQuery:
             or any(character in " /\\%?#" or not "!" <= character <= "~" for character in suffix)
         ):
             raise PlanningError("invalid_doi")
+        canonical_doi = query.doi.lower()
+        registrant, suffix = canonical_doi.split("/", 1)
         return _NormalizedPlanningQuery(
             QueryMode.IDENTIFIER_LOOKUP,
-            query.doi,
+            canonical_doi,
             doi_registrant=registrant,
             doi_suffix=suffix,
         )
@@ -356,6 +368,10 @@ def _unicode_alphanumeric_terms(value: str) -> tuple[str, ...]:
     current: list[str] = []
     for character in value:
         if character.isalnum():
+            if not current and len(terms) == _GENERAL_MAX_TERMS:
+                raise PlanningError("general_query_term_limit_exceeded")
+            if len(current) == _GENERAL_MAX_TERM_CHARS:
+                raise PlanningError("general_query_term_limit_exceeded")
             current.append(character)
         elif current:
             terms.append("".join(current))

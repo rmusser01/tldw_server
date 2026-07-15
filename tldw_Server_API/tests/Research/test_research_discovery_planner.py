@@ -376,6 +376,20 @@ def test_general_query_rejects_empty_unsafe_or_overlong_term_input(text: str) ->
 
 
 @pytest.mark.parametrize(
+    "text",
+    (
+        "a" + "!" * 1_039,
+        "a" + "\U0001f4a5" * 1_038,
+    ),
+)
+def test_general_query_rejects_raw_character_or_utf8_amplification(text: str) -> None:
+    assert len(text) > 1_039 or len(text.encode("utf-8")) > 4_111
+
+    with pytest.raises((TypeError, ValueError)):
+        _request(("typed_source",), query=planner_module.GeneralFreeTextQuery(text))
+
+
+@pytest.mark.parametrize(
     "doi",
     (
         "",
@@ -530,7 +544,7 @@ def test_general_query_builds_only_literal_terms_and_route_owned_values() -> Non
     )
     intent = plan.dispatch_groups[0].intents[0]
 
-    assert plan.normalized_query == 'Café" OR SRC:PPR + beta'
+    assert plan.normalized_query == "Café OR SRC PPR beta"
     assert intent.path == "/europepmc/webservices/rest/search"
     assert intent.query_pairs == (
         QueryPair(
@@ -559,8 +573,32 @@ def test_general_query_accepts_exact_sixteen_by_sixty_four_term_boundary() -> No
     )
 
     expression = plan.dispatch_groups[0].intents[0].query_pairs[0].value
+    assert plan.normalized_query == text
+    assert len(plan.normalized_query) == 16 * 64 + 15 == 1_039
+    assert len(plan.normalized_query.encode("utf-8")) <= 16 * 64 * 4 + 15 == 4_111
     assert expression.count('" AND "') == 15
     assert expression.endswith(' AND SRC:PPR AND PUBLISHER:"bioRxiv"')
+
+
+def test_general_query_persists_only_bounded_alphanumeric_terms() -> None:
+    registry, readiness = _typed_query_registry()
+    plan = compile_discovery_plan(
+        _request(
+            ("typed_source",),
+            query=planner_module.GeneralFreeTextQuery("alpha" + "!" * 1_000 + "beta"),
+            result_limit=1,
+        ),
+        registry=registry,
+        readiness=readiness,
+        budget=BudgetCeilings(1, 1, 1, 0, 0, 2_000, 1),
+    )
+
+    assert plan.normalized_query == "alpha beta"
+    assert len(plan.normalized_query) <= 1_039
+    assert len(plan.normalized_query.encode("utf-8")) <= 4_111
+    assert plan.dispatch_groups[0].intents[0].query_pairs[0].value == (
+        '"alpha" AND "beta" AND SRC:PPR AND PUBLISHER:"bioRxiv"'
+    )
 
 
 def test_identifier_query_renders_two_canonical_dynamic_path_segments() -> None:
@@ -580,6 +618,32 @@ def test_identifier_query_renders_two_canonical_dynamic_path_segments() -> None:
     assert plan.normalized_query == "10.1101/abc(def):ghi"
     assert intent.path == "/details/biorxiv/10.1101/abc%28def%29%3Aghi/na/json"
     assert intent.query_pairs == ()
+
+
+def test_identifier_query_lowercases_doi_plan_path_and_group_identity() -> None:
+    registry, readiness = _typed_query_registry()
+
+    def compile_doi(doi: str):
+        return compile_discovery_plan(
+            _request(
+                ("typed_source",),
+                query=planner_module.IdentifierLookupQuery(doi),
+                result_limit=5,
+            ),
+            registry=registry,
+            readiness=readiness,
+            budget=BudgetCeilings(1, 1, 1, 0, 0, 2_000, 5),
+        )
+
+    mixed_case_plan = compile_doi("10.1101/ABC.Def")
+    lowercase_plan = compile_doi("10.1101/abc.def")
+    mixed_case_group = mixed_case_plan.dispatch_groups[0]
+    lowercase_group = lowercase_plan.dispatch_groups[0]
+
+    assert mixed_case_plan.normalized_query == lowercase_plan.normalized_query == "10.1101/abc.def"
+    assert mixed_case_group.intents[0].path == "/details/biorxiv/10.1101/abc.def/na/json"
+    assert mixed_case_group.intents == lowercase_group.intents
+    assert mixed_case_group.dispatch_group_id == lowercase_group.dispatch_group_id
 
 
 @pytest.mark.parametrize(

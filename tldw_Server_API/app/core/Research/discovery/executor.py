@@ -1513,7 +1513,7 @@ class _GroupExecutionController:
         seen_cursors = self._seen_cursors.get(intent_index, set())
         if cursor.value in seen_cursors:
             self._reject("pagination_cursor_repeated")
-        if seen_cursors and cursor.value < max(seen_cursors):
+        if path_channel and seen_cursors and cursor.value < max(seen_cursors):
             self._reject("pagination_cursor_non_progress")
         if type(query_key) is str and body_key is None:
             matching = tuple(index for index, pair in enumerate(trusted_intent.query_pairs) if pair.name == query_key)

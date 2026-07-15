@@ -214,7 +214,7 @@ def _fallback_plan():
     return registry, plan
 
 
-def _paginated_semantic_scholar_plan():
+def _paginated_semantic_scholar_plan(*, max_pages: int = 2):
     base = foundation_registry()
     route_id = base.get_source("semantic_scholar").route_references[0].route_id
     routes = []
@@ -222,9 +222,9 @@ def _paginated_semantic_scholar_plan():
         if route.route_id != route_id:
             routes.append(route)
             continue
-        limits = replace(route.policy.limits, max_pages=2)
+        limits = replace(route.policy.limits, max_pages=max_pages)
         policy = replace(route.policy, limits=limits, policy_digest="")
-        routes.append(replace(route, max_physical_dispatches=2, policy=policy))
+        routes.append(replace(route, max_physical_dispatches=max_pages, policy=policy))
     registry = DiscoveryRegistry(
         catalog_version=base.catalog_version,
         registry_version=base.registry_version,
@@ -236,12 +236,12 @@ def _paginated_semantic_scholar_plan():
         PlanningRequest(("semantic_scholar",), "accounted execution", (), 3),
         registry=registry,
         readiness=foundation_readiness(ExecutionMode.SYNTHETIC),
-        budget=BudgetCeilings(1, 2, 2, 0, 0, 40_000, 3),
+        budget=BudgetCeilings(1, max_pages, max_pages, 0, 0, 20_000 * max_pages, 3),
     )
     return registry, plan
 
 
-def _paginated_figshare_plan():
+def _paginated_figshare_plan(*, max_pages: int = 2):
     base = foundation_registry()
     route_id = base.get_source("figshare").route_references[0].route_id
     routes = []
@@ -249,7 +249,7 @@ def _paginated_figshare_plan():
         if route.route_id != route_id:
             routes.append(route)
             continue
-        limits = replace(route.policy.limits, max_pages=2)
+        limits = replace(route.policy.limits, max_pages=max_pages)
         policy = replace(
             route.policy,
             limits=limits,
@@ -260,7 +260,7 @@ def _paginated_figshare_plan():
             integer_json_body_keys=("page", "page_size"),
             policy_digest="",
         )
-        routes.append(replace(route, max_physical_dispatches=2, policy=policy))
+        routes.append(replace(route, max_physical_dispatches=max_pages, policy=policy))
     registry = DiscoveryRegistry(
         catalog_version=base.catalog_version,
         registry_version=base.registry_version,
@@ -272,7 +272,7 @@ def _paginated_figshare_plan():
         PlanningRequest(("figshare",), "accounted execution", (), 3),
         registry=registry,
         readiness=foundation_readiness(ExecutionMode.SYNTHETIC),
-        budget=BudgetCeilings(1, 2, 2, 0, 0, 40_000, 3),
+        budget=BudgetCeilings(1, max_pages, max_pages, 0, 0, 20_000 * max_pages, 3),
     )
     return registry, plan
 
@@ -3037,6 +3037,61 @@ async def test_figshare_numeric_json_body_cursor_replaces_page_for_second_dispat
         type(next(pair.value for pair in intent.json_body_pairs if pair.name == "page")) is int
         for intent in gateway_intents
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("channel", "continuations", "expected_values"),
+    (
+        ("query", (2, 1), ("0", "2", "1")),
+        ("json_body", (3, 2), (1, 3, 2)),
+    ),
+)
+async def test_nonrepeating_retrograde_cursor_dispatches_for_nonpath_channels(
+    channel: str,
+    continuations: tuple[int, int],
+    expected_values: tuple[str, str, str] | tuple[int, int, int],
+) -> None:
+    if channel == "query":
+        registry, plan = _paginated_semantic_scholar_plan(max_pages=3)
+    else:
+        registry, plan = _paginated_figshare_plan(max_pages=3)
+    group = plan.dispatch_groups[0]
+    gateway_intents: list[DispatchIntent] = []
+
+    async def gateway(route, intent, *, is_policy_active):
+        gateway_intents.append(intent)
+        return _gateway_response(route, intent)
+
+    async def adapter(bound_group, dispatch):
+        search = bound_group.intents[0]
+        await dispatch(search)
+        for value in continuations:
+            await dispatch(search, cursor=NumericCursor(value))
+        return DiscoveryAdapterResult(candidates=())
+
+    result = await execute_discovery_plan(
+        plan,
+        registry=registry,
+        adapters={group.adapter_id: adapter},
+        gateway=gateway,
+        policy_is_active=lambda _route_id, _digest: True,
+        dispatch_id_factory=iter(("dispatch-initial", "dispatch-next", "dispatch-retrograde")).__next__,
+    )
+
+    assert result.logical_outcomes[0].state is LogicalOutcomeState.VALID_EMPTY
+    assert len(gateway_intents) == 3
+    assert result.usage.accounting == DispatchAccounting(3, 3, 0, 0, 3)
+    assert result.usage.pages == 3
+    if channel == "query":
+        actual_values = tuple(
+            next(pair.value for pair in intent.query_pairs if pair.name == "offset") for intent in gateway_intents
+        )
+    else:
+        actual_values = tuple(
+            next(pair.value for pair in intent.json_body_pairs if pair.name == "page") for intent in gateway_intents
+        )
+    assert actual_values == expected_values
 
 
 @pytest.mark.asyncio
