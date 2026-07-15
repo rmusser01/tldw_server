@@ -9,6 +9,7 @@ import JSZip from "jszip"
 import {
   mockPowerUserSkillsLibrary,
   mockSkillsBeginnerApi,
+  mockSkillsTrashWorkflow,
 } from "../../../tldw-frontend/e2e/utils/skills-fixtures"
 import { launchWithBuiltExtension } from "./utils/extension-build"
 
@@ -481,6 +482,57 @@ test.describe("Skills parity (extension)", () => {
       await expect.poll(() => page.evaluate(() => window.location.hash)).toBe(withoutToolsHash)
       await expect(targetSkill).toHaveCount(0)
 
+      expect(diagnostics.pageErrors).toEqual([])
+      expect(diagnostics.consoleErrors).toEqual([])
+      expect(diagnostics.requestFailures).toEqual([])
+      expect(diagnostics.unexpectedApiRequests).toEqual([])
+    } finally {
+      await extensionContext?.close()
+    }
+  })
+
+  test("covers Trash management", async () => {
+    test.setTimeout(120_000)
+
+    let extensionContext: BrowserContext | undefined
+
+    try {
+      const launch = await launchSkillsParity(mockSkillsTrashWorkflow)
+      extensionContext = launch.context
+
+      const { api, diagnostics, page } = launch
+      const skillsView = page.getByRole("radiogroup", { name: "Skills view" })
+
+      await expect(page.getByRole("radio", { name: "Library" })).toBeChecked()
+      await expect(
+        page.getByText("Summarize source material", { exact: true }),
+      ).toBeVisible()
+
+      await page.getByRole("button", { name: "More actions for summarize" }).click()
+      await page.getByRole("menuitem", { name: "Delete" }).click()
+      const deleteDialog = page.getByRole("dialog", { name: "Delete summarize?" })
+      await deleteDialog.getByRole("button", { name: "Move to Trash" }).click()
+
+      await expect(deleteDialog).toBeHidden()
+      await expect(
+        page.getByRole("button", { name: "Undo delete summarize" }),
+      ).toBeVisible()
+
+      await skillsView.getByText("Trash", { exact: true }).click()
+      await expect(page.getByRole("radio", { name: "Trash" })).toBeChecked()
+      await expect(page.getByText("1 in Trash", { exact: true })).toBeVisible()
+
+      await page.getByRole("button", { name: "Restore summarize" }).click()
+      await expect(page.getByRole("heading", { name: "Trash is empty" })).toBeVisible()
+
+      await skillsView.getByText("Library", { exact: true }).click()
+      await expect(page.getByRole("radio", { name: "Library" })).toBeChecked()
+      await expect(
+        page.getByText("Summarize source material", { exact: true }),
+      ).toBeVisible()
+
+      expect(api.operations).toEqual(["delete", "restore"])
+      expect(api.state()).toBe("active")
       expect(diagnostics.pageErrors).toEqual([])
       expect(diagnostics.consoleErrors).toEqual([])
       expect(diagnostics.requestFailures).toEqual([])
