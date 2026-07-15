@@ -667,6 +667,23 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                         cur.execute(
                             _sql.SQL("CREATE ROLE {} NOLOGIN").format(_sql.Identifier(role))
                         )
+                    cur.execute(
+                        """
+                        SELECT parent.rolname
+                        FROM pg_auth_members membership
+                        JOIN pg_roles member_role ON member_role.oid = membership.member
+                        JOIN pg_roles parent ON parent.oid = membership.roleid
+                        WHERE member_role.rolname = %s
+                        LIMIT 1
+                        """,
+                        (role,),
+                    )
+                    parent_role_row = cur.fetchone()
+                    if parent_role_row:
+                        raise JobsRLSInstallationError(
+                            f"JOBS_PG_RLS_ROLE {role!r} must not be a member of parent role "
+                            f"{parent_role_row[0]!r}"
+                        )
                     cur.execute("SELECT current_user")
                     user_row = cur.fetchone()
                     current_user = (user_row[0] if user_row else None) or None
@@ -693,7 +710,12 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                     # earlier schema-wide installers before applying least privilege.
                     cur.execute(
                         _sql.SQL(
-                            "REVOKE SELECT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {} FROM {}"
+                            "REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA {} FROM {}"
+                        ).format(schema_ident, role_ident)
+                    )
+                    cur.execute(
+                        _sql.SQL(
+                            "REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA {} FROM {}"
                         ).format(schema_ident, role_ident)
                     )
                     cur.execute(
@@ -714,6 +736,63 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                                 _sql.Identifier(str(schema_name), sequence),
                                 role_ident,
                             )
+                        )
+                    cur.execute(
+                        """
+                        SELECT relation.relname AS unauthorized_table
+                        FROM pg_class relation
+                        JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+                        CROSS JOIN (VALUES (%s::name)) AS configured(role_name)
+                        WHERE namespace.nspname = %s
+                          AND relation.relkind IN ('r', 'p', 'v', 'm', 'f')
+                          AND NOT (relation.relname = ANY(%s))
+                          AND (
+                            has_table_privilege(configured.role_name, relation.oid, 'SELECT')
+                            OR has_table_privilege(configured.role_name, relation.oid, 'INSERT')
+                            OR has_table_privilege(configured.role_name, relation.oid, 'UPDATE')
+                            OR has_table_privilege(configured.role_name, relation.oid, 'DELETE')
+                            OR has_table_privilege(configured.role_name, relation.oid, 'TRUNCATE')
+                            OR has_table_privilege(configured.role_name, relation.oid, 'REFERENCES')
+                            OR has_table_privilege(configured.role_name, relation.oid, 'TRIGGER')
+                            OR has_any_column_privilege(configured.role_name, relation.oid, 'SELECT')
+                            OR has_any_column_privilege(configured.role_name, relation.oid, 'INSERT')
+                            OR has_any_column_privilege(configured.role_name, relation.oid, 'UPDATE')
+                            OR has_any_column_privilege(configured.role_name, relation.oid, 'REFERENCES')
+                          )
+                        LIMIT 1
+                        """,
+                        (role, str(schema_name), list(tables)),
+                    )
+                    unauthorized_table_row = cur.fetchone()
+                    if unauthorized_table_row:
+                        raise JobsRLSInstallationError(
+                            "JOBS_PG_RLS_ROLE retains effective privileges on unrelated table "
+                            f"{unauthorized_table_row[0]!r}; remove PUBLIC or inherited grants"
+                        )
+                    allowed_sequences = (*_JOBS_RLS_SEQUENCES, *_PLAYLIST_RLS_SEQUENCES)
+                    cur.execute(
+                        """
+                        SELECT relation.relname AS unauthorized_sequence
+                        FROM pg_class relation
+                        JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+                        CROSS JOIN (VALUES (%s::name)) AS configured(role_name)
+                        WHERE namespace.nspname = %s
+                          AND relation.relkind = 'S'
+                          AND NOT (relation.relname = ANY(%s))
+                          AND (
+                            has_sequence_privilege(configured.role_name, relation.oid, 'USAGE')
+                            OR has_sequence_privilege(configured.role_name, relation.oid, 'SELECT')
+                            OR has_sequence_privilege(configured.role_name, relation.oid, 'UPDATE')
+                          )
+                        LIMIT 1
+                        """,
+                        (role, str(schema_name), list(allowed_sequences)),
+                    )
+                    unauthorized_sequence_row = cur.fetchone()
+                    if unauthorized_sequence_row:
+                        raise JobsRLSInstallationError(
+                            "JOBS_PG_RLS_ROLE retains effective privileges on unrelated sequence "
+                            f"{unauthorized_sequence_row[0]!r}; remove PUBLIC or inherited grants"
                         )
                 except JobsRLSInstallationError:
                     raise
