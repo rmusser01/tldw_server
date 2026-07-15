@@ -143,6 +143,10 @@ def test_playlist_collection_actions_are_cas_safe_on_postgres(
     created = db.create_media_collection_with_items(
         name="Playlist CAS",
         kind="playlist_ingest",
+        metadata={
+            "playlist_ingest_run_id": "pg-run-cas",
+            "playlist_ingest_initialization_token": "pg-token-a",
+        },
         items=[
             {"source_url": "https://example.com/one", "ordinal": 1},
             {"source_url": "https://example.com/two", "ordinal": 2},
@@ -182,9 +186,29 @@ def test_playlist_collection_actions_are_cas_safe_on_postgres(
         expected_updated_at=resolved.updated_at,
     )
     assert repeated_restore.updated_at == restored.updated_at
+
+    claimed = db.claim_playlist_ingest_collection(
+        created.id,
+        run_id="pg-run-cas",
+        initialization_token="pg-token-b",
+        expected_item_ids=[item.id for item in created.items],
+    )
+    assert claimed.metadata["playlist_ingest_initialization_token"] == "pg-token-b"
+
+    with pytest.raises(ValueError, match="media_collection_discard_mismatch"):
+        db.discard_media_collection(
+            created.id,
+            expected_item_ids=[item.id for item in created.items],
+            expected_run_id="pg-run-cas",
+            expected_initialization_token="pg-token-a",
+        )
+    assert db.get_media_collection(created.id).id == created.id
+
     assert db.discard_media_collection(
         created.id,
         expected_item_ids=[item.id for item in created.items],
+        expected_run_id="pg-run-cas",
+        expected_initialization_token="pg-token-b",
     )
 
 

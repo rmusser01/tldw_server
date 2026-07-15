@@ -60,6 +60,7 @@ class _OwnerCollectionsDB:
         self.create_calls: list[dict] = []
         self.resolve_calls: list[dict] = []
         self.discard_calls: list[int] = []
+        self.discard_attempts: list[dict] = []
         self.create_error: Exception | None = None
         self.create_commit_then_error_once: Exception | None = None
         self.run_lookup_error: Exception | None = None
@@ -120,6 +121,28 @@ class _OwnerCollectionsDB:
             raise RuntimeError("playlist_ingest_collection_marker_ambiguous")
         return matches[0]
 
+    def claim_playlist_ingest_collection(
+        self,
+        collection_id,
+        *,
+        run_id,
+        initialization_token,
+        expected_item_ids,
+    ):
+        collection = next(
+            (
+                candidate
+                for candidate in self.collections
+                if candidate.id == collection_id
+                and candidate.metadata.get("playlist_ingest_run_id") == run_id
+            ),
+            None,
+        )
+        if collection is None or {item.id for item in collection.items} != set(expected_item_ids):
+            raise ValueError("media_collection_claim_mismatch")
+        collection.metadata["playlist_ingest_initialization_token"] = initialization_token
+        return collection
+
     def resolve_media_collection_item(self, item_id, **kwargs):
         self.resolve_calls.append({"item_id": item_id, **kwargs})
         if self.resolve_error is not None:
@@ -161,10 +184,38 @@ class _OwnerCollectionsDB:
         self.items[item_id] = restored
         return restored
 
-    def discard_media_collection(self, collection_id, *, expected_item_ids):
-        self.discard_calls.append(collection_id)
+    def discard_media_collection(
+        self,
+        collection_id,
+        *,
+        expected_item_ids,
+        expected_run_id=None,
+        expected_initialization_token=None,
+    ):
+        self.discard_attempts.append(
+            {
+                "collection_id": collection_id,
+                "expected_item_ids": list(expected_item_ids),
+                "expected_run_id": expected_run_id,
+                "expected_initialization_token": expected_initialization_token,
+            }
+        )
         if self.discard_error is not None:
             raise self.discard_error
+        collection = next((candidate for candidate in self.collections if candidate.id == collection_id), None)
+        if collection is not None and expected_run_id is not None:
+            if (
+                collection.metadata.get("playlist_ingest_run_id") != expected_run_id
+                or collection.metadata.get("playlist_ingest_initialization_token")
+                != expected_initialization_token
+                or {item.id for item in collection.items} != set(expected_item_ids)
+            ):
+                raise ValueError("media_collection_discard_mismatch")
+        self.discard_calls.append(collection_id)
+        if collection is not None:
+            self.collections.remove(collection)
+            for item in collection.items:
+                self.items.pop(item.id, None)
         return True
 
     def close(self) -> None:
@@ -683,10 +734,26 @@ def test_slow_collection_creator_losing_reclaimed_lease_cannot_attach_and_discar
                     SimpleNamespace(id=base + index, ordinal=item["ordinal"])
                     for index, item in enumerate(kwargs["items"], start=1)
                 ],
+                metadata=dict(kwargs.get("metadata") or {}),
             )
             if ordinal == 1:
                 first_created.set()
                 assert release_first.wait(timeout=5)
+            self.collections.append(collection)
+            self.items.update(
+                {
+                    item.id: SimpleNamespace(
+                        id=item.id,
+                        status="planned",
+                        media_id=None,
+                        content_item_id=None,
+                        latest_job_id=None,
+                        latest_run_id=None,
+                        updated_at="2026-07-12T12:00:00+00:00",
+                    )
+                    for item in collection.items
+                }
+            )
             return collection
 
     collections_db = _RacingCollectionsDB()
@@ -711,6 +778,63 @@ def test_slow_collection_creator_losing_reclaimed_lease_cannot_attach_and_discar
     assert winner.collection_id == 2000
     assert collections_db.discard_calls == [1000]
     assert store.get_run("owner-1", winner.run_id).collection_id == 2000
+
+
+def test_reclaimed_initializer_claims_visible_collection_before_stale_creator_cleanup(
+    service_context,
+    monkeypatch,
+):
+    service, store, manager, _media_db = service_context
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
+        PlaylistIngestService,
+        PlaylistRunPendingError,
+        PlaylistRunValidationError,
+    )
+
+    monkeypatch.setenv("PLAYLIST_RUN_INITIALIZATION_LEASE_SECONDS", "1")
+    collection_published = Event()
+    release_creator = Event()
+
+    class _PublishedBeforeReturnCollectionsDB(_OwnerCollectionsDB):
+        def create_media_collection_with_items(self, **kwargs):
+            collection = super().create_media_collection_with_items(**kwargs)
+            collection_published.set()
+            assert release_creator.wait(timeout=5)
+            return collection
+
+    collections_db = _PublishedBeforeReturnCollectionsDB()
+    service._collections_db_factory = lambda _owner: collections_db
+    resumer = PlaylistIngestService(manager, collections_db_factory=lambda _owner: collections_db)
+    request = {
+        "client_request_id": "visible-collection-claim-race",
+        "inputs": [_direct_input("occ-visible-race", "https://example.com/visible-race")],
+        "review_overrides": {},
+        "new_collection": {"name": "Visible before return"},
+    }
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        stale = pool.submit(service.create_run, "owner-1", **request)
+        assert collection_published.wait(timeout=5)
+        connection = manager._connect()
+        try:
+            run_id = connection.execute("SELECT run_id FROM media_ingest_runs").fetchone()[0]
+        finally:
+            connection.close()
+        stale_token = store.get_run("owner-1", run_id).initialization_token
+        store.test_clock.advance(timedelta(seconds=2))
+        winner = pool.submit(resumer.create_run, "owner-1", **request).result(timeout=5)
+        release_creator.set()
+        with pytest.raises((PlaylistRunPendingError, PlaylistRunValidationError)):
+            stale.result(timeout=5)
+
+    assert winner.collection_id == 700
+    assert store.get_run("owner-1", run_id).collection_id == 700
+    assert len(collections_db.collections) == 1
+    assert collections_db.collections[0].id == 700
+    assert 701 in collections_db.items
+    assert collections_db.collections[0].metadata["playlist_ingest_initialization_token"] != stale_token
+    assert collections_db.discard_calls == []
+    assert collections_db.discard_attempts[-1]["expected_initialization_token"] == stale_token
 
 
 def test_create_run_file_only_skips_library_lookup(service_context):
@@ -1997,7 +2121,13 @@ def test_create_run_stale_collection_creator_discards_exact_plan_after_another_c
     original_attach = service._store.attach_collection_plan
     discarded: list[tuple[int, tuple[int, ...]]] = []
 
-    def discard_exact(collection_id, *, expected_item_ids):
+    def discard_exact(
+        collection_id,
+        *,
+        expected_item_ids,
+        expected_run_id=None,
+        expected_initialization_token=None,
+    ):
         discarded.append((collection_id, tuple(expected_item_ids)))
         return True
 
@@ -2067,7 +2197,9 @@ def test_create_run_collection_creation_commit_then_exception_reconciles(
     assert created.collection_id == 700
     assert item.planned_collection_item_id == 701
     assert collections_db.discard_calls == []
-    assert collections_db.create_calls[0]["metadata"] == {"playlist_ingest_run_id": created.run_id}
+    collection_metadata = collections_db.create_calls[0]["metadata"]
+    assert collection_metadata["playlist_ingest_run_id"] == created.run_id
+    assert 1 <= len(collection_metadata["playlist_ingest_initialization_token"]) <= 255
     assert _table_count(manager, "jobs") == 0
 
 

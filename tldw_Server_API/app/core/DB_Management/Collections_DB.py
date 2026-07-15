@@ -3427,14 +3427,120 @@ class CollectionsDatabase:
             raise DatabaseError("playlist_ingest_collection_marker_ambiguous")
         return self._row_to_media_collection(rows[0])
 
+    def claim_playlist_ingest_collection(
+        self,
+        collection_id: int,
+        *,
+        run_id: str,
+        initialization_token: str,
+        expected_item_ids: Iterable[int],
+    ) -> MediaCollectionRow:
+        """Transfer cleanup ownership of an exact playlist plan under one lock."""
+        if type(collection_id) is not int or collection_id < 1:
+            raise ValueError("media_collection_claim_mismatch")
+        if type(run_id) is not str or not run_id or run_id.strip() != run_id or len(run_id) > 100:
+            raise ValueError("playlist_ingest_run_id_invalid")
+        if (
+            type(initialization_token) is not str
+            or not initialization_token
+            or initialization_token.strip() != initialization_token
+            or len(initialization_token) > 255
+        ):
+            raise ValueError("playlist_ingest_initialization_token_invalid")
+        item_ids = list(expected_item_ids)
+        if (
+            len(item_ids) > 500
+            or len(set(item_ids)) != len(item_ids)
+            or any(type(item_id) is not int or item_id < 1 for item_id in item_ids)
+        ):
+            raise ValueError("media_collection_claim_mismatch")
+
+        with self.transaction() as conn:
+            lock = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
+            collection_row = self.backend.execute(
+                """
+                SELECT id, user_id, name, kind, description, source_url, metadata_json,
+                       default_tags_json, deleted, created_at, updated_at
+                FROM media_collections
+                WHERE id = ? AND user_id = ? AND kind = 'playlist_ingest' AND deleted = ?
+                """ + lock,  # nosec B608
+                (
+                    collection_id,
+                    self.user_id,
+                    self._coerce_bool_flag(False, postgres=self.backend_type == BackendType.POSTGRESQL),
+                ),
+                connection=conn,
+            ).first
+            if not collection_row:
+                raise KeyError("media_collection_not_found")
+            metadata = self._json_loads_dict(collection_row.get("metadata_json"))
+            if metadata.get("playlist_ingest_run_id") != run_id:
+                raise ValueError("media_collection_claim_mismatch")
+
+            membership_rows = self.backend.execute(
+                """
+                SELECT id, user_id, collection_id, ordinal, source_url, normalized_source_id,
+                       source_kind, title, speaker, published_at, track, duplicate_status,
+                       status, media_id, content_item_id, latest_job_id, latest_run_id,
+                       idempotency_key, retry_count, error_summary, warnings_json,
+                       metadata_json, tags_json, created_at, updated_at
+                FROM media_collection_items
+                WHERE collection_id = ? AND user_id = ?
+                ORDER BY ordinal ASC, id ASC
+                """ + lock,  # nosec B608
+                (collection_id, self.user_id),
+                connection=conn,
+            ).rows
+            if {int(row["id"]) for row in membership_rows} != set(item_ids):
+                raise ValueError("media_collection_claim_mismatch")
+
+            metadata["playlist_ingest_initialization_token"] = initialization_token
+            now = _utcnow_iso()
+            updated = self.backend.execute(
+                """
+                UPDATE media_collections
+                SET metadata_json = ?, updated_at = ?
+                WHERE id = ? AND user_id = ? AND kind = 'playlist_ingest' AND deleted = ?
+                """,
+                (
+                    self._json_dumps_or_none(metadata),
+                    now,
+                    collection_id,
+                    self.user_id,
+                    self._coerce_bool_flag(False, postgres=self.backend_type == BackendType.POSTGRESQL),
+                ),
+                connection=conn,
+            )
+            if updated.rowcount != 1:
+                raise ValueError("media_collection_claim_mismatch")
+
+            claimed = self._row_to_media_collection(collection_row, include_items=False)
+            claimed.metadata = metadata
+            claimed.updated_at = now
+            claimed.items = [self._row_to_media_collection_item(row) for row in membership_rows]
+        return claimed
+
     def discard_media_collection(
         self,
         collection_id: int,
         *,
         expected_item_ids: Iterable[int],
+        expected_run_id: str,
+        expected_initialization_token: str,
     ) -> bool:
         """Hard-delete one just-created unattached plan and all of its memberships."""
         if type(collection_id) is not int or collection_id < 1:
+            raise ValueError("media_collection_discard_mismatch")
+        if (
+            type(expected_run_id) is not str
+            or not expected_run_id
+            or expected_run_id.strip() != expected_run_id
+            or len(expected_run_id) > 100
+            or type(expected_initialization_token) is not str
+            or not expected_initialization_token
+            or expected_initialization_token.strip() != expected_initialization_token
+            or len(expected_initialization_token) > 255
+        ):
             raise ValueError("media_collection_discard_mismatch")
         collection_id_value = collection_id
         item_ids = list(expected_item_ids)
@@ -3448,7 +3554,7 @@ class CollectionsDatabase:
             lock = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
             existing = self.backend.execute(
                 """
-                SELECT id FROM media_collections
+                SELECT id, metadata_json FROM media_collections
                 WHERE id = ? AND user_id = ? AND kind = 'playlist_ingest' AND deleted = ?
                 """ + lock,  # nosec B608
                 (
@@ -3460,6 +3566,13 @@ class CollectionsDatabase:
             ).first
             if not existing:
                 raise KeyError("media_collection_not_found")
+            metadata = self._json_loads_dict(existing.get("metadata_json"))
+            if (
+                metadata.get("playlist_ingest_run_id") != expected_run_id
+                or metadata.get("playlist_ingest_initialization_token")
+                != expected_initialization_token
+            ):
+                raise ValueError("media_collection_discard_mismatch")
             membership_rows = self.backend.execute(
                 """
                 SELECT id, status, media_id, content_item_id, latest_job_id,

@@ -364,12 +364,106 @@ def test_create_media_collection_with_items_rolls_back_collection_and_membership
     assert collections == []
 
 
+def test_playlist_collection_claim_transfers_initialization_token_atomically(
+    collections_db: CollectionsDatabase,
+) -> None:
+    created = collections_db.create_media_collection_with_items(
+        name="Claimable plan",
+        kind="playlist_ingest",
+        metadata={
+            "playlist_ingest_run_id": "run-claim",
+            "playlist_ingest_initialization_token": "token-a",
+        },
+        items=[{"source_url": "https://example.com/one", "ordinal": 1}],
+    )
+    item_ids = [item.id for item in created.items]
+
+    claimed = collections_db.claim_playlist_ingest_collection(
+        created.id,
+        run_id="run-claim",
+        initialization_token="token-b",
+        expected_item_ids=item_ids,
+    )
+
+    assert claimed.metadata["playlist_ingest_run_id"] == "run-claim"
+    assert claimed.metadata["playlist_ingest_initialization_token"] == "token-b"
+    assert [item.id for item in claimed.items] == item_ids
+
+    with pytest.raises(ValueError, match="playlist_ingest_initialization_token_invalid"):
+        collections_db.claim_playlist_ingest_collection(
+            created.id,
+            run_id="run-claim",
+            initialization_token="x" * 256,
+            expected_item_ids=item_ids,
+        )
+
+
+def test_playlist_collection_claim_rejects_owner_and_run_mismatch(
+    collections_db: CollectionsDatabase,
+) -> None:
+    created = collections_db.create_media_collection_with_items(
+        name="Owner-scoped plan",
+        kind="playlist_ingest",
+        metadata={
+            "playlist_ingest_run_id": "run-owner",
+            "playlist_ingest_initialization_token": "token-owner",
+        },
+        items=[{"source_url": "https://example.com/one", "ordinal": 1}],
+    )
+    item_ids = [item.id for item in created.items]
+
+    with pytest.raises(ValueError, match="media_collection_claim_mismatch"):
+        collections_db.claim_playlist_ingest_collection(
+            created.id,
+            run_id="other-run",
+            initialization_token="token-b",
+            expected_item_ids=item_ids,
+        )
+
+    other_owner = CollectionsDatabase.from_backend(user_id="other-owner", backend=collections_db.backend)
+    with pytest.raises(KeyError, match="media_collection_not_found"):
+        other_owner.claim_playlist_ingest_collection(
+            created.id,
+            run_id="run-owner",
+            initialization_token="token-b",
+            expected_item_ids=item_ids,
+        )
+
+
+def test_discard_media_collection_rejects_wrong_ownership_token(
+    collections_db: CollectionsDatabase,
+) -> None:
+    created = collections_db.create_media_collection_with_items(
+        name="Owned plan",
+        kind="playlist_ingest",
+        metadata={
+            "playlist_ingest_run_id": "run-discard",
+            "playlist_ingest_initialization_token": "token-current",
+        },
+        items=[{"source_url": "https://example.com/one", "ordinal": 1}],
+    )
+
+    with pytest.raises(ValueError, match="media_collection_discard_mismatch"):
+        collections_db.discard_media_collection(
+            created.id,
+            expected_item_ids=[created.items[0].id],
+            expected_run_id="run-discard",
+            expected_initialization_token="token-stale",
+        )
+
+    assert collections_db.get_media_collection(created.id).id == created.id
+
+
 def test_discard_media_collection_removes_just_created_plan_and_memberships(
     collections_db: CollectionsDatabase,
 ) -> None:
     created = collections_db.create_media_collection_with_items(
         name="Compensated plan",
         kind="playlist_ingest",
+        metadata={
+            "playlist_ingest_run_id": "run-discard",
+            "playlist_ingest_initialization_token": "token-current",
+        },
         items=[
             {"source_url": "https://example.com/one", "ordinal": 1},
             {"source_url": "https://example.com/two", "ordinal": 2},
@@ -378,16 +472,28 @@ def test_discard_media_collection_removes_just_created_plan_and_memberships(
     expected_item_ids = [item.id for item in created.items]
 
     with pytest.raises(ValueError, match="media_collection_discard_mismatch"):
-        collections_db.discard_media_collection(True, expected_item_ids=expected_item_ids)
+        collections_db.discard_media_collection(
+            True,
+            expected_item_ids=expected_item_ids,
+            expected_run_id="run-discard",
+            expected_initialization_token="token-current",
+        )
 
     with pytest.raises(ValueError, match="media_collection_discard_mismatch"):
-        collections_db.discard_media_collection(created.id, expected_item_ids=[created.items[0].id])
+        collections_db.discard_media_collection(
+            created.id,
+            expected_item_ids=[created.items[0].id],
+            expected_run_id="run-discard",
+            expected_initialization_token="token-current",
+        )
     assert collections_db.get_media_collection(created.id).id == created.id
 
     assert (
         collections_db.discard_media_collection(
             created.id,
             expected_item_ids=expected_item_ids,
+            expected_run_id="run-discard",
+            expected_initialization_token="token-current",
         )
         is True
     )

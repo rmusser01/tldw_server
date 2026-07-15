@@ -1368,7 +1368,10 @@ class PlaylistIngestService:
                     kind="playlist_ingest",
                     description=collection_request.description,
                     source_url=collection_request.source_url,
-                    metadata={"playlist_ingest_run_id": run_id},
+                    metadata={
+                        "playlist_ingest_run_id": run_id,
+                        "playlist_ingest_initialization_token": initialization_token,
+                    },
                     default_tags=collection_request.default_tags,
                     items=planned_items,
                 )
@@ -1400,15 +1403,33 @@ class PlaylistIngestService:
                     collections_db.discard_media_collection(
                         int(collection.id),
                         expected_item_ids=collection_item_ids,
+                        expected_run_id=run_id,
+                        expected_initialization_token=initialization_token,
                     )
                 except Exception as cleanup_exc:
                     raise PlaylistRunValidationError("collection_planning_cleanup_failed") from cleanup_exc
             raise
+        if not created_new:
+            try:
+                collection = collections_db.claim_playlist_ingest_collection(
+                    int(collection.id),
+                    run_id=run_id,
+                    initialization_token=initialization_token,
+                    expected_item_ids=collection_item_ids,
+                )
+            except Exception as claim_exc:
+                raise PlaylistRunValidationError(
+                    "collection_planning_reconciliation_failed"
+                ) from claim_exc
+            collection_items = list(collection.items)
+            collection_item_ids = [int(item.id) for item in collection_items]
         if len(collection_items) != len(planned_occurrences):
             try:
                 collections_db.discard_media_collection(
                     int(collection.id),
                     expected_item_ids=collection_item_ids,
+                    expected_run_id=run_id,
+                    expected_initialization_token=initialization_token,
                 )
             except Exception as cleanup_exc:
                 raise PlaylistRunValidationError("collection_planning_cleanup_failed") from cleanup_exc
@@ -1450,6 +1471,8 @@ class PlaylistIngestService:
                         collections_db.discard_media_collection(
                             int(collection.id),
                             expected_item_ids=collection_item_ids,
+                            expected_run_id=run_id,
+                            expected_initialization_token=initialization_token,
                         )
                     except Exception as cleanup_exc:
                         raise PlaylistRunValidationError("collection_planning_cleanup_failed") from cleanup_exc
@@ -1459,6 +1482,8 @@ class PlaylistIngestService:
                     collections_db.discard_media_collection(
                         int(collection.id),
                         expected_item_ids=collection_item_ids,
+                        expected_run_id=run_id,
+                        expected_initialization_token=initialization_token,
                     )
                 except Exception as cleanup_exc:
                     raise PlaylistRunValidationError("collection_planning_cleanup_failed") from cleanup_exc
