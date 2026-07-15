@@ -34,7 +34,7 @@
 
 **Tests:** Focused Vitest coverage in `extension-build.test.ts` fails first and then passes.
 
-**Status:** In Progress
+**Status:** Complete
 
 **Files:**
 - Modify: `apps/extension/tests/e2e/utils/extension-build.test.ts`
@@ -137,7 +137,7 @@
 
 **Tests:** One Playwright test named `completes bootstrap and the beginner journey` is written first and fails before fixture completion.
 
-**Status:** Not Started
+**Status:** In Progress
 
 **Files:**
 - Create: `apps/extension/tests/e2e/skills.parity.spec.ts`

@@ -40,7 +40,9 @@ Exercise the merged /skills beginner, power-user, accessibility, responsive, per
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 The five-stage TDD implementation plan passed independent plan review with no blocking issues. The accepted advisory requires explicit empty assertions for page errors, console errors, request failures, and unexpected API requests. The advisory to retain a deleted plan link was not adopted because repository guidance requires removing completed task plans; the link will be removed with the file during finalization.
 
-2026-07-15: Stage 1 started. Implementing the pre-navigation options-page preparation hook and targeted initial route in the built-extension launcher.
+2026-07-15: Stage 1 complete. Added targeted initial options routing and an awaited pre-navigation preparation hook in the built-extension launcher. Focused Vitest verification passed 11/11 tests. Specification review passed. Code-quality review found one test-isolation issue; it was corrected with fresh launcher mocks and re-review passed with no remaining findings.
+
+2026-07-15: Stage 2 started. Building the deterministic packaged-extension bootstrap harness and beginner Skills journey.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
