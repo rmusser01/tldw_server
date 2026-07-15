@@ -1,14 +1,14 @@
 {
-  "startedAt": "2026-07-14T20:32:35.964Z",
+  "startedAt": "2026-07-15T00:36:12.852Z",
   "cdpUrl": "http://127.0.0.1:18162",
   "webUrl": "http://127.0.0.1:18161/research-workspace",
   "apiOrigin": "http://127.0.0.1:18160",
-  "uatRunId": "task12968-cfbc5cb2-7b14-4f8e-b691-5550c62a1377",
+  "uatRunId": "task12968-2035e741-332f-4011-9949-57e4005baa10",
   "markerUrls": {
-    "start": "http://127.0.0.1:18160/api/v1/health?task12968_uat_start=task12968-cfbc5cb2-7b14-4f8e-b691-5550c62a1377",
-    "end": "http://127.0.0.1:18160/api/v1/health?task12968_uat_end=task12968-cfbc5cb2-7b14-4f8e-b691-5550c62a1377"
+    "start": "http://127.0.0.1:18160/api/v1/health?task12968_uat_start=task12968-2035e741-332f-4011-9949-57e4005baa10",
+    "end": "http://127.0.0.1:18160/api/v1/health?task12968_uat_end=task12968-2035e741-332f-4011-9949-57e4005baa10"
   },
-  "browserVersion": "143.0.7499.193",
+  "browserVersion": "145.0.7632.6",
   "backgroundTargets": [],
   "contexts": {
     "marker_start": {
@@ -18,9 +18,9 @@
       "httpErrors": [],
       "apiRequests": [
         {
-          "at": "2026-07-14T20:32:37.959Z",
+          "at": "2026-07-15T00:36:12.988Z",
           "method": "GET",
-          "url": "http://127.0.0.1:18160/api/v1/health?task12968_uat_start=task12968-cfbc5cb2-7b14-4f8e-b691-5550c62a1377",
+          "url": "http://127.0.0.1:18160/api/v1/health?task12968_uat_start=task12968-2035e741-332f-4011-9949-57e4005baa10",
           "transport": "direct_api",
           "hasAuthorization": false,
           "hasXApiKey": false
@@ -65,11 +65,11 @@
         },
         {
           "type": "warning",
-          "text": "[tldw:request] GET /api/v1/workspaces/e3c6e337-b7e7-4df4-b696-a3fe5c015487/context 401 Add or update your API key in Settings -> tldw server, then try again."
+          "text": "[tldw:request] GET /api/v1/workspaces/61ba87f0-f4d7-4e1b-b825-3a31b1a83c47/context 401 Add or update your API key in Settings -> tldw server, then try again."
         },
         {
           "type": "warning",
-          "text": "[tldw:request] PUT /api/v1/workspaces/e3c6e337-b7e7-4df4-b696-a3fe5c015487 401 Add or update your API key in Settings -> tldw server, then try again."
+          "text": "[tldw:request] PUT /api/v1/workspaces/61ba87f0-f4d7-4e1b-b825-3a31b1a83c47 401 Add or update your API key in Settings -> tldw server, then try again."
         },
         {
           "type": "warning",
@@ -77,7 +77,7 @@
         },
         {
           "type": "warning",
-          "text": "[tldw:request] GET /api/v1/workspaces/e3c6e337-b7e7-4df4-b696-a3fe5c015487/context 401 Add or update your API key in Settings -> tldw server, then try again."
+          "text": "[tldw:request] GET /api/v1/workspaces/61ba87f0-f4d7-4e1b-b825-3a31b1a83c47/context 401 Add or update your API key in Settings -> tldw server, then try again."
         },
         {
           "type": "warning",
@@ -105,51 +105,27 @@
         },
         {
           "type": "warning",
-          "text": "[tldw:request] PUT /api/v1/workspaces/e3c6e337-b7e7-4df4-b696-a3fe5c015487 401 Add or update your API key in Settings -> tldw server, then try again."
+          "text": "[tldw:request] PUT /api/v1/workspaces/61ba87f0-f4d7-4e1b-b825-3a31b1a83c47 401 Add or update your API key in Settings -> tldw server, then try again."
         },
         {
           "type": "warning",
-          "text": "[tldw:request] GET /api/v1/workspaces/e3c6e337-b7e7-4df4-b696-a3fe5c015487/context 401 Add or update your API key in Settings -> tldw server, then try again."
+          "text": "[tldw:request] GET /api/v1/workspaces/61ba87f0-f4d7-4e1b-b825-3a31b1a83c47/context 401 Add or update your API key in Settings -> tldw server, then try again."
         },
         {
           "type": "warning",
-          "text": "[tldw:request] PUT /api/v1/workspaces/e3c6e337-b7e7-4df4-b696-a3fe5c015487 401 Add or update your API key in Settings -> tldw server, then try again."
+          "text": "[tldw:request] PUT /api/v1/workspaces/61ba87f0-f4d7-4e1b-b825-3a31b1a83c47 401 Add or update your API key in Settings -> tldw server, then try again."
         },
         {
           "type": "warning",
-          "text": "[tldw:request] GET /api/v1/workspaces/e3c6e337-b7e7-4df4-b696-a3fe5c015487/context 401 Add or update your API key in Settings -> tldw server, then try again."
+          "text": "[tldw:request] GET /api/v1/workspaces/61ba87f0-f4d7-4e1b-b825-3a31b1a83c47/context 401 Add or update your API key in Settings -> tldw server, then try again."
         },
         {
           "type": "warning",
-          "text": "[tldw:request] PUT /api/v1/workspaces/e3c6e337-b7e7-4df4-b696-a3fe5c015487 401 Add or update your API key in Settings -> tldw server, then try again."
+          "text": "[tldw:request] PUT /api/v1/workspaces/61ba87f0-f4d7-4e1b-b825-3a31b1a83c47 401 Add or update your API key in Settings -> tldw server, then try again."
         },
         {
           "type": "warning",
-          "text": "[tldw:request] GET /api/v1/workspaces/e3c6e337-b7e7-4df4-b696-a3fe5c015487/context 401 Add or update your API key in Settings -> tldw server, then try again."
-        },
-        {
-          "type": "warning",
-          "text": "[tldw:request] PUT /api/v1/workspaces/e3c6e337-b7e7-4df4-b696-a3fe5c015487 401 Add or update your API key in Settings -> tldw server, then try again."
-        },
-        {
-          "type": "warning",
-          "text": "[tldw:request] GET /api/v1/workspaces/e3c6e337-b7e7-4df4-b696-a3fe5c015487/context 401 Add or update your API key in Settings -> tldw server, then try again."
-        },
-        {
-          "type": "warning",
-          "text": "[tldw:request] PUT /api/v1/workspaces/e3c6e337-b7e7-4df4-b696-a3fe5c015487 401 Add or update your API key in Settings -> tldw server, then try again."
-        },
-        {
-          "type": "warning",
-          "text": "[tldw:request] GET /api/v1/workspaces/e3c6e337-b7e7-4df4-b696-a3fe5c015487/context 401 Add or update your API key in Settings -> tldw server, then try again."
-        },
-        {
-          "type": "warning",
-          "text": "[tldw:request] PUT /api/v1/workspaces/e3c6e337-b7e7-4df4-b696-a3fe5c015487 401 Add or update your API key in Settings -> tldw server, then try again."
-        },
-        {
-          "type": "warning",
-          "text": "[tldw:request] GET /api/v1/workspaces/e3c6e337-b7e7-4df4-b696-a3fe5c015487/context 401 Add or update your API key in Settings -> tldw server, then try again."
+          "text": "[tldw:request] GET /api/v1/workspaces/61ba87f0-f4d7-4e1b-b825-3a31b1a83c47/context 401 Add or update your API key in Settings -> tldw server, then try again."
         }
       ],
       "pageErrors": [],
@@ -157,7 +133,7 @@
       "httpErrors": [],
       "apiRequests": [
         {
-          "at": "2026-07-14T20:32:42.526Z",
+          "at": "2026-07-15T00:36:13.987Z",
           "method": "GET",
           "url": "http://127.0.0.1:18160/api/v1/health",
           "transport": "direct_api",
@@ -165,7 +141,7 @@
           "hasXApiKey": false
         },
         {
-          "at": "2026-07-14T20:32:42.530Z",
+          "at": "2026-07-15T00:36:13.987Z",
           "method": "GET",
           "url": "http://127.0.0.1:18160/api/v1/health",
           "transport": "direct_api",
@@ -212,11 +188,11 @@
         },
         {
           "type": "warning",
-          "text": "[tldw:request] GET /api/v1/workspaces/d3a2932d-7af9-48a6-a489-9ff245150cc6/context 401 Add or update your API key in Settings -> tldw server, then try again."
+          "text": "[tldw:request] GET /api/v1/workspaces/94b0bf50-2d47-4541-9f4f-98c8130fe0f4/context 401 Add or update your API key in Settings -> tldw server, then try again."
         },
         {
           "type": "warning",
-          "text": "[tldw:request] PUT /api/v1/workspaces/d3a2932d-7af9-48a6-a489-9ff245150cc6 401 Add or update your API key in Settings -> tldw server, then try again."
+          "text": "[tldw:request] PUT /api/v1/workspaces/94b0bf50-2d47-4541-9f4f-98c8130fe0f4 401 Add or update your API key in Settings -> tldw server, then try again."
         },
         {
           "type": "warning",
@@ -224,7 +200,7 @@
         },
         {
           "type": "warning",
-          "text": "[tldw:request] GET /api/v1/workspaces/d3a2932d-7af9-48a6-a489-9ff245150cc6/context 401 Add or update your API key in Settings -> tldw server, then try again."
+          "text": "[tldw:request] GET /api/v1/workspaces/94b0bf50-2d47-4541-9f4f-98c8130fe0f4/context 401 Add or update your API key in Settings -> tldw server, then try again."
         },
         {
           "type": "warning",
@@ -260,7 +236,7 @@
       "httpErrors": [],
       "apiRequests": [
         {
-          "at": "2026-07-14T20:33:45.129Z",
+          "at": "2026-07-15T00:36:34.308Z",
           "method": "GET",
           "url": "http://127.0.0.1:18160/api/v1/health",
           "transport": "direct_api",
@@ -268,7 +244,7 @@
           "hasXApiKey": false
         },
         {
-          "at": "2026-07-14T20:33:45.130Z",
+          "at": "2026-07-15T00:36:34.308Z",
           "method": "GET",
           "url": "http://127.0.0.1:18160/api/v1/health",
           "transport": "direct_api",
@@ -286,9 +262,9 @@
       "httpErrors": [],
       "apiRequests": [
         {
-          "at": "2026-07-14T20:33:50.914Z",
+          "at": "2026-07-15T00:36:39.729Z",
           "method": "GET",
-          "url": "http://127.0.0.1:18160/api/v1/health?task12968_uat_end=task12968-cfbc5cb2-7b14-4f8e-b691-5550c62a1377",
+          "url": "http://127.0.0.1:18160/api/v1/health?task12968_uat_end=task12968-2035e741-332f-4011-9949-57e4005baa10",
           "transport": "direct_api",
           "hasAuthorization": false,
           "hasXApiKey": false
@@ -300,32 +276,32 @@
   },
   "backendAccessLogAudit": {
     "logPath": "/private/tmp/task12968-research-workspace-uat/backend-durable-live.log",
-    "runId": "task12968-cfbc5cb2-7b14-4f8e-b691-5550c62a1377",
-    "startMarkerUrl": "http://127.0.0.1:18160/api/v1/health?task12968_uat_start=task12968-cfbc5cb2-7b14-4f8e-b691-5550c62a1377",
-    "endMarkerUrl": "http://127.0.0.1:18160/api/v1/health?task12968_uat_end=task12968-cfbc5cb2-7b14-4f8e-b691-5550c62a1377",
+    "runId": "task12968-2035e741-332f-4011-9949-57e4005baa10",
+    "startMarkerUrl": "http://127.0.0.1:18160/api/v1/health?task12968_uat_start=task12968-2035e741-332f-4011-9949-57e4005baa10",
+    "endMarkerUrl": "http://127.0.0.1:18160/api/v1/health?task12968_uat_end=task12968-2035e741-332f-4011-9949-57e4005baa10",
     "startMarkerLineCount": 1,
     "endMarkerLineCount": 1,
-    "windowStartedAt": "2026-07-14T20:32:38.109Z",
-    "windowCompletedAt": "2026-07-14T20:33:50.924Z",
-    "correlatedLineCount": 13,
+    "windowStartedAt": "2026-07-15T00:36:12.994Z",
+    "windowCompletedAt": "2026-07-15T00:36:39.736Z",
+    "correlatedLineCount": 24,
     "apiRequestLineCount": 11,
     "apiRequestLines": [
-      "2026-07-14 13:32:38.109 | INFO     | trace= span= tp= req=4bbada43-3708-422c-9cb2-10ba2253f56a job= ps=: | starlette.middleware.errors:_send:161 - 127.0.0.1:52373 - \"GET /api/v1/health?task12968_uat_start=task12968-cfbc5cb2-7b14-4f8e-b691-5550c62a1377 HTTP/1.1\" 200",
-      "2026-07-14 13:32:43.072 | INFO     | trace= span= tp= req=801ba06f-4355-4094-a1fa-5fdef9bf19b1 job= ps=: | tldw_Server_API.app.core.Logging.access_log_middleware:dispatch:70 - HTTP GET /api/v1/health -> 200 in 339ms",
-      "2026-07-14 13:32:43.106 | INFO     | trace= span= tp= req=801ba06f-4355-4094-a1fa-5fdef9bf19b1 job= ps=: | starlette.middleware.errors:_send:161 - 127.0.0.1:52382 - \"GET /api/v1/health HTTP/1.1\" 200",
-      "2026-07-14 13:32:43.455 | INFO     | trace= span= tp= req=07ed6a7a-5fc0-42a2-9f46-f18397c4e723 job= ps=: | tldw_Server_API.app.core.Logging.access_log_middleware:dispatch:70 - HTTP GET /api/v1/health -> 200 in 334ms",
-      "2026-07-14 13:32:43.464 | INFO     | trace= span= tp= req=07ed6a7a-5fc0-42a2-9f46-f18397c4e723 job= ps=: | starlette.middleware.errors:_send:161 - 127.0.0.1:52383 - \"GET /api/v1/health HTTP/1.1\" 200",
-      "2026-07-14 13:33:45.169 | INFO     | trace= span= tp= req=145275df-d9f0-4ecf-ab32-c103e6feae13 job= ps=: | tldw_Server_API.app.core.Logging.access_log_middleware:dispatch:70 - HTTP GET /api/v1/health -> 200 in 24ms",
-      "2026-07-14 13:33:45.171 | INFO     | trace= span= tp= req=145275df-d9f0-4ecf-ab32-c103e6feae13 job= ps=: | starlette.middleware.errors:_send:161 - 127.0.0.1:52424 - \"GET /api/v1/health HTTP/1.1\" 200",
-      "2026-07-14 13:33:45.179 | INFO     | trace= span= tp= req=f8d59b80-da7e-48c3-9baa-92cab41bf15d job= ps=: | tldw_Server_API.app.core.Logging.access_log_middleware:dispatch:70 - HTTP GET /api/v1/health -> 200 in 6ms",
-      "2026-07-14 13:33:45.180 | INFO     | trace= span= tp= req=f8d59b80-da7e-48c3-9baa-92cab41bf15d job= ps=: | starlette.middleware.errors:_send:161 - 127.0.0.1:52424 - \"GET /api/v1/health HTTP/1.1\" 200",
-      "2026-07-14 13:33:50.923 | INFO     | trace= span= tp= req=592cf92f-21c6-476a-9098-250075785622 job= ps=: | tldw_Server_API.app.core.Logging.access_log_middleware:dispatch:70 - HTTP GET /api/v1/health -> 200 in 7ms",
-      "2026-07-14 13:33:50.924 | INFO     | trace= span= tp= req=592cf92f-21c6-476a-9098-250075785622 job= ps=: | starlette.middleware.errors:_send:161 - 127.0.0.1:52427 - \"GET /api/v1/health?task12968_uat_end=task12968-cfbc5cb2-7b14-4f8e-b691-5550c62a1377 HTTP/1.1\" 200"
+      "2026-07-14 17:36:12.994 | INFO     | trace= span= tp= req=b9db516c-b799-4439-8ced-bc5d315963ee job= ps=: | starlette.middleware.errors:_send:161 - 127.0.0.1:50165 - \"GET /api/v1/health?task12968_uat_start=task12968-2035e741-332f-4011-9949-57e4005baa10 HTTP/1.1\" 200",
+      "2026-07-14 17:36:13.993 | INFO     | trace= span= tp= req=2a273c2c-a344-415a-a5ae-936c8ef1351d job= ps=: | tldw_Server_API.app.core.Logging.access_log_middleware:dispatch:70 - HTTP GET /api/v1/health -> 200 in 5ms",
+      "2026-07-14 17:36:13.993 | INFO     | trace= span= tp= req=2a273c2c-a344-415a-a5ae-936c8ef1351d job= ps=: | starlette.middleware.errors:_send:161 - 127.0.0.1:50174 - \"GET /api/v1/health HTTP/1.1\" 200",
+      "2026-07-14 17:36:14.000 | INFO     | trace= span= tp= req=9618eb87-080f-4f73-ad88-727ea3d01b92 job= ps=: | tldw_Server_API.app.core.Logging.access_log_middleware:dispatch:70 - HTTP GET /api/v1/health -> 200 in 4ms",
+      "2026-07-14 17:36:14.000 | INFO     | trace= span= tp= req=9618eb87-080f-4f73-ad88-727ea3d01b92 job= ps=: | starlette.middleware.errors:_send:161 - 127.0.0.1:50174 - \"GET /api/v1/health HTTP/1.1\" 200",
+      "2026-07-14 17:36:34.314 | INFO     | trace= span= tp= req=72e503a8-1814-4e0e-846b-99c7395c7fef job= ps=: | tldw_Server_API.app.core.Logging.access_log_middleware:dispatch:70 - HTTP GET /api/v1/health -> 200 in 5ms",
+      "2026-07-14 17:36:34.315 | INFO     | trace= span= tp= req=72e503a8-1814-4e0e-846b-99c7395c7fef job= ps=: | starlette.middleware.errors:_send:161 - 127.0.0.1:50204 - \"GET /api/v1/health HTTP/1.1\" 200",
+      "2026-07-14 17:36:34.322 | INFO     | trace= span= tp= req=8acf9f85-a645-4181-a039-641732310919 job= ps=: | tldw_Server_API.app.core.Logging.access_log_middleware:dispatch:70 - HTTP GET /api/v1/health -> 200 in 5ms",
+      "2026-07-14 17:36:34.324 | INFO     | trace= span= tp= req=8acf9f85-a645-4181-a039-641732310919 job= ps=: | starlette.middleware.errors:_send:161 - 127.0.0.1:50204 - \"GET /api/v1/health HTTP/1.1\" 200",
+      "2026-07-14 17:36:39.735 | INFO     | trace= span= tp= req=e9f0bc17-985d-4cb6-8fe8-47cf60a1b53c job= ps=: | tldw_Server_API.app.core.Logging.access_log_middleware:dispatch:70 - HTTP GET /api/v1/health -> 200 in 5ms",
+      "2026-07-14 17:36:39.736 | INFO     | trace= span= tp= req=e9f0bc17-985d-4cb6-8fe8-47cf60a1b53c job= ps=: | starlette.middleware.errors:_send:161 - 127.0.0.1:50220 - \"GET /api/v1/health?task12968_uat_end=task12968-2035e741-332f-4011-9949-57e4005baa10 HTTP/1.1\" 200"
     ],
     "migrationRequestCount": 0,
     "migrationLines": []
   },
-  "completedAt": "2026-07-14T20:33:50.936Z",
+  "completedAt": "2026-07-15T00:36:39.749Z",
   "outcome": "pass",
   "failure": null,
   "checkpointCount": 17,

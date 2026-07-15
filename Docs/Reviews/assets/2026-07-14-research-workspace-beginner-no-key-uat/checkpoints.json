@@ -22,28 +22,28 @@
           }
         ]
       },
-      "readinessGateVisible": true,
+      "readinessGateVisible": false,
       "readinessObservations": {
         "readiness": [
           {
-            "atMs": 3589,
+            "atMs": 829,
             "text": "LoadingChecking server readinessThe WebUI is checking the API health endpoint before opening the app.Waiting"
           }
         ],
         "published": [
           {
-            "atMs": 4585,
+            "atMs": 841,
             "state": "ready",
             "degradedChecks": [],
             "healthUrl": "http://127.0.0.1:18160/api/v1/health",
             "httpStatus": 200,
             "healthStatus": "ok",
-            "checkedAt": "2026-07-14T20:32:43.473Z"
+            "checkedAt": "2026-07-15T00:36:14.001Z"
           }
         ]
       },
-      "readinessScreenshot": "/private/tmp/task12968-research-workspace-uat/desktop-01-readiness-gate.png",
-      "routeReadyMs": 26851,
+      "readinessScreenshot": "/private/tmp/task12968-research-workspace-uat/desktop-01-direct-entry.png",
+      "routeReadyMs": 10857,
       "credentials": {
         "cookieCount": 0,
         "localCredentialKeys": [],
@@ -54,12 +54,12 @@
       },
       "freshWorkspaceState": {
         "storageSchema": "workspace_split_v1",
-        "activeWorkspaceId": "e3c6e337-b7e7-4df4-b696-a3fe5c015487",
+        "activeWorkspaceId": "61ba87f0-f4d7-4e1b-b825-3a31b1a83c47",
         "workspaceIds": [
-          "e3c6e337-b7e7-4df4-b696-a3fe5c015487"
+          "61ba87f0-f4d7-4e1b-b825-3a31b1a83c47"
         ],
         "savedWorkspaceIds": [
-          "e3c6e337-b7e7-4df4-b696-a3fe5c015487"
+          "61ba87f0-f4d7-4e1b-b825-3a31b1a83c47"
         ],
         "migrationStatusMessages": [],
         "workspaceCount": 1,
@@ -296,12 +296,12 @@
       "credentialBearingRequestCount": 0,
       "freshWorkspaceState": {
         "storageSchema": "workspace_split_v1",
-        "activeWorkspaceId": "e3c6e337-b7e7-4df4-b696-a3fe5c015487",
+        "activeWorkspaceId": "61ba87f0-f4d7-4e1b-b825-3a31b1a83c47",
         "workspaceIds": [
-          "e3c6e337-b7e7-4df4-b696-a3fe5c015487"
+          "61ba87f0-f4d7-4e1b-b825-3a31b1a83c47"
         ],
         "savedWorkspaceIds": [
-          "e3c6e337-b7e7-4df4-b696-a3fe5c015487"
+          "61ba87f0-f4d7-4e1b-b825-3a31b1a83c47"
         ],
         "migrationStatusMessages": [],
         "workspaceCount": 1,
@@ -329,7 +329,7 @@
           }
         ]
       },
-      "routeReadyMs": 8212,
+      "routeReadyMs": 2987,
       "credentials": {
         "cookieCount": 0,
         "localCredentialKeys": [],
@@ -427,12 +427,12 @@
       },
       "freshWorkspaceState": {
         "storageSchema": "workspace_split_v1",
-        "activeWorkspaceId": "d3a2932d-7af9-48a6-a489-9ff245150cc6",
+        "activeWorkspaceId": "94b0bf50-2d47-4541-9f4f-98c8130fe0f4",
         "workspaceIds": [
-          "d3a2932d-7af9-48a6-a489-9ff245150cc6"
+          "94b0bf50-2d47-4541-9f4f-98c8130fe0f4"
         ],
         "savedWorkspaceIds": [
-          "d3a2932d-7af9-48a6-a489-9ff245150cc6"
+          "94b0bf50-2d47-4541-9f4f-98c8130fe0f4"
         ],
         "migrationStatusMessages": [],
         "workspaceCount": 1,

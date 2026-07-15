@@ -1,7 +1,7 @@
 ---
 id: TASK-12968
 title: Certify Research Workspace beginner no-key UAT for issue 2606
-status: Done
+status: In Progress
 labels:
 - research-workspace
 - uat
@@ -83,7 +83,7 @@ Verification: focused shared UI suite passed 9 files / 164 tests; WebLayout suit
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Certified GitHub issue #2606's beginner/no-key Research Workspace journey and promoted RW-UAT-027 to Pass. The implementation fixes fresh hydration/migration races, restores route tours without global chrome, removes persistent tour-banner clutter, and preserves all mobile controls. The definitive clean CDP run passed 17/17 checkpoints and now has durable, force-tracked manifests: browser-context network capture, browser-level worker/extension target observation, and unique browser-generated start/end sentinels correlate an 11-line backend API segment with zero workspace migration traffic. Final pre-PR verification passed 219 focused shared-UI tests across 9 files and 14 WebLayout tests; the quota-warning test now uses a persistable workspace envelope so it still exercises quota handling without conflicting with the intentional empty-hydration suppression. The maintained real-backend check, lint, artifact integrity, secret scanning, and diff hygiene also pass; only unrelated repository-wide TypeScript/formatting baselines remain documented.
+Reopened after independent pre-merge review of PR #2731. Follow-up scope: prevent empty-hydration no-op broadcasts, retain server workspace context and recovery details in the mobile accessibility tree, make page/network diagnostic buckets gate UAT success, regenerate the live CDP evidence, and reconcile verification counts. The human-authored PR Change summary remains a requester-owned merge gate.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

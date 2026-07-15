@@ -2377,10 +2377,10 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
           data-testid="workspace-server-context-indicator"
           className="order-last flex min-w-0 max-w-full basis-full flex-wrap items-center gap-1.5 rounded-md border border-border bg-surface/80 px-2 py-1 text-xs text-text-muted lg:order-none lg:basis-auto"
         >
-          <span className="hidden font-medium text-text lg:inline">
+          <span className="sr-only font-medium text-text lg:not-sr-only lg:inline">
             {t("playground:workspace.serverWorkspace", "Server Workspace")}
           </span>
-          <span className="hidden max-w-[14rem] truncate lg:inline">
+          <span className="sr-only max-w-[14rem] truncate lg:not-sr-only lg:inline">
             {serverWorkspaceContextLabel}
           </span>
           <span className="rounded bg-surface2 px-1.5 py-0.5">
@@ -2390,7 +2390,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
             )}
           </span>
           {showServerWorkspaceRecovery && (
-            <span className="hidden min-w-0 lg:inline">
+            <span className="sr-only min-w-0 lg:not-sr-only lg:inline">
               {serverWorkspaceRecovery.message}
             </span>
           )}

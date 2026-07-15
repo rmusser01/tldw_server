@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { chromium } from "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/research-workspace-beginner-uat/apps/tldw-frontend/node_modules/playwright/index.mjs";
+import { assertCleanContextDiagnostics } from "./uat-diagnostic-gate.mjs";
 
 const CDP_URL = "http://127.0.0.1:18162";
 const WEB_URL = "http://127.0.0.1:18161/research-workspace";
@@ -1105,6 +1106,7 @@ try {
   await runDesktop(browser);
   await runMobile(browser);
   await emitBackendMarker(browser, "end");
+  assertCleanContextDiagnostics(diagnostics.contexts);
   const browserApiRequests = Object.values(diagnostics.contexts).flatMap(
     (context) => context.apiRequests,
   );

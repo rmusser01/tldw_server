@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { WORKSPACE_STORAGE_KEY } from "@/store/workspace-events"
+import {
+  WORKSPACE_BROADCAST_SYNC_FLAG,
+  WORKSPACE_STORAGE_KEY
+} from "@/store/workspace-events"
 import {
   createWorkspaceStorage,
   WORKSPACE_STORAGE_SPLIT_KEY_FLAG_STORAGE_KEY
@@ -24,6 +27,7 @@ describe("workspace split-key persistence storage adapter", () => {
   })
 
   afterEach(() => {
+    vi.unstubAllGlobals()
     localStorage.clear()
   })
 
@@ -190,6 +194,41 @@ describe("workspace split-key persistence storage adapter", () => {
     )
 
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull()
+  })
+
+  it("does not broadcast split or monolithic empty hydration writes", async () => {
+    const broadcastMessages: unknown[] = []
+    vi.stubGlobal(
+      "BroadcastChannel",
+      class {
+        postMessage(message: unknown) {
+          broadcastMessages.push(message)
+        }
+      }
+    )
+
+    for (const splitStorageFlag of ["1", "0"]) {
+      localStorage.clear()
+      localStorage.setItem(WORKSPACE_BROADCAST_SYNC_FLAG, "1")
+      localStorage.setItem(
+        WORKSPACE_STORAGE_SPLIT_KEY_FLAG_STORAGE_KEY,
+        splitStorageFlag
+      )
+
+      await createWorkspaceStorage().setItem(
+        STORAGE_KEY,
+        buildEnvelope({
+          workspaceId: "",
+          savedWorkspaces: [],
+          archivedWorkspaces: [],
+          workspaceCollections: [],
+          workspaceSnapshots: {},
+          workspaceChatSessions: {}
+        })
+      )
+    }
+
+    expect(broadcastMessages).toEqual([])
   })
 
   it("reconstructs full persisted state from split keys on getItem", async () => {

@@ -777,11 +777,13 @@ describe("WorkspaceHeader workspace browser modal", () => {
       "lg:basis-auto"
     )
     expect(within(serverContext).getByText("Server Workspace")).toHaveClass(
-      "hidden",
+      "sr-only",
+      "lg:not-sr-only",
       "lg:inline"
     )
     expect(within(serverContext).getByText("Canonical Alpha")).toHaveClass(
-      "hidden",
+      "sr-only",
+      "lg:not-sr-only",
       "lg:inline"
     )
     expect(screen.getByTestId("workspace-header-actions")).toHaveClass(
@@ -923,9 +925,14 @@ describe("WorkspaceHeader workspace browser modal", () => {
       />
     )
 
-    expect(
-      await screen.findByText("Server Workspace context is unavailable right now.")
-    ).toBeInTheDocument()
+    const recoveryMessage = await screen.findByText(
+      "Server Workspace context is unavailable right now."
+    )
+    expect(recoveryMessage).toHaveClass(
+      "sr-only",
+      "lg:not-sr-only",
+      "lg:inline"
+    )
     expect(
       screen.getByRole("link", { name: "Open Workspaces" })
     ).toHaveAttribute("href", "#/workspaces")

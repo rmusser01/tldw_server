@@ -1902,13 +1902,13 @@ export const createWorkspaceStorage = (
     },
     setItem: async (name: string, value: string): Promise<void> => {
       try {
-        if (!shouldSuppressInitialEmptyWorkspaceWrite(name, value)) {
-          const handledBySplitStorage = splitStorageEnabled
-            ? await writeSplitWorkspacePersistence(name, value, indexedDbAdapter)
-            : false
-          if (!handledBySplitStorage) {
-            localStorage.setItem(name, value)
-          }
+        if (shouldSuppressInitialEmptyWorkspaceWrite(name, value)) return
+
+        const handledBySplitStorage = splitStorageEnabled
+          ? await writeSplitWorkspacePersistence(name, value, indexedDbAdapter)
+          : false
+        if (!handledBySplitStorage) {
+          localStorage.setItem(name, value)
         }
         broadcastWorkspaceStorageUpdate(name)
       } catch (error) {
