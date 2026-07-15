@@ -1438,6 +1438,14 @@ class PlaylistIngestService:
             elif reconciled_run.collection_id is not None or any(
                 item_id is not None for item_id in reconciled_mapping.values()
             ):
+                if created_new:
+                    try:
+                        collections_db.discard_media_collection(
+                            int(collection.id),
+                            expected_item_ids=collection_item_ids,
+                        )
+                    except Exception as cleanup_exc:
+                        raise PlaylistRunValidationError("collection_planning_cleanup_failed") from cleanup_exc
                 raise PlaylistRunValidationError("collection_planning_reconciliation_failed") from exc
             else:
                 try:

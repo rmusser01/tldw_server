@@ -1901,6 +1901,67 @@ def test_create_run_attachment_commit_then_exception_reconciles_without_discard(
     assert _table_count(manager, "jobs") == 0
 
 
+def test_create_run_stale_collection_creator_discards_exact_plan_after_another_collection_attaches(
+    service_context,
+    monkeypatch,
+):
+    service, store, manager, _media_db = service_context
+    collections_db = service.test_collections_db
+    original_attach = service._store.attach_collection_plan
+    discarded: list[tuple[int, tuple[int, ...]]] = []
+
+    def discard_exact(collection_id, *, expected_item_ids):
+        discarded.append((collection_id, tuple(expected_item_ids)))
+        return True
+
+    def winner_attaches_before_stale(*args, **kwargs):
+        owner_user_id, run_id = args[:2]
+        connection = manager._connect()
+        try:
+            connection.execute(
+                """
+                UPDATE media_ingest_runs
+                SET initialization_token = ?, initialization_expires_at = ?
+                WHERE owner_user_id = ? AND run_id = ?
+                """,
+                ("winner-token", (NOW + timedelta(minutes=5)).isoformat(), owner_user_id, run_id),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        original_attach(
+            owner_user_id,
+            run_id,
+            collection_id=800,
+            planned_item_ids={"occ-new": 801},
+            initialization_token="winner-token",
+        )
+        return original_attach(*args, **kwargs)
+
+    monkeypatch.setattr(collections_db, "discard_media_collection", discard_exact)
+    monkeypatch.setattr(service._store, "attach_collection_plan", winner_attaches_before_stale)
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
+        PlaylistRunValidationError,
+    )
+
+    with pytest.raises(PlaylistRunValidationError, match="collection_planning_reconciliation_failed"):
+        service.create_run(
+            "owner-1",
+            inputs=[_direct_input("occ-new", "https://example.com/new")],
+            review_overrides={},
+            new_collection={"name": "Stale collection"},
+        )
+
+    connection = manager._connect()
+    try:
+        run_id = connection.execute("SELECT run_id FROM media_ingest_runs").fetchone()[0]
+    finally:
+        connection.close()
+    assert store.get_run("owner-1", run_id).collection_id == 800
+    assert discarded == [(700, (701,))]
+
+
 def test_create_run_collection_creation_commit_then_exception_reconciles(
     service_context,
 ):
