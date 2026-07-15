@@ -1,4 +1,4 @@
-import { chromium } from '@playwright/test'
+import { chromium, type BrowserContext, type Page } from '@playwright/test'
 import fs from 'node:fs'
 import path from 'node:path'
 
@@ -14,6 +14,8 @@ type LaunchOptions = {
   allowOffline?: boolean
   seedLocalStorage?: Record<string, any>
   launchTimeoutMs?: number
+  optionsTarget?: string
+  prepareOptionsPage?: ({ context, page }: { context: BrowserContext; page: Page }) => void | Promise<void>
 }
 
 const BASE_EXTENSION_STORAGE_SEED = {
@@ -208,7 +210,7 @@ function resolvePlaywrightChannel(): string | undefined {
 
 const projectRoot = path.resolve(__dirname, '..', '..', '..')
 
-const resolveSidepanelUrl = (baseUrl: string, target?: string): string => {
+const resolveExtensionPageUrl = (baseUrl: string, target?: string): string => {
   const normalized = String(target || "").trim()
   if (!normalized) return baseUrl
   if (normalized.startsWith("?") || normalized.startsWith("#")) {
@@ -218,7 +220,14 @@ const resolveSidepanelUrl = (baseUrl: string, target?: string): string => {
 }
 
 export async function launchWithBuiltExtension(
-  { seedConfig, allowOffline, seedLocalStorage, launchTimeoutMs }: LaunchOptions = {}
+  {
+    seedConfig,
+    allowOffline,
+    seedLocalStorage,
+    launchTimeoutMs,
+    optionsTarget,
+    prepareOptionsPage
+  }: LaunchOptions = {}
 ) {
   const normalizedSeed = normalizeBuiltExtensionSeedConfig(seedConfig)
   const seedStoragePayload = seedConfig ? normalizedSeed.storagePayload : null
@@ -494,7 +503,8 @@ export async function launchWithBuiltExtension(
   const sidepanelUrl = `chrome-extension://${extensionId}/sidepanel.html`
 
   const page = await context.newPage()
-  await page.goto(optionsUrl)
+  await prepareOptionsPage?.({ context, page })
+  await page.goto(resolveExtensionPageUrl(optionsUrl, optionsTarget))
   await waitForStorageSeed(page)
 
   // When seeding config, proactively hydrate the connection store so tests do
@@ -545,7 +555,7 @@ export async function launchWithBuiltExtension(
 
   async function openSidepanel(target?: string) {
     const p = await context.newPage()
-    await p.goto(resolveSidepanelUrl(sidepanelUrl, target))
+    await p.goto(resolveExtensionPageUrl(sidepanelUrl, target))
     return p
   }
 

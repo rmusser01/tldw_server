@@ -68,7 +68,7 @@ describe("normalizeBuiltExtensionSeedConfig", () => {
     expect(normalized.storagePayload.tldwConfig).not.toHaveProperty("tldwConfig")
   })
 
-  it("launches built extensions with crashpad-disabled Chromium options", async () => {
+  it("launches built extensions with compatible options-page setup", async () => {
     process.env.CI = "true"
     process.env.TLDW_E2E_EXTENSION_TARGET_WAIT_MS = "1"
 
@@ -121,6 +121,9 @@ describe("normalizeBuiltExtensionSeedConfig", () => {
 
       await launchWithBuiltExtension()
 
+      expect(page.goto).toHaveBeenCalledWith(
+        `chrome-extension://${"e".repeat(32)}/options.html`,
+      )
       expect(prepareExtensionLaunchPath).toHaveBeenCalledWith(
         extensionDir,
         expect.objectContaining({
@@ -151,6 +154,29 @@ describe("normalizeBuiltExtensionSeedConfig", () => {
           ]),
         }),
       )
+
+      const events: string[] = []
+      let preparedPage: unknown
+      page.goto.mockImplementation(async (url: string) => {
+        events.push(`goto:${url}`)
+      })
+      context.newPage.mockClear()
+
+      await launchWithBuiltExtension({
+        optionsTarget: "/skills",
+        prepareOptionsPage: async ({ page: pageToPrepare }) => {
+          await Promise.resolve()
+          preparedPage = pageToPrepare
+          events.push("prepare")
+        },
+      })
+
+      expect(events).toEqual([
+        "prepare",
+        `goto:chrome-extension://${"e".repeat(32)}/options.html#/skills`,
+      ])
+      expect(preparedPage).toBe(page)
+      expect(context.newPage).toHaveBeenCalledTimes(1)
     } finally {
       fs.rmSync(tempRoot, { recursive: true, force: true })
     }
