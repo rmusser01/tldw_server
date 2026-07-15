@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-15
 
-**Status:** Human-approved design; first-review corrections applied, pending second independent spec review
+**Status:** Human-approved design; second-review corrections applied, pending final independent spec review
 
 **Backlog:** TASK-12115
 
@@ -54,6 +54,7 @@ The existing product PRD lists arbitrary JavaScript as a non-goal. Implementing 
 - A guarantee that arbitrary JavaScript is immune to CPU, memory, renderer, or self-navigation abuse
 - A network-intercepted browser or container runtime in v1
 - Automatic LLM repair loops for malformed or truncated HTML
+- Importing standalone HTML or JSON presentation payloads in v1
 - Collaborative editing, automatic document merges, or a visual HTML diff editor
 - Full MCP HTML generation or returning full HTML documents inline in MCP tool results
 - Exposing chat, media, notes, or RAG source pickers in the new form during the first UI release
@@ -240,7 +241,7 @@ REST and background workers use this service rather than duplicating normalizati
 
 ### Unified generation request
 
-`POST /api/v1/slides/generations` is the single new asynchronous submission route. It requires the `Idempotency-Key` header and accepts a discriminated source union:
+`POST /api/v1/slides/generations` is the single new asynchronous submission route. In v1, `generation_mode` is required and its only accepted value on this route is `standalone_html`. Structured generation remains on the existing per-source endpoints; it does not gain a second public transport in this release. The new route requires the `Idempotency-Key` header and accepts a discriminated source union:
 
 ```json
 {
@@ -299,26 +300,29 @@ Custom OpenAI-compatible URLs and user-provided provider overrides do not bypass
 
 Slides and Jobs use separate persistence stores, so the design does not rely on a cross-database transaction.
 
-At submission, the server canonicalizes the validated request and stores its SHA-256 request digest in the Jobs payload. Because the Jobs unique index is scoped by domain, queue, job type, and key rather than owner, the server derives the internal Jobs key as `slides:v1:` plus the hexadecimal SHA-256 of the canonical owner ID, a NUL separator, and the client key. The raw client key is not accepted as the global Jobs key. The fixed scope is `domain=slides`, `queue=slides`, and `job_type=presentation.generate`.
+Each user's Slides database contains a durable `slides_generation_receipts` ledger. A receipt stores the hashed client key, canonical request digest, bound Jobs UUID, optional committed presentation ID, creation/update timestamps, and expiry. The default idempotency guarantee is 30 days. Receipt cleanup and Jobs active/archive retention for this job type must both preserve lookup for at least that window.
 
-When an existing idempotency record is found, the endpoint compares the stored owner and request digest:
+At submission, the server canonicalizes the validated request and computes its SHA-256 digest. It claims the receipt in a Slides transaction before creating a job. Because each Slides database is already owner-scoped, the hashed key is unique for that owner. The endpoint compares an existing receipt's request digest:
 
-- same owner and digest: return the existing job/result;
-- same owner but different digest: return `409 generation_idempotency_conflict`;
-- a different owner cannot collide because owner identity participates in the derived internal key and is rechecked on lookup.
+- same digest: return or recover the bound job/result;
+- different digest: return `409 generation_idempotency_conflict`.
+
+Because the Jobs unique index is not owner-scoped, the server separately derives the internal Jobs key as `slides:v1:` plus the hexadecimal SHA-256 of the canonical owner ID, a NUL separator, and the client key. The raw client key is not accepted as the global Jobs key. The fixed scope is `domain=slides`, `queue=slides`, and `job_type=presentation.generate`.
+
+If the process crashes after claiming the receipt but before binding the job, retry creates or retrieves the same Jobs row through that derived key and then binds its UUID to the receipt. Submission and status lookup query active and archived Jobs rows. A receipt with `presentation_id` is sufficient to return a completed result even if the Jobs row was later pruned. If a Jobs row disappears before the 30-day receipt expiry and no presentation was committed, the server returns `503 generation_receipt_unresolved`; it does not silently enqueue another model call.
 
 Every generated presentation stores the immutable originating Jobs UUID as `generation_job_id`, protected by a unique index within the owner's Slides database. The worker algorithm is:
 
-1. Look up a presentation by the current Jobs UUID and return it if already committed.
+1. Load the receipt and return its committed presentation if present.
 2. Resolve sources, call the model, and validate output.
-3. Insert the presentation, initial entity version, derived search text, provenance, and `generation_job_id` in one Slides transaction.
+3. In one Slides write transaction, recheck the receipt, insert the presentation with its initial entity version, derived search text, provenance, and `generation_job_id`, then set the receipt's `presentation_id`. If another retry already committed it, return that row instead.
 4. Complete the Jobs result with the committed presentation ID.
 
-If the worker crashes after step 3 but before step 4, retry finds the committed presentation in step 1 and completes the same job. Concurrent retries resolve a unique-index race by fetching the winning row. A failed or stopped client poll therefore cannot create another job or presentation when it reuses the same key and request.
+If the worker crashes after step 3 but before step 4, retry finds the committed presentation through the receipt and completes the same job. Concurrent retries serialize on the receipt transaction and fetch the winning row. Jobs pruning cannot erase the presentation binding during the 30-day guarantee because the owner-scoped receipt is retained independently. After receipt expiry, the key is no longer guaranteed idempotent and clients must create a new deliberate-submission key.
 
 ## Standalone HTML Validation
 
-One pure Python backend validator is authoritative after generation, before persistence/import, on every HTML save, through draft validation, and before saved-document export where applicable. The browser has a separate local preflight and sanitizer for responsiveness; it is never authoritative for persistence or interactive execution.
+One pure Python backend validator is authoritative after generation, before persistence, on every HTML save, through draft validation, and before saved-document export where applicable. The browser has a separate local preflight and sanitizer for responsiveness; it is never authoritative for persistence or interactive execution.
 
 `POST /api/v1/slides/presentations/{presentation_id}/validate-html` accepts the current authenticated editor buffer without saving it. It applies the authoritative backend validator and returns only:
 
@@ -385,6 +389,16 @@ The presentation record gains:
 
 The existing `slides` column remains non-null.
 
+The owner-scoped `slides_generation_receipts` table contains:
+
+- `idempotency_key_sha256 TEXT PRIMARY KEY`
+- `request_sha256 TEXT NOT NULL`
+- `job_uuid TEXT NULL`
+- `presentation_id TEXT NULL`, referencing `presentations.id`
+- `created_at`, `updated_at`, and `expires_at`
+
+It stores no raw client key, source material, prompt, model output, or HTML. The presentation foreign-key behavior preserves a committed binding for the full receipt-retention window.
+
 The canonical invariant is:
 
 - `structured_slides`: validated slide list; `html_document`, `html_sha256`, and `html_bytes` are null.
@@ -392,13 +406,13 @@ The canonical invariant is:
 
 `slides_text` remains the canonical derived FTS source for both kinds. Clients can never supply it.
 
-All create, replace, patch, restore, duplicate, import, REST, MCP, and worker paths enforce the invariant through one domain service. Partial updates first merge with the current record, then validate the complete candidate inside the optimistic-concurrency operation. Omitting `content_kind` preserves the current kind; it never converts an HTML project into an empty structured project. A partial unique index on nonnull `generation_job_id` provides worker retry deduplication. User duplication creates a new presentation with a null generation job ID.
+All create, replace, patch, restore, duplicate, REST, MCP, and worker paths enforce the invariant through one domain service. Partial updates first merge with the current record, then validate the complete candidate inside the optimistic-concurrency operation. Omitting `content_kind` preserves the current kind; it never converts an HTML project into an empty structured project. A partial unique index on nonnull `generation_job_id` provides worker retry deduplication. User duplication creates a new presentation with a null generation job ID.
 
 Content kind cannot change in v1. A request that attempts to change it returns `409 content_kind_immutable`.
 
 ### Migration
 
-Slides schema versioning becomes authoritative for this change. Migration runs under a SQLite write transaction (`BEGIN IMMEDIATE`), rechecks schema state after acquiring the lock, adds/backfills the fields, and advances the schema version atomically. Legacy rows become `structured_slides` with null HTML fields.
+Slides schema versioning becomes authoritative for this change. Migration runs under a SQLite write transaction (`BEGIN IMMEDIATE`), rechecks schema state after acquiring the lock, adds/backfills the presentation fields, creates the receipt table and indexes, and advances the schema version atomically. Legacy rows become `structured_slides` with null HTML fields.
 
 Tests cover a legacy database, an already migrated database, and concurrent first access from separate connections/processes. New row mapping and summary queries use explicit projections rather than depending on `SELECT *` positional/dataclass compatibility. Deployment documentation requires a database backup before upgrade and treats this migration as forward-only for old binaries.
 
@@ -450,11 +464,13 @@ Capabilities separate persistence/editor support from generation availability. A
   },
   "presentation_generation_modes": {
     "structured_slides": {
-      "enabled": true
+      "enabled": true,
+      "transport": "existing_source_endpoints"
     },
     "standalone_html": {
       "enabled": false,
-      "reason": "no_allowed_model"
+      "reason": "no_allowed_model",
+      "transport": "slides_generation_job"
     }
   }
 }
@@ -475,7 +491,7 @@ HTML source is present only in authenticated detail/version-content responses, n
 
 HTML Save uses a kind-aware PATCH with a strong ETag/`If-Match` contract. The server returns strong tags such as `"v7"` and temporarily accepts legacy weak tags produced by existing clients. A stale tag returns `412` with bounded current-version metadata, not the remote HTML body unless the client explicitly fetches it.
 
-HTML updates may change title and `html_document` together. Structured-only fields explicitly supplied for an HTML record are rejected rather than ignored. A successful save returns the new detail and ETag. A no-op digest returns the current representation without a new snapshot.
+HTML updates may change title and `html_document` together. Structured-only fields explicitly supplied for an HTML record are rejected rather than ignored. A successful save returns the new detail and ETag. Only complete merged-entity equality is a no-op; an unchanged HTML digest does not suppress a title, provenance, or other metadata revision.
 
 ### Operation matrix
 
@@ -576,7 +592,7 @@ form-action 'none'
 
 Only validator-approved capped raster image/font data URIs may survive. SVG/HTML data documents and `blob:` script, worker, frame, or object sources are not permitted.
 
-V1 uses no parent/preview `postMessage` command bridge. The parent cannot receive arbitrary deck actions, invoke APIs on behalf of the deck, modify the editor, copy to clipboard, download, navigate, or resize from iframe messages. Fixed dimensions avoid a resize channel.
+V1 uses no parent/preview `postMessage` command bridge. A sandboxed deck can still call `parent.postMessage`, so message events from the preview are treated as attacker-controlled no-ops. The preview component registers no functional message listener. Every application-level `message` consumer must require its own expected `event.source`, origin, strict schema, and unguessable per-instance token, and must explicitly reject a registered preview frame's `contentWindow`. Repository tests enumerate existing message consumers and verify that preview-origin messages cannot invoke APIs, modify the editor, copy to clipboard, download, navigate, resize, or trigger any other side effect. Fixed dimensions remove any need for a preview resize channel.
 
 Any edit, saved-version change, restore, duplication, regeneration, or unmount destroys the running iframe. There is no automatic rerun and no open-in-new-tab control.
 
@@ -618,9 +634,11 @@ Stable errors include:
 - `content_kind_immutable`
 - `operation_not_supported_for_content_kind`
 - `presentation_version_conflict`
+- `generation_idempotency_key_required`
 - `generation_idempotency_conflict`
+- `generation_receipt_unresolved`
 
-Use `413` for hard byte/token/asset ceilings, `422` for malformed documents or invalid options, `409` for kind/operation/idempotency conflicts, `412` for stale ETags, and the existing Jobs failure representation for provider or worker failures.
+Use `400` for a missing/invalid idempotency header, `413` for hard byte/token/asset ceilings, `422` for malformed documents or invalid options, `409` for kind/operation/idempotency conflicts, `412` for stale ETags, `503` for an unresolved receipt whose Jobs row disappeared inside the guarantee window, and the existing Jobs failure representation for provider or worker failures.
 
 Diagnostics identify bounded fields, limits, and machine-readable codes. They do not echo source documents, prompt bodies, API keys, model output, notes, or JavaScript into logs or error responses.
 
@@ -632,7 +650,7 @@ Diagnostics identify bounded fields, limits, and machine-readable codes. They do
 - List clients receive an additive `content_kind` field; HTML source stays out of summary payloads.
 - Frontend normalization preserves both discriminated variants and never converts unknown/missing HTML into `slides: []` for mutation.
 - Old servers are detected through explicit capabilities; the HTML form never assumes support from a generic Slides route.
-- JSON import/export must preserve the discriminator and active payload. Import validates the same invariant and never executes HTML.
+- JSON export preserves the discriminator and active payload. Presentation import remains out of scope for v1.
 - Structured Reveal, PDF, and render workers retain their existing behavior, with an added kind check.
 - The browser extension can list or hand off HTML projects but cannot preview them interactively.
 
@@ -673,13 +691,14 @@ Standalone HTML **generation** is disabled by default until configured. Startup 
 - lightweight summaries do not load full HTML;
 - old and new snapshot restore behavior;
 - FTS excludes scripts/styles/private notes;
-- strong ETags and legacy weak-tag acceptance.
+- strong ETags and legacy weak-tag acceptance;
+- generation-receipt claim, bind, atomic presentation commit, replay, and retention cleanup.
 
 ### API, Jobs, and MCP integration tests
 
 - successful HTML generation from prompt, chat, media, notes, and RAG with mocked LLMs;
 - model allowlist, feature capability, ownership, size, timeout, and idempotency behavior;
-- same-key/same-digest replay, same-key/different-digest conflict, cross-owner isolation, and crash recovery after the presentation commit but before Jobs completion;
+- same-key/same-digest replay, same-key/different-digest conflict, cross-owner isolation, receipt-claim/job-bind crash recovery, crash recovery after the presentation commit but before Jobs completion, active/archive lookup, premature Jobs-row loss failure, and 30-day receipt expiry semantics;
 - failed validation creates no presentation;
 - job result contains metadata rather than HTML;
 - draft validation returns a digest-bound verdict without persistence or source echo;
