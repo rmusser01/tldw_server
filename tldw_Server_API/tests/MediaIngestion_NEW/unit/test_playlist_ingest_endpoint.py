@@ -102,6 +102,7 @@ def _create_run(client: TestClient, *occurrence_ids: str) -> dict:
     response = client.post(
         "/api/v1/media/ingest/runs",
         json={
+            "client_request_id": f"endpoint-run:{':'.join(occurrence_ids)}",
             "inputs": [
                 {
                     "input_kind": "direct_url",
@@ -118,6 +119,37 @@ def _create_run(client: TestClient, *occurrence_ids: str) -> dict:
     )
     assert response.status_code == 201, response.text
     return response.json()
+
+
+@pytest.mark.parametrize(
+    "client_request_id",
+    [pytest.param(None, id="missing"), pytest.param(" ", id="blank"), pytest.param("x" * 256, id="too-long")],
+)
+def test_run_post_requires_bounded_canonical_client_request_id(
+    preflight_api,
+    monkeypatch,
+    client_request_id,
+):
+    client, manager, _clock, _owner = preflight_api
+    _install_endpoint_media_db(monkeypatch)
+    payload = {
+        "inputs": [
+            {
+                "input_kind": "direct_url",
+                "occurrence_id": "occ-request-id",
+                "url": "https://example.com/request-id",
+            }
+        ],
+        "review_overrides": {},
+    }
+    if client_request_id is not None:
+        payload["client_request_id"] = client_request_id
+
+    response = client.post("/api/v1/media/ingest/runs", json=payload)
+
+    assert response.status_code == 422
+    with manager._connect() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM media_ingest_runs").fetchone()[0] == 0
 
 
 def _submit_run_occurrences(client: TestClient, run_id: str, *occurrence_ids: str) -> dict:
@@ -853,6 +885,7 @@ def test_run_post_resolves_terminal_actions_and_returns_authoritative_processing
     response = client.post(
         "/api/v1/media/ingest/runs",
         json={
+            "client_request_id": "endpoint-terminal-actions",
             "inputs": [
                 {
                     "input_kind": "direct_url",
@@ -917,6 +950,7 @@ def test_run_post_rejects_an_explicit_stale_duplicate_target(preflight_api, monk
     response = client.post(
         "/api/v1/media/ingest/runs",
         json={
+            "client_request_id": "endpoint-stale-duplicate-target",
             "inputs": [
                 {
                     "input_kind": "direct_url",

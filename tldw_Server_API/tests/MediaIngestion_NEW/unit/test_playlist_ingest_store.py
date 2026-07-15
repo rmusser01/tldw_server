@@ -232,6 +232,78 @@ def test_validated_manifest_rejects_internal_json_before_write_lock(
     assert entered is False
 
 
+def test_idempotent_validated_run_insert_has_one_concurrent_initializer_and_manifest(store):
+    def create(token: str):
+        return store.create_validated_run(
+            "owner-1",
+            items=[_validated_direct_record(occurrence_id="occ-idempotent")],
+            client_request_id="concurrent-create",
+            request_fingerprint="f" * 64,
+            initialization_token=token,
+            initialization_lease_seconds=30,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        created = list(pool.map(create, ("initializer-a", "initializer-b")))
+
+    assert created[0].run_id == created[1].run_id
+    assert {record.initialization_token for record in created} <= {"initializer-a", "initializer-b"}
+    assert len({record.initialization_token for record in created}) == 1
+    assert [item.occurrence_id for item in store.list_run_items("owner-1", created[0].run_id)] == [
+        "occ-idempotent"
+    ]
+    assert len(store.list_run_events("owner-1", created[0].run_id)) == 1
+
+
+def test_run_initialization_lease_claim_and_renew_are_owner_run_token_cas(store):
+    created = store.create_validated_run(
+        "owner-1",
+        items=[_validated_direct_record(occurrence_id="occ-lease-init")],
+        client_request_id="abandoned-lease",
+        request_fingerprint="a" * 64,
+        initialization_token="initializer-old",
+        initialization_lease_seconds=5,
+    )
+
+    live = store.claim_run_initialization(
+        "owner-1",
+        client_request_id="abandoned-lease",
+        request_fingerprint="a" * 64,
+        initialization_token="initializer-new",
+        initialization_lease_seconds=5,
+    )
+    assert live.initialization_token == "initializer-old"
+
+    store.test_clock.advance(timedelta(seconds=6))
+    claimed = store.claim_run_initialization(
+        "owner-1",
+        client_request_id="abandoned-lease",
+        request_fingerprint="a" * 64,
+        initialization_token="initializer-new",
+        initialization_lease_seconds=5,
+    )
+    assert claimed.run_id == created.run_id
+    assert claimed.initialization_token == "initializer-new"
+    assert store.renew_run_initialization(
+        "owner-2",
+        created.run_id,
+        initialization_token="initializer-new",
+        initialization_lease_seconds=5,
+    ) is False
+    assert store.renew_run_initialization(
+        "owner-1",
+        created.run_id,
+        initialization_token="initializer-old",
+        initialization_lease_seconds=5,
+    ) is False
+    assert store.renew_run_initialization(
+        "owner-1",
+        created.run_id,
+        initialization_token="initializer-new",
+        initialization_lease_seconds=5,
+    ) is True
+
+
 def test_ready_snapshot_guard_rejects_cancelled_linked_job_atomically(store):
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
         PlaylistPreflightLeaseLostError,

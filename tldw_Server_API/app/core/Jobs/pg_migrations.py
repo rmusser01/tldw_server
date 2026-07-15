@@ -252,6 +252,10 @@ CREATE INDEX IF NOT EXISTS idx_playlist_materialization_items_occurrence
 CREATE TABLE IF NOT EXISTS media_ingest_runs (
   run_id TEXT PRIMARY KEY,
   owner_user_id TEXT NOT NULL,
+  client_request_id TEXT,
+  request_fingerprint TEXT,
+  initialization_token TEXT,
+  initialization_expires_at TIMESTAMPTZ,
   status TEXT NOT NULL,
   collection_id BIGINT,
   processing_options_json JSONB,
@@ -443,6 +447,17 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
                 f.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS error_class TEXT")
                 f.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS error_stack JSONB")
                 f.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS batch_group TEXT")
+                f.execute("ALTER TABLE media_ingest_runs ADD COLUMN IF NOT EXISTS client_request_id TEXT")
+                f.execute("ALTER TABLE media_ingest_runs ADD COLUMN IF NOT EXISTS request_fingerprint TEXT")
+                f.execute("ALTER TABLE media_ingest_runs ADD COLUMN IF NOT EXISTS initialization_token TEXT")
+                f.execute(
+                    "ALTER TABLE media_ingest_runs "
+                    "ADD COLUMN IF NOT EXISTS initialization_expires_at TIMESTAMPTZ"
+                )
+                f.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_media_ingest_runs_owner_client_request "
+                    "ON media_ingest_runs(owner_user_id, client_request_id)"
+                )
                 f.execute("ALTER TABLE media_ingest_run_items ADD COLUMN IF NOT EXISTS submission_queue TEXT")
                 f.execute("ALTER TABLE media_ingest_run_items ADD COLUMN IF NOT EXISTS staging_temp_dir TEXT")
                 f.execute("ALTER TABLE media_ingest_run_items ADD COLUMN IF NOT EXISTS submission_lease_token TEXT")

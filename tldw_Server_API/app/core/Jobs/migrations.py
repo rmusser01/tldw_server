@@ -287,6 +287,10 @@ CREATE INDEX IF NOT EXISTS idx_playlist_materialization_items_occurrence
 CREATE TABLE IF NOT EXISTS media_ingest_runs (
   run_id TEXT NOT NULL PRIMARY KEY,
   owner_user_id TEXT NOT NULL,
+  client_request_id TEXT,
+  request_fingerprint TEXT,
+  initialization_token TEXT,
+  initialization_expires_at TEXT,
   status TEXT NOT NULL,
   collection_id INTEGER,
   processing_options_json TEXT CHECK (processing_options_json IS NULL OR json_valid(processing_options_json)),
@@ -447,6 +451,18 @@ def ensure_jobs_tables(db_path: Path | None = None) -> Path:
                 conn.execute("ALTER TABLE jobs ADD COLUMN batch_group TEXT")
             with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
                 conn.execute("ALTER TABLE jobs_archive ADD COLUMN batch_group TEXT")
+            with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
+                conn.execute("ALTER TABLE media_ingest_runs ADD COLUMN client_request_id TEXT")
+            with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
+                conn.execute("ALTER TABLE media_ingest_runs ADD COLUMN request_fingerprint TEXT")
+            with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
+                conn.execute("ALTER TABLE media_ingest_runs ADD COLUMN initialization_token TEXT")
+            with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
+                conn.execute("ALTER TABLE media_ingest_runs ADD COLUMN initialization_expires_at TEXT")
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_media_ingest_runs_owner_client_request "
+                "ON media_ingest_runs(owner_user_id, client_request_id)"
+            )
             with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
                 conn.execute("ALTER TABLE media_ingest_run_items ADD COLUMN submission_queue TEXT")
             with contextlib.suppress(_JOBS_DB_EXCEPTIONS):

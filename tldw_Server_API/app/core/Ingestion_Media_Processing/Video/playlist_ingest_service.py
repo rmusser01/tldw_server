@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
+import json
 import os
 import re
 from collections.abc import Callable, Mapping, Sequence
@@ -10,6 +12,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+from uuid import uuid4
 
 from loguru import logger
 from pydantic import BaseModel, ValidationError
@@ -158,6 +161,19 @@ def _playlist_preflight_queue() -> str:
         or (os.getenv("MEDIA_INGEST_JOBS_DEFAULT_QUEUE") or "").strip()
         or "default"
     )
+
+
+def _request_fingerprint(request: PlaylistIngestRunCreateRequest) -> str:
+    """Hash the canonical validated request body without its replay key."""
+    payload = request.model_dump(mode="json", exclude={"client_request_id"})
+    encoded = json.dumps(
+        payload,
+        allow_nan=False,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _owner_media_db(owner_user_id: str) -> Any:
@@ -655,10 +671,117 @@ class PlaylistIngestService:
             ),
         )
 
+    def _renew_run_initialization_or_pending(
+        self,
+        owner_user_id: str,
+        run_id: str,
+        initialization_token: str,
+        initialization_lease_seconds: int,
+    ) -> None:
+        if not self._store.renew_run_initialization(
+            owner_user_id,
+            run_id,
+            initialization_token=initialization_token,
+            initialization_lease_seconds=initialization_lease_seconds,
+        ):
+            raise PlaylistRunPendingError(run_id)
+
+    @staticmethod
+    def _manifest_from_run_items(
+        records: Sequence[MediaIngestRunItemRecord],
+    ) -> list[dict[str, Any]]:
+        return [
+            {
+                "occurrence_id": item.occurrence_id,
+                "input_kind": item.input_kind,
+                "materialization_id": item.materialization_id,
+                "source_url": item.source_url,
+                "normalized_source_id": item.normalized_source_id,
+                "source_kind": item.source_kind,
+                "display_metadata": item.display_metadata,
+                "state": item.state,
+                "action": item.action,
+                "metadata_patch": item.metadata_patch,
+                "media_id": item.media_id,
+                "planned_collection_item_id": item.planned_collection_item_id,
+            }
+            for item in records
+        ]
+
+    def _resume_run_initialization(
+        self,
+        owner_user_id: str,
+        run: MediaIngestRunRecord,
+        request: PlaylistIngestRunCreateRequest,
+        *,
+        initialization_token: str,
+        initialization_lease_seconds: int,
+    ) -> MediaIngestRunRecord:
+        records = list(self._store.list_run_items(owner_user_id, run.run_id, limit=500))
+        if not records:
+            raise PlaylistRunPendingError(run.run_id)
+        manifest = self._manifest_from_run_items(records)
+        collections_db = None
+        try:
+            if request.new_collection is not None and run.collection_id is None:
+                try:
+                    collections_db = self._collections_db_factory(owner_user_id)
+                except Exception as exc:
+                    raise PlaylistRunValidationError("collection_planning_failed") from exc
+                run = self._create_and_attach_collection_plan(
+                    owner_user_id,
+                    run.run_id,
+                    manifest,
+                    request.new_collection,
+                    collections_db,
+                    initialization_token=initialization_token,
+                    initialization_lease_seconds=initialization_lease_seconds,
+                )
+            if collections_db is None and any(
+                item["action"] in {"include_existing", "update_metadata_only"}
+                and item["planned_collection_item_id"] is not None
+                and record.state != "terminal"
+                for item, record in zip(manifest, records, strict=True)
+            ):
+                collections_db = self._collections_db_factory(owner_user_id)
+            try:
+                self._resolve_nonprocessing_actions(
+                    owner_user_id,
+                    run.run_id,
+                    manifest,
+                    collections_db=collections_db,
+                    initialization_token=initialization_token,
+                    initialization_lease_seconds=initialization_lease_seconds,
+                )
+            except PlaylistRunPendingError:
+                raise
+            except Exception as exc:
+                raise PlaylistRunPendingError(run.run_id) from exc
+            self._resolved_run_or_pending(owner_user_id, run.run_id)
+            self._renew_run_initialization_or_pending(
+                owner_user_id,
+                run.run_id,
+                initialization_token,
+                initialization_lease_seconds,
+            )
+            try:
+                return self._store.complete_run_initialization(
+                    owner_user_id,
+                    run.run_id,
+                    initialization_token=initialization_token,
+                )
+            except PlaylistIngestConflictError as exc:
+                raise PlaylistRunPendingError(run.run_id) from exc
+        finally:
+            if collections_db is not None:
+                with contextlib.suppress(Exception):
+                    collections_db.close()
+
     def create_run(
         self,
         owner_user_id: str,
         *,
+        client_request_id: str | None = None,
         inputs: Sequence[Mapping[str, Any] | BaseModel],
         review_overrides: Mapping[str, Mapping[str, Any] | BaseModel],
         processing_options: Mapping[str, Any] | None = None,
@@ -667,9 +790,9 @@ class PlaylistIngestService:
         new_collection: Mapping[str, Any] | BaseModel | None = None,
     ) -> MediaIngestRunRecord:
         """Validate refreshed evidence, then atomically persist a mixed run manifest."""
-        self._cleanup_expired_resources(owner_user_id)
         if collection_id is not None:
             raise PlaylistRunValidationError("invalid_run_request")
+        request_id = client_request_id if client_request_id is not None else f"internal:{uuid4().hex}"
         try:
             raw_inputs = [item.model_dump() if isinstance(item, BaseModel) else dict(item) for item in inputs]
             raw_overrides = {
@@ -678,6 +801,7 @@ class PlaylistIngestService:
             }
             request = PlaylistIngestRunCreateRequest.model_validate(
                 {
+                    "client_request_id": request_id,
                     "inputs": raw_inputs,
                     "review_overrides": raw_overrides,
                     "processing_options": dict(processing_options) if processing_options is not None else None,
@@ -695,6 +819,40 @@ class PlaylistIngestService:
             raise PlaylistRunValidationError("invalid_run_request") from exc
 
         owner = self._store._owner(owner_user_id)
+        fingerprint = _request_fingerprint(request)
+        initialization_token = uuid4().hex
+        initialization_lease_seconds = _bounded_env_int(
+            "PLAYLIST_RUN_INITIALIZATION_LEASE_SECONDS",
+            30,
+            minimum=1,
+            maximum=900,
+        )
+        existing = self._store.get_run_by_client_request_id(owner, request.client_request_id)
+        if existing is not None:
+            if existing.request_fingerprint != fingerprint:
+                raise PlaylistIngestConflictError("request fingerprint does not match")
+            if existing.initialization_token is None:
+                return existing
+            claimed = self._store.claim_run_initialization(
+                owner,
+                client_request_id=request.client_request_id,
+                request_fingerprint=fingerprint,
+                initialization_token=initialization_token,
+                initialization_lease_seconds=initialization_lease_seconds,
+            )
+            if claimed.initialization_token is None:
+                return claimed
+            if claimed.initialization_token != initialization_token:
+                raise PlaylistRunPendingError(claimed.run_id)
+            return self._resume_run_initialization(
+                owner,
+                claimed,
+                request,
+                initialization_token=initialization_token,
+                initialization_lease_seconds=initialization_lease_seconds,
+            )
+
+        self._cleanup_expired_resources(owner)
         resolved = self._resolve_run_inputs(owner, request.inputs)
         evidence = self._fresh_duplicate_evidence(owner, resolved)
         occurrence_ids = {item["occurrence_id"] for item in resolved}
@@ -806,35 +964,35 @@ class PlaylistIngestService:
             processing_options=request.processing_options,
             playlist_summaries=request.playlist_summaries,
             collection_id=None,
+            client_request_id=request.client_request_id,
+            request_fingerprint=fingerprint,
+            initialization_token=initialization_token,
+            initialization_lease_seconds=initialization_lease_seconds,
         )
-        collections_db = None
-        try:
-            if request.new_collection is not None:
-                try:
-                    collections_db = self._collections_db_factory(owner)
-                except Exception as exc:
-                    raise PlaylistRunValidationError("collection_planning_failed") from exc
-                created = self._create_and_attach_collection_plan(
-                    owner,
-                    created.run_id,
-                    manifest,
-                    request.new_collection,
-                    collections_db,
-                )
-            try:
-                self._resolve_nonprocessing_actions(
-                    owner,
-                    created.run_id,
-                    manifest,
-                    collections_db=collections_db,
-                )
-            except Exception as exc:
-                raise PlaylistRunPendingError(created.run_id) from exc
-        finally:
-            if collections_db is not None:
-                with contextlib.suppress(Exception):
-                    collections_db.close()
-        return self._resolved_run_or_pending(owner, created.run_id)
+        if created.request_fingerprint != fingerprint:
+            raise PlaylistIngestConflictError("request fingerprint does not match")
+        if created.initialization_token is None:
+            return created
+        if created.initialization_token != initialization_token:
+            claimed = self._store.claim_run_initialization(
+                owner,
+                client_request_id=request.client_request_id,
+                request_fingerprint=fingerprint,
+                initialization_token=initialization_token,
+                initialization_lease_seconds=initialization_lease_seconds,
+            )
+            if claimed.initialization_token is None:
+                return claimed
+            if claimed.initialization_token != initialization_token:
+                raise PlaylistRunPendingError(claimed.run_id)
+            created = claimed
+        return self._resume_run_initialization(
+            owner,
+            created,
+            request,
+            initialization_token=initialization_token,
+            initialization_lease_seconds=initialization_lease_seconds,
+        )
 
     def reconcile_nonprocessing_actions(
         self,
@@ -1169,6 +1327,9 @@ class PlaylistIngestService:
         items: list[dict[str, Any]],
         collection_request: BaseModel,
         collections_db: Any,
+        *,
+        initialization_token: str,
+        initialization_lease_seconds: int,
     ) -> MediaIngestRunRecord:
         """Create one non-skip plan, then compensate if run attachment fails."""
         planned_items: list[dict[str, Any]] = []
@@ -1191,6 +1352,13 @@ class PlaylistIngestService:
                     "duplicate_status": "existing" if item.get("action") != "ingest" else "unknown",
                 }
             )
+        self._renew_run_initialization_or_pending(
+            owner_user_id,
+            run_id,
+            initialization_token,
+            initialization_lease_seconds,
+        )
+        created_new = False
         try:
             collection = collections_db.create_media_collection_with_items(
                 name=collection_request.name,
@@ -1201,6 +1369,7 @@ class PlaylistIngestService:
                 default_tags=collection_request.default_tags,
                 items=planned_items,
             )
+            created_new = True
         except Exception as exc:  # noqa: BLE001 - reconcile a possible commit before deciding
             try:
                 collection = collections_db.get_playlist_ingest_collection_for_run(run_id)
@@ -1211,6 +1380,23 @@ class PlaylistIngestService:
 
         collection_items = list(collection.items)
         collection_item_ids = [int(item.id) for item in collection_items]
+        try:
+            self._renew_run_initialization_or_pending(
+                owner_user_id,
+                run_id,
+                initialization_token,
+                initialization_lease_seconds,
+            )
+        except PlaylistRunPendingError:
+            if created_new:
+                try:
+                    collections_db.discard_media_collection(
+                        int(collection.id),
+                        expected_item_ids=collection_item_ids,
+                    )
+                except Exception as cleanup_exc:
+                    raise PlaylistRunValidationError("collection_planning_cleanup_failed") from cleanup_exc
+            raise
         if len(collection_items) != len(planned_occurrences):
             try:
                 collections_db.discard_media_collection(
@@ -1230,6 +1416,7 @@ class PlaylistIngestService:
                 run_id,
                 collection_id=int(collection.id),
                 planned_item_ids=mapping,
+                initialization_token=initialization_token,
             )
         except Exception as exc:
             try:
@@ -1272,6 +1459,8 @@ class PlaylistIngestService:
         items: Sequence[Mapping[str, Any]],
         *,
         collections_db: Any | None = None,
+        initialization_token: str | None = None,
+        initialization_lease_seconds: int = 30,
     ) -> None:
         """Finish reviewed library-duplicate actions without creating media jobs."""
         metadata_db = None
@@ -1283,6 +1472,13 @@ class PlaylistIngestService:
                     continue
                 if action != "skip" and media_id is None:
                     continue
+                if initialization_token is not None:
+                    self._renew_run_initialization_or_pending(
+                        owner_user_id,
+                        run_id,
+                        initialization_token,
+                        initialization_lease_seconds,
+                    )
                 prepared = self._store.prepare_nonprocessing_run_item(
                     owner_user_id,
                     run_id,
@@ -1295,6 +1491,13 @@ class PlaylistIngestService:
                 elif action == "include_existing":
                     outcome = "included_existing"
                 else:
+                    if initialization_token is not None:
+                        self._renew_run_initialization_or_pending(
+                            owner_user_id,
+                            run_id,
+                            initialization_token,
+                            initialization_lease_seconds,
+                        )
                     try:
                         if metadata_db is None:
                             metadata_db = self._media_db_factory(owner_user_id)
@@ -1303,14 +1506,35 @@ class PlaylistIngestService:
                             **dict(item.get("metadata_patch") or {}),
                         )
                     except (ConflictError, InputError):
+                        if initialization_token is not None:
+                            self._renew_run_initialization_or_pending(
+                                owner_user_id,
+                                run_id,
+                                initialization_token,
+                                initialization_lease_seconds,
+                            )
                         outcome = "metadata_update_failed"
                     except Exception:  # noqa: BLE001 - an exact retry reconciles ambiguous commit state
+                        if initialization_token is not None:
+                            self._renew_run_initialization_or_pending(
+                                owner_user_id,
+                                run_id,
+                                initialization_token,
+                                initialization_lease_seconds,
+                            )
                         try:
                             metadata_db.apply_media_metadata_patch(
                                 int(media_id),
                                 **dict(item.get("metadata_patch") or {}),
                             )
                         except Exception as reconciliation_exc:  # noqa: BLE001 - unknown state remains recoverable
+                            if initialization_token is not None:
+                                self._renew_run_initialization_or_pending(
+                                    owner_user_id,
+                                    run_id,
+                                    initialization_token,
+                                    initialization_lease_seconds,
+                                )
                             logger.warning(
                                 "Playlist metadata reconciliation remains ambiguous for run {} item {} ({})",
                                 run_id,
@@ -1319,8 +1543,22 @@ class PlaylistIngestService:
                             )
                             continue
                         else:
+                            if initialization_token is not None:
+                                self._renew_run_initialization_or_pending(
+                                    owner_user_id,
+                                    run_id,
+                                    initialization_token,
+                                    initialization_lease_seconds,
+                                )
                             outcome = "metadata_updated"
                     else:
+                        if initialization_token is not None:
+                            self._renew_run_initialization_or_pending(
+                                owner_user_id,
+                                run_id,
+                                initialization_token,
+                                initialization_lease_seconds,
+                            )
                         outcome = "metadata_updated"
                 planned_item_id = item.get("planned_collection_item_id")
                 resolved_membership = None
@@ -1329,6 +1567,13 @@ class PlaylistIngestService:
                     and planned_item_id is not None
                     and outcome in {"included_existing", "metadata_updated"}
                 ):
+                    if initialization_token is not None:
+                        self._renew_run_initialization_or_pending(
+                            owner_user_id,
+                            run_id,
+                            initialization_token,
+                            initialization_lease_seconds,
+                        )
                     try:
                         resolved_membership = collections_db.resolve_media_collection_item(
                             int(planned_item_id),
@@ -1336,6 +1581,13 @@ class PlaylistIngestService:
                             status="skipped_existing" if outcome == "included_existing" else "completed",
                         )
                     except Exception:  # noqa: BLE001 - reconcile a possible commit before deciding
+                        if initialization_token is not None:
+                            self._renew_run_initialization_or_pending(
+                                owner_user_id,
+                                run_id,
+                                initialization_token,
+                                initialization_lease_seconds,
+                            )
                         try:
                             current_membership = collections_db.get_media_collection_item(int(planned_item_id))
                         except Exception as reconciliation_exc:  # noqa: BLE001 - unknown state remains recoverable
@@ -1357,6 +1609,21 @@ class PlaylistIngestService:
                             outcome = "metadata_update_failed"
                         else:
                             resolved_membership = current_membership
+                    else:
+                        if initialization_token is not None:
+                            self._renew_run_initialization_or_pending(
+                                owner_user_id,
+                                run_id,
+                                initialization_token,
+                                initialization_lease_seconds,
+                            )
+                if initialization_token is not None:
+                    self._renew_run_initialization_or_pending(
+                        owner_user_id,
+                        run_id,
+                        initialization_token,
+                        initialization_lease_seconds,
+                    )
                 try:
                     self._store.resolve_nonprocessing_run_item(
                         owner_user_id,
@@ -1385,6 +1652,13 @@ class PlaylistIngestService:
                     if current_item.state != "preparing":
                         raise PlaylistRunValidationError("duplicate_action_reconciliation_failed") from exc
                     if resolved_membership is not None:
+                        if initialization_token is not None:
+                            self._renew_run_initialization_or_pending(
+                                owner_user_id,
+                                run_id,
+                                initialization_token,
+                                initialization_lease_seconds,
+                            )
                         try:
                             collections_db.restore_media_collection_item_plan(
                                 int(resolved_membership.id),
@@ -1394,6 +1668,13 @@ class PlaylistIngestService:
                             )
                         except Exception as cleanup_exc:
                             raise PlaylistRunValidationError("collection_action_cleanup_failed") from cleanup_exc
+                        if initialization_token is not None:
+                            self._renew_run_initialization_or_pending(
+                                owner_user_id,
+                                run_id,
+                                initialization_token,
+                                initialization_lease_seconds,
+                            )
                     continue
         finally:
             if metadata_db is not None:

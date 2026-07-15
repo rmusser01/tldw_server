@@ -460,6 +460,7 @@ def create_playlist_ingest_run(
     try:
         run = service.create_run(
             owner,
+            client_request_id=request.client_request_id,
             inputs=request.inputs,
             review_overrides=request.review_overrides,
             processing_options=request.processing_options,

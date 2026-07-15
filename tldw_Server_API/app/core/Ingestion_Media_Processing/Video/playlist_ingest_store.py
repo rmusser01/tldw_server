@@ -140,6 +140,10 @@ class ResolvedMaterializationOccurrence:
 class MediaIngestRunRecord:
     run_id: str
     owner_user_id: str
+    client_request_id: str | None
+    request_fingerprint: str | None
+    initialization_token: str | None
+    initialization_expires_at: datetime | None
     status: str
     collection_id: int | None
     processing_options: dict[str, Any] | None
@@ -364,6 +368,13 @@ class PlaylistIngestStore:
         )
         if type(seconds) is not int or not 1 <= seconds <= 900:
             raise ValueError("submission_lease_seconds must be between 1 and 900")
+        return lease_token, seconds
+
+    @classmethod
+    def _initialization_lease_args(cls, token: Any, seconds: Any) -> tuple[str, int]:
+        lease_token = cls._run_text(token, "initialization_token", max_length=_MAX_RUN_IDENTITY_LENGTH)
+        if type(seconds) is not int or not 1 <= seconds <= 900:
+            raise ValueError("initialization_lease_seconds must be between 1 and 900")
         return lease_token, seconds
 
     @classmethod
@@ -593,6 +604,14 @@ class PlaylistIngestStore:
         return MediaIngestRunRecord(
             run_id=str(data["run_id"]),
             owner_user_id=str(data["owner_user_id"]),
+            client_request_id=data.get("client_request_id"),
+            request_fingerprint=data.get("request_fingerprint"),
+            initialization_token=data.get("initialization_token"),
+            initialization_expires_at=(
+                cls._datetime(data["initialization_expires_at"])
+                if data.get("initialization_expires_at") is not None
+                else None
+            ),
             status=str(data["status"]),
             collection_id=(int(data["collection_id"]) if data.get("collection_id") is not None else None),
             processing_options=cls._json_dict(data.get("processing_options_json")),
@@ -1858,6 +1877,10 @@ class PlaylistIngestStore:
         playlist_summaries: Sequence[Mapping[str, Any]] | None = None,
         collection_id: int | None = None,
         expires_at: datetime | None = None,
+        client_request_id: str | None = None,
+        request_fingerprint: str | None = None,
+        initialization_token: str | None = None,
+        initialization_lease_seconds: int = 30,
     ) -> MediaIngestRunRecord:
         """Persist one fully validated mixed manifest and its initial events atomically."""
         owner = self._owner(owner_user_id)
@@ -1881,10 +1904,41 @@ class PlaylistIngestStore:
             normalized_summaries = self._bounded_json(playlist_summaries)
         else:
             raise ValueError("playlist_summaries must be a list of objects")
+        if client_request_id is None:
+            if request_fingerprint is not None or initialization_token is not None:
+                raise ValueError("client_request_id is required for initialization authority")
+            canonical_client_request_id = None
+            canonical_fingerprint = None
+            canonical_initialization_token = None
+            initialization_lease_seconds = 30
+        else:
+            canonical_client_request_id = self._run_text(
+                client_request_id,
+                "client_request_id",
+                max_length=_MAX_RUN_IDENTITY_LENGTH,
+            )
+            canonical_fingerprint = self._run_text(
+                request_fingerprint,
+                "request_fingerprint",
+                max_length=64,
+            )
+            if len(canonical_fingerprint) != 64 or any(
+                character not in "0123456789abcdef" for character in canonical_fingerprint
+            ):
+                raise ValueError("request_fingerprint must be a SHA-256 hex digest")
+            canonical_initialization_token, initialization_lease_seconds = self._initialization_lease_args(
+                initialization_token,
+                initialization_lease_seconds,
+            )
 
         run_id = str(uuid4())
         now = self._now()
         expires = self._future_expiry(expires_at, now=now) if expires_at is not None else now + timedelta(days=7)
+        initialization_expires = (
+            now + timedelta(seconds=initialization_lease_seconds)
+            if canonical_initialization_token is not None
+            else None
+        )
         materialized_records = [item for item in records if item["input_kind"] == "materialized_playlist_item"]
         materialized_pairs = [
             (str(item["materialization_id"]), str(item["occurrence_id"])) for item in materialized_records
@@ -1906,18 +1960,33 @@ class PlaylistIngestStore:
                         or item["display_metadata"] != current.display_metadata
                     ):
                         raise self._not_found()
-            self._query(
+            conflict_clause = (
+                "ON CONFLICT(owner_user_id, client_request_id) DO NOTHING"
+                if canonical_client_request_id is not None
+                else ""
+            )
+            inserted = self._query(
                 db,
-                """
+                f"""
                 INSERT INTO media_ingest_runs (
-                    run_id, owner_user_id, status, collection_id,
+                    run_id, owner_user_id, client_request_id, request_fingerprint,
+                    initialization_token, initialization_expires_at, status, collection_id,
                     processing_options_json, playlist_summaries_json, batch_ids_json,
                     version, created_at, updated_at, expires_at
-                ) VALUES (?, ?, 'staged', ?, ?, ?, ?, 1, ?, ?, ?)
-                """,
+                ) VALUES (?, ?, ?, ?, ?, ?, 'staged', ?, ?, ?, ?, 1, ?, ?, ?)
+                {conflict_clause}
+                """,  # nosec B608 - fixed optional conflict clause
                 (
                     run_id,
                     owner,
+                    canonical_client_request_id,
+                    canonical_fingerprint,
+                    canonical_initialization_token,
+                    (
+                        self._db_datetime(initialization_expires)
+                        if initialization_expires is not None
+                        else None
+                    ),
                     collection_id,
                     self._json_value(normalized_options) if normalized_options is not None else None,
                     (self._json_value(normalized_summaries) if normalized_summaries is not None else None),
@@ -1927,6 +1996,18 @@ class PlaylistIngestStore:
                     self._db_datetime(expires),
                 ),
             )
+            if inserted.rowcount != 1:
+                existing_row = self._query(
+                    db,
+                    """
+                    SELECT * FROM media_ingest_runs
+                    WHERE owner_user_id = ? AND client_request_id = ?
+                    """,
+                    (owner, canonical_client_request_id),
+                ).fetchone()
+                if existing_row is None:
+                    raise PlaylistIngestConflictError("idempotent run insertion changed")
+                return self._run_record(existing_row)
             for ordinal, item in enumerate(records, start=1):
                 action = str(item["action"])
                 duplicate_policy = None if action == "ingest" else action
@@ -1989,6 +2070,197 @@ class PlaylistIngestStore:
                 (self._db_datetime(now), owner, run_id),
             )
         return self.get_run(owner, run_id)
+
+    def get_run_by_client_request_id(
+        self,
+        owner_user_id: str,
+        client_request_id: str,
+    ) -> MediaIngestRunRecord | None:
+        """Return one live owner-scoped idempotent run, if present."""
+        owner = self._owner(owner_user_id)
+        request_id = self._run_text(
+            client_request_id,
+            "client_request_id",
+            max_length=_MAX_RUN_IDENTITY_LENGTH,
+        )
+        now = self._now()
+        with self._connection(write=False) as db:
+            row = self._query(
+                db,
+                f"""
+                SELECT * FROM media_ingest_runs
+                WHERE owner_user_id = ? AND client_request_id = ? AND {self._unexpired_sql()}
+                """,  # nosec B608 - backend-specific timestamp predicate is fixed
+                (owner, request_id, self._db_datetime(now)),
+            ).fetchone()
+        return self._run_record(row) if row is not None else None
+
+    def claim_run_initialization(
+        self,
+        owner_user_id: str,
+        *,
+        client_request_id: str,
+        request_fingerprint: str,
+        initialization_token: str,
+        initialization_lease_seconds: int,
+    ) -> MediaIngestRunRecord:
+        """Claim an expired initializer lease without changing the persisted manifest."""
+        owner = self._owner(owner_user_id)
+        request_id = self._run_text(
+            client_request_id,
+            "client_request_id",
+            max_length=_MAX_RUN_IDENTITY_LENGTH,
+        )
+        fingerprint = self._run_text(request_fingerprint, "request_fingerprint", max_length=64)
+        token, lease_seconds = self._initialization_lease_args(
+            initialization_token,
+            initialization_lease_seconds,
+        )
+        now = self._now()
+        lease_expires = now + timedelta(seconds=lease_seconds)
+        expiry_predicate = (
+            "initialization_expires_at <= ?"
+            if self._postgres
+            else "julianday(initialization_expires_at) <= julianday(?)"
+        )
+        with self._connection(write=True) as db:
+            lock = " FOR UPDATE" if self._postgres else ""
+            row = self._query(
+                db,
+                f"""
+                SELECT * FROM media_ingest_runs
+                WHERE owner_user_id = ? AND client_request_id = ? AND {self._unexpired_sql()}
+                {lock}
+                """,  # nosec B608 - backend-specific predicates are fixed
+                (owner, request_id, self._db_datetime(now)),
+            ).fetchone()
+            if row is None:
+                raise self._not_found()
+            current = self._run_record(row)
+            if not hmac.compare_digest(current.request_fingerprint or "", fingerprint):
+                raise PlaylistIngestConflictError("request fingerprint does not match")
+            if current.initialization_token is None:
+                return current
+            if current.initialization_expires_at is not None and current.initialization_expires_at > now:
+                return current
+            claimed = self._query(
+                db,
+                f"""
+                UPDATE media_ingest_runs
+                SET initialization_token = ?, initialization_expires_at = ?, updated_at = ?
+                WHERE owner_user_id = ? AND run_id = ? AND initialization_token = ?
+                  AND (initialization_expires_at IS NULL OR {expiry_predicate})
+                """,  # nosec B608 - backend-specific timestamp predicate is fixed
+                (
+                    token,
+                    self._db_datetime(lease_expires),
+                    self._db_datetime(now),
+                    owner,
+                    current.run_id,
+                    current.initialization_token,
+                    self._db_datetime(now),
+                ),
+            )
+            if claimed.rowcount != 1:
+                refreshed = self._query(
+                    db,
+                    "SELECT * FROM media_ingest_runs WHERE owner_user_id = ? AND run_id = ?",
+                    (owner, current.run_id),
+                ).fetchone()
+                if refreshed is None:
+                    raise self._not_found()
+                return self._run_record(refreshed)
+            claimed_row = self._query(
+                db,
+                "SELECT * FROM media_ingest_runs WHERE owner_user_id = ? AND run_id = ?",
+                (owner, current.run_id),
+            ).fetchone()
+            if claimed_row is None:
+                raise self._not_found()
+            return self._run_record(claimed_row)
+
+    def renew_run_initialization(
+        self,
+        owner_user_id: str,
+        run_id: str,
+        *,
+        initialization_token: str,
+        initialization_lease_seconds: int,
+    ) -> bool:
+        """Renew one live initializer lease with an owner/run/token CAS."""
+        owner = self._owner(owner_user_id)
+        token, lease_seconds = self._initialization_lease_args(
+            initialization_token,
+            initialization_lease_seconds,
+        )
+        now = self._now()
+        lease_expires = now + timedelta(seconds=lease_seconds)
+        live_predicate = (
+            "initialization_expires_at > ?"
+            if self._postgres
+            else "julianday(initialization_expires_at) > julianday(?)"
+        )
+        with self._connection(write=True) as db:
+            renewed = self._query(
+                db,
+                f"""
+                UPDATE media_ingest_runs
+                SET initialization_expires_at = ?, updated_at = ?
+                WHERE owner_user_id = ? AND run_id = ? AND initialization_token = ?
+                  AND {live_predicate}
+                """,  # nosec B608 - backend-specific timestamp predicate is fixed
+                (
+                    self._db_datetime(lease_expires),
+                    self._db_datetime(now),
+                    owner,
+                    str(run_id),
+                    token,
+                    self._db_datetime(now),
+                ),
+            )
+        return renewed.rowcount == 1
+
+    def complete_run_initialization(
+        self,
+        owner_user_id: str,
+        run_id: str,
+        *,
+        initialization_token: str,
+    ) -> MediaIngestRunRecord:
+        """Clear initializer authority only for the current live owner/run/token lease."""
+        owner = self._owner(owner_user_id)
+        token = self._run_text(
+            initialization_token,
+            "initialization_token",
+            max_length=_MAX_RUN_IDENTITY_LENGTH,
+        )
+        now = self._now()
+        live_predicate = (
+            "initialization_expires_at > ?"
+            if self._postgres
+            else "julianday(initialization_expires_at) > julianday(?)"
+        )
+        with self._connection(write=True) as db:
+            cleared = self._query(
+                db,
+                f"""
+                UPDATE media_ingest_runs
+                SET initialization_token = NULL, initialization_expires_at = NULL, updated_at = ?
+                WHERE owner_user_id = ? AND run_id = ? AND initialization_token = ?
+                  AND {live_predicate}
+                """,  # nosec B608 - backend-specific timestamp predicate is fixed
+                (self._db_datetime(now), owner, str(run_id), token, self._db_datetime(now)),
+            )
+            if cleared.rowcount != 1:
+                raise PlaylistIngestConflictError("run initialization lease no longer matches")
+            row = self._query(
+                db,
+                "SELECT * FROM media_ingest_runs WHERE owner_user_id = ? AND run_id = ?",
+                (owner, str(run_id)),
+            ).fetchone()
+        if row is None:
+            raise self._not_found()
+        return self._run_record(row)
 
     def get_run(self, owner_user_id: str, run_id: str) -> MediaIngestRunRecord:
         """Return one owner-scoped ingest run."""
@@ -4372,6 +4644,7 @@ class PlaylistIngestStore:
         *,
         collection_id: int,
         planned_item_ids: Mapping[str, int],
+        initialization_token: str | None = None,
     ) -> MediaIngestRunRecord:
         """Attach one complete non-skip collection plan to a staged run atomically."""
         if type(collection_id) is not int or collection_id < 1:
@@ -4390,14 +4663,41 @@ class PlaylistIngestStore:
 
         owner = self._owner(owner_user_id)
         now = self._now()
+        token = (
+            self._run_text(
+                initialization_token,
+                "initialization_token",
+                max_length=_MAX_RUN_IDENTITY_LENGTH,
+            )
+            if initialization_token is not None
+            else None
+        )
+        initialization_guard = (
+            (
+                " AND initialization_token = ? AND initialization_expires_at > ?"
+                if self._postgres
+                else (
+                    " AND initialization_token = ? "
+                    "AND julianday(initialization_expires_at) > julianday(?)"
+                )
+            )
+            if token is not None
+            else ""
+        )
+        run_params = (
+            (owner, str(run_id), self._db_datetime(now), token, self._db_datetime(now))
+            if token is not None
+            else (owner, str(run_id), self._db_datetime(now))
+        )
         with self._connection(write=True) as db:
             if self._postgres:
-                run_sql = """
+                run_sql = f"""
                     SELECT version FROM media_ingest_runs
                     WHERE owner_user_id = ? AND run_id = ? AND status = 'staged'
                       AND collection_id IS NULL AND expires_at > ?
+                      {initialization_guard}
                     FOR UPDATE
-                """
+                """  # nosec B608 - fixed optional initializer guard
                 items_sql = """
                     SELECT occurrence_id, duplicate_policy
                     FROM media_ingest_run_items
@@ -4406,12 +4706,13 @@ class PlaylistIngestStore:
                     FOR UPDATE
                 """
             else:
-                run_sql = """
+                run_sql = f"""
                     SELECT version FROM media_ingest_runs
                     WHERE owner_user_id = ? AND run_id = ? AND status = 'staged'
                       AND collection_id IS NULL
                       AND julianday(expires_at) > julianday(?)
-                """
+                      {initialization_guard}
+                """  # nosec B608 - fixed optional initializer guard
                 items_sql = """
                     SELECT occurrence_id, duplicate_policy
                     FROM media_ingest_run_items
@@ -4421,7 +4722,7 @@ class PlaylistIngestStore:
             run_row = self._query(
                 db,
                 run_sql,
-                (owner, str(run_id), self._db_datetime(now)),
+                run_params,
             ).fetchone()
             if run_row is None:
                 raise PlaylistIngestConflictError("run is not available for collection planning")
@@ -4453,15 +4754,19 @@ class PlaylistIngestStore:
                 )
                 if updated.rowcount != 1:
                     raise PlaylistIngestConflictError("run item collection mapping changed")
+            attached_params = [collection_id, self._db_datetime(now), owner, str(run_id), version]
+            if token is not None:
+                attached_params.extend((token, self._db_datetime(now)))
             attached = self._query(
                 db,
-                """
+                f"""
                 UPDATE media_ingest_runs
                 SET collection_id = ?, version = version + 1, updated_at = ?
                 WHERE owner_user_id = ? AND run_id = ? AND status = 'staged'
                   AND collection_id IS NULL AND version = ?
-                """,
-                (collection_id, self._db_datetime(now), owner, str(run_id), version),
+                  {initialization_guard}
+                """,  # nosec B608 - fixed optional initializer guard
+                tuple(attached_params),
             )
             if attached.rowcount != 1:
                 raise PlaylistIngestConflictError("run collection plan changed")

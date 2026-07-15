@@ -404,6 +404,7 @@ class PlaylistIngestRunCreateRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    client_request_id: str = Field(..., min_length=1, max_length=MAX_RUN_IDENTITY_LENGTH)
     inputs: list[PlaylistIngestRunInput] = Field(..., min_length=1, max_length=MAX_PLAYLIST_PREFLIGHT_SELECTIONS)
     review_overrides: dict[str, ReviewOverrideEnvelope] = Field(
         default_factory=dict, max_length=MAX_PLAYLIST_PREFLIGHT_SELECTIONS
@@ -414,6 +415,15 @@ class PlaylistIngestRunCreateRequest(BaseModel):
         max_length=MAX_PLAYLIST_PREFLIGHT_SELECTIONS,
     )
     new_collection: PlaylistIngestNewCollection | None = None
+
+    @field_validator("client_request_id", mode="before")
+    @classmethod
+    def _validate_client_request_id(cls, value: object) -> object:
+        if type(value) is not str:
+            raise ValueError("client_request_id must be a string")
+        if not value or value.strip() != value:
+            raise ValueError("client_request_id must be canonical")
+        return value
 
     @field_validator("review_overrides", mode="before")
     @classmethod

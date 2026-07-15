@@ -22,7 +22,16 @@ EXPECTED_PLAYLIST_COLUMNS = {
     "playlist_preflight_items": {"preflight_id", "occurrence_id", "ordinal", "normalized_source_id"},
     "playlist_materializations": {"materialization_id", "preflight_id", "owner_user_id", "status", "expires_at"},
     "playlist_materialization_items": {"materialization_id", "occurrence_id", "ordinal", "normalized_source_id"},
-    "media_ingest_runs": {"run_id", "owner_user_id", "status", "expires_at"},
+    "media_ingest_runs": {
+        "run_id",
+        "owner_user_id",
+        "client_request_id",
+        "request_fingerprint",
+        "initialization_token",
+        "initialization_expires_at",
+        "status",
+        "expires_at",
+    },
     "media_ingest_run_items": {
         "run_id",
         "occurrence_id",
@@ -62,6 +71,7 @@ EXPECTED_PLAYLIST_INDEXES = {
     "idx_playlist_materialization_items_occurrence",
     "idx_media_ingest_runs_owner_status",
     "idx_media_ingest_runs_expiry",
+    "idx_media_ingest_runs_owner_client_request",
     "idx_media_ingest_run_items_owner_state",
     "idx_media_ingest_run_items_source",
     "idx_media_ingest_run_items_job",
@@ -153,6 +163,54 @@ def test_pg_forward_migration_adds_playlist_submission_authority_columns(jobs_pg
         "submission_lease_expires_at",
         "submission_lease_generation",
     }
+
+
+def test_pg_forward_migration_adds_playlist_run_initialization_authority(jobs_pg_dsn):
+    ensure_jobs_tables_pg(jobs_pg_dsn)
+    with psycopg.connect(jobs_pg_dsn, autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute("DROP INDEX IF EXISTS idx_media_ingest_runs_owner_client_request")
+        cur.execute("ALTER TABLE media_ingest_runs DROP COLUMN IF EXISTS client_request_id")
+        cur.execute("ALTER TABLE media_ingest_runs DROP COLUMN IF EXISTS request_fingerprint")
+        cur.execute("ALTER TABLE media_ingest_runs DROP COLUMN IF EXISTS initialization_token")
+        cur.execute("ALTER TABLE media_ingest_runs DROP COLUMN IF EXISTS initialization_expires_at")
+
+    ensure_jobs_tables_pg(jobs_pg_dsn)
+
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT column_name FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name = 'media_ingest_runs'
+              AND column_name = ANY(%s)
+            """,
+            (
+                [
+                    "client_request_id",
+                    "request_fingerprint",
+                    "initialization_token",
+                    "initialization_expires_at",
+                ],
+            ),
+        )
+        columns = {row[0] for row in cur.fetchall()}
+        cur.execute(
+            """
+            SELECT indexdef FROM pg_indexes
+            WHERE schemaname = current_schema()
+              AND tablename = 'media_ingest_runs'
+              AND indexname = 'idx_media_ingest_runs_owner_client_request'
+            """
+        )
+        index_row = cur.fetchone()
+    assert columns == {
+        "client_request_id",
+        "request_fingerprint",
+        "initialization_token",
+        "initialization_expires_at",
+    }
+    assert index_row is not None
+    assert "UNIQUE" in index_row[0]
 
 
 def test_postgres_schema_has_playlist_ingest_tables(jobs_pg_dsn):

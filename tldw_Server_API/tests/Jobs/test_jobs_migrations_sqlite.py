@@ -55,6 +55,10 @@ EXPECTED_PLAYLIST_COLUMNS = {
     "media_ingest_runs": {
         "run_id",
         "owner_user_id",
+        "client_request_id",
+        "request_fingerprint",
+        "initialization_token",
+        "initialization_expires_at",
         "status",
         "processing_options_json",
         "playlist_summaries_json",
@@ -103,6 +107,7 @@ EXPECTED_PLAYLIST_INDEXES = {
     "idx_playlist_materialization_items_occurrence",
     "idx_media_ingest_runs_owner_status",
     "idx_media_ingest_runs_expiry",
+    "idx_media_ingest_runs_owner_client_request",
     "idx_media_ingest_run_items_owner_state",
     "idx_media_ingest_run_items_source",
     "idx_media_ingest_run_items_job",
@@ -198,6 +203,36 @@ def test_sqlite_forward_migration_adds_playlist_submission_authority_columns(tmp
     } <= columns
 
 
+def test_sqlite_forward_migration_adds_playlist_run_initialization_authority(tmp_path):
+    db_path = ensure_jobs_tables(tmp_path / "jobs_playlist_run_upgrade.db")
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("DROP INDEX IF EXISTS idx_media_ingest_runs_owner_client_request")
+        for column in (
+            "client_request_id",
+            "request_fingerprint",
+            "initialization_token",
+            "initialization_expires_at",
+        ):
+            conn.execute(f"ALTER TABLE media_ingest_runs DROP COLUMN {column}")
+
+    ensure_jobs_tables(db_path)
+
+    with sqlite3.connect(db_path) as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(media_ingest_runs)")}
+        unique_indexes = {
+            tuple(row[2] for row in conn.execute(f"PRAGMA index_info('{index_row[1]}')"))
+            for index_row in conn.execute("PRAGMA index_list('media_ingest_runs')")
+            if index_row[2]
+        }
+    assert {
+        "client_request_id",
+        "request_fingerprint",
+        "initialization_token",
+        "initialization_expires_at",
+    } <= columns
+    assert ("owner_user_id", "client_request_id") in unique_indexes
+
+
 def test_sqlite_playlist_ingest_catalog_has_required_columns_indexes_and_uniques(tmp_path):
     db_path = ensure_jobs_tables(tmp_path / "jobs_playlist_ingest_catalog.db")
 
@@ -223,6 +258,9 @@ def test_sqlite_playlist_ingest_catalog_has_required_columns_indexes_and_uniques
                 ("run_id", "ordinal"),
                 ("run_id", "occurrence_id"),
                 ("run_id", "occurrence_id", "attempt"),
+            },
+            "media_ingest_runs": {
+                ("owner_user_id", "client_request_id"),
             },
         }
         for table, expected in expected_uniques.items():

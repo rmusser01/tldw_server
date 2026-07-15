@@ -1,4 +1,6 @@
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from threading import Event, Lock
 from types import SimpleNamespace
 
 import pytest
@@ -8,8 +10,14 @@ NOW = datetime(2026, 7, 12, 12, 0, tzinfo=timezone.utc)
 
 
 class _FixedClock:
+    def __init__(self) -> None:
+        self.current = NOW
+
     def now_utc(self) -> datetime:
-        return NOW
+        return self.current
+
+    def advance(self, delta: timedelta) -> None:
+        self.current += delta
 
 
 class _OwnerMediaDB:
@@ -154,14 +162,17 @@ def service_context(tmp_path, monkeypatch):
     )
     from tldw_Server_API.app.core.Jobs.manager import JobManager
 
-    manager = JobManager(db_path=tmp_path / "playlist-service-jobs.db", clock=_FixedClock())
+    clock = _FixedClock()
+    manager = JobManager(db_path=tmp_path / "playlist-service-jobs.db", clock=clock)
     media_db = _OwnerMediaDB()
     collections_db = _OwnerCollectionsDB()
     service = PlaylistIngestService(manager)
     service._media_db_factory = lambda _owner: media_db
     service._collections_db_factory = lambda _owner: collections_db
     service.test_collections_db = collections_db
-    return service, PlaylistIngestStore(manager), manager, media_db
+    store = PlaylistIngestStore(manager)
+    store.test_clock = clock
+    return service, store, manager, media_db
 
 
 def _seed_materialized_video(store, normalized_source_id: str = "youtube:video:abc"):
@@ -217,6 +228,21 @@ def _direct_input(occurrence_id: str, url: str) -> dict:
         "url": url,
         "source_kind": "video",
         "display_metadata": {"title": f"Title {occurrence_id}"},
+    }
+
+
+def _validated_direct_manifest(occurrence_id: str, url: str) -> dict:
+    return {
+        "occurrence_id": occurrence_id,
+        "input_kind": "direct_url",
+        "materialization_id": None,
+        "source_url": url,
+        "normalized_source_id": f"url:{url}",
+        "source_kind": "generic_url",
+        "display_metadata": {"title": f"Title {occurrence_id}"},
+        "state": "staged",
+        "action": "ingest",
+        "metadata_patch": None,
     }
 
 
@@ -396,6 +422,210 @@ def test_create_run_mixed_inputs_preserve_identity_order_and_initial_state(servi
     assert _table_count(manager, "jobs") == 0
 
 
+def test_create_run_replay_returns_same_manifest_and_events_without_refreshing_evidence(service_context):
+    service, store, manager, media_db = service_context
+    request = {
+        "client_request_id": "replay-same-request",
+        "inputs": [_direct_input("occ-replay", "https://example.com/replay")],
+        "review_overrides": {},
+        "processing_options": {"media_type": "video", "nested": {"b": 2, "a": 1}},
+    }
+
+    first = service.create_run("owner-1", **request)
+    first_items = list(store.list_run_items("owner-1", first.run_id, limit=10))
+    first_events = list(store.list_run_events("owner-1", first.run_id, limit=10))
+    second = service.create_run(
+        "owner-1",
+        **{
+            **request,
+            "processing_options": {"nested": {"a": 1, "b": 2}, "media_type": "video"},
+        },
+    )
+
+    assert second.run_id == first.run_id
+    assert list(store.list_run_items("owner-1", second.run_id, limit=10)) == first_items
+    assert list(store.list_run_events("owner-1", second.run_id, limit=10)) == first_events
+    assert len(media_db.lookup_calls) == 1
+    assert _table_count(manager, "media_ingest_runs") == 1
+
+
+def test_create_run_client_request_id_is_scoped_to_owner(service_context):
+    service, _store, manager, media_db = service_context
+    request = {
+        "client_request_id": "shared-across-owners",
+        "inputs": [_direct_input("occ-owner-scope", "https://example.com/owner-scope")],
+        "review_overrides": {},
+    }
+
+    owner_one = service.create_run("owner-1", **request)
+    owner_two = service.create_run("owner-2", **request)
+
+    assert owner_one.run_id != owner_two.run_id
+    assert len(media_db.lookup_calls) == 2
+    assert _table_count(manager, "media_ingest_runs") == 2
+
+
+def test_create_run_reused_client_request_id_with_changed_payload_conflicts_before_refresh(service_context):
+    service, _store, _manager, media_db = service_context
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestConflictError,
+    )
+
+    service.create_run(
+        "owner-1",
+        client_request_id="changed-payload",
+        inputs=[_direct_input("occ-fingerprint", "https://example.com/fingerprint")],
+        review_overrides={},
+        processing_options={"media_type": "video"},
+    )
+
+    with pytest.raises(PlaylistIngestConflictError, match="request fingerprint"):
+        service.create_run(
+            "owner-1",
+            client_request_id="changed-payload",
+            inputs=[_direct_input("occ-fingerprint", "https://example.com/fingerprint")],
+            review_overrides={},
+            processing_options={"media_type": "audio"},
+        )
+
+    assert len(media_db.lookup_calls) == 1
+
+
+def test_create_run_recovers_expired_initializer_from_persisted_manifest_without_refresh(service_context):
+    service, store, _manager, media_db = service_context
+    from tldw_Server_API.app.api.v1.schemas.media_playlist_ingest import PlaylistIngestRunCreateRequest
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
+        _request_fingerprint,
+    )
+
+    request = PlaylistIngestRunCreateRequest.model_validate(
+        {
+            "client_request_id": "abandoned-initializer",
+            "inputs": [_direct_input("occ-abandoned", "https://example.com/abandoned")],
+            "review_overrides": {},
+        }
+    )
+    abandoned = store.create_validated_run(
+        "owner-1",
+        items=[_validated_direct_manifest("occ-abandoned", "https://example.com/abandoned")],
+        client_request_id=request.client_request_id,
+        request_fingerprint=_request_fingerprint(request),
+        initialization_token="stale-initializer",
+        initialization_lease_seconds=5,
+    )
+    store.test_clock.advance(timedelta(seconds=6))
+
+    recovered = service.create_run(
+        "owner-1",
+        client_request_id=request.client_request_id,
+        inputs=request.inputs,
+        review_overrides=request.review_overrides,
+    )
+
+    assert recovered.run_id == abandoned.run_id
+    assert recovered.initialization_token is None
+    assert media_db.lookup_calls == []
+
+
+def test_create_run_concurrent_replay_has_one_initializer(service_context, monkeypatch):
+    service, _store, _manager, _media_db = service_context
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
+        PlaylistRunPendingError,
+    )
+
+    entered = Event()
+    release = Event()
+    collections_db = service.test_collections_db
+    original_create = collections_db.create_media_collection_with_items
+
+    def slow_create(**kwargs):
+        entered.set()
+        assert release.wait(timeout=5)
+        return original_create(**kwargs)
+
+    monkeypatch.setattr(collections_db, "create_media_collection_with_items", slow_create)
+    request = {
+        "client_request_id": "concurrent-service-replay",
+        "inputs": [_direct_input("occ-concurrent", "https://example.com/concurrent")],
+        "review_overrides": {},
+        "new_collection": {"name": "Concurrent replay"},
+    }
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(service.create_run, "owner-1", **request)
+        assert entered.wait(timeout=5)
+        second = pool.submit(service.create_run, "owner-1", **request)
+        with pytest.raises(PlaylistRunPendingError) as pending:
+            second.result(timeout=5)
+        release.set()
+        created = first.result(timeout=5)
+
+    assert pending.value.run_id == created.run_id
+    assert len(collections_db.create_calls) == 1
+
+
+def test_slow_collection_creator_losing_reclaimed_lease_cannot_attach_and_discards_exact_collection(
+    service_context,
+    monkeypatch,
+):
+    service, store, manager, _media_db = service_context
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
+        PlaylistIngestService,
+        PlaylistRunPendingError,
+    )
+
+    monkeypatch.setenv("PLAYLIST_RUN_INITIALIZATION_LEASE_SECONDS", "1")
+    first_created = Event()
+    release_first = Event()
+
+    class _RacingCollectionsDB(_OwnerCollectionsDB):
+        def __init__(self) -> None:
+            super().__init__()
+            self._lock = Lock()
+            self._next_collection = 0
+
+        def create_media_collection_with_items(self, **kwargs):
+            with self._lock:
+                self._next_collection += 1
+                ordinal = self._next_collection
+            self.create_calls.append(kwargs)
+            base = ordinal * 1000
+            collection = SimpleNamespace(
+                id=base,
+                items=[
+                    SimpleNamespace(id=base + index, ordinal=item["ordinal"])
+                    for index, item in enumerate(kwargs["items"], start=1)
+                ],
+            )
+            if ordinal == 1:
+                first_created.set()
+                assert release_first.wait(timeout=5)
+            return collection
+
+    collections_db = _RacingCollectionsDB()
+    service._collections_db_factory = lambda _owner: collections_db
+    resumer = PlaylistIngestService(manager, collections_db_factory=lambda _owner: collections_db)
+    request = {
+        "client_request_id": "slow-collection-race",
+        "inputs": [_direct_input("occ-slow", "https://example.com/slow")],
+        "review_overrides": {},
+        "new_collection": {"name": "Lease race"},
+    }
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        stale = pool.submit(service.create_run, "owner-1", **request)
+        assert first_created.wait(timeout=5)
+        store.test_clock.advance(timedelta(seconds=2))
+        winner = pool.submit(resumer.create_run, "owner-1", **request).result(timeout=5)
+        release_first.set()
+        with pytest.raises(PlaylistRunPendingError):
+            stale.result(timeout=5)
+
+    assert winner.collection_id == 2000
+    assert collections_db.discard_calls == [1000]
+    assert store.get_run("owner-1", winner.run_id).collection_id == 2000
+
+
 def test_create_run_file_only_skips_library_lookup(service_context):
     service, store, _manager, media_db = service_context
 
@@ -567,7 +797,11 @@ def test_run_request_union_is_strict_bounded_and_occurrence_unique():
     )
 
     valid = PlaylistIngestRunCreateRequest.model_validate(
-        {"inputs": [_direct_input("occ-1", "https://example.com/1")], "review_overrides": {}}
+        {
+            "client_request_id": "schema-union-valid",
+            "inputs": [_direct_input("occ-1", "https://example.com/1")],
+            "review_overrides": {},
+        }
     )
     assert valid.inputs[0].input_kind == "direct_url"
 
@@ -586,7 +820,9 @@ def test_run_request_union_is_strict_bounded_and_occurrence_unique():
     ]
     for payload in invalid_payloads:
         with pytest.raises(ValidationError):
-            PlaylistIngestRunCreateRequest.model_validate(payload)
+            PlaylistIngestRunCreateRequest.model_validate(
+                {"client_request_id": "schema-union-invalid", **payload}
+            )
 
 
 def test_run_request_new_collection_is_bounded_and_rejects_existing_collection_id():
@@ -596,6 +832,7 @@ def test_run_request_new_collection_is_bounded_and_rejects_existing_collection_i
 
     valid = PlaylistIngestRunCreateRequest.model_validate(
         {
+            "client_request_id": "schema-collection-valid",
             "inputs": [_direct_input("occ-1", "https://example.com/1")],
             "review_overrides": {},
             "new_collection": {
@@ -625,6 +862,7 @@ def test_run_request_new_collection_is_bounded_and_rejects_existing_collection_i
         with pytest.raises(ValidationError):
             PlaylistIngestRunCreateRequest.model_validate(
                 {
+                    "client_request_id": "schema-collection-invalid",
                     "inputs": [_direct_input("occ-1", "https://example.com/1")],
                     "review_overrides": {},
                     "new_collection": collection,
@@ -638,6 +876,7 @@ def test_run_request_new_collection_is_bounded_and_rejects_existing_collection_i
         with pytest.raises(ValidationError):
             PlaylistIngestRunCreateRequest.model_validate(
                 {
+                    "client_request_id": "schema-collection-existing-id",
                     "inputs": [_direct_input("occ-1", "https://example.com/1")],
                     "review_overrides": {},
                     **payload,
