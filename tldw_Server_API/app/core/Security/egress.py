@@ -184,6 +184,14 @@ def _normalize_hostname(host: str) -> str:
     return host.lower()
 
 
+def _canonical_ip_literal(host: str) -> str | None:
+    """Return a canonical IP literal, leaving DNS hostname handling separate."""
+    try:
+        return str(ipaddress.ip_address(host))
+    except ValueError:
+        return None
+
+
 def _canonical_origin(url: str) -> tuple[str, str, int]:
     """Return the canonical HTTP(S) origin for a URL.
 
@@ -601,13 +609,15 @@ def evaluate_url_policy(
 
     # Denylist wins if provided
     if denylist:
+        host_ip = _canonical_ip_literal(host)
         for denied in denylist:
             if not denied:
                 continue
             if denied.startswith("."):
                 denied = denied[1:]
             d = _normalize_hostname(denied)
-            if host == d or host.endswith(f".{d}"):
+            same_ip = host_ip is not None and host_ip == _canonical_ip_literal(d)
+            if same_ip or host == d or host.endswith(f".{d}"):
                 return URLPolicyResult(False, "Host in denylist", reason_code="host_denied")
 
     if configured_endpoint is not None:

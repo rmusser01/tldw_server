@@ -267,6 +267,32 @@ class TestEgressPolicy:
         assert result.allowed is False
         assert result.reason_code == "host_denied"
 
+    @pytest.mark.parametrize(
+        ("request_host", "denylisted_host"),
+        [
+            ("fd12:3456:0:0:0:0:0:10", "fd12:3456::10"),
+            ("fd12:3456::10", "fd12:3456:0:0:0:0:0:10"),
+        ],
+    )
+    def test_configured_scope_denylist_compares_canonical_ip_literals(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        request_host: str,
+        denylisted_host: str,
+    ) -> None:
+        monkeypatch.setenv(egress.GLOBAL_DENYLIST_ENV, denylisted_host)
+        request_url = f"http://[{request_host}]:11434/v1/models"
+        scope = egress.ConfiguredEndpointScope.from_url(request_url)
+
+        result = egress.evaluate_url_policy(
+            request_url,
+            configured_endpoint=scope,
+            resolved_ips_override=[request_host],
+        )
+
+        assert result.allowed is False
+        assert result.reason_code == "host_denied"
+
     def test_configured_scope_satisfies_strict_profile_without_global_allowlist(
         self,
         monkeypatch: pytest.MonkeyPatch,
