@@ -18,7 +18,7 @@ from cachetools import LRUCache
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
 from loguru import logger
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from starlette.responses import JSONResponse
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
@@ -1236,14 +1236,20 @@ async def _submit_run_bound_media_ingest_jobs(
     if run.status not in {"staged", "running"}:
         raise HTTPException(status_code=409, detail="Playlist ingest run is not accepting jobs.")
 
+    merged_form_data = form_data.model_dump(mode="json", exclude={"keywords"})
+    if run.processing_options:
+        merged_form_data.update(run.processing_options)
+    try:
+        effective_form_data = AddMediaForm.model_validate(merged_form_data)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail="invalid_run_processing_options") from exc
+
     batch_id = str(uuid4())
     hmac_key = derive_hmac_key()
-    base_options = form_data.model_dump(mode="json")
+    base_options = effective_form_data.model_dump(mode="json")
     base_options.pop("urls", None)
     base_options.pop("keywords", None)
-    if run.processing_options:
-        base_options.update(run.processing_options)
-    candidate_queue = _resolve_media_ingest_queue(form_data)
+    candidate_queue = _resolve_media_ingest_queue(effective_form_data)
     rid = ensure_request_id(request) if request is not None else None
     tp = ensure_traceparent(request) if request is not None else ""
 
@@ -1731,7 +1737,7 @@ async def _submit_run_bound_media_ingest_jobs(
             source = str(reserved.source_url)
             payload = {
                 "batch_id": reserved_batch,
-                "media_type": str(form_data.media_type),
+                "media_type": str(effective_form_data.media_type),
                 "source": source,
                 "source_kind": "url",
                 "input_ref": source,
@@ -1741,7 +1747,7 @@ async def _submit_run_bound_media_ingest_jobs(
             source = recovered_staging["source"]
             payload = {
                 "batch_id": reserved_batch,
-                "media_type": str(form_data.media_type),
+                "media_type": str(effective_form_data.media_type),
                 "source": source,
                 "source_kind": "file",
                 "input_ref": recovered_staging["input_ref"],
@@ -1774,7 +1780,7 @@ async def _submit_run_bound_media_ingest_jobs(
                         [upload],
                         temp_dir=temp_dir,
                         validator=file_validator_instance,
-                        expected_media_type_key=str(form_data.media_type),
+                        expected_media_type_key=str(effective_form_data.media_type),
                         progress_callback=renew_submission_lease,
                     )
                 if file_errors or len(saved_files) != 1:
@@ -1799,7 +1805,7 @@ async def _submit_run_bound_media_ingest_jobs(
                 completed_staging_is_shared = True
                 payload = {
                     "batch_id": reserved_batch,
-                    "media_type": str(form_data.media_type),
+                    "media_type": str(effective_form_data.media_type),
                     "source": source,
                     "source_kind": "file",
                     "input_ref": saved.get("input_ref") or original_filename or source,

@@ -698,7 +698,14 @@ def test_submit_media_ingest_jobs_routes_heavy_request_to_heavy_queue_when_route
     assert captured == ["media-heavy"]
 
 
-def _seed_occurrence_run(*, owner_id="1", include_file=False, planned=False, file_action="ingest"):
+def _seed_occurrence_run(
+    *,
+    owner_id="1",
+    include_file=False,
+    planned=False,
+    file_action="ingest",
+    processing_options=None,
+):
     from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
         PlaylistIngestStore,
@@ -744,7 +751,11 @@ def _seed_occurrence_run(*, owner_id="1", include_file=False, planned=False, fil
                 "metadata_patch": None,
             }
         )
-    run = store.create_validated_run(owner_id, items=items)
+    run = store.create_validated_run(
+        owner_id,
+        items=items,
+        processing_options=processing_options,
+    )
     if planned:
         planned_ids = {"occ-url-1": 101, "occ-url-2": 102}
         if include_file:
@@ -836,6 +847,69 @@ def test_run_bound_mixed_actions_force_independent_overwrite_options(media_inges
     assert by_occurrence["occ-url-1"]["options"]["overwrite_existing"] is False
     assert by_occurrence["occ-url-2"]["options"]["overwrite_existing"] is True
     assert by_occurrence["occ-url-1"]["options"] is not by_occurrence["occ-url-2"]["options"]
+
+
+def test_run_bound_submit_routes_and_builds_payload_from_authoritative_processing_options(
+    media_ingest_jobs_client,
+    monkeypatch,
+):
+    monkeypatch.setenv("MEDIA_INGEST_JOBS_DEFAULT_QUEUE", "default")
+    monkeypatch.setenv("MEDIA_INGEST_JOBS_HEAVY_QUEUE", "low")
+    monkeypatch.setenv("MEDIA_INGEST_JOBS_ROUTE_HEAVY", "true")
+    monkeypatch.setenv("ROUTES_ENABLE", "media-ingest-heavy-jobs")
+    manager, _store, run = _seed_occurrence_run(
+        processing_options={"media_type": "document", "enable_ocr": True},
+    )
+    data = _run_submit_data(run.run_id)
+    data.update({"media_type": "document", "enable_ocr": "false"})
+
+    response = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=data,
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert response.status_code == 200, response.text
+    job = manager.list_jobs(domain="media_ingest", owner_user_id="1", limit=10)[0]
+    assert job["queue"] == "low"
+    assert job["payload"]["media_type"] == "document"
+    assert job["payload"]["options"]["enable_ocr"] is True
+
+
+def test_run_bound_submit_rejects_invalid_authoritative_processing_options_before_reservation(
+    media_ingest_jobs_client,
+    monkeypatch,
+):
+    manager, store, run = _seed_occurrence_run(processing_options={"ocr_dpi": 999999})
+
+    def fail_if_reserved(*_args, **_kwargs):
+        raise AssertionError("invalid run options must not reserve an occurrence")
+
+    def fail_if_created(*_args, **_kwargs):
+        raise AssertionError("invalid run options must not create a job")
+
+    monkeypatch.setattr(
+        type(store),
+        "prepare_run_item_job_submission",
+        fail_if_reserved,
+        raising=True,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.media.ingest_jobs._create_media_ingest_job",
+        fail_if_created,
+    )
+
+    response = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data=_run_submit_data(run.run_id),
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"] == "invalid_run_processing_options"
+    assert "999999" not in response.text
+    assert store.get_run_item("1", run.run_id, "occ-url-1").state == "staged"
+    assert manager.list_jobs(domain="media_ingest", owner_user_id="1", limit=10) == []
 
 
 def test_run_bound_file_overwrite_action_overrides_opposite_client_option(
