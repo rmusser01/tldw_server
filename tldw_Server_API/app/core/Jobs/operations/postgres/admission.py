@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Callable
 from contextlib import AbstractContextManager
@@ -34,6 +35,12 @@ _COUNTER_NONCRITICAL_ERRORS: tuple[type[BaseException], ...] = (
     ValueError,
     *_PG_ERRORS,
 )
+
+
+def _quota_lock_key(command: CreateJobCommand) -> int:
+    material = f"jobs:admission-quota\0{command.domain}\0{command.owner_user_id}".encode("utf-8")  # noqa: UP012
+    digest = hashlib.blake2b(material, digest_size=8).digest()
+    return int.from_bytes(digest, byteorder="big", signed=True)
 
 
 def _count_from_row(row: Any) -> int:
@@ -255,6 +262,10 @@ def create_job_admission(
 
     with conn:
         with cursor_factory(conn) as cur:
+            quota_enabled = bool(command.owner_user_id and (max_queued_quota or submits_per_minute_quota))
+            if quota_enabled:
+                cur.execute("SELECT pg_advisory_xact_lock(%s)", (_quota_lock_key(command),))
+
             quota_result = _quota_rejection(
                 cur,
                 command=command,

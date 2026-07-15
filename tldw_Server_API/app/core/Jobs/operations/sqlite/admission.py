@@ -240,6 +240,10 @@ def create_job_admission(
     available_at = _future_available_at(command.available_at, now=now)
     available_at_sql = _sqlite_timestamp(available_at) if available_at else None
 
+    quota_enabled = bool(command.owner_user_id and (max_queued_quota or submits_per_minute_quota))
+    if quota_enabled:
+        conn.execute("BEGIN IMMEDIATE")
+
     with conn:
         quota_result = _quota_rejection(
             conn,
