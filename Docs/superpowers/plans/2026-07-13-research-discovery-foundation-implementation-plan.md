@@ -480,7 +480,7 @@ Run the Task 5 verify commands plus the focused executor, planner, registry-reco
 
 **Success Criteria:** The seven enabled adapters exactly equal the recording-tested and statically scanned implementations; OpenAlex remains unavailable with zero calls; and no alternate transport, credential, scraping, Media, or result-dereference path exists.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Files
 
@@ -489,11 +489,11 @@ Run the Task 5 verify commands plus the focused executor, planner, registry-reco
 
 ### Test-first steps
 
-- [ ] Derive enabled adapter identities/modules from the registry and assert exact set equality with recording fixtures and statically scanned modules; fail if any enabled adapter is outside the allowlist.
-- [ ] Add an AST test scanning every new V2 production module (`contracts`, `registry`, `planner`, `executor`, and adapters) and rejecting imports/construction of `httpx`, `aiohttp`, `requests`, `urllib`, sockets, SDK default transports, legacy Third_Party networking, and `Security.http_hop`. Only `gateway.py` may consume TASK-12971's transport API.
-- [ ] Assert OpenAlex produces a typed unavailable/skipped result with zero executable attempts, allowances, journal reservations, and gateway calls; no OpenAlex adapter exists.
-- [ ] Run the synthetic shared-backend aggregator end to end and prove matching, nonmatching, ambiguous attribution, and one coalesced physical request.
-- [ ] Prove provider failures and result URLs make zero calls to generic fetch, Media, scraping, Playwright, cookies, secrets, or any unregistered adapter.
+- [x] Derive enabled adapter identities/modules from the registry and assert exact set equality with recording fixtures and statically scanned modules; fail if any enabled adapter is outside the allowlist.
+- [x] Add exact per-module import allowlists and AST effect-seam checks for every new V2 production module (`contracts`, `registry`, `planner`, `executor`, adapters, and gateway). Permit only pinned URL parsing through `urllib.parse`; reject network-bearing `urllib.request`, dynamic/package reach-through, asyncio/socket/subprocess transports, SDK defaults, legacy Third_Party networking, and deferred credential/scraping/Media systems. Only `gateway.py` may import TASK-12971's exact public transport symbols.
+- [x] Assert OpenAlex produces a typed unavailable/skipped result with zero executable attempts, allowances, journal reservations, and gateway calls; no OpenAlex adapter exists.
+- [x] Run a truthful synthetic aggregator end to end and prove matching, definite nonmatching, and ambiguous attribution with one coalesced physical request. Ambiguous candidates remain unattributed and produce `valid_empty` when no definite match exists; they are never force-stamped as a source.
+- [x] Prove provider failures and result URLs make zero calls to generic fetch, Media, scraping, Playwright, cookies, secrets, or any unregistered adapter.
 
 ### Verify
 
@@ -509,10 +509,27 @@ python -m pytest -q \
   tldw_Server_API/tests/Research/test_research_discovery_registry_reconciliation.py \
   tldw_Server_API/tests/Research/test_research_discovery_legacy_execution_contract.py
 python -m compileall -q tldw_Server_API/app/core/Research/discovery tldw_Server_API/tests/Research
-ruff check tldw_Server_API/app/core/Research/discovery tldw_Server_API/tests/Research/test_research_discovery_gateway_adapters.py tldw_Server_API/tests/Research/test_research_discovery_executor.py tldw_Server_API/tests/Research/test_research_discovery_network_boundary.py
+ruff check \
+  tldw_Server_API/app/core/Research/discovery/contracts.py \
+  tldw_Server_API/app/core/Research/discovery/registry.py \
+  tldw_Server_API/app/core/Research/discovery/planner.py \
+  tldw_Server_API/app/core/Research/discovery/executor.py \
+  tldw_Server_API/app/core/Research/discovery/gateway_adapters.py \
+  tldw_Server_API/app/core/Research/discovery/gateway.py \
+  tldw_Server_API/tests/Research/test_research_discovery_gateway_adapters.py \
+  tldw_Server_API/tests/Research/test_research_discovery_executor.py \
+  tldw_Server_API/tests/Research/test_research_discovery_network_boundary.py
 black --check tldw_Server_API/app/core/Research/discovery tldw_Server_API/tests/Research/test_research_discovery_gateway_adapters.py tldw_Server_API/tests/Research/test_research_discovery_executor.py tldw_Server_API/tests/Research/test_research_discovery_network_boundary.py
 git diff --check
 ```
+
+### Completion evidence
+
+- Added exact registry/factory/parser/recording equality over all seven credentialless adapters, with eight accounted physical fixture dispatches because PubMed performs ESearch then ESummary. OpenAlex remains typed credential-gated with zero planning or runtime effects.
+- Froze the exact nine-module local dependency closure plus all six local package initializers and the local test-mode helper executed before runtime tripwires, using import and semantic-AST digests. Qualified imported-attribute checks, alias propagation, restricted dynamic lookup, runtime tripwires, and mutation probes cover DNS/socket/process/package/credential reach-through without attempting incomplete Python dataflow analysis.
+- Proved route-independent IDs for the repeated fixture DOI without freezing duplicate list rows; Task 9 owns the cross-group document projection and complete provenance merge decision.
+- Verification passed: 34/34 focused boundary tests, 902/902 planned discovery matrix tests, compileall, Black, exact Task 8 Ruff scope, Python 3.10 grammar parsing, diff hygiene, and Bandit with zero findings. Broad Ruff over the whole legacy discovery directory still reports pre-existing V1 findings in untouched files; no Task 8 file is implicated.
+- Independent registry/correctness and security re-reviews both returned CLEAN after adversarial computed-lookup, nested-package, assignment-alias, subscript, walrus, and lambda-alias probes were resolved.
 
 ### Commit
 
@@ -537,6 +554,7 @@ git diff --check
 
 ### Test-first steps
 
+- [ ] Freeze the cross-group document projection before comparing V1 and V2: the recorded fixtures deliberately repeat one DOI across providers. Do not expose duplicate V2 document IDs or discard route/source attribution silently; either merge the repeated identity with all source/provenance ownership in the shared projection or pin a clearly consumer-owned merge boundary.
 - [ ] Define a stable client-visible compatibility projection, then compare V1 and V2 fixture executions for source ordering, normalized content, status meaning, warnings, and legacy serialization. Compare V1 logical adapter calls separately from V2 physical dispatches: PubMed's one legacy wrapper call intentionally becomes two physical requests, and OpenAlex readiness intentionally becomes credential-gated.
 - [ ] Re-run the hard-coded Research broker `src_...` and `note_...` identity goldens alongside the compatibility projection.
 - [ ] Add an import-boundary test proving V1 production catalog/router/service/endpoint modules do not import or construct the V2 executor, plus a construction test proving V2 requires an explicit offline/synthetic opt-in.
