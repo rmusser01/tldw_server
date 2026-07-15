@@ -796,11 +796,14 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_postgres.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_postgres.py
               tldw_Server_API/tests/Workspaces/test_workspace_context_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
+              tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
           - name: db-privileges
             paths: >-
@@ -2210,11 +2213,14 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_postgres.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_postgres.py
               tldw_Server_API/tests/Workspaces/test_workspace_context_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
+              tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
           - name: db-privileges
             paths: >-
@@ -3495,11 +3501,14 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_postgres.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_postgres.py
               tldw_Server_API/tests/Workspaces/test_workspace_context_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
+              tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
           - name: db-privileges
             paths: >-
@@ -4704,11 +4713,14 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_postgres.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_postgres.py
               tldw_Server_API/tests/Workspaces/test_workspace_context_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
+              tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
           - name: db-privileges
             paths: >-
@@ -5914,11 +5926,14 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_postgres.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_postgres.py
               tldw_Server_API/tests/Workspaces/test_workspace_context_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
+              tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
           - name: db-privileges
             paths: >-
