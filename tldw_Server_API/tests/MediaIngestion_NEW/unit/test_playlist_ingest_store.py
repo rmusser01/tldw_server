@@ -133,7 +133,8 @@ def test_bulk_materialization_resolution_uses_one_fixed_shape_collection_bind(
             ]
 
     @contextmanager
-    def fake_connection(*, write):
+    def fake_connection(*, owner_user_id, write):
+        assert owner_user_id == "1"
         assert write is False
         yield object()
 
@@ -214,10 +215,10 @@ def test_validated_manifest_rejects_internal_json_before_write_lock(
     entered = False
 
     @contextmanager
-    def fail_if_entered(*, write):
+    def fail_if_entered(*, owner_user_id, write):
         nonlocal entered
         entered = True
-        raise AssertionError(f"connection entered with write={write}")
+        raise AssertionError(f"connection entered for owner={owner_user_id} with write={write}")
         yield
 
     monkeypatch.setattr(store, "_connection", fail_if_entered)
@@ -1251,7 +1252,8 @@ def test_postgres_snapshot_replacement_locks_mutable_unexpired_parent(store, mon
             return self.row
 
     @contextmanager
-    def fake_connection(*, write):
+    def fake_connection(*, owner_user_id, write):
+        assert owner_user_id == "1"
         assert write is True
         yield object()
 
@@ -1307,7 +1309,8 @@ def test_postgres_preflight_admission_uses_transaction_advisory_lock_before_capa
             return self.row
 
     @contextmanager
-    def fake_connection(*, write):
+    def fake_connection(*, owner_user_id, write):
+        assert owner_user_id == "owner-1"
         assert write is True
         yield object()
 
@@ -1358,7 +1361,8 @@ def test_postgres_preflight_bind_uses_database_now_and_exact_publication_constra
             return self.row
 
     @contextmanager
-    def fake_connection(*, write):
+    def fake_connection(*, owner_user_id, write):
+        assert owner_user_id == "owner-1"
         assert write is True
         yield object()
 
@@ -1418,7 +1422,8 @@ def test_postgres_ready_guard_locks_preflight_then_exact_active_lease(store, mon
             return self.row
 
     @contextmanager
-    def fake_connection(*, write):
+    def fake_connection(*, owner_user_id, write):
+        assert owner_user_id == "1"
         assert write is True
         yield object()
 
@@ -1492,7 +1497,8 @@ def test_postgres_cleanup_locks_all_expired_parents_before_child_deletes(store, 
             return list(self.rows)
 
     @contextmanager
-    def fake_connection(*, write):
+    def fake_connection(*, owner_user_id, write):
+        assert owner_user_id == "owner-1"
         assert write is True
         yield object()
 
@@ -1546,7 +1552,8 @@ def test_postgres_event_append_locks_run_before_versioning(store, monkeypatch):
             return self.row
 
     @contextmanager
-    def fake_connection(*, write):
+    def fake_connection(*, owner_user_id, write):
+        assert owner_user_id == "owner-1"
         assert write is True
         yield object()
 
@@ -1587,7 +1594,8 @@ def test_postgres_attach_collection_plan_locks_run_and_items_before_updates(stor
             return self.rows
 
     @contextmanager
-    def fake_connection(*, write):
+    def fake_connection(*, owner_user_id, write):
+        assert owner_user_id == "owner-1"
         assert write is True
         yield object()
 
@@ -1782,7 +1790,7 @@ def test_cleanup_global_budget_selects_oldest_parent_across_resource_types(store
         materialization_ids=[materialized.id],
         expires_at=NOW + timedelta(hours=1),
     )
-    with store._connection(write=True) as db:
+    with store._connection(owner_user_id="1", write=True) as db:
         store._query(
             db,
             "UPDATE playlist_preflights SET expires_at = ? WHERE preflight_id = ?",
@@ -1864,7 +1872,7 @@ def test_cleanup_global_budget_backfills_after_blocked_oldest_run(
             items=[_validated_direct_record(occurrence_id="occ-backfill-later-run")],
         ).run_id
         table, id_column = "media_ingest_runs", "run_id"
-    with store._connection(write=True) as db:
+    with store._connection(owner_user_id="1", write=True) as db:
         store._query(
             db,
             "UPDATE media_ingest_runs SET expires_at = ? WHERE run_id = ?",
@@ -1909,7 +1917,7 @@ def test_cleanup_global_budget_backfills_after_retry_retained_staging(
         source_kind="url",
         expires_at=NOW + timedelta(hours=1),
     )
-    with store._connection(write=True) as db:
+    with store._connection(owner_user_id="1", write=True) as db:
         store._query(
             db,
             "UPDATE media_ingest_runs SET expires_at = ? WHERE run_id = ?",
@@ -1954,7 +1962,7 @@ def test_cleanup_global_budget_backfills_after_partial_staging_batch(
         source_kind="url",
         expires_at=NOW + timedelta(hours=1),
     )
-    with store._connection(write=True) as db:
+    with store._connection(owner_user_id="1", write=True) as db:
         store._query(
             db,
             "UPDATE media_ingest_runs SET expires_at = ? WHERE run_id = ?",
@@ -2093,7 +2101,8 @@ def test_postgres_cleanup_uses_one_bounded_oldest_first_parent_scan(store, monke
             return []
 
     @contextmanager
-    def fake_connection(*, write):
+    def fake_connection(*, owner_user_id, write):
+        assert owner_user_id == "owner-1"
         assert write is True
         yield object()
 
@@ -2318,7 +2327,7 @@ def test_cleanup_expired_resources_preserves_processing_job(store):
         idempotency_identity="playlist-ingest-v1:held",
         submission_lease_token=reserved.submission_lease_token,
     )
-    with store._connection(write=True) as db:
+    with store._connection(owner_user_id="1", write=True) as db:
         store._query(
             db,
             "UPDATE jobs SET status = ? WHERE id = ?",
@@ -2412,7 +2421,7 @@ def test_cleanup_expired_resources_preserves_claimed_job_after_item_starts_runni
         job_type="media_ingest_item",
     )
     assert claimed is not None
-    with store._connection(write=True) as db:
+    with store._connection(owner_user_id="1", write=True) as db:
         store._query(
             db,
             """
@@ -2451,7 +2460,7 @@ def test_cleanup_expired_resources_allows_terminal_jobs_to_survive_run_deletion(
         idempotency_identity="playlist-ingest-v1:held",
         submission_lease_token=reserved.submission_lease_token,
     )
-    with store._connection(write=True) as db:
+    with store._connection(owner_user_id="1", write=True) as db:
         store._query(
             db,
             "UPDATE jobs SET status = ? WHERE id = ?",
@@ -2540,7 +2549,7 @@ def test_cleanup_job_eligibility_proves_every_row_before_cancelling_any_job(stor
             (json.dumps(payload), int(jobs[1]["id"])),
         )
 
-    with store._connection(write=True) as db:
+    with store._connection(owner_user_id="1", write=True) as db:
         proof = store._cancel_expired_run_held_jobs(
             db,
             owner_user_id="1",
@@ -3644,7 +3653,7 @@ def test_run_returns_to_staged_when_only_terminal_and_unsent_items_remain(store)
             ),
         ],
     )
-    with store._connection(write=True) as db:
+    with store._connection(owner_user_id="1", write=True) as db:
         store._query(
             db,
             """
@@ -4166,7 +4175,7 @@ def test_upgraded_pending_submission_initializes_null_queue_once(store):
         source_kind="url",
         planned_item_id=None,
     )
-    with store._connection(write=True) as db:
+    with store._connection(owner_user_id="1", write=True) as db:
         store._query(
             db,
             "UPDATE media_ingest_run_items SET submission_queue = NULL WHERE run_id = ? AND occurrence_id = ?",
@@ -4587,7 +4596,7 @@ def test_bind_run_item_job_rejects_nonaccepting_run_and_leaves_job_held(store):
     )
 
     run, reserved, job = _seed_held_run_job(store)
-    with store._connection(write=True) as db:
+    with store._connection(owner_user_id="1", write=True) as db:
         store._query(
             db,
             "UPDATE media_ingest_runs SET status = 'completed' WHERE run_id = ?",
@@ -4620,7 +4629,7 @@ def test_bind_run_item_job_rejects_nonaccepting_run_and_leaves_job_held(store):
 
 def test_bind_run_item_job_repairs_exact_bound_but_held_job(store):
     run, reserved, job = _seed_held_run_job(store)
-    with store._connection(write=True) as db:
+    with store._connection(owner_user_id="1", write=True) as db:
         store._query(
             db,
             """
@@ -4701,7 +4710,7 @@ def test_bind_run_item_job_accepts_already_bound_future_available_at(store):
         submission_lease_token=reserved.submission_lease_token,
     )
     future_retry = store.test_clock.current + timedelta(minutes=15)
-    with store._connection(write=True) as db:
+    with store._connection(owner_user_id="1", write=True) as db:
         store._query(
             db,
             "UPDATE jobs SET status = 'queued', available_at = ? WHERE id = ?",
@@ -4780,7 +4789,7 @@ def test_persisted_file_staging_candidates_are_bounded_to_abandoned_pending_item
 
     assert len(candidates) == 1
     assert candidates[0].staging_temp_dir == "/tmp/media_ingest_job_staging"
-    with store._connection(write=True) as db:
+    with store._connection(owner_user_id="1", write=True) as db:
         store._query(
             db,
             """

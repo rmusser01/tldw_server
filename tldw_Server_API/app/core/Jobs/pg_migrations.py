@@ -29,6 +29,26 @@ _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS = (
     UnicodeDecodeError,
 )
 
+_PLAYLIST_RLS_TABLES = (
+    "playlist_preflights",
+    "playlist_preflight_items",
+    "playlist_materializations",
+    "playlist_materialization_items",
+    "media_ingest_runs",
+    "media_ingest_run_items",
+    "media_ingest_run_events",
+)
+_PLAYLIST_RLS_SEQUENCES = (
+    "playlist_preflight_items_id_seq",
+    "playlist_materialization_items_id_seq",
+    "media_ingest_run_items_id_seq",
+    "media_ingest_run_events_event_id_seq",
+)
+
+
+class JobsRLSInstallationError(RuntimeError):
+    """Raised when a security-critical Postgres RLS install step fails."""
+
 JOBS_POSTGRES_DDL = """
 CREATE TABLE IF NOT EXISTS jobs (
   id SERIAL PRIMARY KEY,
@@ -633,26 +653,41 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
     try:
         with psycopg.connect(_dsn, autocommit=True) as conn, conn.cursor() as cur:
             role = str(os.getenv("JOBS_PG_RLS_ROLE", "")).strip()
-            if role and _re.match(r"^[A-Za-z0-9_]+$", role):
+            if role:
+                if not _re.fullmatch(r"[A-Za-z0-9_]+", role):
+                    raise JobsRLSInstallationError("JOBS_PG_RLS_ROLE must be a simple PostgreSQL identifier")
                 try:
                     cur.execute("SELECT current_schema()")
                     schema_row = cur.fetchone()
                     schema_name = (schema_row[0] if schema_row else None) or "public"
-                    cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (role,))
-                    if not cur.fetchone():
+                    if not _re.fullmatch(r"[A-Za-z0-9_]+", str(schema_name)):
+                        raise JobsRLSInstallationError("current PostgreSQL schema is not a simple identifier")
+                    cur.execute("SELECT rolcanlogin FROM pg_roles WHERE rolname = %s", (role,))
+                    role_row = cur.fetchone()
+                    if role_row and bool(role_row[0]):
+                        raise JobsRLSInstallationError(
+                            f"JOBS_PG_RLS_ROLE {role!r} must be a NOLOGIN group role"
+                        )
+                    if not role_row:
                         cur.execute(f"CREATE ROLE {role} NOLOGIN")
-                    try:
-                        cur.execute("SELECT current_user")
-                        user_row = cur.fetchone()
-                        current_user = (user_row[0] if user_row else None) or None
-                        if current_user and _re.match(r"^[A-Za-z0-9_]+$", str(current_user)):
-                            cur.execute(f"GRANT {role} TO {current_user}")
-                    except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
-                        pass
+                    cur.execute("SELECT current_user")
+                    user_row = cur.fetchone()
+                    current_user = (user_row[0] if user_row else None) or None
+                    if current_user and _re.fullmatch(r"[A-Za-z0-9_]+", str(current_user)):
+                        cur.execute(f"GRANT {role} TO {current_user}")
                     cur.execute(f"GRANT USAGE ON SCHEMA {schema_name} TO {role}")
                     cur.execute(f"GRANT SELECT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {schema_name} TO {role}")
-                except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
-                    pass
+                    cur.execute(
+                        f"GRANT INSERT ON {', '.join(_PLAYLIST_RLS_TABLES)} TO {role}"  # nosec B608
+                    )
+                    for sequence in _PLAYLIST_RLS_SEQUENCES:
+                        cur.execute(
+                            f"GRANT USAGE, SELECT ON SEQUENCE {sequence} TO {role}"  # nosec B608
+                        )
+                except JobsRLSInstallationError:
+                    raise
+                except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
+                    raise JobsRLSInstallationError("failed to configure the Postgres RLS role") from exc
 
             def _enable_rls(table: str) -> None:
                 with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
@@ -660,7 +695,7 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                 with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
                     cur.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY")
 
-            # Enable and enforce RLS on all Jobs tables
+            # Preserve best-effort installation for legacy Jobs tables.
             for _table in (
                 "jobs",
                 "job_events",
@@ -669,15 +704,29 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                 "job_sla_policies",
                 "job_attachments",
                 "job_dependencies",
-                "playlist_preflights",
-                "playlist_preflight_items",
-                "playlist_materializations",
-                "playlist_materialization_items",
-                "media_ingest_runs",
-                "media_ingest_run_items",
-                "media_ingest_run_events",
             ):
                 _enable_rls(_table)
+
+            # Playlist authority tables are security boundaries: installation is
+            # successful only when both ENABLE and FORCE are confirmed by Postgres.
+            try:
+                for _table in _PLAYLIST_RLS_TABLES:
+                    cur.execute(f"ALTER TABLE {_table} ENABLE ROW LEVEL SECURITY")  # nosec B608
+                    cur.execute(f"ALTER TABLE {_table} FORCE ROW LEVEL SECURITY")  # nosec B608
+                    cur.execute(
+                        "SELECT relrowsecurity, relforcerowsecurity "
+                        "FROM pg_class WHERE oid = to_regclass(%s)",
+                        (_table,),
+                    )
+                    rls_row = cur.fetchone()
+                    if not rls_row or not bool(rls_row[0]) or not bool(rls_row[1]):
+                        raise JobsRLSInstallationError(
+                            f"playlist RLS was not enabled and forced for {_table}"
+                        )
+            except JobsRLSInstallationError:
+                raise
+            except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
+                raise JobsRLSInstallationError("playlist RLS installation failed") from exc
             admin_expr = "COALESCE(NULLIF(current_setting('app.is_admin', true), ''), '') = 'true'"
             domain_expr = "NULLIF(current_setting('app.domain_allowlist', true), '')"
             owner_expr = "NULLIF(current_setting('app.owner_user_id', true), '')"
@@ -685,7 +734,7 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
             owner_filter = f"({owner_expr} IS NULL OR owner_user_id = {owner_expr})"
 
             def _qualified_owner_filter(table: str) -> str:
-                return f"({owner_expr} IS NULL OR {table}.owner_user_id = {owner_expr})"
+                return f"({owner_expr} IS NOT NULL AND {table}.owner_user_id = {owner_expr})"
 
             playlist_policy_filters = {
                 "playlist_preflights": (
@@ -1001,11 +1050,13 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                     print(f"[jobs-rls-debug] policies={rows}")
                 except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
                     pass
-    except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
+    except JobsRLSInstallationError:
+        raise
+    except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
         if debug:
             with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
                 print("[jobs-rls-debug] failed to apply RLS policies")
-        return
+        raise JobsRLSInstallationError("failed to apply Postgres Jobs RLS policies") from exc
 
 
 def ensure_job_counters_pg(db_url: str) -> None:

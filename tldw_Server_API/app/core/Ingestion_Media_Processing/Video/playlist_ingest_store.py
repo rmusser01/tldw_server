@@ -497,24 +497,30 @@ class PlaylistIngestStore:
         return db if result is None else result
 
     @contextmanager
-    def _connection(self, *, write: bool) -> Iterator[Any]:
-        conn = self._jobs._connect()
-        try:
-            if self._postgres:
-                with self._jobs._pg_cursor(conn) as cursor:
-                    yield cursor
-            else:
+    def _connection(self, *, owner_user_id: str, write: bool) -> Iterator[Any]:
+        owner = self._owner(owner_user_id)
+        with self._jobs.rls_context(
+            is_admin=False,
+            domain_allowlist=_PREFLIGHT_JOB_DOMAIN,
+            owner_user_id=owner,
+        ):
+            conn = self._jobs._connect()
+            try:
+                if self._postgres:
+                    with self._jobs._pg_cursor(conn) as cursor:
+                        yield cursor
+                else:
+                    if write:
+                        conn.execute("BEGIN IMMEDIATE")
+                    yield conn
                 if write:
-                    conn.execute("BEGIN IMMEDIATE")
-                yield conn
-            if write:
-                conn.commit()
-        except Exception:
-            if write:
-                conn.rollback()
-            raise
-        finally:
-            conn.close()
+                    conn.commit()
+            except Exception:
+                if write:
+                    conn.rollback()
+                raise
+            finally:
+                conn.close()
 
     @staticmethod
     def _row_dict(row: Any) -> dict[str, Any]:
@@ -767,7 +773,7 @@ class PlaylistIngestStore:
         preflight_id = str(uuid4())
         now = self._now()
         expires = self._future_expiry(expires_at, now=now)
-        with self._connection(write=True) as db:
+        with self._connection(owner_user_id=owner, write=True) as db:
             self._query(
                 db,
                 """
@@ -810,7 +816,7 @@ class PlaylistIngestStore:
         if type(ttl_seconds) is not int or ttl_seconds < 1:
             raise ValueError("ttl_seconds must be positive")
         preflight_id = str(uuid4())
-        with self._connection(write=True) as db:
+        with self._connection(owner_user_id=owner, write=True) as db:
             if self._postgres:
                 self._query(
                     db,
@@ -904,7 +910,7 @@ class PlaylistIngestStore:
         if not queue:
             raise ValueError("expected_queue is required")
         expected_payload_json = json.dumps(dict(expected_payload), sort_keys=True, separators=(",", ":"))
-        with self._connection(write=True) as db:
+        with self._connection(owner_user_id=owner, write=True) as db:
             preflight_query = (
                 """
                 SELECT status, job_id FROM playlist_preflights
@@ -1055,7 +1061,7 @@ class PlaylistIngestStore:
             raise ValueError("limit must be between 1 and 100")
         sentinel = self._job_datetime(_PREFLIGHT_JOB_SENTINEL)
         claimed = self._job_datetime(_PREFLIGHT_ORPHAN_CLAIM_SENTINEL)
-        with self._connection(write=False) as db:
+        with self._connection(owner_user_id=owner, write=False) as db:
             rows = self._query(
                 db,
                 (
@@ -1111,7 +1117,7 @@ class PlaylistIngestStore:
         owner = self._owner(owner_user_id)
         sentinel = self._job_datetime(_PREFLIGHT_JOB_SENTINEL)
         claimed = self._job_datetime(_PREFLIGHT_ORPHAN_CLAIM_SENTINEL)
-        with self._connection(write=True) as db:
+        with self._connection(owner_user_id=owner, write=True) as db:
             preflight_data: dict[str, Any] | None = None
             if preflight_id:
                 preflight = self._query(
@@ -1222,7 +1228,7 @@ class PlaylistIngestStore:
         if status not in {"blocked", "cancelled", "expired"}:
             raise ValueError("invalid terminal preflight status")
         now = self._now()
-        with self._connection(write=True) as db:
+        with self._connection(owner_user_id=owner, write=True) as db:
             query = (
                 """
                 SELECT job_id FROM playlist_preflights
@@ -1258,7 +1264,7 @@ class PlaylistIngestStore:
     def get_preflight(self, owner_user_id: str, preflight_id: str) -> PlaylistPreflightRecord:
         """Return one owner-scoped preflight or the generic not-found error."""
         owner = self._owner(owner_user_id)
-        with self._connection(write=False) as db:
+        with self._connection(owner_user_id=owner, write=False) as db:
             row = self._query(
                 db,
                 (
@@ -1311,7 +1317,7 @@ class PlaylistIngestStore:
             raise ValueError("ordinal values must be positive and unique")
 
         now = self._now()
-        with self._connection(write=True) as db:
+        with self._connection(owner_user_id=owner, write=True) as db:
             mutable_preflight_query = f"""
                     SELECT status, expires_at, job_id FROM playlist_preflights
                     WHERE owner_user_id = ? AND preflight_id = ? AND {self._unexpired_sql()}
@@ -1444,7 +1450,7 @@ class PlaylistIngestStore:
             if cursor
             else 0
         )
-        with self._connection(write=False) as db:
+        with self._connection(owner_user_id=owner, write=False) as db:
             exists = self._query(
                 db,
                 f"""
@@ -1518,7 +1524,7 @@ class PlaylistIngestStore:
         materialization_id = str(uuid4())
         now = self._now()
         requested_expiry = self._future_expiry(expires_at, now=now) if expires_at is not None else None
-        with self._connection(write=True) as db:
+        with self._connection(owner_user_id=owner, write=True) as db:
             preflight = self._query(
                 db,
                 f"""
@@ -1601,7 +1607,7 @@ class PlaylistIngestStore:
     ) -> PlaylistMaterializationRecord:
         """Return one owner-scoped materialization."""
         owner = self._owner(owner_user_id)
-        with self._connection(write=False) as db:
+        with self._connection(owner_user_id=owner, write=False) as db:
             row = self._query(
                 db,
                 f"""
@@ -1758,7 +1764,7 @@ class PlaylistIngestStore:
         """Resolve up to 500 owner-authorized occurrences with one bulk query."""
         owner = self._owner(owner_user_id)
         normalized = self._normalize_materialization_pairs(pairs)
-        with self._connection(write=False) as db:
+        with self._connection(owner_user_id=owner, write=False) as db:
             return self._resolve_materialization_occurrences_in_connection(
                 db,
                 owner,
@@ -1789,7 +1795,7 @@ class PlaylistIngestStore:
         now = self._now()
         expires = self._future_expiry(expires_at, now=now) if expires_at is not None else now + timedelta(days=7)
         copied: list[dict[str, Any]] = []
-        with self._connection(write=True) as db:
+        with self._connection(owner_user_id=owner, write=True) as db:
             for materialization_id in materializations:
                 parent = self._query(
                     db,
@@ -1943,7 +1949,7 @@ class PlaylistIngestStore:
         materialized_pairs = [
             (str(item["materialization_id"]), str(item["occurrence_id"])) for item in materialized_records
         ]
-        with self._connection(write=True) as db:
+        with self._connection(owner_user_id=owner, write=True) as db:
             if materialized_pairs:
                 authoritative = self._resolve_materialization_occurrences_in_connection(
                     db,
@@ -2084,7 +2090,7 @@ class PlaylistIngestStore:
             max_length=_MAX_RUN_IDENTITY_LENGTH,
         )
         now = self._now()
-        with self._connection(write=False) as db:
+        with self._connection(owner_user_id=owner, write=False) as db:
             row = self._query(
                 db,
                 f"""
@@ -2123,7 +2129,7 @@ class PlaylistIngestStore:
             if self._postgres
             else "julianday(initialization_expires_at) <= julianday(?)"
         )
-        with self._connection(write=True) as db:
+        with self._connection(owner_user_id=owner, write=True) as db:
             lock = " FOR UPDATE" if self._postgres else ""
             row = self._query(
                 db,
@@ -2200,7 +2206,7 @@ class PlaylistIngestStore:
             if self._postgres
             else "julianday(initialization_expires_at) > julianday(?)"
         )
-        with self._connection(write=True) as db:
+        with self._connection(owner_user_id=owner, write=True) as db:
             renewed = self._query(
                 db,
                 f"""
@@ -2240,7 +2246,7 @@ class PlaylistIngestStore:
             if self._postgres
             else "julianday(initialization_expires_at) > julianday(?)"
         )
-        with self._connection(write=True) as db:
+        with self._connection(owner_user_id=owner, write=True) as db:
             cleared = self._query(
                 db,
                 f"""
@@ -2265,7 +2271,7 @@ class PlaylistIngestStore:
     def get_run(self, owner_user_id: str, run_id: str) -> MediaIngestRunRecord:
         """Return one owner-scoped ingest run."""
         owner = self._owner(owner_user_id)
-        with self._connection(write=False) as db:
+        with self._connection(owner_user_id=owner, write=False) as db:
             row = self._query(
                 db,
                 f"""
@@ -2309,7 +2315,7 @@ class PlaylistIngestStore:
         """Return one owner-scoped run occurrence by its stable identity."""
         owner = self._owner(owner_user_id)
         expiry_sql = "run.expires_at > ?" if self._postgres else "julianday(run.expires_at) > julianday(?)"
-        with self._connection(write=False) as db:
+        with self._connection(owner_user_id=owner, write=False) as db:
             row = self._query(
                 db,
                 f"""
@@ -2350,7 +2356,7 @@ class PlaylistIngestStore:
         """Append an event and bump the run version in the same transaction."""
         owner = self._owner(owner_user_id)
         now = self._now()
-        with self._connection(write=True) as db:
+        with self._connection(owner_user_id=owner, write=True) as db:
             run_version_query = f"""
                     SELECT version FROM media_ingest_runs
                     WHERE owner_user_id = ? AND run_id = ? AND {self._unexpired_sql()}
@@ -2426,7 +2432,7 @@ class PlaylistIngestStore:
         """Replay owner-scoped run events in stable append order."""
         owner = self._owner(owner_user_id)
         page_limit = self._page_limit(limit)
-        with self._connection(write=False) as db:
+        with self._connection(owner_user_id=owner, write=False) as db:
             exists = self._query(
                 db,
                 f"""
@@ -2451,7 +2457,7 @@ class PlaylistIngestStore:
     def run_event_bounds(self, owner_user_id: str, run_id: str) -> tuple[int | None, int | None]:
         """Return the oldest and newest retained event IDs for one owned run."""
         owner = self._owner(owner_user_id)
-        with self._connection(write=False) as db:
+        with self._connection(owner_user_id=owner, write=False) as db:
             exists = self._query(
                 db,
                 f"""
@@ -2539,7 +2545,7 @@ class PlaylistIngestStore:
 
         owner = self._owner(owner_user_id)
         now = self._now()
-        with self._connection(write=True) as db:
+        with self._connection(owner_user_id=owner, write=True) as db:
             lock = " FOR UPDATE OF run, item" if self._postgres else ""
             expiry_sql = "run.expires_at > ?" if self._postgres else "julianday(run.expires_at) > julianday(?)"
             row = self._query(
@@ -2681,7 +2687,7 @@ class PlaylistIngestStore:
         """Cancel unsent work or durably request cancellation for accepted work."""
         owner = self._owner(owner_user_id)
         now = self._now()
-        with self._connection(write=True) as db:
+        with self._connection(owner_user_id=owner, write=True) as db:
             lock = " FOR UPDATE OF run, item" if self._postgres else ""
             expiry_sql = "run.expires_at > ?" if self._postgres else "julianday(run.expires_at) > julianday(?)"
             row = self._query(
@@ -2798,7 +2804,7 @@ class PlaylistIngestStore:
             raise ValueError("resolved_media_id must be a positive integer")
         owner = self._owner(owner_user_id)
         now = self._now()
-        with self._connection(write=True) as db:
+        with self._connection(owner_user_id=owner, write=True) as db:
             lock = " FOR UPDATE OF run, item" if self._postgres else ""
             expiry_sql = "run.expires_at > ?" if self._postgres else "julianday(run.expires_at) > julianday(?)"
             row = self._query(
@@ -2954,7 +2960,7 @@ class PlaylistIngestStore:
         owner = self._owner(owner_user_id)
         if (new_state == "terminal") != (outcome is not None):
             raise ValueError("outcome is required exactly when new_state is terminal")
-        with self._connection(write=True) as db:
+        with self._connection(owner_user_id=owner, write=True) as db:
             exists = self._query(
                 db,
                 f"""
@@ -3032,7 +3038,7 @@ class PlaylistIngestStore:
             raise ValueError("planned_item_id must be a positive integer")
 
         now = self._now()
-        with self._connection(write=True) as db:
+        with self._connection(owner_user_id=owner, write=True) as db:
             lock = " FOR UPDATE OF run, item" if self._postgres else ""
             expiry_sql = "run.expires_at > ?" if self._postgres else "julianday(run.expires_at) > julianday(?)"
             row = self._query(
@@ -3257,7 +3263,7 @@ class PlaylistIngestStore:
             submission_lease_seconds,
         )
         now = self._now()
-        with self._connection(write=True) as db:
+        with self._connection(owner_user_id=owner, write=True) as db:
             expiry_predicate = (
                 "submission_lease_expires_at > ?"
                 if self._postgres
@@ -3369,7 +3375,7 @@ class PlaylistIngestStore:
               )
             """
         )
-        with self._connection(write=True) as db:
+        with self._connection(owner_user_id=owner, write=True) as db:
             updated = self._query(
                 db,
                 query,
@@ -3429,7 +3435,7 @@ class PlaylistIngestStore:
         if type(expected_submission_lease_generation) is not int or expected_submission_lease_generation < 1:
             raise ValueError("expected_submission_lease_generation must be positive")
         now = self._now()
-        with self._connection(write=True) as db:
+        with self._connection(owner_user_id=owner, write=True) as db:
             updated = self._query(
                 db,
                 """
@@ -3503,7 +3509,7 @@ class PlaylistIngestStore:
             if self._postgres
             else "julianday(submission_lease_expires_at) > julianday(?)"
         )
-        with self._connection(write=True) as db:
+        with self._connection(owner_user_id=owner, write=True) as db:
             updated = self._query(
                 db,
                 f"""
@@ -3685,7 +3691,7 @@ class PlaylistIngestStore:
         if type(attempt) is not int or attempt < 1:
             raise ValueError("attempt must be a positive integer")
         now = self._now()
-        with self._connection(write=True) as db:
+        with self._connection(owner_user_id=owner, write=True) as db:
             expiry_predicate = (
                 "submission_lease_expires_at > ?"
                 if self._postgres
@@ -3743,7 +3749,7 @@ class PlaylistIngestStore:
         lease_token, _lease_seconds = self._submission_lease_args(submission_lease_token, 120)
         if type(attempt) is not int or attempt < 1:
             raise ValueError("attempt must be a positive integer")
-        with self._connection(write=True) as db:
+        with self._connection(owner_user_id=owner, write=True) as db:
             now = self._now()
             expiry_predicate = (
                 "submission_lease_expires_at > ?"
@@ -3793,7 +3799,7 @@ class PlaylistIngestStore:
             else "julianday(item.updated_at) <= julianday(?) AND "
             "(run.status NOT IN ('staged', 'running') OR julianday(run.expires_at) <= julianday(?))"
         )
-        with self._connection(write=False) as db:
+        with self._connection(owner_user_id=owner, write=False) as db:
             rows = self._query(
                 db,
                 f"""
@@ -3852,7 +3858,7 @@ class PlaylistIngestStore:
                            OR julianday(run.expires_at) <= julianday(?))
                   )
             """
-        with self._connection(write=True) as db:
+        with self._connection(owner_user_id=owner, write=True) as db:
             updated = self._query(
                 db,
                 query,
@@ -3885,7 +3891,7 @@ class PlaylistIngestStore:
             if self._postgres
             else "run.status IN ('staged', 'running') AND julianday(run.expires_at) > julianday(?)"
         )
-        with self._connection(write=False) as db:
+        with self._connection(owner_user_id=owner, write=False) as db:
             row = self._query(
                 db,
                 f"""
@@ -3932,17 +3938,22 @@ class PlaylistIngestStore:
                 _STAGING_JOB_REFERENCE_SCAN_LIMIT,
                 _STAGING_JOB_REFERENCE_TOTAL_SCAN_LIMIT - scanned,
             )
-            jobs = self._jobs.list_jobs(
-                domain="media_ingest",
+            with self._jobs.rls_context(
+                is_admin=False,
+                domain_allowlist=_PREFLIGHT_JOB_DOMAIN,
                 owner_user_id=owner_user_id,
-                job_type="media_ingest_item",
-                batch_group=candidate.batch_id,
-                created_before=cursor_created_at,
-                before_id=cursor_id,
-                limit=page_limit,
-                sort_by="created_at",
-                sort_order="desc",
-            )
+            ):
+                jobs = self._jobs.list_jobs(
+                    domain="media_ingest",
+                    owner_user_id=owner_user_id,
+                    job_type="media_ingest_item",
+                    batch_group=candidate.batch_id,
+                    created_before=cursor_created_at,
+                    before_id=cursor_id,
+                    limit=page_limit,
+                    sort_by="created_at",
+                    sort_order="desc",
+                )
             if len(jobs) > page_limit:
                 return True
             for job in jobs:
@@ -4041,7 +4052,7 @@ class PlaylistIngestStore:
         if not retired:
             return 0
         cleared = 0
-        with self._connection(write=True) as db:
+        with self._connection(owner_user_id=owner_user_id, write=True) as db:
             for candidate in retired:
                 updated = self._query(
                     db,
@@ -4097,7 +4108,7 @@ class PlaylistIngestStore:
             raise ValueError("job_id must be a positive integer")
 
         now = self._now()
-        with self._connection(write=True) as db:
+        with self._connection(owner_user_id=owner, write=True) as db:
             lock = " FOR UPDATE OF run, item" if self._postgres else ""
             expiry_sql = "run.expires_at > ?" if self._postgres else "julianday(run.expires_at) > julianday(?)"
             row = self._query(
@@ -4317,7 +4328,7 @@ class PlaylistIngestStore:
         )
         lease_token, _lease_seconds = self._submission_lease_args(submission_lease_token, 120)
         now = self._now()
-        with self._connection(write=True) as db:
+        with self._connection(owner_user_id=owner, write=True) as db:
             lock = " FOR UPDATE OF run, item" if self._postgres else ""
             expiry_sql = "run.expires_at > ?" if self._postgres else "julianday(run.expires_at) > julianday(?)"
             row = self._query(
@@ -4411,7 +4422,7 @@ class PlaylistIngestStore:
         """Durably record intent before a reviewed duplicate action has side effects."""
         owner = self._owner(owner_user_id)
         now = self._now()
-        with self._connection(write=True) as db:
+        with self._connection(owner_user_id=owner, write=True) as db:
             lock = " FOR UPDATE" if self._postgres else ""
             run_row = self._query(
                 db,
@@ -4524,7 +4535,7 @@ class PlaylistIngestStore:
             raise ValueError("media_id must be a positive integer")
         owner = self._owner(owner_user_id)
         now = self._now()
-        with self._connection(write=True) as db:
+        with self._connection(owner_user_id=owner, write=True) as db:
             lock = " FOR UPDATE" if self._postgres else ""
             run_sql = f"""
                 SELECT version, status FROM media_ingest_runs
@@ -4689,7 +4700,7 @@ class PlaylistIngestStore:
             if token is not None
             else (owner, str(run_id), self._db_datetime(now))
         )
-        with self._connection(write=True) as db:
+        with self._connection(owner_user_id=owner, write=True) as db:
             if self._postgres:
                 run_sql = f"""
                     SELECT version FROM media_ingest_runs
@@ -5119,12 +5130,17 @@ class PlaylistIngestStore:
                         reason="expired_playlist_ingest_run",
                     )
                 )
-            for callback in callbacks:
-                try:
-                    callback()
-                except Exception as exc:  # noqa: BLE001 - observers are post-commit best effort
-                    error_type = type(exc).__name__
-                    failure_counts[error_type] = failure_counts.get(error_type, 0) + 1
+            with self._jobs.rls_context(
+                is_admin=False,
+                domain_allowlist=_PREFLIGHT_JOB_DOMAIN,
+                owner_user_id=str(job["owner_user_id"]),
+            ):
+                for callback in callbacks:
+                    try:
+                        callback()
+                    except Exception as exc:  # noqa: BLE001 - observers are post-commit best effort
+                        error_type = type(exc).__name__
+                        failure_counts[error_type] = failure_counts.get(error_type, 0) + 1
         for error_type, failure_count in failure_counts.items():
             logger.bind(
                 error_code="playlist_expired_job_lifecycle_failed",
@@ -5147,7 +5163,7 @@ class PlaylistIngestStore:
         scanned_parents: list[tuple[str, str]] = []
         staging_candidates: list[_RunStagingCleanupCandidate] = []
         staging_cancelled_jobs: tuple[dict[str, Any], ...] = ()
-        with self._connection(write=True) as db:
+        with self._connection(owner_user_id=owner, write=True) as db:
             scanned_parents = self._select_expired_parent_ids(
                 db,
                 owner_user_id=owner,
@@ -5241,7 +5257,7 @@ class PlaylistIngestStore:
 
         result = {"preflights": 0, "materializations": 0, "runs": 0}
         final_cancelled_jobs: tuple[dict[str, Any], ...] = ()
-        with self._connection(write=True) as db:
+        with self._connection(owner_user_id=owner, write=True) as db:
             locked_parents = self._lock_expired_parent_ids(
                 db,
                 owner_user_id=owner,

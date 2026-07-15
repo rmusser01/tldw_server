@@ -999,7 +999,7 @@ def test_run_bound_submit_rejects_nonprocessing_task6_states(
     action,
 ):
     manager, store, run = _seed_occurrence_run()
-    with store._connection(write=True) as db:
+    with store._connection(owner_user_id="1", write=True) as db:
         if state == "terminal":
             store._query(
                 db,
@@ -3058,7 +3058,7 @@ def test_stale_file_owner_retires_its_replaced_generation_staging(
             create_calls += 1
             call_number = create_calls
         if call_number == 1:
-            with store._connection(write=True) as db:
+            with store._connection(owner_user_id="1", write=True) as db:
                 store._query(
                     db,
                     """
@@ -3400,7 +3400,7 @@ def test_original_failure_cannot_release_reservation_after_retry_creates_job(
             headers={"X-API-KEY": "test-api-key-12345"},
         )
         assert first_entered.wait(10)
-        with store._connection(write=True) as db:
+        with store._connection(owner_user_id="1", write=True) as db:
             store._query(
                 db,
                 """
@@ -3441,7 +3441,7 @@ def test_expired_submission_owner_cannot_create_held_job_after_takeover(
 
     def takeover_before_create(**kwargs):
         payload = kwargs["payload"]
-        with store._connection(write=True) as db:
+        with store._connection(owner_user_id="1", write=True) as db:
             store._query(
                 db,
                 """

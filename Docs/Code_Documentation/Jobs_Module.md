@@ -120,10 +120,10 @@ Audio Studio job payloads are sanitized before persistence. Client requests must
   - `JOBS_INTEGRITY_SWEEP_ENABLED` (default false), `JOBS_INTEGRITY_SWEEP_INTERVAL_SEC` (default 60), `JOBS_INTEGRITY_SWEEP_FIX` (default false).
   - Periodically flags (and optionally fixes) impossible states like leases on non-processing jobs and expired processing leases.
 - Postgres RLS (optional):
-  - `JOBS_PG_RLS_ENABLE` (default false): Enable row-level security policies that scope access to domains in `current_setting('app.domain_allowlist')`.
-  - To scope a connection/session, set the allowlist before issuing queries/updates (example):
-    - `SELECT set_config('app.domain_allowlist', 'chatbooks,prompt_studio', true);`
-    - The policies will then allow access only to rows where `domain` is in that list.
+  - `JOBS_PG_RLS_ENABLE` (default false): Enable row-level security policies that scope Jobs access by domain/owner and playlist authority tables by owner.
+  - `JOBS_PG_RLS_ROLE` must be a dedicated `NOLOGIN` group role. The application login receives membership and `JobManager` assumes that role for managed connections.
+  - Use `JobManager.rls_context(...)` around owner-scoped operations. It restores prior context across nesting and exceptions; playlist authority policies fail closed when `app.owner_user_id` is unset or blank.
+  - RLS is a trusted-application query-bug guardrail. It is not a defense against direct database access, SQL injection, a compromised application login, or database owner/superuser access; enforce network and credential least privilege separately.
 - Metrics/Tracing buckets:
   - `JOBS_DURATION_BUCKETS`: CSV of float seconds for `duration_seconds` histogram buckets.
   - `JOBS_QUEUE_LATENCY_BUCKETS`: CSV of float seconds for `queue_latency_seconds` histogram buckets.
@@ -441,6 +441,7 @@ jm.fail_job(job["id"], error="boom", retryable=True, worker_id=worker_id, lease_
   - Emits text/event-stream with incremental IDs; clients can resume by passing `after_id`.
   - Requires `JOBS_EVENTS_OUTBOX=true` to persist events; otherwise events are process-local only.
   - Admin endpoints set per-request Postgres RLS context automatically when enabled.
+  - Playlist ingestion store and worker paths set owner-scoped RLS context before opening managed Postgres connections; only genuinely global operations use admin context.
   - Response: `{ non_processing_with_lease: int, processing_expired: int, fixed: int }`
   - When `fix=true`, clears stale lease fields on non-processing rows, and re-queues expired processing rows.
 

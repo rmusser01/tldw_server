@@ -9,7 +9,7 @@ import secrets
 import sqlite3
 import time
 import uuid as _uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextvars import ContextVar
 from datetime import datetime
 from datetime import timezone as _tz
@@ -555,6 +555,28 @@ class JobManager:
             return None  # noqa: TRY300
         except _JOB_NONCRITICAL_EXCEPTIONS:
             return None
+
+    @classmethod
+    @contextlib.contextmanager
+    def rls_context(
+        cls,
+        *,
+        is_admin: bool,
+        domain_allowlist: str | None,
+        owner_user_id: str | None,
+    ) -> Iterator[None]:
+        """Temporarily apply one RLS identity and restore the caller's context."""
+        domain = domain_allowlist if (domain_allowlist or "").strip() else None
+        owner = owner_user_id if (owner_user_id or "").strip() else None
+        admin_token = cls._RLS_IS_ADMIN.set(bool(is_admin))
+        domain_token = cls._RLS_DOMAIN_ALLOWLIST.set(domain)
+        owner_token = cls._RLS_OWNER_USER_ID.set(owner)
+        try:
+            yield
+        finally:
+            cls._RLS_OWNER_USER_ID.reset(owner_token)
+            cls._RLS_DOMAIN_ALLOWLIST.reset(domain_token)
+            cls._RLS_IS_ADMIN.reset(admin_token)
 
     @classmethod
     def set_rls_context(cls, *, is_admin: bool, domain_allowlist: str | None, owner_user_id: str | None) -> None:

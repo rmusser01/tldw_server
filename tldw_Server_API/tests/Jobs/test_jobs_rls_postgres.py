@@ -1,5 +1,4 @@
 import os
-from urllib.parse import quote, urlparse, urlunparse
 
 import pytest
 
@@ -34,6 +33,8 @@ def test_playlist_rls_installer_covers_every_authority_table(monkeypatch):
     statements: list[str] = []
 
     class RecordingCursor:
+        last_statement = ""
+
         def __enter__(self):
             return self
 
@@ -41,9 +42,12 @@ def test_playlist_rls_installer_covers_every_authority_table(monkeypatch):
             return False
 
         def execute(self, statement, _params=None):
-            statements.append(str(statement))
+            self.last_statement = str(statement)
+            statements.append(self.last_statement)
 
         def fetchone(self):
+            if "relrowsecurity" in self.last_statement:
+                return (True, True)
             return None
 
     class RecordingConnection:
@@ -69,6 +73,7 @@ def test_playlist_rls_installer_covers_every_authority_table(monkeypatch):
         assert select_prefix in installed_sql
         select_sql = next(statement for statement in statements if select_prefix in statement)
         assert "USING" in select_sql
+        assert "IS NOT NULL" in select_sql
         modify_prefix = f"CREATE POLICY {table}_owner_modify ON {table} FOR ALL"
         assert modify_prefix in installed_sql
         modify_sql = next(statement for statement in statements if modify_prefix in statement)
@@ -80,9 +85,132 @@ def test_playlist_rls_installer_covers_every_authority_table(monkeypatch):
             assert f"FROM {parent_table}" in modify_sql
 
 
+def test_playlist_rls_installation_propagates_security_critical_alter_failure(monkeypatch):
+    class FailingCursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, statement, _params=None):
+            if str(statement) == "ALTER TABLE playlist_preflights FORCE ROW LEVEL SECURITY":
+                raise RuntimeError("force denied")
+
+        def fetchone(self):
+            return (True, True)
+
+    class FailingConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def cursor(self):
+            return FailingCursor()
+
+    monkeypatch.delenv("JOBS_PG_RLS_ROLE", raising=False)
+    monkeypatch.setattr(psycopg, "connect", lambda *_args, **_kwargs: FailingConnection())
+
+    with pytest.raises(RuntimeError, match="playlist.*RLS|force denied"):
+        ensure_jobs_rls_policies_pg("postgresql://example/jobs")
+
+
+def test_playlist_rls_role_grants_are_scoped_and_role_must_be_nologin(monkeypatch):
+    statements: list[str] = []
+
+    class RoleCursor:
+        last_statement = ""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, statement, _params=None):
+            self.last_statement = str(statement)
+            statements.append(self.last_statement)
+
+        def fetchone(self):
+            if "current_schema" in self.last_statement:
+                return ("public",)
+            if "FROM pg_roles" in self.last_statement:
+                return (False,)
+            if "current_user" in self.last_statement:
+                return ("app_user",)
+            if "relrowsecurity" in self.last_statement:
+                return (True, True)
+            return None
+
+    class RoleConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def cursor(self):
+            return RoleCursor()
+
+    monkeypatch.setenv("JOBS_PG_RLS_ROLE", "jobs_rls")
+    monkeypatch.setattr(psycopg, "connect", lambda *_args, **_kwargs: RoleConnection())
+
+    ensure_jobs_rls_policies_pg("postgresql://example/jobs")
+
+    installed_sql = "\n".join(statements)
+    assert "GRANT INSERT ON" in installed_sql
+    for table in PLAYLIST_RLS_TABLES:
+        assert table in installed_sql
+    assert "GRANT USAGE, SELECT ON SEQUENCE" in installed_sql
+    for sequence in (
+        "playlist_preflight_items_id_seq",
+        "playlist_materialization_items_id_seq",
+        "media_ingest_run_items_id_seq",
+        "media_ingest_run_events_event_id_seq",
+    ):
+        assert sequence in installed_sql
+
+
+def test_playlist_rls_rejects_configured_login_role(monkeypatch):
+    class LoginRoleCursor:
+        last_statement = ""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, statement, _params=None):
+            self.last_statement = str(statement)
+
+        def fetchone(self):
+            if "current_schema" in self.last_statement:
+                return ("public",)
+            if "FROM pg_roles" in self.last_statement:
+                return (True,)
+            return None
+
+    class LoginRoleConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def cursor(self):
+            return LoginRoleCursor()
+
+    monkeypatch.setenv("JOBS_PG_RLS_ROLE", "jobs_rls")
+    monkeypatch.setattr(psycopg, "connect", lambda *_args, **_kwargs: LoginRoleConnection())
+
+    with pytest.raises(RuntimeError, match="NOLOGIN"):
+        ensure_jobs_rls_policies_pg("postgresql://example/jobs")
+
+
 def _dsn_or_skip(monkeypatch):
-
-
     base_dsn = os.getenv("JOBS_DB_URL")
     if not base_dsn:
         pytest.skip("JOBS_DB_URL not configured for Postgres RLS tests")
@@ -91,23 +219,18 @@ def _dsn_or_skip(monkeypatch):
     monkeypatch.setenv("JOBS_PG_RLS_ENABLE", "true")
     role = "jobs_rls"
     monkeypatch.setenv("JOBS_PG_RLS_ROLE", role)
-    password = os.getenv("JOBS_PG_RLS_PASSWORD", "jobs_rls_pw")
     monkeypatch.setenv("JOBS_PG_SKIP_SCHEMA_INIT", "true")
-    # Ensure role exists with login and grants for RLS enforcement
+    # The application login assumes a dedicated NOLOGIN role for RLS enforcement.
     import psycopg
     from psycopg import sql as _sql
     with psycopg.connect(base_dsn, autocommit=True) as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (role,))
+            cur.execute("SELECT rolcanlogin FROM pg_roles WHERE rolname = %s", (role,))
             role_ident = _sql.Identifier(role)
-            pwd_literal = _sql.Literal(password)
             if not cur.fetchone():
-                cur.execute(_sql.SQL("CREATE ROLE {} LOGIN PASSWORD {}").format(role_ident, pwd_literal))
+                cur.execute(_sql.SQL("CREATE ROLE {} NOLOGIN").format(role_ident))
             else:
-                try:
-                    cur.execute(_sql.SQL("ALTER ROLE {} LOGIN PASSWORD {}").format(role_ident, pwd_literal))
-                except Exception:
-                    _ = None
+                cur.execute(_sql.SQL("ALTER ROLE {} NOLOGIN").format(role_ident))
             cur.execute("SELECT current_schema()")
             schema_row = cur.fetchone()
             schema_name = (schema_row[0] if schema_row else None) or "public"
@@ -124,21 +247,8 @@ def _dsn_or_skip(monkeypatch):
                 )
             )
 
-    def _with_role(dsn: str, user: str, pwd: str) -> str:
-        parsed = urlparse(dsn)
-        host = parsed.hostname or ""
-        port = f":{parsed.port}" if parsed.port else ""
-        auth = quote(user)
-        if pwd:
-            auth = f"{auth}:{quote(pwd)}"
-        netloc = f"{auth}@{host}{port}"
-        return urlunparse(
-            (parsed.scheme, netloc, parsed.path, parsed.params, parsed.query, parsed.fragment)
-        )
-
-    rls_dsn = _with_role(base_dsn, role, password)
-    monkeypatch.setenv("JOBS_DB_URL", rls_dsn)
-    return base_dsn, rls_dsn
+    monkeypatch.setenv("JOBS_DB_URL", base_dsn)
+    return base_dsn, base_dsn
 
 
 def _row_val(row, key, idx):
@@ -147,10 +257,20 @@ def _row_val(row, key, idx):
     return row[idx] if row is not None else None
 
 
+def _set_raw_rls_context(cur, *, owner_user_id: str | None) -> None:
+    from psycopg import sql as _sql
+
+    cur.execute(_sql.SQL("SET ROLE {}").format(_sql.Identifier("jobs_rls")))
+    cur.execute("SELECT set_config('app.is_admin', 'false', false)")
+    if owner_user_id is None:
+        cur.execute("RESET app.owner_user_id")
+    else:
+        cur.execute("SELECT set_config('app.owner_user_id', %s, false)", (owner_user_id,))
+
+
 def _seed(dsn):
-
-
     import psycopg
+
     with psycopg.connect(dsn, autocommit=True) as conn:
         with conn.cursor() as cur:
             # Minimal cleanup to keep test deterministic
@@ -189,6 +309,7 @@ def _seed(dsn):
 def _seed_playlist_authority(dsn):
     with psycopg.connect(dsn, autocommit=True) as conn:
         with conn.cursor() as cur:
+            cur.execute("SELECT set_config('app.is_admin', 'true', false)")
             for table in (
                 "media_ingest_run_events",
                 "media_ingest_run_items",
@@ -272,8 +393,6 @@ def _seed_playlist_authority(dsn):
 
 @pytest.mark.pg_jobs
 def test_rls_context_filters_results(monkeypatch):
-
-
     admin_dsn, rls_dsn = _dsn_or_skip(monkeypatch)
     ensure_jobs_tables_pg(admin_dsn)
     ensure_jobs_rls_policies_pg(admin_dsn)
@@ -301,8 +420,6 @@ def test_rls_context_filters_results(monkeypatch):
 
 @pytest.mark.pg_jobs
 def test_rls_applies_to_events_and_controls(monkeypatch):
-
-
     admin_dsn, rls_dsn = _dsn_or_skip(monkeypatch)
     ensure_jobs_tables_pg(admin_dsn)
     ensure_jobs_rls_policies_pg(admin_dsn)
@@ -369,8 +486,7 @@ def test_playlist_authority_rls_isolates_owners_and_fences_children(monkeypatch)
 
     with psycopg.connect(rls_dsn, autocommit=True) as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT set_config('app.is_admin', 'false', false)")
-            cur.execute("SELECT set_config('app.owner_user_id', 'u1', false)")
+            _set_raw_rls_context(cur, owner_user_id="u1")
 
             for table, identity_column, expected_identity in visible_rows:
                 cur.execute(f"SELECT {identity_column} FROM {table} ORDER BY {identity_column}")
@@ -394,3 +510,173 @@ def test_playlist_authority_rls_isolates_owners_and_fences_children(monkeypatch)
                         f"WHERE {identity_column} = %s",
                         (other_parent, identity),
                     )
+
+
+@pytest.mark.pg_jobs
+def test_playlist_rls_role_and_table_flags_are_hardened(monkeypatch):
+    admin_dsn, _rls_dsn = _dsn_or_skip(monkeypatch)
+    ensure_jobs_tables_pg(admin_dsn)
+    ensure_jobs_rls_policies_pg(admin_dsn)
+
+    with psycopg.connect(admin_dsn, autocommit=True) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT rolcanlogin FROM pg_roles WHERE rolname = 'jobs_rls'")
+            assert cur.fetchone() == (False,)
+            cur.execute(
+                """
+                SELECT relname, relrowsecurity, relforcerowsecurity
+                FROM pg_class
+                WHERE relname = ANY(%s)
+                ORDER BY relname
+                """,
+                (list(PLAYLIST_RLS_TABLES),),
+            )
+            flags = {row[0]: (bool(row[1]), bool(row[2])) for row in cur.fetchall()}
+    assert flags == dict.fromkeys(sorted(PLAYLIST_RLS_TABLES), (True, True))
+
+
+@pytest.mark.pg_jobs
+def test_playlist_rls_unset_and_blank_owner_context_fail_closed(monkeypatch):
+    admin_dsn, rls_dsn = _dsn_or_skip(monkeypatch)
+    ensure_jobs_tables_pg(admin_dsn)
+    ensure_jobs_rls_policies_pg(admin_dsn)
+    _seed_playlist_authority(admin_dsn)
+
+    with psycopg.connect(rls_dsn, autocommit=True) as conn:
+        with conn.cursor() as cur:
+            _set_raw_rls_context(cur, owner_user_id=None)
+            for context_name, owner_value in (("unset", None), ("blank", "")):
+                if owner_value is None:
+                    cur.execute("RESET app.owner_user_id")
+                else:
+                    cur.execute("SELECT set_config('app.owner_user_id', %s, false)", (owner_value,))
+                for table in PLAYLIST_RLS_TABLES:
+                    cur.execute(f"SELECT COUNT(*) FROM {table}")
+                    assert cur.fetchone()[0] == 0, context_name
+                    cur.execute(f"UPDATE {table} SET owner_user_id = owner_user_id")
+                    assert cur.rowcount == 0, context_name
+                with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                    cur.execute(
+                        """
+                        INSERT INTO playlist_preflights(
+                          preflight_id, owner_user_id, status, source_url, source_kind, expires_at
+                        ) VALUES (%s, 'u1', 'completed', 'https://example.test/denied',
+                                  'playlist', NOW() + INTERVAL '1 hour')
+                        """,
+                        (f"pf-denied-{context_name}",),
+                    )
+
+
+@pytest.mark.pg_jobs
+def test_playlist_rls_role_can_insert_owned_graph_but_not_cross_tenant(monkeypatch):
+    admin_dsn, rls_dsn = _dsn_or_skip(monkeypatch)
+    ensure_jobs_tables_pg(admin_dsn)
+    ensure_jobs_rls_policies_pg(admin_dsn)
+    _seed_playlist_authority(admin_dsn)
+
+    with psycopg.connect(rls_dsn, autocommit=True) as conn:
+        with conn.cursor() as cur:
+            _set_raw_rls_context(cur, owner_user_id="u1")
+            cur.execute(
+                """
+                INSERT INTO playlist_preflights(
+                  preflight_id, owner_user_id, status, source_url, source_kind, expires_at
+                ) VALUES ('pf-insert-u1', 'u1', 'completed', 'https://example.test/pf-insert',
+                          'playlist', NOW() + INTERVAL '1 hour')
+                """
+            )
+            cur.execute(
+                """
+                INSERT INTO playlist_preflight_items(
+                  preflight_id, owner_user_id, occurrence_id, ordinal,
+                  occurrence_index_for_source, source_kind, availability, duplicate_status
+                ) VALUES ('pf-insert-u1', 'u1', 'pfi-insert-u1', 10, 1,
+                          'video', 'available', 'new')
+                """
+            )
+            cur.execute(
+                """
+                INSERT INTO playlist_materializations(
+                  materialization_id, preflight_id, owner_user_id, status, expires_at
+                ) VALUES ('mat-insert-u1', 'pf-insert-u1', 'u1', 'ready',
+                          NOW() + INTERVAL '1 hour')
+                """
+            )
+            cur.execute(
+                """
+                INSERT INTO playlist_materialization_items(
+                  materialization_id, owner_user_id, occurrence_id, ordinal,
+                  source_url, source_kind
+                ) VALUES ('mat-insert-u1', 'u1', 'mi-insert-u1', 10,
+                          'https://example.test/mi-insert', 'video')
+                """
+            )
+            cur.execute(
+                """
+                INSERT INTO media_ingest_runs(run_id, owner_user_id, status, expires_at)
+                VALUES ('run-insert-u1', 'u1', 'ready', NOW() + INTERVAL '1 hour')
+                """
+            )
+            cur.execute(
+                """
+                INSERT INTO media_ingest_run_items(
+                  run_id, owner_user_id, occurrence_id, ordinal, input_kind, state
+                ) VALUES ('run-insert-u1', 'u1', 'ri-insert-u1', 10, 'url', 'staged')
+                """
+            )
+            cur.execute(
+                """
+                INSERT INTO media_ingest_run_events(run_id, owner_user_id, event_type, state)
+                VALUES ('run-insert-u1', 'u1', 'event-insert-u1', 'staged')
+                """
+            )
+
+            for table in PLAYLIST_RLS_TABLES:
+                cur.execute(f"SELECT COUNT(*) FROM {table} WHERE owner_user_id = 'u1'")
+                assert cur.fetchone()[0] >= 1
+
+            with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                cur.execute(
+                    """
+                    INSERT INTO playlist_preflights(
+                      preflight_id, owner_user_id, status, source_url, source_kind, expires_at
+                    ) VALUES ('pf-cross-owner', 'u2', 'completed',
+                              'https://example.test/cross-owner', 'playlist',
+                              NOW() + INTERVAL '1 hour')
+                    """
+                )
+
+            cross_parent_inserts = (
+                """
+                INSERT INTO playlist_preflight_items(
+                  preflight_id, owner_user_id, occurrence_id, ordinal,
+                  occurrence_index_for_source, source_kind, availability, duplicate_status
+                ) VALUES ('pf-u2', 'u1', 'pfi-cross-parent', 20, 1,
+                          'video', 'available', 'new')
+                """,
+                """
+                INSERT INTO playlist_materializations(
+                  materialization_id, preflight_id, owner_user_id, status, expires_at
+                ) VALUES ('mat-cross-parent', 'pf-u2', 'u1', 'ready',
+                          NOW() + INTERVAL '1 hour')
+                """,
+                """
+                INSERT INTO playlist_materialization_items(
+                  materialization_id, owner_user_id, occurrence_id, ordinal,
+                  source_url, source_kind
+                ) VALUES ('mat-u2', 'u1', 'mi-cross-parent', 20,
+                          'https://example.test/cross-parent', 'video')
+                """,
+                """
+                INSERT INTO media_ingest_run_items(
+                  run_id, owner_user_id, occurrence_id, ordinal, input_kind, state
+                ) VALUES ('run-u2', 'u1', 'ri-cross-parent', 20, 'url', 'staged')
+                """,
+                """
+                INSERT INTO media_ingest_run_events(run_id, owner_user_id, event_type, state)
+                VALUES ('run-u2', 'u1', 'event-cross-parent', 'staged')
+                """,
+            )
+            for statement in cross_parent_inserts:
+                with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                    cur.execute(statement)

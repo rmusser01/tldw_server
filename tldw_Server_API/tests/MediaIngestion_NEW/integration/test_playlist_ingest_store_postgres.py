@@ -912,7 +912,7 @@ def test_postgres_validated_manifest_rejects_stale_materialization_authority(pg_
         "pg-race-owner",
         [(materialized.materialization_id, "pg-race-occ")],
     )[0]
-    with store._connection(write=True) as db:
+    with store._connection(owner_user_id="pg-race-owner", write=True) as db:
         store._query(
             db,
             "UPDATE playlist_materializations SET status = 'expired' WHERE materialization_id = ?",
@@ -938,7 +938,7 @@ def test_postgres_validated_manifest_rejects_stale_materialization_authority(pg_
             ],
         )
 
-    with store._connection(write=False) as db:
+    with store._connection(owner_user_id="pg-race-owner", write=False) as db:
         count = store._query(
             db,
             "SELECT COUNT(*) AS count FROM media_ingest_runs WHERE owner_user_id = ?",
