@@ -3505,7 +3505,10 @@ describe("submitQuickIngestBatch", () => {
 
       __resetQuickIngestRuntimeHealthForTests()
       mocks.runtimeId = "ext-fallback-identities"
-      mocks.sendMessage.mockImplementation(async (message: any) => {
+      mocks.sendMessage.mockImplementation(async (message: {
+        type?: string
+        sessionId?: string
+      }) => {
         if (message.type === "tldw:ping") return { ok: true, pong: true }
         if (message.type === "tldw:quick-ingest/start") {
           return { ok: true, sessionId: message.sessionId }
