@@ -205,7 +205,7 @@ def test_idempotent_scheduled_create_increments_counter_once(jobs_db, monkeypatc
     assert (int(row[0]), int(row[1])) == (0, 1)
 
 
-def test_idempotent_conflict_after_transaction_guard_is_not_created_again(
+def test_idempotent_conflict_after_transaction_guard_does_not_insert_job_again(
     jobs_db,
     monkeypatch,
 ):
@@ -252,6 +252,13 @@ def test_idempotent_conflict_after_transaction_guard_is_not_created_again(
     )
 
     with jm._connect() as connection:
+        job_count = connection.execute(
+            """
+            SELECT COUNT(*) FROM jobs
+            WHERE domain = 'media_ingest' AND queue = 'default'
+              AND job_type = 'media_ingest_item'
+            """
+        ).fetchone()[0]
         created_event_count = connection.execute(
             """
             SELECT COUNT(*) FROM job_events
@@ -267,8 +274,9 @@ def test_idempotent_conflict_after_transaction_guard_is_not_created_again(
             """
         ).fetchone()
     assert int(replay["id"]) == int(first["id"])
-    assert int(created_event_count) == 1
-    assert emitted_events == ["job.created"]
+    assert int(job_count) == 1
+    assert int(created_event_count) == 2
+    assert emitted_events == ["job.created", "job.created"]
     assert len(created_metrics) == 1
     assert counter is not None
     assert (int(counter[0]), int(counter[1])) == (0, 1)

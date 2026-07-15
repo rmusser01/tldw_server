@@ -168,7 +168,7 @@ def test_create_rolls_back_when_job_created_event_insert_fails_sqlite(tmp_path, 
         raise AssertionError("create_job should not commit a new row when job.created event insert fails")
 
 
-def test_idempotent_existing_create_does_not_write_job_created_event_sqlite(tmp_path):
+def test_idempotent_existing_create_fails_when_job_created_event_insert_fails_sqlite(tmp_path):
     db_path = tmp_path / "jobs_create_fail_existing.db"
     ensure_jobs_tables(db_path)
     jm = JobManager(db_path)
@@ -189,19 +189,18 @@ def test_idempotent_existing_create_does_not_write_job_created_event_sqlite(tmp_
     orig_connect = jm._connect
     jm._connect = lambda: _FailJobEventsInsertConnection(orig_connect())  # type: ignore[method-assign]
 
-    replay = jm.create_job(
-        domain="ps",
-        queue="default",
-        job_type="event-fail-existing",
-        payload={"x": 2},
-        owner_user_id="u",
-        idempotency_key="stable-key",
-    )
+    with pytest.raises(sqlite3.OperationalError, match="job_events insert failure"):
+        jm.create_job(
+            domain="ps",
+            queue="default",
+            job_type="event-fail-existing",
+            payload={"x": 2},
+            owner_user_id="u",
+            idempotency_key="stable-key",
+        )
 
-    if int(replay["id"]) != int(first["id"]):
-        raise AssertionError("idempotent replay must return the existing job row")
-    if _count_job_created_events(db_path, "ps", "default", "event-fail-existing") != 1:
-        raise AssertionError("idempotent replay must not write another job.created event")
+    if _count_jobs(db_path, "ps", "default", "event-fail-existing") != 1:
+        raise AssertionError("failing idempotent create-existing call must not add a new job row")
 
 
 def test_idempotent_replay_in_process_event_uses_current_context_sqlite(monkeypatch, tmp_path):

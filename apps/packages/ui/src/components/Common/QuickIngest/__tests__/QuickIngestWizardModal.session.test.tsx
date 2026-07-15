@@ -2435,7 +2435,7 @@ describe("QuickIngestWizardModal session runtime", () => {
     })
   })
 
-  it("restores a hidden processing session when the late analysis provider guard blocks startRun", async () => {
+  it("keeps hidden processing without durable tracking display-only", async () => {
     mocks.getQuickIngestAnalysisProviderWarning.mockReturnValue("missing-provider")
     useQuickIngestSessionStore.getState().createDraftSession({
       visibility: "hidden",
@@ -2469,21 +2469,10 @@ describe("QuickIngestWizardModal session runtime", () => {
 
     render(<SessionBackedQuickIngestModal />)
 
-    await waitFor(() => {
-      expect(screen.getByRole("alert")).toHaveTextContent(
-        "Choose an analysis provider before running ingest analysis."
-      )
-    })
-
     const session = useQuickIngestSessionStore.getState().session
-    expect(session?.visibility).toBe("visible")
-    expect(session?.currentStep).toBe(2)
-    const provider = screen.getByRole("combobox", { name: "Analysis provider" })
-    expect(provider).toHaveFocus()
-    expect(provider.getAttribute("aria-describedby")).toContain(
-      "analysis-provider-warning"
-    )
-    expect(screen.queryByTestId("wizard-processing")).not.toBeInTheDocument()
+    expect(session?.visibility).toBe("hidden")
+    expect(session?.currentStep).toBe(4)
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
     expect(mocks.startQuickIngestSession).not.toHaveBeenCalled()
     expect(mocks.submitQuickIngestBatch).not.toHaveBeenCalled()
   })
@@ -3886,7 +3875,7 @@ describe("QuickIngestWizardModal session runtime", () => {
     })
   })
 
-  it("keeps cancellation terminal when runtime completion arrives in the cancel click", async () => {
+  it("lets runtime completion win when it arrives in the cancel click", async () => {
     const user = userEvent.setup()
     useQuickIngestSessionStore.getState().createDraftSession()
     mocks.startQuickIngestSession.mockResolvedValue({
@@ -3920,14 +3909,14 @@ describe("QuickIngestWizardModal session runtime", () => {
     await user.click(screen.getByRole("button", { name: "Cancel Processing" }))
 
     await waitFor(() => {
-      expect(screen.getByTestId("wizard-results")).toHaveTextContent("cancelled:1")
+      expect(screen.getByTestId("wizard-results")).toHaveTextContent("complete:1")
     })
     expect(screen.getByTestId("wizard-result-queued-url-1")).toHaveTextContent(
-      "queued-url-1:cancelled"
+      "queued-url-1:processed"
     )
   })
 
-  it("ignores runtime progress emitted in the cancel click", async () => {
+  it("lets terminal runtime item progress win when emitted in the cancel click", async () => {
     const user = userEvent.setup()
     useQuickIngestSessionStore.getState().createDraftSession()
     mocks.startQuickIngestSession.mockResolvedValue({
@@ -3959,18 +3948,26 @@ describe("QuickIngestWizardModal session runtime", () => {
     await user.click(screen.getByRole("button", { name: "Cancel Processing" }))
 
     await waitFor(() => {
-      expect(screen.getByTestId("wizard-results")).toHaveTextContent("cancelled:1")
+      expect(
+        useQuickIngestSessionStore.getState().session?.processingState
+          .perItemProgress
+      ).toEqual([
+        expect.objectContaining({
+          id: "queued-url-1",
+          status: "complete",
+          lifecycleState: "terminal",
+          terminalOutcome: "completed",
+        }),
+      ])
     })
-    expect(screen.getByTestId("wizard-result-queued-url-1")).toHaveTextContent(
-      "queued-url-1:cancelled"
-    )
+    expect(screen.getByTestId("wizard-processing")).toHaveTextContent("running:1")
+    expect(screen.queryByTestId("wizard-results")).not.toBeInTheDocument()
   })
 
-  it("cancels an extension session acknowledged after cancellation", async () => {
+  it("marks a late-ack extension session interrupted when cancellation fails", async () => {
     const user = userEvent.setup()
     const startAck = deferred<any>()
     const cancelError = new Error("cancel transport unavailable")
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
     useQuickIngestSessionStore.getState().createDraftSession()
     mocks.startQuickIngestSession.mockReturnValue(startAck.promise)
     mocks.cancelQuickIngestSession.mockRejectedValueOnce(cancelError)
@@ -3994,16 +3991,13 @@ describe("QuickIngestWizardModal session runtime", () => {
       )
     })
     await waitFor(() => {
-      expect(warnSpy).toHaveBeenCalledWith(
-        "[QuickIngest] Failed to cancel session.",
-        {
-          sessionId: "qi-runtime-late-ack",
-          error: cancelError,
-        }
-      )
+      expect(useQuickIngestSessionStore.getState().session).toMatchObject({
+        lifecycle: "interrupted",
+        errorMessage: "cancel transport unavailable",
+      })
     })
     expect(mocks.submitQuickIngestBatch).not.toHaveBeenCalled()
-    expect(screen.getByTestId("wizard-results")).toHaveTextContent("cancelled:1")
+    expect(screen.queryByTestId("wizard-results")).not.toBeInTheDocument()
   })
 
   it("does not submit a direct session acknowledged after cancellation", async () => {
@@ -4057,7 +4051,7 @@ describe("QuickIngestWizardModal session runtime", () => {
     expect(screen.getByTestId("wizard-results")).toHaveTextContent("cancelled:1")
   })
 
-  it("keeps cancellation terminal when start acknowledgement rejects", async () => {
+  it("marks the session interrupted when a start acknowledgement rejects", async () => {
     const user = userEvent.setup()
     const startAck = deferred<any>()
     useQuickIngestSessionStore.getState().createDraftSession()
@@ -4082,10 +4076,12 @@ describe("QuickIngestWizardModal session runtime", () => {
       await Promise.resolve()
     })
 
-    expect(screen.getByTestId("wizard-results")).toHaveTextContent("cancelled:1")
-    expect(screen.getByTestId("wizard-result-queued-url-1")).toHaveTextContent(
-      "queued-url-1:cancelled"
-    )
+    expect(useQuickIngestSessionStore.getState().session).toMatchObject({
+      lifecycle: "interrupted",
+      errorMessage:
+        "Quick ingest cancellation could not confirm whether the start request was accepted.",
+    })
+    expect(screen.queryByTestId("wizard-results")).not.toBeInTheDocument()
   })
 
   it("uses runtime completion events for extension-backed sessions instead of calling the broken SSE path", async () => {
@@ -5712,7 +5708,7 @@ describe("QuickIngestWizardModal session runtime", () => {
     })
   })
 
-  it("ignores late persisted reattach processing after cancellation", async () => {
+  it("preserves cancellation requested when late reattach remains nonterminal", async () => {
     vi.useFakeTimers()
     const reattach = deferred<any>()
     mocks.reattachQuickIngestSession.mockReturnValue(reattach.promise)
@@ -5765,14 +5761,19 @@ describe("QuickIngestWizardModal session runtime", () => {
       await Promise.resolve()
     })
 
-    expect(screen.getByTestId("wizard-results")).toHaveTextContent("cancelled:1")
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(2_000)
+    expect(screen.queryByTestId("wizard-results")).not.toBeInTheDocument()
+    expect(useQuickIngestSessionStore.getState().session?.processingState).toMatchObject({
+      status: "running",
+      perItemProgress: [
+        expect.objectContaining({
+          id: "queued-url-1",
+          lifecycleState: "cancellation_requested",
+        }),
+      ],
     })
-    expect(mocks.reattachQuickIngestSession).toHaveBeenCalledTimes(1)
   })
 
-  it("ignores late persisted reattach completion after cancellation", async () => {
+  it("lets late persisted reattach completion win after cancellation", async () => {
     const user = userEvent.setup()
     const reattach = deferred<any>()
     mocks.reattachQuickIngestSession.mockReturnValue(reattach.promise)
@@ -5830,9 +5831,9 @@ describe("QuickIngestWizardModal session runtime", () => {
       await Promise.resolve()
     })
 
-    expect(screen.getByTestId("wizard-results")).toHaveTextContent("cancelled:1")
+    expect(screen.getByTestId("wizard-results")).toHaveTextContent("complete:1")
     expect(screen.getByTestId("wizard-result-queued-url-1")).toHaveTextContent(
-      "queued-url-1:cancelled"
+      "queued-url-1:processed"
     )
   })
 

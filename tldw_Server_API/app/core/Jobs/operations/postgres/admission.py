@@ -288,16 +288,16 @@ def create_job_admission(
                     }
                 if inserted and counters_enabled:
                     _bump_counters_best_effort(cur, command=command, available_at=command.available_at)
+                event = _insert_created_event(
+                    cur,
+                    row=row,
+                    idempotent=not inserted,
+                    request_id=command.request_id,
+                    trace_id=command.trace_id,
+                )
                 if inserted:
-                    event = _insert_created_event(
-                        cur,
-                        row=row,
-                        idempotent=False,
-                        request_id=command.request_id,
-                        trace_id=command.trace_id,
-                    )
                     return AdmissionResult.applied(row=row, durable_events=(event,))
-                return AdmissionResult.existing(row=row)
+                return AdmissionResult.existing(row=row, durable_events=(event,))
 
             row = _insert_job(
                 cur,

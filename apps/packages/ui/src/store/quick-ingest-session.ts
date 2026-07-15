@@ -1069,11 +1069,14 @@ const sanitizeConferenceBatchMetadata = (
   }
 }
 
+const QUICK_INGEST_PERSISTENCE_VERSION = 1
+
 const sanitizeAdvancedValues = (value: unknown): Record<string, unknown> => {
   const advanced = asRecord(value)
   if (!advanced) return {}
   const next: Record<string, unknown> = {}
   for (const key of [
+    "api_name",
     "chunk_method",
     "chunk_size",
     "chunk_overlap",
@@ -1390,7 +1393,10 @@ export const normalizeQuickIngestPersistenceEnvelope = (
       return null
     }
     if (state.session === null) {
-      return JSON.stringify({ state: { session: null }, version: 0 })
+      return JSON.stringify({
+        state: { session: null },
+        version: QUICK_INGEST_PERSISTENCE_VERSION,
+      })
     }
     const rawSession = asRecord(state.session)
     const id = canonicalId(rawSession?.id)
@@ -1413,7 +1419,10 @@ export const normalizeQuickIngestPersistenceEnvelope = (
       rawSession as unknown as QuickIngestSessionRecord
     )
     return session
-      ? JSON.stringify({ state: { session }, version: 0 })
+      ? JSON.stringify({
+          state: { session },
+          version: QUICK_INGEST_PERSISTENCE_VERSION,
+        })
       : null
   } catch {
     return null
@@ -1432,7 +1441,7 @@ const serializePersistedSession = (
   const serialized = normalizeQuickIngestPersistenceEnvelope(
     JSON.stringify({
       state: buildPersistedState(session),
-      version: 0,
+      version: QUICK_INGEST_PERSISTENCE_VERSION,
     })
   )
   if (!serialized) {
@@ -1859,7 +1868,7 @@ export const createQuickIngestSessionStore = (options: {
         name: STORAGE_KEY,
         // Baseline version so future shape changes can migrate instead of discarding
         // persisted state (see apps/FRONTEND_AUDIT.md §6 / TASK-12102).
-        version: 1,
+        version: QUICK_INGEST_PERSISTENCE_VERSION,
         migrate: (persisted) => persisted as any,
         storage: createJSONStorage(() => backgroundStorage),
         partialize: (state) => buildPersistedState(state.session),

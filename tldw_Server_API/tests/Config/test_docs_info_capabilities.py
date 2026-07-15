@@ -218,7 +218,7 @@ def test_docs_info_media_ingest_worker_capability_follows_disabled_media_route(m
     assert caps["mediaPlaylistIngestContractVersion"] != 2
 
 
-def test_docs_info_media_ingest_worker_capability_stays_false_when_route_disabled_and_flag_true(
+def test_docs_info_media_ingest_job_route_remains_independent_when_media_route_is_disabled(
     monkeypatch, tmp_path: Path
 ) -> None:
     config_path = tmp_path / "config.txt"
@@ -234,9 +234,10 @@ def test_docs_info_media_ingest_worker_capability_stays_false_when_route_disable
     safe_config = config_info.load_safe_config()
     caps = safe_config["capabilities"]
 
-    assert caps["hasMediaIngestJobs"] is False
-    assert caps["hasMediaIngestJobEvents"] is False
+    assert caps["hasMediaIngestJobs"] is True
+    assert caps["hasMediaIngestJobEvents"] is True
     assert caps["hasMediaIngestWorker"] is False
+    assert caps["mediaPlaylistIngestContractVersion"] != 2
 
 
 def test_docs_info_media_ingest_job_capabilities_follow_independent_route(

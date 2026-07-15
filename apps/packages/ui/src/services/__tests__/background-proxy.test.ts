@@ -1557,7 +1557,10 @@ describe("background proxy fallback safety", () => {
         return {
           serverUrl: "http://127.0.0.1:8000",
           authMode: "single-user",
-          apiKey: "not-a-real-key"
+          apiKey: "not-a-real-key",
+          credentialSource: "manual",
+          apiKeyPersistence: "device",
+          apiKeyServerOrigin: "http://127.0.0.1:8000"
         }
       }
       return null

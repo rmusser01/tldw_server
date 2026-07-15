@@ -867,7 +867,11 @@ const reducer = (
         existingProgressItem.progressPercent === action.progress.progressPercent &&
         existingProgressItem.currentStage === action.progress.currentStage &&
         existingProgressItem.estimatedRemaining === action.progress.estimatedRemaining &&
-        existingProgressItem.error === action.progress.error
+        existingProgressItem.error === action.progress.error &&
+        existingProgressItem.attempt === action.progress.attempt &&
+        existingProgressItem.lifecycleState === action.progress.lifecycleState &&
+        existingProgressItem.terminalOutcome === action.progress.terminalOutcome &&
+        existingProgressItem.retryable === action.progress.retryable
       ) {
         return state
       }

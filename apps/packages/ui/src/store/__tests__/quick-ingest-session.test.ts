@@ -385,7 +385,7 @@ describe("quick ingest session store", () => {
     ).toBe(true)
 
     const persisted = JSON.parse(persistence.value || "null")
-    expect(persisted?.version).toBe(0)
+    expect(persisted?.version).toBe(1)
     expect(persisted?.state?.session?.currentStep).toBe(3)
     expect(persisted?.state?.session?.tracking).toBeUndefined()
 
@@ -552,6 +552,7 @@ describe("quick ingest session store", () => {
       },
       presetConfig: {
         ...createEmptyQuickIngestSession().presetConfig,
+        advancedValues: { api_name: "openai" },
         thumbnail: marker,
         transient: { marker },
       },
@@ -599,6 +600,7 @@ describe("quick ingest session store", () => {
       sharedTags: ["conference"],
     })
     expect(session.presetConfig.transient).toBeUndefined()
+    expect(session.presetConfig.advancedValues).toEqual({ api_name: "openai" })
     expect(session.customOptions.transient).toBeUndefined()
   })
 

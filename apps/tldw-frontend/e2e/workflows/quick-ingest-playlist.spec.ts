@@ -73,6 +73,11 @@ test.describe('Quick Ingest playlist v2', () => {
     expect(fixture.getMaterializedOccurrenceIds()).toHaveLength(31);
 
     await dialog.getByRole('button', { name: /configure 31 items/i }).click();
+    const analysisProvider = dialog.getByRole('combobox', {
+      name: 'Analysis provider',
+    });
+    await analysisProvider.fill('openai');
+    await expect(analysisProvider).toHaveValue('openai');
     await dialog.getByRole('button', { name: 'Next' }).click();
     await expect(dialog).toContainText('Ready to Process');
     await dialog.getByRole('button', { name: /start processing/i }).click();

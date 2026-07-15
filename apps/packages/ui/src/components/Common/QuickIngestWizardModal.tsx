@@ -1026,9 +1026,12 @@ const buildResultsFromReattachedJobs = (
 const buildProgressFromReattachedJobs = (
   items: WizardQueueItem[],
   jobs: ReattachedQuickIngestJob[],
-  tracking?: PersistedQuickIngestTracking
-): ItemProgress[] =>
-  jobs.map((job, index) => {
+  tracking?: PersistedQuickIngestTracking,
+  existing: ItemProgress[] = [],
+  preserveCancellationRequested = false
+): ItemProgress[] => {
+  const existingById = new Map(existing.map((progress) => [progress.id, progress]))
+  return jobs.map((job, index) => {
     const item = resolveQueueItemForReattachedJob(
       items,
       tracking,
@@ -1036,9 +1039,11 @@ const buildProgressFromReattachedJobs = (
       job.jobId,
       index
     )
+    const id = item?.id || job.sourceItemId || `reattached-${job.jobId}`
+    const previous = existingById.get(id)
     const status = mapReattachedJobStatusToProgress(job.status, job.result)
     const normalizedStatus = String(job.status || "").trim().toLowerCase()
-    const lifecycleState =
+    const reportedLifecycleState =
       job.lifecycleState ||
       (normalizedStatus === "staged" ||
       normalizedStatus === "preparing" ||
@@ -1059,6 +1064,12 @@ const buildProgressFromReattachedJobs = (
       job.result !== null && typeof job.result === "object"
         ? (job.result as Record<string, unknown>)
         : null
+    const lifecycleState =
+      (preserveCancellationRequested ||
+        previous?.lifecycleState === "cancellation_requested") &&
+      reportedLifecycleState !== "terminal"
+        ? "cancellation_requested"
+        : reportedLifecycleState
     const terminalOutcome =
       lifecycleState === "terminal"
         ? job.terminalOutcome ||
@@ -1076,11 +1087,14 @@ const buildProgressFromReattachedJobs = (
           ? 0
           : 0)
     return {
-      id: item?.id || job.sourceItemId || `reattached-${job.jobId}`,
-      attempt: job.attempt,
+      id,
+      attempt: job.attempt ?? previous?.attempt,
       status,
       progressPercent,
       currentStage:
+        (lifecycleState === "cancellation_requested"
+          ? previous?.currentStage || "Cancellation requested"
+          : undefined) ||
         job.progressMessage ||
         (status === "failed"
           ? job.error ||
@@ -1098,6 +1112,7 @@ const buildProgressFromReattachedJobs = (
       retryable: job.retryable,
     }
   })
+}
 
 export const buildStatusUnavailableProgressFromReattachError = (
   error: unknown,
@@ -1296,6 +1311,7 @@ type WizardModalContentProps = {
   setProcessingWarning: (reason: string | null) => void
   shouldAttemptPersistedReattach: boolean
   cancellationRequestNonce: number
+  getCancellationRequestNonce: () => number
   itemCancellationRequest: { id: string; nonce: number } | null
   statusCheckRequestNonce: number
 }
@@ -1319,6 +1335,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   setProcessingWarning,
   shouldAttemptPersistedReattach,
   cancellationRequestNonce,
+  getCancellationRequestNonce,
   itemCancellationRequest,
   statusCheckRequestNonce,
 }) => {
@@ -1569,9 +1586,6 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     restore()
   }, [open, restore, state.isMinimized])
 
-  // Auto-process on mount if autoProcessQueued is set and there are queued items
-  const autoProcessedRef = useRef(false)
-
   useEffect(() => {
     if (currentStep !== 3 || persistenceStatus !== "ready") {
       reviewOwnershipEntryRef.current = false
@@ -1629,7 +1643,14 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         const perItemProgress = buildProgressFromReattachedJobs(
           reattachQueueItems,
           snapshot.jobs,
-          latestTracking
+          latestTracking,
+          processingStateRef.current.perItemProgress,
+          cancelledSessionIdsRef.current.has(
+            buildCancellationAuthorityKey(
+              latestTracking,
+              String(latestTracking.sessionId || "").trim()
+            )
+          )
         )
         const elapsed =
           typeof startedAt === "number" && Number.isFinite(startedAt)
@@ -2248,6 +2269,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         wizardSessionId: string
         externalAuthorityRevision: number
         startedAt: number
+        cancellationRequestNonce: number
       }
     ): Promise<void> => {
       const attemptIsCurrent = () => {
@@ -2276,6 +2298,49 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
           buildFailureResults(unresolvedItems, message, outcome)
         )
       }
+      const wholeRunCancellationRequested = () =>
+        preAuthorityCancelAllRef.current ||
+        getCancellationRequestNonce() > authority.cancellationRequestNonce
+      const cancelAcknowledgedAuthority = (
+        tracking: PersistedQuickIngestTracking,
+        sessionId: string
+      ) => {
+        const cancellationKey = buildCancellationAuthorityKey(tracking, sessionId)
+        cancelledSessionIdsRef.current.add(cancellationKey)
+        const reportFailure = (message: string) => {
+          if (
+            buildCancellationAuthorityKey(
+              persistedTrackingRef.current,
+              String(activeSessionIdRef.current || "").trim()
+            ) !== cancellationKey
+          ) {
+            return
+          }
+          updateProcessingState({ status: "error", estimatedRemaining: 0 })
+          markInterrupted(message)
+        }
+        void cancelQuickIngestSession({
+          sessionId,
+          batchIds: resolveTrackingBatchIds(tracking),
+          tracking,
+          reason: "user_cancelled",
+        })
+          .then((response) => {
+            if (!response.ok) {
+              reportFailure(
+                response.error ||
+                  "Quick ingest cancellation could not be confirmed."
+              )
+            }
+          })
+          .catch((error) => {
+            reportFailure(
+              error instanceof Error
+                ? error.message
+                : "Quick ingest cancellation could not be confirmed."
+            )
+          })
+      }
       try {
         try {
           await tldwClient.initialize()
@@ -2283,6 +2348,10 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
           // Best effort; background proxy handles auth for direct runtimes.
         }
         if (!attemptIsCurrent()) return
+        if (wholeRunCancellationRequested()) {
+          finalizeSubmissionFailure("Cancelled by user.", "cancelled")
+          return
+        }
 
         markRunActive(selectedItems)
         if (!attemptIsCurrent()) return
@@ -2316,12 +2385,11 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
             persistedTrackingRef.current = indeterminateTracking
             await markProcessingTracking(indeterminateTracking)
             if (!attemptIsCurrent()) return
-            if (preAuthorityCancelAllRef.current) {
-              void cancelQuickIngestSession({
-                sessionId: indeterminateSessionId,
-                tracking: indeterminateTracking,
-                reason: "user_cancelled",
-              })
+            if (wholeRunCancellationRequested()) {
+              cancelAcknowledgedAuthority(
+                indeterminateTracking,
+                indeterminateSessionId
+              )
             } else {
               requestOccurrenceCancellation(
                 indeterminateTracking,
@@ -2372,7 +2440,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
           if (!attemptIsCurrent()) return
         }
 
-        if (preAuthorityCancelAllRef.current) {
+        if (wholeRunCancellationRequested()) {
           const cancellationTracking =
             initialTracking ||
             ({
@@ -2381,17 +2449,12 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
               sessionId,
               startedAt: authority.startedAt,
             } as PersistedQuickIngestTracking)
-          const cancellationKey = buildCancellationAuthorityKey(
-            cancellationTracking,
-            sessionId
-          )
-          cancelledSessionIdsRef.current.add(cancellationKey)
-          void cancelQuickIngestSession({
-            sessionId,
-            batchIds: resolveTrackingBatchIds(cancellationTracking),
-            tracking: cancellationTracking,
-            reason: "user_cancelled",
-          })
+          if (extensionRuntime) {
+            cancelAcknowledgedAuthority(cancellationTracking, sessionId)
+          } else {
+            finalizeSubmissionFailure("Cancelled by user.", "cancelled")
+          }
+          return
         } else if (initialTracking) {
           requestOccurrenceCancellation(
             initialTracking,
@@ -2412,7 +2475,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         const response = await submitQuickIngestBatch({
           ...requestPayload,
           __quickIngestSessionId: sessionId,
-          __quickIngestShouldStop: () => preAuthorityCancelAllRef.current,
+          __quickIngestShouldStop: wholeRunCancellationRequested,
           __quickIngestIsOccurrenceCancelled: (occurrenceId) =>
             preAuthorityCancelledOccurrenceIdsRef.current.has(occurrenceId),
           onTrackingMetadata: async (tracking) => {
@@ -2529,6 +2592,13 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         if (!attemptIsCurrent()) return
         setRunSubmissionInFlight(false)
         if (!attemptIsCurrent()) return
+        if (wholeRunCancellationRequested()) {
+          updateProcessingState({ status: "error", estimatedRemaining: 0 })
+          markInterrupted(
+            "Quick ingest cancellation could not confirm whether the start request was accepted."
+          )
+          return
+        }
         finalizeSubmissionFailure(
           error instanceof Error ? error.message : "Quick ingest failed.",
           "failed"
@@ -2545,6 +2615,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     [
       applyResults,
       finalizeRun,
+      getCancellationRequestNonce,
       markInterrupted,
       markProcessingTracking,
       markRunActive,
@@ -2778,6 +2849,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
             wizardSessionId: session.id,
             externalAuthorityRevision: acceptedAuthorityRevision,
             startedAt,
+            cancellationRequestNonce: getCancellationRequestNonce(),
           }
         )
         return true
@@ -2811,6 +2883,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       acquireSubmissionLease,
       applyProcessingTransition,
       commitProcessingHandoff,
+      getCancellationRequestNonce,
       persistenceStatus,
       qi,
       renewSubmissionLease,
@@ -2904,17 +2977,13 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     ) {
       activeAttemptRef.current = null
       activeAttemptPhaseRef.current = null
+      finalizeFailure("Cancelled by user.", "cancelled")
+      return
     }
     const persistedTracking = persistedTrackingRef.current
     const sessionId = String(
       activeSessionIdRef.current || persistedTracking?.sessionId || ""
     ).trim()
-    const cancellationKey = buildCancellationAuthorityKey(
-      persistedTracking,
-      sessionId
-    )
-    if (!sessionId || cancelledSessionIdsRef.current.has(cancellationKey)) return
-    cancelledSessionIdsRef.current.add(cancellationKey)
     for (const progress of processingState.perItemProgress) {
       if (
         progress.status === "complete" ||
@@ -2935,6 +3004,12 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         terminalOutcome: null,
       })
     }
+    const cancellationKey = buildCancellationAuthorityKey(
+      persistedTracking,
+      sessionId
+    )
+    if (!sessionId || cancelledSessionIdsRef.current.has(cancellationKey)) return
+    cancelledSessionIdsRef.current.add(cancellationKey)
     void cancelQuickIngestSession({
       sessionId,
       batchIds: resolveTrackingBatchIds(persistedTracking),
@@ -3002,6 +3077,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       })
   }, [
     cancellationRequestNonce,
+    finalizeFailure,
     processingState.perItemProgress,
     markInterrupted,
     qi,
@@ -3117,31 +3193,6 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       if (isMountedRef.current) void beginProcessing(stateRef.current)
     })
   }, [beginProcessing, isCheckingConnection, isOnlineForIngest])
-
-  useEffect(() => {
-    if (!open || !autoProcessQueued) {
-      autoProcessedRef.current = false
-    }
-  }, [autoProcessQueued, open])
-
-  useEffect(() => {
-    if (
-      autoProcessQueued &&
-      !autoProcessedRef.current &&
-      validQueueItems.length > 0 &&
-      isOnlineForIngest &&
-      !isCheckingConnection
-    ) {
-      autoProcessedRef.current = true
-      handleQuickProcess()
-    }
-  }, [
-    autoProcessQueued,
-    handleQuickProcess,
-    isCheckingConnection,
-    isOnlineForIngest,
-    validQueueItems.length,
-  ])
 
   // Navigation callbacks for WizardResultsStep CTAs
   const navigate = useNavigate()
@@ -3267,7 +3318,8 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         const perItemProgress = buildProgressFromReattachedJobs(
           trackedQueueItems,
           snapshot.jobs,
-          retryTracking
+          retryTracking,
+          processingStateRef.current.perItemProgress
         )
         if (snapshot.lifecycle === "processing") {
           updateProcessingState({
@@ -3568,10 +3620,17 @@ const QuickIngestWizardSession: React.FC<QuickIngestWizardSessionProps> = ({
   const initialStateRef = useRef(
     buildInitialWizardState(initialSessionRef.current)
   )
-  const currentSession = useQuickIngestSessionStore.getState().session
-  const authoritativeSession =
-    currentSession?.id === sessionId ? currentSession : initialSessionRef.current
-  const externalState = buildInitialWizardState(authoritativeSession)
+  const authoritativeSession = useMemo(() => {
+    void externalAuthorityRevision
+    const currentSession = useQuickIngestSessionStore.getState().session
+    return currentSession?.id === sessionId
+      ? currentSession
+      : initialSessionRef.current
+  }, [externalAuthorityRevision, sessionId])
+  const externalState = useMemo(
+    () => buildInitialWizardState(authoritativeSession),
+    [authoritativeSession]
+  )
   const sessionRef = useRef(authoritativeSession)
   sessionRef.current = authoritativeSession
   const showSession = useQuickIngestSessionStore((store) => store.showSession)
@@ -3585,6 +3644,7 @@ const QuickIngestWizardSession: React.FC<QuickIngestWizardSessionProps> = ({
   const reviewHandoffGuardRef = useRef<string | null>(null)
   const processingHandoffGuardRef = useRef<IngestWizardState | null>(null)
   const [cancellationRequestNonce, setCancellationRequestNonce] = useState(0)
+  const cancellationRequestNonceRef = useRef(0)
   const [itemCancellationRequest, setItemCancellationRequest] = useState<{
     id: string
     nonce: number
@@ -3766,13 +3826,25 @@ const QuickIngestWizardSession: React.FC<QuickIngestWizardSessionProps> = ({
   )
 
   const deferAuthoritativeCancellation = useCallback(() => {
-    setCancellationRequestNonce((value) => value + 1)
+    cancellationRequestNonceRef.current += 1
+    setCancellationRequestNonce(cancellationRequestNonceRef.current)
     const tracking = sessionRef.current?.tracking
-    if (tracking?.mode !== "extension-runtime" && !tracking?.runId) {
+    if (
+      tracking?.submissionState !== "creating_run" &&
+      tracking?.mode !== "extension-runtime" &&
+      !tracking?.runId &&
+      !tracking?.jobIds?.length &&
+      !tracking?.batchIds?.length
+    ) {
       return false
     }
     return true
   }, [])
+
+  const getCancellationRequestNonce = useCallback(
+    () => cancellationRequestNonceRef.current,
+    []
+  )
 
   const deferAuthoritativeItemCancellation = useCallback((id: string) => {
     setItemCancellationRequest((current) => ({
@@ -3823,6 +3895,7 @@ const QuickIngestWizardSession: React.FC<QuickIngestWizardSessionProps> = ({
         replaceWithNewDraft={createNewDraft ?? replaceWithNewDraft}
         setProcessingWarning={setSessionProcessingWarning}
         cancellationRequestNonce={cancellationRequestNonce}
+        getCancellationRequestNonce={getCancellationRequestNonce}
         itemCancellationRequest={itemCancellationRequest}
         statusCheckRequestNonce={statusCheckRequestNonce}
       />
