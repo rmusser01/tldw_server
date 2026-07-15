@@ -66,6 +66,7 @@ Phase 3 will not:
 - Make the extraction Playwright lifecycle use the new analyzer browser
   adapter.
 - Proxy or inspect network requests made internally by external executables.
+- Provide DNS-pinned browser transport or an egress-enforcing browser proxy.
 
 ## Selected Approach
 
@@ -124,6 +125,8 @@ The following rules are mandatory:
 
 - `preflight` must not import either legacy scraper.
 - `runtime` must not import `preflight` or concrete policy implementations.
+- `runtime` may define probe-egress protocols; concrete adapters belong under
+  `policy` and may delegate to centralized security policy evaluation.
 - The two scrape consumers must not import analyzer, scoring, or
   recommendation internals.
 - Moved analyzers must not create HTTP sessions, Playwright instances, or
@@ -161,6 +164,14 @@ External tools require a compatibility transition. When
 disables it; an explicit true value enables it. A malformed explicit value
 fails closed to false and produces only a sanitized configuration warning.
 
+When the absent setting activates the installed-tool fallback, a
+concurrency-safe process-level once guard emits one safe warning without a URL
+and increments the bounded metric once:
+`web_scraping_preflight_legacy_external_tool_default_total{tool="wafw00f"}`.
+An explicit true or false setting emits neither warning nor compatibility
+metric. Phase 7 changes the absent-setting default to disabled after migration
+telemetry and documentation have made the transition visible.
+
 No new user-facing budget keys are introduced. Tests and future callers may
 inject optional limits through the execution context.
 
@@ -184,12 +195,30 @@ passing an unbound boolean. Both scrape consumers use the same decision:
 `run_preflight` rejects a denied `PreflightTarget` as programmer error. It
 never performs analyzer work for a denied target.
 
+### ProbeEgressGuard
+
+The Phase 2 `OutboundPolicyChecker` remains a scrape-level boundary. It owns
+the primary egress and optional robots decision and is not reused for every
+redirect, browser asset, or WebSocket attempt.
+
+Phase 3 adds a narrower protocol-only `ProbeEgressGuard` under `runtime` and a
+concrete adapter under `policy`. The guard returns a small immutable
+`ProbeEgressDecision` and delegates to centralized
+`Security.egress.evaluate_url_policy`. It does not evaluate robots.
+
+The execution context uses this guard for every HTTP redirect destination,
+browser request, and explicit external-tool launch target, including
+exact-target dispatches. Positive decisions are not cached across dispatches.
+The HTTP runtime performs its existing egress check again immediately before
+transport work.
+
 ### PreflightExecutionContext
 
 One request-scoped execution context owns:
 
 - the runtime request metadata associated with the explicit target;
 - the outbound policy checker;
+- the probe egress guard;
 - governed HTTP, browser, and external-tool adapters;
 - an overall deadline derived from the existing timeout setting;
 - optional request, browser, and active-probe limits;
@@ -274,6 +303,19 @@ Each analyzer receives the same execution context and performs outbound work
 only through its probe interfaces. Passive parsing and scoring helpers remain
 ordinary pure functions.
 
+Each moved analyzer has two deliberately separate entry surfaces:
+
+- a private async implementation that requires the execution context and is
+  the only surface used by the runner and facade;
+- a public compatibility entry that preserves the historical name, signature,
+  and sync/async classification.
+
+The historically synchronous JS, integrity, WAF, captcha, behavioral, robots,
+and fingerprint entries remain synchronous to direct callers. TLS and
+rate-limit entries remain coroutine functions. Compatibility wrappers adapt
+to the internal async implementation without allowing the standard facade to
+call synchronous wrappers.
+
 Unexpected analyzer exceptions are isolated to that analyzer key. The runner
 continues with the remaining analyzers and then calculates scoring and
 recommendations over the complete result map. `asyncio.CancelledError` is
@@ -293,7 +335,7 @@ The adapter:
   remaining overall deadline;
 - disables transport-level automatic redirects;
 - resolves relative redirects explicitly;
-- applies policy and egress validation before every hop;
+- applies the probe egress guard before every hop;
 - uses the existing `http_client.DEFAULT_MAX_REDIRECTS` limit and redirect
   safety behavior rather than defining a second limit;
 - strips sensitive headers and cookies at origin boundaries through the
@@ -301,11 +343,12 @@ The adapter:
 - closes every response in success, failure, timeout, and cancellation paths.
 
 An exact-target probe reuses the allowed URL-bound `PreflightTarget` decision
-instead of repeating the scrape-level robots decision. Every dispatch still
-runs the lower-level egress guard. A redirect or other subrequest URL receives
-a new outbound policy decision with `respect_robots=False` and a
-`preflight_subrequest` stage before dispatch. This keeps primary robots timing
-unchanged while governing every distinct outbound destination.
+instead of repeating the scrape-level robots decision. Every dispatch,
+including an exact-target dispatch, receives a fresh probe egress decision.
+The runtime HTTP boundary then repeats its existing egress validation
+immediately before transport work. Redirect and subrequest checks use a
+`preflight_subrequest` stage and never evaluate robots. This keeps primary
+robots timing unchanged while governing every actual outbound destination.
 
 Redirect loops, invalid locations, denied destinations, policy-check errors,
 and exhausted budgets become analyzer-scoped safe errors. No denied redirect
@@ -321,22 +364,40 @@ adapter.
 The guarded browser adapter:
 
 - reserves browser budget before launch or context creation;
-- installs request interception before navigation;
-- policy-checks HTTP and HTTPS navigation, redirects, and subresources;
-- intercepts WebSocket attempts when supported by the installed Playwright
-  version and blocks them when they cannot be governed;
+- creates contexts with service workers blocked because Playwright routing
+  cannot reliably intercept requests owned by service workers;
+- installs HTTP and WebSocket routing before creating or navigating a page;
+- applies the probe egress guard to HTTP and HTTPS navigation, redirects,
+  subresources, and WebSocket attempts;
 - aborts denied requests without exposing the full URL in logs;
 - uses the remaining overall deadline to cap navigation and wait timeouts;
 - closes pages, contexts, and browser processes in `finally` paths.
 
-If the installed runtime cannot provide the required interception capability,
-the affected browser analyzer returns `unavailable`. It must not fall back to
-direct synchronous Playwright access.
+Phase 3 raises the Playwright dependency floor to `>=1.48.0` in the base,
+`web_research`, and `scrape-analyzers` dependency groups because
+`browser_context.route_web_socket` was added in Playwright 1.48. The adapter
+also performs a runtime capability check for environments installed before the
+dependency change. If HTTP routing, WebSocket routing, or service-worker
+blocking is unavailable, the affected browser analyzer returns `unavailable`.
+It must not fall back to direct synchronous Playwright access.
+
+These requirements follow the Playwright
+[`BrowserContext` API](https://playwright.dev/python/docs/api/class-browsercontext),
+which documents the WebSocket routing version and recommends blocking service
+workers when relying on request routing.
+
+Browser routing provides URL-level egress enforcement; it does not pin DNS
+resolution to the address approved by the guard. Full DNS-rebinding protection
+for browser probes requires a governed proxy or pinned browser transport and
+is outside Phase 3. This limitation is explicit and must not be described as
+equivalent to the runtime HTTP transport's dispatch-time validation.
 
 Network and browser operations use native async APIs. `asyncio.to_thread` is
 not used for cancellable network, browser, or subprocess work because task
 cancellation cannot stop the underlying thread. Thread offload remains
-permitted only for bounded non-I/O parsing when necessary.
+permitted only for the existing bounded DNS resolver bridge, the probe-egress
+adapter around the synchronous central evaluator, bounded non-I/O parsing, and
+the isolated legacy synchronous compatibility bridge.
 
 ## Governed External Tools
 
@@ -344,8 +405,8 @@ permitted only for bounded non-I/O parsing when necessary.
 adapter:
 
 - honors the compatibility config behavior described above;
-- requires and validates the allowed URL-bound target before launch without
-  repeating the primary policy decision;
+- requires the allowed URL-bound target and obtains a fresh probe egress
+  decision before launch without repeating the primary robots decision;
 - reserves one active-probe budget slot;
 - executes an argument list without a shell;
 - uses an async subprocess;
@@ -359,7 +420,9 @@ An external executable is an opaque active probe. Phase 3 can govern whether
 it starts, its approved target, budget, timeout, cancellation, and exposed
 output, but cannot policy-check redirects or requests the executable makes
 internally. Proxying or sandboxing those internal requests is explicitly out
-of scope. The design does not claim per-hop governance inside `wafw00f`.
+of scope. The tool also resolves its own destination after the launch check,
+so the design does not claim DNS pinning or per-hop governance inside
+`wafw00f`.
 
 ## Advice Semantics
 
@@ -394,6 +457,20 @@ Failure behavior is intentionally asymmetric:
 Policy-check failure for an analyzer probe denies that probe. It never fails
 open into an ungoverned outbound request.
 
+The execution context derives one monotonic deadline at preflight start. Every
+operation caps its local timeout against the remaining time. Expiry of that
+deadline becomes the existing overall preflight timeout result; cancellation
+of the caller remains `asyncio.CancelledError` and is never confused with
+deadline expiry. If the deadline timer and caller cancellation race, observed
+caller cancellation wins.
+
+Resource cleanup runs in a shielded task with one shared two-second grace
+period for the preflight run so caller cancellation does not immediately
+interrupt close operations. If graceful cleanup exceeds that bound, adapters
+force-close resources and terminate, then kill and await subprocesses as
+applicable. Cleanup errors are sanitized and recorded internally but never
+replace the original timeout or cancellation outcome.
+
 ## Redaction
 
 Preflight logs use sanitized host/path labels and exclude:
@@ -415,7 +492,9 @@ The physical implementation moves into `preflight`. Every old import path
 recorded by Phase 0 remains importable under `scraper_analyzers`, including
 deep analyzer, scoring, recommendation, and utility modules.
 
-Shims use explicit re-exports and explicit `__all__` values. They preserve:
+Canonical public compatibility wrappers live in `preflight`; old modules use
+explicit re-exports and explicit `__all__` values. Private internal async
+implementations are not re-exported. The wrappers and shims preserve:
 
 - import paths;
 - public names and callable signatures;
@@ -428,6 +507,15 @@ new consumer. Tests for consumer behavior inject or patch the new facade.
 Direct callers of legacy `gather_analysis` and `run_analysis` receive the same
 `results`/`score`/`recommendations` shape through a default governed context.
 The synchronous wrapper still raises inside an active event loop.
+
+Historically synchronous per-analyzer wrappers run their internal coroutine
+through a lazily started, process-scoped background event-loop thread. The
+bridge propagates return values and exceptions, supports the wrapper's timeout,
+cancels timed-out submissions without abandoning their cleanup, and shuts down
+at process exit. This bridge is compatibility-only and is never used by the
+facade or runner. `run_analysis` deliberately does not use the bridge; it
+retains its historical active-event-loop rejection. Historically async TLS and
+rate-limit public entries remain coroutine functions.
 
 For a policy-denied direct legacy call, the compatibility layer returns the
 stable top-level and analyzer-key structure with safe `policy_denied` analyzer
@@ -472,21 +560,28 @@ network, real browser, or real external-tool work.
   advice, notes, and optional payload shape.
 - Assert the stable top-level and analyzer-key sets for every runner outcome.
 - Cover every existing config key with absent, valid, and malformed values.
+- Assert the absent external-tool setting emits its process-level warning and
+  metric at most once, while explicit true or false emits neither.
 - Cover both scrape consumers and all existing return paths that attach
   preflight metadata.
 
 ### Policy and Probe Tests
 
 - Denied primary targets run no analyzers or extraction probes.
-- Exact-target probes reuse the URL-bound target decision, every dispatch runs
-  lower-level egress validation, and every redirect or other subrequest URL
-  receives a subrequest policy decision.
+- Exact-target probes reuse the scrape-level target and robots decision, every
+  dispatch receives a probe egress decision, and runtime HTTP repeats egress
+  validation immediately before transport work.
 - Redirect tests cover relative locations, loops, maximum hops, scheme changes,
   denied/private targets, missing locations, and policy-check failure.
-- Browser fakes verify interception is installed before navigation and denied
-  navigation, redirects, subresources, and WebSocket attempts are aborted.
+- Browser fakes verify service workers are blocked, routing is installed before
+  page creation, and denied navigation, redirects, subresources, and WebSocket
+  attempts are aborted.
+- Browser capability tests verify environments below Playwright 1.48 return
+  `unavailable` without launching a browser.
 - External-tool availability and execution are fully injected so tests cannot
   execute a locally installed `wafw00f` accidentally.
+- External-tool launch tests require a fresh allowed probe egress decision and
+  prove denial or guard failure prevents process creation.
 
 ### Budget, Timeout, and Cancellation Tests
 
@@ -495,7 +590,9 @@ network, real browser, or real external-tool work.
 - Finite counters never become negative or exceed their limits.
 - Effective operation timeouts never exceed remaining overall time.
 - Overall timeout omits advice and public payload while extraction continues.
-- External cancellation propagates and cleanup completes.
+- Monotonic deadline expiry and caller cancellation remain distinct outcomes.
+- External cancellation propagates, bounded shielded cleanup receives its
+  two-second grace, and forced cleanup preserves the original outcome.
 - Responses, browser resources, and subprocesses close or terminate on every
   exit path.
 
@@ -512,6 +609,10 @@ verify none appear in logs, typed failures, or public analyzer errors.
 
 - Every old import path from the Phase 0 inventory resolves.
 - Explicit shims expose the expected names, signatures, and result shapes.
+- `inspect.signature` and `inspect.iscoroutinefunction` pin every historical
+  public analyzer entry's signature and sync/async classification.
+- Synchronous compatibility wrappers exercise the background-loop bridge,
+  while `run_analysis` still rejects calls from an active event loop.
 - An AST-based dependency guard with a small explicit allowlist rejects:
   - imports from `preflight` to either legacy scraper;
   - analyzer-internal HTTP, Playwright, or subprocess creation;
@@ -532,8 +633,9 @@ Implementation proceeds in reviewable, continuously passing stages:
 
 1. Add typed options, target, execution context, probe protocols, deterministic
    fakes, and characterization tests.
-2. Add governed HTTP, browser, and external-tool adapters with focused policy,
-   timeout, cancellation, cleanup, and redaction tests.
+2. Add governed HTTP, browser, and external-tool adapters, raise the Playwright
+   floor, and add focused capability, policy, timeout, cancellation, cleanup,
+   and redaction tests.
 3. Move analyzers, scoring, recommendations, and utilities into `preflight`,
    adding explicit compatibility shims.
 4. Migrate `Article_Extractor_Lib` to the facade and run its compatibility
@@ -580,7 +682,15 @@ reserve threads for bounded parsing only; assert cleanup on cancellation.
 
 Mitigation: require interception capability before browser analyzer execution
 and return `unavailable` rather than using an ungoverned fallback. Cover
-navigation, subresources, and WebSockets in adapter contract tests.
+navigation, subresources, service workers, and WebSockets in adapter contract
+tests. Document that URL routing is not DNS-pinned transport; a governed proxy
+or pinned browser transport is later hardening work.
+
+### Risk: Synchronous compatibility creates a second execution model
+
+Mitigation: isolate the background event-loop bridge behind historical public
+wrappers, pin signatures and coroutine classification in tests, and prohibit
+the facade and runner from calling the bridge.
 
 ### Risk: Compatibility shims become permanent implementation homes
 
@@ -609,7 +719,8 @@ Phase 3 is successful when:
 
 - `preflight` is the sole analyzer implementation owner.
 - Both article scraping consumers use the same facade.
-- Primary and analyzer probe policy timing is explicit and tested.
+- Scrape-level primary policy and per-dispatch probe egress are separate,
+  explicit, and tested.
 - Analyzer HTTP, browser, and external-tool work uses governed adapters.
 - Existing config keys and successful output behavior remain compatible.
 - Analyzer failures are isolated and extraction remains fail-open.
@@ -635,3 +746,8 @@ Phase 3 is successful when:
   deterministic characterization, structural dependency checks, centralized
   payload eligibility, property invariants, and optional real-browser smoke
   coverage are all specified.
+- Final review refinements incorporated: historical sync/async callable
+  classification, separate scrape and probe policy roles, Playwright 1.48 and
+  service-worker requirements, URL-routing DNS limitations, monotonic deadline
+  and bounded shielded cleanup semantics, and the external-tool default sunset
+  signal are explicit and testable.
