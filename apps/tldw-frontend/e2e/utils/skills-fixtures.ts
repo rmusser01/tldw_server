@@ -436,26 +436,30 @@ export async function mockPowerUserSkillsLibrary(page: Page) {
 
   await page.route(/\/api\/v1\/skills\/([^/?]+)\/export(?:\?.*)?$/, async (route) => {
     const segments = new URL(route.request().url()).pathname.split("/").filter(Boolean)
-    let name = ""
+    const rawName = segments.at(-2) ?? ""
+    let decodedName: string | undefined
     try {
-      name = decodeURIComponent(segments.at(-2) ?? "")
+      decodedName = decodeURIComponent(rawName)
     } catch {
-      await fulfillJson(route, { detail: "Skill not found" }, 404)
-      return
-    }
-
-    if (!largeLibrarySkills.some((candidate) => candidate.name === name)) {
-      await fulfillJson(route, { detail: "Skill not found" }, 404)
-      return
+      decodedName = undefined
     }
 
     const method = route.request().method()
-    exportRequests.push({ method, name })
+    exportRequests.push({ method, name: decodedName ?? rawName })
     if (method !== "GET") {
       await fulfillJson(route, {}, 405)
       return
     }
 
+    if (
+      decodedName === undefined
+      || !largeLibrarySkills.some((candidate) => candidate.name === decodedName)
+    ) {
+      await fulfillJson(route, { detail: "Skill not found" }, 404)
+      return
+    }
+
+    const name = decodedName
     await route.fulfill({
       status: 200,
       headers: {
