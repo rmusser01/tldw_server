@@ -256,23 +256,25 @@ def _build_intents(
             QueryPair("query", normalized_query),
             QueryPair("offset", "0"),
             QueryPair("limit", str(limit)),
+            QueryPair(
+                "fields",
+                "paperId,title,authors,abstract,tldr,externalIds,url,openAccessPdf",
+            ),
         ),
         "crossref_api": (
             QueryPair("query", normalized_query),
             QueryPair("offset", "0"),
             QueryPair("rows", str(limit)),
+            QueryPair("select", "DOI,title,author,abstract,URL,link"),
         ),
         "zenodo_records_api": (
             QueryPair("q", normalized_query),
             QueryPair("page", "1"),
             QueryPair("size", str(limit)),
         ),
-        "figshare_public_api": (
-            QueryPair("page", "1"),
-            QueryPair("page_size", str(limit)),
-        ),
+        "figshare_public_api": (),
         "osf_api": (
-            QueryPair("q", normalized_query),
+            QueryPair("filter[title]", normalized_query),
             QueryPair("page", "1"),
             QueryPair("page[size]", str(limit)),
         ),
@@ -284,7 +286,13 @@ def _build_intents(
         if "limit" in route.policy.allowed_query_keys:
             pairs += (QueryPair("limit", str(limit)),)
     json_body_pairs = (
-        (JSONBodyPair("search_for", normalized_query),) if route.backend_id == "figshare_public_api" else ()
+        (
+            JSONBodyPair("search_for", normalized_query),
+            JSONBodyPair("page", 1),
+            JSONBodyPair("page_size", limit),
+        )
+        if route.backend_id == "figshare_public_api"
+        else ()
     )
     return (
         _intent(

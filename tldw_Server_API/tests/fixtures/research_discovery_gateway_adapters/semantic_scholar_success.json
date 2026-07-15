@@ -1,0 +1,33 @@
+{
+  "data": [
+    {
+      "paperId": "S2-PAPER-001",
+      "title": "Shared Discovery Record",
+      "authors": [
+        {
+          "authorId": "S2-AUTHOR-001",
+          "name": "Ada Researcher"
+        }
+      ],
+      "abstract": "A sanitized abstract for discovery adapter testing.",
+      "tldr": {
+        "model": "tldr@v2.0.0",
+        "text": "A sanitized summary for discovery adapter testing."
+      },
+      "externalIds": {
+        "ArXiv": "2601.01234",
+        "CorpusId": 123456789,
+        "DOI": "10.5555/shared.discovery.2026",
+        "PubMed": "12345678",
+        "PubMedCentral": "PMC1234567"
+      },
+      "url": "https://www.semanticscholar.org/paper/S2-PAPER-001",
+      "openAccessPdf": {
+        "url": "https://example.org/research/shared-discovery.pdf",
+        "status": "GREEN"
+      }
+    }
+  ],
+  "total": 1,
+  "offset": 0
+}

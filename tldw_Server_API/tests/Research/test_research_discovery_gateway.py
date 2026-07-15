@@ -107,6 +107,34 @@ def _post_route_and_intent() -> tuple[AccessRoute, DispatchIntent]:
     )
 
 
+def _figshare_post_route_and_intent() -> tuple[AccessRoute, DispatchIntent]:
+    route, intent = _route_and_intent()
+    limits = replace(intent.limits, max_request_body_bytes=128)
+    policy = replace(
+        route.policy,
+        methods=("POST",),
+        limits=limits,
+        allowed_query_keys=(),
+        pagination_query_key=None,
+        pagination_json_body_key="page",
+        allowed_json_body_keys=("search_for", "page", "page_size"),
+        integer_json_body_keys=("page", "page_size"),
+        policy_digest="",
+    )
+    return replace(route, policy=policy), replace(
+        intent,
+        policy_digest=policy.policy_digest,
+        method="POST",
+        query_pairs=(),
+        limits=limits,
+        json_body_pairs=(
+            JSONBodyPair("search_for", "quantum mechanics"),
+            JSONBodyPair("page", 1),
+            JSONBodyPair("page_size", 25),
+        ),
+    )
+
+
 def _hop_response(
     *,
     status_code: int = 200,
@@ -198,6 +226,62 @@ async def test_post_json_body_is_minified_sorted_bounded_and_explicit() -> None:
 
 
 @pytest.mark.asyncio
+async def test_numeric_json_body_pagination_is_serialized_with_exact_scalar_types() -> None:
+    route, intent = _figshare_post_route_and_intent()
+    calls: list[NormalizedHTTPHopRequest] = []
+
+    async def one_hop(request: NormalizedHTTPHopRequest) -> HTTPHopResponse:
+        calls.append(request)
+        return _hop_response()
+
+    await dispatch_once(
+        route,
+        intent,
+        is_policy_active=lambda _route_id, _digest: True,
+        one_hop=one_hop,
+    )
+
+    assert len(calls) == 1
+    assert calls[0].target == "/search"
+    assert calls[0].body == b'{"page":1,"page_size":25,"search_for":"quantum mechanics"}'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("name", "invalid_value"),
+    (("page", "1"), ("page_size", "25"), ("search_for", 1)),
+)
+async def test_json_body_scalar_schema_mismatch_rejects_before_hop(
+    name: str,
+    invalid_value: str | int,
+) -> None:
+    route, intent = _figshare_post_route_and_intent()
+    intent = replace(
+        intent,
+        json_body_pairs=tuple(
+            JSONBodyPair(pair.name, invalid_value) if pair.name == name else pair for pair in intent.json_body_pairs
+        ),
+    )
+    calls = 0
+
+    async def one_hop(request: NormalizedHTTPHopRequest) -> HTTPHopResponse:
+        nonlocal calls
+        calls += 1
+        return _hop_response()
+
+    with pytest.raises(DiscoveryGatewayError) as caught:
+        await dispatch_once(
+            route,
+            intent,
+            is_policy_active=lambda _route_id, _digest: True,
+            one_hop=one_hop,
+        )
+
+    assert caught.value.code == "request_rejected"
+    assert calls == 0
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "case",
     ("unresolved-binding", "oversized", "unicode", "undeclared-key", "get-with-body"),
@@ -274,9 +358,11 @@ async def test_hostile_json_scalar_subclass_rejects_before_hop() -> None:
         pass
 
     route, intent = _post_route_and_intent()
+    hostile_pair = JSONBodyPair("search_for", "safe")
+    object.__setattr__(hostile_pair, "value", HostileString("secret-body"))
     intent = replace(
         intent,
-        json_body_pairs=(JSONBodyPair("search_for", HostileString("secret-body")),),
+        json_body_pairs=(hostile_pair,),
     )
     calls = 0
 

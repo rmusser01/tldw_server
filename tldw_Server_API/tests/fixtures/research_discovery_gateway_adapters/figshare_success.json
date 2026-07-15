@@ -1,0 +1,27 @@
+[
+  {
+    "id": 2001,
+    "title": "Shared Discovery Record",
+    "doi": "10.5555/shared.discovery.2026",
+    "handle": "12345/figshare.2001",
+    "url": "https://api.figshare.com/v2/articles/2001",
+    "url_public_api": "https://api.figshare.com/v2/articles/2001",
+    "url_public_html": "https://figshare.com/articles/dataset/Shared_Discovery_Record/2001",
+    "url_private_api": "https://api.figshare.com/v2/account/articles/2001",
+    "url_private_html": "https://figshare.com/account/articles/2001",
+    "thumb": "https://ndownloader.figshare.com/files/2001/preview/2001/thumb.png",
+    "defined_type": 3,
+    "defined_type_name": "dataset",
+    "resource_doi": "",
+    "resource_title": "",
+    "created_date": "2026-01-15T00:00:00Z",
+    "modified_date": "2026-01-16T00:00:00Z",
+    "published_date": "2026-01-15T00:00:00Z",
+    "group_id": 0,
+    "timeline": {
+      "firstOnline": "2026-01-15",
+      "publisherPublication": "2026-01-15"
+    },
+    "project_id": null
+  }
+]

@@ -138,7 +138,7 @@ class _BindingSnapshot:
     allowed_query_keys: tuple[str, ...]
     query_pairs: tuple[tuple[str, str], ...]
     query_keys: tuple[str, ...]
-    json_body_pairs: tuple[tuple[str, str], ...]
+    json_body_pairs: tuple[tuple[str, str | int], ...]
     timeout_ms: int
     max_response_bytes: int
     route_limits: RouteLimits
@@ -208,11 +208,14 @@ def _snapshot_binding(route: object, intent: object) -> _BindingSnapshot | None:
             or type(intent.query_bindings) is not tuple
             or type(policy.allowed_query_keys) is not tuple
             or type(policy.allowed_json_body_keys) is not tuple
+            or type(policy.integer_json_body_keys) is not tuple
             or (policy.pagination_query_key is not None and type(policy.pagination_query_key) is not str)
+            or (policy.pagination_json_body_key is not None and type(policy.pagination_json_body_key) is not str)
             or any(type(value) is not str for value in policy.methods)
             or any(type(value) is not str for value in policy.paths)
             or any(type(value) is not str for value in policy.allowed_query_keys)
             or any(type(value) is not str for value in policy.allowed_json_body_keys)
+            or any(type(value) is not str for value in policy.integer_json_body_keys)
             or any(
                 type(getattr(limits, name)) is not int
                 for limits in (policy.limits, intent.limits)
@@ -243,8 +246,19 @@ def _snapshot_binding(route: object, intent: object) -> _BindingSnapshot | None:
             or (bool(intent.json_body_pairs) and intent.method != "POST")
             or (bool(policy.allowed_json_body_keys) and "POST" not in policy.methods)
             or bool(set(policy.allowed_query_keys).intersection(policy.allowed_json_body_keys))
+            or len(set(policy.integer_json_body_keys)) != len(policy.integer_json_body_keys)
+            or not set(policy.integer_json_body_keys).issubset(policy.allowed_json_body_keys)
             or (
                 policy.pagination_query_key is not None and policy.pagination_query_key not in policy.allowed_query_keys
+            )
+            or (
+                policy.pagination_json_body_key is not None
+                and policy.pagination_json_body_key not in policy.allowed_json_body_keys
+            )
+            or (policy.pagination_query_key is not None and policy.pagination_json_body_key is not None)
+            or (
+                policy.pagination_json_body_key is not None
+                and policy.pagination_json_body_key not in policy.integer_json_body_keys
             )
         ):
             return None
@@ -264,16 +278,28 @@ def _snapshot_binding(route: object, intent: object) -> _BindingSnapshot | None:
             query_keys.append(validated_pair.name)
 
         allowed_json_body_keys = set(policy.allowed_json_body_keys)
-        json_body_pairs: list[tuple[str, str]] = []
+        integer_json_body_keys = set(policy.integer_json_body_keys)
+        json_body_pairs: list[tuple[str, str | int]] = []
         seen_body_keys: set[str] = set()
         for pair in intent.json_body_pairs:
-            if type(pair) is not JSONBodyPair or type(pair.name) is not str or type(pair.value) is not str:
+            if type(pair) is not JSONBodyPair or type(pair.name) is not str or type(pair.value) not in {str, int}:
                 return None
             validated_pair = JSONBodyPair(pair.name, pair.value)
             if validated_pair.name not in allowed_json_body_keys or validated_pair.name in seen_body_keys:
                 return None
+            if validated_pair.name in integer_json_body_keys:
+                if type(validated_pair.value) is not int:
+                    return None
+            elif type(validated_pair.value) is not str:
+                return None
             seen_body_keys.add(validated_pair.name)
             json_body_pairs.append((validated_pair.name, validated_pair.value))
+        if policy.pagination_json_body_key is not None:
+            pagination_values = tuple(
+                value for name, value in json_body_pairs if name == policy.pagination_json_body_key
+            )
+            if len(pagination_values) != 1 or type(pagination_values[0]) is not int:
+                return None
 
         http_limits = _hop_limits(intent.limits)
         return _BindingSnapshot(
@@ -344,7 +370,10 @@ def _build_request(binding: _BindingSnapshot) -> NormalizedHTTPHopRequest | None
         if binding.method != "POST":
             return None
         if (
-            sum(len(name) + len(value) for name, value in binding.json_body_pairs)
+            sum(
+                len(name) + (len(value) if type(value) is str else len(str(value)))
+                for name, value in binding.json_body_pairs
+            )
             > binding.http_limits.max_request_body_bytes
         ):
             return None

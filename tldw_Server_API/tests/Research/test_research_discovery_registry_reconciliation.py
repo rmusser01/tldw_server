@@ -111,7 +111,7 @@ _EXPECTED_PAGINATION_KEYS = {
     "arxiv": "start",
     "pubmed": "retstart",
     "zenodo": "page",
-    "figshare": "page",
+    "figshare": None,
     "osf": "page",
 }
 
@@ -166,6 +166,10 @@ def test_foundation_route_policies_bind_exact_normalized_origins_and_paths() -> 
         assert route.query_modes == (QueryMode.STRUCTURED_QUERY,)
 
 
+def test_foundation_registry_version_tracks_frozen_route_policy_content() -> None:
+    assert foundation_registry().registry_version == "research-discovery-v2-foundation-2026-07-15"
+
+
 def test_foundation_routes_declare_exact_pagination_and_figshare_body_shape() -> None:
     registry = foundation_registry()
 
@@ -179,8 +183,33 @@ def test_foundation_routes_declare_exact_pagination_and_figshare_body_shape() ->
 
     assert actual == _EXPECTED_PAGINATION_KEYS
     assert figshare.methods == ("POST",)
-    assert figshare.allowed_query_keys == ("page", "page_size")
-    assert figshare.allowed_json_body_keys == ("search_for", "order", "order_direction")
+    assert figshare.allowed_query_keys == ()
+    assert figshare.pagination_json_body_key == "page"
+    assert figshare.allowed_json_body_keys == (
+        "search_for",
+        "page",
+        "page_size",
+        "order",
+        "order_direction",
+    )
+    assert figshare.integer_json_body_keys == ("page", "page_size")
+
+
+def test_osf_policy_keeps_supported_plain_page_number_shape() -> None:
+    policy = foundation_registry().get_route("open_science_framework_osf_api_direct").policy
+
+    assert policy.pagination_query_key == "page"
+    assert policy.allowed_query_keys == ("filter[title]", "page", "page[size]")
+    assert "q" not in policy.allowed_query_keys
+    assert "filter" not in policy.allowed_query_keys
+    assert "page[number]" not in policy.allowed_query_keys
+
+
+def test_zenodo_anonymous_route_caps_one_page_at_twenty_five_records() -> None:
+    policy = foundation_registry().get_route("zenodo_zenodo_records_api_direct").policy
+
+    assert policy.limits.max_pages == 1
+    assert policy.limits.max_results == 25
 
 
 def test_crossref_seed_alias_resolves_to_stable_product_identity() -> None:

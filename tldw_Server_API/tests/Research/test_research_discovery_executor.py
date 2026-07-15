@@ -6,6 +6,7 @@ import ast
 import asyncio
 import inspect
 from dataclasses import FrozenInstanceError, replace
+from urllib.parse import urlencode
 
 import pytest
 
@@ -13,6 +14,7 @@ from tldw_Server_API.app.core.Research.discovery import executor as executor_mod
 from tldw_Server_API.app.core.Research.discovery.contracts import (
     BudgetCeilings,
     CredentialStatus,
+    DispatchIntent,
     ExecutionMode,
     OperationKind,
     PredicateOperator,
@@ -110,6 +112,12 @@ def _gateway_response(route, intent) -> DiscoveryGatewayResponse:
         redirect_location=None,
         retry_after=None,
     )
+
+
+def _equivalent_reordered_redirect_location(intent: DispatchIntent) -> str:
+    """Build one same-path Location with every current query pair reordered."""
+    query = urlencode(tuple((pair.name, pair.value) for pair in reversed(intent.query_pairs)))
+    return f"{intent.path}?{query}"
 
 
 async def _assert_plan_validation_precedes_effects(registry, plan) -> None:
@@ -218,6 +226,42 @@ def _paginated_semantic_scholar_plan():
     )
     plan = compile_discovery_plan(
         PlanningRequest(("semantic_scholar",), "accounted execution", (), 3),
+        registry=registry,
+        readiness=foundation_readiness(ExecutionMode.SYNTHETIC),
+        budget=BudgetCeilings(1, 2, 2, 0, 0, 40_000, 3),
+    )
+    return registry, plan
+
+
+def _paginated_figshare_plan():
+    base = foundation_registry()
+    route_id = base.get_source("figshare").route_references[0].route_id
+    routes = []
+    for route in base.routes:
+        if route.route_id != route_id:
+            routes.append(route)
+            continue
+        limits = replace(route.policy.limits, max_pages=2)
+        policy = replace(
+            route.policy,
+            limits=limits,
+            allowed_query_keys=(),
+            pagination_query_key=None,
+            pagination_json_body_key="page",
+            allowed_json_body_keys=("search_for", "page", "page_size", "order", "order_direction"),
+            integer_json_body_keys=("page", "page_size"),
+            policy_digest="",
+        )
+        routes.append(replace(route, max_physical_dispatches=2, policy=policy))
+    registry = DiscoveryRegistry(
+        catalog_version=base.catalog_version,
+        registry_version=base.registry_version,
+        sources=base.sources,
+        routes=tuple(routes),
+        backends=base.backends,
+    )
+    plan = compile_discovery_plan(
+        PlanningRequest(("figshare",), "accounted execution", (), 3),
         registry=registry,
         readiness=foundation_readiness(ExecutionMode.SYNTHETIC),
         budget=BudgetCeilings(1, 2, 2, 0, 0, 40_000, 3),
@@ -381,6 +425,9 @@ def test_executor_public_contract_is_typed_and_frozen() -> None:
         cursor.value = 1  # type: ignore[misc]
     with pytest.raises(ValueError, match="cursor"):
         NumericCursor(-1)
+    with pytest.raises(ValueError, match="cursor"):
+        NumericCursor(2_147_483_648)
+    assert executor_module.MAX_PAGINATION_CURSOR == 2_147_483_647
     with pytest.raises(ValueError, match="binding"):
         NumericCSVBindingValues("result_ids", (0,))
 
@@ -2605,7 +2652,7 @@ async def test_post_terminal_stop_wins_before_retry_or_redirect_decision(
             response,
             status_code=302,
             trace=replace(response.trace, status_code=302),
-            redirect_location=f"{intent.path}?limit=3&offset=0&query=accounted+execution",
+            redirect_location=_equivalent_reordered_redirect_location(intent),
         )
 
     async def adapter(bound_group, dispatch):
@@ -2775,6 +2822,182 @@ async def test_initial_search_and_one_typed_page_are_independently_accounted() -
         result.usage.redirects,
         result.usage.retries,
     ) == (1, 2, 0, 0)
+
+
+@pytest.mark.asyncio
+async def test_figshare_numeric_json_body_cursor_replaces_page_for_second_dispatch() -> None:
+    registry, plan = _paginated_figshare_plan()
+    group = plan.dispatch_groups[0]
+    gateway_intents = []
+
+    async def gateway(route, intent, *, is_policy_active):
+        gateway_intents.append(intent)
+        return _gateway_response(route, intent)
+
+    async def adapter(bound_group, dispatch):
+        await dispatch(bound_group.intents[0])
+        await dispatch(bound_group.intents[0], cursor=NumericCursor(2))
+        return DiscoveryAdapterResult(candidates=())
+
+    await execute_discovery_plan(
+        plan,
+        registry=registry,
+        adapters={group.adapter_id: adapter},
+        gateway=gateway,
+        policy_is_active=lambda _route_id, _digest: True,
+        dispatch_id_factory=iter(("dispatch-page-1", "dispatch-page-2")).__next__,
+    )
+
+    assert tuple(intent.query_pairs for intent in gateway_intents) == ((), ())
+    assert tuple({pair.name: pair.value for pair in intent.json_body_pairs} for intent in gateway_intents) == (
+        {"search_for": "accounted execution", "page": 1, "page_size": 3},
+        {"search_for": "accounted execution", "page": 2, "page_size": 3},
+    )
+    assert all(
+        type(next(pair.value for pair in intent.json_body_pairs if pair.name == "page")) is int
+        for intent in gateway_intents
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("channel", ("query", "json_body"))
+async def test_unserializable_cursor_failure_latches_when_adapter_catches_dispatch_error(channel: str) -> None:
+    if channel == "query":
+        registry, plan = _paginated_semantic_scholar_plan()
+    else:
+        registry, plan = _paginated_figshare_plan()
+    cursor = NumericCursor(1)
+    object.__setattr__(cursor, "value", 2_147_483_648)
+    group = plan.dispatch_groups[0]
+    caught = []
+
+    async def gateway(route, intent, *, is_policy_active):
+        return _gateway_response(route, intent)
+
+    async def adapter(bound_group, dispatch):
+        await dispatch(bound_group.intents[0])
+        try:
+            await dispatch(bound_group.intents[0], cursor=cursor)
+        except Exception as error:  # noqa: BLE001 - hostile adapter swallows the boundary error.
+            caught.append(error)
+        return DiscoveryAdapterResult(candidates=())
+
+    result = await execute_discovery_plan(
+        plan,
+        registry=registry,
+        adapters={group.adapter_id: adapter},
+        gateway=gateway,
+        policy_is_active=lambda _route_id, _digest: True,
+        dispatch_id_factory=iter(("dispatch-initial", "dispatch-must-not-reserve")).__next__,
+    )
+
+    assert len(caught) == 1
+    assert result.logical_outcomes[0].state is LogicalOutcomeState.FAILED
+    assert result.logical_outcomes[0].code == "invalid_pagination_cursor"
+    assert tuple(record.dispatch_id for record in result.usage.physical_records) == ("dispatch-initial",)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("channel", ("query", "json_body"))
+async def test_latched_dispatch_rejection_poisons_capability_before_later_valid_page(channel: str) -> None:
+    if channel == "query":
+        registry, plan = _paginated_semantic_scholar_plan()
+        valid_cursor = NumericCursor(10)
+    else:
+        registry, plan = _paginated_figshare_plan()
+        valid_cursor = NumericCursor(2)
+    group = plan.dispatch_groups[0]
+    invalid_cursor = NumericCursor(1)
+    object.__setattr__(invalid_cursor, "value", 2_147_483_648)
+    caught_codes = []
+    gateway_calls = []
+    id_calls = []
+
+    async def gateway(route, intent, *, is_policy_active):
+        gateway_calls.append(intent)
+        return _gateway_response(route, intent)
+
+    def dispatch_id_factory():
+        dispatch_id = f"dispatch-{len(id_calls) + 1}"
+        id_calls.append(dispatch_id)
+        return dispatch_id
+
+    async def adapter(bound_group, dispatch):
+        await dispatch(bound_group.intents[0])
+        for cursor in (invalid_cursor, valid_cursor):
+            try:
+                await dispatch(bound_group.intents[0], cursor=cursor)
+            except executor_module.DiscoveryExecutionError as error:
+                caught_codes.append(error.code)
+        return DiscoveryAdapterResult(candidates=())
+
+    result = await execute_discovery_plan(
+        plan,
+        registry=registry,
+        adapters={group.adapter_id: adapter},
+        gateway=gateway,
+        policy_is_active=lambda _route_id, _digest: True,
+        dispatch_id_factory=dispatch_id_factory,
+    )
+
+    assert caught_codes == ["invalid_pagination_cursor", "invalid_pagination_cursor"]
+    assert id_calls == ["dispatch-1"]
+    assert len(gateway_calls) == 1
+    assert result.logical_outcomes[0].state is LogicalOutcomeState.FAILED
+    assert result.logical_outcomes[0].code == "invalid_pagination_cursor"
+    assert tuple(record.dispatch_id for record in result.usage.physical_records) == ("dispatch-1",)
+
+
+@pytest.mark.asyncio
+async def test_oversized_planned_query_cursor_rejects_before_id_or_gateway() -> None:
+    registry, plan = _semantic_scholar_plan()
+    group = plan.dispatch_groups[0]
+    intent = group.intents[0]
+    oversized_intent = replace(
+        intent,
+        query_pairs=tuple(
+            replace(pair, value="9" * 5_000) if pair.name == "offset" else pair for pair in intent.query_pairs
+        ),
+    )
+    provisional_group = replace(group, intents=(oversized_intent,))
+    group_id = expected_dispatch_group_id(provisional_group)
+    attempts = tuple(
+        replace(
+            attempt,
+            logical_attempt_id=expected_logical_attempt_id(attempt, group_id),
+        )
+        for attempt in group.logical_attempts
+    )
+    oversized_group = replace(
+        provisional_group,
+        dispatch_group_id=group_id,
+        logical_attempts=attempts,
+    )
+    plan = _replace_plan_with_fresh_digest(plan, dispatch_groups=(oversized_group,))
+    calls = []
+
+    async def gateway(route, dispatched_intent, *, is_policy_active):
+        calls.append("gateway")
+        return _gateway_response(route, dispatched_intent)
+
+    async def adapter(bound_group, dispatch):
+        calls.append("adapter")
+        await dispatch(bound_group.intents[0])
+        return DiscoveryAdapterResult(candidates=())
+
+    result = await execute_discovery_plan(
+        plan,
+        registry=registry,
+        adapters={group.adapter_id: adapter},
+        gateway=gateway,
+        policy_is_active=lambda _route_id, _digest: True,
+        dispatch_id_factory=lambda: calls.append("id") or "must-not-reserve",
+    )
+
+    assert calls == ["adapter"]
+    assert result.logical_outcomes[0].state is LogicalOutcomeState.FAILED
+    assert result.logical_outcomes[0].code == "pagination_query_invalid"
+    assert result.usage.physical_records == ()
 
 
 @pytest.mark.asyncio
@@ -3461,7 +3684,7 @@ async def test_semantically_identical_relative_redirect_reaches_final_2xx() -> N
         gateway_intents.append(intent)
         response = _gateway_response(route, intent)
         if len(gateway_intents) == 1:
-            location = f"{intent.path}?limit=3&offset=0&query=accounted+execution"
+            location = _equivalent_reordered_redirect_location(intent)
             return replace(
                 response,
                 status_code=302,
@@ -3529,12 +3752,12 @@ async def test_invalid_redirect_location_rejects_before_second_id(case: str) -> 
 
     async def gateway(route, intent, *, is_policy_active):
         calls.append("gateway")
-        valid = f"{intent.path}?query=accounted+execution&offset=0&limit=3"
+        valid = _equivalent_reordered_redirect_location(intent)
         locations = {
             "missing": None,
-            "changed_query": f"{intent.path}?query=changed&offset=0&limit=3",
-            "changed_limit": f"{intent.path}?query=accounted+execution&offset=0&limit=99",
-            "changed_path": "/undeclared/path?query=accounted+execution&offset=0&limit=3",
+            "changed_query": valid.replace("query=accounted+execution", "query=changed"),
+            "changed_limit": valid.replace("limit=3", "limit=99"),
+            "changed_path": valid.replace(intent.path, "/undeclared/path", 1),
             "cross_origin": f"https://attacker.example{valid}",
             "malformed": 7,
             "hostile": "https://secret-location-token@attacker.example/hidden",
@@ -3590,7 +3813,7 @@ async def test_redirect_allowance_exhaustion_rejects_before_second_id(exhausted:
             response,
             status_code=302,
             trace=replace(response.trace, status_code=302),
-            redirect_location=f"{intent.path}?query=accounted+execution&offset=0&limit=3",
+            redirect_location=_equivalent_reordered_redirect_location(intent),
         )
 
     async def adapter(bound_group, dispatch):
@@ -3625,7 +3848,7 @@ async def test_second_redirect_after_allowance_rejects_before_third_id() -> None
             response,
             status_code=302,
             trace=replace(response.trace, status_code=302),
-            redirect_location=f"{intent.path}?query=accounted+execution&offset=0&limit=3",
+            redirect_location=_equivalent_reordered_redirect_location(intent),
         )
 
     async def adapter(bound_group, dispatch):
@@ -3729,7 +3952,7 @@ async def test_redirect_followed_by_4xx_does_not_ground_candidates() -> None:
                 response,
                 status_code=302,
                 trace=replace(response.trace, status_code=302),
-                redirect_location=f"{intent.path}?query=accounted+execution&offset=0&limit=3",
+                redirect_location=_equivalent_reordered_redirect_location(intent),
             )
         return replace(response, status_code=400, trace=replace(response.trace, status_code=400))
 
@@ -3999,7 +4222,7 @@ async def test_redirect_selected_but_id_factory_failure_does_not_count_as_contin
             response,
             status_code=302,
             trace=replace(response.trace, status_code=302),
-            redirect_location=f"{intent.path}?query=accounted+execution&offset=0&limit=3",
+            redirect_location=_equivalent_reordered_redirect_location(intent),
         )
 
     async def adapter(bound_group, dispatch):
@@ -4138,7 +4361,7 @@ async def test_redirect_rechecks_registry_around_continuation_reservation(replac
             response,
             status_code=302,
             trace=replace(response.trace, status_code=302),
-            redirect_location=f"{intent.path}?query=accounted+execution&offset=0&limit=3",
+            redirect_location=_equivalent_reordered_redirect_location(intent),
         )
 
     async def adapter(bound_group, dispatch):
@@ -4211,6 +4434,40 @@ async def test_executor_uses_pre_adapter_plan_snapshot_for_caps_counters_and_res
     assert len(gateway_calls) == 2
     assert result.skipped == original_skipped
     assert "secret_mutated" not in repr(result)
+
+
+@pytest.mark.asyncio
+async def test_stale_self_consistent_registry_version_rejects_before_runtime_effects() -> None:
+    registry, plan = _semantic_scholar_plan()
+    group = plan.dispatch_groups[0]
+    stale = replace(
+        plan,
+        registry_version="research-discovery-v2-foundation-2026-07-14",
+        plan_digest="",
+    )
+    calls = []
+
+    async def adapter(bound_group, dispatch):
+        calls.append("adapter")
+        return DiscoveryAdapterResult(candidates=())
+
+    async def gateway(route, intent, *, is_policy_active):
+        calls.append("gateway")
+        return _gateway_response(route, intent)
+
+    with pytest.raises(executor_module.DiscoveryExecutionError) as caught:
+        await execute_discovery_plan(
+            stale,
+            registry=registry,
+            adapters={group.adapter_id: adapter},
+            gateway=gateway,
+            policy_is_active=lambda _route_id, _digest: calls.append("policy") or True,
+            dispatch_id_factory=lambda: calls.append("id") or "must-not-reserve",
+        )
+
+    assert stale.plan_digest != plan.plan_digest
+    assert caught.value.code == "plan_registry_version_mismatch"
+    assert calls == []
 
 
 @pytest.mark.asyncio
@@ -4804,3 +5061,335 @@ async def test_nested_plan_contract_corruption_is_rejected_before_adapter_or_id(
 
     assert caught.value.code == "plan_validation_failed"
     assert calls == []
+
+
+def test_discovery_adapter_error_and_retry_after_outcome_contract_is_exact() -> None:
+    error_type = executor_module.DiscoveryAdapterError
+    allowed_codes = (
+        "provider_rate_limited",
+        "provider_response_rejected",
+        "provider_payload_invalid",
+        "provider_parse_limit_exceeded",
+        "provider_parse_deadline_exceeded",
+    )
+
+    for code in allowed_codes:
+        error = error_type(code)
+        assert type(error) is error_type
+        assert error.code == code
+        assert error.retry_after is None
+        assert str(error) == code
+
+    rate_limited = error_type("provider_rate_limited", retry_after="120")
+    assert rate_limited.retry_after == "120"
+    zero_padded = error_type("provider_rate_limited", retry_after="001")
+    assert zero_padded.retry_after == "001"
+    dated = error_type(
+        "provider_rate_limited",
+        retry_after="Wed, 21 Oct 2015 07:28:00 GMT",
+    )
+    assert dated.retry_after == "Wed, 21 Oct 2015 07:28:00 GMT"
+    with pytest.raises((TypeError, ValueError)):
+        error_type("adapter_failed")
+    with pytest.raises((TypeError, ValueError)):
+        error_type(1)
+    with pytest.raises(ValueError, match="retry_after"):
+        error_type("provider_payload_invalid", retry_after="120")
+    for invalid_retry_after in (
+        "tomorrow",
+        "Sunday, 06-Nov-94 08:49:37 GMT",
+        "Sun Nov  6 08:49:37 1994",
+        "wed, 21 Oct 2015 07:28:00 GMT",
+        "Wed, 21 Oct 2015 07:28:00 GMT ",
+        "Wed, 31 Feb 2015 07:28:00 GMT",
+        120,
+    ):
+        with pytest.raises((TypeError, ValueError), match="retry_after"):
+            error_type("provider_rate_limited", retry_after=invalid_retry_after)
+
+    outcome = executor_module.LogicalAttemptOutcome(
+        "attempt-1",
+        "semantic_scholar",
+        LogicalOutcomeState.FAILED,
+        "provider_rate_limited",
+        "120",
+    )
+    assert outcome.retry_after == "120"
+    with pytest.raises(FrozenInstanceError):
+        outcome.retry_after = None
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_error_preserves_safe_retry_after_on_all_coalesced_outcomes() -> None:
+    registry, plan = _coalesced_semantic_scholar_plan()
+    group = plan.dispatch_groups[0]
+    error_type = executor_module.DiscoveryAdapterError
+
+    async def gateway(route, intent, *, is_policy_active):
+        return _gateway_response(route, intent)
+
+    async def adapter(bound_group, dispatch):
+        await dispatch(bound_group.intents[0])
+        raise error_type("provider_rate_limited", retry_after="120")
+
+    result = await execute_discovery_plan(
+        plan,
+        registry=registry,
+        adapters={group.adapter_id: adapter},
+        gateway=gateway,
+        policy_is_active=lambda _route_id, _digest: True,
+        dispatch_id_factory=lambda: "dispatch-rate-limited",
+    )
+
+    assert len(result.logical_outcomes) == 2
+    assert all(outcome.state is LogicalOutcomeState.FAILED for outcome in result.logical_outcomes)
+    assert all(outcome.code == "provider_rate_limited" for outcome in result.logical_outcomes)
+    assert all(outcome.retry_after == "120" for outcome in result.logical_outcomes)
+    assert result.candidates == ()
+
+
+@pytest.mark.asyncio
+async def test_bound_plan_mutation_overrides_typed_provider_failure_and_retry_hint() -> None:
+    registry, plan = _semantic_scholar_plan()
+    group = plan.dispatch_groups[0]
+    journal = AttemptJournal(physical_ceiling=plan.ceilings.max_physical_dispatches)
+
+    async def gateway(route, intent, *, is_policy_active):
+        return _gateway_response(route, intent)
+
+    async def adapter(bound_group, dispatch):
+        await dispatch(bound_group.intents[0])
+        object.__setattr__(bound_group, "adapter_id", "mutated-adapter")
+        raise executor_module.DiscoveryAdapterError(
+            "provider_rate_limited",
+            retry_after="120",
+        )
+
+    result = await execute_discovery_plan(
+        plan,
+        registry=registry,
+        adapters={group.adapter_id: adapter},
+        gateway=gateway,
+        policy_is_active=lambda _route_id, _digest: True,
+        dispatch_id_factory=lambda: "dispatch-mutated-provider-failure",
+        journal=journal,
+    )
+
+    assert journal.records[0].state is PhysicalDispatchState.SUCCEEDED
+    assert result.logical_outcomes[0].state is LogicalOutcomeState.FAILED
+    assert result.logical_outcomes[0].code == "bound_plan_mutated"
+    assert result.logical_outcomes[0].retry_after is None
+    assert result.candidates == ()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("code", "expected_state"),
+    (
+        ("provider_response_rejected", LogicalOutcomeState.FAILED),
+        ("provider_payload_invalid", LogicalOutcomeState.FAILED),
+        ("provider_parse_limit_exceeded", LogicalOutcomeState.FAILED),
+        ("provider_parse_deadline_exceeded", LogicalOutcomeState.TIMED_OUT),
+    ),
+)
+async def test_typed_adapter_failures_map_to_exact_logical_state(
+    code: str,
+    expected_state: LogicalOutcomeState,
+) -> None:
+    registry, plan = _semantic_scholar_plan()
+    group = plan.dispatch_groups[0]
+    error_type = executor_module.DiscoveryAdapterError
+
+    async def gateway(route, intent, *, is_policy_active):
+        return _gateway_response(route, intent)
+
+    async def adapter(bound_group, dispatch):
+        await dispatch(bound_group.intents[0])
+        raise error_type(code)
+
+    result = await execute_discovery_plan(
+        plan,
+        registry=registry,
+        adapters={group.adapter_id: adapter},
+        gateway=gateway,
+        policy_is_active=lambda _route_id, _digest: True,
+        dispatch_id_factory=lambda: f"dispatch-{code}",
+    )
+
+    assert result.candidates == ()
+    assert result.logical_outcomes[0].state is expected_state
+    assert result.logical_outcomes[0].code == code
+    assert result.logical_outcomes[0].retry_after is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "hostile_case",
+    (
+        "subclass",
+        "mutated_code",
+        "mutated_allowed_code",
+        "mutated_retry_after",
+        "mutated_valid_retry_after",
+        "duck_type",
+    ),
+)
+async def test_hostile_or_spoofed_adapter_errors_sanitize_to_adapter_failed(
+    hostile_case: str,
+) -> None:
+    registry, plan = _semantic_scholar_plan()
+    group = plan.dispatch_groups[0]
+    error_type = executor_module.DiscoveryAdapterError
+
+    if hostile_case == "subclass":
+
+        class HostileAdapterError(error_type):
+            pass
+
+        error = HostileAdapterError("provider_payload_invalid")
+    elif hostile_case == "mutated_code":
+        error = error_type("provider_payload_invalid")
+        object.__setattr__(error, "code", "fixture-secret-code")
+    elif hostile_case == "mutated_allowed_code":
+        error = error_type("provider_payload_invalid")
+        object.__setattr__(error, "code", "provider_parse_deadline_exceeded")
+    elif hostile_case == "mutated_retry_after":
+        error = error_type("provider_rate_limited", retry_after="120")
+        object.__setattr__(error, "retry_after", "120\nfixture-secret")
+    elif hostile_case == "mutated_valid_retry_after":
+        error = error_type("provider_rate_limited", retry_after="120")
+        object.__setattr__(error, "retry_after", "001")
+    else:
+        assert hostile_case == "duck_type"
+
+        class DuckAdapterError(Exception):
+            code = "provider_rate_limited"
+            retry_after = "120"
+
+        error = DuckAdapterError("fixture-secret")
+
+    async def gateway(route, intent, *, is_policy_active):
+        return _gateway_response(route, intent)
+
+    async def adapter(bound_group, dispatch):
+        await dispatch(bound_group.intents[0])
+        raise error
+
+    result = await execute_discovery_plan(
+        plan,
+        registry=registry,
+        adapters={group.adapter_id: adapter},
+        gateway=gateway,
+        policy_is_active=lambda _route_id, _digest: True,
+        dispatch_id_factory=lambda: f"dispatch-hostile-{hostile_case}",
+    )
+
+    assert result.candidates == ()
+    assert result.logical_outcomes[0].state is LogicalOutcomeState.FAILED
+    assert result.logical_outcomes[0].code == "adapter_failed"
+    assert result.logical_outcomes[0].retry_after is None
+    assert "fixture-secret" not in repr(result)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "hostile_case",
+    ("synchronized_mutation", "forged_new", "string_subclass"),
+)
+async def test_fully_forged_adapter_errors_sanitize_to_adapter_failed(
+    hostile_case: str,
+) -> None:
+    registry, plan = _semantic_scholar_plan()
+    group = plan.dispatch_groups[0]
+    error_type = executor_module.DiscoveryAdapterError
+
+    if hostile_case == "forged_new":
+        error = error_type.__new__(error_type)
+        object.__setattr__(error, "code", "provider_rate_limited")
+        object.__setattr__(error, "retry_after", "120")
+        object.__setattr__(error, "args", ("provider_rate_limited",))
+    else:
+        error = error_type("provider_payload_invalid")
+        if hostile_case == "synchronized_mutation":
+            forged_code = "provider_rate_limited"
+        else:
+
+            class HostileString(str):
+                pass
+
+            forged_code = HostileString("provider_rate_limited")
+        object.__setattr__(error, "code", forged_code)
+        object.__setattr__(error, "retry_after", "120")
+        object.__setattr__(error, "args", (forged_code,))
+
+    async def gateway(route, intent, *, is_policy_active):
+        return _gateway_response(route, intent)
+
+    async def adapter(bound_group, dispatch):
+        await dispatch(bound_group.intents[0])
+        raise error
+
+    result = await execute_discovery_plan(
+        plan,
+        registry=registry,
+        adapters={group.adapter_id: adapter},
+        gateway=gateway,
+        policy_is_active=lambda _route_id, _digest: True,
+        dispatch_id_factory=lambda: f"dispatch-forged-{hostile_case}",
+    )
+
+    assert result.logical_outcomes[0].code == "adapter_failed"
+    assert result.logical_outcomes[0].retry_after is None
+
+
+@pytest.mark.asyncio
+async def test_typed_adapter_error_without_completed_dispatch_is_not_trusted() -> None:
+    registry, plan = _semantic_scholar_plan()
+    group = plan.dispatch_groups[0]
+
+    async def should_not_run(*args, **kwargs):
+        raise AssertionError("gateway must not run")
+
+    async def adapter(_bound_group, _dispatch):
+        raise executor_module.DiscoveryAdapterError(
+            "provider_rate_limited",
+            retry_after="120",
+        )
+
+    result = await execute_discovery_plan(
+        plan,
+        registry=registry,
+        adapters={group.adapter_id: adapter},
+        gateway=should_not_run,
+        policy_is_active=lambda _route_id, _digest: True,
+        dispatch_id_factory=lambda: "must-not-reserve",
+    )
+
+    assert result.logical_outcomes[0].state is LogicalOutcomeState.FAILED
+    assert result.logical_outcomes[0].code == "adapter_failed"
+    assert result.logical_outcomes[0].retry_after is None
+    assert result.usage.physical_records == ()
+
+
+@pytest.mark.parametrize(
+    ("state", "code", "retry_after"),
+    (
+        (LogicalOutcomeState.SUCCEEDED, "provider_rate_limited", "120"),
+        (LogicalOutcomeState.FAILED, "provider_payload_invalid", "120"),
+        (LogicalOutcomeState.FAILED, "provider_rate_limited", "tomorrow"),
+        (LogicalOutcomeState.FAILED, None, "120"),
+    ),
+)
+def test_logical_outcome_rejects_invalid_retry_after_combinations(
+    state: LogicalOutcomeState,
+    code: str | None,
+    retry_after: str,
+) -> None:
+    with pytest.raises((TypeError, ValueError), match="retry_after"):
+        executor_module.LogicalAttemptOutcome(
+            "attempt-1",
+            "semantic_scholar",
+            state,
+            code,
+            retry_after,
+        )

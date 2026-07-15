@@ -14,6 +14,7 @@ _IDENTIFIER_RE = re.compile(r"[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*\Z")
 _DIGEST_RE = re.compile(r"[0-9a-f]{64}\Z")
 _QUERY_NAME_RE = re.compile(r"[A-Za-z0-9_.\[\]-]+\Z")
 _MISSING = object()
+MAX_PAGINATION_CURSOR = 2_147_483_647
 CREDENTIALED_ROUTE_SKIP_REASON = "credentialed_route_not_authorized_for_foundation"
 
 
@@ -129,15 +130,18 @@ class QueryPair:
 
 @dataclass(frozen=True, slots=True)
 class JSONBodyPair:
-    """One immutable string key/value pair for a bounded JSON request body."""
+    """One immutable key and bounded scalar for a JSON request body."""
 
     name: str
-    value: str
+    value: str | int
 
     def __post_init__(self) -> None:
         if not isinstance(self.name, str) or not _QUERY_NAME_RE.fullmatch(self.name):
             raise ValueError("invalid_json_body_pair_name")
-        if not isinstance(self.value, str) or "\x00" in self.value:
+        if type(self.value) is str:
+            if "\x00" in self.value:
+                raise ValueError("invalid_json_body_pair_value")
+        elif type(self.value) is not int or not 0 <= self.value <= MAX_PAGINATION_CURSOR:
             raise ValueError("invalid_json_body_pair_value")
 
 
@@ -279,7 +283,9 @@ class RoutePolicy:
     allowed_query_keys: tuple[str, ...]
     limits: RouteLimits
     pagination_query_key: str | None = None
+    pagination_json_body_key: str | None = None
     allowed_json_body_keys: tuple[str, ...] = ()
+    integer_json_body_keys: tuple[str, ...] = ()
     policy_digest: str = ""
 
     def __post_init__(self) -> None:
@@ -290,6 +296,8 @@ class RoutePolicy:
         _require_tuple("paths", self.paths)
         _require_tuple("allowed_query_keys", self.allowed_query_keys)
         _require_tuple("allowed_json_body_keys", self.allowed_json_body_keys)
+        if type(self.integer_json_body_keys) is not tuple:
+            raise TypeError("integer_json_body_keys_must_be_tuple")
         if not self.methods or any(
             not isinstance(method, str) or method != method.upper() or not method.isalpha() for method in self.methods
         ):
@@ -308,6 +316,12 @@ class RoutePolicy:
             raise ValueError("invalid_policy_json_body_key")
         if len(set(self.allowed_json_body_keys)) != len(self.allowed_json_body_keys):
             raise ValueError("duplicate_policy_json_body_key")
+        if any(type(key) is not str for key in self.integer_json_body_keys):
+            raise ValueError("invalid_integer_json_body_key")
+        if len(set(self.integer_json_body_keys)) != len(self.integer_json_body_keys):
+            raise ValueError("duplicate_integer_json_body_key")
+        if not set(self.integer_json_body_keys).issubset(self.allowed_json_body_keys):
+            raise ValueError("invalid_integer_json_body_key")
         if set(self.allowed_query_keys).intersection(self.allowed_json_body_keys):
             raise ValueError("json_body_key_channel_overlap")
         if self.allowed_json_body_keys and "POST" not in self.methods:
@@ -316,6 +330,18 @@ class RoutePolicy:
             not isinstance(self.pagination_query_key, str) or self.pagination_query_key not in self.allowed_query_keys
         ):
             raise ValueError("invalid_pagination_query_key")
+        if self.pagination_json_body_key is not None and (
+            not isinstance(self.pagination_json_body_key, str)
+            or self.pagination_json_body_key not in self.allowed_json_body_keys
+        ):
+            raise ValueError("invalid_pagination_json_body_key")
+        if (
+            self.pagination_json_body_key is not None
+            and self.pagination_json_body_key not in self.integer_json_body_keys
+        ):
+            raise ValueError("pagination_json_body_key_must_be_integer")
+        if self.pagination_query_key is not None and self.pagination_json_body_key is not None:
+            raise ValueError("multiple_pagination_channels")
         if not isinstance(self.limits, RouteLimits):
             raise TypeError("limits_must_be_route_limits")
 
@@ -855,6 +881,10 @@ def canonical_policy_digest(policy: RoutePolicy) -> str:
         "pagination_query_key": policy.pagination_query_key,
         "policy_version": policy.policy_version,
     }
+    if policy.pagination_json_body_key is not None:
+        payload["pagination_json_body_key"] = policy.pagination_json_body_key
+    if policy.integer_json_body_keys:
+        payload["integer_json_body_keys"] = policy.integer_json_body_keys
     return hashlib.sha256(_canonical_json_bytes(payload)).hexdigest()
 
 

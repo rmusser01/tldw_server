@@ -476,6 +476,77 @@ def test_request_shape_rules_are_bound_into_the_policy_digest() -> None:
         replace(base, pagination_query_key="page", policy_digest="")
 
 
+def test_unrelated_policy_digest_keeps_pre_body_pagination_material() -> None:
+    assert _policy().policy_digest == "8ec7b6572f32690e1425390518077742607bee40f87224c45913d7c5f54e7865"
+
+
+def test_json_body_pairs_allow_only_bounded_exact_strings_or_nonnegative_integers() -> None:
+    class StringSubclass(str):
+        pass
+
+    assert JSONBodyPair("search_for", "test").value == "test"
+    assert JSONBodyPair("page", 0).value == 0
+    assert JSONBodyPair("page", 2_147_483_647).value == 2_147_483_647
+
+    for value in (StringSubclass("test"), True, -1, 2_147_483_648, 1.5):
+        with pytest.raises(ValueError, match="json_body_pair_value"):
+            JSONBodyPair("page", value)  # type: ignore[arg-type]
+
+
+def test_policy_declares_exactly_one_pagination_channel() -> None:
+    base = _policy()
+    body_pagination = RoutePolicy(
+        policy_version=base.policy_version,
+        origin=base.origin,
+        methods=("POST",),
+        paths=base.paths,
+        allowed_query_keys=(),
+        limits=base.limits,
+        pagination_json_body_key="page",
+        allowed_json_body_keys=("search_for", "page", "page_size"),
+        integer_json_body_keys=("page", "page_size"),
+    )
+
+    assert body_pagination.pagination_query_key is None
+    assert body_pagination.pagination_json_body_key == "page"
+    assert body_pagination.integer_json_body_keys == ("page", "page_size")
+    assert body_pagination.policy_digest != base.policy_digest
+
+    with pytest.raises(ValueError, match="pagination"):
+        replace(
+            body_pagination,
+            allowed_query_keys=("cursor",),
+            pagination_query_key="cursor",
+            policy_digest="",
+        )
+    with pytest.raises(ValueError, match="pagination"):
+        replace(body_pagination, pagination_json_body_key="cursor", policy_digest="")
+
+
+def test_policy_integer_json_body_keys_are_exact_bounded_schema_material() -> None:
+    base = _policy()
+    body_pagination = RoutePolicy(
+        policy_version=base.policy_version,
+        origin=base.origin,
+        methods=("POST",),
+        paths=base.paths,
+        allowed_query_keys=(),
+        limits=base.limits,
+        pagination_json_body_key="page",
+        allowed_json_body_keys=("search_for", "page", "page_size"),
+        integer_json_body_keys=("page", "page_size"),
+    )
+
+    with pytest.raises(TypeError, match="integer_json_body_keys"):
+        replace(body_pagination, integer_json_body_keys=["page"], policy_digest="")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="integer_json_body"):
+        replace(body_pagination, integer_json_body_keys=("page", "page"), policy_digest="")
+    with pytest.raises(ValueError, match="integer_json_body"):
+        replace(body_pagination, integer_json_body_keys=("page", "unknown"), policy_digest="")
+    with pytest.raises(ValueError, match="pagination"):
+        replace(body_pagination, integer_json_body_keys=("page_size",), policy_digest="")
+
+
 @pytest.mark.parametrize(
     "changes",
     (

@@ -323,29 +323,74 @@ git diff --check
 
 **Success Criteria:** The five adapters parse bounded offline fixtures, return inert metadata/snippets, and have no raw transport or legacy-wrapper access.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Files
 
+- Modify `tldw_Server_API/app/core/Research/discovery/contracts.py`.
+- Modify `tldw_Server_API/app/core/Research/discovery/registry.py`.
+- Modify `tldw_Server_API/app/core/Research/discovery/planner.py`.
+- Modify `tldw_Server_API/app/core/Research/discovery/gateway.py`.
+- Modify `tldw_Server_API/app/core/Research/discovery/executor.py`.
 - Add `tldw_Server_API/app/core/Research/discovery/gateway_adapters.py`.
+- Modify the focused contracts, registry, planner, gateway, and executor tests under `tldw_Server_API/tests/Research/`.
 - Add `tldw_Server_API/tests/Research/test_research_discovery_gateway_adapters.py`.
 - Add sanitized provider fixtures under the existing Research fixture convention; do not create a second framework.
 
 ### Test-first steps
 
-- [ ] Cover success, valid empty, bounded pagination, rate-limit metadata, timeout, cancellation, malformed/schema-drift payloads, unsafe echoed errors, and inert result URLs.
-- [ ] Enforce route-level maximum record count, field characters, structural depth, and parse deadline before normalized output; include deeply nested and oversized fixtures.
-- [ ] Rebuild cursors only through typed fields and approved query templates; never accept an absolute next URL.
-- [ ] Prove every adapter uses only executor-owned `dispatch(intent)` and that returned URLs receive zero requests.
+- [x] Correct and pin the frozen request schemas before adapter work: Semantic Scholar requests the exact response fields the parser consumes; Crossref uses an exact `select` projection; credentialless Zenodo caps anonymous `size` at 25; Figshare sends numeric `page`/`page_size` in its POST JSON body through an explicit body-pagination key; and OSF uses title-substring `filter[title]` with plain query `page` plus `page[size]`. Reject OSF's ignored `q`, generic `filter`, and ignored `page[number]`; preserve unrelated route-policy digests.
+- [x] Define frozen adapter parse profiles keyed by exact `(adapter_id, adapter_version)` rather than adding parser fields to `RouteLimits`, whose canonical policy digest is already frozen. Clamp input bytes and records to the stricter route limits.
+- [x] Reject non-200 responses before parsing, preserve sanitized 429 `Retry-After` through a typed adapter failure/outcome, accept only `application/json` or `application/*+json`, and strictly reject duplicate keys, invalid UTF-8/BOM, non-finite numbers, oversized numeric tokens, excessive depth/nodes/strings/records, malformed schema, and parse-deadline overruns.
+- [x] Normalize only inert metadata (`title`, `authors`, `abstract`, `snippet`, scholarly IDs, `url`, `pdf_url`, `provider`, and `provider_ids`), require a stable provider record ID, and derive the candidate ID from the canonical document fingerprint so equivalent DOI records converge across providers.
+- [x] Cover success, valid empty, bounded pagination, rate-limit metadata, timeout, cancellation, malformed/schema-drift payloads, unsafe echoed errors, and inert result URLs.
+- [x] Enforce route-level maximum record count, field characters, structural depth, and parse deadline before normalized output; include deeply nested and oversized fixtures.
+- [x] Rebuild cursors only through typed fields and approved query templates; never accept an absolute next URL.
+- [x] Prove every adapter uses only executor-owned `dispatch(intent)` and that returned URLs receive zero requests.
+
+### Completion evidence
+
+- Added ten sanitized success/empty fixtures and five exact gateway-only adapters with frozen version-keyed parsing profiles, canonical candidate identities, typed sanitized failures, local numeric pagination, and no transport or legacy-wrapper seam.
+- RED-first review regressions closed strict request-shape drift, parser and schema bounds, aggregate/page cardinality precedence, provider-envelope consistency, cooperative parse deadlines, atomic cross-page conflicts, typed-error integrity precedence, and browser/parser-differential result URLs including private, numeric, Unicode, control-character, and multiply encoded forms.
+- The settled six-suite Task 5 matrix passed 857/857 tests. The earlier-stage transport, legacy discovery, identity, service, and broker compatibility gate passed 310/310 tests.
+- Compileall, Ruff, Black, Python 3.10 AST parsing, and diff hygiene passed. Bandit reported zero findings and zero errors across 4,952 touched production LOC.
+- Two independent final security/correctness reviews returned CLEAN after the URL, total, and Semantic Scholar next-offset hardening. V2 remains offline-only and production-disabled; arXiv, PubMed, production cutover, durable journaling, and authenticated routes remain in their later authorized stages.
 
 ### Verify
 
 ```bash
 source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
 python -m pytest -q tldw_Server_API/tests/Research/test_research_discovery_gateway_adapters.py tldw_Server_API/tests/Research/test_research_discovery_executor.py
-python -m compileall -q tldw_Server_API/app/core/Research/discovery/gateway_adapters.py tldw_Server_API/tests/Research/test_research_discovery_gateway_adapters.py
-ruff check tldw_Server_API/app/core/Research/discovery/gateway_adapters.py tldw_Server_API/tests/Research/test_research_discovery_gateway_adapters.py
-black --check tldw_Server_API/app/core/Research/discovery/gateway_adapters.py tldw_Server_API/tests/Research/test_research_discovery_gateway_adapters.py
+python -m pytest -q \
+  tldw_Server_API/tests/Research/test_research_discovery_contracts.py \
+  tldw_Server_API/tests/Research/test_research_discovery_registry_reconciliation.py \
+  tldw_Server_API/tests/Research/test_research_discovery_planner.py \
+  tldw_Server_API/tests/Research/test_research_discovery_gateway.py \
+  tldw_Server_API/tests/Research/test_research_discovery_executor.py \
+  tldw_Server_API/tests/Research/test_research_discovery_gateway_adapters.py
+python -m compileall -q \
+  tldw_Server_API/app/core/Research/discovery/contracts.py \
+  tldw_Server_API/app/core/Research/discovery/registry.py \
+  tldw_Server_API/app/core/Research/discovery/planner.py \
+  tldw_Server_API/app/core/Research/discovery/gateway.py \
+  tldw_Server_API/app/core/Research/discovery/executor.py \
+  tldw_Server_API/app/core/Research/discovery/gateway_adapters.py
+ruff check \
+  tldw_Server_API/app/core/Research/discovery/contracts.py \
+  tldw_Server_API/app/core/Research/discovery/registry.py \
+  tldw_Server_API/app/core/Research/discovery/planner.py \
+  tldw_Server_API/app/core/Research/discovery/gateway.py \
+  tldw_Server_API/app/core/Research/discovery/executor.py \
+  tldw_Server_API/app/core/Research/discovery/gateway_adapters.py \
+  tldw_Server_API/tests/Research/test_research_discovery_gateway_adapters.py
+black --check \
+  tldw_Server_API/app/core/Research/discovery/contracts.py \
+  tldw_Server_API/app/core/Research/discovery/registry.py \
+  tldw_Server_API/app/core/Research/discovery/planner.py \
+  tldw_Server_API/app/core/Research/discovery/gateway.py \
+  tldw_Server_API/app/core/Research/discovery/executor.py \
+  tldw_Server_API/app/core/Research/discovery/gateway_adapters.py \
+  tldw_Server_API/tests/Research/test_research_discovery_gateway_adapters.py
 git diff --check
 ```
 

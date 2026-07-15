@@ -272,7 +272,7 @@ def test_foundation_plan_compiles_seven_routes_and_pubmed_two_dispatch_allowance
         (
             ("semantic_scholar", "crossref", "arxiv", "pubmed", "zenodo", "figshare", "osf"),
             25,
-            700,
+            625,
             25,
         ),
     ],
@@ -338,9 +338,84 @@ def test_figshare_plan_uses_official_query_and_json_body_shape() -> None:
     intent = plan.dispatch_groups[0].intents[0]
 
     assert intent.method == "POST"
-    assert intent.query_pairs == (QueryPair("page", "1"), QueryPair("page_size", "25"))
-    assert intent.json_body_pairs == (JSONBodyPair("search_for", "causal inference"),)
+    assert intent.query_pairs == ()
+    assert intent.json_body_pairs == (
+        JSONBodyPair("search_for", "causal inference"),
+        JSONBodyPair("page", 1),
+        JSONBodyPair("page_size", 25),
+    )
     assert intent.query_bindings == ()
+
+
+@pytest.mark.parametrize("requested_limit", (25, 26, 100))
+def test_zenodo_anonymous_search_clamps_physical_page_size_to_twenty_five(requested_limit: int) -> None:
+    plan = compile_discovery_plan(
+        _request(("zenodo",), query="Causal Inference", result_limit=requested_limit),
+        registry=foundation_registry(),
+        readiness=foundation_readiness(ExecutionMode.SYNTHETIC),
+        budget=_budget(),
+    )
+    group = plan.dispatch_groups[0]
+
+    assert plan.result_limit == requested_limit
+    assert group.limits.max_results == 25
+    assert group.intents[0].query_pairs == (
+        QueryPair("q", "causal inference"),
+        QueryPair("page", "1"),
+        QueryPair("size", "25"),
+    )
+    assert plan.allowance.returned_results == 25
+
+
+def test_semantic_scholar_plan_requests_exact_consumed_fields() -> None:
+    plan = compile_discovery_plan(
+        _request(("semantic_scholar",), query="Causal Inference", result_limit=25),
+        registry=foundation_registry(),
+        readiness=foundation_readiness(ExecutionMode.SYNTHETIC),
+        budget=_budget(),
+    )
+
+    assert plan.dispatch_groups[0].intents[0].query_pairs == (
+        QueryPair("query", "causal inference"),
+        QueryPair("offset", "0"),
+        QueryPair("limit", "25"),
+        QueryPair(
+            "fields",
+            "paperId,title,authors,abstract,tldr,externalIds,url,openAccessPdf",
+        ),
+    )
+
+
+def test_crossref_plan_requests_exact_consumed_fields() -> None:
+    plan = compile_discovery_plan(
+        _request(("crossref",), query="Causal Inference", result_limit=25),
+        registry=foundation_registry(),
+        readiness=foundation_readiness(ExecutionMode.SYNTHETIC),
+        budget=_budget(),
+    )
+
+    assert plan.dispatch_groups[0].intents[0].query_pairs == (
+        QueryPair("query", "causal inference"),
+        QueryPair("offset", "0"),
+        QueryPair("rows", "25"),
+        QueryPair("select", "DOI,title,author,abstract,URL,link"),
+    )
+
+
+def test_osf_plan_uses_exact_title_filter_and_plain_page_number_shape() -> None:
+    plan = compile_discovery_plan(
+        _request(("osf",), query="Causal Inference", result_limit=25),
+        registry=foundation_registry(),
+        readiness=foundation_readiness(ExecutionMode.SYNTHETIC),
+        budget=_budget(),
+    )
+
+    assert plan.dispatch_groups[0].intents[0].query_pairs == (
+        QueryPair("filter[title]", "causal inference"),
+        QueryPair("page", "1"),
+        QueryPair("page[size]", "25"),
+    )
+    assert {pair.name for pair in plan.dispatch_groups[0].intents[0].query_pairs}.isdisjoint({"q", "filter"})
 
 
 def test_plan_bytes_and_attempt_ids_are_deterministic_after_input_normalization() -> None:
@@ -427,10 +502,7 @@ def test_shared_id_recomputation_changes_with_hashed_group_and_logical_material(
         intents=(
             replace(
                 intent,
-                query_pairs=(
-                    intent.query_pairs[0],
-                    replace(intent.query_pairs[1], value="24"),
-                ),
+                query_pairs=(QueryPair("page", "24"),),
             ),
         ),
     )
@@ -439,7 +511,10 @@ def test_shared_id_recomputation_changes_with_hashed_group_and_logical_material(
         intents=(
             replace(
                 intent,
-                json_body_pairs=(replace(intent.json_body_pairs[0], value="changed query"),),
+                json_body_pairs=(
+                    replace(intent.json_body_pairs[0], value="changed query"),
+                    *intent.json_body_pairs[1:],
+                ),
             ),
         ),
     )

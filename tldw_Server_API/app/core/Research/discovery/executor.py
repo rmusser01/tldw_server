@@ -10,9 +10,12 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import email.utils
 import math
+import re
 import time
 import uuid
+import weakref
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, fields, is_dataclass, replace
 from enum import Enum
@@ -21,6 +24,7 @@ from typing import Any, Protocol, cast
 
 from .contracts import (
     CREDENTIALED_ROUTE_SKIP_REASON,
+    MAX_PAGINATION_CURSOR,
     AccessRoute,
     AttributionMatch,
     BudgetCeilings,
@@ -69,6 +73,16 @@ _EXECUTION_STOP_CODES = frozenset(
         "execution_clock_invalid",
     }
 )
+_ADAPTER_ERROR_CODES = frozenset(
+    {
+        "provider_rate_limited",
+        "provider_response_rejected",
+        "provider_payload_invalid",
+        "provider_parse_limit_exceeded",
+        "provider_parse_deadline_exceeded",
+    }
+)
+_DELTA_SECONDS_RE = re.compile(r"[0-9]+\Z")
 
 
 class ExecutionState(str, Enum):
@@ -101,15 +115,81 @@ class DiscoveryExecutionError(ValueError):
         super().__init__(code)
 
 
+def _valid_retry_after(value: object) -> bool:
+    """Return whether one value is delta-seconds or strict IMF-fixdate."""
+    if type(value) is not str:
+        return False
+    if _DELTA_SECONDS_RE.fullmatch(value) is not None:
+        return True
+    try:
+        parsed = email.utils.parsedate_to_datetime(value)
+        return email.utils.format_datetime(parsed, usegmt=True) == value
+    except (TypeError, ValueError):
+        return False
+
+
+class DiscoveryAdapterError(ValueError):
+    """Stable adapter failure containing only allowlisted metadata."""
+
+    __slots__ = (
+        "code",
+        "retry_after",
+        "__weakref__",
+    )
+
+    def __init__(self, code: str, *, retry_after: str | None = None) -> None:
+        if type(code) is not str:
+            raise TypeError("adapter_error_code_must_be_string")
+        if code not in _ADAPTER_ERROR_CODES:
+            raise ValueError("adapter_error_code_invalid")
+        if retry_after is not None:
+            if code != "provider_rate_limited":
+                raise ValueError("retry_after_requires_rate_limit")
+            if not _valid_retry_after(retry_after):
+                raise ValueError("retry_after_invalid")
+        self.code = code
+        self.retry_after = retry_after
+        super().__init__(code)
+        _ADAPTER_ERROR_SEALS[self] = (code, retry_after)
+
+
+_ADAPTER_ERROR_SEALS: weakref.WeakKeyDictionary[
+    DiscoveryAdapterError,
+    tuple[str, str | None],
+] = weakref.WeakKeyDictionary()
+
+
+def _trusted_adapter_error(error: BaseException) -> tuple[str, str | None] | None:
+    """Snapshot one exact, unmodified adapter failure."""
+    if type(error) is not DiscoveryAdapterError:
+        return None
+    try:
+        code = error.code
+        retry_after = error.retry_after
+        if (
+            type(code) is not str
+            or (retry_after is not None and type(retry_after) is not str)
+            or _ADAPTER_ERROR_SEALS.get(error) != (code, retry_after)
+            or error.args != (code,)
+            or code not in _ADAPTER_ERROR_CODES
+            or (retry_after is not None and not _valid_retry_after(retry_after))
+            or (code != "provider_rate_limited" and retry_after is not None)
+        ):
+            return None
+    except Exception:  # noqa: BLE001 - malformed adapter failures fail closed.
+        return None
+    return code, retry_after
+
+
 @dataclass(frozen=True, slots=True)
 class NumericCursor:
-    """A nonnegative numeric pagination cursor."""
+    """A bounded nonnegative numeric pagination cursor."""
 
     value: int
 
     def __post_init__(self) -> None:
-        if isinstance(self.value, bool) or not isinstance(self.value, int) or self.value < 0:
-            raise ValueError("cursor_must_be_nonnegative_integer")
+        if type(self.value) is not int or not 0 <= self.value <= MAX_PAGINATION_CURSOR:
+            raise ValueError("cursor_must_be_bounded_nonnegative_integer")
 
 
 @dataclass(frozen=True, slots=True)
@@ -700,6 +780,18 @@ class LogicalAttemptOutcome:
     catalog_source_id: str
     state: ExecutionState
     code: str | None = None
+    retry_after: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.retry_after is None:
+            return
+        if (
+            type(self.retry_after) is not str
+            or not _valid_retry_after(self.retry_after)
+            or self.code != "provider_rate_limited"
+            or self.state is not ExecutionState.FAILED
+        ):
+            raise ValueError("retry_after_outcome_invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -1086,6 +1178,7 @@ class _GroupExecutionController:
         self._max_retries = max_retries
         self._continuation_usage = continuation_usage
         self._used: set[int] = set()
+        self._completed_searches: set[int] = set()
         self._successful_searches: set[int] = set()
         self._seen_cursors: dict[int, set[int]] = {}
         self.physical_dispatches = 0
@@ -1110,6 +1203,10 @@ class _GroupExecutionController:
     @property
     def has_successful_search(self) -> bool:
         return bool(self._successful_searches)
+
+    @property
+    def has_completed_search(self) -> bool:
+        return bool(self._completed_searches)
 
     def close(self) -> None:
         self.closed = True
@@ -1258,28 +1355,70 @@ class _GroupExecutionController:
             self._used.add(intent_index)
             if trusted_intent.operation_kind is not OperationKind.SEARCH:
                 return trusted_intent, None
-            key = route.policy.pagination_query_key
-            values = [pair.value for pair in trusted_intent.query_pairs if pair.name == key]
-            if type(key) is not str or len(values) != 1 or not values[0].isascii() or not values[0].isdecimal():
+            query_key = route.policy.pagination_query_key
+            body_key = route.policy.pagination_json_body_key
+            if type(query_key) is str and body_key is None:
+                values = tuple(pair.value for pair in trusted_intent.query_pairs if pair.name == query_key)
+                valid = (
+                    len(values) == 1
+                    and type(values[0]) is str
+                    and values[0].isascii()
+                    and values[0].isdecimal()
+                    and len(values[0]) <= len(str(MAX_PAGINATION_CURSOR))
+                    and int(values[0]) <= MAX_PAGINATION_CURSOR
+                )
+            elif query_key is None and type(body_key) is str:
+                values = tuple(pair.value for pair in trusted_intent.json_body_pairs if pair.name == body_key)
+                valid = len(values) == 1 and type(values[0]) is int and 0 <= values[0] <= MAX_PAGINATION_CURSOR
+            else:
+                values = ()
+                valid = False
+            if not valid:
                 self._reject("pagination_query_invalid")
             return trusted_intent, int(values[0])
-        if type(cursor) is not NumericCursor or type(cursor.value) is not int or cursor.value < 0:
+        if (
+            type(cursor) is not NumericCursor
+            or type(cursor.value) is not int
+            or not 0 <= cursor.value <= MAX_PAGINATION_CURSOR
+        ):
             self._reject("invalid_pagination_cursor")
         if trusted_intent.operation_kind is not OperationKind.SEARCH:
             self._reject("cursor_not_allowed")
         if intent_index not in self._successful_searches:
             self._reject("search_not_ready")
-        key = route.policy.pagination_query_key
-        matching = tuple(index for index, pair in enumerate(trusted_intent.query_pairs) if pair.name == key)
-        if type(key) is not str or len(matching) != 1:
-            self._reject("pagination_query_invalid")
         if cursor.value in self._seen_cursors.get(intent_index, set()):
             self._reject("pagination_cursor_repeated")
-        pairs = tuple(
-            QueryPair(pair.name, str(cursor.value)) if index == matching[0] else pair
-            for index, pair in enumerate(trusted_intent.query_pairs)
-        )
-        return replace(trusted_intent, query_pairs=pairs), cursor.value
+        query_key = route.policy.pagination_query_key
+        body_key = route.policy.pagination_json_body_key
+        if type(query_key) is str and body_key is None:
+            matching = tuple(index for index, pair in enumerate(trusted_intent.query_pairs) if pair.name == query_key)
+            if len(matching) != 1:
+                self._reject("pagination_query_invalid")
+            try:
+                query_pairs = tuple(
+                    QueryPair(pair.name, str(cursor.value)) if index == matching[0] else pair
+                    for index, pair in enumerate(trusted_intent.query_pairs)
+                )
+                effective_intent = replace(trusted_intent, query_pairs=query_pairs)
+            except Exception:  # noqa: BLE001 - cursor reconstruction must latch a typed failure.
+                self._reject("invalid_pagination_cursor")
+            return effective_intent, cursor.value
+        if query_key is None and type(body_key) is str:
+            matching = tuple(
+                index for index, pair in enumerate(trusted_intent.json_body_pairs) if pair.name == body_key
+            )
+            if len(matching) != 1:
+                self._reject("pagination_query_invalid")
+            try:
+                json_body_pairs = tuple(
+                    JSONBodyPair(pair.name, cursor.value) if index == matching[0] else pair
+                    for index, pair in enumerate(trusted_intent.json_body_pairs)
+                )
+                effective_intent = replace(trusted_intent, json_body_pairs=json_body_pairs)
+            except Exception:  # noqa: BLE001 - cursor reconstruction must latch a typed failure.
+                self._reject("invalid_pagination_cursor")
+            return effective_intent, cursor.value
+        self._reject("pagination_query_invalid")
 
     async def __call__(
         self,
@@ -1292,6 +1431,8 @@ class _GroupExecutionController:
             self._reject("dispatch_task_mismatch")
         if self.closed:
             self._reject("dispatch_capability_closed")
+        if self.failure_code is not None:
+            raise DiscoveryExecutionError(self.failure_code)
         self._execution_checkpoint()
         binding = self._intent_bindings.get(id(intent))
         if binding is None:
@@ -1451,8 +1592,10 @@ class _GroupExecutionController:
                 effective_intent = redirected
                 continue
             break
-        if is_page and 200 <= response.status_code < 300:
-            self._successful_searches.add(intent_index)
+        if is_page:
+            self._completed_searches.add(intent_index)
+            if 200 <= response.status_code < 300:
+                self._successful_searches.add(intent_index)
         return response
 
 
@@ -1469,16 +1612,29 @@ def _adapter_dispatch(controller: _GroupExecutionController) -> BoundDispatch:
 
 
 def _outcomes(
-    group: PlannedDispatchGroup, state: ExecutionState, code: str | None = None
+    group: PlannedDispatchGroup,
+    state: ExecutionState,
+    code: str | None = None,
+    retry_after: str | None = None,
 ) -> list[LogicalAttemptOutcome]:
     return [
-        LogicalAttemptOutcome(attempt.logical_attempt_id, attempt.catalog_source_id, state, code)
+        LogicalAttemptOutcome(
+            attempt.logical_attempt_id,
+            attempt.catalog_source_id,
+            state,
+            code,
+            retry_after,
+        )
         for attempt in group.logical_attempts
     ]
 
 
 def _failure_state(code: str) -> ExecutionState:
-    if code in {"gateway_timed_out", "aggregate_deadline_exceeded"}:
+    if code in {
+        "gateway_timed_out",
+        "aggregate_deadline_exceeded",
+        "provider_parse_deadline_exceeded",
+    }:
         return ExecutionState.TIMED_OUT
     if code in {"execution_cancelled", "cancellation_check_failed"}:
         return ExecutionState.CANCELLED
@@ -1590,6 +1746,7 @@ async def execute_discovery_plan(
             continue
         adapter_result: object = None
         adapter_error: str | None = None
+        adapter_retry_after: str | None = None
         route_attempts += group_route_attempts
         try:
             controller.bind_owner_task()
@@ -1615,6 +1772,12 @@ async def execute_discovery_plan(
                 controller.validate_journal_lineage()
                 controller._execution_checkpoint()
                 adapter_result = _snapshot_adapter_result(raw_adapter_result)
+        except DiscoveryAdapterError as error:
+            trusted_error = _trusted_adapter_error(error)
+            if trusted_error is None or controller.failure_code is not None or not controller.has_completed_search:
+                adapter_error = controller.failure_code or "adapter_failed"
+            else:
+                adapter_error, adapter_retry_after = trusted_error
         except DiscoveryExecutionError:
             adapter_error = controller.failure_code or "adapter_failed"
         except Exception:  # noqa: BLE001 - adapter/provider details stay private.
@@ -1624,15 +1787,7 @@ async def execute_discovery_plan(
             pages += controller.pages
         journal_guard.validate()
 
-        failure_code = controller.failure_code or adapter_error
-        if failure_code is None and type(adapter_result) is not DiscoveryAdapterResult:
-            failure_code = "malformed_adapter_result"
-        if (
-            failure_code is None
-            and isinstance(adapter_result, DiscoveryAdapterResult)
-            and not controller.has_successful_search
-        ):
-            failure_code = "missing_search_dispatch"
+        failure_code = controller.failure_code
         if failure_code is None and not controller.intact:
             failure_code = "bound_plan_mutated"
         if failure_code is None:
@@ -1642,7 +1797,7 @@ async def execute_discovery_plan(
                 current_route = None
             if current_route is None or not _group_matches_route(trusted_group, current_route):
                 failure_code = "registry_mismatch"
-        if failure_code is None:
+        if failure_code is None and (adapter_error is None or controller.has_completed_search):
             policy_active = _policy_active(
                 policy_is_active,
                 trusted_group.route_id,
@@ -1655,8 +1810,28 @@ async def execute_discovery_plan(
             else:
                 if not policy_active:
                     failure_code = "dispatch_policy_inactive"
+        if failure_code is None:
+            failure_code = adapter_error
+        if failure_code is None and type(adapter_result) is not DiscoveryAdapterResult:
+            failure_code = "malformed_adapter_result"
+        if (
+            failure_code is None
+            and isinstance(adapter_result, DiscoveryAdapterResult)
+            and not controller.has_successful_search
+        ):
+            failure_code = "missing_search_dispatch"
         if failure_code is not None:
-            outcomes.extend(_outcomes(trusted_group, _failure_state(failure_code), failure_code))
+            retry_after = (
+                adapter_retry_after if controller.failure_code is None and failure_code == adapter_error else None
+            )
+            outcomes.extend(
+                _outcomes(
+                    trusted_group,
+                    _failure_state(failure_code),
+                    failure_code,
+                    retry_after,
+                )
+            )
             continue
 
         adapter_result = cast(DiscoveryAdapterResult, adapter_result)
