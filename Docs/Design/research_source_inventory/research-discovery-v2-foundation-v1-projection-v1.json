@@ -1,0 +1,588 @@
+{
+  "contract_version": "research-discovery-v2-foundation-v1-projection-v1",
+  "stable_response": {
+    "catalog_version": "research-discovery-v1",
+    "effective_config": {
+      "categories": [
+        "biomedical",
+        "open_research_graph",
+        "preprints",
+        "repositories"
+      ],
+      "defaulted_categories": [],
+      "execution_policy": {
+        "max_concurrency": 4,
+        "per_source_timeout_seconds": 10.0,
+        "total_timeout_seconds": 30.0
+      },
+      "fallback_policy": "disabled",
+      "filters": {},
+      "snapshot_retention_hours": 24,
+      "source_ids": [
+        "openalex",
+        "semantic_scholar",
+        "crossref",
+        "arxiv",
+        "pubmed",
+        "zenodo",
+        "figshare",
+        "osf"
+      ],
+      "source_policy": "balanced"
+    },
+    "metrics": {
+      "deduped_result_count": 2,
+      "oa_candidate_count": 5,
+      "result_count": 2,
+      "selected_source_count": 8
+    },
+    "query": "offline compatibility",
+    "results": [
+      {
+        "abstract": "A sanitized abstract for discovery adapter testing.",
+        "adapter_version": "semantic_scholar:research-discovery-router-v1",
+        "arxiv_id": "2601.01234",
+        "authors": [
+          "Ada Researcher"
+        ],
+        "canonical_url": "https://www.semanticscholar.org/paper/S2-PAPER-001",
+        "catalog_version": "research-discovery-v1",
+        "dedupe_confidence": 1.0,
+        "discovery_mode": "api",
+        "doi": "10.5555/shared.discovery.2026",
+        "fingerprint": "doi:10.5555/shared.discovery.2026",
+        "ingest_eligible": true,
+        "merged_provenance": [
+          {
+            "adapter_version": "semantic_scholar:research-discovery-router-v1",
+            "discovery_mode": "api",
+            "provider": "semantic_scholar",
+            "provider_ids": {
+              "arxiv_id": "2601.01234",
+              "doi": "10.5555/shared.discovery.2026",
+              "pmcid": "PMC1234567",
+              "pmid": "12345678",
+              "semantic_scholar_id": "S2-PAPER-001"
+            },
+            "safe_metadata": {
+              "abstract": "A sanitized abstract for discovery adapter testing.",
+              "adapter_version": "semantic_scholar:research-discovery-router-v1",
+              "arxiv_id": "2601.01234",
+              "authors": [
+                "Ada Researcher"
+              ],
+              "discovery_mode": "api",
+              "doi": "10.5555/shared.discovery.2026",
+              "pmcid": "PMC1234567",
+              "pmid": "12345678",
+              "provider": "semantic_scholar",
+              "provider_ids": {
+                "arxiv_id": "2601.01234",
+                "doi": "10.5555/shared.discovery.2026",
+                "pmcid": "PMC1234567",
+                "pmid": "12345678",
+                "semantic_scholar_id": "S2-PAPER-001"
+              },
+              "snippet": "A sanitized summary for discovery adapter testing.",
+              "source_category": "open_research_graph",
+              "source_id": "semantic_scholar",
+              "source_priority": 20,
+              "title": "Shared Discovery Record"
+            },
+            "source_id": "semantic_scholar",
+            "source_rank": 20,
+            "status": "ok",
+            "url": "https://www.semanticscholar.org/paper/S2-PAPER-001",
+            "warnings": []
+          },
+          {
+            "adapter_version": "crossref:research-discovery-router-v1",
+            "discovery_mode": "api",
+            "provider": "crossref",
+            "provider_ids": {
+              "crossref_id": "10.5555/shared.discovery.2026",
+              "doi": "10.5555/shared.discovery.2026"
+            },
+            "safe_metadata": {
+              "abstract": "<jats:p>A sanitized abstract for discovery adapter testing.</jats:p>",
+              "adapter_version": "crossref:research-discovery-router-v1",
+              "authors": [
+                "Ada Researcher"
+              ],
+              "discovery_mode": "api",
+              "doi": "10.5555/shared.discovery.2026",
+              "provider": "crossref",
+              "provider_ids": {
+                "crossref_id": "10.5555/shared.discovery.2026",
+                "doi": "10.5555/shared.discovery.2026"
+              },
+              "snippet": "<jats:p>A sanitized abstract for discovery adapter testing.</jats:p>",
+              "source_category": "open_research_graph",
+              "source_id": "crossref",
+              "source_priority": 30,
+              "title": "Shared Discovery Record"
+            },
+            "source_id": "crossref",
+            "source_rank": 30,
+            "status": "ok",
+            "url": "https://doi.org/10.5555/shared.discovery.2026",
+            "warnings": []
+          },
+          {
+            "adapter_version": "arxiv:research-discovery-router-v1",
+            "discovery_mode": "api",
+            "provider": "arxiv",
+            "provider_ids": {
+              "arxiv_id": "2601.01234v2",
+              "doi": "10.5555/shared.discovery.2026"
+            },
+            "safe_metadata": {
+              "abstract": "A sanitized abstract for arXiv discovery adapter testing.",
+              "adapter_version": "arxiv:research-discovery-router-v1",
+              "arxiv_id": "2601.01234v2",
+              "authors": [
+                "Ada Researcher",
+                "Grace Scientist"
+              ],
+              "discovery_mode": "api",
+              "doi": "10.5555/shared.discovery.2026",
+              "provider": "arxiv",
+              "provider_ids": {
+                "arxiv_id": "2601.01234v2",
+                "doi": "10.5555/shared.discovery.2026"
+              },
+              "snippet": "A sanitized abstract for arXiv discovery adapter testing.",
+              "source_category": "preprints",
+              "source_id": "arxiv",
+              "source_priority": 40,
+              "title": "Shared Discovery Record"
+            },
+            "source_id": "arxiv",
+            "source_rank": 40,
+            "status": "ok",
+            "url": "https://arxiv.org/abs/2601.01234v2",
+            "warnings": []
+          },
+          {
+            "adapter_version": "pubmed:research-discovery-router-v1",
+            "discovery_mode": "api",
+            "provider": "pubmed",
+            "provider_ids": {
+              "doi": "10.5555/shared.discovery.2026",
+              "pmcid": "PMC3141592",
+              "pmid": "31415926",
+              "pubmed_id": "31415926"
+            },
+            "safe_metadata": {
+              "adapter_version": "pubmed:research-discovery-router-v1",
+              "authors": [
+                "Ada Researcher",
+                "Grace Scientist"
+              ],
+              "discovery_mode": "api",
+              "doi": "10.5555/shared.discovery.2026",
+              "pmcid": "PMC3141592",
+              "pmid": "31415926",
+              "provider": "pubmed",
+              "provider_ids": {
+                "doi": "10.5555/shared.discovery.2026",
+                "pmcid": "PMC3141592",
+                "pmid": "31415926",
+                "pubmed_id": "31415926"
+              },
+              "source_category": "biomedical",
+              "source_id": "pubmed",
+              "source_priority": 50,
+              "title": "Shared Discovery Record"
+            },
+            "source_id": "pubmed",
+            "source_rank": 50,
+            "status": "ok",
+            "url": "https://pubmed.ncbi.nlm.nih.gov/31415926/",
+            "warnings": []
+          },
+          {
+            "adapter_version": "zenodo:research-discovery-router-v1",
+            "discovery_mode": "api",
+            "provider": "zenodo",
+            "provider_ids": {
+              "doi": "10.5555/shared.discovery.2026",
+              "zenodo_id": "1001"
+            },
+            "safe_metadata": {
+              "abstract": "A sanitized description for discovery adapter testing.",
+              "adapter_version": "zenodo:research-discovery-router-v1",
+              "authors": [
+                "Researcher, Ada"
+              ],
+              "discovery_mode": "api",
+              "doi": "10.5555/shared.discovery.2026",
+              "provider": "zenodo",
+              "provider_ids": {
+                "doi": "10.5555/shared.discovery.2026",
+                "zenodo_id": "1001"
+              },
+              "snippet": "A sanitized description for discovery adapter testing.",
+              "source_category": "repositories",
+              "source_id": "zenodo",
+              "source_priority": 60,
+              "title": "Shared Discovery Record"
+            },
+            "source_id": "zenodo",
+            "source_rank": 60,
+            "status": "ok",
+            "url": "https://zenodo.org/records/1001",
+            "warnings": []
+          },
+          {
+            "adapter_version": "figshare:research-discovery-router-v1",
+            "discovery_mode": "api",
+            "provider": "figshare",
+            "provider_ids": {
+              "doi": "10.5555/shared.discovery.2026",
+              "figshare_id": "2001"
+            },
+            "safe_metadata": {
+              "adapter_version": "figshare:research-discovery-router-v1",
+              "authors": [],
+              "discovery_mode": "api",
+              "doi": "10.5555/shared.discovery.2026",
+              "provider": "figshare",
+              "provider_ids": {
+                "doi": "10.5555/shared.discovery.2026",
+                "figshare_id": "2001"
+              },
+              "source_category": "repositories",
+              "source_id": "figshare",
+              "source_priority": 70,
+              "title": "Shared Discovery Record"
+            },
+            "source_id": "figshare",
+            "source_rank": 70,
+            "status": "ok",
+            "url": "https://figshare.com/articles/dataset/Shared_Discovery_Record/2001",
+            "warnings": []
+          },
+          {
+            "adapter_version": "osf:research-discovery-router-v1",
+            "discovery_mode": "api",
+            "provider": "osf",
+            "provider_ids": {
+              "doi": "10.5555/shared.discovery.2026",
+              "osf_id": "osf001"
+            },
+            "safe_metadata": {
+              "abstract": "A sanitized description for discovery adapter testing.",
+              "adapter_version": "osf:research-discovery-router-v1",
+              "authors": [],
+              "discovery_mode": "api",
+              "doi": "10.5555/shared.discovery.2026",
+              "provider": "osf",
+              "provider_ids": {
+                "doi": "10.5555/shared.discovery.2026",
+                "osf_id": "osf001"
+              },
+              "snippet": "A sanitized description for discovery adapter testing.",
+              "source_category": "repositories",
+              "source_id": "osf",
+              "source_priority": 80,
+              "title": "Shared Discovery Record"
+            },
+            "source_id": "osf",
+            "source_rank": 80,
+            "status": "ok",
+            "url": "https://osf.io/preprints/osf/osf001/",
+            "warnings": []
+          }
+        ],
+        "oa_candidates": [
+          {
+            "access_status": "open",
+            "candidate_id": "oa_candidate:29e0074961a791f755a005ed",
+            "candidate_type": "pdf",
+            "confidence": 0.9,
+            "content_type_hint": "application/pdf",
+            "license_hint": null,
+            "provider": "zenodo",
+            "rank": 1,
+            "requires_reresolution": false,
+            "resolver_reference": "resolver:2be132ac673598acead22345",
+            "safe_url": "https://zenodo.org/api/records/1001/files/shared-discovery.pdf/content",
+            "url_redacted": false,
+            "warnings": []
+          },
+          {
+            "access_status": "open",
+            "candidate_id": "oa_candidate:73f91eb85d74180896bd2a8a",
+            "candidate_type": "pdf",
+            "confidence": 0.9,
+            "content_type_hint": "application/pdf",
+            "license_hint": null,
+            "provider": "crossref",
+            "rank": 1,
+            "requires_reresolution": false,
+            "resolver_reference": "resolver:bc019afa97b32e02798ae6d9",
+            "safe_url": "https://example.org/research/shared-discovery.pdf",
+            "url_redacted": false,
+            "warnings": []
+          },
+          {
+            "access_status": "open",
+            "candidate_id": "oa_candidate:8e518e038e2190c7dea2defd",
+            "candidate_type": "pdf",
+            "confidence": 0.9,
+            "content_type_hint": "application/pdf",
+            "license_hint": null,
+            "provider": "semantic_scholar",
+            "rank": 1,
+            "requires_reresolution": false,
+            "resolver_reference": "resolver:408e021843849bb20874920a",
+            "safe_url": "https://example.org/research/shared-discovery.pdf",
+            "url_redacted": false,
+            "warnings": []
+          },
+          {
+            "access_status": "open",
+            "candidate_id": "oa_candidate:e0cf9cc2d37482469ee92508",
+            "candidate_type": "pdf",
+            "confidence": 0.9,
+            "content_type_hint": "application/pdf",
+            "license_hint": null,
+            "provider": "arxiv",
+            "rank": 1,
+            "requires_reresolution": false,
+            "resolver_reference": "resolver:067bd72990d723de93bf153c",
+            "safe_url": "https://arxiv.org/pdf/2601.01234v2",
+            "url_redacted": false,
+            "warnings": []
+          },
+          {
+            "access_status": "open",
+            "candidate_id": "oa_candidate:ff17a29f79e3dfa922dd29fb",
+            "candidate_type": "pdf",
+            "confidence": 0.9,
+            "content_type_hint": "application/pdf",
+            "license_hint": null,
+            "provider": "pubmed",
+            "rank": 1,
+            "requires_reresolution": false,
+            "resolver_reference": "resolver:28e0246a9bbe97b6744f237c",
+            "safe_url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC3141592/pdf/",
+            "url_redacted": false,
+            "warnings": []
+          }
+        ],
+        "pmcid": "PMC1234567",
+        "pmid": "12345678",
+        "primary_provider": "semantic_scholar",
+        "primary_source_id": "semantic_scholar",
+        "provider_ids": {
+          "arxiv_id": "2601.01234",
+          "crossref_id": "10.5555/shared.discovery.2026",
+          "doi": "10.5555/shared.discovery.2026",
+          "figshare_id": "2001",
+          "osf_id": "osf001",
+          "pmcid": "PMC1234567",
+          "pmid": "12345678",
+          "pubmed_id": "31415926",
+          "semantic_scholar_id": "S2-PAPER-001",
+          "zenodo_id": "1001"
+        },
+        "published_at": null,
+        "ranking_signals": {
+          "fingerprint": "doi:10.5555/shared.discovery.2026",
+          "has_oa_candidate": true,
+          "identifier_strength": 6,
+          "primary_source_priority": 20,
+          "title_length": 23
+        },
+        "recommended_candidate_id": "oa_candidate:29e0074961a791f755a005ed",
+        "result_id": "discovery_result:d66b8d605fcf26166e656b7f",
+        "safe_metadata": {
+          "abstract": "A sanitized abstract for discovery adapter testing.",
+          "adapter_version": "semantic_scholar:research-discovery-router-v1",
+          "arxiv_id": "2601.01234",
+          "authors": [
+            "Ada Researcher"
+          ],
+          "discovery_mode": "api",
+          "doi": "10.5555/shared.discovery.2026",
+          "pmcid": "PMC1234567",
+          "pmid": "12345678",
+          "provider": "semantic_scholar",
+          "provider_ids": {
+            "arxiv_id": "2601.01234",
+            "doi": "10.5555/shared.discovery.2026",
+            "pmcid": "PMC1234567",
+            "pmid": "12345678",
+            "semantic_scholar_id": "S2-PAPER-001"
+          },
+          "snippet": "A sanitized summary for discovery adapter testing.",
+          "source_category": "open_research_graph",
+          "source_id": "semantic_scholar",
+          "source_priority": 20,
+          "title": "Shared Discovery Record"
+        },
+        "source_category": "open_research_graph",
+        "title": "Shared Discovery Record",
+        "updated_at": null,
+        "warnings": []
+      },
+      {
+        "abstract": null,
+        "adapter_version": "pubmed:research-discovery-router-v1",
+        "arxiv_id": null,
+        "authors": [
+          "Lin Researcher"
+        ],
+        "canonical_url": "https://pubmed.ncbi.nlm.nih.gov/27182818/",
+        "catalog_version": "research-discovery-v1",
+        "dedupe_confidence": 0.95,
+        "discovery_mode": "api",
+        "doi": null,
+        "fingerprint": "pmid:27182818",
+        "ingest_eligible": false,
+        "merged_provenance": [
+          {
+            "adapter_version": "pubmed:research-discovery-router-v1",
+            "discovery_mode": "api",
+            "provider": "pubmed",
+            "provider_ids": {
+              "pmid": "27182818",
+              "pubmed_id": "27182818"
+            },
+            "safe_metadata": {
+              "adapter_version": "pubmed:research-discovery-router-v1",
+              "authors": [
+                "Lin Researcher"
+              ],
+              "discovery_mode": "api",
+              "pmid": "27182818",
+              "provider": "pubmed",
+              "provider_ids": {
+                "pmid": "27182818",
+                "pubmed_id": "27182818"
+              },
+              "source_category": "biomedical",
+              "source_id": "pubmed",
+              "source_priority": 50,
+              "title": "Second Bounded Record"
+            },
+            "source_id": "pubmed",
+            "source_rank": 50,
+            "status": "ok",
+            "url": "https://pubmed.ncbi.nlm.nih.gov/27182818/",
+            "warnings": []
+          }
+        ],
+        "oa_candidates": [],
+        "pmcid": null,
+        "pmid": "27182818",
+        "primary_provider": "pubmed",
+        "primary_source_id": "pubmed",
+        "provider_ids": {
+          "pmid": "27182818",
+          "pubmed_id": "27182818"
+        },
+        "published_at": null,
+        "ranking_signals": {
+          "fingerprint": "pmid:27182818",
+          "has_oa_candidate": false,
+          "identifier_strength": 5,
+          "primary_source_priority": 50,
+          "title_length": 21
+        },
+        "recommended_candidate_id": null,
+        "result_id": "discovery_result:a99e1e135c2c1e266e7a36b0",
+        "safe_metadata": {
+          "adapter_version": "pubmed:research-discovery-router-v1",
+          "authors": [
+            "Lin Researcher"
+          ],
+          "discovery_mode": "api",
+          "pmid": "27182818",
+          "provider": "pubmed",
+          "provider_ids": {
+            "pmid": "27182818",
+            "pubmed_id": "27182818"
+          },
+          "source_category": "biomedical",
+          "source_id": "pubmed",
+          "source_priority": 50,
+          "title": "Second Bounded Record"
+        },
+        "source_category": "biomedical",
+        "title": "Second Bounded Record",
+        "updated_at": null,
+        "warnings": []
+      }
+    ],
+    "source_statuses": [
+      {
+        "message": null,
+        "provider": "openalex",
+        "result_count": 0,
+        "source_id": "openalex",
+        "status": "ok",
+        "warnings": []
+      },
+      {
+        "message": null,
+        "provider": "semantic_scholar",
+        "result_count": 1,
+        "source_id": "semantic_scholar",
+        "status": "ok",
+        "warnings": []
+      },
+      {
+        "message": null,
+        "provider": "crossref",
+        "result_count": 1,
+        "source_id": "crossref",
+        "status": "ok",
+        "warnings": []
+      },
+      {
+        "message": null,
+        "provider": "arxiv",
+        "result_count": 1,
+        "source_id": "arxiv",
+        "status": "ok",
+        "warnings": []
+      },
+      {
+        "message": null,
+        "provider": "pubmed",
+        "result_count": 2,
+        "source_id": "pubmed",
+        "status": "ok",
+        "warnings": []
+      },
+      {
+        "message": null,
+        "provider": "zenodo",
+        "result_count": 1,
+        "source_id": "zenodo",
+        "status": "ok",
+        "warnings": []
+      },
+      {
+        "message": null,
+        "provider": "figshare",
+        "result_count": 1,
+        "source_id": "figshare",
+        "status": "ok",
+        "warnings": []
+      },
+      {
+        "message": null,
+        "provider": "osf",
+        "result_count": 1,
+        "source_id": "osf",
+        "status": "ok",
+        "warnings": []
+      }
+    ],
+    "warnings": []
+  }
+}

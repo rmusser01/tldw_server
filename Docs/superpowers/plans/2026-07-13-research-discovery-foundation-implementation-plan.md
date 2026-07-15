@@ -543,7 +543,7 @@ git diff --check
 
 **Tests:** Full Research Discovery regression, offline golden comparison, no-production-double-fetch assertion, compile, Bandit, and diff hygiene.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Files
 
@@ -554,14 +554,22 @@ git diff --check
 
 ### Test-first steps
 
-- [ ] Freeze the cross-group document projection before comparing V1 and V2: the recorded fixtures deliberately repeat one DOI across providers. Do not expose duplicate V2 document IDs or discard route/source attribution silently; either merge the repeated identity with all source/provenance ownership in the shared projection or pin a clearly consumer-owned merge boundary.
-- [ ] Define a stable client-visible compatibility projection, then compare V1 and V2 fixture executions for source ordering, normalized content, status meaning, warnings, and legacy serialization. Compare V1 logical adapter calls separately from V2 physical dispatches: PubMed's one legacy wrapper call intentionally becomes two physical requests, and OpenAlex readiness intentionally becomes credential-gated.
-- [ ] Re-run the hard-coded Research broker `src_...` and `note_...` identity goldens alongside the compatibility projection.
-- [ ] Add an import-boundary test proving V1 production catalog/router/service/endpoint modules do not import or construct the V2 executor, plus a construction test proving V2 requires an explicit offline/synthetic opt-in.
-- [ ] Execute one real legacy service or endpoint request with a raising V2 executor/gateway tripwire and recording V1 adapters. Assert the expected legacy provider counts and zero V2 calls so the no-double-fetch claim exercises a production entry point.
-- [ ] Run the complete existing Research Discovery suite plus all new foundation tests.
-- [ ] Run Bandit on the touched discovery and security integration scope; fix new findings rather than suppressing them.
-- [ ] Request an independent correctness/security review and resolve all important findings before completion.
+- [x] Freeze the cross-group document projection before comparing V1 and V2: the recorded fixtures deliberately repeat one DOI across providers. Do not expose duplicate V2 document IDs or discard route/source attribution silently; either merge the repeated identity with all source/provenance ownership in the shared projection or pin a clearly consumer-owned merge boundary.
+- [x] Define a stable client-visible compatibility projection, then compare V1 and V2 fixture executions for source ordering, normalized content, status meaning, warnings, and legacy serialization. Compare V1 logical adapter calls separately from V2 physical dispatches: PubMed's one legacy wrapper call intentionally becomes two physical requests, and OpenAlex readiness intentionally becomes credential-gated.
+- [x] Re-run the hard-coded Research broker `src_...` and `note_...` identity goldens alongside the compatibility projection.
+- [x] Add an import-boundary test proving V1 production catalog/router/service/endpoint modules do not import or construct the V2 executor, plus a construction test proving V2 requires an explicit offline/synthetic opt-in.
+- [x] Execute one real legacy service or endpoint request with a raising V2 executor/gateway tripwire and recording V1 adapters. Assert the expected legacy provider counts and zero V2 calls so the no-double-fetch claim exercises a production entry point.
+- [x] Run the complete existing Research Discovery suite plus all new foundation tests.
+- [x] Run Bandit on the touched discovery and security integration scope; fix new findings rather than suppressing them.
+- [x] Request an independent correctness/security review and resolve all important findings before completion.
+
+### Completion evidence
+
+- The offline executor now merges route-independent document identities before the unique-result cap, preserves registry-ordered route contributions and immutable route provenance, and fails conflicting identities or changed policy/route metadata atomically.
+- A canonical complete V1 response golden removes only generated discovery IDs and elapsed timings. It freezes all other public fields while separate assertions pin V2-to-V1 identity linkage, logical versus physical calls, OpenAlex's credentialed skip, PubMed's two dispatches, and seven-route attribution.
+- Fresh-process import closure plus a real legacy endpoint request prove standalone Search and active Deep Research remain on V1: all legacy adapters run exactly once, V2 executor/gateway/factory tripwires remain at zero, and V2 construction accepts only explicit offline-fixture or synthetic modes.
+- Final verification passed 300/300 executor/boundary/compatibility tests and 1,640/1,640 full Research tests. Compileall, exact-scope Ruff, Black, Python 3.10 grammar parsing, and `git diff --check` passed. Bandit reported 0 findings and 0 errors over 8,877 discovery LOC; the one skipped check is the previously justified DefusedXMLParser/ElementTree B405 boundary.
+- Independent correctness, security, and simplicity reviews returned CLEAN after provenance aliasing, attribution-basis mutation/whitespace, gateway-origin matching, full-response golden coverage, and redundant-test cleanup were resolved.
 
 ### Verify
 

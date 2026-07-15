@@ -31,8 +31,10 @@ from .contracts import (
     CredentialRequirement,
     DeferredNumericCSVQueryBinding,
     DiscoveryPlan,
+    DiscoveryProvenanceV2,
     DispatchAllowance,
     DispatchIntent,
+    ExactOrigin,
     ExecutionMode,
     JSONBodyPair,
     OperationKind,
@@ -57,6 +59,7 @@ from .gateway import (
     DiscoveryGatewayTrace,
     reconstruct_redirect_intent,
 )
+from .identity import build_fingerprint
 from .planner import expected_dispatch_group_id, expected_logical_attempt_id
 from .registry import DiscoveryRegistry
 
@@ -764,12 +767,48 @@ def _snapshot_adapter_result(value: object) -> DiscoveryAdapterResult | None:
 
 
 @dataclass(frozen=True, slots=True)
+class DiscoveryCandidateContribution:
+    """One provider record and its executor-owned route provenance."""
+
+    record: Mapping[str, Any]
+    provenance: DiscoveryProvenanceV2
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.record, Mapping):
+            raise TypeError("contribution_record_must_be_mapping")
+        if not isinstance(self.provenance, DiscoveryProvenanceV2):
+            raise TypeError("contribution_provenance_must_be_typed")
+        object.__setattr__(self, "record", _freeze_candidate_record(self.record))
+
+
+@dataclass(frozen=True, slots=True)
 class AttributedDiscoveryCandidate:
-    """One committed candidate with executor-owned attribution."""
+    """One unique document with every trusted route contribution."""
 
     candidate_id: str
-    record: Mapping[str, Any]
     catalog_source_ids: tuple[str, ...]
+    contributions: tuple[DiscoveryCandidateContribution, ...]
+
+    def __post_init__(self) -> None:
+        if type(self.candidate_id) is not str or not self.candidate_id:
+            raise ValueError("candidate_id_must_be_nonempty")
+        if (
+            type(self.catalog_source_ids) is not tuple
+            or not self.catalog_source_ids
+            or any(type(source_id) is not str or not source_id for source_id in self.catalog_source_ids)
+        ):
+            raise TypeError("catalog_source_ids_must_be_nonempty_string_tuple")
+        if (
+            type(self.contributions) is not tuple
+            or not self.contributions
+            or any(type(item) is not DiscoveryCandidateContribution for item in self.contributions)
+        ):
+            raise TypeError("candidate_contributions_must_be_typed_tuple")
+
+    @property
+    def record(self) -> Mapping[str, Any]:
+        """Retain the first registry-ordered contribution as the primary record."""
+        return self.contributions[0].record
 
 
 @dataclass(frozen=True, slots=True)
@@ -1106,6 +1145,8 @@ def _group_matches_route(group: PlannedDispatchGroup, route: AccessRoute) -> boo
             and group.backend_id == route.backend_id
             and group.adapter_id == route.adapter_id
             and group.adapter_version == route.adapter_version
+            and type(route.attribution_basis) is str
+            and bool(route.attribution_basis.strip())
             and group.fallback_order == route.fallback_order
             and group.policy_digest == route.policy.policy_digest == canonical_policy_digest(route.policy)
             and group.limits == limits
@@ -1118,6 +1159,21 @@ def _group_matches_route(group: PlannedDispatchGroup, route: AccessRoute) -> boo
         return False
 
 
+def _snapshot_exact_origin(origin: object) -> ExactOrigin | None:
+    """Reconstruct an origin without retaining mutable registry aliases."""
+    if type(origin) is not ExactOrigin:
+        return None
+    try:
+        return ExactOrigin(origin.scheme, origin.host, origin.port)
+    except Exception:  # noqa: BLE001 - mutated registry state fails closed.
+        return None
+
+
+def _origin_requested_host(origin: ExactOrigin) -> str:
+    default_port = 443 if origin.scheme == "https" else 80
+    return origin.host if origin.port == default_port else f"{origin.host}:{origin.port}"
+
+
 def _response_matches(response: object, route: AccessRoute, intent: DispatchIntent) -> bool:
     if type(response) is not DiscoveryGatewayResponse or type(response.trace) is not DiscoveryGatewayTrace:
         return False
@@ -1127,6 +1183,17 @@ def _response_matches(response: object, route: AccessRoute, intent: DispatchInte
         and trace.route_id == route.route_id
         and type(trace.policy_digest) is str
         and trace.policy_digest == intent.policy_digest
+        and type(trace.scheme) is str
+        and trace.scheme == route.policy.origin.scheme
+        and type(trace.requested_host) is str
+        and trace.requested_host == _origin_requested_host(route.policy.origin)
+        and type(trace.port) is int
+        and trace.port == route.policy.origin.port
+        and (
+            type(trace.tls_server_name) is str and trace.tls_server_name == route.policy.origin.host
+            if route.policy.origin.scheme == "https"
+            else trace.tls_server_name is None
+        )
         and type(trace.method) is str
         and trace.method == intent.method
         and type(trace.path) is str
@@ -1153,6 +1220,7 @@ class _GroupExecutionController:
         gateway: DiscoveryGateway,
         policy_is_active: PolicyActivityCheck,
         dispatch_id_factory: DispatchIDFactory,
+        attribution_basis: str,
         max_pages_per_route: int,
         max_redirects: int,
         max_retries: int,
@@ -1173,6 +1241,9 @@ class _GroupExecutionController:
         self._gateway = gateway
         self._policy_is_active = policy_is_active
         self._dispatch_id_factory = dispatch_id_factory
+        if type(attribution_basis) is not str or not attribution_basis.strip():
+            raise DiscoveryExecutionError("registry_mismatch")
+        self._attribution_basis = attribution_basis
         self._max_pages_per_route = max_pages_per_route
         self._max_redirects = max_redirects
         self._max_retries = max_retries
@@ -1188,6 +1259,7 @@ class _GroupExecutionController:
         self.closed = False
         self.failure_code: str | None = None
         self._owner_task: asyncio.Task[Any] | None = None
+        self._transport_origin: ExactOrigin | None = None
 
     @property
     def exposed_group(self) -> PlannedDispatchGroup:
@@ -1207,6 +1279,14 @@ class _GroupExecutionController:
     @property
     def has_completed_search(self) -> bool:
         return bool(self._completed_searches)
+
+    @property
+    def transport_origin(self) -> ExactOrigin | None:
+        return self._transport_origin
+
+    @property
+    def attribution_basis(self) -> str:
+        return self._attribution_basis
 
     def close(self) -> None:
         self.closed = True
@@ -1276,7 +1356,7 @@ class _GroupExecutionController:
             route = self._registry.get_route(self._trusted_group.route_id)
         except Exception:  # noqa: BLE001 - registry lookup fails closed.
             self._reject("registry_mismatch")
-        if not _group_matches_route(self._trusted_group, route):
+        if not _group_matches_route(self._trusted_group, route) or route.attribution_basis != self._attribution_basis:
             self._reject("registry_mismatch")
         return route
 
@@ -1596,6 +1676,10 @@ class _GroupExecutionController:
             self._completed_searches.add(intent_index)
             if 200 <= response.status_code < 300:
                 self._successful_searches.add(intent_index)
+                transport_origin = _snapshot_exact_origin(route.policy.origin)
+                if transport_origin is None:
+                    self._reject("registry_mismatch")
+                self._transport_origin = transport_origin
         return response
 
 
@@ -1609,6 +1693,19 @@ def _adapter_dispatch(controller: _GroupExecutionController) -> BoundDispatch:
         return await controller(intent, cursor=cursor, bindings=bindings)
 
     return dispatch
+
+
+def _ordered_union(existing: tuple[str, ...], additions: tuple[str, ...]) -> tuple[str, ...]:
+    return existing + tuple(item for item in additions if item not in existing)
+
+
+def _candidate_fingerprint(record: Mapping[str, Any]) -> str | None:
+    """Build identity from a frozen record without exposing provider values."""
+    try:
+        fingerprint = build_fingerprint(dict(record))
+    except Exception:  # noqa: BLE001 - malformed candidate identity fails closed.
+        return None
+    return fingerprint if type(fingerprint) is str and fingerprint else None
 
 
 def _outcomes(
@@ -1692,6 +1789,9 @@ async def execute_discovery_plan(
     )
 
     committed: list[AttributedDiscoveryCandidate] = []
+    committed_indexes: dict[str, int] = {}
+    committed_fingerprints: dict[str, str] = {}
+    truncated_fingerprints: dict[str, str] = {}
     outcomes: list[LogicalAttemptOutcome] = []
     truncated = 0
     route_attempts = 0
@@ -1736,6 +1836,7 @@ async def execute_discovery_plan(
                 gateway=gateway,
                 policy_is_active=policy_is_active,
                 dispatch_id_factory=dispatch_id_factory,
+                attribution_basis=route.attribution_basis,
                 max_pages_per_route=trusted_plan.ceilings.max_pages_per_route,
                 max_redirects=trusted_plan.ceilings.max_redirects,
                 max_retries=trusted_plan.ceilings.max_retries,
@@ -1837,9 +1938,10 @@ async def execute_discovery_plan(
         adapter_result = cast(DiscoveryAdapterResult, adapter_result)
         matched_sources: set[str] = set()
         route_candidates = adapter_result.candidates[: trusted_group.limits.max_results]
-        group_candidates: list[AttributedDiscoveryCandidate] = []
         group_truncated = max(0, len(adapter_result.candidates) - len(route_candidates))
         attribution_failed = False
+        projection_failure: str | None = None
+        staged_by_id: dict[str, tuple[DiscoveryCandidate, str, tuple[str, ...]]] = {}
         for candidate in route_candidates:
             try:
                 source_ids = tuple(
@@ -1854,27 +1956,114 @@ async def execute_discovery_plan(
             if not source_ids:
                 continue
             matched_sources.update(source_ids)
-            if len(committed) + len(group_candidates) >= returned_result_cap:
-                group_truncated += 1
-                continue
-            group_candidates.append(AttributedDiscoveryCandidate(candidate.candidate_id, candidate.record, source_ids))
+            fingerprint = _candidate_fingerprint(candidate.record)
+            if fingerprint is None:
+                projection_failure = "candidate_identity_invalid"
+                break
+            known_fingerprint = committed_fingerprints.get(candidate.candidate_id)
+            if known_fingerprint is None:
+                known_fingerprint = truncated_fingerprints.get(candidate.candidate_id)
+            staged = staged_by_id.get(candidate.candidate_id)
+            if known_fingerprint is None and staged is not None:
+                known_fingerprint = staged[1]
+            if known_fingerprint is not None and known_fingerprint != fingerprint:
+                projection_failure = "candidate_identity_conflict"
+                break
+            if staged is None:
+                staged_by_id[candidate.candidate_id] = (candidate, fingerprint, source_ids)
+            else:
+                staged_by_id[candidate.candidate_id] = (
+                    staged[0],
+                    staged[1],
+                    _ordered_union(staged[2], source_ids),
+                )
         if attribution_failed:
             outcomes.extend(_outcomes(trusted_group, ExecutionState.FAILED, "candidate_attribution_failed"))
             continue
+        if projection_failure is not None:
+            outcomes.extend(_outcomes(trusted_group, ExecutionState.FAILED, projection_failure))
+            continue
+
+        accepted: list[tuple[DiscoveryCandidate, str, tuple[str, ...], int | None]] = []
+        staged_truncated: dict[str, str] = {}
+        staged_new_count = 0
+        for candidate_id, (candidate, fingerprint, source_ids) in staged_by_id.items():
+            committed_index = committed_indexes.get(candidate_id)
+            if committed_index is not None:
+                accepted.append((candidate, fingerprint, source_ids, committed_index))
+                continue
+            if candidate_id in truncated_fingerprints:
+                continue
+            if len(committed) + staged_new_count >= returned_result_cap:
+                staged_truncated[candidate_id] = fingerprint
+                group_truncated += 1
+                continue
+            accepted.append((candidate, fingerprint, source_ids, None))
+            staged_new_count += 1
+
         policy_active = _policy_active(
             policy_is_active,
             trusted_group.route_id,
             trusted_group.policy_digest,
         )
         try:
-            controller._validate_after_policy_callback()
+            _current_route, _remaining_seconds = controller._validate_after_policy_callback()
         except DiscoveryExecutionError as error:
             outcomes.extend(_outcomes(trusted_group, _failure_state(error.code), error.code))
             continue
         if not policy_active:
             outcomes.extend(_outcomes(trusted_group, ExecutionState.FAILED, "dispatch_policy_inactive"))
             continue
-        committed.extend(group_candidates)
+        transport_origin = _snapshot_exact_origin(controller.transport_origin)
+        if transport_origin is None:
+            outcomes.extend(_outcomes(trusted_group, ExecutionState.FAILED, "missing_transport_provenance"))
+            continue
+
+        replacements: dict[int, AttributedDiscoveryCandidate] = {}
+        additions: list[tuple[AttributedDiscoveryCandidate, str]] = []
+        for candidate, fingerprint, source_ids, committed_index in accepted:
+            provenance = DiscoveryProvenanceV2(
+                requested_catalog_source_ids=source_ids,
+                route_id=trusted_group.route_id,
+                backend_id=trusted_group.backend_id,
+                transport_origin=ExactOrigin(
+                    transport_origin.scheme,
+                    transport_origin.host,
+                    transport_origin.port,
+                ),
+                reported_document_origin=None,
+                retrieval_observed_origin=None,
+                attribution_basis=controller.attribution_basis,
+                catalog_version=trusted_plan.catalog_version,
+                adapter_version=trusted_group.adapter_version,
+                policy_digest=trusted_group.policy_digest,
+            )
+            contribution = DiscoveryCandidateContribution(candidate.record, provenance)
+            if committed_index is None:
+                additions.append(
+                    (
+                        AttributedDiscoveryCandidate(
+                            candidate.candidate_id,
+                            source_ids,
+                            (contribution,),
+                        ),
+                        fingerprint,
+                    )
+                )
+                continue
+            existing = committed[committed_index]
+            replacements[committed_index] = AttributedDiscoveryCandidate(
+                existing.candidate_id,
+                _ordered_union(existing.catalog_source_ids, source_ids),
+                existing.contributions + (contribution,),
+            )
+        for committed_index, replacement in replacements.items():
+            committed[committed_index] = replacement
+        for addition, fingerprint in additions:
+            committed_indexes[addition.candidate_id] = len(committed)
+            committed_fingerprints[addition.candidate_id] = fingerprint
+            committed.append(addition)
+        truncated_fingerprints.update(staged_truncated)
         truncated += group_truncated
         outcomes.extend(
             LogicalAttemptOutcome(

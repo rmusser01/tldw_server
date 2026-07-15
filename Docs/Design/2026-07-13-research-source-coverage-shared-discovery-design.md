@@ -126,6 +126,8 @@ Origins are distinct provenance fields:
 - `reported_document_origin` is an untrusted, normalized origin reported by the provider for a candidate document. It is not evidence that tldw fetched that document.
 - `retrieval_observed_origin` is populated only by a future approved retrieval path after an actual fetch. It is absent during phase-one discovery.
 
+TASK-12968.2 implements a deliberately narrower offline foundation record. The executor merges equal route-independent candidate IDs before applying the unique-document result cap, retains one registry-ordered contribution per successful route, and fails a later group atomically if the same candidate ID carries a different canonical fingerprint. Its `transport_origin` is the registered scheme, host, and port only after those fields and the TLS server name match the gateway trace. Redirect-chain, resolved-peer, request-time, cache-state, and other full hop evidence are not yet persisted in the result projection and remain consumer-cutover work. The foundation also leaves `reported_document_origin` and `retrieval_observed_origin` unset; provider result URLs stay inert and do not establish either field.
+
 ## Frozen Seed Manifest and Coverage Ledger
 
 The program creates a checked-in, machine-readable JSON seed manifest from a dated capture of the referenced page. It stores only the factual inventory needed for reconciliation: captured label, URL, stable row ID, first-seen position, source category placements, capture date, and content digests. It does not copy descriptions, editorial prose, or page structure.
@@ -370,6 +372,8 @@ Cutover occurs only after golden characterization of:
 - source status and warning shapes
 - error handling and physical provider-call counts
 - serialized snapshot compatibility
+
+The TASK-12968.2 compatibility proof is intentionally offline and asymmetric. Recorded V2 contributions are replayed through the real frozen V1 router, normalizer, serializer, and snapshot service for the seven credentialless routes where the contracts overlap. OpenAlex remains an explicit difference: V1 makes one logical stub call while V2 performs zero work and reports the API-key route as credentialed-out-of-scope. PubMed remains one logical V1 call but two accounted V2 physical requests. The proof does not claim general request equivalence because V1 has independent per-source and total limits, V2 currently uses one result limit for route and global caps, V1 forwards filters that V2 currently only freezes, and query-normalization rules differ. TASK-12968.3 owns those translations and consumer cutover. Until then, fresh-process and endpoint tripwires require standalone Search and active Deep Research jobs to remain on V1 with no V2 construction or double-fetching.
 
 The new selection contract remains opt-in until API, UI, and cross-surface tests pass. The existing default is not silently changed.
 

@@ -103,7 +103,7 @@ _EXPECTED_IMPORT_DIGESTS = {
     "contracts.py": "795b84090cafaa034f2a12af4e6f3b3c6ddbb9ebb3f1607db1ae714cbd8d4ea5",
     "registry.py": "56ffcb107d482f12c2c2477f563b571e716ba73d0937e1a632c89a59b6c1b797",
     "planner.py": "f336d46cff187fd8cc7211a695381d267119ea6355832f79448aae070c4f70b6",
-    "executor.py": "b8505ddcc1a65658aac518b2317a1d608b4f7abebc0d123457a6adf1f3f5737e",
+    "executor.py": "fe278b31cd51d12649bc43e9ac9c35425acec3e1b11a7f8770018ffa49b58f41",
     "gateway_adapters.py": "ea8c72d2b9fe6ea818249606c2ae6c43a2e50620566e620cf895f89937fc6b95",
     "gateway.py": "8920262b8556a7f3ba611d21fc3de16f11002f218e4ced782b5dd21cefc58e5a",
     "identity.py": "233069fec1e798085a85b14bc1d887a585e22b8a6a6ddaa7dd90001f65b2668d",
@@ -121,7 +121,7 @@ _EXPECTED_AST_DIGESTS = {
     "contracts.py": "db0c60425b6701cc4ba21c3d695b257b58860067a21fe8628ce727f7cc67a022",
     "registry.py": "260df2717fcf7cdd91a926dda694bf0517611f0d6378049448581637b4a3def3",
     "planner.py": "0d1d8915a2de7cc02b59d561279f1fb0dbe44e42e0234c826bedc10b955b38e2",
-    "executor.py": "d7e1c98fb7129648fce5fc2489de1a1df719a284d1c6ccaa0c27b42fa9904f4b",
+    "executor.py": "9d173f33fe35aa1ce5d771d145090699488b99c53f89c7ba0056367f294933bf",
     "gateway_adapters.py": "2edc3b14b1a478a911aca78775705bc942a30f43790e103d96d6b9e2729382fa",
     "gateway.py": "76c021b0845ffc8e1a3905fdc822d5f3744c82cb83f29cdac4cb59f6c6c78237",
     "identity.py": "f59640d8f793fd3ebd11df49d333f73ebee9e59efb549393116bee2a241f5f06",
@@ -145,10 +145,13 @@ _EXPECTED_GATEWAY_IMPORTS = {
     "gateway_adapters.py": {"DiscoveryGatewayResponse"},
 }
 _EXPECTED_IDENTITY_IMPORTS = {
-    "build_fingerprint",
-    "canonicalize_url",
-    "has_unsafe_url_material",
-    "normalize_doi",
+    "executor.py": {"build_fingerprint"},
+    "gateway_adapters.py": {
+        "build_fingerprint",
+        "canonicalize_url",
+        "has_unsafe_url_material",
+        "normalize_doi",
+    },
 }
 _EXPECTED_HTTP_HOP_IMPORTS = {
     "HTTPHopError",
@@ -430,7 +433,7 @@ def _boundary_violations(source: str, filename: str, *, check_import_digest: boo
                     violations.append(f"{filename}:{node.lineno}:gateway_symbols:{sorted(imported)}")
             if isinstance(node, ast.ImportFrom) and node.level == 1 and node.module == "identity":
                 imported = {alias.name for alias in node.names}
-                if filename != "gateway_adapters.py" or imported != _EXPECTED_IDENTITY_IMPORTS:
+                if imported != _EXPECTED_IDENTITY_IMPORTS.get(filename, set()):
                     violations.append(f"{filename}:{node.lineno}:identity_symbols:{sorted(imported)}")
             if isinstance(node, ast.ImportFrom) and node.module == _HTTP_HOP_MODULE:
                 imported = {alias.name for alias in node.names}
@@ -881,7 +884,15 @@ async def test_all_ready_registry_adapters_execute_recorded_fixtures_with_only_a
     assert len(gateway_calls) == expected_dispatches
     assert Counter(adapter_id for adapter_id, _path in gateway_calls) == expected_dispatches_by_adapter
     assert tuple(outcome.state for outcome in result.logical_outcomes) == (LogicalOutcomeState.SUCCEEDED,) * 7
-    assert {candidate.record["provider"] for candidate in result.candidates} == {
+    assert tuple(candidate.record["provider"] for candidate in result.candidates) == (
+        "semantic_scholar",
+        "pubmed",
+    )
+    shared_doi_candidates = [
+        candidate for candidate in result.candidates if candidate.record["doi"] == "10.5555/shared.discovery.2026"
+    ]
+    assert len(shared_doi_candidates) == 1
+    assert tuple(contribution.record["provider"] for contribution in shared_doi_candidates[0].contributions) == (
         "semantic_scholar",
         "crossref",
         "arxiv",
@@ -889,12 +900,16 @@ async def test_all_ready_registry_adapters_execute_recorded_fixtures_with_only_a
         "zenodo",
         "figshare",
         "osf",
-    }
-    shared_doi_candidates = [
-        candidate for candidate in result.candidates if candidate.record["doi"] == "10.5555/shared.discovery.2026"
-    ]
-    assert len(shared_doi_candidates) >= 2
-    assert len({candidate.candidate_id for candidate in shared_doi_candidates}) == 1
+    )
+    assert shared_doi_candidates[0].catalog_source_ids == (
+        "semantic_scholar",
+        "crossref",
+        "arxiv",
+        "pubmed",
+        "zenodo",
+        "figshare",
+        "osf",
+    )
     assert all(candidate.record["url"].startswith("https://") for candidate in result.candidates)
     assert len(result.usage.physical_records) == expected_dispatches
     assert result.usage.accounting.debited == expected_dispatches
