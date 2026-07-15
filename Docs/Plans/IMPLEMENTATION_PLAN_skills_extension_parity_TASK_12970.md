@@ -270,7 +270,7 @@ The strict browser diagnostics reproduced the options entrypoint's inline theme 
 
 **Tests:** Add each Playwright test before adding its missing fixture behavior.
 
-**Status:** In Progress
+**Status:** Complete
 
 **Files:**
 - Modify: `apps/extension/tests/e2e/skills.parity.spec.ts`
@@ -340,7 +340,7 @@ The strict browser diagnostics reproduced the options entrypoint's inline theme 
 
 **Tests:** Add and run each test separately before running the full file.
 
-**Status:** Not Started
+**Status:** In Progress
 
 **Files:**
 - Modify: `apps/extension/tests/e2e/skills.parity.spec.ts`
