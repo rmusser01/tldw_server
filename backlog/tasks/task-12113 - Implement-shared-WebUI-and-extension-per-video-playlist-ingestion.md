@@ -16,6 +16,7 @@ references:
 - TASK-12111
 - TASK-12112
 - Docs/superpowers/specs/2026-07-12-youtube-playlist-per-item-ingest-design.md
+- https://github.com/rmusser01/tldw_server/pull/2738
 documentation:
 - Docs/superpowers/plans/2026-07-12-youtube-playlist-ingest-shared-frontend.md
 - Docs/superpowers/plans/2026-07-14-quick-ingest-explicit-submission-command.md
@@ -174,4 +175,5 @@ Task 9 final cross-client release gate is complete. The deterministic 34-item ve
 Verification-record correction for the final durability-waiter remediation: the fresh post-restoration gate is IndexedDB/session 77/77 plus repository-pinned ESLint and whitespace checks. The earlier sentence claiming a two-file Prettier pass referred to an incorrect frontend formatter invocation whose mechanical changes were fully discarded; no formatter-only diff remains. The broader Task 9 configured Prettier result for its intended configured files is unchanged.
 Task 9 and TASK-12113 implementation committed successfully as f616d29ec6: test: verify shared playlist ingest experience (TASK-12113). The commit contains the exact 19-file staged set reviewed above; cached whitespace checks were clean, and both protected watchlist templates remained untracked and excluded.
 Post-origin/dev integration reconciliation completed before PR packaging. Current-dev contract fixes preserve durable idempotent replay events in SQLite/PostgreSQL, independent media-ingest-jobs capability registration, valid single-user stream test credentials, Quick Ingest persistence/provider fields, synchronous cancellation fencing, and authoritative completion/reattach precedence. Fresh verification: backend integration gate 683 passed / 2 skipped; PostgreSQL-targeted gate 4 passed / 24 environment skips; frontend branch sweep 25 files / 878 tests passed; focused modal 208/208; Chromium playlist reload journey 1/1; touched-scope ESLint and git diff --check passed; Bandit scanned all changed production Python paths with 0 findings. Full frontend TSC remains the previously documented repository-baseline skip. Draft PR creation is pending.
+Draft PR opened as https://github.com/rmusser01/tldw_server/pull/2738 against dev after a clean 63-commit rebase onto bb0c9d6bd5. Post-rebase frontend verification remained green: 25 files / 878 Vitest tests, touched-scope ESLint, scoped Prettier, range whitespace checks, and Chromium playlist journey 1/1. The PR remains draft until the human requester supplies the required Change summary explaining what changed and why.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
