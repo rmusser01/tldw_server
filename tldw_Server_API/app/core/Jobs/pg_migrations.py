@@ -669,6 +669,13 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                 "job_sla_policies",
                 "job_attachments",
                 "job_dependencies",
+                "playlist_preflights",
+                "playlist_preflight_items",
+                "playlist_materializations",
+                "playlist_materialization_items",
+                "media_ingest_runs",
+                "media_ingest_run_items",
+                "media_ingest_run_events",
             ):
                 _enable_rls(_table)
             admin_expr = "COALESCE(NULLIF(current_setting('app.is_admin', true), ''), '') = 'true'"
@@ -676,6 +683,72 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
             owner_expr = "NULLIF(current_setting('app.owner_user_id', true), '')"
             domain_filter = f"({domain_expr} IS NULL OR domain = ANY(string_to_array({domain_expr}, ',')))"
             owner_filter = f"({owner_expr} IS NULL OR owner_user_id = {owner_expr})"
+
+            def _qualified_owner_filter(table: str) -> str:
+                return f"({owner_expr} IS NULL OR {table}.owner_user_id = {owner_expr})"
+
+            playlist_policy_filters = {
+                "playlist_preflights": (
+                    f"{admin_expr} OR {_qualified_owner_filter('playlist_preflights')}"
+                ),
+                "playlist_preflight_items": (
+                    f"{admin_expr} OR ("  # nosec B608
+                    f"{_qualified_owner_filter('playlist_preflight_items')} AND EXISTS ("
+                    "SELECT 1 FROM playlist_preflights parent "
+                    "WHERE parent.preflight_id = playlist_preflight_items.preflight_id "
+                    "AND parent.owner_user_id = playlist_preflight_items.owner_user_id "
+                    f"AND {_qualified_owner_filter('parent')}))"
+                ),
+                "playlist_materializations": (
+                    f"{admin_expr} OR ("  # nosec B608
+                    f"{_qualified_owner_filter('playlist_materializations')} AND EXISTS ("
+                    "SELECT 1 FROM playlist_preflights parent "
+                    "WHERE parent.preflight_id = playlist_materializations.preflight_id "
+                    "AND parent.owner_user_id = playlist_materializations.owner_user_id "
+                    f"AND {_qualified_owner_filter('parent')}))"
+                ),
+                "playlist_materialization_items": (
+                    f"{admin_expr} OR ("  # nosec B608
+                    f"{_qualified_owner_filter('playlist_materialization_items')} AND EXISTS ("
+                    "SELECT 1 FROM playlist_materializations parent "
+                    "WHERE parent.materialization_id = playlist_materialization_items.materialization_id "
+                    "AND parent.owner_user_id = playlist_materialization_items.owner_user_id "
+                    f"AND {_qualified_owner_filter('parent')}))"
+                ),
+                "media_ingest_runs": (
+                    f"{admin_expr} OR {_qualified_owner_filter('media_ingest_runs')}"
+                ),
+                "media_ingest_run_items": (
+                    f"{admin_expr} OR ("  # nosec B608
+                    f"{_qualified_owner_filter('media_ingest_run_items')} AND EXISTS ("
+                    "SELECT 1 FROM media_ingest_runs parent "
+                    "WHERE parent.run_id = media_ingest_run_items.run_id "
+                    "AND parent.owner_user_id = media_ingest_run_items.owner_user_id "
+                    f"AND {_qualified_owner_filter('parent')}))"
+                ),
+                "media_ingest_run_events": (
+                    f"{admin_expr} OR ("  # nosec B608
+                    f"{_qualified_owner_filter('media_ingest_run_events')} AND EXISTS ("
+                    "SELECT 1 FROM media_ingest_runs parent "
+                    "WHERE parent.run_id = media_ingest_run_events.run_id "
+                    "AND parent.owner_user_id = media_ingest_run_events.owner_user_id "
+                    f"AND {_qualified_owner_filter('parent')}))"
+                ),
+            }
+            for table, policy_filter in playlist_policy_filters.items():
+                cur.execute(f"DROP POLICY IF EXISTS {table}_owner_select ON {table}")  # nosec B608
+                select_policy_sql = f"""
+                    CREATE POLICY {table}_owner_select ON {table} FOR SELECT
+                    USING ({policy_filter})
+                    """  # nosec B608
+                cur.execute(select_policy_sql)
+                cur.execute(f"DROP POLICY IF EXISTS {table}_owner_modify ON {table}")  # nosec B608
+                modify_policy_sql = f"""
+                    CREATE POLICY {table}_owner_modify ON {table} FOR ALL
+                    USING ({policy_filter})
+                    WITH CHECK ({policy_filter})
+                    """  # nosec B608
+                cur.execute(modify_policy_sql)
 
             cur.execute("DROP POLICY IF EXISTS jobs_domain_select ON jobs")
             cur.execute(
@@ -916,7 +989,10 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                             WHERE schemaname = current_schema()
                               AND tablename IN (
                                 'jobs','job_events','job_counters','job_queue_controls',
-                                'job_attachments','job_sla_policies','job_dependencies','jobs_archive'
+                                'job_attachments','job_sla_policies','job_dependencies','jobs_archive',
+                                'playlist_preflights','playlist_preflight_items',
+                                'playlist_materializations','playlist_materialization_items',
+                                'media_ingest_runs','media_ingest_run_items','media_ingest_run_events'
                               )
                             ORDER BY tablename, polname
                             """

@@ -1,14 +1,83 @@
 import os
-import pytest
 from urllib.parse import quote, urlparse, urlunparse
+
+import pytest
 
 psycopg = pytest.importorskip("psycopg")
 
-from tldw_Server_API.app.core.Jobs.pg_migrations import ensure_jobs_rls_policies_pg, ensure_jobs_tables_pg
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Jobs.pg_migrations import (
+    ensure_jobs_rls_policies_pg,
+    ensure_jobs_tables_pg,
+)
+
+PLAYLIST_RLS_TABLES = (
+    "playlist_preflights",
+    "playlist_preflight_items",
+    "playlist_materializations",
+    "playlist_materialization_items",
+    "media_ingest_runs",
+    "media_ingest_run_items",
+    "media_ingest_run_events",
+)
+
+PLAYLIST_RLS_CHILD_PARENTS = {
+    "playlist_preflight_items": "playlist_preflights",
+    "playlist_materializations": "playlist_preflights",
+    "playlist_materialization_items": "playlist_materializations",
+    "media_ingest_run_items": "media_ingest_runs",
+    "media_ingest_run_events": "media_ingest_runs",
+}
 
 
-pytestmark = pytest.mark.pg_jobs
+def test_playlist_rls_installer_covers_every_authority_table(monkeypatch):
+    statements: list[str] = []
+
+    class RecordingCursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, statement, _params=None):
+            statements.append(str(statement))
+
+        def fetchone(self):
+            return None
+
+    class RecordingConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def cursor(self):
+            return RecordingCursor()
+
+    monkeypatch.delenv("JOBS_PG_RLS_ROLE", raising=False)
+    monkeypatch.setattr(psycopg, "connect", lambda *_args, **_kwargs: RecordingConnection())
+
+    ensure_jobs_rls_policies_pg("postgresql://example/jobs")
+
+    installed_sql = "\n".join(statements)
+    for table in PLAYLIST_RLS_TABLES:
+        assert f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY" in installed_sql
+        assert f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY" in installed_sql
+        select_prefix = f"CREATE POLICY {table}_owner_select ON {table} FOR SELECT"
+        assert select_prefix in installed_sql
+        select_sql = next(statement for statement in statements if select_prefix in statement)
+        assert "USING" in select_sql
+        modify_prefix = f"CREATE POLICY {table}_owner_modify ON {table} FOR ALL"
+        assert modify_prefix in installed_sql
+        modify_sql = next(statement for statement in statements if modify_prefix in statement)
+        assert "USING" in modify_sql
+        assert "WITH CHECK" in modify_sql
+        parent_table = PLAYLIST_RLS_CHILD_PARENTS.get(table)
+        if parent_table is not None:
+            assert f"FROM {parent_table}" in select_sql
+            assert f"FROM {parent_table}" in modify_sql
 
 
 def _dsn_or_skip(monkeypatch):
@@ -117,6 +186,91 @@ def _seed(dsn):
             )
 
 
+def _seed_playlist_authority(dsn):
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        with conn.cursor() as cur:
+            for table in (
+                "media_ingest_run_events",
+                "media_ingest_run_items",
+                "media_ingest_runs",
+                "playlist_materialization_items",
+                "playlist_materializations",
+                "playlist_preflight_items",
+                "playlist_preflights",
+            ):
+                cur.execute(f"DELETE FROM {table}")
+
+            cur.execute(
+                """
+                INSERT INTO playlist_preflights(
+                  preflight_id, owner_user_id, status, source_url, source_kind, expires_at
+                ) VALUES
+                  ('pf-u1', 'u1', 'completed', 'https://example.test/pf-u1', 'playlist', NOW() + INTERVAL '1 hour'),
+                  ('pf-u2', 'u2', 'completed', 'https://example.test/pf-u2', 'playlist', NOW() + INTERVAL '1 hour')
+                """
+            )
+            cur.execute(
+                """
+                INSERT INTO playlist_preflight_items(
+                  preflight_id, owner_user_id, occurrence_id, ordinal,
+                  occurrence_index_for_source, source_kind, availability, duplicate_status
+                ) VALUES
+                  ('pf-u1', 'u1', 'pfi-u1', 1, 1, 'video', 'available', 'new'),
+                  ('pf-u2', 'u2', 'pfi-u2', 2, 1, 'video', 'available', 'new'),
+                  ('pf-u2', 'u1', 'pfi-invalid-parent', 3, 1, 'video', 'available', 'new')
+                """
+            )
+            cur.execute(
+                """
+                INSERT INTO playlist_materializations(
+                  materialization_id, preflight_id, owner_user_id, status, expires_at
+                ) VALUES
+                  ('mat-u1', 'pf-u1', 'u1', 'ready', NOW() + INTERVAL '1 hour'),
+                  ('mat-u2', 'pf-u2', 'u2', 'ready', NOW() + INTERVAL '1 hour'),
+                  ('mat-invalid-parent', 'pf-u2', 'u1', 'ready', NOW() + INTERVAL '1 hour')
+                """
+            )
+            cur.execute(
+                """
+                INSERT INTO playlist_materialization_items(
+                  materialization_id, owner_user_id, occurrence_id, ordinal,
+                  source_url, source_kind
+                ) VALUES
+                  ('mat-u1', 'u1', 'mi-u1', 1, 'https://example.test/mi-u1', 'video'),
+                  ('mat-u2', 'u2', 'mi-u2', 2, 'https://example.test/mi-u2', 'video'),
+                  ('mat-u2', 'u1', 'mi-invalid-parent', 3, 'https://example.test/mi-invalid', 'video')
+                """
+            )
+            cur.execute(
+                """
+                INSERT INTO media_ingest_runs(run_id, owner_user_id, status, expires_at) VALUES
+                  ('run-u1', 'u1', 'ready', NOW() + INTERVAL '1 hour'),
+                  ('run-u2', 'u2', 'ready', NOW() + INTERVAL '1 hour')
+                """
+            )
+            cur.execute(
+                """
+                INSERT INTO media_ingest_run_items(
+                  run_id, owner_user_id, occurrence_id, ordinal, input_kind, state
+                ) VALUES
+                  ('run-u1', 'u1', 'ri-u1', 1, 'url', 'staged'),
+                  ('run-u2', 'u2', 'ri-u2', 2, 'url', 'staged'),
+                  ('run-u2', 'u1', 'ri-invalid-parent', 3, 'url', 'staged')
+                """
+            )
+            cur.execute(
+                """
+                INSERT INTO media_ingest_run_events(
+                  run_id, owner_user_id, event_type, state
+                ) VALUES
+                  ('run-u1', 'u1', 'event-u1', 'staged'),
+                  ('run-u2', 'u2', 'event-u2', 'staged'),
+                  ('run-u2', 'u1', 'event-invalid-parent', 'staged')
+                """
+            )
+
+
+@pytest.mark.pg_jobs
 def test_rls_context_filters_results(monkeypatch):
 
 
@@ -145,6 +299,7 @@ def test_rls_context_filters_results(monkeypatch):
     assert web_u2[0]["domain"] == "web" and web_u2[0]["owner_user_id"] == "u2"
 
 
+@pytest.mark.pg_jobs
 def test_rls_applies_to_events_and_controls(monkeypatch):
 
 
@@ -152,7 +307,6 @@ def test_rls_applies_to_events_and_controls(monkeypatch):
     ensure_jobs_tables_pg(admin_dsn)
     ensure_jobs_rls_policies_pg(admin_dsn)
     _seed(admin_dsn)
-    import psycopg
 
     jm = JobManager(backend="postgres", db_url=rls_dsn)
 
@@ -175,3 +329,68 @@ def test_rls_applies_to_events_and_controls(monkeypatch):
             assert sla_count >= 1
     finally:
         conn.close()
+
+
+@pytest.mark.pg_jobs
+def test_playlist_authority_rls_isolates_owners_and_fences_children(monkeypatch):
+    admin_dsn, rls_dsn = _dsn_or_skip(monkeypatch)
+    ensure_jobs_tables_pg(admin_dsn)
+    ensure_jobs_rls_policies_pg(admin_dsn)
+    _seed_playlist_authority(admin_dsn)
+
+    visible_rows = (
+        ("playlist_preflights", "preflight_id", "pf-u1"),
+        ("playlist_preflight_items", "occurrence_id", "pfi-u1"),
+        ("playlist_materializations", "materialization_id", "mat-u1"),
+        ("playlist_materialization_items", "occurrence_id", "mi-u1"),
+        ("media_ingest_runs", "run_id", "run-u1"),
+        ("media_ingest_run_items", "occurrence_id", "ri-u1"),
+        ("media_ingest_run_events", "event_type", "event-u1"),
+    )
+    child_rows = (
+        ("playlist_preflight_items", "occurrence_id", "pfi-u1", "preflight_id", "pf-u2"),
+        (
+            "playlist_materializations",
+            "materialization_id",
+            "mat-u1",
+            "preflight_id",
+            "pf-u2",
+        ),
+        (
+            "playlist_materialization_items",
+            "occurrence_id",
+            "mi-u1",
+            "materialization_id",
+            "mat-u2",
+        ),
+        ("media_ingest_run_items", "occurrence_id", "ri-u1", "run_id", "run-u2"),
+        ("media_ingest_run_events", "event_type", "event-u1", "run_id", "run-u2"),
+    )
+
+    with psycopg.connect(rls_dsn, autocommit=True) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT set_config('app.is_admin', 'false', false)")
+            cur.execute("SELECT set_config('app.owner_user_id', 'u1', false)")
+
+            for table, identity_column, expected_identity in visible_rows:
+                cur.execute(f"SELECT {identity_column} FROM {table} ORDER BY {identity_column}")
+                assert [row[0] for row in cur.fetchall()] == [expected_identity]
+
+                cur.execute(
+                    f"UPDATE {table} SET owner_user_id = owner_user_id WHERE owner_user_id = 'u2'"
+                )
+                assert cur.rowcount == 0
+
+            for table, identity_column, identity, parent_column, other_parent in child_rows:
+                with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                    cur.execute(
+                        f"UPDATE {table} SET owner_user_id = 'u2' "
+                        f"WHERE {identity_column} = %s",
+                        (identity,),
+                    )
+                with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                    cur.execute(
+                        f"UPDATE {table} SET {parent_column} = %s "
+                        f"WHERE {identity_column} = %s",
+                        (other_parent, identity),
+                    )
