@@ -1,16 +1,12 @@
 ---
 id: TASK-12972
 title: Allow trusted configured local LLM endpoints through scoped egress policy
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-07-15 19:34'
-updated_date: '2026-07-15 20:54'
+updated_date: '2026-07-15 21:22'
 labels:
-  - llm-providers
-  - security
-  - egress
-  - local-models
-  - webui
+  - browser-extension
 dependencies: []
 references:
   - TASK-605
@@ -38,6 +34,7 @@ Fix the mismatch where guarded setup accepts LAN-hosted llama.cpp and third-part
 - [ ] #6 Focused backend/frontend tests, Bandit on touched Python paths, ADR/configuration/user documentation, and migration guidance pass without adding a global SSRF exception.
 - [ ] #7 Every registered configured-local adapter wrapper and configured custom OpenAI alias resolves trusted context at its common adapter boundary, so Chat and all direct registry callers use the checked scoped path; numbered custom slots gain transport coverage without new catalog/setup surfaces.
 - [ ] #8 The exact enabled and blocked backend metadata records drive WebUI selection correctly; saved-provider events generation-invalidate both cache layers, and pre-save in-flight responses cannot repopulate stale models.
+- [ ] #9 Shared model discovery, visibility, and cache invalidation behavior is verified in both the Next.js WebUI and packaged browser extension surfaces.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -60,6 +57,8 @@ Docs/Plans/IMPLEMENTATION_PLAN_scoped_local_llm_egress_TASK_12972.md
 2026-07-15 final spec review identified an in-flight cache race: clearing references did not stop a pre-save request from repopulating stale data. The design now uses one monotonic invalidation generation per existing model-cache layer and promise-ownership guards; no new cache or event is introduced.
 
 2026-07-15 final post-correction review: independent spec and implementation-plan reviewers approved the current artifacts with no blocking issues or advisory recommendations. TASK-12972 remains To Do and implementation remains gated on requester approval of this corrected design/plan.
+
+2026-07-15 requester approved implementation and clarified that the fix must apply to both the WebUI and browser extension. The implementation remains shared in apps/packages/ui, with explicit verification through both frontend test configurations.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

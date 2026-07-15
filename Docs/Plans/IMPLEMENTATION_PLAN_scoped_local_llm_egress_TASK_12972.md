@@ -4,7 +4,7 @@
 
 **Goal:** Make trusted, configured local LLM endpoints work on LAN, Docker, and overlay-network addresses and nonstandard ports without weakening global SSRF protection.
 
-**Architecture:** Add one exact-origin `ConfiguredEndpointScope` to the existing egress evaluator and carry it through only `fetch`, `afetch`, and a checked synchronous stream helper. The guarded setup route creates scope after authorization; at runtime, each configured-local adapter base resolves one paired endpoint/scope value from fresh server-owned configuration before every dispatch. This common boundary covers Chat and all direct registry callers without modifying each feature. Discovery runs once per provider, the WebUI consumes the exact backend metadata contract, and provider saves invalidate both model caches.
+**Architecture:** Add one exact-origin `ConfiguredEndpointScope` to the existing egress evaluator and carry it through only `fetch`, `afetch`, and a checked synchronous stream helper. The guarded setup route creates scope after authorization; at runtime, each configured-local adapter base resolves one paired endpoint/scope value from fresh server-owned configuration before every dispatch. This common boundary covers Chat and all direct registry callers without modifying each feature. Discovery runs once per provider, the shared UI package consumes the exact backend metadata contract for both the WebUI and browser extension, and provider saves invalidate both model caches.
 
 **Tech Stack:** Python 3.10+, FastAPI, `httpx`, existing `tldw_Server_API.app.core.http_client`, Pytest, React/TypeScript, Vitest, Backlog.md.
 
@@ -80,7 +80,7 @@
 - Modify: `tldw_Server_API/tests/Chat_NEW/unit/test_llm_provider_details.py`
 - Modify: `tldw_Server_API/tests/LLM_Adapters/unit/test_llm_providers_error_mapping.py`
 
-**WebUI and documentation**
+**WebUI, browser extension, and documentation**
 
 - Modify: `apps/packages/ui/src/services/tldw/TldwModels.ts` — generation-guard persistent/in-flight cache writes.
 - Modify: `apps/packages/ui/src/services/tldw-server.ts` — clear inner and outer model caches on config updates.
@@ -88,6 +88,7 @@
 - Modify: `apps/packages/ui/src/services/tldw/__tests__/TldwModels.test.ts`
 - Modify: `apps/packages/ui/src/services/__tests__/tldw-server.fetch-chat-models.test.ts`
 - Modify: `apps/packages/ui/src/services/tldw/__tests__/setup-onboarding.test.ts`
+- Modify: `apps/packages/ui/src/routes/__tests__/option-quick-chat-popout.test.tsx` — assert the shared extension/WebUI route requests the common model service.
 - Create: `Docs/ADR/030-configured-local-llm-egress-policy.md`
 - Modify: `tldw_Server_API/Config_Files/README.md`
 - Modify: `Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md`
@@ -340,17 +341,17 @@
 
 ---
 
-## Stage 5: WebUI visibility, documentation, and final gates
+## Stage 5: WebUI/extension visibility, documentation, and final gates
 
-**Goal:** Prove the fixed backend record appears immediately in the WebUI and finish security/documentation verification.
+**Goal:** Prove the fixed backend record appears immediately in both the WebUI and browser extension and finish security/documentation verification.
 
-**Success Criteria:** Exact backend-shaped enabled models are selectable, blocked models remain excluded, configuration updates clear both caches, docs remove the unsafe workaround, and all quality gates pass.
+**Success Criteria:** Exact backend-shaped enabled models are selectable and blocked models remain excluded in the shared package used by both clients; configuration updates clear both caches; both WebUI and extension test configurations pass; docs remove the unsafe workaround; and all quality gates pass.
 
-**Tests:** Frontend model/cache contract plus all focused backend tests.
+**Tests:** Shared frontend model/cache/route contract under both WebUI and extension Vitest configurations, plus all focused backend tests.
 
 **Status:** Not Started
 
-### Task 5.1: Write the backend-to-WebUI regression
+### Task 5.1: Write the backend-to-WebUI/extension regression
 
 - [ ] Feed `TldwModelsService` the exact enabled llama metadata object asserted by Stage 4 and prove the manual model is returned by the chat selector.
 - [ ] Feed the paired `egress_blocked` object and prove it is excluded.
@@ -360,7 +361,8 @@
 - [ ] Update `setup-onboarding.ts` to emit the existing event after a saved response; do not depend on the hook's setup-state refresh for model invalidation.
 - [ ] Add one monotonic invalidation generation to `TldwModelsService` and one to the outer chat-model cache. Every fetch captures its generation and commits cache/timestamps only if unchanged; every clear increments it; `finally` clears only its own promise.
 - [ ] Update `tldw-server.ts`'s existing config listener to call both generation-aware `clearChatModelsCache()` and `void tldwModels.clearCache()`; do not add another event or cache layer.
-- [ ] Run:
+- [ ] Assert the shared quick-chat route calls `fetchChatModels`, and confirm the packaged extension route continues to import that same shared service rather than duplicating discovery/cache logic.
+- [ ] Run the focused shared-package tests under the normal WebUI configuration and then the extension configuration:
 
   ```bash
   cd apps/tldw-frontend
@@ -368,6 +370,13 @@
     ../packages/ui/src/services/tldw/__tests__/TldwModels.test.ts \
     ../packages/ui/src/services/__tests__/tldw-server.fetch-chat-models.test.ts \
     ../packages/ui/src/services/tldw/__tests__/setup-onboarding.test.ts \
+    ../packages/ui/src/routes/__tests__/option-quick-chat-popout.test.tsx \
+    --reporter=dot
+  bunx vitest run --config vitest.extension.config.ts \
+    ../packages/ui/src/services/tldw/__tests__/TldwModels.test.ts \
+    ../packages/ui/src/services/__tests__/tldw-server.fetch-chat-models.test.ts \
+    ../packages/ui/src/services/tldw/__tests__/setup-onboarding.test.ts \
+    ../packages/ui/src/routes/__tests__/option-quick-chat-popout.test.tsx \
     --reporter=dot
   ```
 
@@ -380,7 +389,7 @@
 
 ### Task 5.3: Run final verification and security scan
 
-- [ ] Run the union of every focused backend command from Stages 1–4 and both frontend tests from Task 5.1.
+- [ ] Run the union of every focused backend command from Stages 1–4 and the shared frontend suite under both WebUI and extension configurations from Task 5.1.
 - [ ] Run Bandit over every touched Python production path:
 
   ```bash
@@ -427,5 +436,6 @@
 - [ ] Explicit local models survive optional discovery and exact metadata becomes visible immediately after config updates.
 - [ ] A saved provider emits the existing config-update event and clears both model caches; a failed save does not.
 - [ ] Pre-save in-flight fetches cannot repopulate either cache or clear ownership of a post-save fetch.
+- [ ] The shared model service and quick-chat route are verified through both WebUI and browser-extension test configurations; no client-specific discovery bypass exists.
 - [ ] Focused backend/frontend tests pass, Bandit introduces no findings, and `git diff --check` is clean.
 - [ ] ADR, configuration docs, local setup guide, Backlog notes, and the human-authored PR `Change summary` gate are complete.

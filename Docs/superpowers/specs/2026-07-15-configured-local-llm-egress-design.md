@@ -15,7 +15,7 @@ The setup flow accepts llama.cpp and other OpenAI-compatible local endpoints on 
 - summarization, quiz generation, and claims extraction call adapters directly and bypass Chat orchestration;
 - setup persists manual local model names that the runtime catalog does not consistently read;
 - setup readiness uses `kobold_openai_api_IP`, while setup persists the canonical native Kobold field `kobold_api_IP`;
-- the WebUI correctly hides providers marked unavailable, but its persistent model cache can retain that result after provider configuration changes.
+- the WebUI and browser extension correctly hide providers marked unavailable, but their shared persistent model cache can retain that result after provider configuration changes.
 
 The usual workaround—globally disabling private-address blocking and opening local inference ports—weakens SSRF protection for unrelated workflows, webhooks, scrapers, and integrations.
 
@@ -34,7 +34,7 @@ The implementation must address these additional constraints before coding start
 9. Authentication, server, DNS, and connection failures are not cached as durable discovery results.
 10. Only transport entrypoints used by this feature are extended: `fetch`, `afetch`, and synchronous `stream_response`. Async byte/SSE stream APIs remain unchanged until a scoped caller needs them.
 11. Setup readiness parity applies only to providers already exposed by setup; this task fixes their canonical fields but does not invent setup/catalog surfaces for generic `local-llm` or numbered custom slots.
-12. Exact backend metadata and WebUI cache invalidation must be tested together so a fixed backend result becomes visible immediately after configuration.
+12. Exact backend metadata and shared UI cache invalidation must be tested together under both WebUI and browser-extension configurations so a fixed backend result becomes visible immediately after configuration.
 
 ## Decision
 
@@ -134,9 +134,9 @@ Policy evaluation—including hostname resolution and address classification—a
 
 Setup/catalog mappings read the existing `llama_model`, `kobold_model`, `ooba_model`, and `tabby_model` fields. Setup readiness uses the canonical native Kobold endpoint field `kobold_api_IP`. Surface parity remains limited to providers already represented by setup/catalog.
 
-## WebUI behavior
+## WebUI and browser-extension behavior
 
-The backend catalog remains authoritative and the existing `TldwModels.isSelectableChatModel` filter remains correct. The regression uses the exact flattened `/api/v1/llm/models/metadata` record produced for a configured non-loopback llama endpoint and proves the model is selectable; the paired `egress_blocked` record remains excluded.
+The backend catalog remains authoritative and the existing shared `TldwModels.isSelectableChatModel` filter remains correct. Both the Next.js WebUI and packaged browser extension consume this service from `apps/packages/ui`; neither receives a separate egress or model-discovery implementation. The regression uses the exact flattened `/api/v1/llm/models/metadata` record produced for a configured non-loopback llama endpoint and proves the model is selectable; the paired `egress_blocked` record remains excluded.
 
 The existing `tldw:config-updated` event already clears the outer chat-model cache. A `saveSetupProvider` response with `status="saved"` must dispatch that event; failed saves must not. The listener must also clear `TldwModels`' persistent 15-minute cache and forced-refresh timestamp so a successful provider save is visible immediately rather than for up to 15 minutes later.
 
@@ -152,7 +152,7 @@ The implementation is divided into five independently green stages:
 2. scoped `fetch`/`afetch`/`stream_response`, redirects, DNS pinning, and TLS pinning;
 3. fresh trusted resolution at the configured-local adapter boundary, covering Chat and every direct registry caller;
 4. guarded setup, canonical readiness fields, one-shot typed discovery, and manual-model catalog parity;
-5. exact backend-to-WebUI contract, cache invalidation, ADR/docs, security scan, and verification.
+5. exact backend-to-shared-UI contract under both WebUI and extension test configurations, cache invalidation, ADR/docs, security scan, and verification.
 
 ## Risks and mitigations
 
@@ -173,8 +173,8 @@ The implementation is divided into five independently green stages:
 - adding LAN scanning, mDNS, server lifecycle management, or a new dependency;
 - adding setup/catalog surfaces for generic `local-llm` or numbered custom providers;
 - changing async byte/SSE transport APIs without a scoped consumer;
-- redesigning the WebUI model selector or settings UI.
+- redesigning the WebUI or browser-extension model selector or settings UI.
 
 ## Success criteria
 
-With global private blocking enabled and the global port list unchanged, an operator can configure a supported local provider on an approved LAN/Docker/overlay address and nonstandard port. Guarded setup, readiness, one-shot model discovery, Chat, and every direct registry dispatch agree on the exact configured origin. Dangerous targets and request-derived overrides remain blocked, structured failures retain stable reason codes through TLS pinning, explicit/discovered models become visible immediately in the WebUI, and unrelated outbound callers receive no private-network exception.
+With global private blocking enabled and the global port list unchanged, an operator can configure a supported local provider on an approved LAN/Docker/overlay address and nonstandard port. Guarded setup, readiness, one-shot model discovery, Chat, and every direct registry dispatch agree on the exact configured origin. Dangerous targets and request-derived overrides remain blocked, structured failures retain stable reason codes through TLS pinning, explicit/discovered models become visible immediately in both the WebUI and browser extension through their shared service, and unrelated outbound callers receive no private-network exception.
