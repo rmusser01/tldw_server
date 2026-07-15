@@ -697,26 +697,63 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                     role_ident = _sql.Identifier(role)
                     schema_ident = _sql.Identifier(str(schema_name))
                     tables = (*_JOBS_RLS_INSERT_TABLES, *_PLAYLIST_RLS_TABLES)
+                    allowed_sequences = (*_JOBS_RLS_SEQUENCES, *_PLAYLIST_RLS_SEQUENCES)
                     qualified_tables = _sql.SQL(", ").join(
                         _sql.Identifier(str(schema_name), table) for table in tables
                     )
+                    cur.execute(
+                        """
+                        SELECT COALESCE(
+                          array_agg(namespace.nspname::text ORDER BY namespace.nspname),
+                          ARRAY[]::text[]
+                        ) AS managed_schemas
+                        FROM pg_namespace namespace
+                        WHERE namespace.nspname <> 'information_schema'
+                          AND namespace.nspname !~ '^pg_'
+                        """
+                    )
+                    managed_schemas_row = cur.fetchone()
+                    managed_schema_values = managed_schemas_row[0] if managed_schemas_row else ()
+                    managed_schemas = [
+                        str(value)
+                        for value in (managed_schema_values or ())
+                        if str(value) != "information_schema"
+                        and not str(value).startswith("pg_")
+                    ]
+                    if str(schema_name) == "information_schema" or str(schema_name).startswith(
+                        "pg_"
+                    ):
+                        raise JobsRLSInstallationError(
+                            "JOBS_PG_RLS_ROLE cannot use a PostgreSQL system schema"
+                        )
+                    if str(schema_name) not in managed_schemas:
+                        managed_schemas.append(str(schema_name))
+                    # JOBS_PG_RLS_ROLE is a dedicated role. Remove grants left by
+                    # earlier installers across every user schema before applying
+                    # the one schema-qualified allowlist below.
+                    for managed_schema in managed_schemas:
+                        managed_schema_ident = _sql.Identifier(managed_schema)
+                        cur.execute(
+                            _sql.SQL("REVOKE ALL PRIVILEGES ON SCHEMA {} FROM {}").format(
+                                managed_schema_ident,
+                                role_ident,
+                            )
+                        )
+                        cur.execute(
+                            _sql.SQL(
+                                "REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA {} FROM {}"
+                            ).format(managed_schema_ident, role_ident)
+                        )
+                        cur.execute(
+                            _sql.SQL(
+                                "REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA {} FROM {}"
+                            ).format(managed_schema_ident, role_ident)
+                        )
                     cur.execute(
                         _sql.SQL("GRANT USAGE ON SCHEMA {} TO {}").format(
                             schema_ident,
                             role_ident,
                         )
-                    )
-                    # JOBS_PG_RLS_ROLE is a dedicated role. Remove grants left by
-                    # earlier schema-wide installers before applying least privilege.
-                    cur.execute(
-                        _sql.SQL(
-                            "REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA {} FROM {}"
-                        ).format(schema_ident, role_ident)
-                    )
-                    cur.execute(
-                        _sql.SQL(
-                            "REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA {} FROM {}"
-                        ).format(schema_ident, role_ident)
                     )
                     cur.execute(
                         _sql.SQL("GRANT SELECT, UPDATE, DELETE ON {} TO {}").format(
@@ -730,7 +767,7 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                             role_ident,
                         )
                     )
-                    for sequence in (*_JOBS_RLS_SEQUENCES, *_PLAYLIST_RLS_SEQUENCES):
+                    for sequence in allowed_sequences:
                         cur.execute(
                             _sql.SQL("GRANT USAGE, SELECT ON SEQUENCE {} TO {}").format(
                                 _sql.Identifier(str(schema_name), sequence),
@@ -739,13 +776,17 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                         )
                     cur.execute(
                         """
-                        SELECT relation.relname AS unauthorized_table
+                        SELECT namespace.nspname, relation.relname AS unauthorized_table
                         FROM pg_class relation
                         JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
                         CROSS JOIN (VALUES (%s::name)) AS configured(role_name)
-                        WHERE namespace.nspname = %s
+                        WHERE namespace.nspname <> 'information_schema'
+                          AND namespace.nspname !~ '^pg_'
                           AND relation.relkind IN ('r', 'p', 'v', 'm', 'f')
-                          AND NOT (relation.relname = ANY(%s))
+                          AND NOT (
+                            namespace.nspname = %s
+                            AND relation.relname = ANY(%s)
+                          )
                           AND (
                             has_table_privilege(configured.role_name, relation.oid, 'SELECT')
                             OR has_table_privilege(configured.role_name, relation.oid, 'INSERT')
@@ -767,18 +808,52 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                     if unauthorized_table_row:
                         raise JobsRLSInstallationError(
                             "JOBS_PG_RLS_ROLE retains effective privileges on unrelated table "
-                            f"{unauthorized_table_row[0]!r}; remove PUBLIC or inherited grants"
+                            f"{unauthorized_table_row[0]}.{unauthorized_table_row[1]!s}; "
+                            "remove PUBLIC or inherited grants"
                         )
-                    allowed_sequences = (*_JOBS_RLS_SEQUENCES, *_PLAYLIST_RLS_SEQUENCES)
                     cur.execute(
                         """
-                        SELECT relation.relname AS unauthorized_sequence
+                        SELECT namespace.nspname, relation.relname AS overprivileged_table
                         FROM pg_class relation
                         JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
                         CROSS JOIN (VALUES (%s::name)) AS configured(role_name)
                         WHERE namespace.nspname = %s
+                          AND relation.relname = ANY(%s)
+                          AND relation.relkind IN ('r', 'p', 'v', 'm', 'f')
+                          AND (
+                            has_table_privilege(configured.role_name, relation.oid, 'TRUNCATE')
+                            OR has_table_privilege(
+                              configured.role_name, relation.oid, 'REFERENCES'
+                            )
+                            OR has_table_privilege(configured.role_name, relation.oid, 'TRIGGER')
+                            OR has_any_column_privilege(
+                              configured.role_name, relation.oid, 'REFERENCES'
+                            )
+                          )
+                        LIMIT 1
+                        """,
+                        (role, str(schema_name), list(tables)),
+                    )
+                    overprivileged_table_row = cur.fetchone()
+                    if overprivileged_table_row:
+                        raise JobsRLSInstallationError(
+                            "JOBS_PG_RLS_ROLE has effective privileges outside the allowed "
+                            "privilege set on allowlisted table "
+                            f"{overprivileged_table_row[0]}.{overprivileged_table_row[1]}"
+                        )
+                    cur.execute(
+                        """
+                        SELECT namespace.nspname, relation.relname AS unauthorized_sequence
+                        FROM pg_class relation
+                        JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+                        CROSS JOIN (VALUES (%s::name)) AS configured(role_name)
+                        WHERE namespace.nspname <> 'information_schema'
+                          AND namespace.nspname !~ '^pg_'
                           AND relation.relkind = 'S'
-                          AND NOT (relation.relname = ANY(%s))
+                          AND NOT (
+                            namespace.nspname = %s
+                            AND relation.relname = ANY(%s)
+                          )
                           AND (
                             has_sequence_privilege(configured.role_name, relation.oid, 'USAGE')
                             OR has_sequence_privilege(configured.role_name, relation.oid, 'SELECT')
@@ -792,7 +867,51 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                     if unauthorized_sequence_row:
                         raise JobsRLSInstallationError(
                             "JOBS_PG_RLS_ROLE retains effective privileges on unrelated sequence "
-                            f"{unauthorized_sequence_row[0]!r}; remove PUBLIC or inherited grants"
+                            f"{unauthorized_sequence_row[0]}.{unauthorized_sequence_row[1]!s}; "
+                            "remove PUBLIC or inherited grants"
+                        )
+                    cur.execute(
+                        """
+                        SELECT namespace.nspname, relation.relname AS overprivileged_sequence
+                        FROM pg_class relation
+                        JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+                        CROSS JOIN (VALUES (%s::name)) AS configured(role_name)
+                        WHERE namespace.nspname = %s
+                          AND relation.relname = ANY(%s)
+                          AND relation.relkind = 'S'
+                          AND has_sequence_privilege(
+                            configured.role_name, relation.oid, 'UPDATE'
+                          )
+                        LIMIT 1
+                        """,
+                        (role, str(schema_name), list(allowed_sequences)),
+                    )
+                    overprivileged_sequence_row = cur.fetchone()
+                    if overprivileged_sequence_row:
+                        raise JobsRLSInstallationError(
+                            "JOBS_PG_RLS_ROLE has effective privileges outside the allowed "
+                            "privilege set on allowlisted sequence "
+                            f"{overprivileged_sequence_row[0]}.{overprivileged_sequence_row[1]}"
+                        )
+                    cur.execute(
+                        """
+                        SELECT namespace.nspname AS unauthorized_schema
+                        FROM pg_namespace namespace
+                        CROSS JOIN (VALUES (%s::name)) AS configured(role_name)
+                        WHERE namespace.nspname <> 'information_schema'
+                          AND namespace.nspname !~ '^pg_'
+                          AND has_schema_privilege(
+                            configured.role_name, namespace.oid, 'CREATE'
+                          )
+                        LIMIT 1
+                        """,
+                        (role,),
+                    )
+                    unauthorized_schema_row = cur.fetchone()
+                    if unauthorized_schema_row:
+                        raise JobsRLSInstallationError(
+                            "JOBS_PG_RLS_ROLE retains effective CREATE privilege on schema "
+                            f"{unauthorized_schema_row[0]!r}; remove PUBLIC or inherited grants"
                         )
                 except JobsRLSInstallationError:
                     raise
