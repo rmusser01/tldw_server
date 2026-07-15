@@ -2,118 +2,122 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make trusted, configured local LLM endpoints work on LAN, Docker, and overlay-network addresses and nonstandard ports without weakening the global SSRF policy.
+**Goal:** Make trusted, configured local LLM endpoints work on LAN, Docker, and overlay-network addresses and nonstandard ports without weakening global SSRF protection.
 
-**Architecture:** Extend the existing Security egress evaluator with an exact configured-origin scope and typed policy outcomes, then carry that scope separately from URLs through the centralized HTTP request and streaming paths. Only guarded setup, server-owned configuration resolution, and the Chat orchestration boundary may mint the scope; adapters never derive authorization from their final URL. The managed llama “use in chat” action persists normal server configuration and follows that same resolver. Typed model-discovery outcomes and explicit readiness rules keep the backend catalog authoritative, so the existing WebUI availability filter works without a production UI redesign.
+**Architecture:** Add one exact-origin `ConfiguredEndpointScope` to the existing egress evaluator and carry it through only `fetch`, `afetch`, and a checked synchronous stream helper. The guarded setup route creates scope after authorization; at runtime, each configured-local adapter base resolves one paired endpoint/scope value from fresh server-owned configuration before every dispatch. This common boundary covers Chat and all direct registry callers without modifying each feature. Discovery runs once per provider, the WebUI consumes the exact backend metadata contract, and provider saves invalidate both model caches.
 
-**Tech Stack:** Python 3.11, FastAPI, `httpx`, existing `tldw_Server_API.app.core.http_client`, Pytest, React/TypeScript, Vitest, Backlog.md.
+**Tech Stack:** Python 3.10+, FastAPI, `httpx`, existing `tldw_Server_API.app.core.http_client`, Pytest, React/TypeScript, Vitest, Backlog.md.
 
 **Task:** TASK-12972
 **Design:** `Docs/superpowers/specs/2026-07-15-configured-local-llm-egress-design.md`
 **Base reviewed:** `origin/dev` at `bb0c9d6bd565e669db0f00f7b248717c4ae5247f`
 **Baseline:** 48 focused Security, Setup, readiness, and local-streaming tests passed on 2026-07-15.
-**Implementation gate:** Do not begin Stage 1 until the requester approves the design. The task remains `To Do` and this plan remains proposed until that approval is recorded.
+**Implementation gate:** Do not begin Stage 1 until the requester approves this post-review design and plan. Keep TASK-12972 `To Do` until that approval is recorded.
 
 ---
 
-## Reviewed constraints
+## Scope and compatibility constraints
 
-- Do not solve this with `WORKFLOWS_EGRESS_BLOCK_PRIVATE=false`, a global port expansion, or a generic `allow_private` flag.
-- Do not trust hostname suffixes by themselves. Resolve and classify addresses.
-- Do not change global egress behavior for workflows, webhooks, scraping, ingestion, MCP/ACP, audio, or embeddings.
-- Do not allow chat payloads, BYOK fields, or generic user/provider overrides to create the configured-local-provider scope.
-- Do not let an adapter create a scope from its final URL. The scope is private internal context minted from trusted server configuration before adapter dispatch.
-- Include every network-backed local provider path: `local-llm`, llama.cpp, Kobold.cpp, Oobabooga, TabbyAPI, vLLM, Ollama, Aphrodite, and custom OpenAI-compatible providers. Do not scope Novita, Poe, Together, or other public-service subclasses of the custom adapter.
-- Keep the global denylist authoritative.
-- Reuse the existing resolution-set consistency checks; do not add a custom DNS transport/resolver in this task. Record the remaining preflight-to-connect TOCTOU as a bounded residual risk.
-- Cover both non-streaming and streaming local chat. The current raw streaming client path is part of the defect.
-- Reuse setup’s existing manual model fields. Do not add LAN scanning, browser-direct discovery, a new dependency, or a new WebUI settings surface.
-- Preserve readiness metadata and the WebUI’s existing rule that explicitly unavailable providers are not selectable.
+- Do not change global egress defaults, allowlists, or allowed ports.
+- Do not add `allow_private`, trust hostname suffixes, or mutate a process-wide policy from provider configuration.
+- Discard all reserved base-URL/scope/transport keys in Chat and adapters; only guarded setup and the shared fresh-config resolver create context.
+- Resolve trusted runtime context at the configured-local adapter base so Chat and every direct registry caller are covered structurally. Do not enumerate and patch individual feature call sites.
+- Cover `local-llm`, llama.cpp, Kobold.cpp, Oobabooga, TabbyAPI, vLLM, Ollama, Aphrodite, `custom-openai-api`, and numbered custom aliases.
+- Numbered custom aliases receive Chat transport coverage only; do not create 99 setup/catalog entries.
+- Keep Novita, Poe, Together, and other public custom-adapter subclasses outside this task; track their central-transport hardening separately.
+- Extend only `fetch`, `afetch`, and synchronous `stream_response`; do not modify async byte/SSE stream APIs without a consumer.
+- Preserve manual model fields and existing setup/provider surfaces. Fix the canonical Kobold field instead of inventing aliases.
+- Use one discovery result per provider. Cache only `ready` and `unsupported`, never transient auth/server/DNS/connection failures.
+- Preserve the existing frontend selector rules, but invalidate both model caches on `tldw:config-updated`.
 
 ## Planned file map
 
-**Backend policy and transport**
+**Policy and transport**
 
-- Modify: `tldw_Server_API/app/core/Security/egress.py`
-- Modify: `tldw_Server_API/app/core/http_client.py`
+- Modify: `tldw_Server_API/app/core/Security/egress.py` — scope, canonical origin, positive address classifier, policy reason codes.
+- Modify: `tldw_Server_API/app/core/exceptions.py` — optional `EgressPolicyError.reason_code`.
+- Modify: `tldw_Server_API/app/core/http_client.py` — scoped sync/async requests, sync streaming, DNS/TLS pin propagation.
 - Modify: `tldw_Server_API/tests/Security/test_egress.py`
 - Modify: `tldw_Server_API/tests/Security/test_egress_global_env.py`
 - Modify: `tldw_Server_API/tests/Security/test_egress_env_absent_defaults.py`
 - Modify: `tldw_Server_API/tests/http_client/test_http_client.py`
-- Modify: `tldw_Server_API/tests/http_client/test_http_client_sse_edges.py`
+- Modify: `tldw_Server_API/tests/http_client/test_http_client_adapters.py`
+- Modify: `tldw_Server_API/tests/http_client/test_http_client_pinning.py`
+- Modify: `tldw_Server_API/tests/http_client/test_redirect_header_hardening.py`
+- Modify: `tldw_Server_API/tests/http_client/test_http_client_stream_timeouts.py`
+- Modify: `tldw_Server_API/tests/http_client/test_http_client_truthiness_flags.py`
 
-**Provider integration**
+**Trusted runtime and adapter boundary**
 
-- Modify: `tldw_Server_API/app/core/Setup/provider_validation.py`
-- Modify: `tldw_Server_API/app/core/LLM_Calls/provider_readiness.py`
-- Modify: `tldw_Server_API/app/core/LLM_Calls/provider_config_resolution.py`
-- Modify: `tldw_Server_API/app/core/Chat/chat_service.py`
-- Modify: `tldw_Server_API/app/api/v1/endpoints/llm_providers.py`
-- Modify: `tldw_Server_API/app/core/LLM_Calls/providers/local_adapters.py`
-- Modify: `tldw_Server_API/app/core/LLM_Calls/providers/custom_openai_adapter.py`
-- Modify: `tldw_Server_API/tests/Setup/test_setup_provider_validation.py`
-- Modify: `tldw_Server_API/tests/Chat_NEW/unit/test_llm_providers_readiness.py`
-- Modify: `tldw_Server_API/tests/Chat_NEW/unit/test_llm_provider_details.py`
+- Modify: `tldw_Server_API/app/core/LLM_Calls/provider_config_resolution.py` — fresh trusted endpoint resolver and all endpoint aliases.
+- Modify: `tldw_Server_API/app/api/v1/endpoints/chat.py` — URL-free BYOK/server/request endpoint provenance.
+- Modify: `tldw_Server_API/app/core/Chat/chat_service.py` — reserved-key rejection and existing URL-override guard.
+- Modify: `tldw_Server_API/app/core/LLM_Calls/providers/local_adapters.py` — every local wrapper plus native Kobold.
+- Modify: `tldw_Server_API/app/core/LLM_Calls/providers/custom_openai_adapter.py` — configured custom aliases, pre-validation stripping, checked sync/stream paths.
+- Create: `tldw_Server_API/tests/LLM_Calls/test_provider_config_resolution.py`
+- Create: `tldw_Server_API/tests/Chat/test_custom_openai_endpoint_provenance.py`
+- Modify: `tldw_Server_API/tests/Chat/unit/test_chat_service_base_url_override.py`
 - Modify: `tldw_Server_API/tests/LLM_Calls/test_local_streaming_contract.py`
 - Modify: `tldw_Server_API/tests/LLM_Calls/test_local_http_error_mapping.py`
 - Modify: `tldw_Server_API/tests/LLM_Adapters/unit/test_custom_openai_native_http.py`
+- Modify: `tldw_Server_API/tests/LLM_Adapters/unit/test_local_adapter_merge.py`
+- Modify: `tldw_Server_API/tests/LLM_Calls/test_local_llm_param_forwarding.py`
+- Modify: `tldw_Server_API/tests/LLM_Calls/test_provider_timeout_and_role_regressions.py`
+
+**Setup, readiness, discovery, and catalog**
+
+- Modify: `tldw_Server_API/app/api/v1/endpoints/setup.py` — create setup scope after route guard.
+- Modify: `tldw_Server_API/app/core/Setup/provider_validation.py` — accept scope and use `afetch`.
+- Modify: `tldw_Server_API/app/core/Setup/readiness_service.py` — canonical Kobold key.
+- Modify: `tldw_Server_API/app/core/Setup/readiness_profiles.py` — canonical Kobold key.
+- Modify: `tldw_Server_API/app/core/LLM_Calls/provider_readiness.py` — pure reducer over one discovery result.
+- Modify: `tldw_Server_API/app/api/v1/endpoints/llm_providers.py` — typed discovery, cache policy, one-probe catalog flow, manual models.
+- Modify: `tldw_Server_API/tests/integration/test_unified_first_run_setup_api.py`
+- Modify: `tldw_Server_API/tests/Setup/test_setup_provider_validation.py`
+- Modify: `tldw_Server_API/tests/Setup/test_setup_readiness_profiles.py`
+- Modify: `tldw_Server_API/tests/Setup/test_setup_readiness_api.py`
+- Modify: `tldw_Server_API/tests/Chat_NEW/unit/test_llm_providers_readiness.py`
+- Modify: `tldw_Server_API/tests/Chat_NEW/unit/test_llm_provider_details.py`
 - Modify: `tldw_Server_API/tests/LLM_Adapters/unit/test_llm_providers_error_mapping.py`
-- Modify: `tldw_Server_API/tests/Chat/unit/test_chat_service_base_url_override.py`
-- Create: `tldw_Server_API/tests/LLM_Calls/test_provider_config_resolution.py`
 
-**WebUI contract and documentation**
+**WebUI and documentation**
 
+- Modify: `apps/packages/ui/src/services/tldw/TldwModels.ts` — generation-guard persistent/in-flight cache writes.
+- Modify: `apps/packages/ui/src/services/tldw-server.ts` — clear inner and outer model caches on config updates.
+- Modify: `apps/packages/ui/src/services/tldw/domains/setup-onboarding.ts` — dispatch config update after a saved provider.
 - Modify: `apps/packages/ui/src/services/tldw/__tests__/TldwModels.test.ts`
+- Modify: `apps/packages/ui/src/services/__tests__/tldw-server.fetch-chat-models.test.ts`
+- Modify: `apps/packages/ui/src/services/tldw/__tests__/setup-onboarding.test.ts`
 - Create: `Docs/ADR/030-configured-local-llm-egress-policy.md`
 - Modify: `tldw_Server_API/Config_Files/README.md`
 - Modify: `Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md`
-- Modify: `backlog/tasks/task-12972 - Allow-trusted-configured-local-LLM-endpoints-through-scoped-egress-policy.md`
-
-No production TypeScript file is expected to change. Add one only if the regression test demonstrates that the existing normalized readiness contract is insufficient.
+- Modify through Backlog MCP/CLI: `backlog/tasks/task-12972 - Allow-trusted-configured-local-LLM-endpoints-through-scoped-egress-policy.md`
 
 ---
 
-## Stage 1: Exact-origin Security policy
+## Stage 1: Exact-origin policy and structured errors
 
-**Goal:** Represent and evaluate a trusted configured provider origin without changing default egress behavior.
+**Goal:** Represent and evaluate one trusted configured origin while leaving no-scope behavior unchanged.
 
-**Success Criteria:** A target under the configured scheme/host/port can use the configured nonstandard port and approved local addresses while all other targets keep the current global rules. Dangerous address classes, userinfo, origin changes, denylisted hosts, and DNS changes fail closed with stable machine-readable reason codes.
+**Success Criteria:** Exact configured origins can use approved local/global addresses and their configured port. Every other origin uses existing global rules. Metadata and special-use targets fail closed. Policy reason codes survive the exception boundary.
 
-**Tests:** `tldw_Server_API/tests/Security/test_egress.py`
+**Tests:** Security evaluator and global-policy regression files.
 
 **Status:** Not Started
 
 ### Task 1.1: Write the failing policy matrix
 
-- [ ] Add parameterized tests for these target/scope pairs with `WORKFLOWS_EGRESS_BLOCK_PRIVATE=true` and `WORKFLOWS_EGRESS_ALLOWED_PORTS=80,443`:
-  - configured `http://192.168.1.50:8080/v1` → target `/v1/models`: allowed;
-  - configured `http://127.0.0.1:11434` → target `/api/tags`: allowed;
-  - configured IPv6 ULA → same-origin target: allowed;
-  - configured `100.64.0.10:8000` → same-origin target: allowed;
-  - resolved Docker/bare hostname with `resolved_ips_override=["172.18.0.2"]`: allowed;
-  - same host with a different port, scheme, or hostname: denied;
-  - URL containing username/password: denied;
-  - link-local/metadata, multicast, unspecified, documentation, benchmarking, IPv4-mapped, and reserved targets: denied;
-  - known metadata endpoints inside otherwise allowed CGNAT/ULA/public ranges, including `100.100.100.200`, `fd00:ec2::254`, and `168.63.129.16`: denied;
-  - global denylist match: denied even when the origin matches;
-  - strict profile with no global allowlist: the configured origin is allowed, unrelated origins are denied;
-  - changed `pinned_resolved_ips`: denied.
-- [ ] Add a canonical-origin table covering explicit/default ports, trailing-dot and IDNA hostnames, bracketed IPv6 literals, userinfo, unsupported schemes, scheme changes, and port changes.
-- [ ] Assert the complete authoritative metadata/platform address set is denied: `169.254.169.254`, `169.254.170.2`, `169.254.170.23`, `100.100.100.200`, `168.63.129.16`, and `fd00:ec2::254`.
-- [ ] Assert stable `reason_code` values distinguish invalid URL, origin mismatch, forbidden address, DNS failure, and DNS change while preserving sanitized human-readable reasons.
+- [ ] Add parameterized tests with `WORKFLOWS_EGRESS_BLOCK_PRIVATE=true` and allowed ports `80,443` for loopback, RFC1918, IPv6 ULA, CGNAT, Docker DNS, and ordinary public unicast on the exact configured port.
+- [ ] Add denials for scheme/host/port mismatch, URL userinfo, global denylist matches, link-local, multicast, unspecified, documentation, benchmarking, translation, reserved, IPv4-mapped IPv6, and mixed DNS answers containing one forbidden address.
+- [ ] Test the complete metadata set: `169.254.169.254`, `169.254.170.2`, `169.254.170.23`, `100.100.100.200`, `168.63.129.16`, and `fd00:ec2::254`.
+- [ ] Test strict profile, DNS changes, trailing-dot/IDNA equivalence, default ports, bracketed IPv6, and the scoped branch ignoring test/global private-block overrides.
+- [ ] Assert `URLPolicyResult(True, None, resolved_ips)` retains its existing third positional argument and that all new failures expose stable `reason_code` values.
+- [ ] Add exception tests proving `EgressPolicyError("message")` remains valid and `EgressPolicyError("message", reason_code="dns_unresolved")` retains the code.
+- [ ] Run `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Security/test_egress.py tldw_Server_API/tests/Security/test_egress_global_env.py tldw_Server_API/tests/Security/test_egress_env_absent_defaults.py -q` and confirm the new tests fail for missing scope/classifier/code behavior.
 
-- [ ] Run:
+### Task 1.2: Implement the minimal evaluator extension
 
-  ```bash
-  source .venv/bin/activate
-  python -m pytest tldw_Server_API/tests/Security/test_egress.py -q
-  ```
-
-  Expected: new exact-origin tests fail because no scoped policy type or evaluator parameter exists.
-
-### Task 1.2: Implement the minimal scope in the existing evaluator
-
-- [ ] Add a frozen value object in `egress.py`; do not create a policy framework:
+- [ ] Add only this value object in `egress.py`:
 
   ```python
   @dataclass(frozen=True)
@@ -123,95 +127,68 @@ No production TypeScript file is expected to change. Add one only if the regress
       port: int
 
       @classmethod
-      def from_url(cls, url: str) -> "ConfiguredEndpointScope":
-          ...
-
-      def matches(self, url: str) -> bool:
-          ...
+      def from_url(cls, url: str) -> "ConfiguredEndpointScope": ...
+      def matches(self, url: str) -> bool: ...
   ```
 
-- [ ] Canonicalize schemes and IDNA hostnames, strip a trailing dot, and materialize default ports (`80`/`443`). Reject missing hosts, invalid ports, unsupported schemes, and URL userinfo while constructing or evaluating the scope.
-- [ ] Extend `evaluate_url_policy` with one explicit optional argument:
+- [ ] Reuse one helper for scheme, IDNA hostname, trailing-dot, IPv6, and effective-port canonicalization.
+- [ ] Add `configured_endpoint: ConfiguredEndpointScope | None = None` to `evaluate_url_policy` and append `reason_code: str | None = None` after `URLPolicyResult.resolved_ips`.
+- [ ] Implement one scoped-address predicate: explicit metadata denial first; allow loopback/RFC1918/ULA/CGNAT; otherwise require `is_global` plus ordinary-unicast flags and no explicit special-use match. Do not use `is_global` alone; deny IPv4-mapped IPv6 and all remaining special-use classes.
+- [ ] Preserve no-scope behavior and global denylist precedence. Resolve every scoped hostname, reject any forbidden answer, and compare the accepted set with `pinned_resolved_ips`.
+- [ ] Add an optional `reason_code` attribute to `EgressPolicyError` and raise it from sync/async transport validation without changing sanitized messages.
 
-  ```python
-  configured_endpoint: ConfiguredEndpointScope | None = None
-  ```
+### Task 1.3: Verify and commit
 
-- [ ] Extend `URLPolicyResult` compatibly by appending an optional `reason_code` field after the existing `resolved_ips` field. Define at least `invalid_url`, `unsupported_scheme`, `userinfo_not_allowed`, `origin_mismatch`, `port_not_allowed`, `host_denied`, `dns_unresolved`, `address_forbidden`, and `dns_changed`; do not require existing no-scope callers to consume the new field.
-- [ ] Add a regression that constructs `URLPolicyResult(True, None, resolved_ips)` positionally and proves the third positional argument still populates `resolved_ips`, not `reason_code`.
-
-- [ ] When the scope is present:
-  - require `configured_endpoint.matches(url)` before relaxing any port/address rule;
-  - allow only the scope’s effective port instead of consulting the global allowed-port list for that request;
-  - preserve the merged global/workflow denylist;
-  - treat the exact configured host as the scoped authorization in strict mode without mutating environment allowlists;
-  - resolve the host even though approved local addresses are allowed;
-  - permit loopback, RFC1918, IPv6 ULA, CGNAT, and ordinary public unicast;
-  - reject all other private/reserved ranges already listed in `PRIVATE_RANGES` and the authoritative metadata/platform address set from Task 1.1 that overlaps otherwise allowed classes;
-  - populate `resolved_ips` and compare pinned resolution sets.
-- [ ] Leave the existing no-scope branch behavior byte-for-byte equivalent where practical.
-
-### Task 1.3: Verify and commit Stage 1
-
-- [ ] Run the focused Security test file and confirm all existing plus new tests pass.
-- [ ] Run `git diff --check`.
-- [ ] Commit:
-
-  ```bash
-  git add tldw_Server_API/app/core/Security/egress.py \
-    tldw_Server_API/tests/Security/test_egress.py
-  git commit -m "fix(security): scope configured local provider egress (TASK-12972)"
-  ```
+- [ ] Re-run the Stage 1 tests, `git diff --check`, and inspect the diff for any no-scope policy change.
+- [ ] Commit policy, exception, and tests with `fix(security): scope configured local provider egress (TASK-12972)`.
 
 ---
 
-## Stage 2: Central request and stream propagation
+## Stage 2: Checked request, stream, DNS-pin, and TLS-pin propagation
 
-**Goal:** Carry the exact-origin scope through every retry/redirect check and provide a checked synchronous streaming entrypoint.
+**Goal:** Carry the scope through the three transport paths used by configured local providers.
 
-**Success Criteria:** `fetch`, `afetch`, adapter requests, retries, and redirects re-evaluate targets against the same scope. Local streaming no longer needs an unchecked raw `session.stream(...)` call. Default callers behave as before.
+**Success Criteria:** `fetch`, `afetch`, and `stream_response` validate the same origin and accepted DNS set on initial requests, retries, redirects, and certificate checks. No-scope callers behave as before.
 
-**Tests:** `tldw_Server_API/tests/http_client/test_http_client.py`, `test_http_client_sse_edges.py`, and existing redirect/pinning tests.
+**Tests:** HTTP client request, adapter, redirect, pinning, timeout, and truthiness regressions.
 
 **Status:** Not Started
 
 ### Task 2.1: Write failing transport tests
 
-- [ ] Add tests proving:
-  - sync and async request adapters pass `ConfiguredEndpointScope` into initial and repeated egress checks;
-  - a same-origin path redirect remains eligible while a cross-origin, cross-scheme, or cross-port redirect is rejected before the redirected network call;
-  - a checked synchronous stream accepts an approved private/nonstandard configured origin;
-  - the stream rejects a target outside the scope before invoking the client;
-  - async `stream_bytes` and `stream_sse` carry the scope through initial validation, retry validation, and DNS-pin reuse;
-  - calls without a scope retain the global port/private rules.
-- [ ] Use injected fake clients and `resolved_ips_override`/monkeypatching; do not make real DNS or network calls.
-- [ ] Run the focused HTTP client tests and observe the missing-parameter/helper failures.
+- [ ] Prove sync `fetch` and async `afetch` preserve the scope and `EgressPolicyError.reason_code` through initial and repeated validation.
+- [ ] Prove a same-origin path redirect is revalidated while cross-origin/scheme/port redirects are rejected before the redirected call.
+- [ ] Prove a synchronous checked stream accepts one approved LAN/nonstandard origin, disables redirects, rejects an origin mismatch before I/O, and closes only clients it owns.
+- [ ] Prove `_check_cert_pinning` receives the scope and original accepted IP set; a scoped HTTPS LAN origin must not be rejected by a nested unscoped validation.
+- [ ] Add explicit certificate denial cases for origin/address denial during the nested check, changed DNS, no certificate, pin mismatch, and socket/TLS failure. Assert `EgressPolicyError.reason_code` remains `origin_mismatch`/`address_forbidden`, `dns_changed`, `tls_pin_missing`, `tls_pin_mismatch`, or `tls_pin_error` rather than becoming `NetworkError`.
+- [ ] Prove both `fetch`/`afetch` and the new `stream_response` enforce configured certificate pins when pins are supplied.
+- [ ] Prove Unicode/punycode/trailing-dot host variants share one DNS-pin key.
+- [ ] Add no-scope regressions for port/private blocking, timeout behavior, falsey adapter flags, and existing adapter signatures.
+- [ ] Do not add scope tests for `astream_bytes` or `astream_sse`.
 
-### Task 2.2: Thread the scope through existing validation
+### Task 2.2: Implement the three entrypoints
 
-- [ ] Add `configured_endpoint: ConfiguredEndpointScope | None = None` to `_validate_egress_or_raise` and `_avalidate_egress_or_raise`.
-- [ ] Propagate it through `TransportAdapter.request`, `arequest`, `stream_bytes`, and `stream_sse`, plus their HTTPX/AIOHTTP implementations and public `fetch`/`afetch` entrypoints.
-- [ ] Pass the same scope on every retry and redirect validation. Do not recompute a scope from a redirect URL.
-- [ ] Reuse the existing DNS pin cache for scoped requests.
-- [ ] Add one small exported synchronous context manager, for example:
+- [ ] Thread `configured_endpoint` through `_validate_egress_or_raise`, `_avalidate_egress_or_raise`, sync/async request adapters, public `fetch`, and public `afetch`.
+- [ ] Pass the original scope and accepted resolution set into every retry, redirect, DNS-pin, and `_check_cert_pinning` validation.
+- [ ] Add `configured_endpoint` and accepted-IP parameters to `_check_cert_pinning`; preserve URL-policy reason codes and assign typed `tls_pin_missing`, `tls_pin_mismatch`, or `tls_pin_error` codes to pin-specific failures.
+- [ ] In scoped request and stream paths, catch and re-raise `EgressPolicyError` before the existing broad noncritical/network catches. Do not collapse a certificate-policy failure into a retry reason string or `NetworkError`.
+- [ ] Normalize DNS-pin host keys with the same IDNA/trailing-dot helper used by `ConfiguredEndpointScope`.
+- [ ] Add one exported context manager:
 
   ```python
   @contextmanager
   def stream_response(
-      *,
-      method: str,
-      url: str,
+      *, method: str, url: str,
       configured_endpoint: ConfiguredEndpointScope | None = None,
       client: httpx.Client | None = None,
       **kwargs: Any,
-  ) -> Iterator[httpx.Response]:
-      ...
+  ) -> Iterator[httpx.Response]: ...
   ```
 
-  It must validate before I/O, disable automatic redirects, close only clients it owns, and allow the response body to remain streamed.
-- [ ] Keep proxy validation, TLS settings, retry behavior, metrics, and redacted logging unchanged.
+- [ ] Validate before I/O, set `follow_redirects=False`, enforce the same configured certificate-pin map as checked requests, preserve TLS/proxy/redaction/timeout behavior, and keep the response open for iteration.
+- [ ] Leave async stream protocols untouched.
 
-### Task 2.3: Verify and commit Stage 2
+### Task 2.3: Verify and commit
 
 - [ ] Run:
 
@@ -219,211 +196,206 @@ No production TypeScript file is expected to change. Add one only if the regress
   source .venv/bin/activate
   python -m pytest \
     tldw_Server_API/tests/http_client/test_http_client.py \
-    tldw_Server_API/tests/http_client/test_http_client_sse_edges.py \
+    tldw_Server_API/tests/http_client/test_http_client_adapters.py \
+    tldw_Server_API/tests/http_client/test_http_client_pinning.py \
     tldw_Server_API/tests/http_client/test_redirect_header_hardening.py \
-    tldw_Server_API/tests/http_client/test_http_client_pinning.py -q
+    tldw_Server_API/tests/http_client/test_http_client_stream_timeouts.py \
+    tldw_Server_API/tests/http_client/test_http_client_truthiness_flags.py -q
   ```
 
-- [ ] Run `git diff --check`.
-- [ ] Commit the HTTP client and tests with `TASK-12972` in the message.
+- [ ] Run the Stage 1 suite and `git diff --check`.
+- [ ] Commit transport and tests with `fix(http): propagate configured endpoint scope (TASK-12972)`.
 
 ---
 
-## Stage 3: Setup, readiness, discovery, and catalog parity
+## Stage 3: Trusted resolution at the configured-local adapter boundary
 
-**Goal:** Remove policy drift from pre-chat paths and preserve explicit manual models.
+**Goal:** Resolve fresh trusted endpoints once at the common adapter boundary so every registry dispatch is covered without accepting request-derived authorization.
 
-**Success Criteria:** Existing setup, readiness, and discovery surfaces agree for the same configured endpoint. Scope provenance is carried from trusted server configuration and never inferred from request/adapter URLs. Bare Docker/local DNS names are evaluated by resolved addresses rather than suffixes. Discovery distinguishes ready, ready-empty, authentication, server, unsupported-shape, and unreachable outcomes, and llama.cpp/Kobold/Ooba/Tabby manual models follow the defined readiness matrix. Generic `local-llm` receives chat transport coverage in Stage 4 but does not gain new pre-chat surfaces.
+**Success Criteria:** Every local wrapper, native Kobold, and configured custom alias discards fake context, resolves its paired endpoint/scope from its registered name, and propagates it for sync/async and stream calls. Chat and all direct registry callers inherit the behavior without call-site edits.
 
-**Tests:** Setup validation, readiness, provider details.
+**Tests:** Resolver, Chat override/reserved-key guards, table-driven direct adapter execution, and existing adapter contracts.
 
 **Status:** Not Started
 
-### Task 3.1: Write failing integration-unit tests
+### Task 3.1: Write failing provenance and execution tests
 
-- [ ] In `test_setup_provider_validation.py`, add cases for:
-  - a bare Docker hostname resolving to RFC1918;
-  - CGNAT and IPv6 ULA;
-  - link-local/metadata denial before client I/O;
-  - a configured nonstandard port while global allowed ports remain `80,443`;
-  - auth failure and manual-model fallback retaining their existing sanitized response categories.
-- [ ] In `test_llm_providers_readiness.py`, replace the expectation that a configured Ollama `:11434` LAN endpoint is `egress_blocked` with the new expectation that its policy is accepted. Add a separate forbidden-target case that remains `egress_blocked`.
-- [ ] In `test_llm_provider_details.py`, configure `llama_model`, `kobold_model`, `ooba_model`, and `tabby_model`, return typed `unsupported` and `unreachable` discovery outcomes as appropriate, and assert explicit models follow the state matrix without being erased.
-- [ ] Add table-driven catalog/readiness cases for the design's state matrix: policy denial; probe reachability failure; explicit model with probe disabled; explicit model with reachable/empty/unsupported model-list responses; no explicit model with ready, ready-empty, unsupported, auth-failed, server-error, and unreachable discovery; and health-probe failure overriding model presence.
-- [ ] Add discovery tests that assert a recognized empty list is `ready`, 401/403 is `auth_failed`, 429/5xx is `server_error`, reachable unsupported paths/shapes are `unsupported`, no-response failures are `unreachable`, and `_http_fetch` receives the same already-minted scope for every candidate model URL.
-- [ ] Add trusted-resolution tests proving config-file/environment endpoints can mint scope while chat `app_config`, request `base_url`/`api_url`, and BYOK values cannot.
-- [ ] Run the focused files below and confirm they fail for the current split validators, untyped discovery, global policy, missing provenance resolver, and missing model-field mappings.
+- [ ] Add resolver tables for all provider aliases and config/environment keys, including the four `LOCAL_LLM_*` aliases and custom slot 37.
+- [ ] Prove the resolver reads current config after loader-cache invalidation rather than Chat's import-time `_config` or a request `app_config`.
+- [ ] Pass fake `configured_endpoint_base_url`, `configured_endpoint_scope`, `http_fetcher`, `http_streamer`, and other reserved keys directly to adapters and through Chat arguments; assert request dictionaries cannot select scope or transport before adapters independently resolve trusted context.
+- [ ] Prove URL/app-config/BYOK overrides cannot mint scope, while the same endpoint selected from current server config supplies one paired base URL/scope value.
+- [ ] Add Chat-endpoint cases for `ResolvedByokCredentials.source` values `user`, `team`, `org`, and server fallback. Assert the endpoint writes only a URL-free private provenance value after request parsing; request extras cannot forge it.
+- [ ] For custom OpenAI, assert `server_config` (or a direct call with no explicit endpoint) uses the fresh trusted pair, while `byok` and `request_override` use their endpoint with no scope and ordinary checked egress.
+- [ ] Give a direct adapter call stale endpoint data in `app_config` and a newer endpoint in current server config; assert the adapter builds its final path from the paired trusted base and the scope matches it.
+- [ ] Add a table-driven direct-registry execution test for `local-llm`, llama, Ooba, Tabby, vLLM, Ollama, Aphrodite, native Kobold, `custom-openai-api`, and custom slot 37. Exercise `chat`, `stream`, `achat`, and `astream` as supported and assert each resolves/forwards the same checked scope without Chat orchestration.
+- [ ] For configured custom aliases, prove no-scope request/BYOK paths use the ordinary checked policy. Prove Novita/Poe/Together remain outside the new scoped path.
+- [ ] Force URL-policy and TLS-pin failures through configured custom sync, stream, `achat`, and `astream`; assert `EgressPolicyError.reason_code` survives instead of being normalized into a generic Chat provider error.
+- [ ] Add one registry-boundary regression showing an adapter obtained and invoked by a generic direct caller is scoped; document the audited direct-call inventory without duplicating tests for every feature.
+- [ ] Preserve merge, parameter forwarding, timeout, role, error mapping, streaming normalization, `[DONE]`, and response-closure contracts.
 
-### Task 3.2: Establish trusted scope minting and reuse it in setup/readiness
+### Task 3.2: Implement fresh trusted resolution
 
-- [ ] Delete `_ALLOWED_PRIVATE_IPV4_NETWORKS`, `_ALLOWED_PRIVATE_IPV6_NETWORKS`, `_ALLOWED_LOCAL_HOST_SUFFIXES`, and `_is_allowed_local_provider_host` from `provider_validation.py`.
-- [ ] Build `ConfiguredEndpointScope` once from the guarded setup payload. Use `http_client.afetch` with that scope and the existing injected validation client; preserve timeouts, auth headers, response sanitization, and manual fallback categories.
-- [ ] Add or reuse a small helper in `provider_config_resolution.py` that resolves endpoints for the enumerated local-provider names from server-owned config/environment. It returns the normalized endpoint plus scope and never accepts request values as a fallback.
-- [ ] In `_build_adapter_request_from_chat_args`, call `_reject_local_request_url_overrides` first, then attach the trusted scope as private adapter context. Do not treat supplied request `app_config`, `base_url`, `api_url`, or BYOK data as trusted provenance.
-- [ ] Expand the existing private internal adapter context/hook path to carry `configured_endpoint_scope` and later `http_streamer`; ensure these keys are removed before provider payload serialization.
-- [ ] In `provider_readiness.py`, evaluate only configured local endpoint URLs with the trusted scope. Keep commercial/untrusted endpoint paths on the default policy.
-- [ ] If scope construction or origin/address policy fails, report `egress_blocked` with a sanitized reason. Map `dns_unresolved`, connection, and timeout failures to `endpoint_unreachable`.
-
-### Task 3.3: Add typed discovery and restore manual model mappings
-
-- [ ] Introduce a minimal `ModelDiscoveryResult` value with status `ready`, `auth_failed`, `server_error`, `unsupported`, or `unreachable` and a model list. Apply the design's deterministic candidate-result precedence. Update readiness/catalog callers instead of using `[]` for every failure. Preserve a list-only compatibility wrapper only if another public caller requires it.
-- [ ] In `discover_models_from_endpoint`, accept the already-minted trusted scope and pass it to `_http_fetch` for every `/models` or `/api/tags` candidate. Never derive scope from the endpoint parameter inside discovery.
-- [ ] Change local provider catalog mappings to read the fields setup already owns:
+- [ ] In `provider_config_resolution.py`, add a small result value such as:
 
   ```python
-  "llama": {"model_field": "llama_model", ...}
-  "kobold": {"model_field": "kobold_model", ...}
-  "ooba": {"model_field": "ooba_model", ...}
-  "tabby": {"model_field": "tabby_model", ...}
+  @dataclass(frozen=True)
+  class TrustedProviderEndpoint:
+      base_url: str
+      scope: ConfiguredEndpointScope
   ```
 
-- [ ] Keep explicit models authoritative. Skip discovery when one is configured and probing is disabled. When probing is enabled, discovery may add a nonblocking diagnostic but must never replace or erase the explicit value.
-- [ ] Do not add a synthetic placeholder model when neither configuration nor discovery supplies one.
-- [ ] Implement the design state matrix exactly: policy or health denial remains unavailable; explicit/no-probe remains enabled; unsupported discovery remains enabled in diagnostics but has no selectable model unless an explicit model exists; reachability failure during a requested probe is unavailable.
-- [ ] Treat a recognized empty list as a reachable endpoint with `no_models_reported`, 401/403 as unavailable `auth_failed`, and 429/5xx as unavailable `endpoint_error`.
-- [ ] Update `test_llm_providers_error_mapping.py` for the typed return contract and stable mapping.
+- [ ] Resolve only from current server configuration/environment. Do not accept a caller-supplied app config or endpoint fallback. Normalize registered provider aliases and document numbered-custom handling.
+- [ ] In the Chat endpoint, derive private endpoint provenance from `ResolvedByokCredentials.source`/`uses_byok` and per-request override state after request parsing. Pass only `server_config`, `byok`, or `request_override`; never put a URL in this signal.
+- [ ] In Chat service, add all reserved fields to `skip_keys`, remove the current general extraction of scope/stream hooks from arbitrary `chat_args`, and keep request URL overrides rejected. It accepts endpoint provenance only from the endpoint's private post-parse argument and does not attach scope.
 
-### Task 3.4: Verify and commit Stage 3
+### Task 3.3: Resolve and consume context inside configured-local adapters
+
+- [ ] In `_LocalAdapterBase`, discard caller-supplied reserved context, resolve `TrustedProviderEndpoint` from `self.name` immediately before every sync/async dispatch, and pass the paired base/scope only to internal handlers. Move deterministic fetch/stream injection to adapter-owned attributes or module monkeypatches rather than request fields.
+- [ ] Update all local wrappers and native Kobold to consume the internally resolved `configured_endpoint_base_url`, `configured_endpoint_scope`, `http_fetcher`, and `http_streamer`, strip them before validation/serialization, build request paths from the trusted base, and forward the scope to `fetch`/`stream_response`.
+- [ ] Remove the `PYTEST_CURRENT_TEST` raw POST branch; deterministic tests inject checked hooks.
+- [ ] In `CustomOpenAIAdapter`, discard caller-supplied reserved context before `validate_payload`. For configured custom names with no explicit request/BYOK endpoint, resolve the paired base/scope from `self.name`; explicit overrides use ordinary checked egress without scope. Public-service subclasses do not invoke the configured-local resolver.
+- [ ] In configured custom `chat` and `stream`, catch and re-raise `EgressPolicyError` before `normalize_error`; async methods inherit the same typed behavior through their sync wrappers.
+- [ ] Map `dns_unresolved` to the existing reachability/provider category and all other policy denials to sanitized `ChatConfigurationError`.
+- [ ] Keep resolver and adapter consumption in this same commit so no intermediate commit passes unknown context to old handlers.
+
+### Task 3.4: Verify and commit
 
 - [ ] Run:
 
   ```bash
   source .venv/bin/activate
   python -m pytest \
-    tldw_Server_API/tests/Setup/test_setup_provider_validation.py \
-    tldw_Server_API/tests/Chat_NEW/unit/test_llm_providers_readiness.py \
-    tldw_Server_API/tests/Chat_NEW/unit/test_llm_provider_details.py \
-    tldw_Server_API/tests/LLM_Adapters/unit/test_llm_providers_error_mapping.py \
-    tldw_Server_API/tests/LLM_Calls/test_provider_config_resolution.py -q
-  ```
-
-- [ ] Run `git diff --check`.
-- [ ] Commit the provider pre-chat integration changes with `TASK-12972` in the message.
-
----
-
-## Stage 4: Streaming and non-streaming chat parity
-
-**Goal:** Ensure actual local inference uses the same configured-origin policy and eliminate test-only transport divergence.
-
-**Success Criteria:** OpenAI-compatible local adapters, numbered custom OpenAI-compatible adapters, and native Kobold calls accept only an already-minted trusted scope and pass it to checked transports. Both streaming and non-streaming requests work for approved LAN/nonstandard origins. Policy denials become sanitized configuration errors. Request-level endpoint overrides remain rejected and cannot manufacture a scope.
-
-**Tests:** Local streaming/error mapping and Chat override guard.
-
-**Status:** Not Started
-
-### Task 4.1: Write failing adapter tests
-
-- [ ] Extend `test_local_streaming_contract.py` so the injected streamer records a `ConfiguredEndpointScope` matching the configured base and verifies no automatic redirect is enabled.
-- [ ] Add non-streaming coverage showing `_hc_fetch` receives that same scope.
-- [ ] Add a policy-denial case and assert the adapter returns/maps a sanitized provider configuration error rather than silently attempting I/O.
-- [ ] Add a native Kobold test that verifies its configured endpoint is scoped.
-- [ ] In `test_custom_openai_native_http.py`, prove trusted configured custom OpenAI sync and stream paths receive scope, while direct/request `base_url` and BYOK paths receive no scope. Prove Novita, Poe, and Together subclasses remain on default policy.
-- [ ] Expand `test_chat_service_base_url_override.py` across llama.cpp, Kobold, Ooba, TabbyAPI, vLLM, Ollama, Aphrodite, `local-llm`, and custom OpenAI aliases. Assert no request-derived value can produce `configured_endpoint_scope`.
-
-### Task 4.2: Route local and custom OpenAI chat through checked transports
-
-- [ ] In `_chat_with_openai_compatible_local_server`, accept the private `configured_endpoint_scope`, verify the final URL matches it through central policy, and pass it to:
-  - `http_client.fetch` for non-streaming calls;
-  - `http_client.stream_response` for streaming calls.
-- [ ] Add a private `http_streamer` hook beside `http_client_factory` and `http_fetcher`; strip all internal keys before payload serialization. Remove the `PYTEST_CURRENT_TEST` raw `session.post(...)` branch. Tests inject fetcher/streamer behavior instead of selecting a different security path.
-- [ ] Preserve SSE normalization, `[DONE]` finalization, response closure, cache diagnostics, retry policy, and HTTP/network error mapping.
-- [ ] Pass the already-carried scope to the native Kobold `_hc_fetch` call; do not derive it from Kobold's final `api_url`.
-- [ ] Update `custom_openai_adapter.py` sync and stream paths to use the same centralized checked fetch/stream hooks. Pass trusted scope only for `custom-openai-api` and numbered variants whose trusted config origin matches the final base; all other subclasses and no-scope calls use those checked transports with `configured_endpoint=None` and retain the default policy.
-- [ ] Catch `EgressPolicyError` before generic HTTP/network normalization and map it to a sanitized `ChatConfigurationError` without exposing credentials or raw response bodies.
-- [ ] Do not modify `_LocalAdapterBase` or custom adapters to accept request-level URL authorization. Keep ADR-025’s request-builder guard unchanged.
-
-### Task 4.3: Verify and commit Stage 4
-
-- [ ] Run:
-
-  ```bash
-  source .venv/bin/activate
-  python -m pytest \
+    tldw_Server_API/tests/LLM_Calls/test_provider_config_resolution.py \
+    tldw_Server_API/tests/Chat/test_custom_openai_endpoint_provenance.py \
+    tldw_Server_API/tests/Chat/unit/test_chat_service_base_url_override.py \
     tldw_Server_API/tests/LLM_Calls/test_local_streaming_contract.py \
     tldw_Server_API/tests/LLM_Calls/test_local_http_error_mapping.py \
     tldw_Server_API/tests/LLM_Adapters/unit/test_custom_openai_native_http.py \
-    tldw_Server_API/tests/Chat/unit/test_chat_service_base_url_override.py -q
+    tldw_Server_API/tests/LLM_Adapters/unit/test_local_adapter_merge.py \
+    tldw_Server_API/tests/LLM_Calls/test_local_llm_param_forwarding.py \
+    tldw_Server_API/tests/LLM_Calls/test_provider_timeout_and_role_regressions.py -q
   ```
 
-- [ ] Run the Stage 1–3 focused backend suite again to detect path drift.
-- [ ] Run `git diff --check`.
-- [ ] Commit the adapter changes with `TASK-12972` in the message.
+- [ ] Re-run Stages 1–2 and `git diff --check`.
+- [ ] Commit with `fix(llm): trust configured local adapter origins (TASK-12972)`.
 
 ---
 
-## Stage 5: WebUI contract, decision record, documentation, and final verification
+## Stage 4: Guarded setup, one-shot discovery, readiness, and catalog parity
 
-**Goal:** Lock the user-visible behavior, document the security boundary, remove the unsafe workaround recommendation, and complete the project quality gates.
+**Goal:** Make all pre-chat surfaces agree and preserve explicit local models.
 
-**Success Criteria:** The WebUI selects an enabled explicit local model and still excludes a truly blocked one. Documentation describes the scoped behavior and migration. Focused verification and Bandit pass.
+**Success Criteria:** Setup creates scope after authorization, setup readiness uses canonical fields, discovery runs once per provider, transient failures are not cached, and exact catalog metadata follows the documented matrix.
 
-**Tests:** One frontend service regression plus the complete focused backend matrix.
+**Tests:** Setup route/validation/readiness plus provider readiness/catalog/error mapping.
 
 **Status:** Not Started
 
-### Task 5.1: Confirm the existing WebUI contract
+### Task 4.1: Write failing setup and readiness tests
 
-- [ ] Add a test in `TldwModels.test.ts` with backend metadata for a manual LAN-hosted model where `provider_enabled=true` and `availability=enabled`; assert it is returned by the chat model selector.
-- [ ] Keep or add the paired case where `provider_enabled=false`, `availability=unavailable`, and `readiness_reason_code=egress_blocked`; assert it remains excluded.
+- [ ] In the first-run setup API integration test, prove the write guard runs before scope construction or network I/O; unauthorized remote input must not invoke either.
+- [ ] Add setup validation cases for Docker/RFC1918, ULA, CGNAT, nonstandard ports, metadata denial, auth failure, unsupported shape, and manual fallback.
+- [ ] Assert validator functions cannot mint scope themselves and require the guarded route to pass it.
+- [ ] Change setup readiness/profile tests to use canonical `kobold_api_IP`; cover only existing setup providers and explicitly avoid adding generic `local-llm`/numbered custom surfaces.
+- [ ] Add a non-loopback llama endpoint with `llama_model`, global private blocking enabled, and no global port exception. Assert the exact flattened `/api/v1/llm/models/metadata` record is enabled and contains the manual model.
+- [ ] Add the paired forbidden metadata/link-local endpoint record with `availability=unavailable` and `readiness_reason_code=egress_blocked`.
+
+### Task 4.2: Write failing one-shot discovery tests
+
+- [ ] Introduce expected `ModelDiscoveryResult` cases for ready/nonempty, ready/empty, auth failure, server failure, unsupported response, and unreachable endpoint.
+- [ ] Instrument the catalog flow and assert at most one discovery computation per provider; readiness receives the same result instead of calling discovery itself.
+- [ ] Assert the existing cache stores `ready` and `unsupported` only. Correcting credentials, starting a server, or recovering DNS must trigger a new attempt immediately.
+- [ ] Test precedence `ready`, `auth_failed`, `server_error`, `unsupported`, `unreachable` across candidate endpoints.
+- [ ] Test the complete matrix: policy/DNS failure; explicit model with probe off; explicit model with requested probe; no explicit model with each discovery status; health failure overriding model presence.
+
+### Task 4.3: Implement guarded setup and pure readiness reduction
+
+- [ ] In the guarded `validate_first_run_provider` route, construct the scope only after `_require_first_run_write_access`; pass it into the local validator.
+- [ ] Replace raw setup `httpx` and duplicate host/range checks with `afetch(..., configured_endpoint=scope)`. Preserve auth headers, timeouts, sanitized messages, and manual fallback.
+- [ ] Fix `readiness_service.py` and `readiness_profiles.py` to read `kobold_api_IP`.
+- [ ] Add a minimal frozen `ModelDiscoveryResult(status, models)` and make discovery accept an already-created scope.
+- [ ] Compute discovery once in catalog code. Pass `discovery_result`, `has_explicit_models`, policy state, and probe/health state into a side-effect-free readiness reducer.
+- [ ] Cache only `ready` and `unsupported`. Keep the existing bounded TTL and key; do not include credentials or secret fingerprints.
+- [ ] Restore `llama_model`, `kobold_model`, `ooba_model`, and `tabby_model` mappings. Explicit models are never erased by optional discovery.
+- [ ] Evaluate scoped policy/DNS before the optional HTTP probe; unresolved DNS remains unavailable even for explicit-model/probe-disabled configuration.
+
+### Task 4.4: Verify and commit
+
+- [ ] Run:
+
+  ```bash
+  source .venv/bin/activate
+  python -m pytest \
+    tldw_Server_API/tests/integration/test_unified_first_run_setup_api.py \
+    tldw_Server_API/tests/Setup/test_setup_provider_validation.py \
+    tldw_Server_API/tests/Setup/test_setup_readiness_profiles.py \
+    tldw_Server_API/tests/Setup/test_setup_readiness_api.py \
+    tldw_Server_API/tests/Chat_NEW/unit/test_llm_providers_readiness.py \
+    tldw_Server_API/tests/Chat_NEW/unit/test_llm_provider_details.py \
+    tldw_Server_API/tests/LLM_Adapters/unit/test_llm_providers_error_mapping.py -q
+  ```
+
+- [ ] Re-run Stages 1–3 and `git diff --check`.
+- [ ] Commit with `fix(setup): align local provider readiness and discovery (TASK-12972)`.
+
+---
+
+## Stage 5: WebUI visibility, documentation, and final gates
+
+**Goal:** Prove the fixed backend record appears immediately in the WebUI and finish security/documentation verification.
+
+**Success Criteria:** Exact backend-shaped enabled models are selectable, blocked models remain excluded, configuration updates clear both caches, docs remove the unsafe workaround, and all quality gates pass.
+
+**Tests:** Frontend model/cache contract plus all focused backend tests.
+
+**Status:** Not Started
+
+### Task 5.1: Write the backend-to-WebUI regression
+
+- [ ] Feed `TldwModelsService` the exact enabled llama metadata object asserted by Stage 4 and prove the manual model is returned by the chat selector.
+- [ ] Feed the paired `egress_blocked` object and prove it is excluded.
+- [ ] Prove `saveSetupProvider` dispatches `tldw:config-updated` only when the redacted response has `status="saved"`; a `failed` response does not dispatch it.
+- [ ] Warm `TldwModels`' persistent cache and the outer `fetchChatModels` cache, perform a successful provider save, then prove the emitted event makes the next fetch reach the backend despite the 15-minute TTL and 30-second forced-refresh cooldown.
+- [ ] Use deferred promises to start pre-save fetch A, emit the saved-provider event, then start post-save fetch B. Resolve A first and assert it cannot write either cache, reset B's in-flight ownership, or persist stale timestamps; resolve B and assert subsequent reads return B.
+- [ ] Update `setup-onboarding.ts` to emit the existing event after a saved response; do not depend on the hook's setup-state refresh for model invalidation.
+- [ ] Add one monotonic invalidation generation to `TldwModelsService` and one to the outer chat-model cache. Every fetch captures its generation and commits cache/timestamps only if unchanged; every clear increments it; `finally` clears only its own promise.
+- [ ] Update `tldw-server.ts`'s existing config listener to call both generation-aware `clearChatModelsCache()` and `void tldwModels.clearCache()`; do not add another event or cache layer.
 - [ ] Run:
 
   ```bash
   cd apps/tldw-frontend
-  bunx vitest run ../packages/ui/src/services/tldw/__tests__/TldwModels.test.ts --reporter=dot
+  bunx vitest run \
+    ../packages/ui/src/services/tldw/__tests__/TldwModels.test.ts \
+    ../packages/ui/src/services/__tests__/tldw-server.fetch-chat-models.test.ts \
+    ../packages/ui/src/services/tldw/__tests__/setup-onboarding.test.ts \
+    --reporter=dot
   ```
-
-- [ ] If this passes without production TypeScript changes, do not change `TldwModels.ts`.
 
 ### Task 5.2: Record the decision and migration
 
-- [ ] Create ADR-030 documenting:
-  - trusted configuration sources;
-  - exact-origin and address-class rules;
-  - global denylist precedence;
-  - redirect/stream rules;
-  - request-level override rejection;
-  - why global `block_private=false` was rejected.
-- [ ] Update `Config_Files/README.md` to state that configured local LLM endpoints no longer require global private-network or port exceptions. Keep the global egress settings documented for unrelated callers.
-- [ ] Update the local LLM setup guide with LAN, Docker, and Tailscale examples and a concise troubleshooting table for `egress_blocked`, `endpoint_unreachable`, `auth_failed`, `endpoint_error`, `model_discovery_unavailable`, and `no_models_reported`.
-- [ ] Do not automatically rewrite user configuration. Advise operators to restore `block_private=true` only after checking whether unrelated integrations depend on the old workaround.
+- [ ] Create ADR-030 covering trusted provenance, exact-origin/address rules, structured errors, redirects/TLS pinning, direct callers, discovery caching, public custom-subclass non-goal, and rejected global relaxation.
+- [ ] Update `Config_Files/README.md` and the local LLM guide with LAN/Docker/Tailscale examples and troubleshooting for `egress_blocked`, `endpoint_unreachable`, `auth_failed`, `endpoint_error`, `model_discovery_unavailable`, and `no_models_reported`.
+- [ ] Advise restoring `block_private=true` only after checking unrelated integrations; do not rewrite user configuration automatically.
+- [ ] Create a follow-up Backlog task for central egress hardening of Novita/Poe/Together public custom-adapter subclasses if no existing task covers it.
 
-### Task 5.3: Run final verification
+### Task 5.3: Run final verification and security scan
 
-- [ ] Backend focused suite:
-
-  ```bash
-  source .venv/bin/activate
-  python -m pytest \
-    tldw_Server_API/tests/Security/test_egress.py \
-    tldw_Server_API/tests/Security/test_egress_global_env.py \
-    tldw_Server_API/tests/Security/test_egress_env_absent_defaults.py \
-    tldw_Server_API/tests/http_client/test_http_client.py \
-    tldw_Server_API/tests/http_client/test_http_client_sse_edges.py \
-    tldw_Server_API/tests/http_client/test_http_client_pinning.py \
-    tldw_Server_API/tests/http_client/test_redirect_header_hardening.py \
-    tldw_Server_API/tests/Setup/test_setup_provider_validation.py \
-    tldw_Server_API/tests/Chat_NEW/unit/test_llm_providers_readiness.py \
-    tldw_Server_API/tests/Chat_NEW/unit/test_llm_provider_details.py \
-    tldw_Server_API/tests/LLM_Calls/test_local_streaming_contract.py \
-    tldw_Server_API/tests/LLM_Calls/test_local_http_error_mapping.py \
-    tldw_Server_API/tests/LLM_Adapters/unit/test_custom_openai_native_http.py \
-    tldw_Server_API/tests/LLM_Adapters/unit/test_llm_providers_error_mapping.py \
-    tldw_Server_API/tests/LLM_Calls/test_provider_config_resolution.py \
-    tldw_Server_API/tests/Chat/unit/test_chat_service_base_url_override.py -q
-  ```
-
-- [ ] Frontend focused test from Task 5.1.
-- [ ] Bandit on all touched Python paths:
+- [ ] Run the union of every focused backend command from Stages 1–4 and both frontend tests from Task 5.1.
+- [ ] Run Bandit over every touched Python production path:
 
   ```bash
   source .venv/bin/activate
   python -m bandit -r \
     tldw_Server_API/app/core/Security/egress.py \
+    tldw_Server_API/app/core/exceptions.py \
     tldw_Server_API/app/core/http_client.py \
+    tldw_Server_API/app/api/v1/endpoints/setup.py \
     tldw_Server_API/app/core/Setup/provider_validation.py \
+    tldw_Server_API/app/core/Setup/readiness_service.py \
+    tldw_Server_API/app/core/Setup/readiness_profiles.py \
     tldw_Server_API/app/core/LLM_Calls/provider_readiness.py \
     tldw_Server_API/app/core/LLM_Calls/provider_config_resolution.py \
+    tldw_Server_API/app/api/v1/endpoints/chat.py \
     tldw_Server_API/app/core/Chat/chat_service.py \
     tldw_Server_API/app/core/LLM_Calls/providers/local_adapters.py \
     tldw_Server_API/app/core/LLM_Calls/providers/custom_openai_adapter.py \
@@ -431,27 +403,29 @@ No production TypeScript file is expected to change. Add one only if the regress
     -f json -o /tmp/bandit_TASK_12972.json
   ```
 
-- [ ] Run `git diff --check`.
-- [ ] Optional live UAT when a LAN interface is available: bind the existing mock OpenAI server to `0.0.0.0`, configure the server through the host’s non-loopback address, verify the model appears in the WebUI, and complete one streaming plus one non-streaming chat. Record an environment skip rather than weakening policy if a LAN route is unavailable.
+- [ ] Run `git diff --check` and inspect `git diff --stat` for unplanned scope.
+- [ ] Optional live UAT: bind the existing mock OpenAI server to `0.0.0.0`, configure a real non-loopback host address, verify model visibility, and complete one sync plus one streaming chat. Record an environment skip if no LAN route exists.
 
-### Task 5.4: Finalize TASK-12972 and commit
+### Task 5.4: Finalize task and commit
 
-- [ ] Update the Backlog task with stage notes, touched files, exact test results, Bandit result, known skips, ADR/doc links, and final summary.
-- [ ] Confirm every acceptance criterion before checking it off.
-- [ ] Commit documentation, frontend regression, and task finalization with `TASK-12972` in the message.
+- [ ] Update TASK-12972 through Backlog MCP/CLI with touched files, exact test/Bandit results, skips, ADR/docs, and final summary.
+- [ ] Confirm every acceptance criterion and Definition of Done item before marking complete.
+- [ ] Commit frontend, docs, and task finalization with `docs(llm): document scoped local provider egress (TASK-12972)`.
 
 ---
 
 ## Definition-of-done audit
 
-- [ ] The global default remains `block_private=true`; no global inference ports were added.
-- [ ] Only exact trusted configured origins receive the scoped behavior.
-- [ ] Adapters never mint scope from their final URL; request/BYOK values and non-custom public-service subclasses remain on default policy.
-- [ ] Setup, readiness, discovery, non-streaming chat, and streaming chat share the same policy.
-- [ ] Request-level local endpoint overrides remain rejected.
-- [ ] Dangerous targets, origin-changing redirects, and DNS changes fail closed.
-- [ ] Explicit local models remain visible when discovery is unavailable.
-- [ ] Discovery and readiness expose stable typed outcomes for blocked, unreachable, and unsupported endpoints.
-- [ ] Existing unavailable-provider WebUI filtering remains intact.
-- [ ] Focused backend/frontend tests pass, Bandit reports no new findings, and `git diff --check` is clean.
-- [ ] ADR, configuration docs, local setup guide, Backlog notes, and human-authored PR `Change summary` requirements are complete.
+- [ ] Global private blocking and global port defaults are unchanged.
+- [ ] Only exact fresh server-configured origins or an authorized setup payload receive scope.
+- [ ] Reserved request keys, URL overrides, request app config, BYOK values, and adapter final URLs cannot manufacture scope.
+- [ ] Custom BYOK/request endpoint provenance is derived after request parsing, carries no URL, and forces ordinary no-scope egress.
+- [ ] Address classification, retries, redirects, DNS pins, and TLS pins fail closed with stable reason codes.
+- [ ] Chat and every direct registry caller inherit scoped behavior from the configured-local adapter boundary; setup, readiness, discovery, sync, and streaming use the intended checked paths.
+- [ ] Every local adapter wrapper and configured custom alias has table-driven scope propagation coverage.
+- [ ] Discovery runs once per provider and transient failures are not cached.
+- [ ] Explicit local models survive optional discovery and exact metadata becomes visible immediately after config updates.
+- [ ] A saved provider emits the existing config-update event and clears both model caches; a failed save does not.
+- [ ] Pre-save in-flight fetches cannot repopulate either cache or clear ownership of a post-save fetch.
+- [ ] Focused backend/frontend tests pass, Bandit introduces no findings, and `git diff --check` is clean.
+- [ ] ADR, configuration docs, local setup guide, Backlog notes, and the human-authored PR `Change summary` gate are complete.

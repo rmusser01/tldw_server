@@ -1,177 +1,180 @@
 # Configured Local LLM Egress Design
 
-**Status:** Draft — reviewed, awaiting requester approval
+**Status:** Draft — revised after security and feasibility review; awaiting requester approval
 **Task:** TASK-12972
 **Related decisions:** ADR-025, ADR-026
 **Related completed work:** TASK-605, TASK-12020.29
 
 ## Problem
 
-The setup flow accepts llama.cpp and other OpenAI-compatible local endpoints on loopback, RFC1918 addresses, IPv6 ULA addresses, and common local DNS suffixes. Runtime behavior does not honor that decision consistently:
+The setup flow accepts llama.cpp and other OpenAI-compatible local endpoints on loopback, LAN, Docker, and overlay-network addresses, but runtime paths apply different network rules:
 
-- setup validation performs its own host check and calls `httpx` directly;
-- provider readiness evaluates the endpoint with the global egress policy;
-- model discovery uses the centralized HTTP client with the global policy;
-- non-streaming local chat uses the centralized HTTP client in production;
-- streaming local chat opens a raw client stream and does not perform the same egress check;
-- the WebUI correctly hides providers that the backend marks unavailable, making the backend mismatch look like a model-selector defect;
-- llama.cpp, Kobold.cpp, Oobabooga, and TabbyAPI setup can persist manual model names, but the runtime catalog mapping does not read those model fields.
+- setup validation uses a separate hostname/private-range check and raw `httpx`;
+- provider readiness and model discovery apply the global egress policy, which blocks private addresses and nonstandard ports;
+- non-streaming local chat is checked in production, while streaming opens a raw unchecked stream;
+- summarization, quiz generation, and claims extraction call adapters directly and bypass Chat orchestration;
+- setup persists manual local model names that the runtime catalog does not consistently read;
+- setup readiness uses `kobold_openai_api_IP`, while setup persists the canonical native Kobold field `kobold_api_IP`;
+- the WebUI correctly hides providers marked unavailable, but its persistent model cache can retain that result after provider configuration changes.
 
-The documented workaround—globally disabling private-address blocking and opening local inference ports—weakens SSRF protection for unrelated workflows, webhooks, scrapers, and integrations.
+The usual workaround—globally disabling private-address blocking and opening local inference ports—weakens SSRF protection for unrelated workflows, webhooks, scrapers, and integrations.
 
-## Review findings and resulting changes
+## Review findings incorporated
 
-The initial “allow private configured endpoints” idea is sound, but six refinements are required before implementation:
+The implementation must address these additional constraints before coding starts:
 
-1. A generic `allow_private=True` or `block_private_override=False` flag is too broad. The exception must be bound to one canonical configured origin: scheme, normalized hostname, and effective port.
-2. The scoped path must still resolve hostnames. It may allow approved local address classes, but it must reject link-local, metadata, multicast, unspecified, documentation, and reserved destinations. Simply skipping the private-address phase also skips useful DNS consistency checks.
-3. Streaming is a separate transport path today. Fixing readiness and ordinary fetches without covering streaming would leave policy drift and a security gap.
-4. Runtime manual-model fallback needs the catalog to read the same `llama_model`, `kobold_model`, `ooba_model`, and `tabby_model` fields that setup already writes. No new WebUI model-entry mechanism is needed.
-5. The authorization cannot be derived inside an adapter from whichever URL it ultimately receives. A trusted orchestration boundary must mint the scope and pass it separately, or an untrusted request override could launder itself into an authorization.
-6. Discovery needs a typed outcome. An empty model list cannot distinguish a connection failure from a reachable server whose model-list response shape is unsupported.
-
-The first-run provider save/validation endpoints are guarded by local setup access and first-run write access. Runtime request-level local `api_url` and provider-specific URL overrides remain rejected under ADR-025. Those existing boundaries are prerequisites for treating a configured origin as trusted.
+1. Reserved transport fields must never be copied from request-derived Chat arguments. They are discarded before payload construction and rebuilt as private internal context.
+2. Trusted context must reach every server-configured adapter call, including the many direct registry dispatches outside Chat. Enumerating call sites is fragile; the configured-local adapter boundary must resolve the trusted context once for every dispatch.
+3. Setup may mint context only inside the guarded route after authorization succeeds; reusable validation functions receive it explicitly.
+4. `URLPolicyResult.reason_code` must survive as `EgressPolicyError.reason_code` through sync, async, redirect, retry, and certificate-pinning paths.
+5. Certificate pinning must reuse the same scope and accepted DNS set; otherwise a scoped HTTPS request passes its outer check and fails the nested unscoped check.
+6. The scoped classifier must positively allow a small set of address classes and reject every other non-global special-use address. Maintaining another incomplete reserved-range list is not sufficient.
+7. Trusted endpoints must be resolved from current server configuration at call time. The Chat module's import-time config snapshot cannot authorize a newly saved endpoint.
+8. Discovery is computed once per provider and reduced into readiness/catalog state. It is not independently repeated by readiness and catalog code.
+9. Authentication, server, DNS, and connection failures are not cached as durable discovery results.
+10. Only transport entrypoints used by this feature are extended: `fetch`, `afetch`, and synchronous `stream_response`. Async byte/SSE stream APIs remain unchanged until a scoped caller needs them.
+11. Setup readiness parity applies only to providers already exposed by setup; this task fixes their canonical fields but does not invent setup/catalog surfaces for generic `local-llm` or numbered custom slots.
+12. Exact backend metadata and WebUI cache invalidation must be tested together so a fixed backend result becomes visible immediately after configuration.
 
 ## Decision
 
-Add a narrow configured-local-provider scope to the existing Security egress evaluator and thread it through every local-provider network path.
+Add one narrow `ConfiguredEndpointScope` to the existing Security egress evaluator. It contains only a canonical scheme, IDNA-normalized hostname, and effective port. For every request, the evaluator proves that the target has that exact origin. Paths and query strings may differ so one configured base can serve `/models`, `/api/tags`, `/completion`, and `/v1/chat/completions`.
 
-The scope contains only a canonical origin. It is not a general permission to access private networks. For every request, the evaluator must prove that the target URL has the same canonical origin as the scope. Paths and query strings may vary so `/models`, `/api/tags`, `/completion`, and `/v1/chat/completions` can share one configured base.
+The scope is not a general private-network permission. It never mutates process-wide allowlists and is never inferred from an adapter's final URL.
 
-Scope provenance is explicit. Adapters never mint a scope from their final URL. A scope is minted at one of these trusted boundaries and carried as private internal adapter context, separately from the endpoint URL:
+### Trusted provenance
 
-- guarded setup validation/save, after first-run write access is authorized;
-- provider catalog, readiness, and discovery code reading server-owned configuration or environment variables;
-- the Chat service request builder, after request URL overrides are rejected and the endpoint is independently resolved from server-owned configuration/environment rather than request `app_config`.
+There are two creation paths:
 
-The managed llama.cpp “use in chat” action already persists its endpoint into server-owned provider configuration; it then follows the same resolver path rather than introducing a separate authorization source.
+- The guarded setup validation route constructs a scope from the submitted endpoint only after `_require_first_run_write_access` succeeds, then passes it explicitly to validation.
+- Registered configured-local adapter bases and provider catalog/readiness code call one shared trusted endpoint resolver. It reads current server-owned configuration/environment at call time and returns the normalized endpoint plus its scope. It does not accept request `app_config`, `base_url`, `api_url`, or BYOK values as fallback sources.
 
-The final request URL must match the carried scope. If no trusted scope is present, the ordinary global egress policy applies. The registered network-backed provider set in scope is: `local-llm`, llama.cpp, Kobold.cpp, Oobabooga, TabbyAPI, vLLM, Ollama, Aphrodite, and custom OpenAI-compatible providers (`custom-openai-api` and numbered variants). For the custom OpenAI adapter hierarchy, the scope applies only to those custom-provider names; Novita, Poe, Together, and other public-service subclasses retain the default policy.
+The runtime resolver supports every documented alias for the provider it resolves, including `LOCAL_LLM_API_URL`, `LOCAL_LLM_API_BASE`, `LOCAL_LLM_API_IP`, and `LOCAL_LLM_BASE_URL` for `local-llm`.
 
-The scope must not be created from:
+Chat strips `configured_endpoint_base_url`, `configured_endpoint_scope`, `http_streamer`, and other reserved transport keys from ordinary arguments before copying extras. It continues to reject request URL overrides, but it does not mint or forward authorization context.
 
-- chat request bodies or arbitrary request extras;
-- user BYOK endpoint overrides;
-- web scraping, webhook, workflow, or ingestion URLs;
-- generic admin/provider override fields unless they pass through the same trusted resolution boundary in a later reviewed change.
+Instead, `_LocalAdapterBase` resolves the paired trusted base URL/scope from its registered provider name immediately before every `chat`, `stream`, `achat`, or `astream` dispatch. This structurally covers Chat plus direct registry callers in Explainer, Data Tables, Prompt Studio/evaluations, speech/audio streaming, document insights, writing, web search, workflows, and future features without editing each caller. The adapter never creates scope from request fields or its computed final URL. It discards any caller-supplied reserved base/scope context, then builds the final path from the resolver's base URL. Test fetch/stream hooks move to adapter-owned dependencies or module monkeypatches rather than request dictionaries.
+
+Configured custom OpenAI adapter names use the same rule only when no explicit request/BYOK endpoint override is selected. The Chat endpoint already has authoritative `ResolvedByokCredentials.source`/`uses_byok` data before it builds call arguments. It writes a private endpoint-provenance value (`server_config`, `byok`, or `request_override`) after parsing the request; same-named request extras are discarded. The custom adapter uses server resolution only for `server_config` or for a direct registry call with no explicit endpoint. For `byok`/`request_override`, it uses the supplied endpoint with no scope and the ordinary checked egress policy. This signal describes source only and never carries or authorizes a URL. Public-service subclasses do not resolve configured-local context.
+
+The managed llama.cpp “use in chat” action continues to persist normal provider configuration and clear the configuration loader cache. The next request resolves that fresh configuration; it does not reuse Chat's module-import-time snapshot.
+
+### Provider scope
+
+The network-backed provider names covered are `local-llm`, llama.cpp, Kobold.cpp, Oobabooga, TabbyAPI, vLLM, Ollama, Aphrodite, `custom-openai-api`, and numbered custom OpenAI variants.
+
+For custom OpenAI providers, only an endpoint selected from trusted server configuration/environment receives a scope. Request/BYOK endpoint overrides receive no scope and use the ordinary checked egress policy. Numbered custom slots receive Chat transport coverage only; adding 99 catalog/setup entries is out of scope.
+
+Novita, Poe, Together, and other public-service subclasses share implementation with the custom adapter but are not configured-local providers. Their existing transport behavior is not broadened in this task; moving those public subclasses onto the central default egress policy is a separate security-hardening change with its own compatibility review.
 
 ## Target policy
 
-The configured origin defines the only allowed scheme, hostname, and port. The existing global denylist continues to win. The configured port is allowed for this origin without adding it to `WORKFLOWS_EGRESS_ALLOWED_PORTS`, and the configured host satisfies strict-profile origin authorization without adding a global allowlist entry.
+The configured origin supplies the only allowed scheme, host, and port. The configured port may be used without adding it to `WORKFLOWS_EGRESS_ALLOWED_PORTS`, and the configured host satisfies strict-profile origin authorization for this call only. The merged global/workflow denylist always wins.
 
-Resolved addresses are classified as follows:
+For a scoped request, classify addresses in this order:
 
-| Address class | Scoped result |
-| --- | --- |
-| IPv4/IPv6 loopback | Allow |
-| RFC1918 IPv4 | Allow |
-| IPv6 ULA (`fc00::/7`) | Allow |
-| Carrier-grade NAT (`100.64.0.0/10`) | Allow for overlay networks such as Tailscale, except explicitly denied metadata endpoints |
-| Ordinary public unicast | Allow if no global deny rule blocks the configured host |
-| IPv4/IPv6 link-local, including `169.254.169.254` | Deny |
-| Multicast, unspecified, documentation, benchmarking, translation, or otherwise reserved ranges | Deny |
+1. Deny the authoritative metadata/platform address set: `169.254.169.254`, `169.254.170.2`, `169.254.170.23`, `100.100.100.200`, `168.63.129.16`, and `fd00:ec2::254`.
+2. Allow IPv4/IPv6 loopback, RFC1918 IPv4, IPv6 ULA (`fc00::/7`), and CGNAT (`100.64.0.0/10`).
+3. Allow ordinary public unicast only when `ipaddress` classifies it as global, none of its multicast/link-local/unspecified/reserved flags apply, and no explicit special-use or deny rule matches. Do not treat `is_global` alone as sufficient.
+4. Deny everything else, including link-local, multicast, unspecified, documentation, benchmarking, translation, reserved, and IPv4-mapped IPv6 addresses.
 
-Hostnames such as `ollama`, `host.docker.internal`, and `gpu-box.lan` are not trusted because of their spelling. They are resolved, every result is classified, and the request is denied if any answer is forbidden. The initial authoritative metadata/platform address set is `169.254.169.254`, `169.254.170.2`, `169.254.170.23`, `100.100.100.200`, `168.63.129.16`, and `fd00:ec2::254`. Link-local entries are intentionally repeated in this explicit set for clarity. The implementation and tests must use this complete set, not an illustrative subset. Resolution sets are reused by the existing request validation flow so retries cannot silently change the accepted destination set.
+Hostnames such as `ollama`, `host.docker.internal`, and `gpu-box.lan` are not trusted by spelling. Resolve them, classify every answer, and deny the request if any answer is forbidden. Scoped evaluation always resolves/classifies even when a test or global setting disables ordinary private blocking.
 
-URLs with embedded username/password data are rejected. Redirects must not escape the configured origin; streaming may reject redirects entirely if supporting same-origin streaming redirects would add disproportionate complexity. Proxies, TLS verification, certificate pinning, denylist handling, and logging redaction retain their existing rules.
+IDNA/trailing-dot hostname normalization is shared by origin matching and DNS-pin keys. The accepted resolution set is reused by retries, redirects, and certificate pinning so alternate Unicode/punycode spellings cannot split the pin cache and a later DNS change cannot silently widen the destination set.
 
-## Runtime flow
+URLs containing username/password data are rejected. Request redirects are revalidated and must remain within the exact origin. Streaming rejects redirects. Proxies, TLS verification, denylist handling, and logging redaction retain their existing rules.
 
-1. Trusted setup/configuration supplies a base endpoint and the trusted boundary mints its canonical-origin scope.
-2. Chat rejects request-level URL overrides, independently resolves the configured endpoint, and attaches the scope as private internal adapter context. An adapter's final URL can never create or widen that context.
-3. Setup validation, readiness, discovery, and chat build provider-specific paths from the configured base.
-4. Every target URL is evaluated against the carried scope before network I/O.
-5. Non-streaming requests and model discovery carry the same scope through the centralized HTTP client so retries and redirects are revalidated.
-6. Streaming uses a centralized no-redirect stream helper. The adapter accepts an internal `http_streamer` hook for deterministic tests, and raw unchecked `session.stream(...)` is removed.
-7. `URLPolicyResult` gains a backward-compatible machine-readable `reason_code`, including `invalid_url`, `unsupported_scheme`, `userinfo_not_allowed`, `origin_mismatch`, `port_not_allowed`, `host_denied`, `dns_unresolved`, `address_forbidden`, and `dns_changed`. Existing human-readable reasons remain sanitized.
-8. `dns_unresolved` is a policy-evaluation result but is mapped by provider callers to the reachability category, not a security denial. Outcomes are therefore consistent:
-   - `egress_blocked` for origin, port, host, or address-policy denial;
-   - `endpoint_unreachable` for `dns_unresolved`, connection, or timeout failure;
-   - `model_discovery_unavailable` when the endpoint is reachable but does not expose a supported model-list shape;
-   - `auth_failed` for a 401/403 discovery response;
-   - `endpoint_error` for a 429/5xx discovery response when no candidate succeeds.
-9. Model discovery returns a typed result instead of overloading `[]` for all outcomes. Candidate results use the following deterministic precedence: `ready`, `auth_failed`, `server_error`, `unsupported`, then `unreachable`.
+## Transport and error contract
 
-Discovery status meanings are exact:
+Only these public transport entrypoints gain an optional scope:
 
-- `ready`: a 2xx JSON response contains a recognized model-list field; an empty recognized list is still `ready` with zero models;
-- `auth_failed`: a candidate returns 401 or 403;
-- `server_error`: no candidate is ready and a candidate returns 429 or 5xx;
-- `unsupported`: the endpoint responds, but candidates only return 404/405/501, other non-auth 4xx responses, invalid JSON, or 2xx JSON without a supported list shape;
+- `fetch` for synchronous requests and discovery;
+- `afetch` for guarded setup validation;
+- a new synchronous `stream_response` context manager for adapter streaming.
+
+The scope is propagated through request adapters, retries, same-origin redirects, DNS-pin reuse, and `_check_cert_pinning`. Scoped `fetch`, `afetch`, and `stream_response` catch and re-raise `EgressPolicyError` before broader network normalization so its reason code is never converted to an untyped `NetworkError`. Existing `astream_bytes` and `astream_sse` APIs are not changed because no scoped local-provider caller uses them.
+
+`URLPolicyResult` gains an optional, backward-compatible `reason_code` after `resolved_ips`. `EgressPolicyError` gains the same optional field without changing existing message behavior. Required URL-policy codes include `invalid_url`, `unsupported_scheme`, `userinfo_not_allowed`, `origin_mismatch`, `port_not_allowed`, `host_denied`, `dns_unresolved`, `address_forbidden`, and `dns_changed`. Certificate failures use `tls_pin_missing`, `tls_pin_mismatch`, or `tls_pin_error` as appropriate.
+
+Provider-facing mappings are stable:
+
+- `egress_blocked`: origin, port, host, or address-policy denial;
+- `endpoint_unreachable`: `dns_unresolved`, connection, or timeout failure;
+- `model_discovery_unavailable`: a reachable endpoint without a supported model-list shape;
+- `auth_failed`: 401/403;
+- `endpoint_error`: 429/5xx when no candidate succeeds.
+
+Chat maps `dns_unresolved` to its existing reachability/provider failure category and maps other egress denials to sanitized configuration errors. Local and configured custom adapters catch and re-raise `EgressPolicyError`—including TLS-pin failures—before broad provider error normalization, so `reason_code` reaches that mapping. They never expose credentials, raw response bodies, or unsanitized URLs.
+
+## Discovery and readiness
+
+Model discovery returns one `ModelDiscoveryResult` with status `ready`, `auth_failed`, `server_error`, `unsupported`, or `unreachable`, plus a model list. Candidate precedence is `ready`, `auth_failed`, `server_error`, `unsupported`, then `unreachable`.
+
+- `ready`: a 2xx JSON response contains a recognized model-list field; an empty recognized list is still ready.
+- `auth_failed`: a candidate returns 401 or 403.
+- `server_error`: no candidate is ready and a candidate returns 429 or 5xx.
+- `unsupported`: the endpoint responds, but candidates return unsupported HTTP statuses, invalid JSON, or a 2xx shape without a supported model field.
 - `unreachable`: no candidate produces an HTTP response because DNS, connection, or timeout fails.
 
-Readiness maps `auth_failed` to unavailable/`auth_failed` and `server_error` to unavailable/`endpoint_error`. A ready-but-empty result keeps the endpoint enabled in diagnostics with no selectable model and a nonblocking `no_models_reported` reason unless an explicit model is configured. These rules apply after egress policy evaluation; a forbidden target remains `egress_blocked` regardless of discovery status.
+Catalog code computes discovery at most once for a provider. A pure readiness reducer receives the explicit model, probe/health settings, policy result, and optional discovery result; catalog mapping consumes the same result. Cache `ready` and `unsupported` outcomes under the existing bounded TTL. Do not cache `auth_failed`, `server_error`, or `unreachable`, so corrected credentials or a newly started server are visible immediately.
 
-## Catalog and WebUI behavior
-
-The backend provider catalog becomes authoritative. Explicit-model and discovery behavior follows this state matrix:
+Policy evaluation—including hostname resolution and address classification—always precedes the optional network probe. Therefore “explicit model, probe disabled” is enabled only after scoped policy/DNS classification succeeds. Unresolved DNS remains `endpoint_unreachable` even when the HTTP health probe is disabled.
 
 | Configuration/probe outcome | Provider state | Selectable models | Reason |
 | --- | --- | --- | --- |
 | Policy denied | Unavailable | None | `egress_blocked` |
-| DNS/connection/timeout failure during a requested probe | Unavailable | None | `endpoint_unreachable` |
-| Explicit model, probe disabled | Enabled | Explicit model | None |
-| Explicit model, probe enabled, endpoint reachable | Enabled | Explicit model; discovery never erases it | Optional nonblocking `model_discovery_unavailable` diagnostic for unsupported list shape |
+| DNS classification fails | Unavailable | None | `endpoint_unreachable` |
+| Explicit model, probe disabled, policy succeeds | Enabled | Explicit model | None |
+| Explicit model, requested probe reachable | Enabled | Explicit model plus discovered models | Optional nonblocking discovery diagnostic |
 | No explicit model, discovery ready | Enabled | Discovered models | None |
 | No explicit model, discovery ready but empty | Enabled in diagnostics | None | `no_models_reported` |
-| No explicit model, discovery unsupported | Enabled in diagnostics | None; prompt operator to configure a model | `model_discovery_unavailable` |
-| No explicit model, discovery unreachable | Unavailable | None | `endpoint_unreachable` |
-| Discovery authentication or server failure | Unavailable | None | `auth_failed` or `endpoint_error` |
+| No explicit model, discovery unsupported | Enabled in diagnostics | None | `model_discovery_unavailable` |
+| Discovery auth/server/unreachable | Unavailable | None | `auth_failed`, `endpoint_error`, or `endpoint_unreachable` |
+| Requested health probe fails | Unavailable | None | Existing health/reachability reason |
 
-A health probe failure still overrides model presence and marks the provider unavailable. When an explicit model is configured and probing is disabled, discovery is skipped. This makes reachability semantics a deliberate operator choice instead of allowing a failed optional discovery request to erase a valid configured model.
+Setup/catalog mappings read the existing `llama_model`, `kobold_model`, `ooba_model`, and `tabby_model` fields. Setup readiness uses the canonical native Kobold endpoint field `kobold_api_IP`. Surface parity remains limited to providers already represented by setup/catalog.
 
-The existing `TldwModels.isSelectableChatModel` behavior is retained. It is correct to exclude a provider explicitly marked unavailable. A regression test will prove that a manually configured local model becomes selectable when backend readiness is enabled. No new network scanning, browser-direct model discovery, or new settings panel is part of this task.
+## WebUI behavior
 
-Surface parity is limited to surfaces a provider already exposes. Generic `local-llm` is included because its network-backed chat adapter must obey the same scoped transport, but this task does not invent setup, catalog, readiness, or discovery registration for it. Setup/catalog guarantees apply to the providers already represented there.
+The backend catalog remains authoritative and the existing `TldwModels.isSelectableChatModel` filter remains correct. The regression uses the exact flattened `/api/v1/llm/models/metadata` record produced for a configured non-loopback llama endpoint and proves the model is selectable; the paired `egress_blocked` record remains excluded.
+
+The existing `tldw:config-updated` event already clears the outer chat-model cache. A `saveSetupProvider` response with `status="saved"` must dispatch that event; failed saves must not. The listener must also clear `TldwModels`' persistent 15-minute cache and forced-refresh timestamp so a successful provider save is visible immediately rather than for up to 15 minutes later.
+
+Clearing references alone is insufficient when an older fetch is still running. Each of the inner and outer model caches therefore keeps a monotonically increasing invalidation generation. A fetch captures the generation at start and may write cache data/timestamps only if that generation is still current when it resolves. Cache clearing increments the generation, and an old fetch may clear an in-flight reference only if it still owns that exact promise. A pre-save caller may receive its already-running result, but that result cannot repopulate either cache or displace a post-save fetch.
 
 ## Compatibility and rollout
 
-No global egress defaults change. Existing installations that set `WORKFLOWS_EGRESS_BLOCK_PRIVATE=false` or globally add inference ports continue to work, but those settings are no longer required for configured local LLM providers. Documentation will recommend restoring `block_private=true` after upgrading, subject to any unrelated integrations that still require the legacy global exception.
+No global egress defaults, allowlists, or port lists change. Existing installations with global private-network exceptions continue to work, but configured local LLM providers no longer require those exceptions. Documentation recommends restoring `block_private=true` after checking whether unrelated integrations depend on the old workaround.
 
-The implementation is split into independently testable stages:
+The implementation is divided into five independently green stages:
 
-1. central exact-origin policy, reason codes, and security tests;
-2. centralized request/stream propagation and redirect tests;
-3. trusted scope minting plus setup, readiness, typed discovery, and manual-model catalog integration;
-4. local and custom OpenAI adapter parity, including streaming and request-override regressions;
-5. WebUI contract regression, ADR, configuration documentation, and end-to-end verification.
-
-## Alternatives rejected
-
-### Disable global private-address blocking
-
-Smallest configuration change, but it weakens every caller of the central egress policy and does not repair streaming/setup drift.
-
-### Maintain a second local-provider validator
-
-This is the current failure mode. Separate allowlists and host-suffix logic inevitably disagree with the runtime transport.
-
-### Automatically scan the LAN or use mDNS/UPnP discovery
-
-Not required to make configured endpoints work. It adds network noise, permissions, privacy concerns, and new dependencies without addressing the policy mismatch.
-
-### Auto-derive a process-wide allowlist from provider configuration
-
-This would make a provider destination available to unrelated outbound features. The exact-origin scope keeps the authorization attached to the local-provider call path.
+1. exact-origin policy, positive address classifier, and structured error codes;
+2. scoped `fetch`/`afetch`/`stream_response`, redirects, DNS pinning, and TLS pinning;
+3. fresh trusted resolution at the configured-local adapter boundary, covering Chat and every direct registry caller;
+4. guarded setup, canonical readiness fields, one-shot typed discovery, and manual-model catalog parity;
+5. exact backend-to-WebUI contract, cache invalidation, ADR/docs, security scan, and verification.
 
 ## Risks and mitigations
 
-- **Untrusted provenance reaches the scoped API:** mint only at the enumerated trusted boundaries, carry the scope separately from URLs, keep request URL overrides rejected, and test that direct adapter/request URLs cannot mint scope.
-- **DNS rebinding or split-horizon surprises:** resolve and classify all answers, retain resolution-set consistency checks, and reject forbidden answers. The existing HTTP stack still resolves again when opening the socket, so a narrow preflight-to-connect TOCTOU remains; implementing a custom pinned resolver is out of scope unless endpoint provisioning becomes untrusted.
-- **Credential leakage on redirect:** require the same canonical origin; streaming uses no redirects unless safely implemented.
-- **Docker/local DNS compatibility:** allow resolved private names without relying on suffixes.
-- **Tailscale compatibility:** treat CGNAT as an approved local-overlay class while retaining exact-origin binding.
-- **Public custom OpenAI-compatible endpoints:** permit normal public unicast only when a custom-provider endpoint came from trusted server configuration; request/BYOK URLs and non-custom public-service subclasses remain on the default policy.
-- **Test-only bypasses hide production behavior:** remove or avoid the local adapter’s production-versus-test transport split and use injected transport functions for deterministic tests.
+- **Caller forges private context:** Chat and adapters discard every reserved input key; configured-local adapter bases independently rebuild paired trusted base URL/scope context from their registered name.
+- **Endpoint and scope use different config snapshots:** resolve them as one frozen value and require adapters to use its base URL whenever its scope is attached.
+- **A direct adapter caller misses scope:** resolve at the common configured-local adapter base rather than at individual call sites; table-test direct registry dispatch for every registered provider name and sync/async entrypoint.
+- **DNS rebinding:** classify every initial answer, carry the accepted set through redirect/retry/TLS checks, and fail on changes. A preflight-to-connect TOCTOU remains; a custom pinned resolver is out of scope while endpoint provisioning remains trusted.
+- **Credential leakage on redirect:** request redirects require exact-origin equality; streams do not follow redirects.
+- **Stale configuration or discovery:** resolve config per call, rely on existing loader-cache invalidation after saves, and avoid caching transient discovery failures.
+- **Public custom-adapter compatibility:** do not bundle transport hardening for Novita/Poe/Together into this local-provider fix; track it separately.
+- **BYOK endpoint receives configured scope:** derive a URL-free provenance value from `ResolvedByokCredentials` inside the Chat endpoint after request parsing; adapters never infer provenance from merged `app_config` content.
+- **Test-only security drift:** remove the local adapter's `PYTEST_CURRENT_TEST` transport branch and inject checked fetch/stream hooks instead.
 
 ## Non-goals
 
-- changing global webhook, workflow, scraping, ingestion, MCP, ACP, TTS, STT, or embedding egress behavior;
+- changing global webhook, workflow, scraping, ingestion, MCP, ACP, TTS, STT, embedding, or public custom-service egress behavior;
 - allowing per-request local endpoint overrides;
-- adding LAN discovery or local-server lifecycle management;
-- redesigning the WebUI model selector;
-- adding a new dependency or a general-purpose policy framework.
+- adding LAN scanning, mDNS, server lifecycle management, or a new dependency;
+- adding setup/catalog surfaces for generic `local-llm` or numbered custom providers;
+- changing async byte/SSE transport APIs without a scoped consumer;
+- redesigning the WebUI model selector or settings UI.
 
 ## Success criteria
 
-With global private blocking enabled and the global port list unchanged, an operator can configure llama.cpp, Ollama, vLLM, Kobold.cpp, Oobabooga, TabbyAPI, Aphrodite, or a custom OpenAI-compatible local endpoint on an approved LAN/overlay address and nonstandard port. Existing setup validation, readiness, model discovery, streaming chat, and non-streaming chat surfaces agree. The generic `local-llm` chat adapter uses the same checked scoped transport without gaining new catalog/setup surfaces. Dangerous targets and untrusted overrides remain blocked, failure categories are stable, and the WebUI exposes the configured manual or discovered model without a global SSRF exception.
+With global private blocking enabled and the global port list unchanged, an operator can configure a supported local provider on an approved LAN/Docker/overlay address and nonstandard port. Guarded setup, readiness, one-shot model discovery, Chat, and every direct registry dispatch agree on the exact configured origin. Dangerous targets and request-derived overrides remain blocked, structured failures retain stable reason codes through TLS pinning, explicit/discovered models become visible immediately in the WebUI, and unrelated outbound callers receive no private-network exception.

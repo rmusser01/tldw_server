@@ -4,7 +4,7 @@ title: Allow trusted configured local LLM endpoints through scoped egress policy
 status: To Do
 assignee: []
 created_date: '2026-07-15 19:34'
-updated_date: '2026-07-15 20:01'
+updated_date: '2026-07-15 20:54'
 labels:
   - llm-providers
   - security
@@ -25,18 +25,19 @@ priority: high
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Fix the mismatch where first-run setup accepts LAN-hosted llama.cpp and third-party local LLM endpoints but provider readiness, model discovery, and chat dispatch apply the global egress policy and hide or block them. Add one exact-origin policy for trusted operator/admin-configured local-provider endpoints while preserving the default SSRF posture for all other outbound traffic. Cover setup validation, readiness, model discovery, non-streaming chat, and streaming chat; preserve manual model fallback when discovery is unavailable.
+Fix the mismatch where guarded setup accepts LAN-hosted llama.cpp and third-party local LLM endpoints but readiness, discovery, adapter dispatch, and the WebUI model cache can hide or block them. Add one exact-origin scope for trusted current server configuration while preserving global SSRF defaults. Resolve paired endpoint/scope context at the configured-local adapter boundary so Chat and every direct registry caller are covered; also cover guarded setup, one-shot typed discovery, TLS/DNS pinning, manual models, and WebUI cache invalidation.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Configured local LLM endpoints on loopback, RFC1918, IPv6 ULA, and approved local-overlay addresses can use their exact configured port without disabling global private-network blocking or globally opening that port.
-- [ ] #2 Only guarded setup and server-owned provider configuration can mint the exact-origin scope; request-level URLs, BYOK values, adapter final URLs, and non-custom public-service adapters remain on the default policy.
-- [ ] #3 Setup validation, provider readiness, typed model discovery, non-streaming chat, and streaming chat use the same central scoped policy and return stable blocked, unreachable, and unsupported outcomes.
-- [ ] #4 The policy rejects malformed URLs, URL userinfo, link-local and authoritative cloud-metadata targets, multicast/unspecified/reserved targets, global denylist matches, DNS resolution changes, and redirects outside the configured origin.
-- [ ] #5 Explicit model and probe behavior follows the documented readiness matrix; supported manual models remain catalog-visible when optional discovery is unsupported, while requested-probe reachability and policy failures remain actionable.
-- [ ] #6 Focused backend and frontend tests cover every network-backed local provider path, custom OpenAI provenance, sync and async streaming, LAN/Docker/overlay addresses, nonstandard ports, dangerous targets, redirects, request override rejection, discovery, and readiness.
-- [ ] #7 Configuration and user documentation remove global private blocking as the recommended local-provider workaround and explain compatibility behavior.
+- [ ] #1 Configured local LLM endpoints on loopback, RFC1918, IPv6 ULA, approved CGNAT/overlay, and ordinary public-unicast addresses can use only their exact configured origin and port without disabling global private blocking or opening a global port.
+- [ ] #2 Only the authorized setup route and a fresh server-config/environment resolver create scope; reserved request fields, request app config, URL/BYOK overrides, and adapter final URLs cannot create or widen it.
+- [ ] #3 fetch, afetch, synchronous stream_response, retries, redirects, DNS pins, and TLS certificate pinning retain the same scope, accepted DNS set, and machine-readable EgressPolicyError reason code.
+- [ ] #4 The scoped address classifier denies metadata and all non-allowed special-use classes, honors the global denylist, rejects DNS changes and origin-changing redirects, and leaves no-scope egress behavior unchanged.
+- [ ] #5 Setup creates scope only after its write guard; canonical setup readiness fields are used, discovery runs at most once per provider, transient failures are not cached, and explicit/manual model behavior follows the documented readiness matrix.
+- [ ] #6 Focused backend/frontend tests, Bandit on touched Python paths, ADR/configuration/user documentation, and migration guidance pass without adding a global SSRF exception.
+- [ ] #7 Every registered configured-local adapter wrapper and configured custom OpenAI alias resolves trusted context at its common adapter boundary, so Chat and all direct registry callers use the checked scoped path; numbered custom slots gain transport coverage without new catalog/setup surfaces.
+- [ ] #8 The exact enabled and blocked backend metadata records drive WebUI selection correctly; saved-provider events generation-invalidate both cache layers, and pre-save in-flight responses cannot repopulate stale models.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -48,13 +49,17 @@ Docs/Plans/IMPLEMENTATION_PLAN_scoped_local_llm_egress_TASK_12972.md
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-2026-07-15 planning review: confirmed setup/runtime egress policy drift, an unchecked raw local streaming path, and runtime catalog mappings that omit setup-owned manual model fields for llama.cpp/Kobold/Ooba/Tabby. The plan uses an exact configured-origin scope, resolved-address classification, global denylist precedence, checked sync/async/stream transports, and no global private-network or port relaxation. No production WebUI change is planned unless the existing selector contract test fails.
+2026-07-15 initial investigation confirmed setup/runtime egress drift, unchecked raw local streaming, and missing runtime manual-model mappings. A 48-test focused baseline passed with 48 passed and 4 warnings.
 
-2026-07-15 independent review found and corrected five planning gaps: trusted-scope provenance was undefined; metadata targets were only examples; DNS/policy/reachability outcomes were ambiguous; readiness/manual-model behavior lacked a state matrix; and custom OpenAI plus async streaming paths were omitted. The revised design carries scope separately from URLs, defines an authoritative metadata set and reason codes, adds typed discovery outcomes, enumerates all local-provider paths, and expands transport/provenance tests.
+2026-07-15 first planning review defined exact-origin scope provenance, an authoritative metadata deny set, typed discovery outcomes, a readiness matrix, custom OpenAI coverage, and checked transport propagation. The planning-only commit changed Markdown artifacts; Bandit was deferred to implementation.
 
-2026-07-15 final review: independent spec and implementation-plan reviewers approved the revised documents with no blocking issues. Advisory improvements were incorporated: runtime summaries now include auth/server discovery failures, and custom-adapter no-scope calls explicitly stay on centralized checked transports with the default policy. Implementation is gated on requester approval of the draft design.
+2026-07-15 second security/feasibility review found additional blockers: caller-supplied reserved context, direct adapter callers outside Chat, loss of reason codes at EgressPolicyError, unscoped TLS pin checks, stale import-time configuration, incomplete special-use classification, duplicate discovery, stale negative discovery cache, canonical Kobold readiness-key drift, and persistent WebUI model cache. The design and plan were revised to address all of them, remove unused async byte/SSE scope propagation, and keep each implementation stage green. No implementation code has started. The post-review design and plan await requester approval.
 
-2026-07-15 planning-artifact verification: the 48-test focused Security, Setup, readiness, and local-streaming baseline passed (48 passed, 4 warnings in 14.65s). Staged diff whitespace validation passed after cleanup. Bandit is not applicable to this planning commit because it changes Markdown task/design/plan files only; implementation-stage Bandit remains required by Stage 5.
+2026-07-15 final plan review found that enumerating only three direct callers was incomplete and that certificate-pinning errors could still lose reason_code during network normalization. The plan now resolves trusted context at the common configured-local adapter boundary, structurally covering all registry callers, and adds explicit certificate-pin enforcement/denial tests with typed error preservation.
+
+2026-07-15 final spec review identified an in-flight cache race: clearing references did not stop a pre-save request from repopulating stale data. The design now uses one monotonic invalidation generation per existing model-cache layer and promise-ownership guards; no new cache or event is introduced.
+
+2026-07-15 final post-correction review: independent spec and implementation-plan reviewers approved the current artifacts with no blocking issues or advisory recommendations. TASK-12972 remains To Do and implementation remains gated on requester approval of this corrected design/plan.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
