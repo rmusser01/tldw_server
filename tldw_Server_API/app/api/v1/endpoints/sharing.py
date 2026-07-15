@@ -10,11 +10,13 @@ creating share links (tokens), and admin management.
 from __future__ import annotations
 
 import inspect
+import sqlite3
 import threading
 import time
 from collections import defaultdict
 from typing import Any
 
+import asyncpg
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
 from loguru import logger
 from starlette.concurrency import run_in_threadpool
@@ -129,6 +131,20 @@ def _safe_exception_type(exc: BaseException) -> str:
     if exc_type and all(char.isalnum() or char == "_" for char in exc_type):
         return exc_type
     return "Exception"
+
+
+def _is_duplicate_share_error(exc: BaseException) -> bool:
+    if isinstance(exc, asyncpg.UniqueViolationError):
+        return exc.constraint_name == "uq_shared_workspaces_scope"
+    sqlite_scope_error = (
+        "unique constraint failed: shared_workspaces.workspace_id, "
+        "shared_workspaces.owner_user_id, shared_workspaces.share_scope_type, "
+        "shared_workspaces.share_scope_id"
+    )
+    return (
+        isinstance(exc, sqlite3.IntegrityError)
+        and str(exc).strip().lower() == sqlite_scope_error
+    )
 
 
 async def _audit_log_best_effort(audit: Any, event_type: str, **kwargs: Any) -> None:
@@ -489,7 +505,7 @@ async def share_workspace(
             created_by=user.id,
         )
     except Exception as exc:
-        if "UNIQUE constraint" in str(exc):
+        if _is_duplicate_share_error(exc):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="This workspace is already shared with the specified scope.",

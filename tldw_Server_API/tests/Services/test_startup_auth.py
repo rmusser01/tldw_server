@@ -163,6 +163,7 @@ async def test_init_auth_services_runs_pg_extras_when_pool_present(
         ensure_user_timestamp_timezones_pg=_make_pg_ensure("user_timestamps"),
         ensure_authnz_core_tables_pg=_make_pg_ensure("authnz_core"),
         ensure_notification_permissions_pg=_make_pg_ensure("notification_permissions"),
+        ensure_sharing_tables_pg=_make_pg_ensure("sharing"),
         ensure_generated_files_table_pg=_make_pg_ensure("generated_files"),
         ensure_tool_catalogs_tables_pg=_make_pg_ensure("tool_catalogs"),
         ensure_privilege_snapshots_table_pg=_make_pg_ensure("privilege_snapshots"),
@@ -180,6 +181,7 @@ async def test_init_auth_services_runs_pg_extras_when_pool_present(
     assert pg_calls == [
         "user_timestamps",
         "authnz_core",
+        "sharing",
         "notification_permissions",
         "generated_files",
         "tool_catalogs",
@@ -205,6 +207,7 @@ async def test_pg_ensure_false_emits_high_signal_warning(
         "ensure_user_timestamp_timezones_pg": _successful_ensure,
         "ensure_authnz_core_tables_pg": _successful_ensure,
         "ensure_notification_permissions_pg": _failed_ensure,
+        "ensure_sharing_tables_pg": _successful_ensure,
         "ensure_generated_files_table_pg": _successful_ensure,
         "ensure_tool_catalogs_tables_pg": _successful_ensure,
         "ensure_privilege_snapshots_table_pg": _successful_ensure,
@@ -243,6 +246,7 @@ async def test_pg_authnz_core_readiness_failure_blocks_startup(
     pg_ensures = {
         "ensure_user_timestamp_timezones_pg": _successful_ensure,
         "ensure_authnz_core_tables_pg": _profile_version_not_ready,
+        "ensure_sharing_tables_pg": _successful_ensure,
         "ensure_notification_permissions_pg": _successful_ensure,
         "ensure_generated_files_table_pg": _successful_ensure,
         "ensure_tool_catalogs_tables_pg": _successful_ensure,
@@ -285,6 +289,7 @@ async def test_pg_user_timestamp_readiness_failure_blocks_startup(
     pg_ensures = {
         "ensure_user_timestamp_timezones_pg": _timestamp_ensure,
         "ensure_authnz_core_tables_pg": _successful_ensure,
+        "ensure_sharing_tables_pg": _successful_ensure,
         "ensure_notification_permissions_pg": _successful_ensure,
         "ensure_generated_files_table_pg": _successful_ensure,
         "ensure_tool_catalogs_tables_pg": _successful_ensure,
@@ -304,6 +309,49 @@ async def test_pg_user_timestamp_readiness_failure_blocks_startup(
     with pytest.raises(
         startup_auth.AuthStartupError,
         match="AUTHNZ_USER_TIMESTAMPS_NOT_READY",
+    ) as exc_info:
+        await startup_auth._ensure_pg_extras(SimpleNamespace(pool=object()))
+
+    assert exc_info.value.__cause__ is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_mode", ["false", "exception"])
+async def test_pg_sharing_readiness_failure_blocks_startup(
+    monkeypatch: pytest.MonkeyPatch,
+    failure_mode: str,
+) -> None:
+    async def _successful_ensure(_pool: object) -> bool:
+        return True
+
+    async def _failed_sharing_ensure(_pool: object) -> bool:
+        if failure_mode == "exception":
+            raise RuntimeError("private sharing migration failure")
+        return False
+
+    pg_ensures = {
+        "ensure_user_timestamp_timezones_pg": _successful_ensure,
+        "ensure_authnz_core_tables_pg": _successful_ensure,
+        "ensure_sharing_tables_pg": _failed_sharing_ensure,
+        "ensure_notification_permissions_pg": _successful_ensure,
+        "ensure_generated_files_table_pg": _successful_ensure,
+        "ensure_tool_catalogs_tables_pg": _successful_ensure,
+        "ensure_privilege_snapshots_table_pg": _successful_ensure,
+        "ensure_api_keys_tables_pg": _successful_ensure,
+        "ensure_usage_tables_pg": _successful_ensure,
+        "ensure_virtual_key_counters_pg": _successful_ensure,
+        "ensure_llm_provider_overrides_pg": _successful_ensure,
+    }
+    _install_module(
+        monkeypatch,
+        "tldw_Server_API.app.core.AuthNZ.pg_migrations_extra",
+        **pg_ensures,
+    )
+    startup_auth = _import_startup_auth()
+
+    with pytest.raises(
+        startup_auth.AuthStartupError,
+        match="AUTHNZ_PG_SHARING_SCHEMA_NOT_READY",
     ) as exc_info:
         await startup_auth._ensure_pg_extras(SimpleNamespace(pool=object()))
 

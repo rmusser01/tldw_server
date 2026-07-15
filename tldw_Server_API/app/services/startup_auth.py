@@ -111,6 +111,7 @@ async def _ensure_pg_extras(db_pool: object) -> None:
             ensure_llm_provider_overrides_pg,
             ensure_notification_permissions_pg,
             ensure_privilege_snapshots_table_pg,
+            ensure_sharing_tables_pg,
             ensure_tool_catalogs_tables_pg,
             ensure_usage_tables_pg,
             ensure_user_timestamp_timezones_pg,
@@ -118,35 +119,42 @@ async def _ensure_pg_extras(db_pool: object) -> None:
         )
 
         pg_ensures = [
-            ("users timestamp time zones", ensure_user_timestamp_timezones_pg),
-            ("AuthNZ core tables", ensure_authnz_core_tables_pg),
-            ("notification permissions", ensure_notification_permissions_pg),
-            ("generated_files table", ensure_generated_files_table_pg),
-            ("tool catalogs tables", ensure_tool_catalogs_tables_pg),
-            ("privilege_snapshots table", ensure_privilege_snapshots_table_pg),
-            ("api_keys tables", ensure_api_keys_tables_pg),
-            ("usage tables", ensure_usage_tables_pg),
-            ("virtual-key counters tables", ensure_virtual_key_counters_pg),
-            ("llm_provider_overrides table", ensure_llm_provider_overrides_pg),
+            (
+                "users timestamp time zones",
+                ensure_user_timestamp_timezones_pg,
+                "AUTHNZ_USER_TIMESTAMPS_NOT_READY",
+            ),
+            (
+                "AuthNZ core tables",
+                ensure_authnz_core_tables_pg,
+                "AUTHNZ_CORE_SCHEMA_NOT_READY",
+            ),
+            (
+                "sharing tables",
+                ensure_sharing_tables_pg,
+                "AUTHNZ_PG_SHARING_SCHEMA_NOT_READY",
+            ),
+            ("notification permissions", ensure_notification_permissions_pg, None),
+            ("generated_files table", ensure_generated_files_table_pg, None),
+            ("tool catalogs tables", ensure_tool_catalogs_tables_pg, None),
+            ("privilege_snapshots table", ensure_privilege_snapshots_table_pg, None),
+            ("api_keys tables", ensure_api_keys_tables_pg, None),
+            ("usage tables", ensure_usage_tables_pg, None),
+            ("virtual-key counters tables", ensure_virtual_key_counters_pg, None),
+            ("llm_provider_overrides table", ensure_llm_provider_overrides_pg, None),
         ]
 
-        for label, ensure_fn in pg_ensures:
+        for label, ensure_fn, readiness_error in pg_ensures:
             try:
                 ok = await ensure_fn(db_pool)
             except _STARTUP_GUARD_EXCEPTIONS:
-                if ensure_fn is ensure_user_timestamp_timezones_pg:
-                    raise AuthStartupError(
-                        "AUTHNZ_USER_TIMESTAMPS_NOT_READY"
-                    ) from None
-                if ensure_fn is ensure_authnz_core_tables_pg:
-                    raise AuthStartupError("AUTHNZ_CORE_SCHEMA_NOT_READY") from None
+                if readiness_error is not None:
+                    raise AuthStartupError(readiness_error) from None
                 raise
-            if ensure_fn is ensure_user_timestamp_timezones_pg and not ok:
-                raise AuthStartupError("AUTHNZ_USER_TIMESTAMPS_NOT_READY")
-            if ensure_fn is ensure_authnz_core_tables_pg and not ok:
-                raise AuthStartupError("AUTHNZ_CORE_SCHEMA_NOT_READY")
             if ok:
                 logger.info(f"App Startup: Ensured PG {label}")
+            elif readiness_error is not None:
+                raise AuthStartupError(readiness_error)
             else:
                 logger.warning(
                     f"App Startup: PG {label} ensure returned False; "

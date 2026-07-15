@@ -545,6 +545,7 @@ async def setup_database():
                 ensure_generated_files_table_pg,
                 ensure_notification_permissions_pg,
                 ensure_org_provider_secrets_pg,
+                ensure_sharing_tables_pg,
                 ensure_usage_tables_pg,
                 ensure_user_provider_secrets_pg,
                 ensure_virtual_key_counters_pg,
@@ -555,6 +556,9 @@ async def setup_database():
             # Ensure core AuthNZ tables (audit_logs, sessions, registration_codes, RBAC, orgs/teams)
             if not await ensure_authnz_core_tables_pg(pool):
                 raise RuntimeError("Failed to ensure Postgres AuthNZ core tables")
+
+            if not await ensure_sharing_tables_pg(pool):
+                raise RuntimeError("Failed to ensure Postgres sharing tables")
 
             # Ensure billing tables used by webhook/invoice/audit paths.
             ok_billing_tables = await ensure_billing_tables_pg(pool)
@@ -619,7 +623,7 @@ async def setup_database():
 
             print(
                 "✅ Basic schema ensured for Postgres (users, api keys, sessions, "
-                "registration_codes, RBAC, orgs/teams, usage tables)"
+                "registration_codes, RBAC, orgs/teams, sharing, usage tables)"
             )
         except _AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS as e:
             print(f"❌ Failed to bootstrap Postgres schema: {e}")

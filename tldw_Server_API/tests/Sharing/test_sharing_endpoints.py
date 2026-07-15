@@ -735,23 +735,21 @@ class TestShareTokens:
         self,
         client,
         mock_repo,
-        monkeypatch,
     ):
         calls: list[tuple[str, int]] = []
 
         async def _record_workspace_ownership(workspace_id: str, user: User):
             calls.append((workspace_id, user.id))
 
-        monkeypatch.setattr(
+        with patch.object(
             sharing_endpoints,
             "_verify_workspace_ownership",
             _record_workspace_ownership,
-        )
-
-        resp = client.post("/api/v1/sharing/tokens", json={
-            "resource_type": "workspace",
-            "resource_id": "ws-owned",
-        })
+        ):
+            resp = client.post("/api/v1/sharing/tokens", json={
+                "resource_type": "workspace",
+                "resource_id": "ws-owned",
+            })
 
         assert resp.status_code == 200
         assert calls == [("ws-owned", 1)]
@@ -793,17 +791,20 @@ class TestShareTokens:
         assert data["resource_type"] == "prototype_workspace"
         assert data["resource_id"] == "pws-1"
 
-    def test_create_prototype_workspace_token_requires_owner(self, client, mock_repo, monkeypatch):
+    def test_create_prototype_workspace_token_requires_owner(self, client, mock_repo):
         class _ForeignPrototypeRepo:
             async def get_workspace(self, prototype_workspace_id: str):
                 return {"id": prototype_workspace_id, "owner_user_id": 2}
 
-        monkeypatch.setattr(sharing_endpoints, "_get_prototype_repo", lambda: _ForeignPrototypeRepo())
-
-        resp = client.post("/api/v1/sharing/tokens", json={
-            "resource_type": "prototype_workspace",
-            "resource_id": "pws-foreign",
-        })
+        with patch.object(
+            sharing_endpoints,
+            "_get_prototype_repo",
+            return_value=_ForeignPrototypeRepo(),
+        ):
+            resp = client.post("/api/v1/sharing/tokens", json={
+                "resource_type": "prototype_workspace",
+                "resource_id": "pws-foreign",
+            })
 
         assert resp.status_code == 404
 
