@@ -6,6 +6,7 @@ from tldw_Server_API.app.core.Setup.readiness_models import (
     OVERLAY_IDS,
 )
 from tldw_Server_API.app.core.Setup.readiness_profiles import build_readiness_profiles
+from tldw_Server_API.app.core.Setup.readiness_service import preview_readiness_selection
 
 
 def _setup_status(needs_setup: bool = True) -> dict:
@@ -130,3 +131,53 @@ def test_post_setup_profiles_report_admin_required_overlay():
 
     assert "requires_admin" in response["active_overlays"]
     assert response["setup_access"]["mode"] == "admin"
+
+
+def test_advanced_profile_reads_canonical_kobold_endpoint_key():
+    snapshot = _config_snapshot()
+    api_fields = snapshot["sections"][0]["fields"]
+    api_fields[0]["value"] = "kobold"
+    snapshot["sections"].append(
+        {
+            "name": "Local-API",
+            "fields": [
+                {
+                    "key": "kobold_api_IP",
+                    "value": "http://127.0.0.1:5001/api/v1/generate",
+                    "placeholder": False,
+                },
+                {
+                    "key": "kobold_openai_api_IP",
+                    "value": "http://wrong.example/v1",
+                    "placeholder": False,
+                },
+            ],
+        }
+    )
+
+    response = build_readiness_profiles(
+        setup_status=_setup_status(),
+        config_snapshot=snapshot,
+        audio_recommendations=_audio_recommendations(),
+    )
+
+    advanced = next(profile for profile in response["profiles"] if profile["profile_id"] == "advanced_custom")
+    assert advanced["lanes"]["chat"]["endpoint"] == "http://127.0.0.1:5001/api/v1/generate"
+
+
+def test_kobold_preview_writes_only_canonical_endpoint_key():
+    preview = preview_readiness_selection(
+        {
+            "lanes": {
+                "chat": {
+                    "mode": "local",
+                    "provider": "kobold",
+                    "endpoint": "http://127.0.0.1:5001/api/v1/generate",
+                }
+            }
+        }
+    )
+
+    assert preview["config_updates"]["Local-API"] == {
+        "kobold_api_IP": "http://127.0.0.1:5001/api/v1/generate"
+    }

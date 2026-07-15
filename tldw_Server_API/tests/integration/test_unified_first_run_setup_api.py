@@ -1877,8 +1877,9 @@ def test_first_run_provider_validate_returns_typed_response_without_token_echo(
     _setup_needs_setup(monkeypatch)
     raw_token = "secret-local-token"
 
-    async def _fake_validate(payload):
+    async def _fake_validate(payload, *, configured_endpoint):
         assert payload.api_key == raw_token
+        assert configured_endpoint.matches(payload.base_url)
         return setup_endpoint.SetupProviderValidationResponse(
             provider_key=payload.provider_key,
             status="ready",
@@ -1921,13 +1922,14 @@ def test_first_run_kobold_provider_validate_uses_native_validator(
     _setup_needs_setup(monkeypatch)
     raw_token = "secret-local-token"
 
-    async def _fail_openai_validate(payload):  # noqa: ARG001
+    async def _fail_openai_validate(payload, *, configured_endpoint):  # noqa: ARG001
         pytest.fail("koboldcpp validation should not use OpenAI-compatible /models")
 
-    async def _fake_kobold_validate(payload):
+    async def _fake_kobold_validate(payload, *, configured_endpoint):
         assert payload.provider_key == "koboldcpp"
         assert payload.base_url == "http://127.0.0.1:5001/api/v1/generate"
         assert payload.api_key == raw_token
+        assert configured_endpoint.matches(payload.base_url)
         return setup_endpoint.SetupProviderValidationResponse(
             provider_key=payload.provider_key,
             status="ready",
@@ -1955,6 +1957,38 @@ def test_first_run_kobold_provider_validate_uses_native_validator(
     assert body["provider_key"] == "koboldcpp"
     assert body["status"] == "ready"
     assert raw_token not in str(body)
+
+
+def test_remote_provider_validation_guard_precedes_scope_and_network(monkeypatch, tmp_path):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+
+    class ScopeMustNotBeCreated:
+        @staticmethod
+        def from_url(_url):
+            pytest.fail("scope must be created only after first-run write authorization")
+
+    async def network_must_not_run(*_args, **_kwargs):
+        pytest.fail("provider validation network I/O must not run before authorization")
+
+    monkeypatch.setattr(setup_endpoint, "ConfiguredEndpointScope", ScopeMustNotBeCreated)
+    monkeypatch.setattr(setup_endpoint, "validate_local_openai_endpoint", network_must_not_run)
+
+    client = TestClient(app, client=("203.0.113.10", 50000))
+    try:
+        response = client.post(
+            "/api/v1/setup/first-run/providers/validate",
+            headers={"host": "server.example"},
+            json={
+                "provider_key": "ollama",
+                "base_url": "http://10.0.0.5:11434/v1",
+            },
+        )
+    finally:
+        client.close()
+
+    assert response.status_code == 403
 
 
 def test_first_run_hosted_provider_validate_rejects_blank_key_with_typed_response(

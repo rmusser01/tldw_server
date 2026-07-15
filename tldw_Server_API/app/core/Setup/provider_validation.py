@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import ipaddress
 from typing import Any
-from urllib.parse import urlsplit
 
-import httpx
 from pydantic import BaseModel, Field
 
 from tldw_Server_API.app.api.v1.schemas.setup_schemas import SetupProviderValidationResponse
+from tldw_Server_API.app.core.exceptions import EgressPolicyError, NetworkError, RetryExhaustedError
+from tldw_Server_API.app.core.http_client import RetryPolicy, afetch
+from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
 
 VALIDATION_STATUS_READY = "ready"
 VALIDATION_STATUS_ACCEPTED = "accepted"
@@ -21,11 +21,6 @@ FAILURE_MODEL_DISCOVERY_UNAVAILABLE = "model_discovery_unavailable"
 FAILURE_PROVIDER_API_KEY_REQUIRED = "provider_api_key_required"
 FAILURE_PROVIDER_API_KEY_INVALID = "provider_api_key_invalid"
 FAILURE_LOCAL_PROVIDER_ENDPOINT_NOT_ALLOWED = "local_provider_endpoint_not_allowed"
-_ALLOWED_PRIVATE_IPV4_NETWORKS = tuple(
-    ipaddress.ip_network(network) for network in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
-)
-_ALLOWED_PRIVATE_IPV6_NETWORKS = (ipaddress.ip_network("fc00::/7"),)
-_ALLOWED_LOCAL_HOST_SUFFIXES = (".home", ".internal", ".lan", ".local")
 
 
 class LocalEndpointValidationRequest(BaseModel):
@@ -97,59 +92,6 @@ def _has_kobold_native_result(body: Any) -> bool:
     return isinstance(first_result.get("text"), str)
 
 
-def _is_allowed_local_provider_host(hostname: str) -> bool:
-    normalized_host = hostname.strip().lower()
-    if normalized_host == "localhost":
-        return True
-    if any(normalized_host.endswith(suffix) for suffix in _ALLOWED_LOCAL_HOST_SUFFIXES):
-        return True
-
-    if "%" in normalized_host:
-        normalized_host = normalized_host.split("%", 1)[0]
-
-    try:
-        address = ipaddress.ip_address(normalized_host)
-    except ValueError:
-        return False
-
-    if address.is_multicast or address.is_unspecified or address.is_link_local:
-        return False
-
-    if address.version == 4:
-        return address.is_loopback or any(address in network for network in _ALLOWED_PRIVATE_IPV4_NETWORKS)
-
-    if address.is_loopback:
-        return True
-    return any(address in network for network in _ALLOWED_PRIVATE_IPV6_NETWORKS)
-
-
-def _validate_local_provider_target(
-    payload: LocalEndpointValidationRequest,
-) -> SetupProviderValidationResponse | None:
-    try:
-        parsed = urlsplit(payload.base_url)
-    except ValueError:
-        return _failed_response(
-            payload,
-            failure_category=FAILURE_LOCAL_PROVIDER_UNREACHABLE,
-            message="Local provider endpoint is unreachable.",
-        )
-
-    if parsed.scheme.lower() not in {"http", "https"}:
-        return _failed_response(
-            payload,
-            failure_category=FAILURE_LOCAL_PROVIDER_ENDPOINT_NOT_ALLOWED,
-            message="Local provider endpoint target is not allowed.",
-        )
-    if not parsed.hostname or not _is_allowed_local_provider_host(parsed.hostname):
-        return _failed_response(
-            payload,
-            failure_category=FAILURE_LOCAL_PROVIDER_ENDPOINT_NOT_ALLOWED,
-            message="Local provider endpoint target is not allowed.",
-        )
-    return None
-
-
 def validate_hosted_provider_credentials(
     payload: HostedProviderValidationRequest,
 ) -> SetupProviderValidationResponse:
@@ -182,10 +124,6 @@ def validate_hosted_provider_credentials(
     )
 
 
-def _create_validation_client() -> httpx.AsyncClient:
-    return httpx.AsyncClient(timeout=5.0)
-
-
 def _openai_compatible_models_url(base_url: str) -> str:
     """Return the OpenAI-compatible models URL matching runtime URL normalization."""
     base = base_url.rstrip("/")
@@ -199,47 +137,69 @@ def _openai_compatible_models_url(base_url: str) -> str:
 
 async def validate_local_openai_endpoint(
     payload: LocalEndpointValidationRequest,
+    *,
+    configured_endpoint: ConfiguredEndpointScope,
 ) -> SetupProviderValidationResponse:
     """Validate a local OpenAI-compatible endpoint using its ``/models`` shape."""
-    if rejected_response := _validate_local_provider_target(payload):
-        return rejected_response
-
     models_url = _openai_compatible_models_url(payload.base_url)
     headers: dict[str, str] = {}
     if payload.api_key:
         headers["Authorization"] = f"Bearer {payload.api_key}"
 
     try:
-        async with _create_validation_client() as client:
-            response = await client.get(models_url, headers=headers)
-    except (httpx.InvalidURL, httpx.HTTPError, TimeoutError, OSError):
+        response = await afetch(
+            method="GET",
+            url=models_url,
+            headers=headers,
+            timeout=5.0,
+            retry=RetryPolicy(attempts=1),
+            configured_endpoint=configured_endpoint,
+        )
+    except EgressPolicyError:
+        return _failed_response(
+            payload,
+            failure_category=FAILURE_LOCAL_PROVIDER_ENDPOINT_NOT_ALLOWED,
+            message="Local provider endpoint target is not allowed.",
+        )
+    except (NetworkError, RetryExhaustedError, TimeoutError, OSError, ValueError):
+        return _failed_response(
+            payload,
+            failure_category=FAILURE_LOCAL_PROVIDER_UNREACHABLE,
+            message="Local provider endpoint is unreachable.",
+        )
+    except Exception:  # noqa: BLE001 - setup validation returns only sanitized failures.
         return _failed_response(
             payload,
             failure_category=FAILURE_LOCAL_PROVIDER_UNREACHABLE,
             message="Local provider endpoint is unreachable.",
         )
 
-    if response.status_code in {401, 403}:
-        return _failed_response(
-            payload,
-            failure_category=FAILURE_AUTH_FAILED,
-            message="Local provider rejected the supplied credentials.",
-        )
-    if response.status_code >= 400:
-        return _manual_model_fallback_response(payload)
-
     try:
-        body = response.json()
-    except ValueError:
-        return _failed_response(
-            payload,
-            failure_category=FAILURE_UNSUPPORTED_API_SHAPE,
-            message="Local provider did not return valid JSON.",
-        )
+        if response.status_code in {401, 403}:
+            return _failed_response(
+                payload,
+                failure_category=FAILURE_AUTH_FAILED,
+                message="Local provider rejected the supplied credentials.",
+            )
+        if response.status_code >= 400:
+            return _manual_model_fallback_response(payload)
 
-    model_ids = _extract_model_ids(body)
-    if model_ids is None or not model_ids:
-        return _manual_model_fallback_response(payload)
+        try:
+            body = response.json()
+        except ValueError:
+            return _failed_response(
+                payload,
+                failure_category=FAILURE_UNSUPPORTED_API_SHAPE,
+                message="Local provider did not return valid JSON.",
+            )
+
+        model_ids = _extract_model_ids(body)
+        if model_ids is None or not model_ids:
+            return _manual_model_fallback_response(payload)
+    finally:
+        close = getattr(response, "close", None)
+        if callable(close):
+            close()
 
     return SetupProviderValidationResponse(
         provider_key=payload.provider_key,
@@ -252,11 +212,10 @@ async def validate_local_openai_endpoint(
 
 async def validate_native_kobold_endpoint(
     payload: LocalEndpointValidationRequest,
+    *,
+    configured_endpoint: ConfiguredEndpointScope,
 ) -> SetupProviderValidationResponse:
     """Validate a Kobold.cpp native ``/api/v1/generate`` endpoint shape."""
-    if rejected_response := _validate_local_provider_target(payload):
-        return rejected_response
-
     headers = {"Content-Type": "application/json"}
     if payload.api_key:
         headers["X-Api-Key"] = payload.api_key
@@ -268,47 +227,67 @@ async def validate_native_kobold_endpoint(
     }
 
     try:
-        async with _create_validation_client() as client:
-            response = await client.post(
-                payload.base_url,
-                headers=headers,
-                json=request_body,
-            )
-    except (httpx.InvalidURL, httpx.HTTPError, TimeoutError, OSError):
+        response = await afetch(
+            method="POST",
+            url=payload.base_url,
+            headers=headers,
+            json=request_body,
+            timeout=5.0,
+            retry=RetryPolicy(attempts=1),
+            configured_endpoint=configured_endpoint,
+        )
+    except EgressPolicyError:
+        return _failed_response(
+            payload,
+            failure_category=FAILURE_LOCAL_PROVIDER_ENDPOINT_NOT_ALLOWED,
+            message="Local provider endpoint target is not allowed.",
+        )
+    except (NetworkError, RetryExhaustedError, TimeoutError, OSError, ValueError):
+        return _failed_response(
+            payload,
+            failure_category=FAILURE_LOCAL_PROVIDER_UNREACHABLE,
+            message="Local provider endpoint is unreachable.",
+        )
+    except Exception:  # noqa: BLE001 - setup validation returns only sanitized failures.
         return _failed_response(
             payload,
             failure_category=FAILURE_LOCAL_PROVIDER_UNREACHABLE,
             message="Local provider endpoint is unreachable.",
         )
 
-    if response.status_code in {401, 403}:
-        return _failed_response(
-            payload,
-            failure_category=FAILURE_AUTH_FAILED,
-            message="Local provider rejected the supplied credentials.",
-        )
-    if response.status_code >= 400:
-        return _failed_response(
-            payload,
-            failure_category=FAILURE_UNSUPPORTED_API_SHAPE,
-            message="Local provider did not return a supported Kobold-compatible response.",
-        )
-
     try:
-        body = response.json()
-    except ValueError:
-        return _failed_response(
-            payload,
-            failure_category=FAILURE_UNSUPPORTED_API_SHAPE,
-            message="Local provider did not return valid JSON.",
-        )
+        if response.status_code in {401, 403}:
+            return _failed_response(
+                payload,
+                failure_category=FAILURE_AUTH_FAILED,
+                message="Local provider rejected the supplied credentials.",
+            )
+        if response.status_code >= 400:
+            return _failed_response(
+                payload,
+                failure_category=FAILURE_UNSUPPORTED_API_SHAPE,
+                message="Local provider did not return a supported Kobold-compatible response.",
+            )
 
-    if not _has_kobold_native_result(body):
-        return _failed_response(
-            payload,
-            failure_category=FAILURE_UNSUPPORTED_API_SHAPE,
-            message="Local provider did not expose a Kobold-compatible generate response.",
-        )
+        try:
+            body = response.json()
+        except ValueError:
+            return _failed_response(
+                payload,
+                failure_category=FAILURE_UNSUPPORTED_API_SHAPE,
+                message="Local provider did not return valid JSON.",
+            )
+
+        if not _has_kobold_native_result(body):
+            return _failed_response(
+                payload,
+                failure_category=FAILURE_UNSUPPORTED_API_SHAPE,
+                message="Local provider did not expose a Kobold-compatible generate response.",
+            )
+    finally:
+        close = getattr(response, "close", None)
+        if callable(close):
+            close()
 
     return SetupProviderValidationResponse(
         provider_key=payload.provider_key,

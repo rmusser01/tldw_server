@@ -300,39 +300,39 @@ A second compatibility review restored the pre-Stage-3 client factory transport 
 
 **Tests:** Setup route/validation/readiness plus provider readiness/catalog/error mapping.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 4.1: Write failing setup and readiness tests
 
-- [ ] In the first-run setup API integration test, prove the write guard runs before scope construction or network I/O; unauthorized remote input must not invoke either.
-- [ ] Add setup validation cases for Docker/RFC1918, ULA, CGNAT, nonstandard ports, metadata denial, auth failure, unsupported shape, and manual fallback.
-- [ ] Assert validator functions cannot mint scope themselves and require the guarded route to pass it.
-- [ ] Change setup readiness/profile tests to use canonical `kobold_api_IP`; cover only existing setup providers and explicitly avoid adding generic `local-llm`/numbered custom surfaces.
-- [ ] Add a non-loopback llama endpoint with `llama_model`, global private blocking enabled, and no global port exception. Assert the exact flattened `/api/v1/llm/models/metadata` record is enabled and contains the manual model.
-- [ ] Add the paired forbidden metadata/link-local endpoint record with `availability=unavailable` and `readiness_reason_code=egress_blocked`.
+- [x] In the first-run setup API integration test, prove the write guard runs before scope construction or network I/O; unauthorized remote input must not invoke either.
+- [x] Add setup validation cases for Docker/RFC1918, ULA, CGNAT, nonstandard ports, metadata denial, auth failure, unsupported shape, and manual fallback.
+- [x] Assert validator functions cannot mint scope themselves and require the guarded route to pass it.
+- [x] Change setup readiness/profile tests to use canonical `kobold_api_IP`; cover only existing setup providers and explicitly avoid adding generic `local-llm`/numbered custom surfaces.
+- [x] Add a non-loopback llama endpoint with `llama_model`, global private blocking enabled, and no global port exception. Assert the exact flattened `/api/v1/llm/models/metadata` record is enabled and contains the manual model.
+- [x] Add the paired forbidden metadata/link-local endpoint record with `availability=unavailable` and `readiness_reason_code=egress_blocked`.
 
 ### Task 4.2: Write failing one-shot discovery tests
 
-- [ ] Introduce expected `ModelDiscoveryResult` cases for ready/nonempty, ready/empty, auth failure, server failure, unsupported response, and unreachable endpoint.
-- [ ] Instrument the catalog flow and assert at most one discovery computation per provider; readiness receives the same result instead of calling discovery itself.
-- [ ] Assert the existing cache stores `ready` and `unsupported` only. Correcting credentials, starting a server, or recovering DNS must trigger a new attempt immediately.
-- [ ] Test precedence `ready`, `auth_failed`, `server_error`, `unsupported`, `unreachable` across candidate endpoints.
-- [ ] Test the complete matrix: policy/DNS failure; explicit model with probe off; explicit model with requested probe; no explicit model with each discovery status; health failure overriding model presence.
+- [x] Introduce expected `ModelDiscoveryResult` cases for ready/nonempty, ready/empty, auth failure, server failure, unsupported response, and unreachable endpoint.
+- [x] Instrument the catalog flow and assert at most one discovery computation per provider; readiness receives the same result instead of calling discovery itself.
+- [x] Assert the existing cache stores `ready` and `unsupported` only. Correcting credentials, starting a server, or recovering DNS must trigger a new attempt immediately.
+- [x] Test precedence `ready`, `auth_failed`, `server_error`, `unsupported`, `unreachable` across candidate endpoints.
+- [x] Test the complete matrix: policy/DNS failure; explicit model with probe off; explicit model with requested probe; no explicit model with each discovery status; health failure overriding model presence.
 
 ### Task 4.3: Implement guarded setup and pure readiness reduction
 
-- [ ] In the guarded `validate_first_run_provider` route, construct the scope only after `_require_first_run_write_access`; pass it into the local validator.
-- [ ] Replace raw setup `httpx` and duplicate host/range checks with `afetch(..., configured_endpoint=scope)`. Preserve auth headers, timeouts, sanitized messages, and manual fallback.
-- [ ] Fix `readiness_service.py` and `readiness_profiles.py` to read `kobold_api_IP`.
-- [ ] Add a minimal frozen `ModelDiscoveryResult(status, models)` and make discovery accept an already-created scope.
-- [ ] Compute discovery once in catalog code. Pass `discovery_result`, `has_explicit_models`, policy state, and probe/health state into a side-effect-free readiness reducer.
-- [ ] Cache only `ready` and `unsupported`. Keep the existing bounded TTL and key; do not include credentials or secret fingerprints.
-- [ ] Restore `llama_model`, `kobold_model`, `ooba_model`, and `tabby_model` mappings. Explicit models are never erased by optional discovery.
-- [ ] Evaluate scoped policy/DNS before the optional HTTP probe; unresolved DNS remains unavailable even for explicit-model/probe-disabled configuration.
+- [x] In the guarded `validate_first_run_provider` route, construct the scope only after `_require_first_run_write_access`; pass it into the local validator.
+- [x] Replace raw setup `httpx` and duplicate host/range checks with `afetch(..., configured_endpoint=scope)`. Preserve auth headers, timeouts, sanitized messages, and manual fallback.
+- [x] Fix `readiness_service.py` and `readiness_profiles.py` to read `kobold_api_IP`.
+- [x] Add a minimal frozen `ModelDiscoveryResult(status, models)` and make discovery accept an already-created scope.
+- [x] Compute discovery once in catalog code. Pass `discovery_result`, `has_explicit_models`, policy state, and probe/health state into a side-effect-free readiness reducer.
+- [x] Cache only `ready` and `unsupported`. Keep the existing bounded TTL and key; do not include credentials or secret fingerprints.
+- [x] Restore `llama_model`, `kobold_model`, `ooba_model`, and `tabby_model` mappings. Explicit models are never erased by optional discovery.
+- [x] Evaluate scoped policy/DNS before the optional HTTP probe; unresolved DNS remains unavailable even for explicit-model/probe-disabled configuration.
 
 ### Task 4.4: Verify and commit
 
-- [ ] Run:
+- [x] Run:
 
   ```bash
   source .venv/bin/activate
@@ -346,8 +346,10 @@ A second compatibility review restored the pre-Stage-3 client factory transport 
     tldw_Server_API/tests/LLM_Adapters/unit/test_llm_providers_error_mapping.py -q
   ```
 
-- [ ] Re-run Stages 1–3 and `git diff --check`.
-- [ ] Commit with `fix(setup): align local provider readiness and discovery (TASK-12972)`.
+- [x] Re-run Stages 1–3 and `git diff --check`.
+- [x] Commit with `fix(setup): align local provider readiness and discovery (TASK-12972)`.
+
+Verification used the repository virtual environment at `../../.venv` from the isolated worktree. The Stage 4 primary suite passed 221 tests, and the complete Stages 1–3 compatibility union passed 264 tests. Focused Ruff, Python compilation, Bandit, and `git diff --check` passed before commit.
 
 ---
 

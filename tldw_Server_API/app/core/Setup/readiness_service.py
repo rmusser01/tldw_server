@@ -36,7 +36,7 @@ _LOCAL_PROVIDER_MODEL_KEYS = {
 
 _LOCAL_PROVIDER_ENDPOINT_KEYS = {
     "custom_openai": ("API", "custom_openai_api_ip"),
-    "kobold": ("Local-API", "kobold_openai_api_IP"),
+    "kobold": ("Local-API", "kobold_api_IP"),
     "llama": ("Local-API", "llama_api_IP"),
     "ooba": ("Local-API", "ooba_api_IP"),
     "tabby": ("Local-API", "tabby_api_IP"),

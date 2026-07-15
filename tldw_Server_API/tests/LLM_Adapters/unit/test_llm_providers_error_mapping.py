@@ -61,16 +61,185 @@ def test_discover_models_from_endpoint_sanitizes_http_status_log(monkeypatch):
     )
     llm_endpoints._LOCAL_MODEL_CACHE.clear()
 
-    models = llm_endpoints.discover_models_from_endpoint(
+    result = llm_endpoints.discover_models_from_endpoint(
         "private-provider",
         "http://127.0.0.1:1234/v1",
+        configured_endpoint=llm_endpoints.ConfiguredEndpointScope.from_url(
+            "http://127.0.0.1:1234/v1"
+        ),
     )
 
-    assert models == []
+    assert result.status == "server_error"
     _assert_sanitized_log(
         logger_stub.debugs,
         "Model discovery endpoint returned an error status",
     )
+
+
+def test_model_discovery_transient_failure_is_not_cached(monkeypatch):
+    calls = 0
+
+    class Response:
+        def __init__(self, status_code, payload=None):
+            self.status_code = status_code
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+        def close(self):
+            return None
+
+    def fake_fetch(**_kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return Response(503)
+        return Response(200, {"data": [{"id": "recovered"}]})
+
+    monkeypatch.setattr(llm_endpoints, "_http_fetch", fake_fetch)
+    llm_endpoints._LOCAL_MODEL_CACHE.clear()
+    scope = llm_endpoints.ConfiguredEndpointScope.from_url("http://10.0.0.5:18080/v1")
+
+    first = llm_endpoints.discover_models_from_endpoint(
+        "llama", "http://10.0.0.5:18080/v1", configured_endpoint=scope
+    )
+    second = llm_endpoints.discover_models_from_endpoint(
+        "llama", "http://10.0.0.5:18080/v1", configured_endpoint=scope
+    )
+
+    assert first.status == "server_error"
+    assert second == llm_endpoints.ModelDiscoveryResult("ready", ("recovered",))
+    assert calls == 2
+
+
+@pytest.mark.parametrize("first_failure", ["auth_failed", "unreachable"])
+def test_model_discovery_auth_and_network_failures_retry_immediately(monkeypatch, first_failure):
+    calls = 0
+
+    class Response:
+        def __init__(self, status_code, payload=None):
+            self.status_code = status_code
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+        def close(self):
+            return None
+
+    def fake_fetch(**_kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            if first_failure == "unreachable":
+                raise ConnectionError("offline")
+            return Response(401)
+        return Response(200, {"data": [{"id": "recovered"}]})
+
+    monkeypatch.setattr(llm_endpoints, "_http_fetch", fake_fetch)
+    llm_endpoints._LOCAL_MODEL_CACHE.clear()
+    scope = llm_endpoints.ConfiguredEndpointScope.from_url("http://10.0.0.5:18080/v1")
+
+    first = llm_endpoints.discover_models_from_endpoint(
+        "llama", "http://10.0.0.5:18080/v1", configured_endpoint=scope
+    )
+    second = llm_endpoints.discover_models_from_endpoint(
+        "llama", "http://10.0.0.5:18080/v1", configured_endpoint=scope
+    )
+
+    assert first.status == first_failure
+    assert second.status == "ready"
+    assert calls == 2
+
+
+@pytest.mark.parametrize(
+    ("status_code", "payload", "expected_status"),
+    [
+        (200, {"data": [{"id": "cached"}]}, "ready"),
+        (200, {"data": []}, "ready"),
+        (404, None, "unsupported"),
+    ],
+)
+def test_model_discovery_caches_only_stable_results(
+    monkeypatch,
+    status_code,
+    payload,
+    expected_status,
+):
+    calls = 0
+
+    class Response:
+        def json(self):
+            return payload
+
+        def close(self):
+            return None
+
+    response = Response()
+    response.status_code = status_code
+
+    def fake_fetch(**_kwargs):
+        nonlocal calls
+        calls += 1
+        return response
+
+    monkeypatch.setattr(llm_endpoints, "_http_fetch", fake_fetch)
+    llm_endpoints._LOCAL_MODEL_CACHE.clear()
+    scope = llm_endpoints.ConfiguredEndpointScope.from_url("http://10.0.0.5:18080/v1")
+
+    first = llm_endpoints.discover_models_from_endpoint(
+        "llama", "http://10.0.0.5:18080/v1", configured_endpoint=scope
+    )
+    second = llm_endpoints.discover_models_from_endpoint(
+        "llama", "http://10.0.0.5:18080/v1", configured_endpoint=scope
+    )
+
+    assert first.status == expected_status
+    assert second is first
+    assert calls == 1
+
+
+@pytest.mark.parametrize(
+    ("outcomes", "expected_status"),
+    [
+        ([503, 401], "auth_failed"),
+        ([401, 404], "auth_failed"),
+        ([503, 404], "server_error"),
+        ([404, "error"], "unsupported"),
+        (["error", "error"], "unreachable"),
+        ([503, 200], "ready"),
+    ],
+)
+def test_model_discovery_candidate_status_precedence(monkeypatch, outcomes, expected_status):
+    class Response:
+        def __init__(self, status_code):
+            self.status_code = status_code
+
+        def json(self):
+            return {"data": [{"id": "model"}]}
+
+        def close(self):
+            return None
+
+    pending = list(outcomes)
+
+    def fake_fetch(**_kwargs):
+        outcome = pending.pop(0)
+        if outcome == "error":
+            raise ConnectionError("offline")
+        return Response(outcome)
+
+    monkeypatch.setattr(llm_endpoints, "_http_fetch", fake_fetch)
+    llm_endpoints._LOCAL_MODEL_CACHE.clear()
+    endpoint = "http://10.0.0.5:18080/custom"
+    scope = llm_endpoints.ConfiguredEndpointScope.from_url(endpoint)
+
+    result = llm_endpoints.discover_models_from_endpoint(
+        "llama", endpoint, configured_endpoint=scope
+    )
+
+    assert result.status == expected_status
 
 
 def test_discover_models_from_endpoint_sanitizes_noncritical_error_log(monkeypatch):
@@ -83,12 +252,15 @@ def test_discover_models_from_endpoint_sanitizes_noncritical_error_log(monkeypat
     monkeypatch.setattr(llm_endpoints, "_http_fetch", boom)
     llm_endpoints._LOCAL_MODEL_CACHE.clear()
 
-    models = llm_endpoints.discover_models_from_endpoint(
+    result = llm_endpoints.discover_models_from_endpoint(
         "private-provider",
         "http://127.0.0.1:1234/v1",
+        configured_endpoint=llm_endpoints.ConfiguredEndpointScope.from_url(
+            "http://127.0.0.1:1234/v1"
+        ),
     )
 
-    assert models == []
+    assert result.status == "unreachable"
     _assert_sanitized_log(
         logger_stub.debugs,
         "Model discovery endpoint query failed",
@@ -107,12 +279,15 @@ def test_discover_models_from_endpoint_sanitizes_unexpected_error_log(monkeypatc
     monkeypatch.setattr(llm_endpoints, "_http_fetch", boom)
     llm_endpoints._LOCAL_MODEL_CACHE.clear()
 
-    models = llm_endpoints.discover_models_from_endpoint(
+    result = llm_endpoints.discover_models_from_endpoint(
         "private-provider",
         "http://127.0.0.1:1234/v1",
+        configured_endpoint=llm_endpoints.ConfiguredEndpointScope.from_url(
+            "http://127.0.0.1:1234/v1"
+        ),
     )
 
-    assert models == []
+    assert result.status == "unreachable"
     _assert_sanitized_log(
         logger_stub.debugs,
         "Model discovery endpoint query failed unexpectedly",

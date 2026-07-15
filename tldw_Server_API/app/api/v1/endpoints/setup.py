@@ -8,9 +8,9 @@ import json
 import os
 import re
 import sys
-from configparser import ConfigParser
 import uuid
 from collections.abc import Callable
+from configparser import ConfigParser
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -64,18 +64,18 @@ from tldw_Server_API.app.api.v1.schemas.setup_schemas import (
     SetupCompleteResponse,
     SetupConfigUpdateResponse,
     SetupInstallStatusResponse,
-    SetupReadinessPreviewRequest,
-    SetupReadinessPreviewResponse,
-    SetupReadinessProvisionRequest,
-    SetupReadinessProvisionResponse,
-    SetupReadinessVerifyRequest,
-    SetupReadinessVerifyResponse,
     SetupProviderCatalogResponse,
     SetupProviderSaveRequest,
     SetupProviderSaveResponse,
     SetupProviderSaveStatus,
     SetupProviderType,
     SetupProviderValidationResponse,
+    SetupReadinessPreviewRequest,
+    SetupReadinessPreviewResponse,
+    SetupReadinessProvisionRequest,
+    SetupReadinessProvisionResponse,
+    SetupReadinessVerifyRequest,
+    SetupReadinessVerifyResponse,
     SetupResetResponse,
     SetupStatusResponse,
 )
@@ -83,6 +83,7 @@ from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.config import clear_config_cache
 from tldw_Server_API.app.core.exceptions import BadRequestError, InvalidFirstRunTransition
+from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
 from tldw_Server_API.app.core.Setup import (
     audio_pack_service,
     audio_profile_service,
@@ -117,14 +118,16 @@ from tldw_Server_API.app.core.Setup.provider_validation import (
     validate_local_openai_endpoint,
     validate_native_kobold_endpoint,
 )
-from tldw_Server_API.app.core.Setup.readiness_profiles import build_readiness_profiles
 from tldw_Server_API.app.core.Setup.readiness_models import LANE_IDS, LANE_STATUSES, OVERLAY_IDS
+from tldw_Server_API.app.core.Setup.readiness_profiles import build_readiness_profiles
 from tldw_Server_API.app.core.Setup.readiness_service import preview_readiness_selection, verify_readiness_lanes
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
 from tldw_Server_API.app.services.auth_service import mark_user_verified
 from tldw_Server_API.app.services.mcp_hub_tool_registry import McpHubToolRegistryService
 from tldw_Server_API.app.services.setup_mcp_tools_service import (
     McpToolsApplyRequest as ServiceMcpToolsApplyRequest,
+)
+from tldw_Server_API.app.services.setup_mcp_tools_service import (
     McpToolsApplyResult,
     McpToolsValidationResult,
     SetupMcpToolsService,
@@ -1532,9 +1535,24 @@ async def validate_first_run_provider(
         model=payload.model,
         api_key=payload.api_key,
     )
+    try:
+        configured_endpoint = ConfiguredEndpointScope.from_url(normalized_payload.base_url)
+    except ValueError:
+        return SetupProviderValidationResponse(
+            provider_key=provider_key,
+            status="failed",
+            failure_category=FAILURE_LOCAL_PROVIDER_UNREACHABLE,
+            message="Local provider endpoint is unreachable.",
+        )
     if provider_key == "koboldcpp":
-        return await validate_native_kobold_endpoint(normalized_payload)
-    return await validate_local_openai_endpoint(normalized_payload)
+        return await validate_native_kobold_endpoint(
+            normalized_payload,
+            configured_endpoint=configured_endpoint,
+        )
+    return await validate_local_openai_endpoint(
+        normalized_payload,
+        configured_endpoint=configured_endpoint,
+    )
 
 
 @router.post(
