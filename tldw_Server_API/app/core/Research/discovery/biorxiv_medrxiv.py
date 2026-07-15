@@ -110,6 +110,11 @@ _DOI_RE = re.compile(
     r"10\.[0-9]{4,9}/[A-Za-z0-9][-A-Za-z0-9._~!$&'()*+,;=:@]*\Z",
     re.ASCII,
 )
+_PUBLICATION_DOI_RE = re.compile(
+    r"10\.[0-9]{4,9}/[A-Za-z0-9][-A-Za-z0-9._~!$&'()*+,;=:@/]*\Z",
+    re.ASCII,
+)
+_DETAILS_DOI_REGISTRANT_RE = re.compile(r"10\.[0-9]{4,9}\Z", re.ASCII)
 _YEAR_RE = re.compile(r"[0-9]{4}\Z", re.ASCII)
 _MISSING = object()
 _MAX_TITLE_CHARS = 4_096
@@ -570,9 +575,27 @@ def _normalized_details_category(value: Any) -> str:
     if any(not character.isalnum() and character not in " -&/" for character in canonical):
         raise _PayloadInvalid
     normalized = " ".join(canonical.split()).casefold()
+    if len(normalized) > 128:
+        raise _ParseLimitExceeded
     if not normalized or not any(character.isalnum() for character in normalized):
         raise _PayloadInvalid
     return normalized
+
+
+def _details_request_doi(value: Any) -> str:
+    """Return one canonical DOI from the exact typed-details request domain."""
+    if type(value) is not str or not value.isascii() or value.count("/") != 1:
+        raise _PayloadInvalid
+    registrant, suffix = value.split("/", 1)
+    if (
+        _DETAILS_DOI_REGISTRANT_RE.fullmatch(registrant) is None
+        or not suffix
+        or len(suffix) > 128
+        or not suffix[0].isalnum()
+        or any(character in " /\\%?#" or not "!" <= character <= "~" for character in suffix)
+    ):
+        raise _PayloadInvalid
+    return value.lower()
 
 
 def _details_integer(
@@ -662,18 +685,13 @@ def _trusted_details_inputs(
     end_date: str | None = None
     category: str | None = None
     if mode == "doi":
-        doi = group.normalized_query
-        if (
-            not doi.isascii()
-            or doi != doi.lower()
-            or doi.count("/") != 1
-            or _DOI_RE.fullmatch(doi) is None
-            or intent.query_pairs
-        ):
+        try:
+            doi = _details_request_doi(group.normalized_query)
+        except _PayloadInvalid:
+            raise DiscoveryAdapterError("provider_payload_invalid") from None
+        if doi != group.normalized_query or intent.query_pairs:
             raise DiscoveryAdapterError("provider_payload_invalid")
         registrant, suffix = doi.split("/", 1)
-        if len(suffix) > 128:
-            raise DiscoveryAdapterError("provider_payload_invalid")
         encoded_suffix = quote_from_bytes(suffix.encode("ascii"), safe="")
         expected_path = f"/details/{source_id}/{registrant}/{encoded_suffix}/na/json"
         if intent.path != expected_path:
@@ -767,7 +785,7 @@ def _published_doi(record: dict[str, Any]) -> str | None:
         value != stripped
         or len(value) > _MAX_IDENTIFIER_CHARS
         or not value.isascii()
-        or _DOI_RE.fullmatch(canonical) is None
+        or _PUBLICATION_DOI_RE.fullmatch(canonical) is None
     ):
         raise _PayloadInvalid
     return canonical
@@ -788,9 +806,10 @@ def _details_record(
     record = _require_dict(raw)
     if record.get("server") != response_server:
         raise _PayloadInvalid
-    doi = _doi(record)
-    if doi is None or (expected_doi is not None and doi != expected_doi):
+    doi = _details_request_doi(record.get("doi", _MISSING))
+    if expected_doi is not None and doi != expected_doi:
         raise _PayloadInvalid
+    doi_registrant, doi_suffix = doi.split("/", 1)
     title = _plain_text(_required_text(record, "title"), max_chars=_MAX_TITLE_CHARS, required=True)
     if title is None:
         raise _PayloadInvalid
@@ -810,7 +829,7 @@ def _details_record(
     if license_value is None:
         raise _PayloadInvalid
     category = _normalized_details_category(_required_text(record, "category"))
-    if expected_category is not None and category != expected_category:
+    if expected_category not in {None, "all"} and category != expected_category:
         raise _PayloadInvalid
     normalized = _base_record(
         title=title,
@@ -821,7 +840,7 @@ def _details_record(
         pmid=None,
         pmcid=None,
         arxiv_id=None,
-        url=f"https://doi.org/{doi}",
+        url=(f"https://doi.org/{doi_registrant}/" f"{quote_from_bytes(doi_suffix.encode('ascii'), safe='')}"),
         pdf_url=None,
         provider="biorxiv_details",
         provider_ids={"doi": doi, "version": str(version)},

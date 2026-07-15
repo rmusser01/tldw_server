@@ -1736,6 +1736,68 @@ async def test_details_doi_success_binds_exact_path_and_keeps_highest_version(
     assert "fixture-secret" not in repr(record)
 
 
+@pytest.mark.parametrize(
+    ("doi", "encoded_suffix"),
+    (
+        ("10.5555/a[b", "a%5Bb"),
+        (f"10.5555/{'x' * 128}", "x" * 128),
+    ),
+    ids=("visible_ascii_suffix", "maximum_suffix"),
+)
+@pytest.mark.asyncio
+async def test_details_doi_planner_boundaries_execute_bind_and_encode_landing_url(
+    doi: str,
+    encoded_suffix: str,
+) -> None:
+    module = _module()
+    payload = json.loads(_details_fixture("biorxiv_details_doi_success"))
+    payload["collection"][0]["doi"] = doi.upper()
+    registry, plan = _details_plan_for("biorxiv", IdentifierLookupQuery(doi), result_limit=30)
+    group = plan.dispatch_groups[0]
+    intent = group.intents[0]
+    expected_path = f"/details/biorxiv/10.5555/{encoded_suffix}/na/json"
+    paths: list[str] = []
+
+    async def gateway(route, dispatched_intent, *, is_policy_active):
+        assert is_policy_active(route.route_id, route.policy.policy_digest)
+        paths.append(dispatched_intent.path)
+        return _response(route, dispatched_intent, _payload_bytes(payload))
+
+    execution = await execute_discovery_plan(
+        plan,
+        registry=registry,
+        adapters=module.biorxiv_medrxiv_gateway_adapters(),
+        gateway=gateway,
+        policy_is_active=lambda _route_id, _digest: True,
+        dispatch_id_factory=lambda: "details-doi-boundary-1",
+    )
+
+    assert intent.path == expected_path
+    assert paths == [expected_path]
+    assert execution.logical_outcomes[0].state is LogicalOutcomeState.SUCCEEDED
+    assert len(execution.candidates) == 1
+    record = execution.candidates[0].record
+    assert record["doi"] == doi
+    assert record["provider_ids"] == {"doi": doi, "version": "1"}
+    assert record["url"] == f"https://doi.org/10.5555/{encoded_suffix}"
+
+
+@pytest.mark.asyncio
+async def test_details_publication_linkage_accepts_bounded_multi_segment_doi() -> None:
+    payload = json.loads(_details_fixture("biorxiv_details_doi_success"))
+    payload["collection"][0]["published"] = "10.5555/published/extra"
+
+    result, _dispatch, _group = await _invoke_details_payloads(
+        "biorxiv",
+        IdentifierLookupQuery("10.5555/biorxiv.details.synthetic"),
+        [payload],
+    )
+
+    record = result.candidates[0].record
+    assert record["published_doi"] == "10.5555/published/extra"
+    assert record["url"] == "https://doi.org/10.5555/biorxiv.details.synthetic"
+
+
 @pytest.mark.asyncio
 async def test_details_interval_category_uses_response_derived_path_cursor() -> None:
     module = _module()
@@ -1867,6 +1929,43 @@ async def test_details_oversized_retained_category_is_a_parse_limit_failure() ->
 
 
 @pytest.mark.parametrize(
+    "category",
+    ("ẞ" * 65, "ﬃ" * 43),
+    ids=("casefold_expansion", "nfkc_expansion"),
+)
+@pytest.mark.asyncio
+async def test_details_normalized_category_expansion_over_limit_is_parse_limit(
+    category: str,
+) -> None:
+    payload = json.loads(_details_fixture("biorxiv_details_doi_success"))
+    payload["collection"][0]["category"] = category
+
+    with pytest.raises(Exception) as caught:
+        await _invoke_details_payloads(
+            "biorxiv",
+            IdentifierLookupQuery("10.5555/biorxiv.details.synthetic"),
+            [payload],
+        )
+
+    _assert_typed_error(caught.value, "provider_parse_limit_exceeded")
+
+
+@pytest.mark.asyncio
+async def test_details_planner_approved_dotted_i_category_matches_after_casefold() -> None:
+    payload = json.loads(_details_fixture("biorxiv_details_interval_page_1"))
+    payload["messages"][0].update({"category": "İ", "total": 1})
+    payload["collection"][0]["category"] = "İ"
+
+    result, _dispatch, _group = await _invoke_details_payloads(
+        "biorxiv",
+        DateIntervalQuery("2026-06-01", "2026-06-02", "İ"),
+        [payload],
+    )
+
+    assert result.candidates[0].record["category"] == "i\N{COMBINING DOT ABOVE}"
+
+
+@pytest.mark.parametrize(
     "case",
     (
         "application_error",
@@ -1919,6 +2018,10 @@ async def test_details_malformed_or_application_error_envelopes_fail_closed(case
         ("version", "not-a-number"),
         ("date", "2026-02-30"),
         ("published", "https://attacker.invalid/article"),
+        ("published", "10.5555/published%2Fextra"),
+        ("published", "10.5555/published?next"),
+        ("published", "10.5555/published#fragment"),
+        ("published", "10.5555/published\\extra"),
         ("category", "bad\tcategory"),
         ("authors", ["Ada Example"]),
     ),
@@ -2093,6 +2196,42 @@ async def test_details_category_binding_canonicalizes_case_whitespace_and_unders
         "cell biology",
         "cell biology",
     )
+
+
+@pytest.mark.asyncio
+async def test_details_all_category_wildcard_retains_diverse_item_categories() -> None:
+    first = json.loads(_details_fixture("biorxiv_details_interval_page_1"))
+    second = json.loads(_details_fixture("biorxiv_details_interval_page_2"))
+    first["messages"][0]["category"] = "all"
+    second["messages"][0]["category"] = "All"
+    first["collection"][0]["category"] = "neuroscience"
+    second["collection"][0]["category"] = "cell biology"
+
+    result, _dispatch, _group = await _invoke_details_payloads(
+        "biorxiv",
+        DateIntervalQuery("2026-06-01", "2026-06-02", "All"),
+        [first, second],
+    )
+
+    assert tuple(candidate.record["category"] for candidate in result.candidates) == (
+        "neuroscience",
+        "cell biology",
+    )
+
+
+@pytest.mark.asyncio
+async def test_details_all_category_wildcard_still_binds_message_echo() -> None:
+    payload = json.loads(_details_fixture("biorxiv_details_interval_page_1"))
+    payload["messages"][0].update({"category": "neuroscience", "total": 1})
+
+    with pytest.raises(Exception) as caught:
+        await _invoke_details_payloads(
+            "biorxiv",
+            DateIntervalQuery("2026-06-01", "2026-06-02", "All"),
+            [payload],
+        )
+
+    _assert_typed_error(caught.value, "provider_payload_invalid")
 
 
 @pytest.mark.parametrize(
