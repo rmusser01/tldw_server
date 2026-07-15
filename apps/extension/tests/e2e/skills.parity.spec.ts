@@ -359,10 +359,12 @@ test.describe("Skills parity (extension)", () => {
       await exportButton.click()
       const download = await downloadPromise
 
-      await expect.poll(() => [...api.exportRequests].sort()).toEqual([
-        "archive-helper-01",
-        "archive-helper-02",
-      ])
+      await expect
+        .poll(() => [...api.exportRequests].sort((a, b) => a.name.localeCompare(b.name)))
+        .toEqual([
+          { method: "GET", name: "archive-helper-01" },
+          { method: "GET", name: "archive-helper-02" },
+        ])
       await expect(exportButton).toBeEnabled()
       expect(downloadedFilenames).toEqual([download.suggestedFilename()])
       expect(download.suggestedFilename()).toMatch(
@@ -379,6 +381,19 @@ test.describe("Skills parity (extension)", () => {
         "archive-helper-01.zip",
         "archive-helper-02.zip",
       ])
+      for (const nestedArchiveName of [
+        "archive-helper-01.zip",
+        "archive-helper-02.zip",
+      ]) {
+        const nestedArchiveEntry = aggregateArchive.file(nestedArchiveName)
+        if (!nestedArchiveEntry) {
+          throw new Error(`Missing nested archive ${nestedArchiveName}`)
+        }
+        const nestedArchive = await JSZip.loadAsync(
+          await nestedArchiveEntry.async("uint8array"),
+        )
+        expect(Object.keys(nestedArchive.files)).toEqual([])
+      }
       await expect(page.getByText("2 selected", { exact: true })).toHaveCount(1)
 
       await expect(page.getByText("10 / page", { exact: true })).toBeVisible()
@@ -393,7 +408,17 @@ test.describe("Skills parity (extension)", () => {
       )
 
       await page.getByRole("button", { name: "Filters", exact: true }).click()
-      await page.getByLabel("Filter by model").fill("gpt-4.1-mini")
+      const modelFilter = page.getByLabel("Filter by model")
+      await modelFilter.fill("  GPT-4.1-MINI  ")
+      await expect
+        .poll(() => api.lastListUrl()?.searchParams.get("model"))
+        .toBe("GPT-4.1-MINI")
+      await expect(targetSkill).toBeVisible()
+      await expect(
+        page.getByText("batch-cleanup-helper", { exact: true }),
+      ).toHaveCount(0)
+
+      await modelFilter.fill("gpt-4.1-mini")
       await expect
         .poll(() => api.lastListUrl()?.searchParams.get("model"))
         .toBe("gpt-4.1-mini")

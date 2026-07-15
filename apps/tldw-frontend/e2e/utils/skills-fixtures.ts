@@ -344,7 +344,7 @@ const filterLargeLibrarySkills = (url: URL) => {
   const query = (url.searchParams.get("q") ?? "").trim().toLowerCase()
   const context = url.searchParams.get("context")
   const hasTools = url.searchParams.get("has_tools")
-  const model = url.searchParams.get("model")
+  const model = (url.searchParams.get("model") ?? "").trim().toLowerCase()
   const sort = url.searchParams.get("sort")
   const order = url.searchParams.get("order")
   const limit = Number(url.searchParams.get("limit") ?? 10)
@@ -361,7 +361,7 @@ const filterLargeLibrarySkills = (url: URL) => {
     if (context && skill.context !== context) return false
     if (hasTools === "true" && !(skill.allowed_tools?.length)) return false
     if (hasTools === "false" && skill.allowed_tools?.length) return false
-    if (model !== null && skill.model !== model) return false
+    if (model && (skill.model ?? "").trim().toLowerCase() !== model) return false
     return true
   })
 
@@ -381,7 +381,7 @@ const filterLargeLibrarySkills = (url: URL) => {
 export async function mockPowerUserSkillsLibrary(page: Page) {
   const listUrls: URL[] = []
   const deleteRequests: unknown[] = []
-  const exportRequests: string[] = []
+  const exportRequests: Array<{ method: string; name: string }> = []
 
   await mockSkillsCapabilityRoutes(page)
 
@@ -435,11 +435,6 @@ export async function mockPowerUserSkillsLibrary(page: Page) {
   })
 
   await page.route(/\/api\/v1\/skills\/([^/?]+)\/export(?:\?.*)?$/, async (route) => {
-    if (route.request().method() !== "GET") {
-      await fulfillJson(route, {}, 405)
-      return
-    }
-
     const segments = new URL(route.request().url()).pathname.split("/").filter(Boolean)
     let name = ""
     try {
@@ -454,7 +449,13 @@ export async function mockPowerUserSkillsLibrary(page: Page) {
       return
     }
 
-    exportRequests.push(name)
+    const method = route.request().method()
+    exportRequests.push({ method, name })
+    if (method !== "GET") {
+      await fulfillJson(route, {}, 405)
+      return
+    }
+
     await route.fulfill({
       status: 200,
       headers: {
