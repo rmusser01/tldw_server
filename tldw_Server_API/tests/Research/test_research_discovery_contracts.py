@@ -118,6 +118,12 @@ def test_path_template_rejects_non_visible_or_non_segment_literals(literal: str)
         PathTemplate(("details", literal, PathSlot(PathSlotKind.UINT, 10)))
 
 
+@pytest.mark.parametrize("literal", (".", "..", "%2F", "%2f", "%5C", "%252F", "?", "#"))
+def test_path_template_rejects_literals_with_url_path_semantics(literal: str) -> None:
+    with pytest.raises(ValueError, match="path_template_literal"):
+        PathTemplate(("details", literal, PathSlot(PathSlotKind.UINT, 10)))
+
+
 def test_path_template_requires_exact_segments_and_uint_pagination_slot() -> None:
     class SlotSubclass(PathSlot):
         pass
@@ -220,6 +226,30 @@ def test_route_policy_requires_exactly_one_path_channel() -> None:
         replace(dynamic, path_template=None, policy_digest="")
     with pytest.raises(TypeError, match="path_template"):
         replace(dynamic, path_template=object(), policy_digest="")
+
+
+def test_route_policy_preserves_legacy_full_positional_policy_digest_binding() -> None:
+    origin = ExactOrigin("https", "api.example.test", 443)
+    limits = RouteLimits(1, 0, 0, 1_000, 4_096, 25)
+    expected = RoutePolicy("policy-v1", origin, ("GET",), ("/search",), (), limits)
+
+    positional = RoutePolicy(
+        "policy-v1",
+        origin,
+        ("GET",),
+        ("/search",),
+        (),
+        limits,
+        None,
+        None,
+        (),
+        (),
+        expected.policy_digest,
+    )
+
+    assert positional.policy_digest == expected.policy_digest
+    assert positional.path_template is None
+    assert positional.query_value_policies == ()
 
 
 def test_template_pagination_is_exclusive_with_query_and_json_channels() -> None:

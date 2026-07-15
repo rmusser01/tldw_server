@@ -540,6 +540,25 @@ async def test_dynamic_template_nested_policy_is_reconstructed_before_policy_or_
     await _assert_rejected_before_policy_or_hop(route, intent)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("literal", (".", "..", "%2F", "%2f", "%5C", "%252F", "?", "#"))
+async def test_dynamic_template_hostile_literal_mutation_rejects_before_policy_or_hop(
+    literal: str,
+) -> None:
+    route, intent = _interval_path_route_and_intent()
+    template = route.policy.path_template
+    assert template is not None
+    object.__setattr__(template, "segments", ("details", literal, *template.segments[2:]))
+    digest = canonical_policy_digest(route.policy)
+    object.__setattr__(route.policy, "policy_digest", digest)
+    object.__setattr__(intent, "policy_digest", digest)
+    path_segments = intent.path.split("/")
+    path_segments[2] = literal
+    object.__setattr__(intent, "path", "/".join(path_segments))
+
+    await _assert_rejected_before_policy_or_hop(route, intent)
+
+
 def _hop_response(
     *,
     status_code: int = 200,

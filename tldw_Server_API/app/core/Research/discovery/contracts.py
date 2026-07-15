@@ -324,6 +324,8 @@ class PathTemplate:
                     not segment
                     or not segment.isascii()
                     or any(not "!" <= character <= "~" for character in segment)
+                    or segment in {".", ".."}
+                    or any(character in "%?#" for character in segment)
                     or "/" in segment
                     or "\\" in segment
                 ):
@@ -436,9 +438,9 @@ class RoutePolicy:
     pagination_json_body_key: str | None = None
     allowed_json_body_keys: tuple[str, ...] = ()
     integer_json_body_keys: tuple[str, ...] = ()
+    policy_digest: str = ""
     path_template: PathTemplate | None = None
     query_value_policies: tuple[QueryValuePolicy, ...] = ()
-    policy_digest: str = ""
 
     def __post_init__(self) -> None:
         _require_nonempty("policy_version", self.policy_version)
