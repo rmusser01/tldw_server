@@ -1309,9 +1309,10 @@ def test_postgres_preflight_admission_uses_transaction_advisory_lock_before_capa
             return self.row
 
     @contextmanager
-    def fake_connection(*, owner_user_id, write):
+    def fake_connection(*, owner_user_id, write, rls_admin=False):
         assert owner_user_id == "owner-1"
         assert write is True
+        assert rls_admin is True
         yield object()
 
     def fake_query(_db, sql, params=()):

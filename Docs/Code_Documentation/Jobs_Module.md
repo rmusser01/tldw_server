@@ -121,7 +121,7 @@ Audio Studio job payloads are sanitized before persistence. Client requests must
   - Periodically flags (and optionally fixes) impossible states like leases on non-processing jobs and expired processing leases.
 - Postgres RLS (optional):
   - `JOBS_PG_RLS_ENABLE` (default false): Enable row-level security policies that scope Jobs access by domain/owner and playlist authority tables by owner.
-  - `JOBS_PG_RLS_ROLE` must be a dedicated `NOLOGIN` group role. The application login receives membership and `JobManager` assumes that role for managed connections.
+  - `JOBS_PG_RLS_ROLE` must be a dedicated `NOLOGIN`, non-superuser group role without `BYPASSRLS`. The installer adds narrowly enumerated Jobs/playlist insert and sequence rights alongside its schema read/update/delete grant; the application login receives membership and `JobManager` assumes the role for managed connections.
   - Use `JobManager.rls_context(...)` around owner-scoped operations. It restores prior context across nesting and exceptions; playlist authority policies fail closed when `app.owner_user_id` is unset or blank.
   - RLS is a trusted-application query-bug guardrail. It is not a defense against direct database access, SQL injection, a compromised application login, or database owner/superuser access; enforce network and credential least privilege separately.
 - Metrics/Tracing buckets:

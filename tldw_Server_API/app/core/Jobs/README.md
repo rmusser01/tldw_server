@@ -65,7 +65,7 @@ quotas, metrics, events, audit hooks, and worker SDK utilities.
 
 - Postgres paths preserve RLS and domain allowlist behavior through endpoint context and manager calls. Do not fabricate owner or principal context to make an admin route easier.
 - Treat Postgres RLS as a guardrail against trusted-application query bugs, not as the primary authentication boundary. It does not protect against direct database access, SQL injection, a compromised application login, or database owner/superuser access; restrict network access and credentials independently.
-- `JOBS_PG_RLS_ROLE` must name a dedicated `NOLOGIN` group role. Grant the application login membership and let `JobManager` assume the role; never configure a directly usable login as the RLS role.
+- `JOBS_PG_RLS_ROLE` must name a dedicated `NOLOGIN`, non-superuser group role without `BYPASSRLS`. The installer adds narrowly enumerated Jobs/playlist insert and sequence rights alongside its schema read/update/delete grant; grant the application login membership and let `JobManager` assume the role.
 - Use `JobManager.rls_context(...)` for owner-scoped work so nested and exceptional paths restore the previous context. Playlist authority queries fail closed unless a nonblank owner is set; reserve admin context for genuinely global operations.
 - Destructive admin operations such as prune, batch cancel, and quarantine requeue require scoped filters and confirmation behavior outside test mode.
 - Leases are the concurrency boundary. Workers must complete, fail, or renew with the expected worker and lease identifiers rather than updating rows directly.

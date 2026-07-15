@@ -497,10 +497,16 @@ class PlaylistIngestStore:
         return db if result is None else result
 
     @contextmanager
-    def _connection(self, *, owner_user_id: str, write: bool) -> Iterator[Any]:
+    def _connection(
+        self,
+        *,
+        owner_user_id: str,
+        write: bool,
+        rls_admin: bool = False,
+    ) -> Iterator[Any]:
         owner = self._owner(owner_user_id)
         with self._jobs.rls_context(
-            is_admin=False,
+            is_admin=rls_admin,
             domain_allowlist=_PREFLIGHT_JOB_DOMAIN,
             owner_user_id=owner,
         ):
@@ -816,7 +822,7 @@ class PlaylistIngestStore:
         if type(ttl_seconds) is not int or ttl_seconds < 1:
             raise ValueError("ttl_seconds must be positive")
         preflight_id = str(uuid4())
-        with self._connection(owner_user_id=owner, write=True) as db:
+        with self._connection(owner_user_id=owner, write=True, rls_admin=True) as db:
             if self._postgres:
                 self._query(
                     db,

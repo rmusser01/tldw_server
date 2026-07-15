@@ -6,6 +6,7 @@ psycopg = pytest.importorskip("psycopg")
 
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.pg_migrations import (
+    JobsRLSInstallationError,
     ensure_jobs_rls_policies_pg,
     ensure_jobs_tables_pg,
 )
@@ -18,6 +19,21 @@ PLAYLIST_RLS_TABLES = (
     "media_ingest_runs",
     "media_ingest_run_items",
     "media_ingest_run_events",
+)
+JOBS_RLS_INSERT_TABLES = (
+    "jobs",
+    "job_events",
+    "job_counters",
+    "job_queue_controls",
+    "job_sla_policies",
+    "job_attachments",
+    "job_dependencies",
+    "jobs_archive",
+)
+JOBS_RLS_SEQUENCES = (
+    "jobs_id_seq",
+    "job_events_id_seq",
+    "job_attachments_id_seq",
 )
 
 PLAYLIST_RLS_CHILD_PARENTS = {
@@ -117,6 +133,84 @@ def test_playlist_rls_installation_propagates_security_critical_alter_failure(mo
         ensure_jobs_rls_policies_pg("postgresql://example/jobs")
 
 
+def test_playlist_rls_installer_keeps_legacy_tables_best_effort_for_psycopg_errors(monkeypatch):
+    class MissingLegacyCursor:
+        last_statement = ""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, statement, _params=None):
+            self.last_statement = str(statement)
+            if self.last_statement == "ALTER TABLE jobs ENABLE ROW LEVEL SECURITY":
+                raise psycopg.Error("legacy table unavailable")
+
+        def fetchone(self):
+            if "relrowsecurity" in self.last_statement:
+                return (True, True)
+            return None
+
+    class MissingLegacyConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def cursor(self):
+            return MissingLegacyCursor()
+
+    monkeypatch.delenv("JOBS_PG_RLS_ROLE", raising=False)
+    monkeypatch.setattr(psycopg, "connect", lambda *_args, **_kwargs: MissingLegacyConnection())
+
+    ensure_jobs_rls_policies_pg("postgresql://example/jobs")
+
+
+def test_jobs_schema_bootstrap_propagates_security_critical_rls_failure(monkeypatch):
+    from tldw_Server_API.app.core.Jobs import pg_migrations
+
+    class BootstrapCursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, _statement, _params=None):
+            return None
+
+        def fetchone(self):
+            return None
+
+    class BootstrapConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def cursor(self):
+            return BootstrapCursor()
+
+        def commit(self):
+            return None
+
+    def fail_rls(_db_url):
+        raise JobsRLSInstallationError("playlist RLS installation failed")
+
+    monkeypatch.setenv("JOBS_PG_RLS_ENABLE", "true")
+    monkeypatch.setattr(psycopg, "connect", lambda *_args, **_kwargs: BootstrapConnection())
+    monkeypatch.setattr(pg_migrations, "ensure_job_events_pg", lambda _db_url: None)
+    monkeypatch.setattr(pg_migrations, "ensure_job_counters_pg", lambda _db_url: None)
+    monkeypatch.setattr(pg_migrations, "ensure_jobs_rls_policies_pg", fail_rls)
+
+    with pytest.raises(JobsRLSInstallationError, match="playlist RLS installation failed"):
+        ensure_jobs_tables_pg("postgresql://example/jobs")
+
+
 def test_playlist_rls_role_grants_are_scoped_and_role_must_be_nologin(monkeypatch):
     statements: list[str] = []
 
@@ -137,7 +231,7 @@ def test_playlist_rls_role_grants_are_scoped_and_role_must_be_nologin(monkeypatc
             if "current_schema" in self.last_statement:
                 return ("public",)
             if "FROM pg_roles" in self.last_statement:
-                return (False,)
+                return (False, False, False)
             if "current_user" in self.last_statement:
                 return ("app_user",)
             if "relrowsecurity" in self.last_statement:
@@ -161,10 +255,11 @@ def test_playlist_rls_role_grants_are_scoped_and_role_must_be_nologin(monkeypatc
 
     installed_sql = "\n".join(statements)
     assert "GRANT INSERT ON" in installed_sql
-    for table in PLAYLIST_RLS_TABLES:
+    for table in (*JOBS_RLS_INSERT_TABLES, *PLAYLIST_RLS_TABLES):
         assert table in installed_sql
     assert "GRANT USAGE, SELECT ON SEQUENCE" in installed_sql
     for sequence in (
+        *JOBS_RLS_SEQUENCES,
         "playlist_preflight_items_id_seq",
         "playlist_materialization_items_id_seq",
         "media_ingest_run_items_id_seq",
@@ -173,7 +268,15 @@ def test_playlist_rls_role_grants_are_scoped_and_role_must_be_nologin(monkeypatc
         assert sequence in installed_sql
 
 
-def test_playlist_rls_rejects_configured_login_role(monkeypatch):
+@pytest.mark.parametrize(
+    ("role_flags", "expected_error"),
+    [
+        ((True, False, False), "NOLOGIN"),
+        ((False, True, False), "superuser"),
+        ((False, False, True), "BYPASSRLS"),
+    ],
+)
+def test_playlist_rls_rejects_configured_privileged_role(monkeypatch, role_flags, expected_error):
     class LoginRoleCursor:
         last_statement = ""
 
@@ -190,7 +293,7 @@ def test_playlist_rls_rejects_configured_login_role(monkeypatch):
             if "current_schema" in self.last_statement:
                 return ("public",)
             if "FROM pg_roles" in self.last_statement:
-                return (True,)
+                return role_flags
             return None
 
     class LoginRoleConnection:
@@ -206,7 +309,7 @@ def test_playlist_rls_rejects_configured_login_role(monkeypatch):
     monkeypatch.setenv("JOBS_PG_RLS_ROLE", "jobs_rls")
     monkeypatch.setattr(psycopg, "connect", lambda *_args, **_kwargs: LoginRoleConnection())
 
-    with pytest.raises(RuntimeError, match="NOLOGIN"):
+    with pytest.raises(RuntimeError, match=expected_error):
         ensure_jobs_rls_policies_pg("postgresql://example/jobs")
 
 
@@ -225,12 +328,17 @@ def _dsn_or_skip(monkeypatch):
     from psycopg import sql as _sql
     with psycopg.connect(base_dsn, autocommit=True) as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT rolcanlogin FROM pg_roles WHERE rolname = %s", (role,))
+            cur.execute(
+                "SELECT rolcanlogin, rolsuper, rolbypassrls FROM pg_roles WHERE rolname = %s",
+                (role,),
+            )
             role_ident = _sql.Identifier(role)
             if not cur.fetchone():
                 cur.execute(_sql.SQL("CREATE ROLE {} NOLOGIN").format(role_ident))
             else:
-                cur.execute(_sql.SQL("ALTER ROLE {} NOLOGIN").format(role_ident))
+                cur.execute(
+                    _sql.SQL("ALTER ROLE {} NOLOGIN NOSUPERUSER NOBYPASSRLS").format(role_ident)
+                )
             cur.execute("SELECT current_schema()")
             schema_row = cur.fetchone()
             schema_name = (schema_row[0] if schema_row else None) or "public"
@@ -520,8 +628,11 @@ def test_playlist_rls_role_and_table_flags_are_hardened(monkeypatch):
 
     with psycopg.connect(admin_dsn, autocommit=True) as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT rolcanlogin FROM pg_roles WHERE rolname = 'jobs_rls'")
-            assert cur.fetchone() == (False,)
+            cur.execute(
+                "SELECT rolcanlogin, rolsuper, rolbypassrls "
+                "FROM pg_roles WHERE rolname = 'jobs_rls'"
+            )
+            assert cur.fetchone() == (False, False, False)
             cur.execute(
                 """
                 SELECT relname, relrowsecurity, relforcerowsecurity

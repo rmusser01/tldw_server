@@ -98,6 +98,10 @@ def test_playlist_store_sets_owner_before_postgres_cursor_and_restores(monkeypat
                 assert _current_rls_context() == (False, "media_ingest", "u2")
                 raise RuntimeError("store failure")
         assert _current_rls_context() == (True, "outer", "outer-owner")
+
+        with store._connection(owner_user_id="u3", write=False, rls_admin=True):
+            assert _current_rls_context() == (True, "media_ingest", "u3")
+        assert _current_rls_context() == (True, "outer", "outer-owner")
     finally:
         JobManager.clear_rls_context()
 
@@ -106,4 +110,6 @@ def test_playlist_store_sets_owner_before_postgres_cursor_and_restores(monkeypat
         ("cursor", (False, "media_ingest", "u1")),
         ("connect", (False, "media_ingest", "u2")),
         ("cursor", (False, "media_ingest", "u2")),
+        ("connect", (True, "media_ingest", "u3")),
+        ("cursor", (True, "media_ingest", "u3")),
     ]
