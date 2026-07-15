@@ -828,4 +828,134 @@ test.describe("Skills parity (extension)", () => {
       await extensionContext?.close()
     }
   })
+
+  test("covers session draft recovery", async () => {
+    test.setTimeout(120_000)
+
+    let extensionContext: BrowserContext | undefined
+
+    try {
+      const launch = await launchSkillsParity(mockSkillsBeginnerApi)
+      extensionContext = launch.context
+
+      const { diagnostics, page } = launch
+      const skillsHeading = page.getByRole("heading", {
+        level: 1,
+        name: "Skills",
+        exact: true,
+      })
+      const newSkill = page.getByRole("button", {
+        name: "New Skill",
+        exact: true,
+      })
+      const recoveryNotice = "Recovered your unsaved draft from this session."
+      const customName = "session-draft-recovery-check"
+      const customInstructions =
+        "Recover this session-only draft and organize $ARGUMENTS into verified notes."
+
+      await expect.poll(() => page.evaluate(() => window.location.hash)).toBe("#/skills")
+      await expect(skillsHeading).toBeVisible()
+      await expect(newSkill).toBeVisible()
+      await newSkill.click()
+
+      const initialDialog = page.getByRole("dialog", {
+        name: /^New Skill: /,
+      })
+      await expect(initialDialog).toBeVisible()
+      const initialNameInput = initialDialog.getByRole("textbox", {
+        name: "Name",
+        exact: true,
+      })
+      const initialInstructionsInput = initialDialog.getByRole("textbox", {
+        name: "Instructions",
+        exact: true,
+      })
+      const initialName = await initialNameInput.inputValue()
+      const initialInstructions = await initialInstructionsInput.inputValue()
+
+      expect(customName).not.toBe(initialName)
+      expect(customInstructions).not.toBe(initialInstructions)
+
+      await initialNameInput.fill(customName)
+      await initialInstructionsInput.fill(customInstructions)
+      await expect(initialNameInput).toHaveValue(customName)
+      await expect(initialInstructionsInput).toHaveValue(customInstructions)
+
+      await page.reload({ waitUntil: "domcontentloaded" })
+
+      await expect.poll(() => page.evaluate(() => window.location.hash)).toBe("#/skills")
+      await expect(skillsHeading).toBeVisible()
+      await expect(newSkill).toBeVisible()
+      await newSkill.click()
+
+      const recoveredDialog = page.getByRole("dialog", {
+        name: /^New Skill: /,
+      })
+      await expect(recoveredDialog).toBeVisible()
+      const recoveredNameInput = recoveredDialog.getByRole("textbox", {
+        name: "Name",
+        exact: true,
+      })
+      const recoveredInstructionsInput = recoveredDialog.getByRole("textbox", {
+        name: "Instructions",
+        exact: true,
+      })
+      const recoveredNotice = recoveredDialog.getByText(recoveryNotice, {
+        exact: true,
+      })
+      const discardRecoveredDraft = recoveredDialog.getByRole("button", {
+        name: "Discard recovered draft",
+        exact: true,
+      })
+
+      await expect(recoveredNotice).toBeVisible()
+      await expect(discardRecoveredDraft).toBeVisible()
+      await expect(recoveredNameInput).toHaveValue(customName)
+      await expect(recoveredInstructionsInput).toHaveValue(customInstructions)
+
+      await discardRecoveredDraft.click()
+
+      await expect(recoveredNotice).toBeHidden()
+      await expect(recoveredNameInput).toHaveValue(initialName)
+      await expect(recoveredInstructionsInput).toHaveValue(initialInstructions)
+
+      await recoveredDialog.getByRole("button", {
+        name: "Cancel",
+        exact: true,
+      }).click()
+      await expect(recoveredDialog).toBeHidden()
+      await expect(
+        page.getByRole("dialog", {
+          name: "Discard unsaved skill draft?",
+          exact: true,
+        }),
+      ).toHaveCount(0)
+
+      await newSkill.click()
+
+      const reopenedDialog = page.getByRole("dialog", {
+        name: /^New Skill: /,
+      })
+      await expect(reopenedDialog).toBeVisible()
+      await expect(
+        reopenedDialog.getByText(recoveryNotice, { exact: true }),
+      ).toHaveCount(0)
+      await expect(
+        reopenedDialog.getByRole("textbox", { name: "Name", exact: true }),
+      ).toHaveValue(initialName)
+      await expect(
+        reopenedDialog.getByRole("textbox", {
+          name: "Instructions",
+          exact: true,
+        }),
+      ).toHaveValue(initialInstructions)
+
+      expect(diagnostics.pageErrors).toEqual([])
+      expect(diagnostics.consoleErrors).toEqual([])
+      expect(diagnostics.requestFailures).toEqual([])
+      expect(diagnostics.unexpectedApiRequests).toEqual([])
+    } finally {
+      await extensionContext?.close()
+    }
+  })
 })
