@@ -300,7 +300,7 @@ python -m pytest -q \
 
 **Tests:** New focused family suite plus foundation registry/compatibility checks.
 
-**Status:** In Progress
+**Status:** Complete
 
 ### Files
 
@@ -328,18 +328,18 @@ Freeze distinct constants for the family catalog, registry, readiness, policy, a
 
 ### Test-first steps
 
-- [ ] Write RED registry tests for exact stable source IDs `biorxiv`/`medrxiv`, aliases, priorities after the foundation set, site hosts, categories/content types, intended surfaces, ordered route references, six route IDs, two backend IDs, and exact `https:443` origins.
-- [ ] Assert the general routes use `RouteKind.AGGREGATOR`, `SourceConstraint.PROVIDER_SOURCE_FILTER`, `QueryMode.GENERAL_FREE_TEXT`, adapter `europe_pmc_preprint_v2`, one page, zero redirects, no credentials, and exact `source_platform` predicates.
-- [ ] Assert the details routes are declared now but use the correct direct kinds, query modes, server-specific literal templates, shared details backend, and explicit `DISABLED` readiness reason until Stage 4 supplies the adapter. Stage 4 changes those entries to `READY`; no ready route may lack an adapter.
-- [ ] Prove foundation and shadow catalog/registry/readiness versions differ, all source values match their enclosing catalog version, foundation values are unchanged, duplicate IDs are rejected, and composing adapter maps rejects duplicate adapter IDs.
-- [ ] Write RED request tests for exact Europe PMC path `/europepmc/webservices/rest/search`; required keys `query`, `format`, `resultType`, `pageSize`; exact `format=json`; exact `resultType=core`; `pageSize=min(result_limit, route.max_results)`; publisher-specific fixed suffix; no `cursorMark`.
-- [ ] Add one bounded family parse profile keyed by exact `(adapter_id, adapter_version)`. Reuse `_ParsingProfile`, `_strict_json`, `_checked_response`, `_require_dict`, `_require_list`, `_required_text`, `_optional_text`, `_base_record`, `_raise_adapter_error`, `build_fingerprint`, `DiscoveryOutcomeIdentity`, `DiscoveryAdapterError`, and `BoundDispatch` rather than copying their behavior.
-- [ ] Write RED success and valid-empty tests using only the three checked-in fixtures. Accept exact Europe PMC core result shape, top-level `source == "PPR"`, and exact known `bookOrReportDetails.publisher` values.
-- [ ] Normalize a validated known publisher into `source_platform`; let the existing exact `SourcePredicate` decide bioRxiv versus medRxiv. Missing/unknown attribution is ambiguous; a different known publisher is a non-match.
-- [ ] Retain only bounded title, authors, abstract/snippet, date/year, DOI, PPR identifier, derived source platform, provider name/IDs, and synthesized inert links. Synthesize only `https://doi.org/{doi}` or `https://europepmc.org/article/PPR/{id}` from strict identifiers; leave `pdf_url=None`.
-- [ ] Drop provider URLs, `nextCursorMark`, `nextPageUrl`, HTML, grants, annotations, references, full-text/JATS links, and unknown fields. Convert bounded title/abstract HTML fragments to plain text without I/O.
-- [ ] Add parameterized mutations for malformed JSON/UTF-8/schema, HTML bounds, too many records, missing/unknown/mismatched source/publisher, bad DOI/PPR IDs, duplicate/conflicting identities, hostile next-page URLs, rate limit with/without valid retry metadata, timeout, cancellation, and one-source partial failure.
-- [ ] Prove the adapter invokes `dispatch(intent)` exactly once, uses no cursor, ignores provider continuation fields, performs zero result-link requests, and emits only existing typed errors/outcomes.
+- [x] Write RED registry tests for exact stable source IDs `biorxiv`/`medrxiv`, aliases, priorities after the foundation set, site hosts, categories/content types, intended surfaces, ordered route references, six route IDs, two backend IDs, and exact `https:443` origins.
+- [x] Assert the general routes use `RouteKind.AGGREGATOR`, `SourceConstraint.PROVIDER_SOURCE_FILTER`, `QueryMode.GENERAL_FREE_TEXT`, adapter `europe_pmc_preprint_v2`, one page, zero redirects, no credentials, and exact `source_platform` predicates.
+- [x] Assert the details routes are declared now but use the correct direct kinds, query modes, server-specific literal templates, shared details backend, and explicit `DISABLED` readiness reason until Stage 4 supplies the adapter. Stage 4 changes those entries to `READY`; no ready route may lack an adapter.
+- [x] Prove foundation and shadow catalog/registry/readiness versions differ, all source values match their enclosing catalog version, foundation values are unchanged, duplicate IDs are rejected, and composing adapter maps rejects duplicate adapter IDs.
+- [x] Write RED request tests for exact Europe PMC path `/europepmc/webservices/rest/search`; required keys `query`, `format`, `resultType`, `pageSize`; exact `format=json`; exact `resultType=core`; `pageSize=min(result_limit, route.max_results)`; publisher-specific fixed suffix; no `cursorMark`.
+- [x] Add one bounded family parse profile keyed by exact `(adapter_id, adapter_version)`. Reuse `_ParsingProfile`, `_strict_json`, `_checked_response`, `_require_dict`, `_require_list`, `_required_text`, `_optional_text`, `_base_record`, `_raise_adapter_error`, `build_fingerprint`, `DiscoveryOutcomeIdentity`, `DiscoveryAdapterError`, and `BoundDispatch` rather than copying their behavior.
+- [x] Write RED success and valid-empty tests using only the three checked-in fixtures. Accept exact Europe PMC core result shape, top-level `source == "PPR"`, and exact known `bookOrReportDetails.publisher` values.
+- [x] Normalize a validated known publisher into `source_platform`; let the existing exact `SourcePredicate` decide bioRxiv versus medRxiv. Missing/unknown attribution is ambiguous; a different known publisher is a non-match.
+- [x] Retain only bounded title, authors, abstract/snippet, date/year, DOI, PPR identifier, derived source platform, provider name/IDs, and synthesized inert links. Synthesize only `https://doi.org/{doi}` or `https://europepmc.org/article/PPR/{id}` from strict identifiers; leave `pdf_url=None`.
+- [x] Drop provider URLs, `nextCursorMark`, `nextPageUrl`, HTML, grants, annotations, references, full-text/JATS links, and unknown fields. Convert bounded title/abstract HTML fragments to plain text without I/O.
+- [x] Add parameterized mutations for malformed JSON/UTF-8/schema, HTML bounds, too many records, missing/unknown/mismatched source/publisher, bad DOI/PPR IDs, duplicate/conflicting identities, hostile next-page URLs, rate limit with/without valid retry metadata, timeout, cancellation, and one-source partial failure.
+- [x] Prove the adapter invokes `dispatch(intent)` exactly once, uses no cursor, ignores provider continuation fields, performs zero result-link requests, and emits only existing typed errors/outcomes.
 
 ### Focused RED/GREEN command
 
@@ -358,6 +358,12 @@ python -m pytest -q \
 
 `feat(research): add Europe PMC preprint discovery routes`
 
+- Implementation: `b6d416cf4dfbcb4109d6668c17c34ed3f35492eb`.
+- Exact six-suite gate: 798 passed with four pre-existing warnings; final family suite: 159 passed with four pre-existing warnings.
+- Ruff, Black, Python byte-compilation, fixture JSON validation, diff hygiene, and Bandit passed; Bandit reported zero findings and zero errors.
+- Independent specification and code-quality/security reviews found no Critical, Important, or actionable Minor findings.
+- The family remains shadow-only: Europe PMC general routes are ready, the four official-details routes remain disabled, and production Search/Deep Research consumers are unchanged.
+
 ## Task 4 / Stage 4: Implement Strict Official Details Lookup and Interval Adapters
 
 **Goal:** Add truthful DOI, date-interval, and category operations over the official bioRxiv/medRxiv details service with response-to-request binding and response-derived path pagination.
@@ -366,7 +372,7 @@ python -m pytest -q \
 
 **Tests:** Expand the focused family suite with distinct valid details fixtures and derived failure cases.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ### Files
 
