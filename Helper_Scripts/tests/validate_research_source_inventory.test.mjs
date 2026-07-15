@@ -609,26 +609,43 @@ test("the canonical closure gate rejects a structurally valid one-row substitute
 });
 
 
-test("required sources block contract freeze until mapped to their exact targets", () => {
+test("required sources require exact aggregator, lookup, and interval semantics", () => {
   const { manifest, ledger } = validDocuments();
+  const publisherPredicate = {
+    provider_field: "bookOrReportDetails.publisher",
+    operator: "equals",
+    values: ["bioRxiv"],
+  };
   const requiredSources = {
     "sourclip-2026-07-13-0001": {
       canonicalTarget: "biorxiv",
       generalRoute: {
-        id: "biorxiv_site_search",
-        routeKind: "site_search",
-        backendId: "biorxiv_site_search",
+        id: "biorxiv_europe_pmc_search_aggregator",
+        routeKind: "aggregator",
+        backendId: "europe_pmc_rest_api",
         queryModes: ["general_free_text"],
-        sourceConstraint: "native_corpus",
-        attributionBasis: "native_response",
+        sourceConstraint: "provider_source_filter",
+        sourcePredicate: publisherPredicate,
+        attributionBasis: "provider_source_field",
         evidenceHosts: ["example.test"],
       },
-      boundedRoute: {
-        id: "biorxiv_details_api",
+      lookupRoute: {
+        id: "biorxiv_details_lookup_direct",
         routeKind: "direct",
         backendId: "biorxiv_details_api",
-        queryModes: ["identifier_lookup", "recent_feed", "date_interval", "category_browse"],
+        queryModes: ["identifier_lookup"],
         sourceConstraint: "native_corpus",
+        sourcePredicate: null,
+        attributionBasis: "native_response",
+        evidenceHosts: ["api.example.test"],
+      },
+      intervalRoute: {
+        id: "biorxiv_details_interval_direct",
+        routeKind: "direct",
+        backendId: "biorxiv_details_api",
+        queryModes: ["date_interval", "category_browse"],
+        sourceConstraint: "native_corpus",
+        sourcePredicate: null,
         attributionBasis: "native_response",
         evidenceHosts: ["api.example.test"],
       },
@@ -649,14 +666,10 @@ test("required sources block contract freeze until mapped to their exact targets
     false,
   );
 
-  const row = mapExampleRow(manifest, ledger, mappedRoute({
-    routeCandidateId: "fake_route",
-    plannedBackendId: "fake_backend",
-  }));
+  const row = mapExampleRow(manifest, ledger);
   row.canonical_targets = ["wrong_target"];
   ledger.target_definitions[0].canonical_target_id = "wrong_target";
   refreshLedgerDigest(ledger);
-
   const wrongTarget = validateInventoryDocuments(manifest, ledger, {
     freeze: freezeFor(manifest),
     requiredSources,
@@ -666,10 +679,6 @@ test("required sources block contract freeze until mapped to their exact targets
   assert.deepEqual(wrongTarget.errors, []);
   assert.equal(wrongTarget.counts.triaged, 1);
   assert.equal(wrongTarget.contract_freeze_ready, false);
-  assert.equal(
-    wrongTarget.required_sources["sourclip-2026-07-13-0001"].mapping_satisfied,
-    false,
-  );
 
   row.canonical_targets = ["biorxiv"];
   ledger.target_definitions[0].canonical_target_id = "biorxiv";
@@ -682,74 +691,158 @@ test("required sources block contract freeze until mapped to their exact targets
   });
   assert.deepEqual(correctTargetWrongRoute.errors, []);
   assert.equal(correctTargetWrongRoute.contract_freeze_ready, false);
-  assert.equal(
-    correctTargetWrongRoute.required_sources["sourclip-2026-07-13-0001"].mapping_satisfied,
-    false,
-  );
 
   row.route_candidates = [
     {
+      ...mappedRoute({
+        routeCandidateId: "biorxiv_europe_pmc_search_aggregator",
+        plannedBackendId: "europe_pmc_rest_api",
+        evidenceReference: "https://example.test/api",
+      }),
+      route_kind: "aggregator",
+      source_constraint: "provider_source_filter",
+      source_constraint_predicate: structuredClone(publisherPredicate),
+      attribution_basis: "provider_source_field",
+    },
+    {
+      ...mappedRoute({
+        routeCandidateId: "biorxiv_details_lookup_direct",
+        plannedBackendId: "biorxiv_details_api",
+        evidenceReference: "https://api.example.test/details/biorxiv/help",
+        queryModes: ["identifier_lookup"],
+      }),
+      route_kind: "direct",
+    },
+    {
+      ...mappedRoute({
+        routeCandidateId: "biorxiv_details_interval_direct",
+        plannedBackendId: "biorxiv_details_api",
+        evidenceReference: "https://api.example.test/details/biorxiv/help",
+        queryModes: ["date_interval", "category_browse"],
+      }),
+      route_kind: "direct",
+    },
+  ];
+  row.route_kinds = ["aggregator", "direct"];
+  refreshLedgerDigest(ledger);
+  const completeMapping = validateInventoryDocuments(manifest, ledger, {
+    freeze: freezeFor(manifest),
+    requiredSources,
+    schemaValidated: true,
+    trustedReviewerIds: ["research-maintainer"],
+  });
+  assert.deepEqual(completeMapping.errors, []);
+  assert.equal(completeMapping.contract_freeze_ready, true);
+  const requiredState = completeMapping.required_sources["sourclip-2026-07-13-0001"];
+  assert.deepEqual(requiredState, {
+    canonical_target: "biorxiv",
+    required_general_route_id: "biorxiv_europe_pmc_search_aggregator",
+    required_lookup_route_id: "biorxiv_details_lookup_direct",
+    required_interval_route_id: "biorxiv_details_interval_direct",
+    captured_label: "Example Source",
+    resolution: "mapped",
+    canonical_targets: ["biorxiv"],
+    declared_surfaces: ["standalone_search", "deep_research"],
+    mapping_satisfied: true,
+  });
+
+  for (const credentialRequirement of ["none", "browser_session"]) {
+    row.route_candidates.push({
       ...mappedRoute({
         routeCandidateId: "biorxiv_site_search",
         plannedBackendId: "biorxiv_site_search",
         evidenceReference: "https://example.test/search",
       }),
       route_kind: "site_search",
-    },
-    {
-      ...mappedRoute({
-        routeCandidateId: "biorxiv_details_api",
-        plannedBackendId: "biorxiv_details_api",
-        evidenceReference: "https://api.example.test/details/biorxiv/help",
-        queryModes: ["identifier_lookup", "recent_feed", "date_interval", "category_browse"],
-      }),
-      route_kind: "direct",
-    },
-  ];
-  row.route_kinds = ["site_search", "direct"];
-  refreshLedgerDigest(ledger);
-  const correctTargetAndRoute = validateInventoryDocuments(manifest, ledger, {
-    freeze: freezeFor(manifest),
-    requiredSources,
-    schemaValidated: true,
-    trustedReviewerIds: ["research-maintainer"],
-  });
-  assert.deepEqual(correctTargetAndRoute.errors, []);
-  assert.equal(correctTargetAndRoute.contract_freeze_ready, true);
-  assert.equal(
-    correctTargetAndRoute.required_sources["sourclip-2026-07-13-0001"].mapping_satisfied,
-    true,
-  );
+      credential_requirement: credentialRequirement,
+    });
+    row.route_kinds = ["aggregator", "direct", "site_search"];
+    refreshLedgerDigest(ledger);
+    const staleNativeCandidate = validateInventoryDocuments(manifest, ledger, {
+      freeze: freezeFor(manifest),
+      requiredSources,
+      schemaValidated: true,
+      trustedReviewerIds: ["research-maintainer"],
+    });
+    assert.equal(
+      staleNativeCandidate.required_sources["sourclip-2026-07-13-0001"]
+        .mapping_satisfied,
+      false,
+    );
+    row.route_candidates.pop();
+  }
+  row.route_kinds = ["aggregator", "direct"];
 
   row.route_candidates.pop();
-  row.route_kinds = ["site_search"];
   refreshLedgerDigest(ledger);
-  const missingBoundedRoute = validateInventoryDocuments(manifest, ledger, {
+  const missingIntervalRoute = validateInventoryDocuments(manifest, ledger, {
     freeze: freezeFor(manifest),
     requiredSources,
     schemaValidated: true,
     trustedReviewerIds: ["research-maintainer"],
   });
-  assert.equal(missingBoundedRoute.contract_freeze_ready, false);
+  assert.equal(missingIntervalRoute.contract_freeze_ready, false);
 
   row.route_candidates.push({
     ...mappedRoute({
-      routeCandidateId: "biorxiv_details_api",
+      routeCandidateId: "biorxiv_details_interval_direct",
       plannedBackendId: "biorxiv_details_api",
       evidenceReference: "https://api.example.test/details/biorxiv/help",
-      queryModes: ["general_free_text"],
+      queryModes: ["recent_feed", "date_interval", "category_browse"],
     }),
     route_kind: "direct",
   });
-  row.route_kinds = ["site_search", "direct"];
   refreshLedgerDigest(ledger);
-  const boundedRouteMislabeledGeneral = validateInventoryDocuments(manifest, ledger, {
+  const intervalRouteAdvertisesRecent = validateInventoryDocuments(manifest, ledger, {
     freeze: freezeFor(manifest),
     requiredSources,
     schemaValidated: true,
     trustedReviewerIds: ["research-maintainer"],
   });
-  assert.equal(boundedRouteMislabeledGeneral.contract_freeze_ready, false);
+  assert.equal(intervalRouteAdvertisesRecent.contract_freeze_ready, false);
+
+  row.route_candidates[2].query_modes = ["date_interval", "category_browse"];
+  row.route_candidates[0].source_constraint_predicate.values = ["medRxiv"];
+  refreshLedgerDigest(ledger);
+  const wrongPublisher = validateInventoryDocuments(manifest, ledger, {
+    freeze: freezeFor(manifest),
+    requiredSources,
+    schemaValidated: true,
+    trustedReviewerIds: ["research-maintainer"],
+  });
+  assert.deepEqual(wrongPublisher.errors, []);
+  assert.equal(wrongPublisher.contract_freeze_ready, false);
+
+  for (const predicate of [
+    {
+      provider_field: "source",
+      operator: "equals",
+      values: ["bioRxiv"],
+    },
+    {
+      provider_field: "bookOrReportDetails.publisher",
+      operator: "one_of",
+      values: ["bioRxiv"],
+    },
+    {
+      operator: "equals",
+      values: ["bioRxiv"],
+    },
+  ]) {
+    row.route_candidates[0].source_constraint_predicate = predicate;
+    refreshLedgerDigest(ledger);
+    const predicateMismatch = validateInventoryDocuments(manifest, ledger, {
+      freeze: freezeFor(manifest),
+      requiredSources,
+      schemaValidated: true,
+      trustedReviewerIds: ["research-maintainer"],
+    });
+    assert.equal(
+      predicateMismatch.required_sources["sourclip-2026-07-13-0001"]
+        .mapping_satisfied,
+      false,
+    );
+  }
 });
 
 
@@ -963,8 +1056,9 @@ test("the authoritative CLI composes schema and semantic validation", (t) => {
     VALIDATOR_PATH,
     "--root", ROOT,
     "--gate", "contract",
-    "--as-of", "2026-07-13",
+    "--as-of", "2026-07-15",
     "--trusted-reviewer", "codex-task-12968.1-source-triage",
+    "--trusted-reviewer", "codex-task-12968.5-inventory-review",
     "--json",
   ];
   const valid = spawnSync(process.execPath, args, {
@@ -976,6 +1070,11 @@ test("the authoritative CLI composes schema and semantic validation", (t) => {
   const validReport = JSON.parse(valid.stdout);
   assert.equal(validReport.schema_validated, true);
   assert.deepEqual(validReport.errors, []);
+  assert.equal(validReport.as_of, "2026-07-15");
+  assert.deepEqual(validReport.trusted_reviewer_ids, [
+    "codex-task-12968.1-source-triage",
+    "codex-task-12968.5-inventory-review",
+  ]);
   assert.equal(validReport.contract_freeze_ready, true);
   assert.match(validReport.digests.schema_validator, /^[a-f0-9]{64}$/);
   assert.deepEqual(
@@ -985,8 +1084,30 @@ test("the authoritative CLI composes schema and semantic validation", (t) => {
       "Docs/Design/research_source_inventory/research-source-inventory-freeze-report-2026-07-13.json",
     ), "utf8")),
   );
+  assert.equal(
+    valid.stdout,
+    fs.readFileSync(path.join(
+      ROOT,
+      "Docs/Design/research_source_inventory/research-source-inventory-freeze-report-2026-07-13.json",
+    ), "utf8"),
+  );
   assert.equal(validReport.counts.resolution.mapped, 191);
   assert.equal(validReport.counts.resolution.credentialed_out_of_scope, 35);
+  assert.deepEqual(validReport.counts.implementation, {
+    planned: 233,
+    implemented: 2,
+  });
+  assert.deepEqual(validReport.counts.fixture, {
+    not_run: 233,
+    passed: 2,
+    failed: 0,
+  });
+  assert.deepEqual(validReport.counts.live, {
+    not_run: 235,
+    current: 0,
+    expired: 0,
+    failed: 0,
+  });
 
   const authoritativeLedger = JSON.parse(fs.readFileSync(path.join(
     ROOT,
@@ -995,6 +1116,88 @@ test("the authoritative CLI composes schema and semantic validation", (t) => {
   const rowsById = new Map(
     authoritativeLedger.rows.map((row) => [row.inventory_id, row]),
   );
+  assert.equal(authoritativeLedger.generated_at_utc, "2026-07-15T20:46:48Z");
+  const expectedRequiredSources = {
+    "sourclip-2026-07-13-0021": {
+      target: "biorxiv",
+      publisher: "bioRxiv",
+    },
+    "sourclip-2026-07-13-0022": {
+      target: "medrxiv",
+      publisher: "medRxiv",
+    },
+  };
+  for (const [inventoryId, expected] of Object.entries(expectedRequiredSources)) {
+    const required = validReport.required_sources[inventoryId];
+    assert.equal(
+      required.required_general_route_id,
+      `${expected.target}_europe_pmc_search_aggregator`,
+    );
+    assert.equal(
+      required.required_lookup_route_id,
+      `${expected.target}_details_lookup_direct`,
+    );
+    assert.equal(
+      required.required_interval_route_id,
+      `${expected.target}_details_interval_direct`,
+    );
+    assert.equal(required.mapping_satisfied, true);
+
+    const row = rowsById.get(inventoryId);
+    assert.deepEqual(row.canonical_targets, [expected.target]);
+    assert.deepEqual(row.declared_surfaces, ["standalone_search", "deep_research"]);
+    assert.equal(row.implementation_state, "implemented");
+    assert.equal(row.fixture_state, "passed");
+    assert.equal(row.live_state, "not_run");
+    assert.deepEqual(row.certifications, []);
+    assert.deepEqual(row.ownership, {
+      reviewer: "codex-task-12968.5-inventory-review",
+      review_date: "2026-07-15",
+      workstream: "TASK-12968.5",
+      follow_up_task: "TASK-12968.5",
+      revisit_trigger: "Run live and product-surface certification before presenting these implemented shadow routes as user-ready.",
+    });
+    assert.deepEqual(row.route_kinds, ["aggregator", "direct"]);
+    assert.deepEqual(
+      row.route_candidates.map((route) => route.route_candidate_id),
+      [
+        `${expected.target}_europe_pmc_search_aggregator`,
+        `${expected.target}_details_lookup_direct`,
+        `${expected.target}_details_interval_direct`,
+      ],
+    );
+    const [general, lookup, interval] = row.route_candidates;
+    assert.deepEqual(general, {
+      route_candidate_id: `${expected.target}_europe_pmc_search_aggregator`,
+      route_kind: "aggregator",
+      credential_requirement: "none",
+      planned_backend_id: "europe_pmc_rest_api",
+      query_modes: ["general_free_text"],
+      source_constraint: "provider_source_filter",
+      source_constraint_predicate: {
+        provider_field: "bookOrReportDetails.publisher",
+        operator: "equals",
+        values: [expected.publisher],
+      },
+      attribution_basis: "provider_source_field",
+      coverage_notes: general.coverage_notes,
+      evidence_reference: "https://europepmc.org/RestfulWebService",
+    });
+    assert.deepEqual(lookup.query_modes, ["identifier_lookup"]);
+    assert.equal(lookup.route_kind, "direct");
+    assert.equal(lookup.planned_backend_id, "biorxiv_details_api");
+    assert.deepEqual(lookup.source_constraint_predicate, null);
+    assert.deepEqual(interval.query_modes, ["date_interval", "category_browse"]);
+    assert.equal(interval.route_kind, "direct");
+    assert.equal(interval.planned_backend_id, "biorxiv_details_api");
+    assert.deepEqual(interval.source_constraint_predicate, null);
+    assert.ok(row.route_candidates.every(
+      (route) => !route.query_modes.includes("recent_feed"),
+    ));
+    assert.ok(row.evidence.some(
+      (entry) => /2026-07-15/.test(entry.claim) && /recent/i.test(entry.claim),
+    ));
+  }
   const openAlex = rowsById.get("sourclip-2026-07-13-0088");
   assert.equal(openAlex.resolution, "credentialed_out_of_scope");
   assert.equal(openAlex.resolution_code, "credential_required_no_public_route");
@@ -1079,8 +1282,9 @@ test("the authoritative CLI composes schema and semantic validation", (t) => {
     VALIDATOR_PATH,
     "--root", temporaryRoot,
     "--gate", "contract",
-    "--as-of", "2026-07-13",
+    "--as-of", "2026-07-15",
     "--trusted-reviewer", "codex-task-12968.1-source-triage",
+    "--trusted-reviewer", "codex-task-12968.5-inventory-review",
     "--json",
   ], {
     encoding: "utf8",

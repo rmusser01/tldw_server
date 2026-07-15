@@ -3,8 +3,8 @@
   "manifest_id": "sourclip-research-sources-2026-07-13",
   "manifest_items_sha256": "cef8c83a2f6cf0640d88e6300f54205363654d800927263c2d918060e6a28339",
   "closure_policy_version": "credentialless-public-v2",
-  "generated_at_utc": "2026-07-14T14:21:40Z",
-  "rows_sha256": "cd48707690c211d4c2517e03fe21261994f21de59a90dc081d806a2b9efb8cd1",
+  "generated_at_utc": "2026-07-15T20:46:48Z",
+  "rows_sha256": "1d607d9b7e3a14aa47f773bf3248f5ecfcdf3dcbf9934ee36999fcfb555881c9",
   "rows": [
     {
       "inventory_id": "sourclip-2026-07-13-0001",
@@ -1359,42 +1359,60 @@
       "source_snapshot_sha256": "630e58ca761d761473f4b375d3a742cfbaf0b46235e64ab5bbe30f99d40c4e5a",
       "resolution": "mapped",
       "resolution_code": "credentialless_route_identified",
-      "resolution_reason": "bioRxiv's native anonymous search supports general free-text discovery. Its separate official details API is useful only for bounded recent/date windows or DOI lookup, so it must not be represented as complete historical free-text search.",
+      "resolution_reason": "On 2026-07-15, native search was not a viable automated route because a credentialless probe encountered a Cloudflare challenge. Europe PMC supports source-constrained free-text search, while the official details API is implemented only for explicit DOI and date/category operations because recent-count/day shortcuts were stale or failed. These routes remain shadow-only with no live or product-surface certification.",
       "review_status": "reviewed",
       "route_kinds": [
-        "site_search",
+        "aggregator",
         "direct"
       ],
       "route_candidates": [
         {
-          "route_candidate_id": "biorxiv_site_search",
-          "route_kind": "site_search",
+          "route_candidate_id": "biorxiv_europe_pmc_search_aggregator",
+          "route_kind": "aggregator",
           "credential_requirement": "none",
-          "planned_backend_id": "biorxiv_site_search",
+          "planned_backend_id": "europe_pmc_rest_api",
           "query_modes": [
             "general_free_text"
           ],
-          "source_constraint": "native_corpus",
-          "source_constraint_predicate": null,
-          "attribution_basis": "native_response",
-          "coverage_notes": "Native source search is the planned general-query route; it requires fixture and live policy certification before enablement.",
-          "evidence_reference": "https://www.biorxiv.org/search"
+          "source_constraint": "provider_source_filter",
+          "source_constraint_predicate": {
+            "provider_field": "bookOrReportDetails.publisher",
+            "operator": "equals",
+            "values": [
+              "bioRxiv"
+            ]
+          },
+          "attribution_basis": "provider_source_field",
+          "coverage_notes": "Europe PMC provides bounded first-page free-text discovery constrained to preprints whose publisher field is exactly bioRxiv.",
+          "evidence_reference": "https://europepmc.org/RestfulWebService"
         },
         {
-          "route_candidate_id": "biorxiv_details_api",
+          "route_candidate_id": "biorxiv_details_lookup_direct",
           "route_kind": "direct",
           "credential_requirement": "none",
           "planned_backend_id": "biorxiv_details_api",
           "query_modes": [
-            "identifier_lookup",
-            "recent_feed",
+            "identifier_lookup"
+          ],
+          "source_constraint": "native_corpus",
+          "source_constraint_predicate": null,
+          "attribution_basis": "native_response",
+          "coverage_notes": "The official shared details API provides exact DOI lookup for bioRxiv metadata without enabling recent-feed shortcuts.",
+          "evidence_reference": "https://api.biorxiv.org/"
+        },
+        {
+          "route_candidate_id": "biorxiv_details_interval_direct",
+          "route_kind": "direct",
+          "credential_requirement": "none",
+          "planned_backend_id": "biorxiv_details_api",
+          "query_modes": [
             "date_interval",
             "category_browse"
           ],
           "source_constraint": "native_corpus",
           "source_constraint_predicate": null,
           "attribution_basis": "native_response",
-          "coverage_notes": "The official details API is limited to DOI, recent, date-interval, and category-shaped discovery and does not satisfy general free-text search.",
+          "coverage_notes": "The official shared details API provides explicit date-interval and optional category discovery with bounded path pagination.",
           "evidence_reference": "https://api.biorxiv.org/details/biorxiv/help"
         }
       ],
@@ -1408,8 +1426,8 @@
         "standalone_search",
         "deep_research"
       ],
-      "implementation_state": "planned",
-      "fixture_state": "not_run",
+      "implementation_state": "implemented",
+      "fixture_state": "passed",
       "live_state": "not_run",
       "canonical_targets": [
         "biorxiv"
@@ -1428,16 +1446,28 @@
         {
           "kind": "route_triage",
           "reference_type": "https_url",
+          "reference": "https://europepmc.org/RestfulWebService",
+          "claim": "On 2026-07-15, credentialless review confirmed Europe PMC REST search supports bounded preprint results constrained by the exact bioRxiv publisher value."
+        },
+        {
+          "kind": "route_triage",
+          "reference_type": "https_url",
           "reference": "https://www.biorxiv.org/search",
-          "claim": "bioRxiv's native anonymous search supports general free-text discovery. Its separate official details API is useful only for bounded recent/date windows or DOI lookup, so it must not be represented as complete historical free-text search."
+          "claim": "On 2026-07-15, a credentialless native-search probe received a Cloudflare challenge, so HTML site search was removed from viable automated routes."
+        },
+        {
+          "kind": "route_triage",
+          "reference_type": "https_url",
+          "reference": "https://api.biorxiv.org/",
+          "claim": "On 2026-07-15, explicit DOI and date-interval requests worked, while recent-count/day shortcuts returned stale records or HTTP 500 and therefore remain disabled."
         }
       ],
       "ownership": {
-        "reviewer": "codex-task-12968.1-source-triage",
-        "review_date": "2026-07-13",
-        "workstream": "TASK-12968.1",
+        "reviewer": "codex-task-12968.5-inventory-review",
+        "review_date": "2026-07-15",
+        "workstream": "TASK-12968.5",
         "follow_up_task": "TASK-12968.5",
-        "revisit_trigger": "Implement and fixture/live-certify this candidate route before presenting it as ready."
+        "revisit_trigger": "Run live and product-surface certification before presenting these implemented shadow routes as user-ready."
       }
     },
     {
@@ -1445,42 +1475,60 @@
       "source_snapshot_sha256": "f57249cb946752205a95d9e339e55fa5fec5f53e6f8ccd540b4d2779f9e3e05a",
       "resolution": "mapped",
       "resolution_code": "credentialless_route_identified",
-      "resolution_reason": "medRxiv's native anonymous search supports general free-text discovery. Its separate official details API is useful only for bounded recent/date windows or DOI lookup, so it must not be represented as complete historical free-text search.",
+      "resolution_reason": "On 2026-07-15, medRxiv's robots policy disallowed /search/ and declared a seven-second crawl delay, so native HTML search was not selected for automation. Europe PMC supports source-constrained free-text search, while the official details API is implemented only for explicit DOI and date/category operations because recent-count/day shortcuts were stale or failed. These routes remain shadow-only with no live or product-surface certification.",
       "review_status": "reviewed",
       "route_kinds": [
-        "site_search",
+        "aggregator",
         "direct"
       ],
       "route_candidates": [
         {
-          "route_candidate_id": "medrxiv_site_search",
-          "route_kind": "site_search",
+          "route_candidate_id": "medrxiv_europe_pmc_search_aggregator",
+          "route_kind": "aggregator",
           "credential_requirement": "none",
-          "planned_backend_id": "medrxiv_site_search",
+          "planned_backend_id": "europe_pmc_rest_api",
           "query_modes": [
             "general_free_text"
+          ],
+          "source_constraint": "provider_source_filter",
+          "source_constraint_predicate": {
+            "provider_field": "bookOrReportDetails.publisher",
+            "operator": "equals",
+            "values": [
+              "medRxiv"
+            ]
+          },
+          "attribution_basis": "provider_source_field",
+          "coverage_notes": "Europe PMC provides bounded first-page free-text discovery constrained to preprints whose publisher field is exactly medRxiv.",
+          "evidence_reference": "https://europepmc.org/RestfulWebService"
+        },
+        {
+          "route_candidate_id": "medrxiv_details_lookup_direct",
+          "route_kind": "direct",
+          "credential_requirement": "none",
+          "planned_backend_id": "biorxiv_details_api",
+          "query_modes": [
+            "identifier_lookup"
           ],
           "source_constraint": "native_corpus",
           "source_constraint_predicate": null,
           "attribution_basis": "native_response",
-          "coverage_notes": "Native source search is the planned general-query route; it requires fixture and live policy certification before enablement.",
-          "evidence_reference": "https://www.medrxiv.org/search"
+          "coverage_notes": "The official shared details API provides exact DOI lookup for medRxiv metadata without enabling recent-feed shortcuts.",
+          "evidence_reference": "https://api.biorxiv.org/"
         },
         {
-          "route_candidate_id": "medrxiv_details_api",
+          "route_candidate_id": "medrxiv_details_interval_direct",
           "route_kind": "direct",
           "credential_requirement": "none",
-          "planned_backend_id": "medrxiv_details_api",
+          "planned_backend_id": "biorxiv_details_api",
           "query_modes": [
-            "identifier_lookup",
-            "recent_feed",
             "date_interval",
             "category_browse"
           ],
           "source_constraint": "native_corpus",
           "source_constraint_predicate": null,
           "attribution_basis": "native_response",
-          "coverage_notes": "The official details API is limited to DOI, recent, date-interval, and category-shaped discovery and does not satisfy general free-text search.",
+          "coverage_notes": "The official shared details API provides explicit date-interval and optional category discovery with bounded path pagination.",
           "evidence_reference": "https://api.biorxiv.org/details/medrxiv/help"
         }
       ],
@@ -1494,8 +1542,8 @@
         "standalone_search",
         "deep_research"
       ],
-      "implementation_state": "planned",
-      "fixture_state": "not_run",
+      "implementation_state": "implemented",
+      "fixture_state": "passed",
       "live_state": "not_run",
       "canonical_targets": [
         "medrxiv"
@@ -1514,16 +1562,28 @@
         {
           "kind": "route_triage",
           "reference_type": "https_url",
-          "reference": "https://www.medrxiv.org/search",
-          "claim": "medRxiv's native anonymous search supports general free-text discovery. Its separate official details API is useful only for bounded recent/date windows or DOI lookup, so it must not be represented as complete historical free-text search."
+          "reference": "https://europepmc.org/RestfulWebService",
+          "claim": "On 2026-07-15, credentialless review confirmed Europe PMC REST search supports bounded preprint results constrained by the exact medRxiv publisher value."
+        },
+        {
+          "kind": "route_triage",
+          "reference_type": "https_url",
+          "reference": "https://www.medrxiv.org/robots.txt",
+          "claim": "On 2026-07-15, medRxiv robots.txt disallowed /search/ and declared a seven-second crawl delay, so native HTML search was removed from viable automated routes."
+        },
+        {
+          "kind": "route_triage",
+          "reference_type": "https_url",
+          "reference": "https://api.biorxiv.org/",
+          "claim": "On 2026-07-15, explicit DOI and date-interval requests worked, while recent-count/day shortcuts returned stale records or HTTP 500 and therefore remain disabled."
         }
       ],
       "ownership": {
-        "reviewer": "codex-task-12968.1-source-triage",
-        "review_date": "2026-07-13",
-        "workstream": "TASK-12968.1",
+        "reviewer": "codex-task-12968.5-inventory-review",
+        "review_date": "2026-07-15",
+        "workstream": "TASK-12968.5",
         "follow_up_task": "TASK-12968.5",
-        "revisit_trigger": "Implement and fixture/live-certify this candidate route before presenting it as ready."
+        "revisit_trigger": "Run live and product-surface certification before presenting these implemented shadow routes as user-ready."
       }
     },
     {

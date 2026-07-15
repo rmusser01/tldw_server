@@ -23,25 +23,36 @@ const REQUIRED_SOURCES = Object.freeze({
   "sourclip-2026-07-13-0021": Object.freeze({
     canonicalTarget: "biorxiv",
     generalRoute: Object.freeze({
-      id: "biorxiv_site_search",
-      routeKind: "site_search",
-      backendId: "biorxiv_site_search",
+      id: "biorxiv_europe_pmc_search_aggregator",
+      routeKind: "aggregator",
+      backendId: "europe_pmc_rest_api",
       queryModes: Object.freeze(["general_free_text"]),
-      sourceConstraint: "native_corpus",
-      attributionBasis: "native_response",
-      evidenceHosts: Object.freeze(["biorxiv.org"]),
+      sourceConstraint: "provider_source_filter",
+      sourcePredicate: Object.freeze({
+        provider_field: "bookOrReportDetails.publisher",
+        operator: "equals",
+        values: Object.freeze(["bioRxiv"]),
+      }),
+      attributionBasis: "provider_source_field",
+      evidenceHosts: Object.freeze(["europepmc.org"]),
     }),
-    boundedRoute: Object.freeze({
-      id: "biorxiv_details_api",
+    lookupRoute: Object.freeze({
+      id: "biorxiv_details_lookup_direct",
       routeKind: "direct",
       backendId: "biorxiv_details_api",
-      queryModes: Object.freeze([
-        "identifier_lookup",
-        "recent_feed",
-        "date_interval",
-        "category_browse",
-      ]),
+      queryModes: Object.freeze(["identifier_lookup"]),
       sourceConstraint: "native_corpus",
+      sourcePredicate: null,
+      attributionBasis: "native_response",
+      evidenceHosts: Object.freeze(["api.biorxiv.org"]),
+    }),
+    intervalRoute: Object.freeze({
+      id: "biorxiv_details_interval_direct",
+      routeKind: "direct",
+      backendId: "biorxiv_details_api",
+      queryModes: Object.freeze(["date_interval", "category_browse"]),
+      sourceConstraint: "native_corpus",
+      sourcePredicate: null,
       attributionBasis: "native_response",
       evidenceHosts: Object.freeze(["api.biorxiv.org"]),
     }),
@@ -49,25 +60,36 @@ const REQUIRED_SOURCES = Object.freeze({
   "sourclip-2026-07-13-0022": Object.freeze({
     canonicalTarget: "medrxiv",
     generalRoute: Object.freeze({
-      id: "medrxiv_site_search",
-      routeKind: "site_search",
-      backendId: "medrxiv_site_search",
+      id: "medrxiv_europe_pmc_search_aggregator",
+      routeKind: "aggregator",
+      backendId: "europe_pmc_rest_api",
       queryModes: Object.freeze(["general_free_text"]),
-      sourceConstraint: "native_corpus",
-      attributionBasis: "native_response",
-      evidenceHosts: Object.freeze(["medrxiv.org"]),
+      sourceConstraint: "provider_source_filter",
+      sourcePredicate: Object.freeze({
+        provider_field: "bookOrReportDetails.publisher",
+        operator: "equals",
+        values: Object.freeze(["medRxiv"]),
+      }),
+      attributionBasis: "provider_source_field",
+      evidenceHosts: Object.freeze(["europepmc.org"]),
     }),
-    boundedRoute: Object.freeze({
-      id: "medrxiv_details_api",
+    lookupRoute: Object.freeze({
+      id: "medrxiv_details_lookup_direct",
       routeKind: "direct",
-      backendId: "medrxiv_details_api",
-      queryModes: Object.freeze([
-        "identifier_lookup",
-        "recent_feed",
-        "date_interval",
-        "category_browse",
-      ]),
+      backendId: "biorxiv_details_api",
+      queryModes: Object.freeze(["identifier_lookup"]),
       sourceConstraint: "native_corpus",
+      sourcePredicate: null,
+      attributionBasis: "native_response",
+      evidenceHosts: Object.freeze(["api.biorxiv.org"]),
+    }),
+    intervalRoute: Object.freeze({
+      id: "medrxiv_details_interval_direct",
+      routeKind: "direct",
+      backendId: "biorxiv_details_api",
+      queryModes: Object.freeze(["date_interval", "category_browse"]),
+      sourceConstraint: "native_corpus",
+      sourcePredicate: null,
       attributionBasis: "native_response",
       evidenceHosts: Object.freeze(["api.biorxiv.org"]),
     }),
@@ -346,6 +368,8 @@ function routeMatchesRequirement(candidate, requirement) {
     && candidate?.planned_backend_id === requirement.backendId
     && sameStringSet(candidate?.query_modes, requirement.queryModes)
     && candidate?.source_constraint === requirement.sourceConstraint
+    && canonicalJson(candidate?.source_constraint_predicate)
+      === canonicalJson(requirement.sourcePredicate)
     && candidate?.attribution_basis === requirement.attributionBasis
     && urlHostMatches(candidate?.evidence_reference, requirement.evidenceHosts);
 }
@@ -1205,11 +1229,26 @@ export function validateInventoryDocuments(
         routeMatchesRequirement(candidate, requirement.generalRoute)
       ))
       : null;
-    const boundedRoute = Array.isArray(row?.route_candidates)
+    const lookupRoute = Array.isArray(row?.route_candidates)
       ? row.route_candidates.find((candidate) => (
-        routeMatchesRequirement(candidate, requirement.boundedRoute)
+        routeMatchesRequirement(candidate, requirement.lookupRoute)
       ))
       : null;
+    const intervalRoute = Array.isArray(row?.route_candidates)
+      ? row.route_candidates.find((candidate) => (
+        routeMatchesRequirement(candidate, requirement.intervalRoute)
+      ))
+      : null;
+    const requiredRouteIds = new Set([
+      requirement.generalRoute.id,
+      requirement.lookupRoute.id,
+      requirement.intervalRoute.id,
+    ]);
+    const routeCandidateIds = Array.isArray(row?.route_candidates)
+      ? row.route_candidates.map((candidate) => candidate?.route_candidate_id)
+      : [];
+    const hasExactRequiredRoutes = routeCandidateIds.length === requiredRouteIds.size
+      && routeCandidateIds.every((routeId) => requiredRouteIds.has(routeId));
     const mappingSatisfied = row?.resolution === "mapped"
       && Array.isArray(row.canonical_targets)
       && row.canonical_targets.length === 1
@@ -1217,12 +1256,15 @@ export function validateInventoryDocuments(
       && Array.isArray(row.declared_surfaces)
       && [...SURFACES].every((surface) => row.declared_surfaces.includes(surface))
       && Boolean(generalRoute)
-      && Boolean(boundedRoute)
+      && Boolean(lookupRoute)
+      && Boolean(intervalRoute)
+      && hasExactRequiredRoutes
       && isSubstantivelyTriaged(row, asOf, trustedReviewers);
     requiredSourceStates[inventoryId] = {
       canonical_target: requirement.canonicalTarget,
       required_general_route_id: requirement.generalRoute.id,
-      required_bounded_route_id: requirement.boundedRoute.id,
+      required_lookup_route_id: requirement.lookupRoute.id,
+      required_interval_route_id: requirement.intervalRoute.id,
       captured_label: manifestById.get(inventoryId)?.label ?? null,
       resolution: row?.resolution ?? null,
       canonical_targets: Array.isArray(row?.canonical_targets) ? [...row.canonical_targets] : [],
