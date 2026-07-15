@@ -253,7 +253,7 @@ class WorkspaceSourceSavedViewStateV1(BaseModel):
         return normalized
 
     @model_validator(mode="after")
-    def _validate_ranges(self) -> "WorkspaceSourceSavedViewStateV1":
+    def _validate_ranges(self) -> WorkspaceSourceSavedViewStateV1:
         if self.date_from is not None and self.date_to is not None and self.date_from > self.date_to:
             raise ValueError("date_from must be less than or equal to date_to")
         for minimum, maximum in (
