@@ -1951,6 +1951,26 @@ def _map_provider_egress_error(
     )
 
 
+def _map_sync_stream_egress_errors(provider: str, stream: Any) -> Iterator[Any]:
+    """Map policy failures raised lazily while consuming a sync stream."""
+    try:
+        yield from stream
+    except EgressPolicyError as exc:
+        raise _map_provider_egress_error(provider, exc) from exc
+
+
+async def _map_async_stream_egress_errors(
+    provider: str,
+    stream: AsyncIterator[Any],
+) -> AsyncIterator[Any]:
+    """Map policy failures raised lazily while consuming an async stream."""
+    try:
+        async for item in stream:
+            yield item
+    except EgressPolicyError as exc:
+        raise _map_provider_egress_error(provider, exc) from exc
+
+
 def perform_chat_api_call(**kwargs: Any) -> Any:
     """Adapter-backed replacement for chat_orchestrator.chat_api_call."""
     provider, request, internal = _build_adapter_request_from_chat_args(kwargs)
@@ -1960,7 +1980,7 @@ def perform_chat_api_call(**kwargs: Any) -> Any:
     _attach_internal_http_hooks(adapter, request, internal)
     try:
         if request.get("stream"):
-            return adapter.stream(request)
+            return _map_sync_stream_egress_errors(provider, adapter.stream(request))
         return adapter.chat(request)
     except EgressPolicyError as exc:
         raise _map_provider_egress_error(provider, exc) from exc
@@ -1980,10 +2000,13 @@ async def perform_chat_api_call_async(**kwargs: Any) -> Any:
                 stream_iter = adapter.astream(request)
                 if inspect.isawaitable(stream_iter):
                     stream_iter = await stream_iter
-                return stream_iter
+                return _map_async_stream_egress_errors(provider, stream_iter)
             except NotImplementedError:
                 stream_iter = adapter.stream(request)
-                return wrap_sync_stream(stream_iter)
+                return _map_async_stream_egress_errors(
+                    provider,
+                    wrap_sync_stream(stream_iter),
+                )
 
         try:
             return await adapter.achat(request)

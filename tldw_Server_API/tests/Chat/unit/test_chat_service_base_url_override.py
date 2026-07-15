@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from tldw_Server_API.app.core.AuthNZ import byok_helpers
@@ -155,3 +157,98 @@ def test_policy_denial_maps_to_sanitized_configuration_error() -> None:
 
     assert isinstance(mapped, ChatConfigurationError)
     assert "secret host" not in mapped.message
+
+
+@pytest.mark.parametrize(
+    ("reason_code", "expected_error"),
+    [
+        ("dns_unresolved", ChatProviderError),
+        ("origin_mismatch", ChatConfigurationError),
+    ],
+)
+def test_sync_stream_maps_egress_errors_raised_during_iteration(
+    monkeypatch: pytest.MonkeyPatch,
+    reason_code: str,
+    expected_error: type[Exception],
+) -> None:
+    class _LazyFailingAdapter:
+        def stream(self, _request):
+            yield "data: first\n\n"
+            raise EgressPolicyError("secret endpoint", reason_code=reason_code)
+
+    registry = SimpleNamespace(get_adapter=lambda _provider: _LazyFailingAdapter())
+    monkeypatch.setattr(chat_service, "_get_llm_registry", lambda: registry)
+
+    stream = chat_service.perform_chat_api_call(
+        api_provider="custom-openai-api",
+        messages=[{"role": "user", "content": "hi"}],
+        model="model",
+        stream=True,
+    )
+
+    assert next(stream) == "data: first\n\n"
+    with pytest.raises(expected_error) as exc_info:
+        next(stream)
+    assert "secret endpoint" not in exc_info.value.message
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("reason_code", "expected_error"),
+    [
+        ("dns_unresolved", ChatProviderError),
+        ("origin_mismatch", ChatConfigurationError),
+    ],
+)
+async def test_async_stream_maps_egress_errors_raised_during_iteration(
+    monkeypatch: pytest.MonkeyPatch,
+    reason_code: str,
+    expected_error: type[Exception],
+) -> None:
+    class _LazyFailingAdapter:
+        async def astream(self, _request):
+            yield "data: first\n\n"
+            raise EgressPolicyError("secret endpoint", reason_code=reason_code)
+
+    registry = SimpleNamespace(get_adapter=lambda _provider: _LazyFailingAdapter())
+    monkeypatch.setattr(chat_service, "_get_llm_registry", lambda: registry)
+
+    stream = await chat_service.perform_chat_api_call_async(
+        api_provider="custom-openai-api",
+        messages=[{"role": "user", "content": "hi"}],
+        model="model",
+        stream=True,
+    )
+
+    assert await stream.__anext__() == "data: first\n\n"
+    with pytest.raises(expected_error) as exc_info:
+        await stream.__anext__()
+    assert "secret endpoint" not in exc_info.value.message
+
+
+@pytest.mark.asyncio
+async def test_async_stream_sync_fallback_maps_lazy_egress_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _SyncFallbackAdapter:
+        def astream(self, _request):
+            raise NotImplementedError
+
+        def stream(self, _request):
+            yield "data: fallback\n\n"
+            raise EgressPolicyError("secret endpoint", reason_code="origin_mismatch")
+
+    registry = SimpleNamespace(get_adapter=lambda _provider: _SyncFallbackAdapter())
+    monkeypatch.setattr(chat_service, "_get_llm_registry", lambda: registry)
+
+    stream = await chat_service.perform_chat_api_call_async(
+        api_provider="custom-openai-api",
+        messages=[{"role": "user", "content": "hi"}],
+        model="model",
+        stream=True,
+    )
+
+    assert await stream.__anext__() == "data: fallback\n\n"
+    with pytest.raises(ChatConfigurationError) as exc_info:
+        await stream.__anext__()
+    assert "secret endpoint" not in exc_info.value.message

@@ -284,6 +284,8 @@ Verification used the repository virtual environment at `../../.venv` from the i
 
 Verification used the repository virtual environment at `../../.venv` from the isolated worktree. The TDD red run produced 26 expected failures and 10 passes before implementation. The final Stage 3 suite passed 72 tests, followed by 66 Stage 1 and 88 Stage 2 regression tests. Focused Ruff correctness checks, Python compilation, and `git diff --check` passed.
 
+Spec-review corrections were also completed test-first: lazy sync/async stream policy failures are mapped during consumption (including the `NotImplementedError` sync fallback), configured custom adapters resolve raw explicit endpoint aliases before stripping transport/provenance context, and public custom adapters retain their existing request boundary. Endpoint-level provenance, every registered local alias, configured custom slots 1 and 37, and the audited shared direct-caller boundary now have regression coverage. The updated Stage 3 suite passed 99 tests; Stage 1 and Stage 2 remained at 66 and 88 passing tests respectively.
+
 ---
 
 ## Stage 4: Guarded setup, one-shot discovery, readiness, and catalog parity

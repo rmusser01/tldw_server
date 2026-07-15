@@ -83,3 +83,69 @@ def test_untrusted_private_provenance_value_is_discarded() -> None:
     _provider, request, _internal = chat_service._build_adapter_request_from_chat_args(args)
 
     assert "_endpoint_provenance" not in request
+
+
+@pytest.mark.parametrize(
+    ("source", "override_key", "expected"),
+    [
+        ("user", None, "byok"),
+        ("team", None, "byok"),
+        ("org", None, "byok"),
+        ("server", None, "server_config"),
+        ("user", "base_url", "request_override"),
+        ("server", "api_base_url", "request_override"),
+    ],
+)
+def test_chat_endpoint_sets_post_parse_url_free_provenance(
+    authenticated_client,
+    mock_chacha_db,
+    setup_dependencies,
+    monkeypatch: pytest.MonkeyPatch,
+    source: str,
+    override_key: str | None,
+    expected: str,
+) -> None:
+    from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
+
+    async def _resolve_byok(provider: str, **_kwargs) -> ResolvedByokCredentials:
+        return ResolvedByokCredentials(
+            provider=provider,
+            api_key="key",
+            app_config=None,
+            credential_fields={},
+            source=source,
+            allowlisted=True,
+        )
+
+    captured: list[dict] = []
+
+    def _perform_chat_api_call(**kwargs):
+        captured.append(kwargs)
+        return {
+            "id": "chatcmpl-provenance",
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "ok"},
+                    "finish_reason": "stop",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(chat_endpoint, "resolve_byok_credentials", _resolve_byok)
+    monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", _perform_chat_api_call)
+    body = {
+        "api_provider": "custom-openai-api",
+        "model": "model",
+        "messages": [{"role": "user", "content": "hi"}],
+        "_endpoint_provenance": "request_override",
+        "endpoint_provenance": "http://attacker.invalid",
+    }
+    if override_key:
+        body[override_key] = "http://request-owned-endpoint:18095/v1"
+
+    response = authenticated_client.post("/api/v1/chat/completions", json=body)
+
+    assert response.status_code == 200
+    marker = captured[-1]["_endpoint_provenance"]
+    assert marker == expected
+    assert "://" not in marker

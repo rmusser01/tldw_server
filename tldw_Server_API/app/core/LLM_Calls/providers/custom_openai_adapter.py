@@ -39,14 +39,25 @@ class CustomOpenAIAdapter(ChatProvider):
     http_fetcher = staticmethod(_hc_fetch)
     http_streamer = staticmethod(_hc_stream_response)
 
+    _GENERIC_ENDPOINT_KEYS = (
+        "base_url",
+        "api_base_url",
+        "api_base",
+        "api_url",
+        "api_ip",
+    )
+
     _RESERVED_CONTEXT_KEYS = frozenset(
         {
+            "app_config",
+            "configured_endpoint",
             "configured_endpoint_base_url",
             "configured_endpoint_scope",
             "endpoint_provenance",
             "http_client_factory",
             "http_fetcher",
             "http_streamer",
+            "trusted_base_url_override",
         }
     )
 
@@ -110,9 +121,10 @@ class CustomOpenAIAdapter(ChatProvider):
 
     def _resolve_base(self, request: dict[str, Any]) -> str:
         """Resolve the endpoint base URL from request, app config, env, or defaults."""
-        override = (request or {}).get("base_url")
-        if isinstance(override, str) and override.strip():
-            return override.strip().rstrip("/")
+        for key in self._request_endpoint_keys():
+            override = (request or {}).get(key)
+            if isinstance(override, str) and override.strip():
+                return override.strip().rstrip("/")
 
         cfg = request.get("app_config") or {}
         section = cfg.get(self.config_section) or {}
@@ -136,10 +148,20 @@ class CustomOpenAIAdapter(ChatProvider):
 
         return custom_openai_provider_number(self.name) is not None
 
+    def _request_endpoint_keys(self) -> tuple[str, ...]:
+        """Return supported raw endpoint fields in compatibility precedence order."""
+        if not self._is_configured_custom():
+            return ("base_url",)
+        return tuple(
+            dict.fromkeys(
+                (*self._GENERIC_ENDPOINT_KEYS, *(key.lower() for key in self.default_base_url_env))
+            )
+        )
+
     def _sanitize_request(self, request: dict[str, Any]) -> dict[str, Any]:
         """Strip request-owned authorization and transport context before validation."""
         sanitized = dict(request or {})
-        for key in self._RESERVED_CONTEXT_KEYS:
+        for key in (*self._RESERVED_CONTEXT_KEYS, *self._request_endpoint_keys()):
             sanitized.pop(key, None)
         sanitized.pop("_endpoint_provenance", None)
         return sanitized

@@ -52,6 +52,49 @@ def test_trusted_provider_endpoint_resolves_aliases_from_one_current_snapshot(
         endpoint.base_url = "http://attacker.invalid"  # type: ignore[misc]
 
 
+def test_trusted_provider_endpoint_covers_every_registered_local_and_custom_alias(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.custom_openai_providers import (
+        custom_openai_aliases,
+        custom_openai_endpoint_env_keys,
+        custom_openai_provider_name,
+    )
+    from tldw_Server_API.app.core.LLM_Calls import provider_config_resolution as resolution
+
+    settings: dict[str, dict[str, str]] = {}
+    expected_by_name: dict[str, str] = {}
+    for index, (canonical, (section, field)) in enumerate(
+        resolution._LOCAL_ENDPOINT_FIELDS.items(),
+        start=1,
+    ):
+        url = f"http://configured-local-{index}:18{index:03d}/v1"
+        settings[section] = {field: url}
+        expected_by_name[canonical] = url
+    for alias, canonical in resolution._LOCAL_ENDPOINT_ALIASES.items():
+        expected_by_name[alias] = expected_by_name[canonical]
+
+    for number in (1, 37):
+        provider = custom_openai_provider_name(number)
+        section = "custom_openai_api" if number == 1 else f"custom_openai_api_{number}"
+        url = f"http://configured-custom-{number}:19{number:03d}/v1"
+        settings[section] = {"api_ip": url}
+        expected_by_name[provider] = url
+        for alias in custom_openai_aliases(number):
+            expected_by_name[alias] = url
+        for env_key in custom_openai_endpoint_env_keys(number):
+            monkeypatch.delenv(env_key, raising=False)
+    for env_key in resolution._LOCAL_LLM_ENDPOINT_ENV_KEYS:
+        monkeypatch.delenv(env_key, raising=False)
+    monkeypatch.setattr(resolution, "load_settings", lambda: settings)
+
+    for provider, expected_url in expected_by_name.items():
+        endpoint = resolution.resolve_trusted_provider_endpoint(provider)
+        assert endpoint is not None, provider
+        assert endpoint.base_url == expected_url, provider
+        assert endpoint.scope.matches(f"{expected_url}/chat/completions"), provider
+
+
 @pytest.mark.parametrize(
     "env_key",
     (
@@ -250,16 +293,18 @@ def test_direct_registry_local_adapters_scope_sync_and_async_dispatch(
     assert all(call["url"].startswith(trusted.base_url) for call in calls)
 
 
-def test_direct_registry_custom_slot_37_scopes_all_dispatch_modes(
+@pytest.mark.parametrize("adapter_name", ["custom-openai-api", "custom-openai-api-37"])
+def test_direct_registry_custom_adapters_scope_all_dispatch_modes(
     monkeypatch: pytest.MonkeyPatch,
+    adapter_name: str,
 ) -> None:
     from tldw_Server_API.app.core.LLM_Calls.adapter_registry import ChatProviderRegistry
     from tldw_Server_API.app.core.LLM_Calls.provider_config_resolution import TrustedProviderEndpoint
     from tldw_Server_API.app.core.LLM_Calls.providers import custom_openai_adapter
 
     trusted = TrustedProviderEndpoint(
-        base_url="http://slot37-lan:18370/v1",
-        scope=ConfiguredEndpointScope.from_url("http://slot37-lan:18370/v1"),
+        base_url=f"http://{adapter_name}-lan:18370/v1",
+        scope=ConfiguredEndpointScope.from_url(f"http://{adapter_name}-lan:18370/v1"),
     )
     monkeypatch.setattr(
         custom_openai_adapter,
@@ -290,7 +335,7 @@ def test_direct_registry_custom_slot_37_scopes_all_dispatch_modes(
         calls.append(kwargs)
         yield _Response()
 
-    adapter = ChatProviderRegistry().get_adapter("custom-openai-api-37")
+    adapter = ChatProviderRegistry().get_adapter(adapter_name)
     assert adapter is not None
     adapter.http_fetcher = _fetch
     adapter.http_streamer = _stream
@@ -307,3 +352,58 @@ def test_direct_registry_custom_slot_37_scopes_all_dispatch_modes(
 
     assert len(calls) == 4
     assert all(call["configured_endpoint"] is trusted.scope for call in calls)
+
+
+def test_generic_direct_adapter_caller_inherits_local_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cover the common boundary used by audited non-Chat direct registry callers.
+
+    Audited callers include quiz generation, document insights, speech chat,
+    summarization, structured generation, and adapter_utils. They all obtain a
+    registry adapter, so one adapter_utils execution regression covers the
+    shared configured-local boundary without duplicating every feature test.
+    """
+    from tldw_Server_API.app.core.LLM_Calls import adapter_utils
+    from tldw_Server_API.app.core.LLM_Calls.provider_config_resolution import TrustedProviderEndpoint
+    from tldw_Server_API.app.core.LLM_Calls.providers import local_adapters
+
+    trusted = TrustedProviderEndpoint(
+        base_url="http://generic-direct-caller:18096/v1",
+        scope=ConfiguredEndpointScope.from_url("http://generic-direct-caller:18096/v1"),
+    )
+    monkeypatch.setattr(local_adapters, "resolve_trusted_provider_endpoint", lambda _name: trusted)
+    captured: dict[str, Any] = {}
+
+    class _Response:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, Any]:
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+        def close(self) -> None:
+            return None
+
+    class _Client:
+        def close(self) -> None:
+            return None
+
+    def _fetch(**kwargs: Any) -> _Response:
+        captured.update(kwargs)
+        return _Response()
+
+    adapter = adapter_utils.get_adapter_or_raise("local-llm")
+    monkeypatch.setattr(adapter, "http_fetcher", _fetch)
+    monkeypatch.setattr(adapter, "http_client_factory", lambda **_kwargs: _Client())
+
+    adapter.chat(
+        {
+            "messages": [{"role": "user", "content": "hi"}],
+            "model": "model",
+            "app_config": {"local_llm": {"api_ip": "http://stale-request:9999/v1"}},
+        }
+    )
+
+    assert captured["configured_endpoint"] is trusted.scope
+    assert captured["url"].startswith(trusted.base_url)
