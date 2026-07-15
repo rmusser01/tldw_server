@@ -276,7 +276,9 @@ Verification used the repository virtual environment at `../../.venv` from the i
     tldw_Server_API/tests/LLM_Adapters/unit/test_custom_openai_native_http.py \
     tldw_Server_API/tests/LLM_Adapters/unit/test_local_adapter_merge.py \
     tldw_Server_API/tests/LLM_Calls/test_local_llm_param_forwarding.py \
-    tldw_Server_API/tests/LLM_Calls/test_provider_timeout_and_role_regressions.py -q
+    tldw_Server_API/tests/LLM_Calls/test_provider_timeout_and_role_regressions.py \
+    tldw_Server_API/tests/LLM_Calls/test_openai_compatible_provider_adapters.py \
+    tldw_Server_API/tests/LLM_Calls/test_custom_openai_top_p.py -q
   ```
 
 - [x] Re-run Stages 1–2 and `git diff --check`.
@@ -285,6 +287,8 @@ Verification used the repository virtual environment at `../../.venv` from the i
 Verification used the repository virtual environment at `../../.venv` from the isolated worktree. The TDD red run produced 26 expected failures and 10 passes before implementation. The final Stage 3 suite passed 72 tests, followed by 66 Stage 1 and 88 Stage 2 regression tests. Focused Ruff correctness checks, Python compilation, and `git diff --check` passed.
 
 Spec-review corrections were also completed test-first: lazy sync/async stream policy failures are mapped during consumption (including the `NotImplementedError` sync fallback), configured custom adapters resolve raw explicit endpoint aliases before stripping transport/provenance context, and public custom adapters retain their existing request boundary. Endpoint-level provenance, every registered local alias, configured custom slots 1 and 37, and the audited shared direct-caller boundary now have regression coverage. The updated Stage 3 suite passed 99 tests; Stage 1 and Stage 2 remained at 66 and 88 passing tests respectively.
+
+A second compatibility review restored the pre-Stage-3 client factory transport only for Novita, Poe, and Together while configured custom slots remain on checked central fetch/stream hooks. The two previously omitted compatibility suites are now part of the Stage 3 command. Their baseline reproduced 7 failures; public/configured boundary tests then produced the expected 7-fail/4-pass RED and 11-pass GREEN. The complete Stage 3 suite passed 110 tests, followed by 66 Stage 1 and 88 Stage 2 regression tests.
 
 ---
 

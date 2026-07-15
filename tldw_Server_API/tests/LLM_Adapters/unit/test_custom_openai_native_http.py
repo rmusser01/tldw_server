@@ -305,21 +305,21 @@ def test_configured_custom_byok_app_config_is_used_then_stripped_before_validati
 
 
 @pytest.mark.parametrize("adapter_name", ["novita", "poe", "together"])
-def test_public_custom_subclasses_never_receive_configured_local_scope(adapter_name: str):
+def test_public_custom_subclasses_never_use_configured_local_transport(
+    monkeypatch: pytest.MonkeyPatch,
+    adapter_name: str,
+):
     from tldw_Server_API.app.core.LLM_Calls.adapter_registry import ChatProviderRegistry
+    from tldw_Server_API.app.core.LLM_Calls.providers import custom_openai_adapter
 
-    captured: dict[str, Any] = {}
-
-    def _fetch(**kwargs):
-        captured.update(kwargs)
-        return _FakeResponse(200)
+    monkeypatch.setattr(custom_openai_adapter, "http_client_factory", _FakeClient)
 
     adapter = ChatProviderRegistry().get_adapter(adapter_name)
     assert adapter is not None
-    adapter.http_fetcher = _fetch
-    adapter.chat({"messages": [{"role": "user", "content": "hi"}], "model": "model"})
+    adapter.http_fetcher = lambda **_kwargs: pytest.fail("public provider used configured fetcher")
+    result = adapter.chat({"messages": [{"role": "user", "content": "hi"}], "model": "model"})
 
-    assert captured["configured_endpoint"] is None
+    assert result["choices"][0]["message"]["content"] == "ok"
 
 
 def test_public_custom_subclass_does_not_accept_configured_custom_endpoint_alias(
