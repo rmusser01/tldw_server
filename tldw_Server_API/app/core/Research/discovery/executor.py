@@ -25,6 +25,7 @@ from typing import Any, Protocol, cast
 from .contracts import (
     CREDENTIALED_ROUTE_SKIP_REASON,
     MAX_PAGINATION_CURSOR,
+    QUERY_MODE_NOT_SUPPORTED_SKIP_REASON,
     AccessRoute,
     AttributionMatch,
     BudgetCeilings,
@@ -38,6 +39,9 @@ from .contracts import (
     ExecutionMode,
     JSONBodyPair,
     OperationKind,
+    PathSlot,
+    PathSlotKind,
+    PathTemplate,
     PlannedBudgetAllowance,
     PlannedDispatchGroup,
     PlannedLogicalAttempt,
@@ -86,6 +90,7 @@ _ADAPTER_ERROR_CODES = frozenset(
     }
 )
 _DELTA_SECONDS_RE = re.compile(r"[0-9]+\Z")
+_CANONICAL_UNSIGNED_DECIMAL_RE = re.compile(r"(?:0|[1-9][0-9]*)\Z")
 
 
 class ExecutionState(str, Enum):
@@ -1084,8 +1089,18 @@ def _validate_plan_catalog_references(plan: DiscoveryPlan, registry: DiscoveryRe
             route = registry.get_route(skipped.route_id)
             if route.route_id != skipped.route_id:
                 raise ValueError("skipped_target_route_mismatch")
-            if route.credential_requirement is CredentialRequirement.NONE:
-                if skipped.status is not SkippedStatus.SKIPPED or skipped.code is not SkippedCode.ROUTE_NOT_READY:
+            if skipped.code is SkippedCode.QUERY_MODE_NOT_SUPPORTED:
+                if (
+                    skipped.status is not SkippedStatus.SKIPPED
+                    or skipped.reason != QUERY_MODE_NOT_SUPPORTED_SKIP_REASON
+                ):
+                    raise ValueError("query_mode_skipped_target_semantics_mismatch")
+            elif route.credential_requirement is CredentialRequirement.NONE:
+                if (
+                    skipped.status is not SkippedStatus.SKIPPED
+                    or skipped.code is not SkippedCode.ROUTE_NOT_READY
+                    or skipped.reason == QUERY_MODE_NOT_SUPPORTED_SKIP_REASON
+                ):
                     raise ValueError("credentialless_skipped_target_semantics_mismatch")
             elif route.credential_requirement is CredentialRequirement.API_KEY:
                 if (
@@ -1429,14 +1444,19 @@ class _GroupExecutionController:
             )
         elif type(bindings) is not tuple or bindings:
             self._reject("bindings_not_allowed")
+        query_key = route.policy.pagination_query_key
+        body_key = route.policy.pagination_json_body_key
+        path_template = route.policy.path_template
+        path_index = path_template.pagination_segment_index if type(path_template) is PathTemplate else None
+        path_channel = type(path_index) is int
+        if sum((type(query_key) is str, type(body_key) is str, path_channel)) > 1:
+            self._reject("pagination_query_invalid")
         if cursor is None:
             if intent_index in self._used:
                 self._reject("dispatch_intent_already_used")
             self._used.add(intent_index)
             if trusted_intent.operation_kind is not OperationKind.SEARCH:
                 return trusted_intent, None
-            query_key = route.policy.pagination_query_key
-            body_key = route.policy.pagination_json_body_key
             if type(query_key) is str and body_key is None:
                 values = tuple(pair.value for pair in trusted_intent.query_pairs if pair.name == query_key)
                 valid = (
@@ -1450,6 +1470,30 @@ class _GroupExecutionController:
             elif query_key is None and type(body_key) is str:
                 values = tuple(pair.value for pair in trusted_intent.json_body_pairs if pair.name == body_key)
                 valid = len(values) == 1 and type(values[0]) is int and 0 <= values[0] <= MAX_PAGINATION_CURSOR
+            elif query_key is None and body_key is None and path_channel:
+                if (
+                    type(path_template) is not PathTemplate
+                    or type(path_template.segments) is not tuple
+                    or type(path_index) is not int
+                    or not 0 <= path_index < len(path_template.segments)
+                    or type(path_template.segments[path_index]) is not PathSlot
+                    or path_template.segments[path_index].kind is not PathSlotKind.UINT
+                    or type(trusted_intent.path) is not str
+                    or not trusted_intent.path.startswith("/")
+                    or not trusted_intent.path.isascii()
+                ):
+                    self._reject("pagination_query_invalid")
+                segments = trusted_intent.path[1:].split("/")
+                raw_cursor = segments[path_index] if len(segments) == len(path_template.segments) else ""
+                slot = path_template.segments[path_index]
+                values = (raw_cursor,)
+                valid = (
+                    _CANONICAL_UNSIGNED_DECIMAL_RE.fullmatch(raw_cursor) is not None
+                    and len(raw_cursor) <= slot.max_chars
+                    and int(raw_cursor) <= MAX_PAGINATION_CURSOR
+                )
+            elif query_key is None and body_key is None and route.policy.limits.max_pages == 1:
+                return trusted_intent, None
             else:
                 values = ()
                 valid = False
@@ -1466,10 +1510,11 @@ class _GroupExecutionController:
             self._reject("cursor_not_allowed")
         if intent_index not in self._successful_searches:
             self._reject("search_not_ready")
-        if cursor.value in self._seen_cursors.get(intent_index, set()):
+        seen_cursors = self._seen_cursors.get(intent_index, set())
+        if cursor.value in seen_cursors:
             self._reject("pagination_cursor_repeated")
-        query_key = route.policy.pagination_query_key
-        body_key = route.policy.pagination_json_body_key
+        if seen_cursors and cursor.value < max(seen_cursors):
+            self._reject("pagination_cursor_non_progress")
         if type(query_key) is str and body_key is None:
             matching = tuple(index for index, pair in enumerate(trusted_intent.query_pairs) if pair.name == query_key)
             if len(matching) != 1:
@@ -1495,6 +1540,25 @@ class _GroupExecutionController:
                     for index, pair in enumerate(trusted_intent.json_body_pairs)
                 )
                 effective_intent = replace(trusted_intent, json_body_pairs=json_body_pairs)
+            except Exception:  # noqa: BLE001 - cursor reconstruction must latch a typed failure.
+                self._reject("invalid_pagination_cursor")
+            return effective_intent, cursor.value
+        if query_key is None and body_key is None and path_channel:
+            if (
+                type(path_template) is not PathTemplate
+                or type(path_template.segments) is not tuple
+                or type(path_index) is not int
+                or not 0 <= path_index < len(path_template.segments)
+                or type(trusted_intent.path) is not str
+                or not trusted_intent.path.startswith("/")
+            ):
+                self._reject("pagination_query_invalid")
+            segments = trusted_intent.path[1:].split("/")
+            if len(segments) != len(path_template.segments):
+                self._reject("pagination_query_invalid")
+            try:
+                segments[path_index] = str(cursor.value)
+                effective_intent = replace(trusted_intent, path=f"/{'/'.join(segments)}")
             except Exception:  # noqa: BLE001 - cursor reconstruction must latch a typed failure.
                 self._reject("invalid_pagination_cursor")
             return effective_intent, cursor.value
@@ -1586,7 +1650,8 @@ class _GroupExecutionController:
             pending_continuation = None
             if first_hop and is_page:
                 self.pages += 1
-                self._seen_cursors.setdefault(intent_index, set()).add(page_cursor)  # type: ignore[arg-type]
+                if type(page_cursor) is int:
+                    self._seen_cursors.setdefault(intent_index, set()).add(page_cursor)
             first_hop = False
             aggregate_timed_out = False
             try:

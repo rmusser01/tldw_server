@@ -16,6 +16,7 @@ _QUERY_NAME_RE = re.compile(r"[A-Za-z0-9_.\[\]-]+\Z")
 _MISSING = object()
 MAX_PAGINATION_CURSOR = 2_147_483_647
 CREDENTIALED_ROUTE_SKIP_REASON = "credentialed_route_not_authorized_for_foundation"
+QUERY_MODE_NOT_SUPPORTED_SKIP_REASON = "query_mode_not_supported"
 
 
 class RouteKind(str, Enum):
@@ -131,6 +132,7 @@ class SkippedCode(str, Enum):
     """Typed reason for omitting executable work."""
 
     CREDENTIALED_OUT_OF_SCOPE = "credentialed_out_of_scope"
+    QUERY_MODE_NOT_SUPPORTED = "query_mode_not_supported"
     ROUTE_NOT_READY = "route_not_ready"
 
 

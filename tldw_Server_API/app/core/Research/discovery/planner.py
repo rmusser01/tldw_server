@@ -4,23 +4,34 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import unicodedata
 from dataclasses import asdict, dataclass
+from datetime import date
 
 from .contracts import (
     CREDENTIALED_ROUTE_SKIP_REASON,
+    QUERY_MODE_NOT_SUPPORTED_SKIP_REASON,
     AccessRoute,
+    BoundedDecimalQueryValuePolicy,
+    BoundedTextQueryValuePolicy,
     BudgetCeilings,
     CredentialRequirement,
     DeferredNumericCSVQueryBinding,
     DiscoveryPlan,
     DispatchAllowance,
     DispatchIntent,
+    ExactQueryValuePolicy,
     JSONBodyPair,
+    LiteralTermsQueryValuePolicy,
     OperationKind,
+    PathSlot,
+    PathSlotKind,
+    PathTemplate,
     PlannedBudgetAllowance,
     PlannedDispatchGroup,
     PlannedLogicalAttempt,
+    QueryMode,
     QueryPair,
     ReadinessOverlay,
     ReadinessState,
@@ -36,6 +47,9 @@ from .contracts import (
 from .registry import DiscoveryRegistry
 
 PLANNER_VERSION = "research-discovery-planner-v2-foundation"
+_DOI_REGISTRANT = re.compile(r"10\.[0-9]{4,9}\Z")
+_CANONICAL_DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}\Z")
+_RFC3986_UNRESERVED = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
 
 
 class PlanningError(ValueError):
@@ -47,11 +61,52 @@ class PlanningError(ValueError):
 
 
 @dataclass(frozen=True, slots=True)
+class GeneralFreeTextQuery:
+    """Literal Unicode terms for a route-owned free-text expression."""
+
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class IdentifierLookupQuery:
+    """One canonical ASCII DOI to resolve through an identifier route."""
+
+    doi: str
+
+
+@dataclass(frozen=True, slots=True)
+class DateIntervalQuery:
+    """One bounded inclusive date interval with an optional category."""
+
+    start_date: str
+    end_date: str
+    category: str | None = None
+
+
+PlanningQuery = str | GeneralFreeTextQuery | IdentifierLookupQuery | DateIntervalQuery
+_PLANNING_QUERY_TYPES = (str, GeneralFreeTextQuery, IdentifierLookupQuery, DateIntervalQuery)
+
+
+@dataclass(frozen=True, slots=True)
+class _NormalizedPlanningQuery:
+    """Planner-owned normalized values for one exact public query type."""
+
+    mode: QueryMode
+    normalized_query: str
+    terms: tuple[str, ...] = ()
+    doi_registrant: str | None = None
+    doi_suffix: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+    category: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class PlanningRequest:
     """Explicit V2 selection and normalized planning inputs."""
 
     source_ids: tuple[str, ...]
-    query: str
+    query: PlanningQuery
     filters: tuple[QueryPair, ...]
     result_limit: int
 
@@ -62,11 +117,14 @@ class PlanningRequest:
             not isinstance(source_id, str) or not source_id.strip() for source_id in self.source_ids
         ):
             raise ValueError("explicit_selection_requires_source_ids")
-        if not isinstance(self.query, str) or not self.query.strip():
-            raise ValueError("query_must_be_nonempty")
+        if type(self.query) not in _PLANNING_QUERY_TYPES:
+            raise TypeError("query_must_be_exact_planning_query")
+        _normalize_planning_query(self.query)
         if not isinstance(self.filters, tuple) or any(not isinstance(item, QueryPair) for item in self.filters):
             raise TypeError("filters_must_be_query_pair_tuple")
-        if not isinstance(self.result_limit, int) or isinstance(self.result_limit, bool) or self.result_limit <= 0:
+        if type(self.query) is not str and self.filters:
+            raise ValueError("typed_query_filters_not_supported")
+        if type(self.result_limit) is not int or self.result_limit <= 0:
             raise ValueError("result_limit_must_be_positive")
 
 
@@ -113,7 +171,8 @@ def compile_discovery_plan(
         raise TypeError("budget_must_be_budget_ceilings")
     _validate_readiness_references(registry, readiness)
 
-    normalized_query = _normalize_query(request.query)
+    query_context = _normalize_planning_query(request.query)
+    normalized_query = query_context.normalized_query
     filters = tuple(sorted(request.filters, key=lambda item: (item.name, item.value)))
     sources = _resolve_sources(request.source_ids, registry)
     logical: list[_LogicalAttempt] = []
@@ -122,6 +181,17 @@ def compile_discovery_plan(
     for source in sources:
         references = {reference.route_id: reference for reference in source.route_references}
         for route in registry.routes_for_source(source.catalog_source_id):
+            if query_context.mode not in route.query_modes:
+                skipped.append(
+                    SkippedTarget(
+                        requested_source_id=source.catalog_source_id,
+                        route_id=route.route_id,
+                        status=SkippedStatus.SKIPPED,
+                        code=SkippedCode.QUERY_MODE_NOT_SUPPORTED,
+                        reason=QUERY_MODE_NOT_SUPPORTED_SKIP_REASON,
+                    )
+                )
+                continue
             route_readiness = readiness.get(route.route_id)
             if route_readiness is None:
                 raise PlanningError(f"missing_readiness:{route.route_id}")
@@ -148,7 +218,11 @@ def compile_discovery_plan(
                 )
                 continue
 
-            intents = _build_intents(route, normalized_query, request.result_limit)
+            intents = (
+                _build_intents(route, normalized_query, request.result_limit)
+                if type(request.query) is str
+                else _build_typed_intents(route, query_context, request.result_limit)
+            )
             logical.append(
                 _LogicalAttempt(
                     source_priority=source.priority,
@@ -206,8 +280,236 @@ def _resolve_sources(
     return tuple(sorted(resolved.values(), key=lambda source: (source.priority, source.catalog_source_id)))
 
 
+def _normalize_planning_query(query: PlanningQuery) -> _NormalizedPlanningQuery:
+    """Validate one exact query type and return its route-selection values."""
+    if type(query) is str:
+        if not query.strip():
+            raise PlanningError("query_must_be_nonempty")
+        return _NormalizedPlanningQuery(QueryMode.STRUCTURED_QUERY, _normalize_query(query))
+    if type(query) is GeneralFreeTextQuery:
+        if type(query.text) is not str:
+            raise PlanningError("general_query_text_must_be_exact_string")
+        if any(unicodedata.category(character).startswith("C") for character in query.text):
+            raise PlanningError("general_query_contains_invalid_unicode")
+        canonical = unicodedata.normalize("NFKC", query.text)
+        terms = _unicode_alphanumeric_terms(canonical)
+        if not terms:
+            raise PlanningError("general_query_requires_term")
+        if len(terms) > 16 or any(len(term) > 64 for term in terms):
+            raise PlanningError("general_query_term_limit_exceeded")
+        return _NormalizedPlanningQuery(
+            QueryMode.GENERAL_FREE_TEXT,
+            " ".join(canonical.split()),
+            terms=terms,
+        )
+    if type(query) is IdentifierLookupQuery:
+        if type(query.doi) is not str:
+            raise PlanningError("doi_must_be_exact_string")
+        if not query.doi.isascii() or query.doi.count("/") != 1:
+            raise PlanningError("invalid_doi")
+        registrant, suffix = query.doi.split("/", 1)
+        if (
+            _DOI_REGISTRANT.fullmatch(registrant) is None
+            or not suffix
+            or len(suffix) > 128
+            or not suffix[0].isalnum()
+            or any(character in " /\\%?#" or not "!" <= character <= "~" for character in suffix)
+        ):
+            raise PlanningError("invalid_doi")
+        return _NormalizedPlanningQuery(
+            QueryMode.IDENTIFIER_LOOKUP,
+            query.doi,
+            doi_registrant=registrant,
+            doi_suffix=suffix,
+        )
+    if type(query) is DateIntervalQuery:
+        start = _validated_date(query.start_date)
+        end = _validated_date(query.end_date)
+        if start > end or (end - start).days + 1 > 366:
+            raise PlanningError("invalid_date_interval")
+        category = query.category
+        if category is not None:
+            if (
+                type(category) is not str
+                or not category
+                or len(category) > 128
+                or unicodedata.normalize("NFKC", category) != category
+                or category != category.strip()
+                or "  " in category
+                or not any(character.isalnum() for character in category)
+                or any(not character.isalnum() and character not in " -&/" for character in category)
+            ):
+                raise PlanningError("invalid_category")
+        return _NormalizedPlanningQuery(
+            QueryMode.CATEGORY_BROWSE if category is not None else QueryMode.DATE_INTERVAL,
+            f"{query.start_date}/{query.end_date}" + (f"/{category}" if category is not None else ""),
+            start_date=query.start_date,
+            end_date=query.end_date,
+            category=category,
+        )
+    raise TypeError("query_must_be_exact_planning_query")
+
+
+def _unicode_alphanumeric_terms(value: str) -> tuple[str, ...]:
+    """Split canonical Unicode text into contiguous literal alphanumeric terms."""
+    terms: list[str] = []
+    current: list[str] = []
+    for character in value:
+        if character.isalnum():
+            current.append(character)
+        elif current:
+            terms.append("".join(current))
+            current = []
+    if current:
+        terms.append("".join(current))
+    return tuple(terms)
+
+
+def _validated_date(value: object) -> date:
+    """Return one exact canonical ISO calendar date or fail planning."""
+    if type(value) is not str or _CANONICAL_DATE.fullmatch(value) is None:
+        raise PlanningError("invalid_date")
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError:
+        raise PlanningError("invalid_date") from None
+    if parsed.isoformat() != value:
+        raise PlanningError("invalid_date")
+    return parsed
+
+
 def _normalize_query(query: str) -> str:
     return " ".join(unicodedata.normalize("NFKC", query).split()).casefold()
+
+
+def _build_typed_intents(
+    route: AccessRoute,
+    query: _NormalizedPlanningQuery,
+    result_limit: int,
+) -> tuple[DispatchIntent, ...]:
+    """Render typed query values only through closed route policy shapes."""
+    if route.policy.allowed_json_body_keys:
+        raise PlanningError(f"typed_intent_json_body_not_supported:{route.route_id}")
+    if query.mode is QueryMode.GENERAL_FREE_TEXT:
+        if route.policy.path_template is not None or len(route.policy.paths) != 1:
+            raise PlanningError(f"invalid_general_query_path_policy:{route.route_id}")
+        policies = {policy.name: policy for policy in route.policy.query_value_policies}
+        pairs: list[QueryPair] = []
+        literal_terms_seen = False
+        for name in route.policy.allowed_query_keys:
+            policy = policies.get(name)
+            if type(policy) is LiteralTermsQueryValuePolicy:
+                if (
+                    literal_terms_seen
+                    or name != "query"
+                    or not 1 <= len(query.terms) <= policy.max_terms
+                    or any(len(term) > policy.max_term_chars for term in query.terms)
+                ):
+                    raise PlanningError(f"invalid_literal_terms_policy:{route.route_id}")
+                literal_terms_seen = True
+                pairs.append(
+                    QueryPair(
+                        name,
+                        " AND ".join(f'"{term}"' for term in query.terms) + policy.fixed_suffix,
+                    )
+                )
+            elif type(policy) is ExactQueryValuePolicy:
+                pairs.append(QueryPair(name, policy.value))
+            elif type(policy) is BoundedDecimalQueryValuePolicy:
+                limit = min(result_limit, route.policy.limits.max_results)
+                if limit > policy.maximum:
+                    raise PlanningError(f"typed_result_limit_exceeds_policy:{route.route_id}")
+                pairs.append(QueryPair(name, str(limit)))
+            else:
+                raise PlanningError(f"invalid_general_query_value_policy:{route.route_id}")
+        if not literal_terms_seen or len(pairs) != len(route.policy.allowed_query_keys):
+            raise PlanningError(f"incomplete_general_query_policy:{route.route_id}")
+        return (
+            _intent(
+                route,
+                OperationKind.SEARCH,
+                route.policy.paths[0],
+                tuple(pairs),
+            ),
+        )
+
+    template = route.policy.path_template
+    if type(template) is not PathTemplate:
+        raise PlanningError(f"typed_query_requires_path_template:{route.route_id}")
+    if query.mode is QueryMode.IDENTIFIER_LOOKUP:
+        if (
+            query.doi_registrant is None
+            or query.doi_suffix is None
+            or template.pagination_segment_index is not None
+            or route.policy.allowed_query_keys
+            or route.policy.query_value_policies
+        ):
+            raise PlanningError(f"invalid_identifier_route_policy:{route.route_id}")
+        path = _render_path_template(
+            template,
+            {
+                PathSlotKind.DOI_REGISTRANT: (query.doi_registrant,),
+                PathSlotKind.DOI_SUFFIX: (query.doi_suffix,),
+            },
+        )
+        return (_intent(route, OperationKind.SEARCH, path, ()),)
+
+    if query.mode not in {QueryMode.DATE_INTERVAL, QueryMode.CATEGORY_BROWSE}:
+        raise PlanningError(f"unsupported_typed_query_mode:{route.route_id}")
+    if query.start_date is None or query.end_date is None:
+        raise PlanningError(f"invalid_interval_query:{route.route_id}")
+    path = _render_path_template(
+        template,
+        {
+            PathSlotKind.DATE: (query.start_date, query.end_date),
+            PathSlotKind.UINT: ("0",),
+        },
+    )
+    policies = route.policy.query_value_policies
+    if (
+        len(policies) != 1
+        or type(policies[0]) is not BoundedTextQueryValuePolicy
+        or policies[0].name != "category"
+        or route.policy.allowed_query_keys != ("category",)
+    ):
+        raise PlanningError(f"invalid_interval_query_policy:{route.route_id}")
+    category_policy = policies[0]
+    if query.category is None:
+        if category_policy.required:
+            raise PlanningError(f"interval_category_required:{route.route_id}")
+        pairs = ()
+    else:
+        if len(query.category) > category_policy.max_chars:
+            raise PlanningError(f"interval_category_exceeds_policy:{route.route_id}")
+        pairs = (QueryPair("category", query.category),)
+    return (_intent(route, OperationKind.SEARCH, path, pairs),)
+
+
+def _render_path_template(
+    template: PathTemplate,
+    values: dict[PathSlotKind, tuple[str, ...]],
+) -> str:
+    """Render exact typed slot values into one canonical encoded path."""
+    remaining = {kind: list(items) for kind, items in values.items()}
+    rendered: list[str] = []
+    for segment in template.segments:
+        if type(segment) is str:
+            rendered.append(segment)
+            continue
+        if type(segment) is not PathSlot or not remaining.get(segment.kind):
+            raise PlanningError("path_template_shape_mismatch")
+        value = remaining[segment.kind].pop(0)
+        if not value.isascii() or len(value) > segment.max_chars:
+            raise PlanningError("path_template_value_invalid")
+        rendered.append(_encode_ascii_path_segment(value))
+    if any(items for items in remaining.values()):
+        raise PlanningError("path_template_shape_mismatch")
+    return f"/{'/'.join(rendered)}"
+
+
+def _encode_ascii_path_segment(value: str) -> str:
+    """Percent-encode one validated ASCII segment without transport imports."""
+    return "".join(character if character in _RFC3986_UNRESERVED else f"%{ord(character):02X}" for character in value)
 
 
 def _build_intents(

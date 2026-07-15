@@ -12,12 +12,18 @@ import pytest
 
 from tldw_Server_API.app.core.Research.discovery import executor as executor_module
 from tldw_Server_API.app.core.Research.discovery.contracts import (
+    QUERY_MODE_NOT_SUPPORTED_SKIP_REASON,
+    BoundedTextQueryValuePolicy,
     BudgetCeilings,
     CredentialStatus,
     DispatchIntent,
     ExecutionMode,
     OperationKind,
+    PathSlot,
+    PathSlotKind,
+    PathTemplate,
     PredicateOperator,
+    QueryMode,
     ReadinessState,
     SkippedCode,
     SkippedStatus,
@@ -43,6 +49,8 @@ from tldw_Server_API.app.core.Research.discovery.gateway import (
     DiscoveryGatewayTrace,
 )
 from tldw_Server_API.app.core.Research.discovery.planner import (
+    DateIntervalQuery,
+    GeneralFreeTextQuery,
     PlanningRequest,
     compile_discovery_plan,
     expected_dispatch_group_id,
@@ -265,6 +273,96 @@ def _paginated_figshare_plan():
         registry=registry,
         readiness=foundation_readiness(ExecutionMode.SYNTHETIC),
         budget=BudgetCeilings(1, 2, 2, 0, 0, 40_000, 3),
+    )
+    return registry, plan
+
+
+def _zero_channel_semantic_scholar_plan(*, max_pages: int = 1):
+    base = foundation_registry()
+    route_id = base.get_source("semantic_scholar").route_references[0].route_id
+    routes = []
+    for route in base.routes:
+        if route.route_id != route_id:
+            routes.append(route)
+            continue
+        limits = replace(route.policy.limits, max_pages=max_pages)
+        policy = replace(
+            route.policy,
+            limits=limits,
+            pagination_query_key=None,
+            policy_digest="",
+        )
+        routes.append(replace(route, max_physical_dispatches=max_pages, policy=policy))
+    registry = DiscoveryRegistry(
+        catalog_version=base.catalog_version,
+        registry_version=base.registry_version,
+        sources=base.sources,
+        routes=tuple(routes),
+        backends=base.backends,
+    )
+    plan = compile_discovery_plan(
+        PlanningRequest(("semantic_scholar",), "accounted execution", (), 3),
+        registry=registry,
+        readiness=foundation_readiness(ExecutionMode.SYNTHETIC),
+        budget=BudgetCeilings(1, max_pages, max_pages, 0, 0, 20_000 * max_pages, 3),
+    )
+    return registry, plan
+
+
+def _path_paginated_plan(*, max_pages: int = 3):
+    base = foundation_registry()
+    route_id = base.get_source("semantic_scholar").route_references[0].route_id
+    routes = []
+    for route in base.routes:
+        if route.route_id != route_id:
+            routes.append(route)
+            continue
+        limits = replace(route.policy.limits, max_pages=max_pages)
+        policy = replace(
+            route.policy,
+            paths=(),
+            allowed_query_keys=("category",),
+            limits=limits,
+            pagination_query_key=None,
+            path_template=PathTemplate(
+                (
+                    "details",
+                    "biorxiv",
+                    PathSlot(PathSlotKind.DATE, 10),
+                    PathSlot(PathSlotKind.DATE, 10),
+                    PathSlot(PathSlotKind.UINT, 10),
+                    "json",
+                ),
+                pagination_segment_index=4,
+            ),
+            query_value_policies=(BoundedTextQueryValuePolicy("category", 128),),
+            policy_digest="",
+        )
+        routes.append(
+            replace(
+                route,
+                query_modes=(QueryMode.DATE_INTERVAL, QueryMode.CATEGORY_BROWSE),
+                max_physical_dispatches=max_pages,
+                policy=policy,
+            )
+        )
+    registry = DiscoveryRegistry(
+        catalog_version=base.catalog_version,
+        registry_version=base.registry_version,
+        sources=base.sources,
+        routes=tuple(routes),
+        backends=base.backends,
+    )
+    plan = compile_discovery_plan(
+        PlanningRequest(
+            ("semantic_scholar",),
+            DateIntervalQuery("2020-02-02", "2020-02-20", "Cell Biology"),
+            (),
+            3,
+        ),
+        registry=registry,
+        readiness=foundation_readiness(ExecutionMode.SYNTHETIC),
+        budget=BudgetCeilings(1, max_pages, max_pages, 0, 0, 20_000 * max_pages, 3),
     )
     return registry, plan
 
@@ -2715,6 +2813,88 @@ async def test_skipped_only_plan_performs_zero_runtime_work_with_zero_ceiling() 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("source_id", ("semantic_scholar", "openalex"))
+async def test_query_mode_skip_is_valid_for_credentialless_and_credentialed_routes(source_id: str) -> None:
+    registry = foundation_registry()
+    plan = compile_discovery_plan(
+        PlanningRequest((source_id,), GeneralFreeTextQuery("typed mismatch"), (), 1),
+        registry=registry,
+        readiness=foundation_readiness(ExecutionMode.SYNTHETIC),
+        budget=BudgetCeilings(0, 0, 0, 0, 0, 0, 0),
+    )
+    calls: list[str] = []
+
+    async def forbidden(*_args, **_kwargs):
+        calls.append("runtime")
+        raise AssertionError("runtime must not execute")
+
+    result = await execute_discovery_plan(
+        plan,
+        registry=registry,
+        adapters={},
+        gateway=forbidden,
+        policy_is_active=lambda _route_id, _digest: calls.append("policy") or True,
+        dispatch_id_factory=lambda: calls.append("id") or "must-not-reserve",
+    )
+
+    assert result.skipped == plan.skipped
+    assert plan.skipped == (
+        SkippedTarget(
+            requested_source_id=source_id,
+            route_id=registry.get_source(source_id).route_references[0].route_id,
+            status=SkippedStatus.SKIPPED,
+            code=SkippedCode.QUERY_MODE_NOT_SUPPORTED,
+            reason=QUERY_MODE_NOT_SUPPORTED_SKIP_REASON,
+        ),
+    )
+    assert calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("forgery", ("status", "code", "reason"))
+async def test_forged_query_mode_skip_is_rejected_before_every_runtime_effect(forgery: str) -> None:
+    registry = foundation_registry()
+    plan = compile_discovery_plan(
+        PlanningRequest(("semantic_scholar",), GeneralFreeTextQuery("typed mismatch"), (), 1),
+        registry=registry,
+        readiness=foundation_readiness(ExecutionMode.SYNTHETIC),
+        budget=BudgetCeilings(0, 0, 0, 0, 0, 0, 0),
+    )
+    skipped = plan.skipped[0]
+    if forgery == "status":
+        forged = replace(skipped, status=SkippedStatus.UNAVAILABLE)
+    elif forgery == "code":
+        forged = replace(skipped, code=SkippedCode.ROUTE_NOT_READY)
+    else:
+        forged = replace(skipped, reason="forged_query_mode_reason")
+    plan = _replace_plan_with_fresh_digest(plan, skipped=(forged,))
+    journal = AttemptJournal(physical_ceiling=0)
+    calls: list[str] = []
+
+    async def forbidden(*_args, **_kwargs):
+        calls.append("runtime")
+        raise AssertionError("runtime must not execute")
+
+    with pytest.raises(executor_module.DiscoveryExecutionError) as caught:
+        await execute_discovery_plan(
+            plan,
+            registry=registry,
+            adapters={},
+            gateway=forbidden,
+            policy_is_active=lambda _route_id, _digest: calls.append("policy") or True,
+            dispatch_id_factory=lambda: calls.append("id") or "must-not-reserve",
+            journal=journal,
+            monotonic_clock=lambda: calls.append("clock") or 0.0,
+            cancellation_check=lambda: calls.append("cancel") or False,
+        )
+
+    assert caught.value.code == "plan_validation_failed"
+    assert calls == []
+    assert journal.records == ()
+    assert journal.accounting == DispatchAccounting(0, 0, 0, 0, 0)
+
+
+@pytest.mark.asyncio
 async def test_fallback_group_is_projected_skipped_without_runtime_work() -> None:
     registry, plan = _fallback_plan()
     group = plan.dispatch_groups[0]
@@ -2857,6 +3037,302 @@ async def test_figshare_numeric_json_body_cursor_replaces_page_for_second_dispat
         type(next(pair.value for pair in intent.json_body_pairs if pair.name == "page")) is int
         for intent in gateway_intents
     )
+
+
+@pytest.mark.asyncio
+async def test_one_page_search_without_pagination_channel_dispatches_once() -> None:
+    registry, plan = _zero_channel_semantic_scholar_plan()
+    group = plan.dispatch_groups[0]
+    gateway_intents: list[DispatchIntent] = []
+
+    async def gateway(route, intent, *, is_policy_active):
+        gateway_intents.append(intent)
+        return _gateway_response(route, intent)
+
+    async def adapter(bound_group, dispatch):
+        await dispatch(bound_group.intents[0])
+        return DiscoveryAdapterResult(candidates=())
+
+    result = await execute_discovery_plan(
+        plan,
+        registry=registry,
+        adapters={group.adapter_id: adapter},
+        gateway=gateway,
+        policy_is_active=lambda _route_id, _digest: True,
+        dispatch_id_factory=lambda: "dispatch-one-page-zero-channel",
+    )
+
+    assert gateway_intents == [group.intents[0]]
+    assert result.usage.pages == 1
+    assert result.usage.accounting == DispatchAccounting(1, 1, 0, 0, 1)
+    assert result.logical_outcomes[0].state is LogicalOutcomeState.VALID_EMPTY
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", ("cursor", "multi_page"))
+async def test_zero_channel_rejects_cursor_or_multi_page_route_before_extra_reservation(case: str) -> None:
+    registry, plan = _zero_channel_semantic_scholar_plan(max_pages=2 if case == "multi_page" else 1)
+    group = plan.dispatch_groups[0]
+    gateway_calls: list[DispatchIntent] = []
+    dispatch_ids: list[str] = []
+
+    async def gateway(route, intent, *, is_policy_active):
+        gateway_calls.append(intent)
+        return _gateway_response(route, intent)
+
+    def dispatch_id_factory():
+        dispatch_id = f"dispatch-{len(dispatch_ids) + 1}"
+        dispatch_ids.append(dispatch_id)
+        return dispatch_id
+
+    async def adapter(bound_group, dispatch):
+        search = bound_group.intents[0]
+        if case == "cursor":
+            await dispatch(search)
+            await dispatch(search, cursor=NumericCursor(2))
+        else:
+            await dispatch(search)
+        return DiscoveryAdapterResult(candidates=())
+
+    result = await execute_discovery_plan(
+        plan,
+        registry=registry,
+        adapters={group.adapter_id: adapter},
+        gateway=gateway,
+        policy_is_active=lambda _route_id, _digest: True,
+        dispatch_id_factory=dispatch_id_factory,
+    )
+
+    assert result.logical_outcomes[0].state is LogicalOutcomeState.FAILED
+    assert result.logical_outcomes[0].code == "pagination_query_invalid"
+    assert len(dispatch_ids) == len(gateway_calls) == (1 if case == "cursor" else 0)
+
+
+@pytest.mark.asyncio
+async def test_path_cursor_replaces_only_declared_segment_and_is_fully_accounted() -> None:
+    registry, plan = _path_paginated_plan()
+    group = plan.dispatch_groups[0]
+    gateway_intents: list[DispatchIntent] = []
+
+    async def gateway(route, intent, *, is_policy_active):
+        gateway_intents.append(intent)
+        return _gateway_response(route, intent)
+
+    async def adapter(bound_group, dispatch):
+        search = bound_group.intents[0]
+        await dispatch(search)
+        await dispatch(search, cursor=NumericCursor(2))
+        return DiscoveryAdapterResult(candidates=())
+
+    result = await execute_discovery_plan(
+        plan,
+        registry=registry,
+        adapters={group.adapter_id: adapter},
+        gateway=gateway,
+        policy_is_active=lambda _route_id, _digest: True,
+        dispatch_id_factory=iter(("dispatch-path-0", "dispatch-path-2")).__next__,
+    )
+
+    assert tuple(intent.path for intent in gateway_intents) == (
+        "/details/biorxiv/2020-02-02/2020-02-20/0/json",
+        "/details/biorxiv/2020-02-02/2020-02-20/2/json",
+    )
+    assert (
+        gateway_intents[0].query_pairs
+        == gateway_intents[1].query_pairs
+        == (executor_module.QueryPair("category", "Cell Biology"),)
+    )
+    for field_name in (
+        "route_id",
+        "policy_digest",
+        "operation_kind",
+        "method",
+        "limits",
+        "json_body_pairs",
+        "query_bindings",
+    ):
+        assert getattr(gateway_intents[0], field_name) == getattr(gateway_intents[1], field_name)
+    assert tuple(record.dispatch_id for record in result.usage.physical_records) == (
+        "dispatch-path-0",
+        "dispatch-path-2",
+    )
+    assert result.usage.pages == 2
+    assert result.usage.accounting == DispatchAccounting(2, 2, 0, 0, 3)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("case", "expected_code", "expected_work"),
+    (
+        ("repeat_initial", "pagination_cursor_repeated", 1),
+        ("repeat_page", "pagination_cursor_repeated", 2),
+        ("retrograde", "pagination_cursor_non_progress", 2),
+    ),
+)
+async def test_path_cursor_requires_unique_strictly_increasing_progress(
+    case: str,
+    expected_code: str,
+    expected_work: int,
+) -> None:
+    registry, plan = _path_paginated_plan()
+    group = plan.dispatch_groups[0]
+    gateway_calls: list[DispatchIntent] = []
+    dispatch_ids: list[str] = []
+
+    async def gateway(route, intent, *, is_policy_active):
+        gateway_calls.append(intent)
+        return _gateway_response(route, intent)
+
+    def dispatch_id_factory():
+        dispatch_id = f"dispatch-{len(dispatch_ids) + 1}"
+        dispatch_ids.append(dispatch_id)
+        return dispatch_id
+
+    async def adapter(bound_group, dispatch):
+        search = bound_group.intents[0]
+        await dispatch(search)
+        if case == "repeat_initial":
+            await dispatch(search, cursor=NumericCursor(0))
+        else:
+            await dispatch(search, cursor=NumericCursor(2))
+            await dispatch(search, cursor=NumericCursor(2 if case == "repeat_page" else 1))
+        return DiscoveryAdapterResult(candidates=())
+
+    result = await execute_discovery_plan(
+        plan,
+        registry=registry,
+        adapters={group.adapter_id: adapter},
+        gateway=gateway,
+        policy_is_active=lambda _route_id, _digest: True,
+        dispatch_id_factory=dispatch_id_factory,
+    )
+
+    assert result.logical_outcomes[0].code == expected_code
+    assert len(dispatch_ids) == len(gateway_calls) == expected_work
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", ("subclass", "bool", "overflow"))
+async def test_path_cursor_rejects_nonexact_or_out_of_range_values_before_reservation(case: str) -> None:
+    registry, plan = _path_paginated_plan()
+    group = plan.dispatch_groups[0]
+    gateway_calls: list[DispatchIntent] = []
+    dispatch_ids: list[str] = []
+
+    class CursorSubclass(NumericCursor):
+        pass
+
+    cursor = NumericCursor(2) if case != "subclass" else CursorSubclass(2)
+    if case == "bool":
+        object.__setattr__(cursor, "value", True)
+    elif case == "overflow":
+        object.__setattr__(cursor, "value", 2_147_483_648)
+
+    async def gateway(route, intent, *, is_policy_active):
+        gateway_calls.append(intent)
+        return _gateway_response(route, intent)
+
+    def dispatch_id_factory():
+        dispatch_id = f"dispatch-{len(dispatch_ids) + 1}"
+        dispatch_ids.append(dispatch_id)
+        return dispatch_id
+
+    async def adapter(bound_group, dispatch):
+        await dispatch(bound_group.intents[0])
+        await dispatch(bound_group.intents[0], cursor=cursor)
+        return DiscoveryAdapterResult(candidates=())
+
+    result = await execute_discovery_plan(
+        plan,
+        registry=registry,
+        adapters={group.adapter_id: adapter},
+        gateway=gateway,
+        policy_is_active=lambda _route_id, _digest: True,
+        dispatch_id_factory=dispatch_id_factory,
+    )
+
+    assert result.logical_outcomes[0].code == "invalid_pagination_cursor"
+    assert len(dispatch_ids) == len(gateway_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_registry_path_cursor_channel_mutation_between_pages_fails_before_reservation() -> None:
+    registry, plan = _path_paginated_plan()
+    group = plan.dispatch_groups[0]
+    route = registry.get_route(group.route_id)
+    gateway_calls: list[DispatchIntent] = []
+    dispatch_ids: list[str] = []
+
+    async def gateway(bound_route, intent, *, is_policy_active):
+        gateway_calls.append(intent)
+        return _gateway_response(bound_route, intent)
+
+    def dispatch_id_factory():
+        dispatch_id = f"dispatch-{len(dispatch_ids) + 1}"
+        dispatch_ids.append(dispatch_id)
+        return dispatch_id
+
+    async def adapter(bound_group, dispatch):
+        await dispatch(bound_group.intents[0])
+        assert route.policy.path_template is not None
+        object.__setattr__(route.policy.path_template, "pagination_segment_index", 3)
+        await dispatch(bound_group.intents[0], cursor=NumericCursor(2))
+        return DiscoveryAdapterResult(candidates=())
+
+    result = await execute_discovery_plan(
+        plan,
+        registry=registry,
+        adapters={group.adapter_id: adapter},
+        gateway=gateway,
+        policy_is_active=lambda _route_id, _digest: True,
+        dispatch_id_factory=dispatch_id_factory,
+    )
+
+    assert result.logical_outcomes[0].code == "registry_mismatch"
+    assert len(dispatch_ids) == len(gateway_calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mutation", ("literal", "server", "date", "query", "digest"))
+async def test_malicious_adapter_cannot_change_non_cursor_path_or_policy_material(mutation: str) -> None:
+    registry, plan = _path_paginated_plan()
+    group = plan.dispatch_groups[0]
+    gateway_calls: list[DispatchIntent] = []
+
+    async def gateway(route, intent, *, is_policy_active):
+        gateway_calls.append(intent)
+        return _gateway_response(route, intent)
+
+    async def adapter(bound_group, dispatch):
+        intent = bound_group.intents[0]
+        await dispatch(intent)
+        if mutation == "literal":
+            object.__setattr__(intent, "path", intent.path.replace("/details/", "/detail/"))
+        elif mutation == "server":
+            object.__setattr__(intent, "path", intent.path.replace("/biorxiv/", "/medrxiv/"))
+        elif mutation == "date":
+            object.__setattr__(intent, "path", intent.path.replace("2020-02-02", "2020-02-03"))
+        elif mutation == "query":
+            object.__setattr__(intent.query_pairs[0], "value", "Mutated Category")
+        else:
+            object.__setattr__(intent, "policy_digest", "0" * 64)
+        with pytest.raises(executor_module.DiscoveryExecutionError) as caught:
+            await dispatch(intent, cursor=NumericCursor(2))
+        assert caught.value.code == "bound_plan_mutated"
+        return DiscoveryAdapterResult(candidates=())
+
+    result = await execute_discovery_plan(
+        plan,
+        registry=registry,
+        adapters={group.adapter_id: adapter},
+        gateway=gateway,
+        policy_is_active=lambda _route_id, _digest: True,
+        dispatch_id_factory=lambda: "dispatch-initial-path-page",
+    )
+
+    assert len(gateway_calls) == 1
+    assert tuple(record.dispatch_id for record in result.usage.physical_records) == ("dispatch-initial-path-page",)
+    assert result.logical_outcomes[0].code == "bound_plan_mutated"
 
 
 @pytest.mark.asyncio

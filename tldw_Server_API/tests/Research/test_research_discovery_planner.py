@@ -3,22 +3,31 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from tldw_Server_API.app.core.Research.discovery import planner as planner_module
 from tldw_Server_API.app.core.Research.discovery.contracts import (
     AccessRoute,
     AttributionMatch,
     BackendDefinition,
+    BoundedDecimalQueryValuePolicy,
+    BoundedTextQueryValuePolicy,
     BudgetCeilings,
     CredentialRequirement,
     CredentialStatus,
     DeferredNumericCSVQueryBinding,
     ExactOrigin,
+    ExactQueryValuePolicy,
     ExecutionMode,
     JSONBodyPair,
+    LiteralTermsQueryValuePolicy,
+    PathSlot,
+    PathSlotKind,
+    PathTemplate,
     PlannedDispatchGroup,
     PredicateOperator,
     QueryMode,
@@ -81,7 +90,7 @@ def _budget(**changes: int) -> BudgetCeilings:
 def _request(
     source_ids: tuple[str, ...],
     *,
-    query: str = "  Causal   Inference  ",
+    query: object = "  Causal   Inference  ",
     filters: tuple[QueryPair, ...] = (),
     result_limit: int = 25,
 ) -> PlanningRequest:
@@ -91,6 +100,149 @@ def _request(
         filters=filters,
         result_limit=result_limit,
     )
+
+
+def _typed_query_registry() -> tuple[DiscoveryRegistry, ReadinessOverlay]:
+    limits = RouteLimits(1, 0, 0, 2_000, 16_384, 50)
+    general_policy = RoutePolicy(
+        policy_version="typed-policy-v1",
+        origin=ExactOrigin("https", "www.ebi.ac.uk", 443),
+        methods=("GET",),
+        paths=("/europepmc/webservices/rest/search",),
+        allowed_query_keys=("query", "format", "resultType", "pageSize"),
+        limits=limits,
+        query_value_policies=(
+            LiteralTermsQueryValuePolicy(
+                "query",
+                ' AND SRC:PPR AND PUBLISHER:"bioRxiv"',
+                16,
+                64,
+            ),
+            ExactQueryValuePolicy("format", "json"),
+            ExactQueryValuePolicy("resultType", "core"),
+            BoundedDecimalQueryValuePolicy("pageSize", 50),
+        ),
+    )
+    details_origin = ExactOrigin("https", "api.biorxiv.org", 443)
+    doi_policy = RoutePolicy(
+        policy_version="typed-policy-v1",
+        origin=details_origin,
+        methods=("GET",),
+        paths=(),
+        allowed_query_keys=(),
+        limits=limits,
+        path_template=PathTemplate(
+            (
+                "details",
+                "biorxiv",
+                PathSlot(PathSlotKind.DOI_REGISTRANT, 12),
+                PathSlot(PathSlotKind.DOI_SUFFIX, 128),
+                "na",
+                "json",
+            )
+        ),
+    )
+    interval_limits = replace(limits, max_pages=2)
+    interval_policy = RoutePolicy(
+        policy_version="typed-policy-v1",
+        origin=details_origin,
+        methods=("GET",),
+        paths=(),
+        allowed_query_keys=("category",),
+        limits=interval_limits,
+        path_template=PathTemplate(
+            (
+                "details",
+                "biorxiv",
+                PathSlot(PathSlotKind.DATE, 10),
+                PathSlot(PathSlotKind.DATE, 10),
+                PathSlot(PathSlotKind.UINT, 10),
+                "json",
+            ),
+            pagination_segment_index=4,
+        ),
+        query_value_policies=(BoundedTextQueryValuePolicy("category", 128),),
+    )
+    routes = (
+        AccessRoute(
+            route_id="typed_general_search",
+            backend_id="typed_general_backend",
+            adapter_id="typed_general_adapter",
+            route_kind=RouteKind.AGGREGATOR,
+            query_modes=(QueryMode.GENERAL_FREE_TEXT,),
+            source_constraint=SourceConstraint.NATIVE_CORPUS,
+            attribution_basis="native_response",
+            credential_requirement=CredentialRequirement.NONE,
+            fallback_order=0,
+            max_physical_dispatches=1,
+            adapter_version="typed-v1",
+            policy=general_policy,
+        ),
+        AccessRoute(
+            route_id="typed_identifier_lookup",
+            backend_id="typed_details_backend",
+            adapter_id="typed_details_adapter",
+            route_kind=RouteKind.DIRECT,
+            query_modes=(QueryMode.IDENTIFIER_LOOKUP,),
+            source_constraint=SourceConstraint.NATIVE_CORPUS,
+            attribution_basis="native_response",
+            credential_requirement=CredentialRequirement.NONE,
+            fallback_order=0,
+            max_physical_dispatches=1,
+            adapter_version="typed-v1",
+            policy=doi_policy,
+        ),
+        AccessRoute(
+            route_id="typed_interval_browse",
+            backend_id="typed_details_backend",
+            adapter_id="typed_details_adapter",
+            route_kind=RouteKind.DIRECT,
+            query_modes=(QueryMode.DATE_INTERVAL, QueryMode.CATEGORY_BROWSE),
+            source_constraint=SourceConstraint.NATIVE_CORPUS,
+            attribution_basis="native_response",
+            credential_requirement=CredentialRequirement.NONE,
+            fallback_order=0,
+            max_physical_dispatches=2,
+            adapter_version="typed-v1",
+            policy=interval_policy,
+        ),
+    )
+    source = SourceDefinition(
+        catalog_source_id="typed_source",
+        display_name="Typed Source",
+        aliases=(),
+        categories=("synthetic",),
+        content_types=("works",),
+        surfaces=("standalone_search",),
+        route_references=tuple(SourceRouteReference(route.route_id, None) for route in routes),
+        site_hosts=("typed.example.test",),
+        priority=10,
+        catalog_version="typed-catalog-v1",
+    )
+    registry = DiscoveryRegistry(
+        catalog_version="typed-catalog-v1",
+        registry_version="typed-registry-v1",
+        sources=(source,),
+        routes=routes,
+        backends=(
+            BackendDefinition("typed_general_backend", "Typed General Backend"),
+            BackendDefinition("typed_details_backend", "Typed Details Backend"),
+        ),
+    )
+    readiness = ReadinessOverlay(
+        overlay_version="typed-readiness-v1",
+        execution_mode=ExecutionMode.SYNTHETIC,
+        routes=tuple(
+            RouteReadiness(
+                route.route_id,
+                ReadinessState.READY,
+                CredentialStatus.NOT_REQUIRED,
+                "typed_ready",
+            )
+            for route in routes
+        ),
+    )
+    return registry, readiness
 
 
 def _aggregator_registry(
@@ -175,6 +327,380 @@ def _aggregator_registry(
         ),
     )
     return registry, readiness
+
+
+def test_planning_request_accepts_only_exact_public_query_types() -> None:
+    queries = (
+        "raw structured query",
+        planner_module.GeneralFreeTextQuery("Causal inference"),
+        planner_module.IdentifierLookupQuery("10.1101/2024.01.02.123456"),
+        planner_module.DateIntervalQuery("2024-01-01", "2024-12-31"),
+    )
+
+    for query in queries:
+        request = _request(("typed_source",), query=query)
+        assert request.query is query
+
+    class StringSubclass(str):
+        pass
+
+    class GeneralSubclass(planner_module.GeneralFreeTextQuery):
+        pass
+
+    for query in (
+        StringSubclass("raw"),
+        GeneralSubclass("general"),
+        SimpleNamespace(text="general"),
+        True,
+    ):
+        with pytest.raises((TypeError, ValueError)):
+            _request(("typed_source",), query=query)
+
+
+@pytest.mark.parametrize(
+    "text",
+    (
+        "",
+        "   ",
+        "!!!",
+        "control\ntext",
+        "control\x00text",
+        "surrogate\ud800text",
+        " ".join(f"term{index}" for index in range(17)),
+        "x" * 65,
+    ),
+)
+def test_general_query_rejects_empty_unsafe_or_overlong_term_input(text: str) -> None:
+    with pytest.raises((TypeError, ValueError)):
+        _request(("typed_source",), query=planner_module.GeneralFreeTextQuery(text))
+
+
+@pytest.mark.parametrize(
+    "doi",
+    (
+        "",
+        "10.123/short-registrant",
+        "10.1234567890/long-registrant",
+        "11.1101/wrong-prefix",
+        "10.abc/not-digits",
+        "10.1101/no/slash",
+        "10.1101/-not-alphanumeric",
+        "10.1101/has%percent",
+        "10.1101/has\\backslash",
+        "10.1101/has space",
+        "10.1101/has?query",
+        "10.1101/has#fragment",
+        "10.1101/café",
+        f"10.1101/{'x' * 129}",
+    ),
+)
+def test_identifier_query_rejects_noncanonical_or_path_unsafe_doi(doi: str) -> None:
+    with pytest.raises((TypeError, ValueError)):
+        _request(("typed_source",), query=planner_module.IdentifierLookupQuery(doi))
+
+
+@pytest.mark.parametrize(
+    ("start_date", "end_date"),
+    (
+        ("", "2024-01-01"),
+        ("2024-1-01", "2024-01-02"),
+        ("2024-02-30", "2024-03-01"),
+        ("2024-02-02", "2024-02-01"),
+        ("2023-01-01", "2024-01-02"),
+    ),
+)
+def test_interval_query_rejects_invalid_reversed_or_overlong_dates(
+    start_date: str,
+    end_date: str,
+) -> None:
+    with pytest.raises((TypeError, ValueError)):
+        _request(
+            ("typed_source",),
+            query=planner_module.DateIntervalQuery(start_date, end_date),
+        )
+
+
+@pytest.mark.parametrize(
+    "category",
+    (
+        "",
+        "   ",
+        " leading",
+        "trailing ",
+        "double  space",
+        "noncanonical Ａ",
+        "punctuation!",
+        "---",
+        "x" * 129,
+    ),
+)
+def test_category_query_requires_exact_bounded_canonical_category(category: str) -> None:
+    with pytest.raises((TypeError, ValueError)):
+        _request(
+            ("typed_source",),
+            query=planner_module.DateIntervalQuery(
+                "2024-01-01",
+                "2024-01-31",
+                category,
+            ),
+        )
+
+
+def test_typed_query_rejects_nonempty_filters_and_scalar_subclasses() -> None:
+    class StringSubclass(str):
+        pass
+
+    typed_queries = (
+        planner_module.GeneralFreeTextQuery(StringSubclass("general")),
+        planner_module.IdentifierLookupQuery(StringSubclass("10.1101/example")),
+        planner_module.DateIntervalQuery(StringSubclass("2024-01-01"), "2024-01-02"),
+        planner_module.DateIntervalQuery("2024-01-01", "2024-01-02", StringSubclass("Biology")),
+    )
+    for query in typed_queries:
+        with pytest.raises((TypeError, ValueError)):
+            _request(("typed_source",), query=query)
+
+    with pytest.raises((TypeError, ValueError)):
+        _request(
+            ("typed_source",),
+            query=planner_module.GeneralFreeTextQuery("general"),
+            filters=(QueryPair("year", "2024"),),
+        )
+
+
+@pytest.mark.parametrize(
+    ("query_factory", "selected_route_id", "expected_mode"),
+    (
+        (
+            lambda: planner_module.GeneralFreeTextQuery("Causal inference"),
+            "typed_general_search",
+            QueryMode.GENERAL_FREE_TEXT,
+        ),
+        (
+            lambda: planner_module.IdentifierLookupQuery("10.1101/2024.01.02.123456"),
+            "typed_identifier_lookup",
+            QueryMode.IDENTIFIER_LOOKUP,
+        ),
+        (
+            lambda: planner_module.DateIntervalQuery("2024-01-01", "2024-01-31"),
+            "typed_interval_browse",
+            QueryMode.DATE_INTERVAL,
+        ),
+        (
+            lambda: planner_module.DateIntervalQuery("2024-01-01", "2024-01-31", "Cell Biology"),
+            "typed_interval_browse",
+            QueryMode.CATEGORY_BROWSE,
+        ),
+    ),
+)
+def test_typed_query_selects_only_the_exact_supported_mode(
+    query_factory,
+    selected_route_id: str,
+    expected_mode: QueryMode,
+) -> None:
+    registry, readiness = _typed_query_registry()
+    plan = compile_discovery_plan(
+        _request(("typed_source",), query=query_factory(), result_limit=5),
+        registry=registry,
+        readiness=readiness,
+        budget=BudgetCeilings(1, 2, 2, 0, 0, 40_000, 5),
+    )
+
+    assert tuple(group.route_id for group in plan.dispatch_groups) == (selected_route_id,)
+    assert expected_mode in registry.get_route(selected_route_id).query_modes
+    assert tuple(target.route_id for target in plan.skipped) == tuple(
+        route.route_id for route in registry.routes if route.route_id != selected_route_id
+    )
+    assert all(target.status is SkippedStatus.SKIPPED for target in plan.skipped)
+    assert all(target.code is SkippedCode.QUERY_MODE_NOT_SUPPORTED for target in plan.skipped)
+    assert all(target.reason == "query_mode_not_supported" for target in plan.skipped)
+
+
+def test_general_query_builds_only_literal_terms_and_route_owned_values() -> None:
+    registry, readiness = _typed_query_registry()
+    plan = compile_discovery_plan(
+        _request(
+            ("typed_source",),
+            query=planner_module.GeneralFreeTextQuery('  Ｃafé" OR SRC:PPR + beta  '),
+            result_limit=75,
+        ),
+        registry=registry,
+        readiness=readiness,
+        budget=BudgetCeilings(1, 1, 1, 0, 0, 2_000, 50),
+    )
+    intent = plan.dispatch_groups[0].intents[0]
+
+    assert plan.normalized_query == 'Café" OR SRC:PPR + beta'
+    assert intent.path == "/europepmc/webservices/rest/search"
+    assert intent.query_pairs == (
+        QueryPair(
+            "query",
+            '"Café" AND "OR" AND "SRC" AND "PPR" AND "beta"' ' AND SRC:PPR AND PUBLISHER:"bioRxiv"',
+        ),
+        QueryPair("format", "json"),
+        QueryPair("resultType", "core"),
+        QueryPair("pageSize", "50"),
+    )
+    assert "cursorMark" not in {pair.name for pair in intent.query_pairs}
+
+
+def test_general_query_accepts_exact_sixteen_by_sixty_four_term_boundary() -> None:
+    registry, readiness = _typed_query_registry()
+    text = " ".join(chr(ord("a") + index) * 64 for index in range(16))
+    plan = compile_discovery_plan(
+        _request(
+            ("typed_source",),
+            query=planner_module.GeneralFreeTextQuery(text),
+            result_limit=1,
+        ),
+        registry=registry,
+        readiness=readiness,
+        budget=BudgetCeilings(1, 1, 1, 0, 0, 2_000, 1),
+    )
+
+    expression = plan.dispatch_groups[0].intents[0].query_pairs[0].value
+    assert expression.count('" AND "') == 15
+    assert expression.endswith(' AND SRC:PPR AND PUBLISHER:"bioRxiv"')
+
+
+def test_identifier_query_renders_two_canonical_dynamic_path_segments() -> None:
+    registry, readiness = _typed_query_registry()
+    plan = compile_discovery_plan(
+        _request(
+            ("typed_source",),
+            query=planner_module.IdentifierLookupQuery("10.1101/abc(def):ghi"),
+            result_limit=5,
+        ),
+        registry=registry,
+        readiness=readiness,
+        budget=BudgetCeilings(1, 1, 1, 0, 0, 2_000, 5),
+    )
+    intent = plan.dispatch_groups[0].intents[0]
+
+    assert plan.normalized_query == "10.1101/abc(def):ghi"
+    assert intent.path == "/details/biorxiv/10.1101/abc%28def%29%3Aghi/na/json"
+    assert intent.query_pairs == ()
+
+
+@pytest.mark.parametrize(
+    ("category", "expected_pairs"),
+    (
+        (None, ()),
+        ("Cell Biology & Genomics/Genetics", (QueryPair("category", "Cell Biology & Genomics/Genetics"),)),
+    ),
+)
+def test_interval_query_renders_fixed_server_dates_and_initial_path_cursor(
+    category: str | None,
+    expected_pairs: tuple[QueryPair, ...],
+) -> None:
+    registry, readiness = _typed_query_registry()
+    plan = compile_discovery_plan(
+        _request(
+            ("typed_source",),
+            query=planner_module.DateIntervalQuery("2024-01-01", "2024-12-31", category),
+            result_limit=5,
+        ),
+        registry=registry,
+        readiness=readiness,
+        budget=BudgetCeilings(1, 2, 2, 0, 0, 4_000, 5),
+    )
+    intent = plan.dispatch_groups[0].intents[0]
+
+    assert intent.path == "/details/biorxiv/2024-01-01/2024-12-31/0/json"
+    assert intent.query_pairs == expected_pairs
+
+
+@pytest.mark.parametrize(
+    "query",
+    (
+        planner_module.DateIntervalQuery("2024-02-29", "2024-02-29"),
+        planner_module.DateIntervalQuery("2024-01-01", "2024-12-31"),
+        planner_module.DateIntervalQuery("2023-01-01", "2024-01-01"),
+        planner_module.DateIntervalQuery("2024-01-01", "2024-01-01", "A" * 128),
+    ),
+)
+def test_interval_and_category_accept_exact_calendar_and_length_boundaries(query: object) -> None:
+    request = _request(("typed_source",), query=query)
+    assert request.query is query
+
+
+def test_raw_string_selects_structured_mode_and_preserves_foundation_behavior() -> None:
+    registry, readiness = _typed_query_registry()
+    typed_family_plan = compile_discovery_plan(
+        _request(("typed_source",), query="raw structured query", result_limit=5),
+        registry=registry,
+        readiness=readiness,
+        budget=BudgetCeilings(0, 0, 0, 0, 0, 0, 0),
+    )
+
+    assert typed_family_plan.dispatch_groups == ()
+    assert tuple(target.route_id for target in typed_family_plan.skipped) == tuple(
+        route.route_id for route in registry.routes
+    )
+    assert all(target.code is SkippedCode.QUERY_MODE_NOT_SUPPORTED for target in typed_family_plan.skipped)
+
+    foundation_plan = compile_discovery_plan(
+        _request(("arxiv",), query="  Causal   Inference  "),
+        registry=foundation_registry(),
+        readiness=foundation_readiness(ExecutionMode.OFFLINE_FIXTURE),
+        budget=_budget(),
+    )
+    assert foundation_plan.normalized_query == "causal inference"
+    assert foundation_plan.dispatch_groups[0].intents[0].query_pairs[0] == QueryPair(
+        "search_query",
+        "all:causal inference",
+    )
+
+
+@pytest.mark.parametrize("incompatible_state", ("missing", "credentialed", "disabled"))
+def test_mode_mismatch_precedes_credential_and_readiness_checks(incompatible_state: str) -> None:
+    registry, readiness = _typed_query_registry()
+    general_route = registry.get_route("typed_general_search")
+    if incompatible_state == "credentialed":
+        registry = replace(
+            registry,
+            routes=tuple(
+                (
+                    replace(route, credential_requirement=CredentialRequirement.API_KEY)
+                    if route.route_id == general_route.route_id
+                    else route
+                )
+                for route in registry.routes
+            ),
+        )
+    elif incompatible_state == "disabled":
+        readiness = replace(
+            readiness,
+            routes=tuple(
+                (
+                    replace(entry, state=ReadinessState.DISABLED, reason="must_not_win")
+                    if entry.route_id == general_route.route_id
+                    else entry
+                )
+                for entry in readiness.routes
+            ),
+        )
+    else:
+        readiness = replace(
+            readiness,
+            routes=tuple(entry for entry in readiness.routes if entry.route_id != general_route.route_id),
+        )
+
+    plan = compile_discovery_plan(
+        _request(
+            ("typed_source",),
+            query=planner_module.IdentifierLookupQuery("10.1101/example"),
+            result_limit=5,
+        ),
+        registry=registry,
+        readiness=readiness,
+        budget=BudgetCeilings(1, 1, 1, 0, 0, 20_000, 5),
+    )
+
+    skipped = next(target for target in plan.skipped if target.route_id == general_route.route_id)
+    assert skipped.status is SkippedStatus.SKIPPED
+    assert skipped.code is SkippedCode.QUERY_MODE_NOT_SUPPORTED
+    assert skipped.reason == "query_mode_not_supported"
 
 
 def test_openalex_is_typed_unavailable_with_no_attempt_or_dispatch_allowance() -> None:
