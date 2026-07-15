@@ -404,18 +404,33 @@ git diff --check
 
 **Success Criteria:** arXiv fixtures cover bounded success, empty, pagination, malformed XML, excessive structure/fields/records, deadline, and safe error behavior.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Test-first steps
 
-- [ ] Add arXiv fixtures and failing adapter tests before implementation.
-- [ ] Reject entity-expansion-style input and enforce structural depth, record, field, input-byte, and parse-deadline ceilings.
-- [ ] Reconstruct pagination from approved numeric cursor fields; do not consume provider-supplied absolute links.
-- [ ] Prove result links are inert and every physical request is mediated by executor-owned `dispatch(intent)`.
+- [x] Add arXiv fixtures and failing adapter tests before implementation. The focused RED stopped on the absent `("arxiv_v2", "foundation-v2")` profile before any production edit.
+- [x] Reject entity-expansion-style input and enforce structural depth, record, field, input-byte, expanded-name-material, and parse-deadline ceilings.
+- [x] Reconstruct pagination from approved numeric cursor fields; do not consume provider-supplied absolute links.
+- [x] Prove result links are inert and every physical request is mediated by executor-owned `dispatch(intent)`.
+- [x] Preserve the established twelve-field V2 record shape and versioned arXiv IDs; do not silently add legacy `published_date`, implicit sort keys, or untranslated author/year filters in the adapter.
+
+### Production cutover gate (`TASK-12968.3`)
+
+- Keep arXiv V2 production-disabled until one shared per-origin limiter enforces one connection at a time and at least three seconds between legacy API requests across concurrent runs/processes; do not sleep inside the adapter ([arXiv API terms](https://info.arxiv.org/help/api/tou.html#rate-limits)).
+- Cache or coalesce equivalent repeated queries because arXiv updates results on a daily cycle ([arXiv API manual](https://info.arxiv.org/help/api/user-manual.html)).
+- Validate the production error contract for throttling surfaced as HTTP 503 (including sanitized `Retry-After`) as well as 429 before enablement ([arXiv staff guidance](https://groups.google.com/a/arxiv.org/g/api/c/pNB3lnxf4mQ)).
 
 ### Verify
 
 Run the Task 5 verify commands plus the focused executor, planner, and gateway suites.
+
+### Completion evidence
+
+- Added sanitized success/empty Atom fixtures and one exact gateway-only `arxiv_v2` adapter. It uses strict Atom MIME handling, `DefusedXMLParser`, frozen parse ceilings, canonical arXiv/DOI identity, numeric cursor reconstruction, inert canonical result links, and executor-owned dispatch only.
+- RED-first review regressions closed real arXiv `itemsPerPage` capacity semantics, terminal-zero compatibility, ASCII-only IDs, UTF-8 parser differentials, namespace-declaration and cumulative expanded-name bounds, exact per-entry field accounting, official unversioned-entry/versioned-PDF behavior, version conflicts, aggregate raw-record stopping, cooperative deadlines, and atomic later-page failure.
+- Final focused coverage passed 137/137 arXiv tests and 499/499 combined JSON-plus-arXiv adapter tests. The full contracts/registry/planner/gateway/executor/adapter matrix passed 994/994.
+- Compileall, Ruff, Black, Python 3.10 AST parsing, and diff hygiene passed. Bandit reported zero findings across 1,173 production LOC with one justified B405 skip because stdlib ElementTree supplies only tree types while every untrusted byte is parsed by `DefusedXMLParser`.
+- Independent correctness and input-validation reviews returned CLEAN after the pagination, identifier, PDF-version, parser-differential, raw-cap, and namespace-amplification fixes. V2 remains offline-only and production-disabled behind the explicit `TASK-12968.3` cutover gates above.
 
 ### Commit
 

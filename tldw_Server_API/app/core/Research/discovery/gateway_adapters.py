@@ -1,16 +1,24 @@
-"""Bounded, gateway-only JSON adapters for the discovery V2 foundation."""
+"""Bounded, gateway-only adapters for the discovery V2 foundation.
+
+Stdlib ElementTree supplies tree types only; XML bytes use DefusedXMLParser.
+"""
 
 from __future__ import annotations
 
 import ipaddress
 import json
 import math
+import re
 import time
+import xml.etree.ElementTree as ElementTree  # nosec B405
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
 from urllib.parse import unquote, urlsplit
+
+from defusedxml.common import DefusedXmlException
+from defusedxml.ElementTree import DefusedXMLParser
 
 from .contracts import MAX_PAGINATION_CURSOR, DiscoveryOutcomeIdentity, PlannedDispatchGroup
 from .executor import (
@@ -60,14 +68,39 @@ _ADAPTER_IDS = (
     "zenodo_v2",
     "figshare_v2",
     "osf_v2",
+    "arxiv_v2",
 )
 _PARSING_PROFILES = MappingProxyType(
     {(adapter_id, "foundation-v2"): _FOUNDATION_PROFILE for adapter_id in _ADAPTER_IDS}
 )
 _CLOCK_CHECK_INTERVAL = 256
+_XML_CHUNK_BYTES = 8_192
 _URL_PATH_DECODE_PASSES = 4
+_MAX_XML_ATTRIBUTES_PER_ELEMENT = 16
+_MAX_ARXIV_FIELDS_PER_ENTRY = 512
 _MISSING = object()
 _MIME_TOKEN_CHARACTERS = frozenset("!#$%&'*+-.^_`|~0123456789abcdefghijklmnopqrstuvwxyz")
+_ATOM_NAMESPACE = "http://www.w3.org/2005/Atom"
+_OPEN_SEARCH_NAMESPACE = "http://a9.com/-/spec/opensearch/1.1/"
+_ARXIV_NAMESPACE = "http://arxiv.org/schemas/atom"
+_ATOM_FEED = f"{{{_ATOM_NAMESPACE}}}feed"
+_ATOM_ENTRY = f"{{{_ATOM_NAMESPACE}}}entry"
+_ATOM_ID = f"{{{_ATOM_NAMESPACE}}}id"
+_ATOM_TITLE = f"{{{_ATOM_NAMESPACE}}}title"
+_ATOM_SUMMARY = f"{{{_ATOM_NAMESPACE}}}summary"
+_ATOM_AUTHOR = f"{{{_ATOM_NAMESPACE}}}author"
+_ATOM_NAME = f"{{{_ATOM_NAMESPACE}}}name"
+_ATOM_LINK = f"{{{_ATOM_NAMESPACE}}}link"
+_ARXIV_DOI = f"{{{_ARXIV_NAMESPACE}}}doi"
+_OPEN_SEARCH_TOTAL = f"{{{_OPEN_SEARCH_NAMESPACE}}}totalResults"
+_OPEN_SEARCH_START = f"{{{_OPEN_SEARCH_NAMESPACE}}}startIndex"
+_OPEN_SEARCH_ITEMS = f"{{{_OPEN_SEARCH_NAMESPACE}}}itemsPerPage"
+_ARXIV_ID_RE = re.compile(
+    r"(?:\d{4}\.\d{4,5}|[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)*/\d{7})(?:v[1-9]\d*)?\Z",
+    re.IGNORECASE | re.ASCII,
+)
+_ARXIV_VERSION_RE = re.compile(r"v[1-9]\d*\Z", re.IGNORECASE | re.ASCII)
+_XML_ENCODING_RE = re.compile(r"\bencoding\s*=\s*(['\"])([^'\"]+)\1", re.IGNORECASE)
 
 
 class _PayloadInvalid(Exception):
@@ -211,6 +244,139 @@ def _walk_json(value: Any, *, depth: int, guard: _ParseGuard) -> None:
             _walk_json(item, depth=depth + 1, guard=guard)
 
 
+class _BoundedXMLTarget:
+    """Tree builder that applies structural ceilings while XML is parsed."""
+
+    def __init__(self, guard: _ParseGuard, *, max_name_chars: int) -> None:
+        if type(max_name_chars) is not int or max_name_chars <= 0:
+            raise _PayloadInvalid
+        self.guard = guard
+        self.max_name_chars = max_name_chars
+        self.builder = ElementTree.TreeBuilder()
+        self.depth = 0
+        self.text_lengths: list[int] = []
+        self.pending_namespace_count = 0
+        self.name_chars = 0
+
+    def _visit_name(self, value: str) -> None:
+        _check_string(value, self.guard.profile)
+        self.name_chars += len(value)
+        if self.name_chars > self.max_name_chars:
+            raise _ParseLimitExceeded
+
+    def start_ns(self, prefix: str, uri: str) -> None:
+        if type(prefix) is not str or type(uri) is not str:
+            raise _PayloadInvalid
+        if self.pending_namespace_count >= _MAX_XML_ATTRIBUTES_PER_ELEMENT:
+            raise _ParseLimitExceeded
+        self.guard.visit_node()
+        self._visit_name(prefix)
+        self._visit_name(uri)
+        self.pending_namespace_count += 1
+
+    def end_ns(self, prefix: str) -> None:
+        if type(prefix) is not str:
+            raise _PayloadInvalid
+        _check_string(prefix, self.guard.profile)
+
+    def start(self, tag: str, attributes: dict[str, str]) -> ElementTree.Element:
+        if type(tag) is not str or type(attributes) is not dict:
+            raise _PayloadInvalid
+        self.depth += 1
+        if self.depth > self.guard.profile.max_depth:
+            raise _ParseLimitExceeded
+        self.guard.visit_node()
+        self._visit_name(tag)
+        if len(attributes) + self.pending_namespace_count > _MAX_XML_ATTRIBUTES_PER_ELEMENT:
+            raise _ParseLimitExceeded
+        for name, value in attributes.items():
+            if type(name) is not str or type(value) is not str:
+                raise _PayloadInvalid
+            self.guard.visit_node()
+            self._visit_name(name)
+            _check_string(value, self.guard.profile)
+        self.pending_namespace_count = 0
+        self.text_lengths.append(0)
+        return self.builder.start(tag, attributes)
+
+    def data(self, value: str) -> None:
+        if type(value) is not str:
+            raise _PayloadInvalid
+        _check_string(value, self.guard.profile)
+        if self.text_lengths:
+            self.text_lengths[-1] += len(value)
+            if self.text_lengths[-1] > self.guard.profile.max_string_chars:
+                raise _ParseLimitExceeded
+        elif value.strip():
+            raise _PayloadInvalid
+        self.builder.data(value)
+
+    def end(self, tag: str) -> ElementTree.Element:
+        if type(tag) is not str or self.depth <= 0 or not self.text_lengths:
+            raise _PayloadInvalid
+        _check_string(tag, self.guard.profile)
+        element = self.builder.end(tag)
+        self.text_lengths.pop()
+        self.depth -= 1
+        return element
+
+    def close(self) -> ElementTree.Element:
+        if self.depth != 0 or self.text_lengths or self.pending_namespace_count:
+            raise _PayloadInvalid
+        root = self.builder.close()
+        if type(root) is not ElementTree.Element:
+            raise _PayloadInvalid
+        return root
+
+
+def _strict_atom(
+    response: DiscoveryGatewayResponse,
+    *,
+    profile: _ParsingProfile,
+    max_input_bytes: int,
+    clock: MonotonicClock,
+) -> tuple[ElementTree.Element, _ParseGuard]:
+    """Parse one UTF-8 Atom body with entity and structural defenses."""
+    if type(response.body) is not bytes:
+        raise DiscoveryAdapterError("provider_payload_invalid")
+    if len(response.body) > max_input_bytes:
+        raise DiscoveryAdapterError("provider_parse_limit_exceeded")
+
+    try:
+        guard = _ParseGuard(profile, clock)
+        guard.checkpoint()
+        text = response.body.decode("utf-8", errors="strict")
+        if text.startswith("\ufeff") or "\x00" in text:
+            raise _PayloadInvalid
+        if text.startswith("<?xml"):
+            declaration_end = text.find("?>")
+            if declaration_end < 0:
+                raise _PayloadInvalid
+            encoding = _XML_ENCODING_RE.search(text[: declaration_end + 2])
+            if encoding is not None and encoding.group(2).casefold() not in {"utf-8", "utf8"}:
+                raise _PayloadInvalid
+
+        target = _BoundedXMLTarget(guard, max_name_chars=max_input_bytes)
+        parser = DefusedXMLParser(
+            encoding="utf-8",
+            target=target,
+            forbid_dtd=True,
+            forbid_entities=True,
+            forbid_external=True,
+        )
+        for offset in range(0, len(response.body), _XML_CHUNK_BYTES):
+            guard.checkpoint()
+            parser.feed(response.body[offset : offset + _XML_CHUNK_BYTES])
+        root = parser.close()
+        guard.checkpoint()
+        return root, guard
+    except (_PayloadInvalid, _ParseLimitExceeded, _ParseDeadlineExceeded) as error:
+        _raise_adapter_error(error)
+    except (DefusedXmlException, ElementTree.ParseError, UnicodeError, RecursionError, ValueError, TypeError):
+        raise DiscoveryAdapterError("provider_payload_invalid") from None
+    raise AssertionError("unreachable")
+
+
 def _check_string(value: str, profile: _ParsingProfile) -> None:
     if len(value) > profile.max_string_chars:
         raise _ParseLimitExceeded
@@ -254,6 +420,15 @@ def _is_json_content_type(value: str | None) -> bool:
     return all(_valid_mime_parameter(parameter) for parameter in parts[1:])
 
 
+def _is_atom_content_type(value: str | None) -> bool:
+    if type(value) is not str or "," in value:
+        return False
+    parts = value.split(";")
+    if parts[0].strip().lower() != "application/atom+xml":
+        return False
+    return all(_valid_mime_parameter(parameter) for parameter in parts[1:])
+
+
 def _valid_mime_parameter(raw_parameter: str) -> bool:
     parameter = raw_parameter.strip()
     name, separator, raw_value = parameter.partition("=")
@@ -282,7 +457,11 @@ def _valid_mime_parameter(raw_parameter: str) -> bool:
     return all(character.lower() in _MIME_TOKEN_CHARACTERS for character in raw_value)
 
 
-def _checked_response(response: object) -> DiscoveryGatewayResponse:
+def _checked_response(
+    response: object,
+    *,
+    content_type_matches: Callable[[str | None], bool] = _is_json_content_type,
+) -> DiscoveryGatewayResponse:
     """Validate status and MIME without inspecting rejected bodies."""
     if type(response) is not DiscoveryGatewayResponse or type(response.status_code) is not int:
         raise DiscoveryAdapterError("provider_response_rejected")
@@ -301,7 +480,7 @@ def _checked_response(response: object) -> DiscoveryGatewayResponse:
         raise return_error
     if response.status_code != 200:
         raise DiscoveryAdapterError("provider_response_rejected")
-    if not _is_json_content_type(_response_content_type(response)):
+    if not content_type_matches(_response_content_type(response)):
         raise DiscoveryAdapterError("provider_response_rejected")
     return response
 
@@ -481,6 +660,179 @@ def _base_record(
         "provider": provider,
         "provider_ids": provider_ids,
     }
+
+
+def _direct_xml_children(element: ElementTree.Element, tag: str) -> tuple[ElementTree.Element, ...]:
+    if type(element) is not ElementTree.Element:
+        raise _PayloadInvalid
+    return tuple(child for child in element if type(child) is ElementTree.Element and child.tag == tag)
+
+
+def _single_xml_child(
+    element: ElementTree.Element,
+    tag: str,
+    *,
+    required: bool,
+) -> ElementTree.Element | None:
+    children = _direct_xml_children(element, tag)
+    if len(children) > 1 or (required and not children):
+        raise _PayloadInvalid
+    return children[0] if children else None
+
+
+def _xml_scalar(element: ElementTree.Element, *, required: bool) -> str | None:
+    if type(element) is not ElementTree.Element or element.attrib or len(element):
+        raise _PayloadInvalid
+    text = element.text
+    if text is None:
+        value = ""
+    elif type(text) is str:
+        value = " ".join(text.split())
+    else:
+        raise _PayloadInvalid
+    if required and not value:
+        raise _PayloadInvalid
+    return value or None
+
+
+def _xml_integer(element: ElementTree.Element, profile: _ParsingProfile) -> int:
+    value = _xml_scalar(element, required=True)
+    if type(value) is not str:
+        raise _PayloadInvalid
+    if len(value) > profile.max_numeric_token_chars:
+        raise _ParseLimitExceeded
+    if not value.isascii() or not value.isdecimal():
+        raise _PayloadInvalid
+    return _bounded_cursor(int(value))
+
+
+def _arxiv_identifier_from_url(value: str, *, path_kind: str) -> str | None:
+    if (
+        type(value) is not str
+        or path_kind not in {"abs", "pdf"}
+        or "%" in value
+        or "\\" in value
+        or any(ord(character) < 32 or ord(character) == 127 for character in value)
+    ):
+        return None
+    try:
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme.lower() not in {"http", "https"}
+            or parsed.netloc.lower() != "arxiv.org"
+            or parsed.hostname is None
+            or parsed.hostname.lower() != "arxiv.org"
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.port is not None
+            or parsed.query
+            or parsed.fragment
+        ):
+            return None
+    except ValueError:
+        return None
+    prefix = f"/{path_kind}/"
+    if not parsed.path.startswith(prefix):
+        return None
+    identifier = parsed.path[len(prefix) :]
+    if path_kind == "pdf" and identifier.lower().endswith(".pdf"):
+        identifier = identifier[:-4]
+    if not identifier or not identifier.isascii() or _ARXIV_ID_RE.fullmatch(identifier) is None:
+        return None
+    return identifier
+
+
+def _arxiv_pdf_url(entry: ElementTree.Element, arxiv_id: str) -> str | None:
+    for link in _direct_xml_children(entry, _ATOM_LINK):
+        attributes = link.attrib
+        if (
+            attributes.get("rel") != "related"
+            or attributes.get("title") != "pdf"
+            or attributes.get("type", "").lower() != "application/pdf"
+        ):
+            continue
+        href = attributes.get("href")
+        pdf_id = _arxiv_identifier_from_url(href, path_kind="pdf") if type(href) is str else None
+        if pdf_id is None:
+            return None
+        if _ARXIV_VERSION_RE.search(arxiv_id) is None:
+            identifiers_match = _ARXIV_VERSION_RE.sub("", pdf_id).casefold() == arxiv_id.casefold()
+        else:
+            identifiers_match = pdf_id.casefold() == arxiv_id.casefold()
+        if not identifiers_match:
+            return None
+        return f"https://arxiv.org/pdf/{pdf_id}"
+    return None
+
+
+def _check_arxiv_entry_fields(entry: ElementTree.Element, guard: _ParseGuard) -> None:
+    fields = len(entry.attrib)
+    if fields > _MAX_ARXIV_FIELDS_PER_ENTRY:
+        raise _ParseLimitExceeded
+    stack = list(entry)
+    while stack:
+        element = stack.pop()
+        fields += 1 + len(element.attrib)
+        if fields > _MAX_ARXIV_FIELDS_PER_ENTRY:
+            raise _ParseLimitExceeded
+        if fields % _CLOCK_CHECK_INTERVAL == 0:
+            guard.checkpoint()
+        stack.extend(element)
+
+
+def _arxiv_record(raw: Any, guard: _ParseGuard) -> dict[str, Any]:
+    if type(raw) is not ElementTree.Element or raw.tag != _ATOM_ENTRY:
+        raise _PayloadInvalid
+    _check_arxiv_entry_fields(raw, guard)
+
+    id_element = _single_xml_child(raw, _ATOM_ID, required=True)
+    title_element = _single_xml_child(raw, _ATOM_TITLE, required=True)
+    summary_element = _single_xml_child(raw, _ATOM_SUMMARY, required=False)
+    if id_element is None or title_element is None:
+        raise _PayloadInvalid
+    entry_id_url = _xml_scalar(id_element, required=True)
+    title = _xml_scalar(title_element, required=True)
+    abstract = None if summary_element is None else _xml_scalar(summary_element, required=False)
+    if type(entry_id_url) is not str or type(title) is not str:
+        raise _PayloadInvalid
+    arxiv_id = _arxiv_identifier_from_url(entry_id_url, path_kind="abs")
+    if arxiv_id is None:
+        raise _PayloadInvalid
+
+    author_elements = _direct_xml_children(raw, _ATOM_AUTHOR)
+    authors: list[str] = []
+    for author in _guarded_items(list(author_elements), guard):
+        name_element = _single_xml_child(author, _ATOM_NAME, required=True)
+        if name_element is None:
+            raise _PayloadInvalid
+        name = _xml_scalar(name_element, required=True)
+        if type(name) is not str:
+            raise _PayloadInvalid
+        authors.append(name)
+
+    doi_element = _single_xml_child(raw, _ARXIV_DOI, required=False)
+    if doi_element is None:
+        doi = None
+    else:
+        doi_text = _xml_scalar(doi_element, required=True)
+        doi = _normalized_doi(doi_text)
+    provider_ids = {"arxiv_id": arxiv_id}
+    if doi is not None:
+        provider_ids["doi"] = doi
+    return _base_record(
+        title=title,
+        authors=tuple(authors),
+        abstract=abstract,
+        snippet=abstract,
+        doi=doi,
+        pmid=None,
+        pmcid=None,
+        arxiv_id=arxiv_id,
+        url=f"https://arxiv.org/abs/{arxiv_id}",
+        pdf_url=_arxiv_pdf_url(raw, arxiv_id),
+        provider="arxiv",
+        provider_ids=provider_ids,
+    )
 
 
 def _guarded_items(values: list[Any], guard: _ParseGuard) -> Iterator[Any]:
@@ -690,6 +1042,7 @@ _NORMALIZERS = MappingProxyType(
         "zenodo_v2": _zenodo_record,
         "figshare_v2": _figshare_record,
         "osf_v2": _osf_record,
+        "arxiv_v2": _arxiv_record,
     }
 )
 
@@ -768,6 +1121,37 @@ def _osf_page(payload: Any, current: int, _seen: int, page_size: int) -> tuple[l
     return records, _bounded_cursor(current + 1, greater_than=current)
 
 
+def _arxiv_page(
+    payload: Any,
+    current: int,
+    _seen: int,
+    page_size: int,
+    profile: _ParsingProfile,
+    max_records: int,
+) -> tuple[list[Any], int | None]:
+    if type(payload) is not ElementTree.Element or payload.tag != _ATOM_FEED:
+        raise _PayloadInvalid
+    total_element = _single_xml_child(payload, _OPEN_SEARCH_TOTAL, required=True)
+    start_element = _single_xml_child(payload, _OPEN_SEARCH_START, required=True)
+    items_element = _single_xml_child(payload, _OPEN_SEARCH_ITEMS, required=True)
+    if total_element is None or start_element is None or items_element is None:
+        raise _PayloadInvalid
+    total = _xml_integer(total_element, profile)
+    start = _xml_integer(start_element, profile)
+    items = _xml_integer(items_element, profile)
+    records = list(_direct_xml_children(payload, _ATOM_ENTRY))
+    if len(records) > max_records:
+        raise _ParseLimitExceeded
+    if start != current or items > page_size or len(records) > items or start > total or start + len(records) > total:
+        raise _PayloadInvalid
+    next_value = start + len(records)
+    if next_value < total:
+        if not records:
+            raise _PayloadInvalid
+        return records, _bounded_cursor(next_value, greater_than=current)
+    return records, None
+
+
 _PAGE_READERS = MappingProxyType(
     {
         "semantic_scholar_v2": _semantic_scholar_page,
@@ -807,6 +1191,8 @@ def _initial_page_and_size(group: PlannedDispatchGroup) -> tuple[int, int]:
         return _body_integer(group, "page"), _body_integer(group, "page_size")
     if adapter_id == "osf_v2":
         return _query_integer(group, "page"), _query_integer(group, "page[size]")
+    if adapter_id == "arxiv_v2":
+        return _query_integer(group, "start"), _query_integer(group, "max_results")
     raise _PayloadInvalid
 
 
@@ -864,20 +1250,40 @@ async def _execute_adapter(
     records_by_id: dict[str, dict[str, Any]] = {}
 
     for page_index in range(trusted_group.limits.max_pages):
-        response = _checked_response(await dispatch(intent, cursor=cursor))
-        payload, guard = _strict_json(
-            response,
-            profile=profile,
-            max_input_bytes=max_input_bytes,
-            clock=clock,
-        )
-        try:
-            raw_records, next_page = _PAGE_READERS[adapter_id](
-                payload,
-                current_page,
-                seen_records,
-                page_size,
+        response = await dispatch(intent, cursor=cursor)
+        if adapter_id == "arxiv_v2":
+            response = _checked_response(response, content_type_matches=_is_atom_content_type)
+            payload, guard = _strict_atom(
+                response,
+                profile=profile,
+                max_input_bytes=max_input_bytes,
+                clock=clock,
             )
+        else:
+            response = _checked_response(response)
+            payload, guard = _strict_json(
+                response,
+                profile=profile,
+                max_input_bytes=max_input_bytes,
+                clock=clock,
+            )
+        try:
+            if adapter_id == "arxiv_v2":
+                raw_records, next_page = _arxiv_page(
+                    payload,
+                    current_page,
+                    seen_records,
+                    page_size,
+                    profile,
+                    max_records - seen_records,
+                )
+            else:
+                raw_records, next_page = _PAGE_READERS[adapter_id](
+                    payload,
+                    current_page,
+                    seen_records,
+                    page_size,
+                )
             if len(raw_records) > max_records - seen_records:
                 raise _ParseLimitExceeded
             _validate_page_cardinality(raw_records, page_size)
@@ -904,7 +1310,7 @@ async def _execute_adapter(
         except (KeyError, TypeError, ValueError, OverflowError):
             raise DiscoveryAdapterError("provider_payload_invalid") from None
 
-        if next_page is None or page_index + 1 >= trusted_group.limits.max_pages:
+        if seen_records >= max_records or next_page is None or page_index + 1 >= trusted_group.limits.max_pages:
             break
         current_page = next_page
         cursor = NumericCursor(next_page)
@@ -923,5 +1329,5 @@ def foundation_gateway_adapters(
     *,
     monotonic_clock: MonotonicClock = time.monotonic,
 ) -> Mapping[str, DiscoveryAdapter]:
-    """Return the exact five credentialless foundation JSON adapters."""
+    """Return the exact credentialless foundation adapter set."""
     return MappingProxyType({adapter_id: _adapter(adapter_id, monotonic_clock) for adapter_id in _ADAPTER_IDS})

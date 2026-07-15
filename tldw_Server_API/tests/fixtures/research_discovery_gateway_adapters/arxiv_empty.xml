@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"
+      xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/">
+  <title>arXiv Query: search_query=all:no-results&amp;start=0&amp;max_results=1</title>
+  <id>https://arxiv.org/api/sanitized-empty-fixture</id>
+  <updated>2026-01-01T00:00:00Z</updated>
+  <link href="https://export.arxiv.org/api/query?search_query=all%3Ano-results&amp;start=0&amp;max_results=1"
+        rel="self"
+        type="application/atom+xml" />
+  <opensearch:totalResults>0</opensearch:totalResults>
+  <opensearch:startIndex>0</opensearch:startIndex>
+  <opensearch:itemsPerPage>1</opensearch:itemsPerPage>
+</feed>
