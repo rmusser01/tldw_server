@@ -133,6 +133,9 @@ const sameValidationIssues = (
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
+const hasStatus = (error: unknown, status: number): boolean =>
+  isRecord(error) && error.status === status;
+
 const isPositiveInteger = (value: unknown): value is number =>
   Number.isSafeInteger(value) && Number(value) > 0;
 
@@ -196,6 +199,22 @@ const upsertView = (
   view,
   ...views.filter((candidate) => candidate.id !== view.id),
 ];
+
+const removeView = (
+  state: ControllerState,
+  viewId: string,
+  announcement: string,
+): ControllerState => ({
+  ...clearTransientState(state),
+  views: state.views.filter((candidate) => candidate.id !== viewId),
+  activeViewId: state.activeViewId === viewId ? null : state.activeViewId,
+  activeSnapshot:
+    state.activeViewId === viewId ? null : state.activeSnapshot,
+  activeSignature:
+    state.activeViewId === viewId ? null : state.activeSignature,
+  mutation: null,
+  announcement,
+});
 
 const defaultWireState = (): WorkspaceSourceSavedViewStateV1 => {
   const serialized = serializeSourceListViewState(
@@ -550,6 +569,17 @@ export const useSourceSavedViews = (
       } catch (error) {
         if (!isOperationCurrent(token)) return;
         mutationInFlightRef.current = false;
+        if (hasStatus(error, 404)) {
+          versionRetryRef.current = null;
+          mutationRetryRef.current = null;
+          const committed = commitOperation(token, (current) =>
+            removeView(current, options.viewId, "Saved view no longer exists."),
+          );
+          if (committed) {
+            await reconcileOperation(token, targetWorkspaceId);
+          }
+          return;
+        }
         const detail = parseConflictDetail(error);
         if (detail?.code === "source_view_version_conflict") {
           const refreshToken = await load(
@@ -895,6 +925,15 @@ export const useSourceSavedViews = (
         const token = beginMutation(renderGeneration);
         if (!token) return;
         const needsReconciliation = !hasAuthoritativeViewsRef.current;
+        const finishDelete = () => {
+          if (!isOperationCurrent(token)) return false;
+          mutationInFlightRef.current = false;
+          versionRetryRef.current = null;
+          mutationRetryRef.current = null;
+          return commitOperation(token, (current) =>
+            removeView(current, view.id, "Saved view deleted."),
+          );
+        };
         commitOperation(token, (current) => ({
           ...current,
           loading: false,
@@ -904,29 +943,19 @@ export const useSourceSavedViews = (
         }));
         try {
           await tldwClient.deleteWorkspaceSourceView(workspaceId, view.id);
-          if (!isOperationCurrent(token)) return;
-          mutationInFlightRef.current = false;
-          versionRetryRef.current = null;
-          mutationRetryRef.current = null;
-          const committed = commitOperation(token, (current) => ({
-            ...clearTransientState(current),
-            views: current.views.filter(
-              (candidate) => candidate.id !== view.id,
-            ),
-            activeViewId:
-              current.activeViewId === view.id ? null : current.activeViewId,
-            activeSnapshot:
-              current.activeViewId === view.id ? null : current.activeSnapshot,
-            activeSignature:
-              current.activeViewId === view.id ? null : current.activeSignature,
-            mutation: null,
-            announcement: "Saved view deleted.",
-          }));
+          const committed = finishDelete();
           if (committed && needsReconciliation) {
             void reconcileOperation(token, workspaceId);
           }
         } catch (error) {
           if (!isOperationCurrent(token)) return;
+          if (hasStatus(error, 404)) {
+            const committed = finishDelete();
+            if (committed && needsReconciliation) {
+              void reconcileOperation(token, workspaceId);
+            }
+            return;
+          }
           mutationInFlightRef.current = false;
           mutationRetryRef.current = { ...token, run };
           commitOperation(token, (current) => ({

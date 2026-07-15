@@ -1047,6 +1047,39 @@ describe("useSourceSavedViews", () => {
     expect(result.current.announcement).toBe("Saved view reset.");
   });
 
+  it.each(["replace", "reset"] as const)(
+    "reconciles a missing row after a %s returns 404",
+    async (kind) => {
+      const row = kind === "replace" ? validView() : invalidView();
+      api.listWorkspaceSourceViews
+        .mockResolvedValueOnce({ items: [row] })
+        .mockResolvedValueOnce({ items: [] });
+      api.updateWorkspaceSourceView.mockRejectedValue({
+        status: 404,
+        message: "Saved view not found.",
+      });
+      const { result } = setup();
+      await waitFor(() => expect(result.current.views).toHaveLength(1));
+
+      await act(async () => {
+        if (kind === "replace") {
+          await result.current.replaceView(result.current.views[0]!);
+        } else {
+          await result.current.resetView(result.current.views[0]!);
+        }
+      });
+
+      await waitFor(() =>
+        expect(api.listWorkspaceSourceViews).toHaveBeenCalledTimes(2),
+      );
+      expect(result.current.views).toEqual([]);
+      expect(result.current.mutation).toBeNull();
+      expect(result.current.mutationError).toBeNull();
+      expect(result.current.canRetryMutation).toBe(false);
+      expect(result.current.announcement).toBe("Saved view no longer exists.");
+    },
+  );
+
   it("deletes the active row without changing current filters", async () => {
     const onApply = vi.fn();
     api.listWorkspaceSourceViews.mockResolvedValue({ items: [validView()] });
@@ -1065,6 +1098,88 @@ describe("useSourceSavedViews", () => {
     expect(result.current.activeViewId).toBeNull();
     expect(result.current.activeSnapshot).toBeNull();
     expect(onApply).toHaveBeenCalledTimes(1);
+    expect(result.current.announcement).toBe("Saved view deleted.");
+  });
+
+  it("treats a direct DELETE 404 as an already completed deletion", async () => {
+    api.listWorkspaceSourceViews.mockResolvedValue({ items: [validView()] });
+    api.deleteWorkspaceSourceView.mockRejectedValue({
+      status: 404,
+      message: "Saved view not found.",
+    });
+    const { result } = setup();
+    await waitFor(() => expect(result.current.views).toHaveLength(1));
+    act(() => result.current.applyView(result.current.views[0]!));
+
+    await act(async () => result.current.deleteView(result.current.views[0]!));
+
+    expect(result.current.views).toEqual([]);
+    expect(result.current.activeViewId).toBeNull();
+    expect(result.current.mutationError).toBeNull();
+    expect(result.current.canRetryMutation).toBe(false);
+    expect(result.current.announcement).toBe("Saved view deleted.");
+  });
+
+  it("reconciles other rows after DELETE 404 supersedes an incomplete list", async () => {
+    const initialLoad = deferred<{ items: ReturnType<typeof validView>[] }>();
+    const staleReconciliation = deferred<{
+      items: ReturnType<typeof validView>[];
+    }>();
+    const created = validView({ id: "created-view", name: "Created" });
+    const existing = validView({ id: "existing-view", name: "Existing" });
+    api.listWorkspaceSourceViews
+      .mockReturnValueOnce(initialLoad.promise)
+      .mockReturnValueOnce(staleReconciliation.promise)
+      .mockResolvedValueOnce({ items: [existing] });
+    api.createWorkspaceSourceView.mockResolvedValue(created);
+    api.deleteWorkspaceSourceView.mockRejectedValue({
+      status: 404,
+      message: "Saved view not found.",
+    });
+    const { result } = setup();
+    await waitFor(() =>
+      expect(api.listWorkspaceSourceViews).toHaveBeenCalledTimes(1),
+    );
+
+    await act(async () => result.current.createView("Created"));
+    await waitFor(() =>
+      expect(api.listWorkspaceSourceViews).toHaveBeenCalledTimes(2),
+    );
+    expect(result.current.views.map((view) => view.id)).toEqual([
+      "created-view",
+    ]);
+
+    await act(async () => result.current.deleteView(created));
+
+    await waitFor(() =>
+      expect(api.listWorkspaceSourceViews).toHaveBeenCalledTimes(3),
+    );
+    expect(result.current.views.map((view) => view.id)).toEqual([
+      "existing-view",
+    ]);
+    expect(result.current.announcement).toBe("Saved view deleted.");
+  });
+
+  it("treats a DELETE retry 404 as success after a lost response", async () => {
+    api.listWorkspaceSourceViews.mockResolvedValue({ items: [validView()] });
+    api.deleteWorkspaceSourceView
+      .mockRejectedValueOnce(new Error("Connection lost after request."))
+      .mockRejectedValueOnce({
+        status: 404,
+        message: "Saved view not found.",
+      });
+    const { result } = setup();
+    await waitFor(() => expect(result.current.views).toHaveLength(1));
+
+    await act(async () => result.current.deleteView(result.current.views[0]!));
+    expect(result.current.canRetryMutation).toBe(true);
+
+    await act(async () => result.current.retryMutation());
+
+    expect(api.deleteWorkspaceSourceView).toHaveBeenCalledTimes(2);
+    expect(result.current.views).toEqual([]);
+    expect(result.current.mutationError).toBeNull();
+    expect(result.current.canRetryMutation).toBe(false);
     expect(result.current.announcement).toBe("Saved view deleted.");
   });
 
