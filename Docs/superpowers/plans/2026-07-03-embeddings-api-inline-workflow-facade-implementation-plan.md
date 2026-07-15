@@ -6,6 +6,8 @@
 
 **Architecture:** Add dependency-light workflow contracts and an inline runner under `tldw_Server_API/app/core/Embeddings/`. The runner calls the existing `EmbeddingRequestOrchestrator.prepare()` and `.execute()` methods, preserves endpoint-owned ResourceGovernor reservation through a pre-execute hook, and returns the existing `EmbeddingExecutionResult`. Public endpoint behavior, feature flags, response headers, metrics, schemas, logs, and legacy shims stay unchanged.
 
+**Post-implementation security amendment:** The final trace contract intentionally supersedes the early red/green snippets below. It uses generated and constructor-validated workflow-local ids, an explicit metadata field-and-type allowlist, fixed enum strings, and aggregate values only. Caller-controlled provider/model/cache/fallback/request/user/header identifiers and dynamic error/class strings are omitted rather than accepted through pattern matching.
+
 **Tech Stack:** Python 3.14-compatible syntax already used in tests, dataclasses, typing protocols, FastAPI endpoint integration, pytest, pytest-asyncio, existing Embeddings orchestrator tests, Bandit.
 
 ---
@@ -93,7 +95,7 @@ EmbeddingWorkflowEventType = Literal[
 ]
 ```
 
-Safe metadata scalar values are `str | int | float | bool | None`. Safe metadata dictionaries may contain scalar values or short lists of scalar values. Metadata field names must reject raw input/secrets by field name.
+Final metadata snapshots use immutable mappings and immutable bounded tuples. Metadata fields and value types are explicitly allowlisted; strings are limited to fixed enum values. Credential-pattern rejection remains defense in depth, not the primary safety boundary.
 
 Forbidden field names:
 
@@ -1193,6 +1195,15 @@ git commit -m "docs(embeddings): record workflow facade verification"
 Create this commit only when the implementation task file or plan has changed after verification.
 
 ## Plan Self-Review Checklist
+
+PR-readiness review amendments reflected by the final implementation:
+
+- Validated metadata is immutable after construction, including nested sequence values.
+- Metadata uses an explicit field-and-type allowlist, and strings accept only fixed enum values; credential-pattern checks are defense in depth.
+- Inline workflow ids are generated locally, and caller-controlled request/user/provider/model/cache/fallback/error/class/header identifiers are omitted from trace contracts.
+- Context and event constructors independently reject workflow ids outside the Stage 1 generated format.
+- Successful preparation emits an explicit `planning` phase before `prepare_completed` and the pre-execute hook.
+- Endpoint parity tests compare ResourceGovernor reserve/commit accounting and cover success, execute failure, and reservation denial.
 
 - Spec coverage:
   - Canonical workflow contracts: Task 1.

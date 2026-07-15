@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from typing import TYPE_CHECKING, Any, Protocol
 
 from tldw_Server_API.app.core.Embeddings.request_types import (
@@ -14,8 +14,11 @@ from tldw_Server_API.app.core.Embeddings.workflow_types import (
     EmbeddingNoopWorkflowTraceCollector,
     EmbeddingWorkflowContext,
     EmbeddingWorkflowEvent,
+    EmbeddingWorkflowEventType,
     EmbeddingWorkflowPhase,
+    EmbeddingWorkflowStatus,
     EmbeddingWorkflowTraceCollector,
+    SafeWorkflowMetadataValue,
 )
 
 if TYPE_CHECKING:
@@ -50,9 +53,7 @@ class EmbeddingInlineWorkflowRunner:
         self._pre_execute = pre_execute
 
     async def run(self, raw_input: Any, context: EmbeddingRequestContext) -> EmbeddingExecutionResult:
-        workflow_context = EmbeddingWorkflowContext.from_request(
-            request_id=context.request_id,
-            user_id=context.user_id,
+        workflow_context = EmbeddingWorkflowContext.create(
             endpoint_path=context.endpoint_path,
             runner_mode="inline",
         )
@@ -72,6 +73,8 @@ class EmbeddingInlineWorkflowRunner:
             phase = "normalizing"
             self._record(workflow_context, "phase_changed", phase=phase, status="running")
             prepared = self._orchestrator.prepare(raw_input, context)
+            phase = "planning"
+            self._record(workflow_context, "phase_changed", phase=phase, status="running")
             self._record(
                 workflow_context,
                 "prepare_completed",
@@ -81,7 +84,6 @@ class EmbeddingInlineWorkflowRunner:
             )
 
             if self._pre_execute is not None:
-                phase = "planning"
                 await self._pre_execute(prepared)
 
             phase = "executing"
@@ -105,14 +107,14 @@ class EmbeddingInlineWorkflowRunner:
                 metadata=_domain_error_metadata(exc, phase),
             )
             raise
-        except Exception as exc:
+        except Exception:
             self._record_failure(
                 workflow_context,
                 "workflow_failed",
                 phase=phase,
                 status="failed",
                 metadata={
-                    "cause_class": exc.__class__.__name__,
+                    "failure_kind": "unexpected",
                     "phase": phase,
                 },
             )
@@ -121,11 +123,11 @@ class EmbeddingInlineWorkflowRunner:
     def _record_failure(
         self,
         workflow_context: EmbeddingWorkflowContext,
-        event_type: str,
+        event_type: EmbeddingWorkflowEventType,
         *,
         phase: EmbeddingWorkflowPhase | None,
-        status: str,
-        metadata: dict[str, object],
+        status: EmbeddingWorkflowStatus,
+        metadata: Mapping[str, SafeWorkflowMetadataValue],
     ) -> None:
         try:
             self._record(
@@ -141,11 +143,11 @@ class EmbeddingInlineWorkflowRunner:
     def _record(
         self,
         workflow_context: EmbeddingWorkflowContext,
-        event_type: str,
+        event_type: EmbeddingWorkflowEventType,
         *,
         phase: EmbeddingWorkflowPhase | None = None,
-        status: str | None = None,
-        metadata: dict[str, object] | None = None,
+        status: EmbeddingWorkflowStatus | None = None,
+        metadata: Mapping[str, SafeWorkflowMetadataValue] | None = None,
     ) -> None:
         if not self.trace_collector.enabled:
             return
@@ -160,7 +162,9 @@ class EmbeddingInlineWorkflowRunner:
         )
 
 
-def _prepare_metadata(prepared: "PreparedEmbeddingRequest") -> dict[str, object]:
+def _prepare_metadata(
+    prepared: "PreparedEmbeddingRequest",
+) -> dict[str, SafeWorkflowMetadataValue]:
     normalized = prepared.normalized_input
     policy = prepared.policy_decision
     plan = prepared.execution_plan
@@ -168,44 +172,32 @@ def _prepare_metadata(prepared: "PreparedEmbeddingRequest") -> dict[str, object]
         "item_count": len(normalized.texts),
         "total_tokens": prepared.total_tokens,
         "prompt_tokens": prepared.prompt_tokens,
-        "provider": plan.provider,
-        "model": plan.model,
         "dimensions": plan.dimensions,
         "fallback_allowed": policy.fallback_allowed,
         "fallback_chain_length": len(plan.fallback_chain),
         "execution_path": plan.execution_path,
-        "cache_namespace": plan.cache_namespace,
     }
 
 
-def _execute_metadata(result: EmbeddingExecutionResult) -> dict[str, object]:
+def _execute_metadata(result: EmbeddingExecutionResult) -> dict[str, SafeWorkflowMetadataValue]:
     return {
         "vector_count": len(result.vectors),
         "cache_hits": result.cache_hits,
         "cache_misses": result.cache_misses,
-        "provider": result.provider,
-        "model": result.model,
-        "fallback_source": result.fallback_from,
         "adapter_used": result.embeddings_from_adapter,
-        "response_header_names": sorted(result.response_headers),
+        "response_header_count": len(result.response_headers),
     }
 
 
-def _domain_error_metadata(error: EmbeddingDomainError, phase: EmbeddingWorkflowPhase) -> dict[str, object]:
+def _domain_error_metadata(
+    error: EmbeddingDomainError,
+    phase: EmbeddingWorkflowPhase,
+) -> dict[str, SafeWorkflowMetadataValue]:
     return {
-        "error_code": error.code,
-        "provider": error.provider,
-        "model": error.model,
+        "failure_kind": "domain",
         "retryable": error.retryable,
-        "cause_class": error.cause_class or _cause_class(error),
         "phase": phase,
     }
-
-
-def _cause_class(error: BaseException) -> str | None:
-    if error.__cause__ is None:
-        return None
-    return error.__cause__.__class__.__name__
 
 
 __all__ = [

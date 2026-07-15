@@ -267,6 +267,12 @@ def _assert_response_parity(result):
         assert legacy["headers"].get(header) == orchestrator["headers"].get(header)
     _assert_cache_writes_are_float_vectors(legacy["cache_sets"])
     _assert_cache_writes_are_float_vectors(orchestrator["cache_sets"])
+    assert [request.categories for request, _op_id in legacy["rg_reserves"]] == [
+        request.categories for request, _op_id in orchestrator["rg_reserves"]
+    ]
+    assert [actuals for _handle_id, actuals, _op_id in legacy["rg_commits"]] == [
+        actuals for _handle_id, actuals, _op_id in orchestrator["rg_commits"]
+    ]
 
 
 def _run_dual_path_embedding_request(
@@ -725,6 +731,7 @@ def test_orchestrator_path_uses_inline_workflow_runner_and_preserves_rg_reservat
         )
     )
     runner_calls: list[tuple[str, object]] = []
+    rg_governor = SimpleNamespace(commit=AsyncMock())
 
     monkeypatch.setattr(
         mod,
@@ -736,7 +743,7 @@ def test_orchestrator_path_uses_inline_workflow_runner_and_preserves_rg_reservat
     async def fake_reserve_embedding_rg_tokens(*, request, current_user, token_total):
         del request, current_user
         runner_calls.append(("reserved", token_total))
-        return None, None, None, token_total
+        return rg_governor, "rg-handle", "rg-op", token_total
 
     monkeypatch.setattr(
         mod,
@@ -777,6 +784,92 @@ def test_orchestrator_path_uses_inline_workflow_runner_and_preserves_rg_reservat
         ("reserved", 3),
         ("executed", "huggingface"),
     ]
+    rg_governor.commit.assert_awaited_once_with(
+        "rg-handle",
+        actuals={"tokens": 3},
+        op_id="rg-op",
+    )
+
+
+def test_orchestrator_path_commits_reserved_units_after_execute_failure(client, monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as mod
+
+    monkeypatch.setenv("EMBEDDINGS_ORCHESTRATOR_ENABLED", "true")
+    fake_orchestrator = FakeOrchestrator(
+        execute_error=EmbeddingProviderError(
+            "provider_unavailable",
+            "provider unavailable",
+            provider="huggingface",
+            model="sentence-transformers/all-MiniLM-L6-v2",
+        )
+    )
+    rg_governor = SimpleNamespace(commit=AsyncMock())
+    monkeypatch.setattr(
+        mod,
+        "_build_embedding_request_orchestrator",
+        lambda *_args, **_kwargs: fake_orchestrator,
+        raising=False,
+    )
+
+    async def fake_reserve_embedding_rg_tokens(*, request, current_user, token_total):
+        del request, current_user
+        return rg_governor, "rg-handle", "rg-op", token_total
+
+    monkeypatch.setattr(
+        mod,
+        "_reserve_embedding_rg_tokens",
+        fake_reserve_embedding_rg_tokens,
+        raising=False,
+    )
+
+    response = client.post(
+        "/api/v1/embeddings",
+        headers={"x-provider": "huggingface"},
+        json={"model": "sentence-transformers/all-MiniLM-L6-v2", "input": "workflow failure"},
+    )
+
+    assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+    rg_governor.commit.assert_awaited_once_with(
+        "rg-handle",
+        actuals={"tokens": 3},
+        op_id="rg-op",
+    )
+
+
+def test_orchestrator_path_does_not_execute_or_commit_after_rg_denial(client, monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as mod
+
+    monkeypatch.setenv("EMBEDDINGS_ORCHESTRATOR_ENABLED", "true")
+    fake_orchestrator = FakeOrchestrator()
+    monkeypatch.setattr(
+        mod,
+        "_build_embedding_request_orchestrator",
+        lambda *_args, **_kwargs: fake_orchestrator,
+        raising=False,
+    )
+
+    async def deny_reservation(*, request, current_user, token_total):
+        del request, current_user, token_total
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Rate limit exceeded",
+        )
+
+    monkeypatch.setattr(
+        mod,
+        "_reserve_embedding_rg_tokens",
+        deny_reservation,
+        raising=False,
+    )
+
+    response = client.post(
+        "/api/v1/embeddings",
+        headers={"x-provider": "huggingface"},
+        json={"model": "sentence-transformers/all-MiniLM-L6-v2", "input": "workflow denied"},
+    )
+
+    assert response.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+    assert fake_orchestrator.execute_calls == []
 
 
 def test_orchestrator_input_error_maps_to_current_400_shape(client, monkeypatch):

@@ -1,10 +1,10 @@
 ---
 id: TASK-12142
 title: Implement Embeddings API inline workflow facade
-status: Done
+status: In Progress
 assignee: []
 created_date: 2026-07-04 01:19
-updated_date: 2026-07-10 05:24
+updated_date: 2026-07-15 00:25
 labels:
 - embeddings
 - implementation
@@ -61,6 +61,8 @@ Verification completed:
 - `git diff --check` -> passed.
 
 Review note: Task 1 and Task 2 had subagent spec/quality review loops. The final Task 2 quality re-review and Task 3 review were performed locally because subagent usage limits were reached; validated findings were fixed before final verification.
+PR-readiness review on current origin/dev identified four validated follow-up areas to address before push: trace string value safety, immutable event metadata, explicit planning phase transitions, and ResourceGovernor commit/failure parity coverage. Applying fixes with test-first verification.
+PR-readiness review remediation completed. Trace contracts now use immutable snapshots, explicit planning-phase emission, field-specific metadata allowlists, fixed enum strings, aggregate-only execution data, generated and constructor-validated workflow ids, and no caller-controlled provider/model/cache/fallback/request/user/error/class/header identifiers. ResourceGovernor parity coverage now includes reserve/commit success, execute failure, and reservation denial. Independent final review found no remaining Critical or Important findings. Focused workflow tests: 38 passed; endpoint parity tests: 37 passed; targeted mypy and compile checks passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

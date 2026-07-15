@@ -84,7 +84,7 @@ Boundary ownership stays explicit:
 
 The canonical state model is request-level with item sub-states. One workflow represents one logical embedding request or job. It tracks request-level decisions and item-level progress by stable item index.
 
-Workflow identity is safe metadata. Inline API workflows use the request id when one exists or a generated workflow id otherwise. Durable workflows use persisted workflow ids. Item identity is stable within a workflow and starts with `item_index`; durable slices can add item ids, source references, and attempt ids later.
+Workflow identity is safe metadata. Inline API workflows always generate and validate a workflow-local id in the `emb-wf-<32 lowercase hex characters>` format; both context and event constructors reject arbitrary ids. Client-controlled request ids and user ids are not retained in trace contracts. Durable workflows will need an explicitly designed persisted-id format. Item identity is stable within a workflow and starts with `item_index`; durable slices can add item ids, trusted source references, and attempt ids later.
 
 Request phase values:
 
@@ -121,7 +121,7 @@ Slice one does not persist these states. It derives coarse workflow trace events
 
 The full phase vocabulary is intentionally larger than slice one. Slice one should emit only phases it can represent truthfully around the current wrapped orchestrator. More granular cache, provider, postprocessing, and persistence phases become mandatory when those behaviors move into workflow-owned steps.
 
-Item events carry stable `item_index`, provider/model/backend identity when relevant, adapter-vs-legacy execution path, fallback source if used, and redacted error codes. They do not carry raw text, token arrays, API keys, auth headers, or provider response bodies.
+Item events carry stable `item_index`, aggregate state, and fixed execution categories. Provider/model/backend identity, fallback source, and other caller-controlled identifiers require explicit trusted canonicalization before a later slice may add them. They do not carry raw text, token arrays, API keys, auth headers, or provider response bodies.
 
 Later durable slices add persisted workflow ids, item ids, attempt ids, source references, resume cursors, cache write status, vector-store write status, and redacted failure categories.
 
@@ -148,7 +148,9 @@ Constraints:
 - No FastAPI imports.
 - No DB, Redis, provider client, or endpoint schema imports.
 - No raw input, token arrays, API keys, auth headers, nonce values, or provider body fields.
-- Metadata values are restricted to safe scalar values, small lists of safe scalar values, or redacted mappings.
+- Metadata uses an explicit field-and-type allowlist. String fields accept only fixed enum values; caller-controlled identifiers are not trace metadata.
+- Credential-pattern rejection remains defense in depth rather than the primary safety boundary.
+- Metadata snapshots are immutable mappings whose bounded sequence values are immutable tuples.
 - In-memory traces are bounded. The first implementation should choose an explicit default event cap and fail closed when a caller-supplied collector would exceed that cap, rather than silently dropping events.
 
 ### `workflow_runner.py`
@@ -189,10 +191,10 @@ Non-responsibilities:
 5. Endpoint wraps the orchestrator in `EmbeddingInlineWorkflowRunner` with the default no-op trace collector and a pre-execute hook for ResourceGovernor reservation.
 6. Runner emits `workflow_started` to the collector.
 7. Runner sets phase `normalizing` and calls `orchestrator.prepare(raw_input, context)`.
-8. On prepare success, runner derives safe metadata from `PreparedEmbeddingRequest`: item count, token count, resolved provider/model, dimensions, fallback allowed, fallback chain length, execution path, and cache namespace.
-9. Runner awaits the endpoint-owned pre-execute hook. In slice one this preserves the current RG reservation order: reserve after prepare/token counting and before cache/provider execution.
+8. On prepare success, runner sets and emits phase `planning`, then derives safe metadata from `PreparedEmbeddingRequest`: item count, token counts, dimensions, fallback allowed, fallback chain length, and fixed execution-path category.
+9. Runner emits `prepare_completed` in phase `planning` and awaits the endpoint-owned pre-execute hook. In slice one this preserves the current RG reservation order: reserve after prepare/token counting and before cache/provider execution.
 10. Runner sets phase `executing` and calls `orchestrator.execute(prepared)`.
-11. On execute success, runner derives aggregate metadata from `EmbeddingExecutionResult`: vector count, cache hit/miss totals, provider actually used, fallback source, adapter flag, and response header names.
+11. On execute success, runner derives aggregate metadata from `EmbeddingExecutionResult`: vector count, cache hit/miss totals, adapter flag, and response-header count. Provider/model/fallback identifiers and header names are intentionally omitted.
 12. Runner emits `workflow_completed` and returns `EmbeddingExecutionResult`.
 13. Endpoint applies response headers, metrics, audit/usage behavior, RG actual-unit accounting, and OpenAI-compatible response formatting exactly as today.
 
@@ -205,13 +207,13 @@ Errors are not remapped in the runner.
 If `EmbeddingDomainError` or one of its subclasses is raised:
 
 - Runner records a redacted `workflow_failed` event.
-- Event metadata may include code, safe message category if available, retryable flag, provider, model, phase, and cause class.
+- Event metadata includes only fixed failure kind, retryable flag, and phase.
 - Runner re-raises the original exception.
 - Endpoint keeps using the existing domain-error-to-HTTP mapping.
 
 If an unexpected exception is raised:
 
-- Runner records `workflow_failed` with exception class name only.
+- Runner records `workflow_failed` with fixed failure kind and phase only.
 - Runner does not record exception repr or message, because those could include provider payload text.
 - Runner re-raises the original exception.
 - Endpoint keeps using its current unexpected-error path.
@@ -229,9 +231,12 @@ Trace collection is optional.
 Trace metadata must be safe by construction:
 
 - Use indexes and counts, not raw text.
-- Use provider/model/backend identifiers only where already safe.
-- Use error codes and classes, not exception reprs.
-- Use response header names, not arbitrary header values.
+- Reject metadata fields outside the explicit field-and-type allowlist.
+- Accept string metadata only for fixed enum values; do not trace caller-controlled provider, model, cache, fallback, error, class, request, user, or header identifiers.
+- Validate workflow ids independently at context and event construction so they cannot bypass metadata rules.
+- Treat credential-pattern detection as defense in depth, not proof that an arbitrary string is safe.
+- Use aggregate response-header counts, not names or values.
+- Freeze validated metadata mappings and sequence values before collectors can retain them.
 - Bound collection size to prevent unbounded memory growth in tests or future callers.
 - Fail closed on trace metadata validation errors. Bad trace metadata should fail isolated workflow tests and future debug callers, not become production logs.
 
@@ -293,7 +298,7 @@ Promote workflow-backed paths after parity evidence. Remove obsolete shims, dupl
 Slice one tests:
 
 - `tests/Embeddings_isolated/test_workflow_types.py`
-  - Safe metadata accepts expected scalar fields.
+  - Safe metadata accepts approved aggregate and fixed-enum fields.
   - Unsafe field names are rejected or redacted.
   - Workflow traces preserve event order.
   - In-memory collector enforces bounded event storage.
@@ -303,7 +308,7 @@ Slice one tests:
   - Successful prepare/execute sequence returns the exact `EmbeddingExecutionResult`.
   - Runner emits start, phase, derived prepare metadata, aggregate execution metadata, and completion events.
   - Domain errors are traced with safe metadata and re-raised unchanged.
-  - Unexpected exceptions are traced by class only and re-raised unchanged.
+  - Unexpected exceptions are traced by fixed failure kind and phase only, then re-raised unchanged.
   - Default no-op collector does not retain events.
 
 Endpoint tests:

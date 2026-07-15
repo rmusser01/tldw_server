@@ -127,37 +127,44 @@ async def test_runner_returns_orchestrator_result_and_records_safe_success_event
     assert [event.event_type for event in collector.events] == [
         "workflow_started",
         "phase_changed",
+        "phase_changed",
         "prepare_completed",
         "phase_changed",
         "execute_completed",
         "workflow_completed",
     ]
-    assert {event.workflow_id for event in collector.events} == {"req-123"}
+    assert [event.phase for event in collector.events] == [
+        "created",
+        "normalizing",
+        "planning",
+        "planning",
+        "executing",
+        "executing",
+        "finalizing",
+    ]
+    workflow_ids = {event.workflow_id for event in collector.events}
+    assert len(workflow_ids) == 1
+    assert next(iter(workflow_ids)).startswith("emb-wf-")
+    assert "req-123" not in repr(collector.events)
     assert collector.events[0].metadata == {
         "endpoint_path": "/api/v1/embeddings",
         "runner_mode": "inline",
     }
-    assert collector.events[2].metadata == {
+    assert collector.events[3].metadata == {
         "item_count": 2,
         "total_tokens": 3,
         "prompt_tokens": 3,
-        "provider": "huggingface",
-        "model": "sentence-transformers/all-MiniLM-L6-v2",
         "dimensions": None,
         "fallback_allowed": True,
         "fallback_chain_length": 1,
         "execution_path": "legacy",
-        "cache_namespace": "endpoint",
     }
-    assert collector.events[4].metadata == {
+    assert collector.events[5].metadata == {
         "vector_count": 2,
         "cache_hits": 1,
         "cache_misses": 1,
-        "provider": "huggingface",
-        "model": "sentence-transformers/all-MiniLM-L6-v2",
-        "fallback_source": None,
         "adapter_used": False,
-        "response_header_names": ["authorization", "x-request-id"],
+        "response_header_count": 2,
     }
     assert "sk-secret" not in repr(collector.events)
     assert "provider-secret" not in repr(collector.events)
@@ -233,11 +240,8 @@ async def test_domain_failures_are_traced_with_safe_metadata_and_reraised_unchan
     assert failed.phase == "executing"
     assert failed.status == "failed"
     assert failed.metadata == {
-        "error_code": error.code,
-        "provider": "huggingface",
-        "model": "sentence-transformers/all-MiniLM-L6-v2",
+        "failure_kind": "domain",
         "retryable": error.retryable,
-        "cause_class": error.cause_class,
         "phase": "executing",
     }
     assert "sk-secret" not in repr(collector.events)
@@ -267,17 +271,14 @@ async def test_prepare_domain_failure_is_traced_in_prepare_phase_and_reraised_un
 
     assert exc_info.value is error
     assert collector.events[-1].metadata == {
-        "error_code": "invalid_input_type",
-        "provider": None,
-        "model": None,
+        "failure_kind": "domain",
         "retryable": False,
-        "cause_class": "ValueError",
         "phase": "normalizing",
     }
 
 
 @pytest.mark.asyncio
-async def test_unexpected_exceptions_trace_cause_class_and_phase_only_then_reraise():
+async def test_unexpected_exceptions_trace_failure_kind_and_phase_only_then_reraise():
     error = RuntimeError("raw provider body with sk-secret")
     collector = EmbeddingInMemoryWorkflowTraceCollector()
     runner = EmbeddingInlineWorkflowRunner(
@@ -294,7 +295,7 @@ async def test_unexpected_exceptions_trace_cause_class_and_phase_only_then_rerai
     assert failed.phase == "executing"
     assert failed.status == "failed"
     assert failed.metadata == {
-        "cause_class": "RuntimeError",
+        "failure_kind": "unexpected",
         "phase": "executing",
     }
     assert "sk-secret" not in repr(collector.events)
@@ -316,6 +317,7 @@ async def test_failure_collector_errors_do_not_replace_original_execute_exceptio
     assert exc_info.value is original
     assert [event.event_type for event in collector.events] == [
         "workflow_started",
+        "phase_changed",
         "phase_changed",
         "prepare_completed",
         "phase_changed",
@@ -344,9 +346,44 @@ async def test_pre_execute_failure_is_traced_in_planning_phase_and_reraised_unch
     assert failed.event_type == "workflow_failed"
     assert failed.phase == "planning"
     assert failed.metadata == {
-        "cause_class": "RuntimeError",
+        "failure_kind": "unexpected",
         "phase": "planning",
     }
+
+
+@pytest.mark.asyncio
+async def test_runner_never_traces_caller_controlled_provider_model_or_header_names():
+    prepared = _prepared_request()
+    prepared.execution_plan.provider = "AKIAIOSFODNN7EXAMPLE"
+    prepared.execution_plan.model = "AIzaSyA123456789012345678901234567890123"
+    prepared.execution_plan.cache_namespace = "eyJhbGciOiJIUzI1NiJ9.payload.signature"
+    result = EmbeddingExecutionResult(
+        vectors=[[0.1]],
+        provider="github_pat_0123456789abcdef",
+        model="hf_0123456789abcdef",
+        prompt_tokens=1,
+        total_tokens=1,
+        cache_hits=0,
+        cache_misses=1,
+        fallback_from="sk-proj-0123456789abcdef",
+        response_headers={"AIzaSyA123456789012345678901234567890123": "redacted"},
+    )
+    collector = EmbeddingInMemoryWorkflowTraceCollector()
+    runner = EmbeddingInlineWorkflowRunner(
+        FakeOrchestrator(prepared=prepared, result=result),
+        trace_collector=collector,
+    )
+
+    observed = await runner.run(["one"], _request_context())
+
+    assert observed is result
+    trace = repr(collector.events)
+    assert "AKIA" not in trace
+    assert "AIza" not in trace
+    assert "github_pat" not in trace
+    assert "hf_" not in trace
+    assert "sk-proj" not in trace
+    assert "eyJ" not in trace
 
 
 @pytest.mark.asyncio
