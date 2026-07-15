@@ -152,6 +152,8 @@ const WORKSPACE_REFRESH_LOOP_TRACE_SESSION_KEY =
   "tldw:research-workspace:refresh-loop-trace:v1"
 const WORKSPACE_REFRESH_LOOP_PENDING_SIGNAL_SESSION_KEY =
   "tldw:research-workspace:refresh-loop-pending:v1"
+const WORKSPACE_FRESH_INITIALIZATION_RUNTIME_MARKER =
+  "__tldwResearchWorkspaceFreshInitialization"
 const WORKSPACE_REFRESH_LOOP_WINDOW_MS = 45_000
 const WORKSPACE_REFRESH_LOOP_THRESHOLD = 3
 const WORKSPACE_CONFLICT_TRACKED_FIELDS = [
@@ -232,6 +234,33 @@ const collectResearchWorkspaceLegacyLocalStorageKeys = (): string[] => {
   }
   return keys.sort()
 }
+
+type ResearchWorkspaceRuntimeWindow = Window & {
+  [WORKSPACE_FRESH_INITIALIZATION_RUNTIME_MARKER]?: Set<string>
+}
+
+const markFreshWorkspaceInitializationForRuntime = (
+  workspaceId: string
+): void => {
+  if (typeof window === "undefined" || !workspaceId) return
+  const runtimeWindow = window as ResearchWorkspaceRuntimeWindow
+  const initializedWorkspaceIds =
+    runtimeWindow[WORKSPACE_FRESH_INITIALIZATION_RUNTIME_MARKER] ??
+    new Set<string>()
+  initializedWorkspaceIds.add(workspaceId)
+  runtimeWindow[WORKSPACE_FRESH_INITIALIZATION_RUNTIME_MARKER] =
+    initializedWorkspaceIds
+}
+
+const wasWorkspaceFreshlyInitializedInRuntime = (
+  workspaceId: string
+): boolean =>
+  typeof window !== "undefined" &&
+  Boolean(
+    (window as ResearchWorkspaceRuntimeWindow)[
+      WORKSPACE_FRESH_INITIALIZATION_RUNTIME_MARKER
+    ]?.has(workspaceId)
+  )
 
 const isEditableKeyboardTarget = (target: EventTarget | null): boolean => {
   if (!(target instanceof HTMLElement)) return false
@@ -1227,6 +1256,16 @@ const ResearchWorkspaceBody: React.FC = () => {
     signature: string
     promise: Promise<ResearchWorkspaceMigrationRunResult>
   } | null>(null)
+  const initialWorkspaceMigrationLocalStorageKeysRef = React.useRef<
+    string[] | null
+  >(null)
+  if (
+    typeof window !== "undefined" &&
+    initialWorkspaceMigrationLocalStorageKeysRef.current === null
+  ) {
+    initialWorkspaceMigrationLocalStorageKeysRef.current =
+      collectResearchWorkspaceLegacyLocalStorageKeys()
+  }
   const retryWorkspaceMigration = React.useCallback(() => {
     workspaceMigrationSignatureRef.current = null
     workspaceMigrationInFlightRef.current = null
@@ -1236,8 +1275,6 @@ const ResearchWorkspaceBody: React.FC = () => {
   }, [])
   const onboardingInitializedRef = React.useRef(false)
   const [showTutorialPrompt, setShowTutorialPrompt] = React.useState(false)
-  const [tourLaunchNoticeVisible, setTourLaunchNoticeVisible] =
-    React.useState(false)
   const [showShortcutsModal, setShowShortcutsModal] = React.useState(false)
   const startTutorial = useTutorialStore((s) => s.startTutorial)
 
@@ -1653,7 +1690,16 @@ const ResearchWorkspaceBody: React.FC = () => {
     if (!isStoreHydrated || !workspaceId) return
     if (typeof window === "undefined") return
 
+    if (wasWorkspaceFreshlyInitializedInRuntime(workspaceId)) {
+      workspaceMigrationSignatureRef.current = null
+      workspaceMigrationInFlightRef.current = null
+      setWorkspaceMigrationLoading(false)
+      setWorkspaceMigrationResult(null)
+      return
+    }
+
     const discoveredLocalStorageKeys =
+      initialWorkspaceMigrationLocalStorageKeysRef.current ??
       collectResearchWorkspaceLegacyLocalStorageKeys()
     const discoveredIndexedDbStores =
       collectResearchWorkspaceLegacyIndexedDbStores(discoveredLocalStorageKeys)
@@ -2179,8 +2225,13 @@ const ResearchWorkspaceBody: React.FC = () => {
     startTutorial("research-workspace-basics")
     dismissOnboardingOverlay()
     setShowTutorialPrompt(false)
-    setTourLaunchNoticeVisible(true)
-  }, [dismissOnboardingOverlay, startTutorial])
+    messageApi.info(
+      t(
+        "playground:workspace.tourStartedStatus",
+        "Tour started. Follow the highlighted steps."
+      )
+    )
+  }, [dismissOnboardingOverlay, messageApi, startTutorial, t])
 
   useEffect(() => {
     const normalizedWorkspaceTag =
@@ -2657,10 +2708,33 @@ const ResearchWorkspaceBody: React.FC = () => {
   // Initialize workspace on mount if not already initialized — use ref to keep dep stable
   const initRef = React.useRef(initializeWorkspace)
   initRef.current = initializeWorkspace
+  const currentWorkspaceIdRef = React.useRef(workspaceId)
+  currentWorkspaceIdRef.current = workspaceId
   useEffect(() => {
     if (!isStoreHydrated) return
-    if (!workspaceId) {
-      initRef.current()
+    if (workspaceId) return
+
+    let cancelled = false
+    void Promise.resolve().then(() => {
+      if (!cancelled && !currentWorkspaceIdRef.current) {
+        const initialStorageKeys =
+          initialWorkspaceMigrationLocalStorageKeysRef.current ?? []
+        const hadWorkspaceContentBeforeInitialization = initialStorageKeys.some(
+          (key) =>
+            key === WORKSPACE_STORAGE_KEY ||
+            key.startsWith(WORKSPACE_STORAGE_SPLIT_KEY_PREFIX)
+        )
+        if (!hadWorkspaceContentBeforeInitialization) {
+          const initializedWorkspaceId = initRef.current()
+          markFreshWorkspaceInitializationForRuntime(initializedWorkspaceId)
+          return
+        }
+        initRef.current()
+      }
+    })
+
+    return () => {
+      cancelled = true
     }
   }, [isStoreHydrated, workspaceId])
 
@@ -3393,18 +3467,6 @@ const ResearchWorkspaceBody: React.FC = () => {
       </div>
     </div>
   ) : null
-  const tourLaunchNotice = tourLaunchNoticeVisible ? (
-    <div
-      className="mx-4 mt-2 rounded-md border border-success/30 bg-success/10 px-3 py-2 text-xs text-success"
-      role="status"
-      aria-live="polite"
-    >
-      {t(
-        "playground:workspace.tourStartedStatus",
-        "Tour started. Follow the highlighted steps."
-      )}
-    </div>
-  ) : null
   const deepResearchReturnSourceLabel =
     activeDeepResearchReturnContext?.sourceArtifactTitle ||
     activeDeepResearchReturnContext?.sourceArtifactId ||
@@ -3725,7 +3787,6 @@ const ResearchWorkspaceBody: React.FC = () => {
           {deepResearchReturnBanner}
 
           {tutorialPromptBanner}
-          {tourLaunchNotice}
 
           <WorkspaceStatusBar
             storageUsedBytes={workspaceStorageUsage.usedBytes}
@@ -3784,7 +3845,6 @@ const ResearchWorkspaceBody: React.FC = () => {
           {deepResearchReturnBanner}
 
           {tutorialPromptBanner}
-          {tourLaunchNotice}
 
           <div className="flex min-h-0 flex-1 gap-2 px-2 py-2">
             {!leftPaneOpen && (

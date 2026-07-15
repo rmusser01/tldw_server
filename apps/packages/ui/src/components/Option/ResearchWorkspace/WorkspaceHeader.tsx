@@ -2315,7 +2315,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
       className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b border-border/70 bg-[linear-gradient(90deg,var(--surface)_0%,var(--surface-2)_100%)] px-4 py-3.5"
     >
       {messageContextHolder}
-      <div className="flex min-w-0 flex-1 items-center gap-3">
+      <div className="flex min-w-0 basis-full flex-wrap items-center gap-2 lg:basis-auto lg:flex-1 lg:flex-nowrap lg:gap-3">
         <span className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-primary/30 bg-primary/10">
           <FlaskConical className="h-4 w-4 text-primary" />
         </span>
@@ -2375,12 +2375,12 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
         </div>
         <div
           data-testid="workspace-server-context-indicator"
-          className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5 rounded-md border border-border bg-surface/80 px-2 py-1 text-xs text-text-muted"
+          className="order-last flex min-w-0 max-w-full basis-full flex-wrap items-center gap-1.5 rounded-md border border-border bg-surface/80 px-2 py-1 text-xs text-text-muted lg:order-none lg:basis-auto"
         >
-          <span className="font-medium text-text">
+          <span className="sr-only font-medium text-text lg:not-sr-only lg:inline">
             {t("playground:workspace.serverWorkspace", "Server Workspace")}
           </span>
-          <span className="max-w-[14rem] truncate">
+          <span className="sr-only max-w-[14rem] truncate lg:not-sr-only lg:inline">
             {serverWorkspaceContextLabel}
           </span>
           <span className="rounded bg-surface2 px-1.5 py-0.5">
@@ -2390,7 +2390,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
             )}
           </span>
           {showServerWorkspaceRecovery && (
-            <span className="min-w-0">
+            <span className="sr-only min-w-0 lg:not-sr-only lg:inline">
               {serverWorkspaceRecovery.message}
             </span>
           )}
@@ -2409,7 +2409,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
 
       <div
         data-testid="workspace-header-actions"
-        className="flex min-w-0 max-w-full flex-1 flex-wrap items-center justify-end gap-2 overflow-hidden"
+        className="flex w-full min-w-0 max-w-full flex-none basis-full flex-nowrap items-center justify-end gap-2 overflow-hidden lg:w-auto lg:basis-auto lg:flex-1 lg:flex-wrap"
       >
         {/* Left pane expand button (only shown when collapsed) */}
         {!hideToggles && !leftPaneOpen && (

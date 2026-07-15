@@ -749,7 +749,7 @@ describe("WorkspaceHeader workspace browser modal", () => {
     vi.stubGlobal("fetch", fetchMockState.fetch)
   })
 
-  it("keeps mobile header actions within a shrinkable wrapping row", () => {
+  it("stacks compact context and actions into bounded mobile rows", () => {
     render(
       <WorkspaceHeader
         leftPaneOpen={true}
@@ -767,9 +767,33 @@ describe("WorkspaceHeader workspace browser modal", () => {
     expect(screen.getByRole("heading", { name: "Alpha Research" })).toHaveClass(
       "truncate"
     )
+    const serverContext = screen.getByTestId(
+      "workspace-server-context-indicator"
+    )
+    expect(serverContext).toHaveClass(
+      "order-last",
+      "basis-full",
+      "lg:order-none",
+      "lg:basis-auto"
+    )
+    expect(within(serverContext).getByText("Server Workspace")).toHaveClass(
+      "sr-only",
+      "lg:not-sr-only",
+      "lg:inline"
+    )
+    expect(within(serverContext).getByText("Canonical Alpha")).toHaveClass(
+      "sr-only",
+      "lg:not-sr-only",
+      "lg:inline"
+    )
     expect(screen.getByTestId("workspace-header-actions")).toHaveClass(
       "min-w-0",
-      "flex-wrap",
+      "basis-full",
+      "flex-none",
+      "flex-nowrap",
+      "lg:basis-auto",
+      "lg:flex-1",
+      "lg:flex-wrap",
       "overflow-hidden"
     )
     expect(screen.getByTestId("workspace-workspaces-button")).toHaveClass(
@@ -901,9 +925,14 @@ describe("WorkspaceHeader workspace browser modal", () => {
       />
     )
 
-    expect(
-      await screen.findByText("Server Workspace context is unavailable right now.")
-    ).toBeInTheDocument()
+    const recoveryMessage = await screen.findByText(
+      "Server Workspace context is unavailable right now."
+    )
+    expect(recoveryMessage).toHaveClass(
+      "sr-only",
+      "lg:not-sr-only",
+      "lg:inline"
+    )
     expect(
       screen.getByRole("link", { name: "Open Workspaces" })
     ).toHaveAttribute("href", "#/workspaces")

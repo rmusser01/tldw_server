@@ -1,5 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { WORKSPACE_STORAGE_KEY } from "@/store/workspace-events"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import {
+  WORKSPACE_BROADCAST_SYNC_FLAG,
+  WORKSPACE_STORAGE_KEY
+} from "@/store/workspace-events"
 import {
   createWorkspaceStorage,
   WORKSPACE_STORAGE_SPLIT_KEY_FLAG_STORAGE_KEY
@@ -19,26 +22,18 @@ const buildEnvelope = (state: Record<string, unknown>, version = 1) =>
   })
 
 describe("workspace split-key persistence storage adapter", () => {
-  let originalSetItem: typeof Storage.prototype.setItem
-
   beforeEach(() => {
-    originalSetItem = Storage.prototype.setItem
     localStorage.clear()
   })
 
   afterEach(() => {
-    Storage.prototype.setItem = originalSetItem
+    vi.unstubAllGlobals()
     localStorage.clear()
   })
 
   it("writes split index and only updates changed workspace keys", async () => {
     const storage = createWorkspaceStorage()
-    const writes: string[] = []
-
-    Storage.prototype.setItem = ((name: string, value: string) => {
-      writes.push(name)
-      originalSetItem.call(localStorage, name, value)
-    }) as typeof Storage.prototype.setItem
+    const setItemSpy = vi.spyOn(localStorage, "setItem")
 
     const baseState = {
       workspaceId: "workspace-a",
@@ -143,7 +138,7 @@ describe("workspace split-key persistence storage adapter", () => {
     expect(localStorage.getItem(chatKey("workspace-a"))).toBeTruthy()
     expect(localStorage.getItem(chatKey("workspace-b"))).toBeTruthy()
 
-    writes.length = 0
+    setItemSpy.mockClear()
     const nextState = {
       ...baseState,
       workspaceSnapshots: {
@@ -156,11 +151,84 @@ describe("workspace split-key persistence storage adapter", () => {
     }
     await storage.setItem(STORAGE_KEY, buildEnvelope(nextState))
 
-    expect(writes).toContain(STORAGE_KEY)
-    expect(writes).toContain(snapshotKey("workspace-a"))
-    expect(writes).not.toContain(snapshotKey("workspace-b"))
-    expect(writes).not.toContain(chatKey("workspace-a"))
-    expect(writes).not.toContain(chatKey("workspace-b"))
+    const writtenKeys = setItemSpy.mock.calls.map(([name]) => name)
+    expect(writtenKeys).toContain(STORAGE_KEY)
+    expect(writtenKeys).toContain(snapshotKey("workspace-a"))
+    expect(writtenKeys).not.toContain(snapshotKey("workspace-b"))
+    expect(writtenKeys).not.toContain(chatKey("workspace-a"))
+    expect(writtenKeys).not.toContain(chatKey("workspace-b"))
+  })
+
+  it("does not create persistence for an empty hydration write", async () => {
+    const storage = createWorkspaceStorage()
+
+    await storage.setItem(
+      STORAGE_KEY,
+      buildEnvelope({
+        workspaceId: "",
+        savedWorkspaces: [],
+        archivedWorkspaces: [],
+        workspaceCollections: [],
+        workspaceSnapshots: {},
+        workspaceChatSessions: {}
+      })
+    )
+
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull()
+  })
+
+  it("does not create monolithic persistence for an empty hydration write", async () => {
+    localStorage.setItem(WORKSPACE_STORAGE_SPLIT_KEY_FLAG_STORAGE_KEY, "0")
+    const storage = createWorkspaceStorage()
+
+    await storage.setItem(
+      STORAGE_KEY,
+      buildEnvelope({
+        workspaceId: "",
+        savedWorkspaces: [],
+        archivedWorkspaces: [],
+        workspaceCollections: [],
+        workspaceSnapshots: {},
+        workspaceChatSessions: {}
+      })
+    )
+
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull()
+  })
+
+  it("does not broadcast split or monolithic empty hydration writes", async () => {
+    const broadcastMessages: unknown[] = []
+    vi.stubGlobal(
+      "BroadcastChannel",
+      class {
+        postMessage(message: unknown) {
+          broadcastMessages.push(message)
+        }
+      }
+    )
+
+    for (const splitStorageFlag of ["1", "0"]) {
+      localStorage.clear()
+      localStorage.setItem(WORKSPACE_BROADCAST_SYNC_FLAG, "1")
+      localStorage.setItem(
+        WORKSPACE_STORAGE_SPLIT_KEY_FLAG_STORAGE_KEY,
+        splitStorageFlag
+      )
+
+      await createWorkspaceStorage().setItem(
+        STORAGE_KEY,
+        buildEnvelope({
+          workspaceId: "",
+          savedWorkspaces: [],
+          archivedWorkspaces: [],
+          workspaceCollections: [],
+          workspaceSnapshots: {},
+          workspaceChatSessions: {}
+        })
+      )
+    }
+
+    expect(broadcastMessages).toEqual([])
   })
 
   it("reconstructs full persisted state from split keys on getItem", async () => {

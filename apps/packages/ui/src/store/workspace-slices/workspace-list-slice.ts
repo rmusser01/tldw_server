@@ -188,6 +188,8 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
         [id]: snapshot
       }
     }))
+
+    return id
   },
 
   setWorkspaceName: (name) => {

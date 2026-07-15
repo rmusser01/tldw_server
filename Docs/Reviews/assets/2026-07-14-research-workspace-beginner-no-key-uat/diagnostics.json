@@ -1,0 +1,309 @@
+{
+  "startedAt": "2026-07-15T00:36:12.852Z",
+  "cdpUrl": "http://127.0.0.1:18162",
+  "webUrl": "http://127.0.0.1:18161/research-workspace",
+  "apiOrigin": "http://127.0.0.1:18160",
+  "uatRunId": "task12968-2035e741-332f-4011-9949-57e4005baa10",
+  "markerUrls": {
+    "start": "http://127.0.0.1:18160/api/v1/health?task12968_uat_start=task12968-2035e741-332f-4011-9949-57e4005baa10",
+    "end": "http://127.0.0.1:18160/api/v1/health?task12968_uat_end=task12968-2035e741-332f-4011-9949-57e4005baa10"
+  },
+  "browserVersion": "145.0.7632.6",
+  "backgroundTargets": [],
+  "contexts": {
+    "marker_start": {
+      "console": [],
+      "pageErrors": [],
+      "requestFailures": [],
+      "httpErrors": [],
+      "apiRequests": [
+        {
+          "at": "2026-07-15T00:36:12.988Z",
+          "method": "GET",
+          "url": "http://127.0.0.1:18160/api/v1/health?task12968_uat_start=task12968-2035e741-332f-4011-9949-57e4005baa10",
+          "transport": "direct_api",
+          "hasAuthorization": false,
+          "hasXApiKey": false
+        }
+      ],
+      "serviceWorkerTargets": [],
+      "backgroundPageTargets": []
+    },
+    "desktop": {
+      "console": [
+        {
+          "type": "warning",
+          "text": "[HMR] Invalid message: {\"type\":\"isrManifest\",\"data\":{\"/research-workspace\":true}}\nTypeError: Cannot read properties of undefined (reading 'components')\n    at handleStaticIndicator (webpack-internal:///(pages-dir-browser)/../../../../apps/node_modules/.bun/next@16.1.4+d9efe0b44b7e6f19/node_modules/next/dist/client/dev/hot-reloader/pages/hot-reloader-pages.js:177:46)\n    at processMessage (webpack-internal:///(pages-dir-browser)/../../../../apps/node_modules/.bun/next@16.1.4+d9efe0b44b7e6f19/node_modules/next/dist/client/dev/hot-reloader/pages/hot-reloader-pages.js:191:17)\n    at eval (webpack-internal:///(pages-dir-browser)/../../../../apps/node_modules/.bun/next@16.1.4+d9efe0b44b7e6f19/node_modules/next/dist/client/dev/hot-reloader/pages/hot-reloader-pages.js:69:13)\n    at WebSocket.handleMessage (webpack-internal:///(pages-dir-browser)/../../../../apps/node_modules/.bun/next@16.1.4+d9efe0b44b7e6f19/node_modules/next/dist/client/dev/hot-reloader/pages/websocket.js:68:17)"
+        },
+        {
+          "type": "warning",
+          "text": "tldw server API key is missing. Open Settings → tldw server and configure an API key before continuing."
+        },
+        {
+          "type": "warning",
+          "text": "tldw server API key is missing. Open Settings → tldw server and configure an API key before continuing."
+        },
+        {
+          "type": "warning",
+          "text": "tldw server API key is missing. Open Settings → tldw server and configure an API key before continuing."
+        },
+        {
+          "type": "warning",
+          "text": "tldw server API key is missing. Open Settings → tldw server and configure an API key before continuing."
+        },
+        {
+          "type": "warning",
+          "text": "tldw server API key is missing. Open Settings → tldw server and configure an API key before continuing."
+        },
+        {
+          "type": "warning",
+          "text": "tldw server API key is missing. Open Settings → tldw server and configure an API key before continuing."
+        },
+        {
+          "type": "warning",
+          "text": "[tldw:request] GET /api/v1/chat/commands 401 Add or update your API key in Settings -> tldw server, then try again."
+        },
+        {
+          "type": "warning",
+          "text": "[tldw:request] GET /api/v1/workspaces/61ba87f0-f4d7-4e1b-b825-3a31b1a83c47/context 401 Add or update your API key in Settings -> tldw server, then try again."
+        },
+        {
+          "type": "warning",
+          "text": "[tldw:request] PUT /api/v1/workspaces/61ba87f0-f4d7-4e1b-b825-3a31b1a83c47 401 Add or update your API key in Settings -> tldw server, then try again."
+        },
+        {
+          "type": "warning",
+          "text": "[tldw:request] GET /api/v1/notes/search/?tokens=workspace%3Anew-research&limit=75&include_keywords=true 401 Add or update your API key in Settings -> tldw server, then try again."
+        },
+        {
+          "type": "warning",
+          "text": "[tldw:request] GET /api/v1/workspaces/61ba87f0-f4d7-4e1b-b825-3a31b1a83c47/context 401 Add or update your API key in Settings -> tldw server, then try again."
+        },
+        {
+          "type": "warning",
+          "text": "tldw server API key is missing. Open Settings → tldw server and configure an API key before continuing."
+        },
+        {
+          "type": "warning",
+          "text": "tldw server API key is missing. Open Settings → tldw server and configure an API key before continuing."
+        },
+        {
+          "type": "warning",
+          "text": "[tldw:request] GET /api/v1/flashcards/decks?include_workspace_items=false 401 Add or update your API key in Settings -> tldw server, then try again."
+        },
+        {
+          "type": "warning",
+          "text": "[tldw:request] GET /api/v1/flashcards/decks?include_workspace_items=false 401 Add or update your API key in Settings -> tldw server, then try again."
+        },
+        {
+          "type": "warning",
+          "text": "tldw server API key is missing. Open Settings → tldw server and configure an API key before continuing."
+        },
+        {
+          "type": "warning",
+          "text": "tldw server API key is missing. Open Settings → tldw server and configure an API key before continuing."
+        },
+        {
+          "type": "warning",
+          "text": "[tldw:request] PUT /api/v1/workspaces/61ba87f0-f4d7-4e1b-b825-3a31b1a83c47 401 Add or update your API key in Settings -> tldw server, then try again."
+        },
+        {
+          "type": "warning",
+          "text": "[tldw:request] GET /api/v1/workspaces/61ba87f0-f4d7-4e1b-b825-3a31b1a83c47/context 401 Add or update your API key in Settings -> tldw server, then try again."
+        },
+        {
+          "type": "warning",
+          "text": "[tldw:request] PUT /api/v1/workspaces/61ba87f0-f4d7-4e1b-b825-3a31b1a83c47 401 Add or update your API key in Settings -> tldw server, then try again."
+        },
+        {
+          "type": "warning",
+          "text": "[tldw:request] GET /api/v1/workspaces/61ba87f0-f4d7-4e1b-b825-3a31b1a83c47/context 401 Add or update your API key in Settings -> tldw server, then try again."
+        },
+        {
+          "type": "warning",
+          "text": "[tldw:request] PUT /api/v1/workspaces/61ba87f0-f4d7-4e1b-b825-3a31b1a83c47 401 Add or update your API key in Settings -> tldw server, then try again."
+        },
+        {
+          "type": "warning",
+          "text": "[tldw:request] GET /api/v1/workspaces/61ba87f0-f4d7-4e1b-b825-3a31b1a83c47/context 401 Add or update your API key in Settings -> tldw server, then try again."
+        }
+      ],
+      "pageErrors": [],
+      "requestFailures": [],
+      "httpErrors": [],
+      "apiRequests": [
+        {
+          "at": "2026-07-15T00:36:13.987Z",
+          "method": "GET",
+          "url": "http://127.0.0.1:18160/api/v1/health",
+          "transport": "direct_api",
+          "hasAuthorization": false,
+          "hasXApiKey": false
+        },
+        {
+          "at": "2026-07-15T00:36:13.987Z",
+          "method": "GET",
+          "url": "http://127.0.0.1:18160/api/v1/health",
+          "transport": "direct_api",
+          "hasAuthorization": false,
+          "hasXApiKey": false
+        }
+      ],
+      "serviceWorkerTargets": [],
+      "backgroundPageTargets": []
+    },
+    "mobile": {
+      "console": [
+        {
+          "type": "warning",
+          "text": "[HMR] Invalid message: {\"type\":\"isrManifest\",\"data\":{\"/research-workspace\":true}}\nTypeError: Cannot read properties of undefined (reading 'components')\n    at handleStaticIndicator (webpack-internal:///(pages-dir-browser)/../../../../apps/node_modules/.bun/next@16.1.4+d9efe0b44b7e6f19/node_modules/next/dist/client/dev/hot-reloader/pages/hot-reloader-pages.js:177:46)\n    at processMessage (webpack-internal:///(pages-dir-browser)/../../../../apps/node_modules/.bun/next@16.1.4+d9efe0b44b7e6f19/node_modules/next/dist/client/dev/hot-reloader/pages/hot-reloader-pages.js:191:17)\n    at eval (webpack-internal:///(pages-dir-browser)/../../../../apps/node_modules/.bun/next@16.1.4+d9efe0b44b7e6f19/node_modules/next/dist/client/dev/hot-reloader/pages/hot-reloader-pages.js:69:13)\n    at WebSocket.handleMessage (webpack-internal:///(pages-dir-browser)/../../../../apps/node_modules/.bun/next@16.1.4+d9efe0b44b7e6f19/node_modules/next/dist/client/dev/hot-reloader/pages/websocket.js:68:17)"
+        },
+        {
+          "type": "warning",
+          "text": "tldw server API key is missing. Open Settings → tldw server and configure an API key before continuing."
+        },
+        {
+          "type": "warning",
+          "text": "tldw server API key is missing. Open Settings → tldw server and configure an API key before continuing."
+        },
+        {
+          "type": "warning",
+          "text": "tldw server API key is missing. Open Settings → tldw server and configure an API key before continuing."
+        },
+        {
+          "type": "warning",
+          "text": "tldw server API key is missing. Open Settings → tldw server and configure an API key before continuing."
+        },
+        {
+          "type": "warning",
+          "text": "tldw server API key is missing. Open Settings → tldw server and configure an API key before continuing."
+        },
+        {
+          "type": "warning",
+          "text": "tldw server API key is missing. Open Settings → tldw server and configure an API key before continuing."
+        },
+        {
+          "type": "warning",
+          "text": "[tldw:request] GET /api/v1/chat/commands 401 Add or update your API key in Settings -> tldw server, then try again."
+        },
+        {
+          "type": "warning",
+          "text": "[tldw:request] GET /api/v1/workspaces/94b0bf50-2d47-4541-9f4f-98c8130fe0f4/context 401 Add or update your API key in Settings -> tldw server, then try again."
+        },
+        {
+          "type": "warning",
+          "text": "[tldw:request] PUT /api/v1/workspaces/94b0bf50-2d47-4541-9f4f-98c8130fe0f4 401 Add or update your API key in Settings -> tldw server, then try again."
+        },
+        {
+          "type": "warning",
+          "text": "[tldw:request] GET /api/v1/notes/search/?tokens=workspace%3Anew-research&limit=75&include_keywords=true 401 Add or update your API key in Settings -> tldw server, then try again."
+        },
+        {
+          "type": "warning",
+          "text": "[tldw:request] GET /api/v1/workspaces/94b0bf50-2d47-4541-9f4f-98c8130fe0f4/context 401 Add or update your API key in Settings -> tldw server, then try again."
+        },
+        {
+          "type": "warning",
+          "text": "tldw server API key is missing. Open Settings → tldw server and configure an API key before continuing."
+        },
+        {
+          "type": "warning",
+          "text": "tldw server API key is missing. Open Settings → tldw server and configure an API key before continuing."
+        },
+        {
+          "type": "warning",
+          "text": "[tldw:request] GET /api/v1/chat/commands 401 Add or update your API key in Settings -> tldw server, then try again."
+        },
+        {
+          "type": "warning",
+          "text": "tldw server API key is missing. Open Settings → tldw server and configure an API key before continuing."
+        },
+        {
+          "type": "warning",
+          "text": "tldw server API key is missing. Open Settings → tldw server and configure an API key before continuing."
+        },
+        {
+          "type": "warning",
+          "text": "[tldw:request] GET /api/v1/flashcards/decks?include_workspace_items=false 401 Add or update your API key in Settings -> tldw server, then try again."
+        },
+        {
+          "type": "warning",
+          "text": "[tldw:request] GET /api/v1/flashcards/decks?include_workspace_items=false 401 Add or update your API key in Settings -> tldw server, then try again."
+        }
+      ],
+      "pageErrors": [],
+      "requestFailures": [],
+      "httpErrors": [],
+      "apiRequests": [
+        {
+          "at": "2026-07-15T00:36:34.308Z",
+          "method": "GET",
+          "url": "http://127.0.0.1:18160/api/v1/health",
+          "transport": "direct_api",
+          "hasAuthorization": false,
+          "hasXApiKey": false
+        },
+        {
+          "at": "2026-07-15T00:36:34.308Z",
+          "method": "GET",
+          "url": "http://127.0.0.1:18160/api/v1/health",
+          "transport": "direct_api",
+          "hasAuthorization": false,
+          "hasXApiKey": false
+        }
+      ],
+      "serviceWorkerTargets": [],
+      "backgroundPageTargets": []
+    },
+    "marker_end": {
+      "console": [],
+      "pageErrors": [],
+      "requestFailures": [],
+      "httpErrors": [],
+      "apiRequests": [
+        {
+          "at": "2026-07-15T00:36:39.729Z",
+          "method": "GET",
+          "url": "http://127.0.0.1:18160/api/v1/health?task12968_uat_end=task12968-2035e741-332f-4011-9949-57e4005baa10",
+          "transport": "direct_api",
+          "hasAuthorization": false,
+          "hasXApiKey": false
+        }
+      ],
+      "serviceWorkerTargets": [],
+      "backgroundPageTargets": []
+    }
+  },
+  "backendAccessLogAudit": {
+    "logPath": "/private/tmp/task12968-research-workspace-uat/backend-durable-live.log",
+    "runId": "task12968-2035e741-332f-4011-9949-57e4005baa10",
+    "startMarkerUrl": "http://127.0.0.1:18160/api/v1/health?task12968_uat_start=task12968-2035e741-332f-4011-9949-57e4005baa10",
+    "endMarkerUrl": "http://127.0.0.1:18160/api/v1/health?task12968_uat_end=task12968-2035e741-332f-4011-9949-57e4005baa10",
+    "startMarkerLineCount": 1,
+    "endMarkerLineCount": 1,
+    "windowStartedAt": "2026-07-15T00:36:12.994Z",
+    "windowCompletedAt": "2026-07-15T00:36:39.736Z",
+    "correlatedLineCount": 24,
+    "apiRequestLineCount": 11,
+    "apiRequestLines": [
+      "2026-07-14 17:36:12.994 | INFO     | trace= span= tp= req=b9db516c-b799-4439-8ced-bc5d315963ee job= ps=: | starlette.middleware.errors:_send:161 - 127.0.0.1:50165 - \"GET /api/v1/health?task12968_uat_start=task12968-2035e741-332f-4011-9949-57e4005baa10 HTTP/1.1\" 200",
+      "2026-07-14 17:36:13.993 | INFO     | trace= span= tp= req=2a273c2c-a344-415a-a5ae-936c8ef1351d job= ps=: | tldw_Server_API.app.core.Logging.access_log_middleware:dispatch:70 - HTTP GET /api/v1/health -> 200 in 5ms",
+      "2026-07-14 17:36:13.993 | INFO     | trace= span= tp= req=2a273c2c-a344-415a-a5ae-936c8ef1351d job= ps=: | starlette.middleware.errors:_send:161 - 127.0.0.1:50174 - \"GET /api/v1/health HTTP/1.1\" 200",
+      "2026-07-14 17:36:14.000 | INFO     | trace= span= tp= req=9618eb87-080f-4f73-ad88-727ea3d01b92 job= ps=: | tldw_Server_API.app.core.Logging.access_log_middleware:dispatch:70 - HTTP GET /api/v1/health -> 200 in 4ms",
+      "2026-07-14 17:36:14.000 | INFO     | trace= span= tp= req=9618eb87-080f-4f73-ad88-727ea3d01b92 job= ps=: | starlette.middleware.errors:_send:161 - 127.0.0.1:50174 - \"GET /api/v1/health HTTP/1.1\" 200",
+      "2026-07-14 17:36:34.314 | INFO     | trace= span= tp= req=72e503a8-1814-4e0e-846b-99c7395c7fef job= ps=: | tldw_Server_API.app.core.Logging.access_log_middleware:dispatch:70 - HTTP GET /api/v1/health -> 200 in 5ms",
+      "2026-07-14 17:36:34.315 | INFO     | trace= span= tp= req=72e503a8-1814-4e0e-846b-99c7395c7fef job= ps=: | starlette.middleware.errors:_send:161 - 127.0.0.1:50204 - \"GET /api/v1/health HTTP/1.1\" 200",
+      "2026-07-14 17:36:34.322 | INFO     | trace= span= tp= req=8acf9f85-a645-4181-a039-641732310919 job= ps=: | tldw_Server_API.app.core.Logging.access_log_middleware:dispatch:70 - HTTP GET /api/v1/health -> 200 in 5ms",
+      "2026-07-14 17:36:34.324 | INFO     | trace= span= tp= req=8acf9f85-a645-4181-a039-641732310919 job= ps=: | starlette.middleware.errors:_send:161 - 127.0.0.1:50204 - \"GET /api/v1/health HTTP/1.1\" 200",
+      "2026-07-14 17:36:39.735 | INFO     | trace= span= tp= req=e9f0bc17-985d-4cb6-8fe8-47cf60a1b53c job= ps=: | tldw_Server_API.app.core.Logging.access_log_middleware:dispatch:70 - HTTP GET /api/v1/health -> 200 in 5ms",
+      "2026-07-14 17:36:39.736 | INFO     | trace= span= tp= req=e9f0bc17-985d-4cb6-8fe8-47cf60a1b53c job= ps=: | starlette.middleware.errors:_send:161 - 127.0.0.1:50220 - \"GET /api/v1/health?task12968_uat_end=task12968-2035e741-332f-4011-9949-57e4005baa10 HTTP/1.1\" 200"
+    ],
+    "migrationRequestCount": 0,
+    "migrationLines": []
+  },
+  "completedAt": "2026-07-15T00:36:39.749Z",
+  "outcome": "pass",
+  "failure": null,
+  "checkpointCount": 17,
+  "failedCheckpointCount": 0
+}
