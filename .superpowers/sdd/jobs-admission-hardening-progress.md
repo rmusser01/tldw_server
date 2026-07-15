@@ -4,7 +4,7 @@ Plan: `Docs/superpowers/plans/2026-07-14-jobs-admission-hardening-and-lease-life
 Tracking: `TASK-12969.1`
 Execution base: `7c7d591c6e3552ca4bdbf30bdd6bf79460221ece`
 
-Task 1: in progress
-Task 2: pending
+Task 1: complete (commit b2a281c067, review approved; focused 4 passed with real PostgreSQL; Bandit 0 findings)
+Task 2: in progress
 Task 3: pending
 Task 4: pending

@@ -179,7 +179,7 @@ quota concurrency: 2 created, expected 1
 - Consumes: `JobManager._scan_and_redact_secrets(payload) -> tuple[Any, bool, list[str]]`.
 - Produces: unchanged `create_job(...) -> dict[str, Any]`; reject mode raises the existing public `ValueError` before a database connection is opened.
 
-- [ ] **Step 1: Add red reject and redact tests**
+- [x] **Step 1: Add red reject and redact tests**
 
 Create tests with the following behavior:
 
@@ -239,7 +239,7 @@ def test_secret_reject_prevents_insert_postgres(jobs_pg_dsn, monkeypatch):
     assert manager.count_jobs(domain="secret-hygiene-pg", owner_user_id="owner-1") == 0
 ```
 
-- [ ] **Step 2: Run the reject test and verify red**
+- [x] **Step 2: Run the reject test and verify red**
 
 Run:
 
@@ -250,7 +250,7 @@ RUN_JOBS=1 python -m pytest tldw_Server_API/tests/Jobs/test_jobs_secret_hygiene.
 
 Expected before the fix: `test_secret_reject_prevents_insert_sqlite` fails with `DID NOT RAISE ValueError`.
 
-- [ ] **Step 3: Restructure the manager policy block**
+- [x] **Step 3: Restructure the manager policy block**
 
 Replace the current try/raise/catch block with an `else` branch so only scanner failures are caught:
 
@@ -269,7 +269,7 @@ else:
 
 Do not remove `ValueError` from `_JOB_NONCRITICAL_EXCEPTIONS`; that tuple is shared by unrelated post-commit and compatibility paths.
 
-- [ ] **Step 4: Verify secret behavior**
+- [x] **Step 4: Verify secret behavior**
 
 Run the new file plus existing JSON and create facade tests:
 
@@ -283,7 +283,7 @@ RUN_JOBS=1 python -m pytest \
 
 Expected: all selected tests pass.
 
-- [ ] **Step 5: Commit Task 1**
+- [x] **Step 5: Commit Task 1**
 
 ```bash
 git add tldw_Server_API/app/core/Jobs/manager.py \
