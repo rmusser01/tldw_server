@@ -1,3 +1,4 @@
+import json
 import shutil
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -372,8 +373,8 @@ def test_playlist_collection_claim_transfers_initialization_token_atomically(
         kind="playlist_ingest",
         metadata={
             "playlist_ingest_run_id": "run-claim",
-            "playlist_ingest_initialization_token": "token-a",
         },
+        playlist_ingest_initialization_token="token-a",
         items=[{"source_url": "https://example.com/one", "ordinal": 1}],
     )
     item_ids = [item.id for item in created.items]
@@ -382,18 +383,34 @@ def test_playlist_collection_claim_transfers_initialization_token_atomically(
         created.id,
         run_id="run-claim",
         initialization_token="token-b",
+        expected_initialization_token="token-a",
         expected_item_ids=item_ids,
     )
 
     assert claimed.metadata["playlist_ingest_run_id"] == "run-claim"
-    assert claimed.metadata["playlist_ingest_initialization_token"] == "token-b"
+    assert "playlist_ingest_initialization_token" not in claimed.metadata
+    assert claimed._playlist_ingest_initialization_token == "token-b"
     assert [item.id for item in claimed.items] == item_ids
+
+    with pytest.raises(ValueError, match="media_collection_claim_mismatch"):
+        collections_db.claim_playlist_ingest_collection(
+            created.id,
+            run_id="run-claim",
+            initialization_token="token-stale",
+            expected_initialization_token="token-a",
+            expected_item_ids=item_ids,
+        )
+    assert (
+        collections_db.get_media_collection(created.id)._playlist_ingest_initialization_token
+        == "token-b"
+    )
 
     with pytest.raises(ValueError, match="playlist_ingest_initialization_token_invalid"):
         collections_db.claim_playlist_ingest_collection(
             created.id,
             run_id="run-claim",
             initialization_token="x" * 256,
+            expected_initialization_token="token-b",
             expected_item_ids=item_ids,
         )
 
@@ -406,8 +423,8 @@ def test_playlist_collection_claim_rejects_owner_and_run_mismatch(
         kind="playlist_ingest",
         metadata={
             "playlist_ingest_run_id": "run-owner",
-            "playlist_ingest_initialization_token": "token-owner",
         },
+        playlist_ingest_initialization_token="token-owner",
         items=[{"source_url": "https://example.com/one", "ordinal": 1}],
     )
     item_ids = [item.id for item in created.items]
@@ -417,6 +434,7 @@ def test_playlist_collection_claim_rejects_owner_and_run_mismatch(
             created.id,
             run_id="other-run",
             initialization_token="token-b",
+            expected_initialization_token="token-owner",
             expected_item_ids=item_ids,
         )
 
@@ -426,6 +444,7 @@ def test_playlist_collection_claim_rejects_owner_and_run_mismatch(
             created.id,
             run_id="run-owner",
             initialization_token="token-b",
+            expected_initialization_token="token-owner",
             expected_item_ids=item_ids,
         )
 
@@ -438,8 +457,8 @@ def test_discard_media_collection_rejects_wrong_ownership_token(
         kind="playlist_ingest",
         metadata={
             "playlist_ingest_run_id": "run-discard",
-            "playlist_ingest_initialization_token": "token-current",
         },
+        playlist_ingest_initialization_token="token-current",
         items=[{"source_url": "https://example.com/one", "ordinal": 1}],
     )
 
@@ -462,8 +481,8 @@ def test_discard_media_collection_removes_just_created_plan_and_memberships(
         kind="playlist_ingest",
         metadata={
             "playlist_ingest_run_id": "run-discard",
-            "playlist_ingest_initialization_token": "token-current",
         },
+        playlist_ingest_initialization_token="token-current",
         items=[
             {"source_url": "https://example.com/one", "ordinal": 1},
             {"source_url": "https://example.com/two", "ordinal": 2},
@@ -801,3 +820,55 @@ def test_media_collections_router_exposes_collection_crud(
         assert loaded["metadata"]["conference_name"] == "Conference"
         assert loaded["items"][0]["media_id"] == 321
         assert loaded["items"][0]["content_item_id"] == 654
+
+
+def test_playlist_collection_authority_is_reserved_and_redacted_from_clients(
+    collections_db: CollectionsDatabase,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TEST_MODE", "true")
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("SINGLE_USER_API_KEY", "test-api-key-12345")
+
+    from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import (
+        get_collections_db_for_user,
+    )
+    from tldw_Server_API.app.api.v1.endpoints.media import collections as media_collections
+
+    created = collections_db.create_media_collection(
+        name="Legacy playlist plan",
+        kind="playlist_ingest",
+        metadata={"playlist_ingest_run_id": "run-private-token"},
+    )
+    collections_db.backend.execute(
+        "UPDATE media_collections SET metadata_json = ? WHERE id = ? AND user_id = ?",
+        (
+            json.dumps(
+                {
+                    "playlist_ingest_run_id": "run-private-token",
+                    "playlist_ingest_initialization_token": "legacy-client-visible-token",
+                }
+            ),
+            created.id,
+            collections_db.user_id,
+        ),
+    )
+
+    app = FastAPI()
+    app.include_router(media_collections.router, prefix="/api/v1/media", tags=["media"])
+    app.dependency_overrides[get_collections_db_for_user] = lambda: collections_db
+
+    with TestClient(app) as client:
+        get_response = client.get(
+            f"/api/v1/media/collections/{created.id}",
+            headers={"X-API-KEY": "test-api-key-12345"},
+        )
+        assert get_response.status_code == 200, get_response.text
+        assert "playlist_ingest_initialization_token" not in get_response.json()["metadata"]
+
+        patch_response = client.patch(
+            f"/api/v1/media/collections/{created.id}",
+            json={"metadata": {"playlist_ingest_initialization_token": "attacker-token"}},
+            headers={"X-API-KEY": "test-api-key-12345"},
+        )
+        assert patch_response.status_code == 422, patch_response.text

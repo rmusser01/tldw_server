@@ -7,6 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 NOW = datetime(2026, 7, 12, 12, 0, tzinfo=timezone.utc)
+_UNSET_EXPECTED_TOKEN = object()
 
 
 class _FixedClock:
@@ -99,6 +100,9 @@ class _OwnerCollectionsDB:
             id=collection_id,
             items=items,
             metadata=dict(kwargs.get("metadata") or {}),
+            _playlist_ingest_initialization_token=kwargs.get(
+                "playlist_ingest_initialization_token"
+            ),
         )
         self.collections.append(self.last_collection)
         if self.create_commit_then_error_once is not None:
@@ -128,6 +132,7 @@ class _OwnerCollectionsDB:
         run_id,
         initialization_token,
         expected_item_ids,
+        expected_initialization_token=_UNSET_EXPECTED_TOKEN,
     ):
         collection = next(
             (
@@ -138,9 +143,17 @@ class _OwnerCollectionsDB:
             ),
             None,
         )
-        if collection is None or {item.id for item in collection.items} != set(expected_item_ids):
+        if (
+            collection is None
+            or {item.id for item in collection.items} != set(expected_item_ids)
+            or (
+                expected_initialization_token is not _UNSET_EXPECTED_TOKEN
+                and collection._playlist_ingest_initialization_token
+                != expected_initialization_token
+            )
+        ):
             raise ValueError("media_collection_claim_mismatch")
-        collection.metadata["playlist_ingest_initialization_token"] = initialization_token
+        collection._playlist_ingest_initialization_token = initialization_token
         return collection
 
     def resolve_media_collection_item(self, item_id, **kwargs):
@@ -206,7 +219,7 @@ class _OwnerCollectionsDB:
         if collection is not None and expected_run_id is not None:
             if (
                 collection.metadata.get("playlist_ingest_run_id") != expected_run_id
-                or collection.metadata.get("playlist_ingest_initialization_token")
+                or collection._playlist_ingest_initialization_token
                 != expected_initialization_token
                 or {item.id for item in collection.items} != set(expected_item_ids)
             ):
@@ -644,6 +657,160 @@ def test_create_run_recovers_committed_unattached_collection_without_creating_an
     assert len(collections_db.collections) == 1
 
 
+def test_stale_recovered_initializer_cannot_reclaim_after_newer_collection_claim(
+    service_context,
+    monkeypatch,
+):
+    service, store, manager, _media_db = service_context
+    from tldw_Server_API.app.api.v1.schemas.media_playlist_ingest import PlaylistIngestRunCreateRequest
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
+        PlaylistIngestService,
+        PlaylistRunValidationError,
+        _request_fingerprint,
+    )
+
+    monkeypatch.setenv("PLAYLIST_RUN_INITIALIZATION_LEASE_SECONDS", "1")
+    first_claim_waiting = Event()
+    release_stale_claim = Event()
+    newer_attach_waiting = Event()
+    release_newer_attach = Event()
+
+    class _InterleavingCollectionsDB(_OwnerCollectionsDB):
+        def __init__(self) -> None:
+            super().__init__()
+            self.claim_tokens: list[str] = []
+
+        def claim_playlist_ingest_collection(self, collection_id, **kwargs):
+            self.claim_tokens.append(kwargs["initialization_token"])
+            claim_number = len(self.claim_tokens)
+            if claim_number == 1:
+                first_claim_waiting.set()
+                assert release_stale_claim.wait(timeout=5)
+            return super().claim_playlist_ingest_collection(collection_id, **kwargs)
+
+    request = PlaylistIngestRunCreateRequest.model_validate(
+        {
+            "client_request_id": "recovered-claim-cas-race",
+            "inputs": [_direct_input("occ-claim-cas", "https://example.com/claim-cas")],
+            "review_overrides": {},
+            "new_collection": {"name": "Claim CAS"},
+        }
+    )
+    abandoned = store.create_validated_run(
+        "owner-1",
+        items=[_validated_direct_manifest("occ-claim-cas", "https://example.com/claim-cas")],
+        client_request_id=request.client_request_id,
+        request_fingerprint=_request_fingerprint(request),
+        initialization_token="original-collection-owner",
+        initialization_lease_seconds=1,
+    )
+    collections_db = _InterleavingCollectionsDB()
+    committed = collections_db.create_media_collection_with_items(
+        name=request.new_collection.name,
+        kind="playlist_ingest",
+        metadata={"playlist_ingest_run_id": abandoned.run_id},
+        playlist_ingest_initialization_token="original-collection-owner",
+        items=[{"source_url": "https://example.com/claim-cas", "ordinal": 1}],
+    )
+    service._collections_db_factory = lambda _owner: collections_db
+    resumer = PlaylistIngestService(manager, collections_db_factory=lambda _owner: collections_db)
+    original_newer_attach = resumer._store.attach_collection_plan
+
+    def pause_newer_before_attach(*args, **kwargs):
+        newer_attach_waiting.set()
+        assert release_newer_attach.wait(timeout=5)
+        return original_newer_attach(*args, **kwargs)
+
+    monkeypatch.setattr(resumer._store, "attach_collection_plan", pause_newer_before_attach)
+    store.test_clock.advance(timedelta(seconds=2))
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        stale = pool.submit(
+            service.create_run,
+            "owner-1",
+            client_request_id=request.client_request_id,
+            inputs=request.inputs,
+            review_overrides=request.review_overrides,
+            new_collection=request.new_collection,
+        )
+        assert first_claim_waiting.wait(timeout=5)
+        store.test_clock.advance(timedelta(seconds=2))
+        newer = pool.submit(
+            resumer.create_run,
+            "owner-1",
+            client_request_id=request.client_request_id,
+            inputs=request.inputs,
+            review_overrides=request.review_overrides,
+            new_collection=request.new_collection,
+        )
+        assert newer_attach_waiting.wait(timeout=5)
+        release_stale_claim.set()
+        with pytest.raises(PlaylistRunValidationError):
+            stale.result(timeout=5)
+        release_newer_attach.set()
+        winner = newer.result(timeout=5)
+
+    assert winner.collection_id == committed.id
+    assert len(collections_db.collections) == 1
+    assert collections_db.collections[0].id == committed.id
+    assert collections_db.collections[0]._playlist_ingest_initialization_token == (
+        collections_db.claim_tokens[1]
+    )
+    assert collections_db.discard_calls == []
+
+
+def test_recovered_collection_item_mismatch_fails_without_discarding_user_plan(
+    service_context,
+):
+    service, store, _manager, _media_db = service_context
+    from tldw_Server_API.app.api.v1.schemas.media_playlist_ingest import PlaylistIngestRunCreateRequest
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
+        PlaylistRunValidationError,
+        _request_fingerprint,
+    )
+
+    request = PlaylistIngestRunCreateRequest.model_validate(
+        {
+            "client_request_id": "recovered-edited-plan",
+            "inputs": [_direct_input("occ-edited", "https://example.com/edited")],
+            "review_overrides": {},
+            "new_collection": {"name": "User-edited recovered plan"},
+        }
+    )
+    abandoned = store.create_validated_run(
+        "owner-1",
+        items=[_validated_direct_manifest("occ-edited", "https://example.com/edited")],
+        client_request_id=request.client_request_id,
+        request_fingerprint=_request_fingerprint(request),
+        initialization_token="edited-plan-owner",
+        initialization_lease_seconds=1,
+    )
+    collections_db = service.test_collections_db
+    committed = collections_db.create_media_collection_with_items(
+        name=request.new_collection.name,
+        kind="playlist_ingest",
+        metadata={"playlist_ingest_run_id": abandoned.run_id},
+        playlist_ingest_initialization_token="edited-plan-owner",
+        items=[
+            {"source_url": "https://example.com/edited", "ordinal": 1},
+            {"source_url": "https://example.com/user-added", "ordinal": 2},
+        ],
+    )
+    store.test_clock.advance(timedelta(seconds=2))
+
+    with pytest.raises(PlaylistRunValidationError, match="collection_planning_failed"):
+        service.create_run(
+            "owner-1",
+            client_request_id=request.client_request_id,
+            inputs=request.inputs,
+            review_overrides=request.review_overrides,
+            new_collection=request.new_collection,
+        )
+
+    assert [collection.id for collection in collections_db.collections] == [committed.id]
+    assert collections_db.discard_calls == []
+
+
 def test_create_run_ambiguous_collection_lookup_fails_closed_without_creating(service_context):
     service, _store, _manager, _media_db = service_context
     collections_db = service.test_collections_db
@@ -735,6 +902,9 @@ def test_slow_collection_creator_losing_reclaimed_lease_cannot_attach_and_discar
                     for index, item in enumerate(kwargs["items"], start=1)
                 ],
                 metadata=dict(kwargs.get("metadata") or {}),
+                _playlist_ingest_initialization_token=kwargs.get(
+                    "playlist_ingest_initialization_token"
+                ),
             )
             if ordinal == 1:
                 first_created.set()
@@ -832,7 +1002,7 @@ def test_reclaimed_initializer_claims_visible_collection_before_stale_creator_cl
     assert len(collections_db.collections) == 1
     assert collections_db.collections[0].id == 700
     assert 701 in collections_db.items
-    assert collections_db.collections[0].metadata["playlist_ingest_initialization_token"] != stale_token
+    assert collections_db.collections[0]._playlist_ingest_initialization_token != stale_token
     assert collections_db.discard_calls == []
     assert collections_db.discard_attempts[-1]["expected_initialization_token"] == stale_token
 
@@ -2199,7 +2369,10 @@ def test_create_run_collection_creation_commit_then_exception_reconciles(
     assert collections_db.discard_calls == []
     collection_metadata = collections_db.create_calls[0]["metadata"]
     assert collection_metadata["playlist_ingest_run_id"] == created.run_id
-    assert 1 <= len(collection_metadata["playlist_ingest_initialization_token"]) <= 255
+    assert "playlist_ingest_initialization_token" not in collection_metadata
+    assert 1 <= len(
+        collections_db.create_calls[0]["playlist_ingest_initialization_token"]
+    ) <= 255
     assert _table_count(manager, "jobs") == 0
 
 

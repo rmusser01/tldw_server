@@ -70,6 +70,8 @@ _COLLECTIONS_NONCRITICAL_EXCEPTIONS = (
     InvalidStorageUserIdError,
 )
 
+_PLAYLIST_INGEST_TOKEN_KEY = "playlist_ingest_initialization_token"  # nosec B105
+
 
 def _count_row_total(row: Any) -> int:
     if not row:
@@ -286,6 +288,7 @@ class MediaCollectionRow:
     description: str | None
     source_url: str | None
     metadata: dict[str, Any]
+    _playlist_ingest_initialization_token: str | None
     default_tags: list[str]
     deleted: bool
     created_at: str
@@ -2162,6 +2165,7 @@ class CollectionsDatabase:
                 description TEXT,
                 source_url TEXT,
                 metadata_json TEXT,
+                playlist_ingest_initialization_token TEXT,
                 default_tags_json TEXT,
                 deleted BOOLEAN NOT NULL DEFAULT FALSE,
                 created_at TEXT NOT NULL,
@@ -2314,6 +2318,7 @@ class CollectionsDatabase:
                 description TEXT,
                 source_url TEXT,
                 metadata_json TEXT,
+                playlist_ingest_initialization_token TEXT,
                 default_tags_json TEXT,
                 deleted INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
@@ -2420,6 +2425,50 @@ class CollectionsDatabase:
         except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Collections content_items schema init failed: {e}")
             raise
+        media_collection_columns = (
+            self._sqlite_columns("media_collections")
+            if self.backend.backend_type == BackendType.SQLITE
+            else set()
+        )
+        if (
+            self.backend.backend_type == BackendType.POSTGRESQL
+            or _PLAYLIST_INGEST_TOKEN_KEY not in media_collection_columns
+        ):
+            try:
+                if self.backend.backend_type == BackendType.POSTGRESQL:
+                    self.backend.execute(
+                        "ALTER TABLE media_collections ADD COLUMN IF NOT EXISTS "
+                        f"{_PLAYLIST_INGEST_TOKEN_KEY} TEXT",
+                        (),
+                    )
+                else:
+                    self.backend.execute(
+                        "ALTER TABLE media_collections ADD COLUMN "
+                        f"{_PLAYLIST_INGEST_TOKEN_KEY} TEXT",
+                        (),
+                    )
+            except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as exc:
+                if _is_backfill_noop_error(exc):
+                    logger.debug("collections backfill: private playlist token already exists")
+                else:
+                    raise
+        with self.transaction() as conn:
+            legacy_rows = self.backend.execute(
+                "SELECT id, metadata_json FROM media_collections "
+                "WHERE metadata_json LIKE ?",
+                (f"%{_PLAYLIST_INGEST_TOKEN_KEY}%",),
+                connection=conn,
+            ).rows
+            for row in legacy_rows:
+                metadata = self._json_loads_dict(row.get("metadata_json"))
+                if _PLAYLIST_INGEST_TOKEN_KEY not in metadata:
+                    continue
+                metadata.pop(_PLAYLIST_INGEST_TOKEN_KEY, None)
+                self.backend.execute(
+                    "UPDATE media_collections SET metadata_json = ? WHERE id = ?",
+                    (self._json_dumps_or_none(metadata), int(row["id"])),
+                    connection=conn,
+                )
         if self.backend.backend_type == BackendType.SQLITE:
             content_columns = self._sqlite_columns("content_items")
         if fts_available:
@@ -3161,6 +3210,8 @@ class CollectionsDatabase:
         include_items: bool = True,
     ) -> MediaCollectionRow:
         collection_id = int(row.get("id"))
+        metadata = self._json_loads_dict(row.get("metadata_json"))
+        metadata.pop(_PLAYLIST_INGEST_TOKEN_KEY, None)
         return MediaCollectionRow(
             id=collection_id,
             user_id=str(row.get("user_id")),
@@ -3168,7 +3219,8 @@ class CollectionsDatabase:
             kind=str(row.get("kind")),
             description=row.get("description"),
             source_url=row.get("source_url"),
-            metadata=self._json_loads_dict(row.get("metadata_json")),
+            metadata=metadata,
+            _playlist_ingest_initialization_token=row.get(_PLAYLIST_INGEST_TOKEN_KEY),
             default_tags=self._json_loads_string_list(row.get("default_tags_json")),
             deleted=bool(row.get("deleted", 0)),
             created_at=str(row.get("created_at")),
@@ -3195,6 +3247,8 @@ class CollectionsDatabase:
             raise ValueError("media_collection_kind_required")
         if metadata is not None and not isinstance(metadata, dict):
             raise ValueError("media_collection_metadata_must_be_object")
+        if metadata is not None and _PLAYLIST_INGEST_TOKEN_KEY in metadata:
+            raise ValueError("media_collection_metadata_reserved")
 
         now = _utcnow_iso()
         result = self._execute_insert(
@@ -3231,6 +3285,7 @@ class CollectionsDatabase:
         description: str | None = None,
         source_url: str | None = None,
         metadata: dict[str, Any] | None = None,
+        playlist_ingest_initialization_token: str | None = None,
         default_tags: Iterable[str] | None = None,
     ) -> MediaCollectionRow:
         """Create one collection and its ordered planned items atomically."""
@@ -3242,6 +3297,17 @@ class CollectionsDatabase:
             raise ValueError("media_collection_kind_required")
         if metadata is not None and not isinstance(metadata, dict):
             raise ValueError("media_collection_metadata_must_be_object")
+        if metadata is not None and _PLAYLIST_INGEST_TOKEN_KEY in metadata:
+            raise ValueError("media_collection_metadata_reserved")
+        if playlist_ingest_initialization_token is not None and (
+            kind_value != "playlist_ingest"
+            or type(playlist_ingest_initialization_token) is not str
+            or not playlist_ingest_initialization_token
+            or playlist_ingest_initialization_token.strip()
+            != playlist_ingest_initialization_token
+            or len(playlist_ingest_initialization_token) > 255
+        ):
+            raise ValueError("playlist_ingest_initialization_token_invalid")
 
         item_values: list[dict[str, Any]] = []
         ordinals: set[int] = set()
@@ -3283,8 +3349,9 @@ class CollectionsDatabase:
                 """
                 INSERT INTO media_collections (
                     user_id, name, kind, description, source_url, metadata_json,
-                    default_tags_json, deleted, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    playlist_ingest_initialization_token, default_tags_json,
+                    deleted, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     self.user_id,
@@ -3293,6 +3360,7 @@ class CollectionsDatabase:
                     description.strip() if isinstance(description, str) and description.strip() else None,
                     source_url.strip() if isinstance(source_url, str) and source_url.strip() else None,
                     self._json_dumps_or_none(metadata or {}),
+                    playlist_ingest_initialization_token,
                     self._json_dumps_or_none(self._normalize_string_list(default_tags)),
                     self._coerce_bool_flag(False, postgres=self.backend_type == BackendType.POSTGRESQL),
                     now,
@@ -3339,7 +3407,8 @@ class CollectionsDatabase:
             collection_row = self.backend.execute(
                 """
                 SELECT id, user_id, name, kind, description, source_url, metadata_json,
-                       default_tags_json, deleted, created_at, updated_at
+                       playlist_ingest_initialization_token, default_tags_json,
+                       deleted, created_at, updated_at
                 FROM media_collections
                 WHERE id = ? AND user_id = ? AND deleted = ?
                 """,
@@ -3376,7 +3445,8 @@ class CollectionsDatabase:
         row = self.backend.execute(
             """
             SELECT id, user_id, name, kind, description, source_url, metadata_json,
-                   default_tags_json, deleted, created_at, updated_at
+                   playlist_ingest_initialization_token, default_tags_json,
+                   deleted, created_at, updated_at
             FROM media_collections
             WHERE id = ? AND user_id = ? AND deleted = ?
             """,
@@ -3404,7 +3474,8 @@ class CollectionsDatabase:
         rows = self.backend.execute(
             f"""
             SELECT id, user_id, name, kind, description, source_url, metadata_json,
-                   default_tags_json, deleted, created_at, updated_at
+                   playlist_ingest_initialization_token, default_tags_json,
+                   deleted, created_at, updated_at
             FROM media_collections
             WHERE user_id = ? AND kind = 'playlist_ingest' AND deleted = ?
               AND {marker_filter}
@@ -3433,6 +3504,7 @@ class CollectionsDatabase:
         *,
         run_id: str,
         initialization_token: str,
+        expected_initialization_token: str | None,
         expected_item_ids: Iterable[int],
     ) -> MediaCollectionRow:
         """Transfer cleanup ownership of an exact playlist plan under one lock."""
@@ -3447,6 +3519,13 @@ class CollectionsDatabase:
             or len(initialization_token) > 255
         ):
             raise ValueError("playlist_ingest_initialization_token_invalid")
+        if expected_initialization_token is not None and (
+            type(expected_initialization_token) is not str
+            or not expected_initialization_token
+            or expected_initialization_token.strip() != expected_initialization_token
+            or len(expected_initialization_token) > 255
+        ):
+            raise ValueError("media_collection_claim_mismatch")
         item_ids = list(expected_item_ids)
         if (
             len(item_ids) > 500
@@ -3460,7 +3539,8 @@ class CollectionsDatabase:
             collection_row = self.backend.execute(
                 """
                 SELECT id, user_id, name, kind, description, source_url, metadata_json,
-                       default_tags_json, deleted, created_at, updated_at
+                       playlist_ingest_initialization_token, default_tags_json,
+                       deleted, created_at, updated_at
                 FROM media_collections
                 WHERE id = ? AND user_id = ? AND kind = 'playlist_ingest' AND deleted = ?
                 """ + lock,  # nosec B608
@@ -3474,7 +3554,11 @@ class CollectionsDatabase:
             if not collection_row:
                 raise KeyError("media_collection_not_found")
             metadata = self._json_loads_dict(collection_row.get("metadata_json"))
-            if metadata.get("playlist_ingest_run_id") != run_id:
+            if (
+                metadata.get("playlist_ingest_run_id") != run_id
+                or collection_row.get(_PLAYLIST_INGEST_TOKEN_KEY)
+                != expected_initialization_token
+            ):
                 raise ValueError("media_collection_claim_mismatch")
 
             membership_rows = self.backend.execute(
@@ -3494,16 +3578,15 @@ class CollectionsDatabase:
             if {int(row["id"]) for row in membership_rows} != set(item_ids):
                 raise ValueError("media_collection_claim_mismatch")
 
-            metadata["playlist_ingest_initialization_token"] = initialization_token
             now = _utcnow_iso()
             updated = self.backend.execute(
                 """
                 UPDATE media_collections
-                SET metadata_json = ?, updated_at = ?
+                SET playlist_ingest_initialization_token = ?, updated_at = ?
                 WHERE id = ? AND user_id = ? AND kind = 'playlist_ingest' AND deleted = ?
                 """,
                 (
-                    self._json_dumps_or_none(metadata),
+                    initialization_token,
                     now,
                     collection_id,
                     self.user_id,
@@ -3515,7 +3598,7 @@ class CollectionsDatabase:
                 raise ValueError("media_collection_claim_mismatch")
 
             claimed = self._row_to_media_collection(collection_row, include_items=False)
-            claimed.metadata = metadata
+            claimed._playlist_ingest_initialization_token = initialization_token
             claimed.updated_at = now
             claimed.items = [self._row_to_media_collection_item(row) for row in membership_rows]
         return claimed
@@ -3554,7 +3637,8 @@ class CollectionsDatabase:
             lock = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
             existing = self.backend.execute(
                 """
-                SELECT id, metadata_json FROM media_collections
+                SELECT id, metadata_json, playlist_ingest_initialization_token
+                FROM media_collections
                 WHERE id = ? AND user_id = ? AND kind = 'playlist_ingest' AND deleted = ?
                 """ + lock,  # nosec B608
                 (
@@ -3569,8 +3653,7 @@ class CollectionsDatabase:
             metadata = self._json_loads_dict(existing.get("metadata_json"))
             if (
                 metadata.get("playlist_ingest_run_id") != expected_run_id
-                or metadata.get("playlist_ingest_initialization_token")
-                != expected_initialization_token
+                or existing.get(_PLAYLIST_INGEST_TOKEN_KEY) != expected_initialization_token
             ):
                 raise ValueError("media_collection_discard_mismatch")
             membership_rows = self.backend.execute(
@@ -3651,7 +3734,8 @@ class CollectionsDatabase:
         rows = self.backend.execute(
             f"""
             SELECT id, user_id, name, kind, description, source_url, metadata_json,
-                   default_tags_json, deleted, created_at, updated_at
+                   playlist_ingest_initialization_token, default_tags_json,
+                   deleted, created_at, updated_at
             FROM media_collections
             WHERE {where_sql}
             ORDER BY updated_at DESC, id DESC
@@ -3698,6 +3782,8 @@ class CollectionsDatabase:
         if metadata is not None:
             if not isinstance(metadata, dict):
                 raise ValueError("media_collection_metadata_must_be_object")
+            if _PLAYLIST_INGEST_TOKEN_KEY in metadata:
+                raise ValueError("media_collection_metadata_reserved")
             add_field("metadata_json", self._json_dumps_or_none(metadata))
         if default_tags is not None:
             add_field(

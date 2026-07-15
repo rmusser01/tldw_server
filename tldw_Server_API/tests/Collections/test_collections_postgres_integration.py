@@ -145,8 +145,8 @@ def test_playlist_collection_actions_are_cas_safe_on_postgres(
         kind="playlist_ingest",
         metadata={
             "playlist_ingest_run_id": "pg-run-cas",
-            "playlist_ingest_initialization_token": "pg-token-a",
         },
+        playlist_ingest_initialization_token="pg-token-a",
         items=[
             {"source_url": "https://example.com/one", "ordinal": 1},
             {"source_url": "https://example.com/two", "ordinal": 2},
@@ -191,9 +191,11 @@ def test_playlist_collection_actions_are_cas_safe_on_postgres(
         created.id,
         run_id="pg-run-cas",
         initialization_token="pg-token-b",
+        expected_initialization_token="pg-token-a",
         expected_item_ids=[item.id for item in created.items],
     )
-    assert claimed.metadata["playlist_ingest_initialization_token"] == "pg-token-b"
+    assert claimed._playlist_ingest_initialization_token == "pg-token-b"
+    assert "playlist_ingest_initialization_token" not in claimed.metadata
 
     with pytest.raises(ValueError, match="media_collection_discard_mismatch"):
         db.discard_media_collection(
