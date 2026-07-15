@@ -14,12 +14,12 @@ references:
 - Docs/superpowers/plans/2026-07-04-jobs-admission-operations-extraction-plan.md
 - 'PR #2527'
 - 'PR #2611'
-- origin/dev 132037dd075090c295003d6885ac4276a9640916
+- origin/dev 7c7d591c6e3552ca4bdbf30bdd6bf79460221ece
 documentation:
 - Docs/superpowers/plans/2026-07-14-jobs-admission-hardening-and-lease-lifecycle.md
 modified_files:
 - Docs/superpowers/plans/2026-07-14-jobs-admission-hardening-and-lease-lifecycle.md
-updated_date: 2026-07-15 01:25
+updated_date: 2026-07-15 05:43
 ---
 
 ## Description
@@ -47,6 +47,7 @@ Use Docs/superpowers/plans/2026-07-14-jobs-admission-hardening-and-lease-lifecyc
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Planning worktree: codex/jobs-admission-hardening at .worktrees/jobs-admission-hardening, rebased to origin/dev 132037dd075090c295003d6885ac4276a9640916. Intervening PR #2731 changed only Research Workspace/frontend files and no Jobs source/tests. Latest-head diagnostics reproduced all three defects: secret reject DID NOT RAISE ValueError; optional PostgreSQL counter failure raised InFailedSqlTransaction at event insertion; concurrent max-queued=1 PostgreSQL admission created 2 jobs instead of 1. Latest clean controls: focused SQLite/contracts/parity 22 passed with 52 warnings; real PostgreSQL parity 7 passed with 20 warnings and no skips. A Backlog ID collision with merged Research Workspace TASK-12968 was detected and resolved by reallocating this stream to TASK-12969 and children .1-.3. Final design review split acquisition from renewal/release; PR 3 is stretch scope if merge latency prevents its fresh-base gate. Planning only touched docs/Backlog; Bandit is not applicable until production code changes.
+Implementation branch rebased again to origin/dev 7c7d591c6e3552ca4bdbf30bdd6bf79460221ece before production edits; intervening Skills/MCP commits did not touch Jobs source or tests.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

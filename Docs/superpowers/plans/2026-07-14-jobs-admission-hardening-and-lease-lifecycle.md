@@ -14,7 +14,8 @@
 - Admission implementation task: `TASK-12969.1`.
 - Lease acquisition task: `TASK-12969.2`, dependent on `TASK-12969.1`.
 - Lease renewal/release task: `TASK-12969.3`, dependent on `TASK-12969.2`.
-- Base commit validated during planning: `132037dd075090c295003d6885ac4276a9640916` from `origin/dev`.
+- Current execution base: `7c7d591c6e3552ca4bdbf30bdd6bf79460221ece` from `origin/dev`.
+- Findings were reproduced on `132037dd075090c295003d6885ac4276a9640916`; the intervening upstream commits did not change Jobs source or tests, and each task reconfirms its red state before implementation.
 - Preserve every public `JobManager` method signature and return shape.
 - Backend operation modules must not import `JobManager`.
 - Do not add or change database schema in any PR.
@@ -56,7 +57,7 @@ quota concurrency: 2 created, expected 1
 **Goal:** Make secret rejection authoritative and isolate optional PostgreSQL counter failures.
 **Success Criteria:** Secret-bearing jobs are not inserted in reject mode; a counter failure does not abort job/event commit.
 **Tests:** Focused SQLite secret tests and real PostgreSQL counter fault injection.
-**Status:** Not Started
+**Status:** In Progress
 
 ### Stage 2: Atomic Admission Quotas
 **Goal:** Serialize quota check plus insert only within the enabled owner/domain quota scope and fail closed on quota query errors.
