@@ -1394,7 +1394,8 @@ async def test_adapter_failures_are_sanitized_and_do_not_abort_later_group(
     async def broken_adapter(group, dispatch):
         if failure_mode == "raising":
             raise RuntimeError("secret-adapter-token")
-        return {"secret": "malformed-adapter-result"}
+        # Deliberately secret-shaped malformed output must be sanitized.
+        return {"secret": failure_mode}
 
     async def good_adapter(group, dispatch):
         await dispatch(group.intents[0])

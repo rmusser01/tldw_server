@@ -165,13 +165,13 @@ _EXPECTED_AST_DIGESTS = {
     "tldw_Server_API/app/core/Security/__init__.py": "3543b4693a36a1098850b8bc928887694ed59a6deb7d3dfd0339de01f55a77b6",
 }
 _EXPECTED_FAMILY_RAW_DIGESTS = {
-    "biorxiv_medrxiv.py": "9964d093525cd25e80a8ad5725d39de0081f34de5f06370e88dd733e967c02ea",
+    "biorxiv_medrxiv.py": "023de2769bfeb4e3705237a0c192e1597692ff9688bb0493bda4d6fc3f6fe23c",
 }
 _EXPECTED_FAMILY_IMPORT_DIGESTS = {
     "biorxiv_medrxiv.py": "32bfd0a86b35eeb7017f6035b391061dce15931de2071f33b0a8d64b49c11123",
 }
 _EXPECTED_FAMILY_AST_DIGESTS = {
-    "biorxiv_medrxiv.py": "685b4d3523ac44763c2882cdd041f6799b24d1b49037b2feb669d08ebad2a0d3",
+    "biorxiv_medrxiv.py": "e24806a4a6853b44104d1634b9c229e2fc9d2bcf9668cb3d7ce847e5e2c5a371",
 }
 _EXPECTED_FAMILY_LOCAL_IMPORTS = {
     "contracts": {

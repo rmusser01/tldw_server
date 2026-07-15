@@ -1239,16 +1239,6 @@ export function validateInventoryDocuments(
         routeMatchesRequirement(candidate, requirement.intervalRoute)
       ))
       : null;
-    const requiredRouteIds = new Set([
-      requirement.generalRoute.id,
-      requirement.lookupRoute.id,
-      requirement.intervalRoute.id,
-    ]);
-    const routeCandidateIds = Array.isArray(row?.route_candidates)
-      ? row.route_candidates.map((candidate) => candidate?.route_candidate_id)
-      : [];
-    const hasExactRequiredRoutes = routeCandidateIds.length === requiredRouteIds.size
-      && routeCandidateIds.every((routeId) => requiredRouteIds.has(routeId));
     const mappingSatisfied = row?.resolution === "mapped"
       && Array.isArray(row.canonical_targets)
       && row.canonical_targets.length === 1
@@ -1258,7 +1248,6 @@ export function validateInventoryDocuments(
       && Boolean(generalRoute)
       && Boolean(lookupRoute)
       && Boolean(intervalRoute)
-      && hasExactRequiredRoutes
       && isSubstantivelyTriaged(row, asOf, trustedReviewers);
     requiredSourceStates[inventoryId] = {
       canonical_target: requirement.canonicalTarget,

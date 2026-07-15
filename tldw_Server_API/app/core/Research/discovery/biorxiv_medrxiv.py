@@ -81,16 +81,7 @@ EUROPE_PMC_ADAPTER_VERSION = "europe-pmc-preprint-v2"
 DETAILS_ADAPTER_ID = "biorxiv_details_v2"
 DETAILS_ADAPTER_VERSION = "biorxiv-details-v2"
 
-_EUROPE_PMC_PROFILE = _ParsingProfile(
-    max_input_bytes=2_097_152,
-    max_records=120,
-    max_depth=16,
-    max_nodes=50_000,
-    max_string_chars=65_536,
-    max_numeric_token_chars=32,
-    parse_deadline_ms=500,
-)
-_DETAILS_PROFILE = _ParsingProfile(
+_FAMILY_PROFILE = _ParsingProfile(
     max_input_bytes=2_097_152,
     max_records=120,
     max_depth=16,
@@ -101,8 +92,8 @@ _DETAILS_PROFILE = _ParsingProfile(
 )
 _FAMILY_PARSING_PROFILES = MappingProxyType(
     {
-        (EUROPE_PMC_ADAPTER_ID, EUROPE_PMC_ADAPTER_VERSION): _EUROPE_PMC_PROFILE,
-        (DETAILS_ADAPTER_ID, DETAILS_ADAPTER_VERSION): _DETAILS_PROFILE,
+        (EUROPE_PMC_ADAPTER_ID, EUROPE_PMC_ADAPTER_VERSION): _FAMILY_PROFILE,
+        (DETAILS_ADAPTER_ID, DETAILS_ADAPTER_VERSION): _FAMILY_PROFILE,
     }
 )
 _PPR_ID_RE = re.compile(r"PPR[1-9][0-9]*\Z", re.ASCII)

@@ -5,7 +5,7 @@ from __future__ import annotations
 import ast
 import json
 import os
-import subprocess
+import subprocess  # nosec B404
 import sys
 from dataclasses import FrozenInstanceError, fields, is_dataclass, replace
 from pathlib import Path
@@ -1388,6 +1388,8 @@ def test_pure_foundation_modules_have_no_io_or_runtime_service_dependencies() ->
 
 
 def test_normal_contract_import_is_side_effect_free(tmp_path: Path) -> None:
+    """Run a fixed-interpreter, read-only subprocess to prove import isolation."""
+
     repository_root = Path(__file__).resolve().parents[3]
     environment = os.environ.copy()
     environment.pop("PYTEST_CURRENT_TEST", None)
@@ -1460,7 +1462,7 @@ created = sorted(str(path.relative_to(Path.cwd())) for path in Path.cwd().rglob(
 print(json.dumps({"loaded": loaded, "created": created}))
 """
 
-    completed = subprocess.run(
+    completed = subprocess.run(  # nosec B603
         [sys.executable, "-B", "-c", script],
         cwd=tmp_path,
         env=environment,

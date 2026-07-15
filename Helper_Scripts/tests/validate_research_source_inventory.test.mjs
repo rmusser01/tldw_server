@@ -609,7 +609,7 @@ test("the canonical closure gate rejects a structurally valid one-row substitute
 });
 
 
-test("required sources require exact aggregator, lookup, and interval semantics", () => {
+test("required sources require exact core routes without excluding reviewed additions", () => {
   const { manifest, ledger } = validDocuments();
   const publisherPredicate = {
     provider_field: "bookOrReportDetails.publisher",
@@ -746,31 +746,29 @@ test("required sources require exact aggregator, lookup, and interval semantics"
     mapping_satisfied: true,
   });
 
-  for (const credentialRequirement of ["none", "browser_session"]) {
-    row.route_candidates.push({
-      ...mappedRoute({
-        routeCandidateId: "biorxiv_site_search",
-        plannedBackendId: "biorxiv_site_search",
-        evidenceReference: "https://example.test/search",
-      }),
-      route_kind: "site_search",
-      credential_requirement: credentialRequirement,
-    });
-    row.route_kinds = ["aggregator", "direct", "site_search"];
-    refreshLedgerDigest(ledger);
-    const staleNativeCandidate = validateInventoryDocuments(manifest, ledger, {
-      freeze: freezeFor(manifest),
-      requiredSources,
-      schemaValidated: true,
-      trustedReviewerIds: ["research-maintainer"],
-    });
-    assert.equal(
-      staleNativeCandidate.required_sources["sourclip-2026-07-13-0001"]
-        .mapping_satisfied,
-      false,
-    );
-    row.route_candidates.pop();
-  }
+  row.route_candidates.push({
+    ...mappedRoute({
+      routeCandidateId: "biorxiv_authenticated_archive_search",
+      plannedBackendId: "biorxiv_authenticated_browser",
+      evidenceReference: "https://example.test/authenticated-search",
+    }),
+    route_kind: "site_search",
+    credential_requirement: "browser_session",
+  });
+  row.route_kinds = ["aggregator", "direct", "site_search"];
+  refreshLedgerDigest(ledger);
+  const futureAuthenticatedCandidate = validateInventoryDocuments(manifest, ledger, {
+    freeze: freezeFor(manifest),
+    requiredSources,
+    schemaValidated: true,
+    trustedReviewerIds: ["research-maintainer"],
+  });
+  assert.equal(
+    futureAuthenticatedCandidate.required_sources["sourclip-2026-07-13-0001"]
+      .mapping_satisfied,
+    true,
+  );
+  row.route_candidates.pop();
   row.route_kinds = ["aggregator", "direct"];
 
   row.route_candidates.pop();

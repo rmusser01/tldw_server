@@ -157,7 +157,7 @@ The details service requires dynamic path segments rather than a query-string cu
 
 The interval route policy carries an optional bounded-text query-value rule for `category`, so the gateway rechecks that grammar and size independently of planning.
 
-The DOI must be strict ASCII with exactly one slash, a full-match registrant `10.` followed by four through nine digits, and a bounded path-safe suffix beginning with an alphanumeric character. This validation does not infer source identity from the DOI. The provider does not accept an encoded DOI slash as one segment, so unsupported multi-slash identifier shapes fail closed rather than changing path structure. The looser search-oriented DOI normalizer is not used at this path boundary.
+The DOI must be strict ASCII with exactly one slash, a full-match registrant `10.` followed by four through nine digits, and a path-safe suffix of at most 128 characters beginning with an alphanumeric character. The full retained DOI is therefore bounded at 141 ASCII characters including registrant and slash; the generic 128-character provider-identifier cap applies to non-DOI identifiers. This validation does not infer source identity from the DOI. The provider does not accept an encoded DOI slash as one segment, so unsupported multi-slash identifier shapes fail closed rather than changing path structure. The looser search-oriented DOI normalizer is not used at this path boundary.
 
 ### Bounded path templates
 

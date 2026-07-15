@@ -33,7 +33,7 @@ These are reviewed contract values, not implementation-time guesses. Constructor
 - Category: at most 128 canonical characters from the approved bounded-text grammar.
 - DOI path: registrant `10.` plus 4-9 digits; one suffix of at most 128 decoded characters.
 - Date interval: two real canonical ISO dates, inclusive, at most 366 days.
-- Normalized metadata: title 4,096 characters; abstract/snippet 65,536; at most 1,024 authors of at most 512 characters each; provider/record identifiers 128 characters.
+- Normalized metadata: title 4,096 characters; abstract/snippet 65,536; at most 1,024 authors of at most 512 characters each; non-DOI provider/record identifiers 128 characters. A full DOI follows the separately frozen path bound and is therefore at most 141 ASCII characters including registrant and slash.
 - Family JSON profile: 2,097,152 input bytes; 120 records; depth 16; 50,000 nodes; 65,536 characters per JSON string; 32 characters per numeric token; 500 ms cooperative parse deadline.
 - Europe PMC routes: `max_pages=1`, `max_redirects=0`, `max_retries=0`, `timeout_ms=20_000`, `max_response_bytes=2_097_152`, `max_results=100`, `max_physical_dispatches=1`.
 - Details DOI routes: `max_pages=1`, `max_redirects=0`, `max_retries=0`, `timeout_ms=20_000`, `max_response_bytes=2_097_152`, `max_results=30`, `max_physical_dispatches=1`.
@@ -434,6 +434,8 @@ python -m pytest -q \
 ### Files
 
 - Modify `tldw_Server_API/tests/Research/test_research_discovery_network_boundary.py`.
+- Modify `tldw_Server_API/tests/Research/test_research_discovery_registry_reconciliation.py`.
+- Modify `tldw_Server_API/tests/Research/test_research_discovery_v2_compatibility.py`.
 - Modify `Helper_Scripts/validate_research_source_inventory.mjs`.
 - Modify `Helper_Scripts/tests/validate_research_source_inventory.test.mjs`.
 - Modify `Docs/Design/research_source_inventory/research-source-coverage-ledger-2026-07-13.json`.
@@ -464,8 +466,9 @@ source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
 node Helper_Scripts/validate_research_source_inventory.mjs \
   --root . \
   --gate contract \
-  --as-of 2026-07-13 \
+  --as-of 2026-07-15 \
   --trusted-reviewer codex-task-12968.1-source-triage \
+  --trusted-reviewer codex-task-12968.5-inventory-review \
   --json
 ```
 
@@ -518,8 +521,9 @@ python -m pytest -q Helper_Scripts/tests/test_research_source_inventory_schema.p
 node Helper_Scripts/validate_research_source_inventory.mjs \
   --root . \
   --gate contract \
-  --as-of 2026-07-13 \
+  --as-of 2026-07-15 \
   --trusted-reviewer codex-task-12968.1-source-triage \
+  --trusted-reviewer codex-task-12968.5-inventory-review \
   --json
 ```
 
