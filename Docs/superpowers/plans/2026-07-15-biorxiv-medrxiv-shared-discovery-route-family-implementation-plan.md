@@ -45,12 +45,12 @@ Do not silently raise these values. Any future expansion requires a policy-versi
 
 Before each stage commit:
 
-- [ ] Run all tests added in the current stage plus the earlier focused stages.
-- [ ] Run `python -m compileall -q` on every touched Python source/test path.
-- [ ] Run exact-scope `ruff check` and `black --check` on touched Python files.
-- [ ] Run `git diff --check` and inspect `git status --short` for unrelated changes.
-- [ ] Run Bandit on touched production Python before any commit that claims a security boundary complete.
-- [ ] Ask an independent reviewer to inspect the stage diff; resolve all Critical/Important findings and re-run the affected tests.
+- [x] Run all tests added in the current stage plus the earlier focused stages.
+- [x] Run `python -m compileall -q` on every touched Python source/test path.
+- [x] Run exact-scope `ruff check` and `black --check` on touched Python files.
+- [x] Run `git diff --check` and inspect `git status --short` for unrelated changes.
+- [x] Run Bandit on touched production Python before any commit that claims a security boundary complete.
+- [x] Ask an independent reviewer to inspect the stage diff; resolve all Critical/Important findings and re-run the affected tests.
 
 ## Task 1 / Stage 1: Add Digest-Bound Query and Dynamic-Path Policy Primitives
 
@@ -136,12 +136,12 @@ Add optional `path_template: PathTemplate | None = None` and `query_value_polici
 
 ### Test-first steps
 
-- [ ] Write RED constructor tests proving path slots accept only exact enum instances and positive bounds; template literals are visible ASCII, non-empty, slash-free segments; one template has an exact segment count; and `pagination_segment_index` points to a `UINT` slot.
-- [ ] Write RED tests proving `RoutePolicy` accepts exactly one path channel: non-empty `paths` or one `path_template`, never both or neither. Adjust `AccessRoute`'s required physical-dispatch calculation so one template counts as one initial intent and subsequent pages still count normally.
-- [ ] Treat a template's `pagination_segment_index` as the path pagination channel and prove query, JSON-body, and path pagination channels are pairwise mutually exclusive at contract construction.
-- [ ] Write RED tests proving query-value policy names are unique, are a complete set of `allowed_query_keys` whenever the new tuple is non-empty, and have strict exact runtime types. An optional `category` policy remains declared but may be absent from one intent.
-- [ ] Write RED digest tests proving template literals, ordered slot kind/bounds, pagination index, and each query rule participate in `canonical_policy_digest`; changing any one changes the digest.
-- [ ] Pin the current foundation policy digests before implementation and assert they remain exact. Recompute the complete current all-foundation raw-string baseline from this exact fixture and assert plan digest `2e9869bc7ed6b51fe8ffe823dff2e392933e275b54bc2997e8542ba89829f403`, `sha256(canonical_plan_bytes)=991d3a67132058625bdfef00836240cacc6b91370510c9b9d0762181310c9d46`, and byte length `10936`:
+- [x] Write RED constructor tests proving path slots accept only exact enum instances and positive bounds; template literals are visible ASCII, non-empty, slash-free segments; one template has an exact segment count; and `pagination_segment_index` points to a `UINT` slot.
+- [x] Write RED tests proving `RoutePolicy` accepts exactly one path channel: non-empty `paths` or one `path_template`, never both or neither. Adjust `AccessRoute`'s required physical-dispatch calculation so one template counts as one initial intent and subsequent pages still count normally.
+- [x] Treat a template's `pagination_segment_index` as the path pagination channel and prove query, JSON-body, and path pagination channels are pairwise mutually exclusive at contract construction.
+- [x] Write RED tests proving query-value policy names are unique, are a complete set of `allowed_query_keys` whenever the new tuple is non-empty, and have strict exact runtime types. An optional `category` policy remains declared but may be absent from one intent.
+- [x] Write RED digest tests proving template literals, ordered slot kind/bounds, pagination index, and each query rule participate in `canonical_policy_digest`; changing any one changes the digest.
+- [x] Pin the current foundation policy digests before implementation and assert they remain exact. Recompute the complete current all-foundation raw-string baseline from this exact fixture and assert plan digest `2e9869bc7ed6b51fe8ffe823dff2e392933e275b54bc2997e8542ba89829f403`, `sha256(canonical_plan_bytes)=991d3a67132058625bdfef00836240cacc6b91370510c9b9d0762181310c9d46`, and byte length `10936`:
 
 ```python
 registry = foundation_registry()
@@ -169,13 +169,13 @@ plan = compile_discovery_plan(
     budget=budget,
 )
 ```
-- [ ] Implement the smallest validated dataclasses and conditional digest projection. Add new digest keys only when `path_template` is not `None` or `query_value_policies` is non-empty.
-- [ ] Write RED gateway tests for missing/changed `format=json`, changed `resultType=core`, non-canonical/negative/oversized decimal values, missing fixed suffix, injected Europe PMC operators, too many/long terms, and invalid category text.
-- [ ] Implement one query-policy validator in `gateway.py`. For literal terms, require `"term" AND "term"` where every inner term is canonical NFKC Unicode alphanumeric text within the frozen bounds and the whole value ends in the exact immutable suffix. For bounded text, require canonical NFKC text, single internal spaces, no leading/trailing whitespace, and only alphanumeric characters plus space, hyphen, ampersand, and slash.
-- [ ] Write RED gateway path tests for malformed `%` escapes, non-ASCII raw paths, wrong segment count/literals, empty segments, encoded slash/backslash/percent, controls, dot segments, double encoding, invalid/reversed/over-366-day dates, overflow/non-canonical unsigned cursors, malformed registrants, unsafe DOI suffixes, and non-canonical percent encoding.
-- [ ] Implement one canonical path validator: split the raw ASCII path before decoding; strict-decode dynamic segments once; reject `/`, `\\`, `%`, controls, empty/dot segments, and a second encoded form; full-match the slot grammar; validate the first two date slots as an inclusive interval of at most 366 days; render dynamic segments with one canonical RFC 3986 segment encoder; and require byte-for-byte equality with `DispatchIntent.path`.
-- [ ] Route `_snapshot_binding(...)` through both new validators before policy activity or `one_hop`. Preserve exact-path behavior for foundation routes.
-- [ ] Add mutation tests using `object.__setattr__`/`dataclasses.replace` to prove a self-consistent forged intent/policy cannot bypass value or path enforcement.
+- [x] Implement the smallest validated dataclasses and conditional digest projection. Add new digest keys only when `path_template` is not `None` or `query_value_policies` is non-empty.
+- [x] Write RED gateway tests for missing/changed `format=json`, changed `resultType=core`, non-canonical/negative/oversized decimal values, missing fixed suffix, injected Europe PMC operators, too many/long terms, and invalid category text.
+- [x] Implement one query-policy validator in `gateway.py`. For literal terms, require `"term" AND "term"` where every inner term is canonical NFKC Unicode alphanumeric text within the frozen bounds and the whole value ends in the exact immutable suffix. For bounded text, require canonical NFKC text, single internal spaces, no leading/trailing whitespace, and only alphanumeric characters plus space, hyphen, ampersand, and slash.
+- [x] Write RED gateway path tests for malformed `%` escapes, non-ASCII raw paths, wrong segment count/literals, empty segments, encoded slash/backslash/percent, controls, dot segments, double encoding, invalid/reversed/over-366-day dates, overflow/non-canonical unsigned cursors, malformed registrants, unsafe DOI suffixes, and non-canonical percent encoding.
+- [x] Implement one canonical path validator: split the raw ASCII path before decoding; strict-decode dynamic segments once; reject `/`, `\\`, `%`, controls, empty/dot segments, and a second encoded form; full-match the slot grammar; validate the first two date slots as an inclusive interval of at most 366 days; render dynamic segments with one canonical RFC 3986 segment encoder; and require byte-for-byte equality with `DispatchIntent.path`.
+- [x] Route `_snapshot_binding(...)` through both new validators before policy activity or `one_hop`. Preserve exact-path behavior for foundation routes.
+- [x] Add mutation tests using `object.__setattr__`/`dataclasses.replace` to prove a self-consistent forged intent/policy cannot bypass value or path enforcement.
 
 ### Focused RED/GREEN command
 
@@ -246,13 +246,13 @@ PlanningQuery = str | GeneralFreeTextQuery | IdentifierLookupQuery | DateInterva
 
 ### Test-first steps
 
-- [ ] Write RED construction tests accepting only the exact built-in `str` or exact three typed dataclasses. Reject subclasses, duck types, empty text, invalid Unicode/control content, invalid DOI shape, invalid calendar dates, reversed/over-366-day intervals, empty/invalid categories, and non-empty `filters` on typed requests.
-- [ ] Add an internal normalized query context with the selected `QueryMode` and canonical display/storage value. Preserve the existing `_normalize_query(str)` and `_build_intents(...)` raw-string branch byte-for-byte.
-- [ ] Write RED route-selection tests: `GeneralFreeTextQuery` selects only `GENERAL_FREE_TEXT`; `IdentifierLookupQuery` only `IDENTIFIER_LOOKUP`; an interval without category only `DATE_INTERVAL`; an interval with category only `CATEGORY_BROWSE`; raw strings remain `STRUCTURED_QUERY`.
-- [ ] Add `SkippedCode.QUERY_MODE_NOT_SUPPORTED` plus exact reason `query_mode_not_supported`, and emit one stable skipped outcome for each explicitly selected incompatible source/route instead of silently dropping it. Mode mismatch must be evaluated before readiness/credential handling, independently of egress, and no mode field is added to plans, groups, or intents.
-- [ ] Extend executor plan validation so the new code is accepted only as exact `SkippedStatus.SKIPPED` with the exact stable reason on any otherwise valid route; preserve existing credential/not-ready semantics and reject forged combinations before adapters, journals, ID factories, or gateway effects.
-- [ ] Write RED canonical Europe PMC intent tests. Tokenize the general query into a bounded sequence of NFKC Unicode alphanumeric terms, quote each term, join with literal `AND`, append the exact route-owned publisher suffix, and reject input with no terms. Do not copy punctuation or provider syntax.
-- [ ] Write RED details-intent tests rendering these exact concrete paths:
+- [x] Write RED construction tests accepting only the exact built-in `str` or exact three typed dataclasses. Reject subclasses, duck types, empty text, invalid Unicode/control content, invalid DOI shape, invalid calendar dates, reversed/over-366-day intervals, empty/invalid categories, and non-empty `filters` on typed requests.
+- [x] Add an internal normalized query context with the selected `QueryMode` and canonical display/storage value. Preserve the existing `_normalize_query(str)` and `_build_intents(...)` raw-string branch byte-for-byte.
+- [x] Write RED route-selection tests: `GeneralFreeTextQuery` selects only `GENERAL_FREE_TEXT`; `IdentifierLookupQuery` only `IDENTIFIER_LOOKUP`; an interval without category only `DATE_INTERVAL`; an interval with category only `CATEGORY_BROWSE`; raw strings remain `STRUCTURED_QUERY`.
+- [x] Add `SkippedCode.QUERY_MODE_NOT_SUPPORTED` plus exact reason `query_mode_not_supported`, and emit one stable skipped outcome for each explicitly selected incompatible source/route instead of silently dropping it. Mode mismatch must be evaluated before readiness/credential handling, independently of egress, and no mode field is added to plans, groups, or intents.
+- [x] Extend executor plan validation so the new code is accepted only as exact `SkippedStatus.SKIPPED` with the exact stable reason on any otherwise valid route; preserve existing credential/not-ready semantics and reject forged combinations before adapters, journals, ID factories, or gateway effects.
+- [x] Write RED canonical Europe PMC intent tests. Tokenize the general query into a bounded sequence of NFKC Unicode alphanumeric terms, quote each term, join with literal `AND`, append the exact route-owned publisher suffix, and reject input with no terms. Do not copy punctuation or provider syntax.
+- [x] Write RED details-intent tests rendering these exact concrete paths:
 
 ```text
 /details/{server}/{start_date}/{end_date}/0/json
@@ -260,12 +260,12 @@ PlanningQuery = str | GeneralFreeTextQuery | IdentifierLookupQuery | DateInterva
 ```
 
 The DOI has exactly one slash; registrant full-matches `10.` plus 4-9 digits; suffix begins alphanumeric, is bounded, contains no slash/backslash/percent/control, and is encoded once with the shared canonical path renderer.
-- [ ] Write RED executor tests for a route with no pagination channel: one initial `SEARCH` dispatch succeeds only when `max_pages == 1`, but any supplied cursor or multi-page zero-channel route is rejected. This covers Europe PMC and DOI lookup without weakening foundation routes.
-- [ ] Write RED executor tests for path pagination: first dispatch extracts the initial numeric path cursor, a later `NumericCursor` replaces exactly the declared template segment, repeated/retrograde/overflow cursors fail, and query/body/path channels are mutually exclusive.
-- [ ] Implement path cursor replacement inside `_GroupExecutionController._effective_intent(...)` with `dataclasses.replace`. Keep every derived intent under `_snapshot_binding`, policy activity, journal reservation/debit, gateway dispatch, deadline, cancellation, and page accounting.
-- [ ] Record a cursor in `_seen_cursors` only when it is a real integer; a valid one-page zero-channel search must never insert `None` into cursor lineage.
-- [ ] Add a malicious adapter regression proving it cannot change any other path segment, path literal, date, server, DOI, query value, policy digest, or cursor channel.
-- [ ] Re-run exact canonical foundation-plan tests to prove raw-string behavior, `PLANNER_VERSION`, ordering, IDs, skipped semantics, digests, and serialized bytes did not change.
+- [x] Write RED executor tests for a route with no pagination channel: one initial `SEARCH` dispatch succeeds only when `max_pages == 1`, but any supplied cursor or multi-page zero-channel route is rejected. This covers Europe PMC and DOI lookup without weakening foundation routes.
+- [x] Write RED executor tests for path pagination: first dispatch extracts the initial numeric path cursor, a later `NumericCursor` replaces exactly the declared template segment, repeated/retrograde/overflow cursors fail, and query/body/path channels are mutually exclusive.
+- [x] Implement path cursor replacement inside `_GroupExecutionController._effective_intent(...)` with `dataclasses.replace`. Keep every derived intent under `_snapshot_binding`, policy activity, journal reservation/debit, gateway dispatch, deadline, cancellation, and page accounting.
+- [x] Record a cursor in `_seen_cursors` only when it is a real integer; a valid one-page zero-channel search must never insert `None` into cursor lineage.
+- [x] Add a malicious adapter regression proving it cannot change any other path segment, path literal, date, server, DOI, query value, policy digest, or cursor channel.
+- [x] Re-run exact canonical foundation-plan tests to prove raw-string behavior, `PLANNER_VERSION`, ordering, IDs, skipped semantics, digests, and serialized bytes did not change.
 
 ### Focused RED/GREEN command
 
@@ -429,7 +429,7 @@ python -m pytest -q \
 
 **Tests:** Network-boundary suite, inventory semantic tests, Python schema tests, registry reconciliation, legacy compatibility, full Research regression, static quality gates, and Bandit.
 
-**Status:** In Progress
+**Status:** Complete
 
 ### Files
 
@@ -447,19 +447,19 @@ python -m pytest -q \
 
 ### Test-first steps
 
-- [ ] Add a separate family root/fixture/digest set to the static discovery closure scan; do not add family adapters to the frozen foundation `_RECORDED_FIXTURES`. Enumerate ready family route `(adapter_id, adapter_version)` identities at runtime and require exact equality with `biorxiv_medrxiv_gateway_adapters()`.
-- [ ] Extend runtime tripwires across all six routes: no direct socket/http/urllib client, alternate hop, subprocess, browser, cookie, credential, config, AuthNZ, DB, Web Scraping, Media, OA, legacy Third_Party provider, or result-link access.
-- [ ] Refresh reviewed raw and AST digests only after the final code is stable. Keep the test's closed import/gateway/identity expectations explicit; do not weaken it to a wildcard scan.
-- [ ] Add fixture accounting for the distinct family success fixtures and prove every ready route crosses the executor-owned gateway with a physical debit. Details page two must be separately accounted.
-- [ ] Add the family module to the compatibility suite's forbidden production-consumer import set and patch its factories with raising tripwires during a real legacy endpoint request; assert zero family factory, V2 executor, and V2 gateway calls.
-- [ ] Write RED inventory semantic tests for the corrected required-source contract before changing production validator constants.
-- [ ] Replace required native site-search routes with `biorxiv_europe_pmc_search_aggregator` and `medrxiv_europe_pmc_search_aggregator`; require `RouteKind.AGGREGATOR`, backend `europe_pmc_rest_api`, `GENERAL_FREE_TEXT`, provider-source constraint, exact publisher predicate, and Europe PMC evidence host.
-- [ ] Replace each single stale bounded route requirement with separate lookup and interval requirements using backend `biorxiv_details_api`; allow only identifier lookup on lookup routes and date/category modes on interval routes. Do not require or advertise `RECENT_FEED`.
-- [ ] Update ledger rows `sourclip-2026-07-13-0021` and `...0022`: retain canonical targets and both declared surfaces; remove native site-search and recent-shortcut candidates from `route_candidates`; add the implemented six route candidates; record dated robots/Cloudflare/recent-shortcut evidence in resolution/evidence fields; keep live state `not_run`, certifications empty, and surface claims absent.
-- [ ] Set `implementation_state=implemented` and `fixture_state=passed` only after Stages 3-4 are green. Keep `live_state=not_run`, and do not imply inventory delivery/surface certification.
-- [ ] Assert the derived counts become exactly `233 planned / 2 implemented` and `233 not_run / 2 passed` for fixtures while all 235 live states remain `not_run`; resolution counts remain `191 mapped / 35 credentialed` with all other counts unchanged.
-- [ ] Recompute the ledger `rows_sha256` using the validator's existing `canonicalJson(...)` and `sha256(...)`; do not hand-guess derived hashes.
-- [ ] Run the authoritative validator with the frozen as-of date and trusted reviewer, capture JSON, and update the checked-in report only from that exact result:
+- [x] Add a separate family root/fixture/digest set to the static discovery closure scan; do not add family adapters to the frozen foundation `_RECORDED_FIXTURES`. Enumerate ready family route `(adapter_id, adapter_version)` identities at runtime and require exact equality with `biorxiv_medrxiv_gateway_adapters()`.
+- [x] Extend runtime tripwires across all six routes: no direct socket/http/urllib client, alternate hop, subprocess, browser, cookie, credential, config, AuthNZ, DB, Web Scraping, Media, OA, legacy Third_Party provider, or result-link access.
+- [x] Refresh reviewed raw and AST digests only after the final code is stable. Keep the test's closed import/gateway/identity expectations explicit; do not weaken it to a wildcard scan.
+- [x] Add fixture accounting for the distinct family success fixtures and prove every ready route crosses the executor-owned gateway with a physical debit. Details page two must be separately accounted.
+- [x] Add the family module to the compatibility suite's forbidden production-consumer import set and patch its factories with raising tripwires during a real legacy endpoint request; assert zero family factory, V2 executor, and V2 gateway calls.
+- [x] Write RED inventory semantic tests for the corrected required-source contract before changing production validator constants.
+- [x] Replace required native site-search routes with `biorxiv_europe_pmc_search_aggregator` and `medrxiv_europe_pmc_search_aggregator`; require `RouteKind.AGGREGATOR`, backend `europe_pmc_rest_api`, `GENERAL_FREE_TEXT`, provider-source constraint, exact publisher predicate, and Europe PMC evidence host.
+- [x] Replace each single stale bounded route requirement with separate lookup and interval requirements using backend `biorxiv_details_api`; allow only identifier lookup on lookup routes and date/category modes on interval routes. Do not require or advertise `RECENT_FEED`.
+- [x] Update ledger rows `sourclip-2026-07-13-0021` and `...0022`: retain canonical targets and both declared surfaces; remove native site-search and recent-shortcut candidates from `route_candidates`; add the implemented six route candidates; record dated robots/Cloudflare/recent-shortcut evidence in resolution/evidence fields; keep live state `not_run`, certifications empty, and surface claims absent.
+- [x] Set `implementation_state=implemented` and `fixture_state=passed` only after Stages 3-4 are green. Keep `live_state=not_run`, and do not imply inventory delivery/surface certification.
+- [x] Assert the derived counts become exactly `233 planned / 2 implemented` and `233 not_run / 2 passed` for fixtures while all 235 live states remain `not_run`; resolution counts remain `191 mapped / 35 credentialed` with all other counts unchanged.
+- [x] Recompute the ledger `rows_sha256` using the validator's existing `canonicalJson(...)` and `sha256(...)`; do not hand-guess derived hashes.
+- [x] Run the authoritative validator with the frozen as-of date and trusted reviewer, capture JSON, and update the checked-in report only from that exact result:
 
 ```bash
 source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
@@ -472,7 +472,7 @@ node Helper_Scripts/validate_research_source_inventory.mjs \
   --json
 ```
 
-- [ ] Assert manifest/ledger row counts and resolution counts do not drift, errors remain empty, required-source mappings are satisfied, and regenerated report bytes match the checked-in report.
+- [x] Assert manifest/ledger row counts and resolution counts do not drift, errors remain empty, required-source mappings are satisfied, and regenerated report bytes match the checked-in report.
 
 ### Focused RED/GREEN command
 
@@ -490,7 +490,7 @@ python -m pytest -q Helper_Scripts/tests/test_research_source_inventory_schema.p
 
 ### Final verification and task-finalization steps
 
-- [ ] Run the focused family/security matrix:
+- [x] Run the focused family/security matrix:
 
 ```bash
 source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
@@ -507,13 +507,13 @@ python -m pytest -q \
   tldw_Server_API/tests/Research/test_research_discovery_legacy_selection_contract.py
 ```
 
-- [ ] Run the complete Research suite:
+- [x] Run the complete Research suite:
 
 ```bash
 python -m pytest -q tldw_Server_API/tests/Research
 ```
 
-- [ ] Run authoritative inventory gates:
+- [x] Run authoritative inventory gates:
 
 ```bash
 node --test Helper_Scripts/tests/validate_research_source_inventory.test.mjs
@@ -527,7 +527,7 @@ node Helper_Scripts/validate_research_source_inventory.mjs \
   --json
 ```
 
-- [ ] Run compile/style checks on the exact touched Python set:
+- [x] Run compile/style checks on the exact touched Python set:
 
 ```bash
 python -m compileall -q \
@@ -574,8 +574,8 @@ black --check \
   tldw_Server_API/tests/Research/test_research_discovery_v2_compatibility.py
 ```
 
-- [ ] Parse every touched Python file with Python 3.10 grammar (or the repository's existing AST grammar helper) and record the exact command/result.
-- [ ] Run Bandit over the touched production scope and inspect the JSON rather than trusting exit status alone:
+- [x] Parse every touched Python file with Python 3.10 grammar (or the repository's existing AST grammar helper) and record the exact command/result.
+- [x] Run Bandit over the touched production scope and inspect the JSON rather than trusting exit status alone:
 
 ```bash
 python -m bandit -r \
@@ -583,16 +583,29 @@ python -m bandit -r \
   -f json -o /tmp/bandit_TASK-12968.5.json
 ```
 
-- [ ] Run `git diff --check`, inspect `git diff --stat`, inspect the complete diff, and prove no production Search/Deep Research import or request count changed.
-- [ ] Request independent correctness, security, and minimality reviews. Fix Critical/Important findings RED-first; re-run the affected and full gates. Keep no speculative abstraction solely for hypothetical providers.
-- [ ] Update the task with touched files, fixture/live distinction, exact test counts, inventory report outcome, Bandit outcome, review result, known skips, local commit hashes, and explicit statements that surface cutover/authenticated scraping remain deferred.
-- [ ] Check all acceptance criteria/DoD only after evidence exists. Add one final summary, repair any duplicated CLI summary markers, validate task parsing, and commit the final reviewable unit.
+- [x] Run `git diff --check`, inspect `git diff --stat`, inspect the complete diff, and prove no production Search/Deep Research import or request count changed.
+- [x] Request independent correctness, security, and minimality reviews. Fix Critical/Important findings RED-first; re-run the affected and full gates. Keep no speculative abstraction solely for hypothetical providers.
+- [x] Update the task with touched files, fixture/live distinction, exact test counts, inventory report outcome, Bandit outcome, review result, known skips, local commit hashes, and explicit statements that surface cutover/authenticated scraping remain deferred.
+- [x] Check all acceptance criteria/DoD only after evidence exists. Add one final summary, repair any duplicated CLI summary markers, validate task parsing, and commit the final reviewable unit.
 
 ### Commits
 
 `docs(research): reconcile bioRxiv discovery inventory`
 
-`test(research): verify bioRxiv medRxiv shadow discovery`
+`test(research): close bioRxiv discovery boundary`
+
+`fix(research): resolve bioRxiv final review findings`
+
+### Completion evidence
+
+- Stage 5 inventory reconciliation: `5309e66e4ae2b660a7bd0154edaf5aab685ee7e6`; boundary closure: `df212ce994a02b0de148677f2844b18e195678d8`; final review fixes: `c9d2c1a25a4143fc69b1f8b7cf42ece8b347cb2c`.
+- Final focused family/security matrix: 1,067 passed with four warnings. Complete Research suite: 2,133 passed with seven warnings.
+- Inventory verification: 18 Node tests and eight Python schema tests passed; the authoritative 2026-07-15 contract gate returned `errors=[]`, both required mappings satisfied, and output bytes identical to the checked-in report.
+- Inventory state remains truthful: 233 planned / 2 implemented; fixtures 233 `not_run` / 2 passed; all 235 live checks `not_run`; certifications empty; `inventory_delivery_ready=false`.
+- Final inventory digests: rows `1d607d9b7e3a14aa47f773bf3248f5ecfcdf3dcbf9934ee36999fcfb555881c9`; ledger `1a5748978a75821dc2376817e1295721dc43013e102981a48184f3d0fac2f39e`; validator `5e27669fdbb8845a50468217d07faa9a85efd0551edf006d50f435de1bbb1e61`.
+- Compileall, Ruff, Black, Python 3.10 AST parsing for all 13 touched Python files, Node syntax, ten JSON parses, and diff hygiene passed. Final Bandit JSON inspection reported zero findings and zero errors for the production discovery scope and touched tests with pytest assertions excluded.
+- Independent correctness, security, and minimality reviews all passed with no remaining Critical, Important, or Minor findings. Review-driven fixes removed an exclusive future-route allowlist and a duplicate boundary scan, shared one immutable family parsing profile, and clarified the separately bounded full DOI identity.
+- Production Search and Deep Research consumers remain unchanged and do not import or invoke the family. Live/surface certification, product cutover, and authenticated scraping remain explicitly deferred.
 
 ## Completion Boundary
 
