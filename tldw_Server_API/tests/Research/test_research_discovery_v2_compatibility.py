@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import inspect
 import json
 import os
@@ -39,7 +40,11 @@ from tldw_Server_API.app.core.Research.discovery.gateway import (
 )
 from tldw_Server_API.app.core.Research.discovery.gateway_adapters import foundation_gateway_adapters
 from tldw_Server_API.app.core.Research.discovery.identity import build_fingerprint
-from tldw_Server_API.app.core.Research.discovery.planner import PlanningRequest, compile_discovery_plan
+from tldw_Server_API.app.core.Research.discovery.planner import (
+    PlanningRequest,
+    canonical_plan_bytes,
+    compile_discovery_plan,
+)
 from tldw_Server_API.app.core.Research.discovery.registry import foundation_readiness, foundation_registry
 from tldw_Server_API.app.core.Security.http_hop import HTTPHopLimits
 
@@ -134,6 +139,60 @@ def _foundation_plan(source_ids: tuple[str, ...], *, result_limit: int):
         ),
     )
     return registry, plan
+
+
+def test_additive_request_policy_fields_preserve_exact_foundation_plan_bytes() -> None:
+    registry = foundation_registry()
+    plan = compile_discovery_plan(
+        PlanningRequest(
+            source_ids=_FOUNDATION_SOURCE_IDS,
+            query="  Causal   Inference  ",
+            filters=(),
+            result_limit=25,
+        ),
+        registry=registry,
+        readiness=foundation_readiness(ExecutionMode.OFFLINE_FIXTURE),
+        budget=BudgetCeilings(16, 20, 1, 0, 0, 500_000, 100),
+    )
+    encoded = canonical_plan_bytes(plan)
+
+    assert tuple((route.route_id, route.policy.policy_digest) for route in registry.routes) == (
+        (
+            "openalex_openalex_api_direct",
+            "a4a26b31b2c424c472d93307f0f3091e821bea490a290a63076e4020bde48606",
+        ),
+        (
+            "semantic_scholar_semantic_scholar_graph_api_direct",
+            "caafcd1e81e8c62b9d14282ff7c04e8d7fc67d6dc172a570d47fae90df09421a",
+        ),
+        (
+            "crossref_metadata_search_crossref_api_direct",
+            "83a16ef3dd1ab57321062746907adf638a17ab19129433b9488eb8ba29c6ac70",
+        ),
+        (
+            "arxiv_arxiv_api_direct",
+            "d4697303d03a2aeb989b811ef0c371f871b5727cfc38bdbc8f1272340479d384",
+        ),
+        (
+            "pubmed_ncbi_eutils_pubmed_direct",
+            "0d121b0af2720904ba0aceb50ae18d57a2ee81b2d634d804fbcfc07c324476ab",
+        ),
+        (
+            "zenodo_zenodo_records_api_direct",
+            "ccfc7defbd128a7d8b86619e35772876f2c5378d8eba62f3401a97baa3c2ff5b",
+        ),
+        (
+            "figshare_figshare_public_api_direct",
+            "a6300381a69db2962a30eeb61f19482b57caf6602f28f01151e31851742a1c0d",
+        ),
+        (
+            "open_science_framework_osf_api_direct",
+            "e0c8a099197ae79f7ba1084d05c576d1f04a39fa24d1785e7d5fd8f0924bad25",
+        ),
+    )
+    assert plan.plan_digest == "2e9869bc7ed6b51fe8ffe823dff2e392933e275b54bc2997e8542ba89829f403"
+    assert hashlib.sha256(encoded).hexdigest() == "991d3a67132058625bdfef00836240cacc6b91370510c9b9d0762181310c9d46"
+    assert len(encoded) == 10_936
 
 
 def _gateway_response(

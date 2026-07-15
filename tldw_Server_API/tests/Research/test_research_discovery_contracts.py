@@ -12,10 +12,13 @@ from pathlib import Path
 
 import pytest
 
+from tldw_Server_API.app.core.Research.discovery import contracts as contracts_module
 from tldw_Server_API.app.core.Research.discovery.contracts import (
     AccessRoute,
     AttributionMatch,
     BackendDefinition,
+    BoundedDecimalQueryValuePolicy,
+    BoundedTextQueryValuePolicy,
     BudgetCeilings,
     CredentialRequirement,
     CredentialStatus,
@@ -26,9 +29,14 @@ from tldw_Server_API.app.core.Research.discovery.contracts import (
     DispatchAllowance,
     DispatchIntent,
     ExactOrigin,
+    ExactQueryValuePolicy,
     ExecutionMode,
     JSONBodyPair,
+    LiteralTermsQueryValuePolicy,
     OperationKind,
+    PathSlot,
+    PathSlotKind,
+    PathTemplate,
     PlannedBudgetAllowance,
     PlannedDispatchGroup,
     PlannedLogicalAttempt,
@@ -54,6 +62,287 @@ from tldw_Server_API.app.core.Research.discovery.identity import (
     build_fingerprint,
     stable_result_id,
 )
+
+
+def test_digest_bound_request_policy_contracts_are_public() -> None:
+    expected_names = (
+        "PathSlotKind",
+        "PathSlot",
+        "PathTemplate",
+        "ExactQueryValuePolicy",
+        "BoundedDecimalQueryValuePolicy",
+        "LiteralTermsQueryValuePolicy",
+        "BoundedTextQueryValuePolicy",
+        "QueryValuePolicy",
+    )
+
+    assert all(hasattr(contracts_module, name) for name in expected_names)
+
+
+def test_path_policy_contracts_are_closed_frozen_and_bounded() -> None:
+    slots = (
+        PathSlot(PathSlotKind.DATE, 10),
+        PathSlot(PathSlotKind.UINT, 10),
+        PathSlot(PathSlotKind.DOI_REGISTRANT, 12),
+        PathSlot(PathSlotKind.DOI_SUFFIX, 128),
+    )
+    template = PathTemplate(("details", "biorxiv", slots[1], "json"), pagination_segment_index=2)
+
+    assert template.segments[2] is slots[1]
+    for value in (*slots, template):
+        assert is_dataclass(value)
+        assert value.__dataclass_params__.frozen is True
+        assert not hasattr(value, "__dict__")
+    for slot in slots:
+        with pytest.raises(FrozenInstanceError):
+            slot.max_chars = 1  # type: ignore[misc]
+    with pytest.raises(FrozenInstanceError):
+        template.segments = ()  # type: ignore[misc]
+
+    with pytest.raises(TypeError, match="path_slot_kind"):
+        PathSlot("date", 10)  # type: ignore[arg-type]
+    for kind, maximum in (
+        (PathSlotKind.DATE, 10),
+        (PathSlotKind.UINT, 10),
+        (PathSlotKind.DOI_REGISTRANT, 12),
+        (PathSlotKind.DOI_SUFFIX, 128),
+    ):
+        for invalid in (True, 0, -1, maximum + 1):
+            with pytest.raises(ValueError, match="path_slot_max_chars"):
+                PathSlot(kind, invalid)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("literal", ("", " ", "has space", "has/slash", "has\\backslash", "café"))
+def test_path_template_rejects_non_visible_or_non_segment_literals(literal: str) -> None:
+    with pytest.raises(ValueError, match="path_template_literal"):
+        PathTemplate(("details", literal, PathSlot(PathSlotKind.UINT, 10)))
+
+
+def test_path_template_requires_exact_segments_and_uint_pagination_slot() -> None:
+    class SlotSubclass(PathSlot):
+        pass
+
+    slot = PathSlot(PathSlotKind.UINT, 10)
+    assert PathTemplate(("details", slot), pagination_segment_index=1).segments == ("details", slot)
+
+    with pytest.raises(TypeError, match="path_template_segments"):
+        PathTemplate(["details", slot])  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="path_template_segments"):
+        PathTemplate(())
+    with pytest.raises(TypeError, match="path_template_segment"):
+        PathTemplate(("details", SlotSubclass(PathSlotKind.UINT, 10)))
+    for index in (True, -1, 2):
+        with pytest.raises(ValueError, match="pagination_segment_index"):
+            PathTemplate(("details", slot), pagination_segment_index=index)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="pagination_segment_index"):
+        PathTemplate(
+            ("details", PathSlot(PathSlotKind.DATE, 10)),
+            pagination_segment_index=1,
+        )
+
+
+def test_query_value_policy_contracts_require_exact_types_and_frozen_bounds() -> None:
+    class StringSubclass(str):
+        pass
+
+    policies = (
+        ExactQueryValuePolicy("format", "json"),
+        BoundedDecimalQueryValuePolicy("pageSize", 100),
+        LiteralTermsQueryValuePolicy(
+            "query",
+            ' AND SRC:PPR AND PUBLISHER:"bioRxiv"',
+            16,
+            64,
+        ),
+        BoundedTextQueryValuePolicy("category", 128),
+    )
+    assert tuple(policy.required for policy in policies) == (True, True, True, False)
+    for policy in policies:
+        assert is_dataclass(policy)
+        assert policy.__dataclass_params__.frozen is True
+        assert not hasattr(policy, "__dict__")
+
+    for constructor in (
+        lambda: ExactQueryValuePolicy(StringSubclass("format"), "json"),
+        lambda: ExactQueryValuePolicy("format", StringSubclass("json")),
+        lambda: ExactQueryValuePolicy("format", ""),
+        lambda: BoundedDecimalQueryValuePolicy("pageSize", True),
+        lambda: BoundedDecimalQueryValuePolicy("pageSize", 0),
+        lambda: LiteralTermsQueryValuePolicy("query", "", 16, 64),
+        lambda: LiteralTermsQueryValuePolicy("query", " suffix", 17, 64),
+        lambda: LiteralTermsQueryValuePolicy("query", " suffix", 16, 65),
+        lambda: BoundedTextQueryValuePolicy("category", 129),
+    ):
+        with pytest.raises((TypeError, ValueError)):
+            constructor()
+    for policy in policies:
+        with pytest.raises(TypeError, match="required"):
+            replace(policy, required=1)  # type: ignore[arg-type]
+
+
+def _template_policy(
+    *,
+    template: PathTemplate | None = None,
+    query_value_policies: tuple[object, ...] = (),
+    allowed_query_keys: tuple[str, ...] = (),
+) -> RoutePolicy:
+    return RoutePolicy(
+        policy_version="policy-v2",
+        origin=ExactOrigin("https", "api.example.test", 443),
+        methods=("GET",),
+        paths=(),
+        path_template=template
+        or PathTemplate(
+            (
+                "details",
+                "biorxiv",
+                PathSlot(PathSlotKind.DATE, 10),
+                PathSlot(PathSlotKind.DATE, 10),
+                PathSlot(PathSlotKind.UINT, 10),
+                "json",
+            ),
+            pagination_segment_index=4,
+        ),
+        allowed_query_keys=allowed_query_keys,
+        query_value_policies=query_value_policies,  # type: ignore[arg-type]
+        limits=RouteLimits(2, 0, 0, 1_000, 4_096, 25),
+    )
+
+
+def test_route_policy_requires_exactly_one_path_channel() -> None:
+    dynamic = _template_policy()
+
+    assert dynamic.paths == ()
+    assert dynamic.path_template is not None
+    with pytest.raises(ValueError, match="path_channel"):
+        replace(dynamic, paths=("/details",), policy_digest="")
+    with pytest.raises(ValueError, match="path_channel"):
+        replace(dynamic, path_template=None, policy_digest="")
+    with pytest.raises(TypeError, match="path_template"):
+        replace(dynamic, path_template=object(), policy_digest="")
+
+
+def test_template_pagination_is_exclusive_with_query_and_json_channels() -> None:
+    dynamic = _template_policy()
+
+    with pytest.raises(ValueError, match="pagination"):
+        replace(
+            dynamic,
+            allowed_query_keys=("page",),
+            pagination_query_key="page",
+            policy_digest="",
+        )
+    with pytest.raises(ValueError, match="pagination"):
+        replace(
+            dynamic,
+            methods=("POST",),
+            allowed_json_body_keys=("page",),
+            integer_json_body_keys=("page",),
+            pagination_json_body_key="page",
+            policy_digest="",
+        )
+
+
+def test_access_route_counts_one_template_as_one_initial_dispatch() -> None:
+    dynamic = _template_policy()
+    route = AccessRoute(
+        route_id="example.details",
+        backend_id="example",
+        adapter_id="example.details",
+        route_kind=RouteKind.DIRECT,
+        query_modes=(QueryMode.DATE_INTERVAL,),
+        source_constraint=SourceConstraint.NATIVE_CORPUS,
+        attribution_basis="native response",
+        credential_requirement=CredentialRequirement.NONE,
+        fallback_order=0,
+        max_physical_dispatches=2,
+        adapter_version="v1",
+        policy=dynamic,
+    )
+
+    assert route.policy.path_template is dynamic.path_template
+    with pytest.raises(ValueError, match="physical_dispatches"):
+        replace(route, max_physical_dispatches=1)
+
+
+def test_route_policy_query_value_rules_exactly_cover_allowed_keys() -> None:
+    rules = (
+        LiteralTermsQueryValuePolicy("query", " AND SRC:PPR", 16, 64),
+        ExactQueryValuePolicy("format", "json"),
+        BoundedDecimalQueryValuePolicy("pageSize", 100),
+        BoundedTextQueryValuePolicy("category", 128),
+    )
+    policy = _template_policy(
+        allowed_query_keys=("query", "format", "pageSize", "category"),
+        query_value_policies=rules,
+    )
+
+    assert policy.query_value_policies == rules
+    with pytest.raises(TypeError, match="query_value_policies"):
+        replace(policy, query_value_policies=list(rules), policy_digest="")  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="query_value_policy"):
+        replace(policy, query_value_policies=(*rules[:-1], object()), policy_digest="")
+    with pytest.raises(ValueError, match="query_value_policy"):
+        replace(policy, query_value_policies=(*rules, rules[0]), policy_digest="")
+    with pytest.raises(ValueError, match="query_value_policy"):
+        replace(policy, allowed_query_keys=("query", "format", "pageSize"), policy_digest="")
+
+
+def test_dynamic_path_and_query_rules_are_bound_into_policy_digest() -> None:
+    template = PathTemplate(
+        (
+            "details",
+            "biorxiv",
+            PathSlot(PathSlotKind.DATE, 10),
+            PathSlot(PathSlotKind.DATE, 10),
+            PathSlot(PathSlotKind.UINT, 10),
+            "json",
+        ),
+        pagination_segment_index=4,
+    )
+    rules = (
+        LiteralTermsQueryValuePolicy("query", " AND SRC:PPR", 16, 64),
+        ExactQueryValuePolicy("format", "json"),
+        BoundedDecimalQueryValuePolicy("pageSize", 100),
+        BoundedTextQueryValuePolicy("category", 128),
+    )
+    base = _template_policy(
+        template=template,
+        allowed_query_keys=("query", "format", "pageSize", "category"),
+        query_value_policies=rules,
+    )
+    template_mutations = (
+        replace(template, segments=("details", "medrxiv", *template.segments[2:])),
+        replace(
+            template,
+            segments=(*template.segments[:2], PathSlot(PathSlotKind.DOI_SUFFIX, 10), *template.segments[3:]),
+        ),
+        replace(
+            template,
+            segments=(*template.segments[:4], PathSlot(PathSlotKind.UINT, 9), *template.segments[5:]),
+        ),
+        replace(template, pagination_segment_index=None),
+    )
+    rule_mutations = (
+        replace(rules[0], fixed_suffix=" AND SRC:MED"),
+        replace(rules[0], max_terms=15),
+        replace(rules[0], max_term_chars=63),
+        replace(rules[0], required=False),
+        replace(rules[1], value="xml"),
+        replace(rules[2], maximum=99),
+        replace(rules[3], max_chars=127),
+        replace(rules[3], required=True),
+    )
+
+    digests = {base.policy_digest}
+    for mutated_template in template_mutations:
+        digests.add(replace(base, path_template=mutated_template, policy_digest="").policy_digest)
+    for mutated_rule in rule_mutations:
+        index = next(index for index, rule in enumerate(rules) if type(rule) is type(mutated_rule))
+        mutated_rules = (*rules[:index], mutated_rule, *rules[index + 1 :])
+        digests.add(replace(base, query_value_policies=mutated_rules, policy_digest="").policy_digest)
+
+    assert len(digests) == 1 + len(template_mutations) + len(rule_mutations)
 
 
 def _policy(*, digest: str = "") -> RoutePolicy:

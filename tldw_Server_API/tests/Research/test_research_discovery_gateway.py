@@ -8,12 +8,19 @@ import pytest
 
 from tldw_Server_API.app.core.Research.discovery.contracts import (
     AccessRoute,
+    BoundedDecimalQueryValuePolicy,
+    BoundedTextQueryValuePolicy,
     CredentialRequirement,
     DeferredNumericCSVQueryBinding,
     DispatchIntent,
     ExactOrigin,
+    ExactQueryValuePolicy,
     JSONBodyPair,
+    LiteralTermsQueryValuePolicy,
     OperationKind,
+    PathSlot,
+    PathSlotKind,
+    PathTemplate,
     QueryMode,
     QueryPair,
     RouteKind,
@@ -133,6 +140,404 @@ def _figshare_post_route_and_intent() -> tuple[AccessRoute, DispatchIntent]:
             JSONBodyPair("page_size", 25),
         ),
     )
+
+
+_EUROPE_PMC_SUFFIX = ' AND SRC:PPR AND PUBLISHER:"bioRxiv"'
+_TOO_MANY_LITERAL_TERMS = " AND ".join(f'"term{index}"' for index in range(17))
+_OVERSIZED_LITERAL_TERM = f'"{"x" * 65}"'
+
+
+def _digest_bound_query_route_and_intent() -> tuple[AccessRoute, DispatchIntent]:
+    limits = RouteLimits(1, 0, 0, 250, 4_096, 100)
+    policy = RoutePolicy(
+        policy_version="discovery-route-policy-v2",
+        origin=ExactOrigin("https", "api.example.test", 443),
+        methods=("GET",),
+        paths=("/europepmc/webservices/rest/search",),
+        allowed_query_keys=("query", "format", "resultType", "pageSize", "category"),
+        query_value_policies=(
+            LiteralTermsQueryValuePolicy("query", _EUROPE_PMC_SUFFIX, 16, 64),
+            ExactQueryValuePolicy("format", "json"),
+            ExactQueryValuePolicy("resultType", "core"),
+            BoundedDecimalQueryValuePolicy("pageSize", 100),
+            BoundedTextQueryValuePolicy("category", 128),
+        ),
+        limits=limits,
+    )
+    route = AccessRoute(
+        route_id="example.europe_pmc",
+        backend_id="example",
+        adapter_id="example.europe_pmc",
+        route_kind=RouteKind.AGGREGATOR,
+        query_modes=(QueryMode.GENERAL_FREE_TEXT,),
+        source_constraint=SourceConstraint.PROVIDER_SOURCE_FILTER,
+        attribution_basis="provider source filter",
+        credential_requirement=CredentialRequirement.NONE,
+        fallback_order=0,
+        max_physical_dispatches=1,
+        adapter_version="v1",
+        policy=policy,
+    )
+    intent = DispatchIntent(
+        route_id=route.route_id,
+        policy_digest=policy.policy_digest,
+        operation_kind=OperationKind.SEARCH,
+        method="GET",
+        path="/europepmc/webservices/rest/search",
+        query_pairs=(
+            QueryPair("query", f'"causal" AND "inference"{_EUROPE_PMC_SUFFIX}'),
+            QueryPair("format", "json"),
+            QueryPair("resultType", "core"),
+            QueryPair("pageSize", "25"),
+        ),
+        limits=limits,
+    )
+    return route, intent
+
+
+async def _assert_rejected_before_policy_or_hop(route: AccessRoute, intent: DispatchIntent) -> None:
+    effects = {"policy": 0, "hop": 0}
+
+    def policy_check(_route_id: str, _digest: str) -> bool:
+        effects["policy"] += 1
+        return True
+
+    async def one_hop(_request: NormalizedHTTPHopRequest) -> HTTPHopResponse:
+        effects["hop"] += 1
+        return _hop_response()
+
+    with pytest.raises(DiscoveryGatewayError) as caught:
+        await dispatch_once(route, intent, is_policy_active=policy_check, one_hop=one_hop)
+
+    assert caught.value.code == "request_rejected"
+    assert effects == {"policy": 0, "hop": 0}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("category", (None, "Neuroscience & Bio/Health-2"))
+async def test_digest_bound_query_values_accept_canonical_required_and_optional_values(
+    category: str | None,
+) -> None:
+    route, intent = _digest_bound_query_route_and_intent()
+    if category is not None:
+        intent = replace(intent, query_pairs=(*intent.query_pairs, QueryPair("category", category)))
+    calls: list[NormalizedHTTPHopRequest] = []
+
+    async def one_hop(request: NormalizedHTTPHopRequest) -> HTTPHopResponse:
+        calls.append(request)
+        return _hop_response()
+
+    await dispatch_once(
+        route,
+        intent,
+        is_policy_active=lambda _route_id, _digest: True,
+        one_hop=one_hop,
+    )
+
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("name", "value"),
+    (
+        ("format", None),
+        ("format", "xml"),
+        ("resultType", "lite"),
+        ("pageSize", ""),
+        ("pageSize", "-1"),
+        ("pageSize", "+1"),
+        ("pageSize", "01"),
+        ("pageSize", "101"),
+        ("pageSize", "١"),
+        ("query", '"causal" AND "inference"'),
+        ("query", '"causal" AND "inference" AND SRC:PPR AND PUBLISHER:"medRxiv"'),
+        ("query", f'"causal" OR "inference"{_EUROPE_PMC_SUFFIX}'),
+        ("query", f'"causal?"{_EUROPE_PMC_SUFFIX}'),
+        ("query", f"{_TOO_MANY_LITERAL_TERMS}{_EUROPE_PMC_SUFFIX}"),
+        ("query", f"{_OVERSIZED_LITERAL_TERM}{_EUROPE_PMC_SUFFIX}"),
+        ("query", f'"ｃａｕｓａｌ"{_EUROPE_PMC_SUFFIX}'),
+        ("category", " leading"),
+        ("category", "trailing "),
+        ("category", "double  space"),
+        ("category", "provider:syntax"),
+        ("category", "Ｂio"),
+        ("category", "x" * 129),
+        ("category", ""),
+    ),
+    ids=(
+        "missing-required",
+        "changed-exact-format",
+        "changed-exact-result-type",
+        "empty-decimal",
+        "negative-decimal",
+        "signed-decimal",
+        "noncanonical-decimal",
+        "oversized-decimal",
+        "unicode-decimal",
+        "missing-fixed-suffix",
+        "changed-fixed-suffix",
+        "operator-injection",
+        "punctuation-injection",
+        "too-many-terms",
+        "term-too-long",
+        "noncanonical-term",
+        "category-leading-space",
+        "category-trailing-space",
+        "category-double-space",
+        "category-provider-syntax",
+        "category-noncanonical",
+        "category-too-long",
+        "category-empty",
+    ),
+)
+async def test_digest_bound_query_value_attacks_reject_before_policy_or_hop(
+    name: str,
+    value: str | None,
+) -> None:
+    route, intent = _digest_bound_query_route_and_intent()
+    retained = tuple(pair for pair in intent.query_pairs if pair.name != name)
+    query_pairs = retained if value is None else (*retained, QueryPair(name, value))
+
+    await _assert_rejected_before_policy_or_hop(route, replace(intent, query_pairs=query_pairs))
+
+
+@pytest.mark.asyncio
+async def test_digest_bound_query_rule_is_reconstructed_before_policy_or_hop() -> None:
+    route, intent = _digest_bound_query_route_and_intent()
+    rule = route.policy.query_value_policies[0]
+    object.__setattr__(rule, "max_terms", 0)
+    digest = canonical_policy_digest(route.policy)
+    object.__setattr__(route.policy, "policy_digest", digest)
+    object.__setattr__(intent, "policy_digest", digest)
+
+    await _assert_rejected_before_policy_or_hop(route, intent)
+
+
+def _interval_path_route_and_intent() -> tuple[AccessRoute, DispatchIntent]:
+    limits = RouteLimits(2, 0, 0, 250, 4_096, 100)
+    policy = RoutePolicy(
+        policy_version="discovery-route-policy-v2",
+        origin=ExactOrigin("https", "api.example.test", 443),
+        methods=("GET",),
+        paths=(),
+        path_template=PathTemplate(
+            (
+                "details",
+                "biorxiv",
+                PathSlot(PathSlotKind.DATE, 10),
+                PathSlot(PathSlotKind.DATE, 10),
+                PathSlot(PathSlotKind.UINT, 10),
+                "json",
+            ),
+            pagination_segment_index=4,
+        ),
+        allowed_query_keys=("category",),
+        query_value_policies=(BoundedTextQueryValuePolicy("category", 128),),
+        limits=limits,
+    )
+    route = AccessRoute(
+        route_id="example.interval_details",
+        backend_id="example",
+        adapter_id="example.details",
+        route_kind=RouteKind.DIRECT,
+        query_modes=(QueryMode.DATE_INTERVAL,),
+        source_constraint=SourceConstraint.NATIVE_CORPUS,
+        attribution_basis="native corpus",
+        credential_requirement=CredentialRequirement.NONE,
+        fallback_order=0,
+        max_physical_dispatches=2,
+        adapter_version="v1",
+        policy=policy,
+    )
+    return route, DispatchIntent(
+        route_id=route.route_id,
+        policy_digest=policy.policy_digest,
+        operation_kind=OperationKind.SEARCH,
+        method="GET",
+        path="/details/biorxiv/2024-01-01/2024-12-31/0/json",
+        query_pairs=(),
+        limits=limits,
+    )
+
+
+def _doi_path_route_and_intent() -> tuple[AccessRoute, DispatchIntent]:
+    limits = RouteLimits(1, 0, 0, 250, 4_096, 100)
+    policy = RoutePolicy(
+        policy_version="discovery-route-policy-v2",
+        origin=ExactOrigin("https", "api.example.test", 443),
+        methods=("GET",),
+        paths=(),
+        path_template=PathTemplate(
+            (
+                "details",
+                "biorxiv",
+                PathSlot(PathSlotKind.DOI_REGISTRANT, 12),
+                PathSlot(PathSlotKind.DOI_SUFFIX, 128),
+                "na",
+                "json",
+            )
+        ),
+        allowed_query_keys=(),
+        limits=limits,
+    )
+    route = AccessRoute(
+        route_id="example.doi_details",
+        backend_id="example",
+        adapter_id="example.details",
+        route_kind=RouteKind.DIRECT,
+        query_modes=(QueryMode.IDENTIFIER_LOOKUP,),
+        source_constraint=SourceConstraint.NATIVE_CORPUS,
+        attribution_basis="native corpus",
+        credential_requirement=CredentialRequirement.NONE,
+        fallback_order=0,
+        max_physical_dispatches=1,
+        adapter_version="v1",
+        policy=policy,
+    )
+    return route, DispatchIntent(
+        route_id=route.route_id,
+        policy_digest=policy.policy_digest,
+        operation_kind=OperationKind.SEARCH,
+        method="GET",
+        path="/details/biorxiv/10.1101/2024.01.02.123456/na/json",
+        query_pairs=(),
+        limits=limits,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("kind", "path"),
+    (
+        ("interval", "/details/biorxiv/2024-01-01/2024-12-31/0/json"),
+        ("interval", "/details/biorxiv/2024-01-01/2024-12-31/2147483647/json"),
+        ("doi", "/details/biorxiv/10.1101/2024.01.02.123456/na/json"),
+        ("doi", "/details/biorxiv/10.1101/abc%28def%29/na/json"),
+        ("doi", "/details/biorxiv/10.1101/abc%3Adef/na/json"),
+    ),
+)
+async def test_dynamic_template_paths_dispatch_canonical_values(kind: str, path: str) -> None:
+    route, intent = _interval_path_route_and_intent() if kind == "interval" else _doi_path_route_and_intent()
+    intent = replace(intent, path=path)
+    calls: list[NormalizedHTTPHopRequest] = []
+
+    async def one_hop(request: NormalizedHTTPHopRequest) -> HTTPHopResponse:
+        calls.append(request)
+        return _hop_response()
+
+    await dispatch_once(
+        route,
+        intent,
+        is_policy_active=lambda _route_id, _digest: True,
+        one_hop=one_hop,
+    )
+
+    assert [request.target for request in calls] == [path]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("kind", "path"),
+    (
+        ("interval", "/detail/biorxiv/2024-01-01/2024-12-31/0/json"),
+        ("interval", "/details/medrxiv/2024-01-01/2024-12-31/0/json"),
+        ("interval", "/details/biorxiv/2024-01-01/2024-12-31/0"),
+        ("interval", "/details/biorxiv/2024-01-01/2024-12-31/0/json/extra"),
+        ("interval", "/details/biorxiv//2024-12-31/0/json"),
+        ("interval", "/details/biorxiv/2024-01-%/2024-12-31/0/json"),
+        ("interval", "/details/biorxiv/2024-01-%2/2024-12-31/0/json"),
+        ("interval", "/details/biorxiv/2024-01-%GG/2024-12-31/0/json"),
+        ("interval", "/details/biorxiv/2024-01-é/2024-12-31/0/json"),
+        ("interval", "/details/biorxiv/2024-01%2F01/2024-12-31/0/json"),
+        ("interval", "/details/biorxiv/2024-01%5C01/2024-12-31/0/json"),
+        ("interval", "/details/biorxiv/2024-01%2501/2024-12-31/0/json"),
+        ("interval", "/details/biorxiv/2024-01-%00/2024-12-31/0/json"),
+        ("interval", "/details/biorxiv/2024-01-%7F/2024-12-31/0/json"),
+        ("interval", "/details/biorxiv/%2E%2E/2024-12-31/0/json"),
+        ("interval", "/details/biorxiv/2024-01-%252F/2024-12-31/0/json"),
+        ("interval", "/details/biorxiv/2024-02-30/2024-12-31/0/json"),
+        ("interval", "/details/biorxiv/2024-12-31/2024-01-01/0/json"),
+        ("interval", "/details/biorxiv/2023-01-01/2024-01-02/0/json"),
+        ("interval", "/details/biorxiv/2024-01-01/2024-12-31/00/json"),
+        ("interval", "/details/biorxiv/2024-01-01/2024-12-31/-1/json"),
+        ("interval", "/details/biorxiv/2024-01-01/2024-12-31/+1/json"),
+        ("interval", "/details/biorxiv/2024-01-01/2024-12-31/2147483648/json"),
+        ("interval", "/details/biorxiv/2024-01-01/2024-12-31/00000000000/json"),
+        ("interval", "/details/biorxiv/2024-01-01/2024-12-31/%30/json"),
+        ("interval", "/details/biorxiv/2024-01-01/2024-12-31//json"),
+        ("doi", "/details/biorxiv/11.1101/abc/na/json"),
+        ("doi", "/details/biorxiv/10.123/abc/na/json"),
+        ("doi", "/details/biorxiv/10.1234567890/abc/na/json"),
+        ("doi", "/details/biorxiv/10.abc/abc/na/json"),
+        ("doi", "/details/biorxiv/10%2E1101/abc/na/json"),
+        ("doi", "/details/biorxiv/10.1101//na/json"),
+        ("doi", "/details/biorxiv/10.1101/-abc/na/json"),
+        ("doi", "/details/biorxiv/10.1101/abc%2Fdef/na/json"),
+        ("doi", "/details/biorxiv/10.1101/abc%5Cdef/na/json"),
+        ("doi", "/details/biorxiv/10.1101/abc%25def/na/json"),
+        ("doi", "/details/biorxiv/10.1101/./na/json"),
+        ("doi", "/details/biorxiv/10.1101/../na/json"),
+        ("doi", "/details/biorxiv/10.1101/abc%252Fdef/na/json"),
+        ("doi", "/details/biorxiv/10.1101/abc%00def/na/json"),
+        ("doi", "/details/biorxiv/10.1101/abc%3Fdef/na/json"),
+        ("doi", "/details/biorxiv/10.1101/abc%23def/na/json"),
+        ("doi", "/details/biorxiv/10.1101/abc%20def/na/json"),
+        ("doi", "/details/biorxiv/10.1101/café/na/json"),
+        ("doi", f'/details/biorxiv/10.1101/{"x" * 129}/na/json'),
+        ("doi", "/details/biorxiv/10.1101/abc(def)/na/json"),
+        ("doi", "/details/biorxiv/10.1101/abc:def/na/json"),
+        ("doi", "/details/biorxiv/10.1101/abc%3adef/na/json"),
+        ("doi", "/details/biorxiv/10.1101/%61bc/na/json"),
+        ("doi", "/details/biorxiv/10.1101/abc%/na/json"),
+    ),
+)
+async def test_dynamic_template_path_attacks_reject_before_policy_or_hop(kind: str, path: str) -> None:
+    route, intent = _interval_path_route_and_intent() if kind == "interval" else _doi_path_route_and_intent()
+
+    await _assert_rejected_before_policy_or_hop(route, replace(intent, path=path))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("date_count", (1, 3))
+async def test_dynamic_template_requires_exactly_two_date_slots(date_count: int) -> None:
+    route, intent = _interval_path_route_and_intent()
+    template = route.policy.path_template
+    assert template is not None
+    date_slots = tuple(PathSlot(PathSlotKind.DATE, 10) for _ in range(date_count))
+    object.__setattr__(template, "segments", ("details", "biorxiv", *date_slots, "json"))
+    object.__setattr__(template, "pagination_segment_index", None)
+    digest = canonical_policy_digest(route.policy)
+    object.__setattr__(route.policy, "policy_digest", digest)
+    object.__setattr__(intent, "policy_digest", digest)
+    object.__setattr__(intent, "path", f'/details/biorxiv/{"/".join("2024-01-01" for _ in date_slots)}/json')
+
+    await _assert_rejected_before_policy_or_hop(route, intent)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mutation", ("slot-bound", "slot-kind", "pagination-index", "both-path-channels"))
+async def test_dynamic_template_nested_policy_is_reconstructed_before_policy_or_hop(mutation: str) -> None:
+    route, intent = _interval_path_route_and_intent()
+    template = route.policy.path_template
+    assert template is not None
+    if mutation == "slot-bound":
+        slot = template.segments[2]
+        assert type(slot) is PathSlot
+        object.__setattr__(slot, "max_chars", 0)
+    elif mutation == "slot-kind":
+        slot = template.segments[2]
+        assert type(slot) is PathSlot
+        object.__setattr__(slot, "kind", "date")
+    elif mutation == "pagination-index":
+        object.__setattr__(template, "pagination_segment_index", 3)
+    else:
+        object.__setattr__(route.policy, "paths", (intent.path,))
+    digest = canonical_policy_digest(route.policy)
+    object.__setattr__(route.policy, "policy_digest", digest)
+    object.__setattr__(intent, "policy_digest", digest)
+
+    await _assert_rejected_before_policy_or_hop(route, intent)
 
 
 def _hop_response(

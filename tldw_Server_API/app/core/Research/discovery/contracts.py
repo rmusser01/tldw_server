@@ -37,6 +37,26 @@ class QueryMode(str, Enum):
     CATEGORY_BROWSE = "category_browse"
 
 
+class PathSlotKind(str, Enum):
+    """Closed dynamic-segment grammars supported by route policy."""
+
+    DATE = "date"
+    UINT = "uint"
+    DOI_REGISTRANT = "doi_registrant"
+    DOI_SUFFIX = "doi_suffix"
+
+
+_PATH_SLOT_MAX_CHARS = {
+    PathSlotKind.DATE: 10,
+    PathSlotKind.UINT: 10,
+    PathSlotKind.DOI_REGISTRANT: 12,
+    PathSlotKind.DOI_SUFFIX: 128,
+}
+_MAX_LITERAL_TERMS = 16
+_MAX_LITERAL_TERM_CHARS = 64
+_MAX_BOUNDED_TEXT_CHARS = 128
+
+
 class CredentialRequirement(str, Enum):
     """Static authentication requirement declared by a route."""
 
@@ -273,6 +293,136 @@ class BackendDefinition:
 
 
 @dataclass(frozen=True, slots=True)
+class PathSlot:
+    """One typed dynamic segment in a closed route path template."""
+
+    kind: PathSlotKind
+    max_chars: int
+
+    def __post_init__(self) -> None:
+        if type(self.kind) is not PathSlotKind:
+            raise TypeError("path_slot_kind_must_be_PathSlotKind")
+        if type(self.max_chars) is not int or not 1 <= self.max_chars <= _PATH_SLOT_MAX_CHARS[self.kind]:
+            raise ValueError("invalid_path_slot_max_chars")
+
+
+@dataclass(frozen=True, slots=True)
+class PathTemplate:
+    """One ordered literal/slot path shape."""
+
+    segments: tuple[str | PathSlot, ...]
+    pagination_segment_index: int | None = None
+
+    def __post_init__(self) -> None:
+        if type(self.segments) is not tuple:
+            raise TypeError("path_template_segments_must_be_tuple")
+        if not self.segments:
+            raise ValueError("invalid_path_template_segments")
+        for segment in self.segments:
+            if type(segment) is str:
+                if (
+                    not segment
+                    or not segment.isascii()
+                    or any(not "!" <= character <= "~" for character in segment)
+                    or "/" in segment
+                    or "\\" in segment
+                ):
+                    raise ValueError("invalid_path_template_literal")
+            elif type(segment) is not PathSlot:
+                raise TypeError("invalid_path_template_segment_type")
+        if self.pagination_segment_index is None:
+            return
+        if (
+            type(self.pagination_segment_index) is not int
+            or not 0 <= self.pagination_segment_index < len(self.segments)
+            or type(self.segments[self.pagination_segment_index]) is not PathSlot
+            or self.segments[self.pagination_segment_index].kind is not PathSlotKind.UINT
+        ):
+            raise ValueError("invalid_pagination_segment_index")
+
+
+@dataclass(frozen=True, slots=True)
+class ExactQueryValuePolicy:
+    """Require one query key to carry one exact value."""
+
+    name: str
+    value: str
+    required: bool = True
+
+    def __post_init__(self) -> None:
+        _validate_query_value_policy_common(self.name, self.required)
+        if type(self.value) is not str or not self.value or "\x00" in self.value:
+            raise ValueError("invalid_exact_query_value")
+
+
+@dataclass(frozen=True, slots=True)
+class BoundedDecimalQueryValuePolicy:
+    """Require one canonical unsigned decimal bounded by a ceiling."""
+
+    name: str
+    maximum: int
+    required: bool = True
+
+    def __post_init__(self) -> None:
+        _validate_query_value_policy_common(self.name, self.required)
+        if type(self.maximum) is not int or self.maximum <= 0:
+            raise ValueError("invalid_bounded_decimal_maximum")
+
+
+@dataclass(frozen=True, slots=True)
+class LiteralTermsQueryValuePolicy:
+    """Require literal Unicode terms followed by an immutable suffix."""
+
+    name: str
+    fixed_suffix: str
+    max_terms: int
+    max_term_chars: int
+    required: bool = True
+
+    def __post_init__(self) -> None:
+        _validate_query_value_policy_common(self.name, self.required)
+        if type(self.fixed_suffix) is not str or not self.fixed_suffix or "\x00" in self.fixed_suffix:
+            raise ValueError("invalid_literal_terms_fixed_suffix")
+        if type(self.max_terms) is not int or not 1 <= self.max_terms <= _MAX_LITERAL_TERMS:
+            raise ValueError("invalid_literal_terms_max_terms")
+        if type(self.max_term_chars) is not int or not 1 <= self.max_term_chars <= _MAX_LITERAL_TERM_CHARS:
+            raise ValueError("invalid_literal_terms_max_term_chars")
+
+
+@dataclass(frozen=True, slots=True)
+class BoundedTextQueryValuePolicy:
+    """Require one optional bounded canonical text value."""
+
+    name: str
+    max_chars: int
+    required: bool = False
+
+    def __post_init__(self) -> None:
+        _validate_query_value_policy_common(self.name, self.required)
+        if type(self.max_chars) is not int or not 1 <= self.max_chars <= _MAX_BOUNDED_TEXT_CHARS:
+            raise ValueError("invalid_bounded_text_max_chars")
+
+
+QueryValuePolicy = (
+    ExactQueryValuePolicy | BoundedDecimalQueryValuePolicy | LiteralTermsQueryValuePolicy | BoundedTextQueryValuePolicy
+)
+
+_QUERY_VALUE_POLICY_TYPES = (
+    ExactQueryValuePolicy,
+    BoundedDecimalQueryValuePolicy,
+    LiteralTermsQueryValuePolicy,
+    BoundedTextQueryValuePolicy,
+)
+
+
+def _validate_query_value_policy_common(name: object, required: object) -> None:
+    if type(name) is not str or not _QUERY_NAME_RE.fullmatch(name):
+        raise ValueError("invalid_query_value_policy_name")
+    if type(required) is not bool:
+        raise TypeError("query_value_policy_required_must_be_bool")
+
+
+@dataclass(frozen=True, slots=True)
 class RoutePolicy:
     """Immutable exact-origin and request-shape policy for one route."""
 
@@ -286,6 +436,8 @@ class RoutePolicy:
     pagination_json_body_key: str | None = None
     allowed_json_body_keys: tuple[str, ...] = ()
     integer_json_body_keys: tuple[str, ...] = ()
+    path_template: PathTemplate | None = None
+    query_value_policies: tuple[QueryValuePolicy, ...] = ()
     policy_digest: str = ""
 
     def __post_init__(self) -> None:
@@ -298,20 +450,34 @@ class RoutePolicy:
         _require_tuple("allowed_json_body_keys", self.allowed_json_body_keys)
         if type(self.integer_json_body_keys) is not tuple:
             raise TypeError("integer_json_body_keys_must_be_tuple")
+        if type(self.query_value_policies) is not tuple:
+            raise TypeError("query_value_policies_must_be_tuple")
         if not self.methods or any(
             not isinstance(method, str) or method != method.upper() or not method.isalpha() for method in self.methods
         ):
             raise ValueError("invalid_policy_methods")
         if len(set(self.methods)) != len(self.methods):
             raise ValueError("duplicate_policy_method")
-        if not self.paths or any(not _valid_path(path) for path in self.paths):
-            raise ValueError("invalid_policy_paths")
-        if len(set(self.paths)) != len(self.paths):
-            raise ValueError("duplicate_policy_path")
-        if any(not isinstance(key, str) or not _QUERY_NAME_RE.fullmatch(key) for key in self.allowed_query_keys):
+        if bool(self.paths) == (self.path_template is not None):
+            raise ValueError("invalid_policy_path_channel")
+        if self.paths:
+            if any(not _valid_path(path) for path in self.paths):
+                raise ValueError("invalid_policy_paths")
+            if len(set(self.paths)) != len(self.paths):
+                raise ValueError("duplicate_policy_path")
+        elif type(self.path_template) is not PathTemplate:
+            raise TypeError("path_template_must_be_PathTemplate")
+        if any(type(key) is not str or not _QUERY_NAME_RE.fullmatch(key) for key in self.allowed_query_keys):
             raise ValueError("invalid_policy_query_key")
         if len(set(self.allowed_query_keys)) != len(self.allowed_query_keys):
             raise ValueError("duplicate_policy_query_key")
+        if any(type(rule) not in _QUERY_VALUE_POLICY_TYPES for rule in self.query_value_policies):
+            raise TypeError("query_value_policy_must_be_closed_typed_rule")
+        query_policy_names = tuple(rule.name for rule in self.query_value_policies)
+        if len(set(query_policy_names)) != len(query_policy_names):
+            raise ValueError("duplicate_query_value_policy_name")
+        if self.query_value_policies and set(query_policy_names) != set(self.allowed_query_keys):
+            raise ValueError("query_value_policy_key_coverage_mismatch")
         if any(not isinstance(key, str) or not _QUERY_NAME_RE.fullmatch(key) for key in self.allowed_json_body_keys):
             raise ValueError("invalid_policy_json_body_key")
         if len(set(self.allowed_json_body_keys)) != len(self.allowed_json_body_keys):
@@ -340,7 +506,17 @@ class RoutePolicy:
             and self.pagination_json_body_key not in self.integer_json_body_keys
         ):
             raise ValueError("pagination_json_body_key_must_be_integer")
-        if self.pagination_query_key is not None and self.pagination_json_body_key is not None:
+        path_pagination = self.path_template is not None and self.path_template.pagination_segment_index is not None
+        if (
+            sum(
+                (
+                    self.pagination_query_key is not None,
+                    self.pagination_json_body_key is not None,
+                    path_pagination,
+                )
+            )
+            > 1
+        ):
             raise ValueError("multiple_pagination_channels")
         if not isinstance(self.limits, RouteLimits):
             raise TypeError("limits_must_be_route_limits")
@@ -450,8 +626,9 @@ class AccessRoute:
         _require_nonempty("adapter_version", self.adapter_version)
         if not isinstance(self.policy, RoutePolicy):
             raise TypeError("policy_must_be_route_policy")
+        initial_intents = 1 if self.policy.path_template is not None else len(self.policy.paths)
         required_dispatches = (
-            len(self.policy.paths)
+            initial_intents
             + self.policy.limits.max_pages
             - 1
             + self.policy.limits.max_redirects
@@ -885,6 +1062,31 @@ def canonical_policy_digest(policy: RoutePolicy) -> str:
         payload["pagination_json_body_key"] = policy.pagination_json_body_key
     if policy.integer_json_body_keys:
         payload["integer_json_body_keys"] = policy.integer_json_body_keys
+    if policy.path_template is not None:
+        payload["path_template"] = {
+            "segments": tuple(
+                (
+                    {"literal": segment}
+                    if type(segment) is str
+                    else {
+                        "slot": {
+                            "kind": segment.kind,
+                            "max_chars": segment.max_chars,
+                        }
+                    }
+                )
+                for segment in policy.path_template.segments
+            ),
+            "pagination_segment_index": policy.path_template.pagination_segment_index,
+        }
+    if policy.query_value_policies:
+        payload["query_value_policies"] = tuple(
+            {
+                "kind": type(rule).__name__,
+                **asdict(rule),
+            }
+            for rule in policy.query_value_policies
+        )
     return hashlib.sha256(_canonical_json_bytes(payload)).hexdigest()
 
 
