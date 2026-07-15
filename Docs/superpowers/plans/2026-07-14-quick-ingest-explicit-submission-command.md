@@ -697,9 +697,11 @@ The specification reviewer must confirm all Task 8 requirements. A fresh quality
 
 Final closeout review is approved. After Step 4a, the same specification and code-quality reviewers both returned APPROVE with no critical, important, or minor findings. Fresh root verification passed persistence/context `135/135`, full Modal `184/184`, Results/pending-open `26/26`, side-panel/pending-open `22/22`, and existing Dexie migration helpers `10/10`, all with exit 0 and no unhandled test failures. Repository-pinned explicit-config ESLint passed all 22 dirty TypeScript/TSX files; tracked and untracked whitespace checks were clean; and the Ant Design symlink was restored exactly. Full TypeScript remains skipped under the documented Task 1 three-attempt baseline cap, and Bandit is not applicable to this TypeScript-only scope. The internal-QA debug side-panel can co-mount two already-hydrated modal hosts, but both reviewers confirmed this pre-existing debug-only ownership issue is a non-blocking follow-up: production WebUI uses the global host and the production extension side panel uses the local host.
 
-- [ ] **Step 5: Update tracking and commit**
+- [x] **Step 5: Update tracking and commit**
 
 Use Backlog MCP to record exact verification counts, review results, and touched files. Check Task 8 Step 5 only after both reviews approve.
+
+Task 8 implementation committed as `e97cc15b8b` (`feat: persist quick ingest runs in indexeddb (TASK-12113)`). The verified staged set contained exactly the 26 Task 8 implementation, test, design, plan, and Backlog files; cached whitespace was clean and both protected watchlist templates remained untracked and excluded.
 
 ```bash
 git add Docs/superpowers/specs/2026-07-12-youtube-playlist-per-item-ingest-design.md \
