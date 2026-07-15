@@ -1,0 +1,50 @@
+{
+  "version": "6.9",
+  "hitCount": 19,
+  "nextCursorMark": "AoIIPPR-MEDRXIV-NEXT",
+  "nextPageUrl": "https://example.invalid/europe-pmc/next?continuation=ignored-medrxiv",
+  "request": {
+    "queryString": "sanitized fixture query",
+    "resultType": "core",
+    "pageSize": 1,
+    "cursorMark": "*"
+  },
+  "resultList": {
+    "result": [
+      {
+        "id": "PPR900002",
+        "source": "PPR",
+        "doi": "10.5555/medrxiv.synthetic.2026",
+        "title": "<i>Bounded</i> medRxiv discovery",
+        "authorList": {
+          "author": [
+            {
+              "fullName": "Lin Example"
+            }
+          ]
+        },
+        "pubYear": "2026",
+        "abstractText": "<div>Invented <b>clinical</b> fixture metadata.</div>",
+        "bookOrReportDetails": {
+          "publisher": "medRxiv"
+        },
+        "firstPublicationDate": "2026-06-11",
+        "fullTextUrlList": {
+          "fullTextUrl": [
+            {
+              "availability": "Open access",
+              "documentStyle": "pdf",
+              "site": "Provider",
+              "url": "https://example.invalid/fulltext/medrxiv?ignored=provider-url"
+            }
+          ]
+        },
+        "isOpenAccess": "Y",
+        "hasReferences": "N",
+        "unknownFixtureField": {
+          "nested": "must-not-survive"
+        }
+      }
+    ]
+  }
+}

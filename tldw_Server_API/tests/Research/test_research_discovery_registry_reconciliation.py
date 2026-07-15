@@ -170,6 +170,23 @@ def test_foundation_registry_version_tracks_frozen_route_policy_content() -> Non
     assert foundation_registry().registry_version == "research-discovery-v2-foundation-2026-07-15"
 
 
+def test_biorxiv_medrxiv_shadow_registry_is_strictly_additive_to_foundation() -> None:
+    from tldw_Server_API.app.core.Research.discovery.biorxiv_medrxiv import (
+        SHADOW_CATALOG_VERSION,
+        biorxiv_medrxiv_shadow_registry,
+    )
+
+    foundation = foundation_registry()
+    shadow = biorxiv_medrxiv_shadow_registry()
+
+    assert shadow.sources[:8] == tuple(
+        replace(source, catalog_version=SHADOW_CATALOG_VERSION) for source in foundation.sources
+    )
+    assert shadow.routes[:8] == foundation.routes
+    assert shadow.backends[:8] == foundation.backends
+    assert tuple(source.catalog_source_id for source in shadow.sources[8:]) == ("biorxiv", "medrxiv")
+
+
 def test_foundation_routes_declare_exact_pagination_and_figshare_body_shape() -> None:
     registry = foundation_registry()
 
