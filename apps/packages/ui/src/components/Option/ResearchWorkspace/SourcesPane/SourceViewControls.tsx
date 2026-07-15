@@ -519,6 +519,7 @@ export const SourceViewOverlayHost: React.FC<SourceViewOverlayHostProps> = ({
   const replaceInvalid = replacementIssues.length > 0
 
   const cancel = () => {
+    if (controller.busy) return
     if (duplicate) controller.dismissDuplicateConflict()
     else if (controller.mutationError || controller.versionConflict) {
       controller.dismissMutationFailure()
@@ -644,6 +645,9 @@ export const SourceViewOverlayHost: React.FC<SourceViewOverlayHostProps> = ({
         title={title}
         open={activeRequest !== null}
         onCancel={cancel}
+        closable={!controller.busy}
+        maskClosable={!controller.busy}
+        keyboard={!controller.busy}
         destroyOnHidden
         focusable={{ focusTriggerAfterClose: false }}
         afterOpenChange={(open) => {

@@ -766,7 +766,8 @@ export const useSourceSavedViews = (
   ]);
 
   const dismissDuplicateConflict = React.useCallback(() => {
-    if (!isGenerationCurrent(renderGeneration)) return;
+    if (mutationInFlightRef.current || !isGenerationCurrent(renderGeneration))
+      return;
     invalidateMutationRetries();
     commitGeneration(renderGeneration, (current) => ({
       ...current,
@@ -782,7 +783,8 @@ export const useSourceSavedViews = (
   ]);
 
   const dismissMutationFailure = React.useCallback(() => {
-    if (!isGenerationCurrent(renderGeneration)) return;
+    if (mutationInFlightRef.current || !isGenerationCurrent(renderGeneration))
+      return;
     invalidateMutationRetries();
     commitGeneration(renderGeneration, (current) => ({
       ...current,

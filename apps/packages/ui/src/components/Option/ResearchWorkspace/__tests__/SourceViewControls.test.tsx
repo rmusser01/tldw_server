@@ -539,6 +539,50 @@ describe("SourceViewControls", () => {
     expect(screen.queryByRole("dialog", { name: "Replace saved view?" })).not.toBeInTheDocument()
   })
 
+  it("blocks every duplicate replacement dismissal path while busy", async () => {
+    const user = userEvent.setup()
+    const dismissDuplicateConflict = vi.fn()
+    const duplicate = {
+      viewId: "view-1",
+      version: 2,
+      name: "My PDFs",
+      state: validView().state
+    }
+    const { rerender } = render(
+      <Harness model={controller({ dismissDuplicateConflict })} />
+    )
+    await user.click(screen.getByRole("button", { name: "Save source view" }))
+    rerender(
+      <Harness
+        model={controller({
+          busy: true,
+          mutation: "replace",
+          duplicateConflict: duplicate,
+          dismissDuplicateConflict
+        })}
+      />
+    )
+
+    const dialog = await screen.findByRole("dialog", {
+      name: "Replace saved view?"
+    })
+    const cancel = within(dialog).getByRole("button", { name: "Cancel" })
+    expect(cancel).toBeDisabled()
+    fireEvent.click(cancel)
+    expect(screen.getByRole("dialog", { name: "Replace saved view?" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Close" })).not.toBeInTheDocument()
+
+    fireEvent.keyDown(document, { key: "Escape", code: "Escape" })
+    expect(screen.getByRole("dialog", { name: "Replace saved view?" })).toBeInTheDocument()
+
+    const wrapper = dialog.closest(".ant-modal-wrap")
+    expect(wrapper).not.toBeNull()
+    fireEvent.click(wrapper!)
+
+    expect(screen.getByRole("dialog", { name: "Replace saved view?" })).toBeInTheDocument()
+    expect(dismissDuplicateConflict).not.toHaveBeenCalled()
+  })
+
   it("dismisses a failed saved-view mutation when its overlay is canceled", async () => {
     const user = userEvent.setup()
     const dismissMutationFailure = vi.fn()

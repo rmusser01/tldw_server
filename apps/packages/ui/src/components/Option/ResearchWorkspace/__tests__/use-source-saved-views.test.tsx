@@ -594,6 +594,66 @@ describe("useSourceSavedViews", () => {
     expect(api.updateWorkspaceSourceView).toHaveBeenCalledTimes(1);
   });
 
+  it("ignores duplicate dismissal while its replacement is in flight", async () => {
+    const replacement = deferred<ReturnType<typeof validView>>();
+    api.createWorkspaceSourceView.mockRejectedValue({
+      status: 409,
+      details: {
+        detail: {
+          code: "source_view_name_exists",
+          view_id: "view-1",
+          version: 2,
+        },
+      },
+    });
+    api.updateWorkspaceSourceView.mockReturnValue(replacement.promise);
+    const { result } = setup();
+
+    await act(async () => result.current.createView("Duplicate"));
+    let pending!: Promise<void>;
+    act(() => {
+      pending = result.current.confirmReplace();
+    });
+    expect(result.current.busy).toBe(true);
+
+    act(() => result.current.dismissDuplicateConflict());
+    expect(result.current.duplicateConflict).not.toBeNull();
+
+    await act(async () => {
+      replacement.resolve(validView({ name: "Duplicate", version: 3 }));
+      await pending;
+    });
+
+    expect(result.current.busy).toBe(false);
+    expect(result.current.duplicateConflict).toBeNull();
+    expect(result.current.announcement).toBe("Saved view replaced.");
+  });
+
+  it("ignores mutation failure dismissal while a replacement is in flight", async () => {
+    const replacement = deferred<ReturnType<typeof validView>>();
+    api.listWorkspaceSourceViews.mockResolvedValue({ items: [validView()] });
+    api.updateWorkspaceSourceView.mockReturnValue(replacement.promise);
+    const { result } = setup();
+    await waitFor(() => expect(result.current.views).toHaveLength(1));
+
+    let pending!: Promise<void>;
+    act(() => {
+      pending = result.current.replaceView(result.current.views[0]!);
+    });
+    expect(result.current.busy).toBe(true);
+
+    act(() => result.current.dismissMutationFailure());
+
+    await act(async () => {
+      replacement.resolve(validView({ version: 3 }));
+      await pending;
+    });
+
+    expect(result.current.busy).toBe(false);
+    expect(result.current.views[0]?.version).toBe(3);
+    expect(result.current.announcement).toBe("Saved view replaced.");
+  });
+
   it("treats malformed duplicate detail as an ordinary retryable error", async () => {
     api.createWorkspaceSourceView.mockRejectedValue({
       status: 409,
