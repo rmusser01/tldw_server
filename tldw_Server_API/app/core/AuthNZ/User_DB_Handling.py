@@ -35,18 +35,18 @@ from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.rbac_repo import AuthnzRbacRepo
 from tldw_Server_API.app.core.AuthNZ.session_manager import get_session_manager
-from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode, is_truthy
 
 #
 # Local Imports
 # New unified settings
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
-from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-from tldw_Server_API.app.core.DB_Management.scope_context import set_scope
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
+from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.DB_Management.scope_context import set_scope
 from tldw_Server_API.app.core.exceptions import InactiveUserError
+from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode, is_truthy
 
 _USER_DB_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -229,6 +229,10 @@ class User(BaseModel):
     roles: list[str] = Field(default_factory=list)
     permissions: list[str] = Field(default_factory=list)
     is_admin: bool = False
+    org_ids: list[int] = Field(default_factory=list)
+    team_ids: list[int] = Field(default_factory=list)
+    active_org_id: Optional[int] = None
+    active_team_id: Optional[int] = None
 
     # Convenience properties for downstream code that expects int ids
     @property
@@ -841,6 +845,10 @@ async def verify_jwt_and_fetch_user(request: Request, token: str = Depends(oauth
     user.permissions = list(scoped_result.permissions or [])
     active_org_id = scoped_result.active_org_id
     active_team_id = scoped_result.active_team_id
+    user.org_ids = list(org_ids)
+    user.team_ids = list(team_ids)
+    user.active_org_id = active_org_id
+    user.active_team_id = active_team_id
     try:
         request.state.team_ids = team_ids
         request.state.org_ids = org_ids
@@ -1254,6 +1262,10 @@ async def authenticate_api_key_user(request: Request, api_key: str) -> User:
         user_obj.permissions = list(scoped_result.permissions or [])
         active_org_id = scoped_result.active_org_id
         active_team_id = scoped_result.active_team_id
+        user_obj.org_ids = list(org_ids)
+        user_obj.team_ids = list(team_ids)
+        user_obj.active_org_id = active_org_id
+        user_obj.active_team_id = active_team_id
 
         try:
             request.state.team_ids = team_ids

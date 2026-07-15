@@ -1,7 +1,8 @@
+from types import SimpleNamespace
+
 import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
-from types import SimpleNamespace
 
 from tldw_Server_API.app.core.AuthNZ import User_DB_Handling as user_handling
 
@@ -236,7 +237,10 @@ async def test_verify_jwt_accepts_valid_membership_claims(monkeypatch):
         return _StubUsersRepo()
 
     async def _fake_list_memberships(_user_id: int):
-        return [{"org_id": 1, "team_id": 10}]
+        return [
+            {"org_id": 1, "team_id": 10},
+            {"org_id": 2, "team_id": 20},
+        ]
 
     async def _fake_apply_scoped_permissions(**kwargs):
         return SimpleNamespace(
@@ -269,5 +273,9 @@ async def test_verify_jwt_accepts_valid_membership_claims(monkeypatch):
     assert user.id == 1
     assert user.username == "tester"
     assert "media.read" in list(user.permissions or [])
+    assert user.org_ids == [1]
+    assert user.team_ids == [10]
+    assert user.active_org_id == 1
+    assert user.active_team_id == 10
     assert request.state.org_ids == [1]
     assert request.state.team_ids == [10]

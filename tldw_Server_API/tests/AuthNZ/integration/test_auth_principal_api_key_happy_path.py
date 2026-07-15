@@ -1,5 +1,4 @@
-import os
-from typing import Any, Dict
+from typing import Any
 
 import pytest
 from fastapi import APIRouter, Depends, FastAPI, Request
@@ -9,9 +8,8 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     get_auth_principal,
     get_current_user,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 
 pytestmark = pytest.mark.integration
 
@@ -30,9 +28,9 @@ def _attach_api_key_whoami_router(app: FastAPI) -> None:
     async def whoami_api_key_happy(
         request: Request,
         principal: AuthPrincipal = Depends(get_auth_principal),
-        user: Dict[str, Any] = Depends(get_current_user),
+        user: dict[str, Any] = Depends(get_current_user),
         request_user: User = Depends(get_request_user),
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         return {
             "principal": {
                 "principal_id": principal.principal_id,
@@ -43,6 +41,8 @@ def _attach_api_key_whoami_router(app: FastAPI) -> None:
                 "permissions": principal.permissions,
                 "org_ids": principal.org_ids,
                 "team_ids": principal.team_ids,
+                "active_org_id": principal.active_org_id,
+                "active_team_id": principal.active_team_id,
             },
             "user": {
                 "id": user.get("id"),
@@ -57,12 +57,18 @@ def _attach_api_key_whoami_router(app: FastAPI) -> None:
                 "roles": list(getattr(request_user, "roles", []) or []),
                 "permissions": list(getattr(request_user, "permissions", []) or []),
                 "is_admin": bool(getattr(request_user, "is_admin", False)),
+                "org_ids": list(getattr(request_user, "org_ids", []) or []),
+                "team_ids": list(getattr(request_user, "team_ids", []) or []),
+                "active_org_id": getattr(request_user, "active_org_id", None),
+                "active_team_id": getattr(request_user, "active_team_id", None),
             },
             "state": {
                 "user_id": getattr(request.state, "user_id", None),
                 "api_key_id": getattr(request.state, "api_key_id", None),
                 "org_ids": getattr(request.state, "org_ids", None),
                 "team_ids": getattr(request.state, "team_ids", None),
+                "active_org_id": getattr(request.state, "active_org_id", None),
+                "active_team_id": getattr(request.state, "active_team_id", None),
             },
             "state_auth_principal": (
                 {
@@ -74,6 +80,8 @@ def _attach_api_key_whoami_router(app: FastAPI) -> None:
                     "permissions": getattr(getattr(request.state, "auth", None).principal, "permissions", None),
                     "org_ids": getattr(getattr(request.state, "auth", None).principal, "org_ids", None),
                     "team_ids": getattr(getattr(request.state, "auth", None).principal, "team_ids", None),
+                    "active_org_id": getattr(getattr(request.state, "auth", None).principal, "active_org_id", None),
+                    "active_team_id": getattr(getattr(request.state, "auth", None).principal, "active_team_id", None),
                 }
                 if getattr(request.state, "auth", None) is not None
                 else None
@@ -117,9 +125,9 @@ async def test_multi_user_api_key_happy_path_principal_matches_state(
     # Create a user and API key using the real DB/repo stack
     from uuid import uuid4
 
+    from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
-    from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
 
     pool = await get_db_pool()
 
@@ -332,10 +340,18 @@ async def test_api_key_scopes_org_and_team_membership(
 
     assert payload_org["principal"]["org_ids"] == [int(org_a["id"])]
     assert sorted(payload_org["principal"]["team_ids"]) == expected_org_team_ids
+    assert payload_org["request_user"]["org_ids"] == [int(org_a["id"])]
+    assert sorted(payload_org["request_user"]["team_ids"]) == expected_org_team_ids
+    assert int(org_b["id"]) not in payload_org["request_user"]["org_ids"]
+    assert int(team_b["id"]) not in payload_org["request_user"]["team_ids"]
     assert payload_org["state"]["org_ids"] == [int(org_a["id"])]
     assert sorted(payload_org["state"]["team_ids"]) == expected_org_team_ids
     assert payload_org["state_auth_principal"]["org_ids"] == [int(org_a["id"])]
     assert sorted(payload_org["state_auth_principal"]["team_ids"]) == expected_org_team_ids
+    assert payload_org["request_user"]["active_org_id"] == payload_org["principal"]["active_org_id"]
+    assert payload_org["request_user"]["active_team_id"] == payload_org["principal"]["active_team_id"]
+    assert payload_org["state"]["active_org_id"] == payload_org["principal"]["active_org_id"]
+    assert payload_org["state"]["active_team_id"] == payload_org["principal"]["active_team_id"]
 
     key_team = await mgr.create_virtual_key(
         user_id=user_id,
@@ -362,6 +378,14 @@ async def test_api_key_scopes_org_and_team_membership(
 
     assert payload_team["principal"]["org_ids"] == [int(org_a["id"])]
     assert payload_team["principal"]["team_ids"] == [int(team_a["id"])]
+    assert payload_team["request_user"]["org_ids"] == [int(org_a["id"])]
+    assert payload_team["request_user"]["team_ids"] == [int(team_a["id"])]
+    assert int(org_b["id"]) not in payload_team["request_user"]["org_ids"]
+    assert int(team_b["id"]) not in payload_team["request_user"]["team_ids"]
+    assert payload_team["request_user"]["active_org_id"] == payload_team["principal"]["active_org_id"]
+    assert payload_team["request_user"]["active_team_id"] == payload_team["principal"]["active_team_id"]
+    assert payload_team["state"]["active_org_id"] == payload_team["principal"]["active_org_id"]
+    assert payload_team["state"]["active_team_id"] == payload_team["principal"]["active_team_id"]
 
     org_c = await create_organization(name="Scoped Org C", owner_user_id=None)
     key_invalid = await mgr.create_virtual_key(
