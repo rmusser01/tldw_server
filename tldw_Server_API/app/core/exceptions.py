@@ -471,6 +471,10 @@ class EmbeddingExecutionError(EmbeddingDomainError):
     """Embedding execution failed after request planning."""
 
 
+class EmbeddingWorkflowTraceError(ValueError):
+    """Workflow trace data violated its safety or boundedness contract."""
+
+
 class RecipeEnqueueError(RuntimeError):
     """Raised when a recipe run cannot be enqueued into Jobs."""
 

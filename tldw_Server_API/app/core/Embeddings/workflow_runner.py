@@ -31,10 +31,12 @@ PreExecuteHook = Callable[["PreparedEmbeddingRequest"], Awaitable[None]]
 class PrepareExecuteOrchestrator(Protocol):
     """Minimal orchestrator contract needed by the inline workflow runner."""
 
-    def prepare(self, raw_input: Any, context: EmbeddingRequestContext) -> "PreparedEmbeddingRequest":
+    def prepare(self, raw_input: Any, context: EmbeddingRequestContext) -> PreparedEmbeddingRequest:
+        """Normalize and plan one raw embedding request."""
         raise NotImplementedError
 
-    async def execute(self, prepared: "PreparedEmbeddingRequest") -> EmbeddingExecutionResult:
+    async def execute(self, prepared: PreparedEmbeddingRequest) -> EmbeddingExecutionResult:
+        """Execute one prepared embedding request."""
         raise NotImplementedError
 
 
@@ -48,11 +50,13 @@ class EmbeddingInlineWorkflowRunner:
         trace_collector: EmbeddingWorkflowTraceCollector | None = None,
         pre_execute: PreExecuteHook | None = None,
     ) -> None:
+        """Configure the orchestrator, optional collector, and boundary hook."""
         self._orchestrator = orchestrator
         self.trace_collector = trace_collector or EmbeddingNoopWorkflowTraceCollector()
         self._pre_execute = pre_execute
 
     async def run(self, raw_input: Any, context: EmbeddingRequestContext) -> EmbeddingExecutionResult:
+        """Run prepare and execute inline while emitting safe lifecycle events."""
         workflow_context = EmbeddingWorkflowContext.create(
             endpoint_path=context.endpoint_path,
             runner_mode="inline",
@@ -129,6 +133,7 @@ class EmbeddingInlineWorkflowRunner:
         status: EmbeddingWorkflowStatus,
         metadata: Mapping[str, SafeWorkflowMetadataValue],
     ) -> None:
+        """Record failure metadata without replacing the original exception."""
         try:
             self._record(
                 workflow_context,
@@ -137,7 +142,7 @@ class EmbeddingInlineWorkflowRunner:
                 status=status,
                 metadata=metadata,
             )
-        except Exception as trace_error:
+        except Exception as trace_error:  # noqa: BLE001 - tracing must not mask the request failure.
             del trace_error
 
     def _record(
@@ -149,6 +154,7 @@ class EmbeddingInlineWorkflowRunner:
         status: EmbeddingWorkflowStatus | None = None,
         metadata: Mapping[str, SafeWorkflowMetadataValue] | None = None,
     ) -> None:
+        """Record one event when trace collection is enabled."""
         if not self.trace_collector.enabled:
             return
         self.trace_collector.record(
@@ -163,8 +169,9 @@ class EmbeddingInlineWorkflowRunner:
 
 
 def _prepare_metadata(
-    prepared: "PreparedEmbeddingRequest",
+    prepared: PreparedEmbeddingRequest,
 ) -> dict[str, SafeWorkflowMetadataValue]:
+    """Derive aggregate allowlisted metadata from a prepared request."""
     normalized = prepared.normalized_input
     policy = prepared.policy_decision
     plan = prepared.execution_plan
@@ -180,6 +187,7 @@ def _prepare_metadata(
 
 
 def _execute_metadata(result: EmbeddingExecutionResult) -> dict[str, SafeWorkflowMetadataValue]:
+    """Derive aggregate allowlisted metadata from an execution result."""
     return {
         "vector_count": len(result.vectors),
         "cache_hits": result.cache_hits,
@@ -193,6 +201,7 @@ def _domain_error_metadata(
     error: EmbeddingDomainError,
     phase: EmbeddingWorkflowPhase,
 ) -> dict[str, SafeWorkflowMetadataValue]:
+    """Reduce a domain failure to fixed, non-sensitive trace metadata."""
     return {
         "failure_kind": "domain",
         "retryable": error.retryable,

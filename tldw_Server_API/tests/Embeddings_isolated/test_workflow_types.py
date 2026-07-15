@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from tldw_Server_API.app.core import exceptions as core_exceptions
 from tldw_Server_API.app.core.Embeddings import workflow_types
 from tldw_Server_API.app.core.Embeddings.workflow_types import (
     EmbeddingInMemoryWorkflowTraceCollector,
@@ -11,7 +12,6 @@ from tldw_Server_API.app.core.Embeddings.workflow_types import (
     EmbeddingWorkflowTraceError,
     safe_workflow_metadata,
 )
-
 
 pytestmark = pytest.mark.unit
 WORKFLOW_ID = "emb-wf-00000000000000000000000000000000"
@@ -25,6 +25,14 @@ def test_workflow_types_public_exports_include_safety_constants():
     assert "MAX_METADATA_STRING_LENGTH" in workflow_types.__all__
     assert "SAFE_METADATA_ENUM_VALUES" in workflow_types.__all__
     assert "WORKFLOW_ID_PATTERN" in workflow_types.__all__
+
+
+def test_workflow_trace_error_uses_central_exception_contract():
+    assert EmbeddingWorkflowTraceError is getattr(
+        core_exceptions,
+        "EmbeddingWorkflowTraceError",
+        None,
+    )
 
 
 def test_workflow_context_generates_id_without_retaining_request_or_user_identifiers():

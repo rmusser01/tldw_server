@@ -85,6 +85,7 @@ from tldw_Server_API.app.core.Embeddings.provider_resolution import (
 from tldw_Server_API.app.core.Embeddings.orchestrator import (
     EmbeddingExecutorOutput,
     EmbeddingRequestOrchestrator,
+    PreparedEmbeddingRequest,
 )
 from tldw_Server_API.app.core.Embeddings.request_types import (
     EmbeddingDomainError,
@@ -3201,7 +3202,8 @@ async def _create_embedding_with_orchestrator(
         )
 
         try:
-            async def _reserve_before_execute(prepared) -> None:
+            async def _reserve_before_execute(prepared: PreparedEmbeddingRequest) -> None:
+                """Reserve RG units after planning and before cache/provider execution."""
                 nonlocal rg_governor, rg_handle_id, rg_commit_op_id, rg_reserved_units
                 rg_reserved_units = max(1, _prepared_total_tokens(prepared))
                 rg_governor, rg_handle_id, rg_commit_op_id, rg_reserved_units = await _reserve_embedding_rg_tokens(

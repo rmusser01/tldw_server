@@ -9,6 +9,8 @@ from types import MappingProxyType
 from typing import Literal, Protocol, TypeAlias
 from uuid import uuid4
 
+from tldw_Server_API.app.core.exceptions import EmbeddingWorkflowTraceError
+
 EmbeddingWorkflowPhase = Literal[
     "created",
     "normalizing",
@@ -78,20 +80,7 @@ FORBIDDEN_VALUE_SUBSTRINGS = (
     "raw input",
     "secret",
 )
-FORBIDDEN_METADATA_FIELD_FRAGMENTS = frozenset(
-    {
-        "raw_input",
-        "input",
-        "texts",
-        "token_arrays",
-        "api_key",
-        "authorization",
-        "cookie",
-        "nonce",
-        "provider_response",
-        "provider_body",
-    }
-)
+FORBIDDEN_METADATA_FIELD_FRAGMENTS = FORBIDDEN_METADATA_FIELDS
 SAFE_TOKEN_COUNT_FIELDS = frozenset(
     {"token_count", "token_counts", "total_tokens", "prompt_tokens"}
 )
@@ -153,19 +142,15 @@ SENSITIVE_VALUE_PATTERN = re.compile(
 )
 
 
-class EmbeddingWorkflowTraceError(ValueError):
-    """Raised when workflow trace metadata is unsafe or exceeds collector bounds."""
-
-
 def _validate_workflow_id(workflow_id: str) -> None:
+    """Reject workflow identifiers outside the generated Stage 1 format."""
     if WORKFLOW_ID_PATTERN.fullmatch(workflow_id) is None:
         raise EmbeddingWorkflowTraceError("Workflow id does not match the approved format")
 
 
 def _validate_metadata_name(name: str) -> None:
+    """Reject trace metadata names outside the safe field contract."""
     normalized = name.strip().lower()
-    if normalized in FORBIDDEN_METADATA_FIELDS:
-        raise EmbeddingWorkflowTraceError(f"Unsafe workflow metadata field: {name}")
     if any(fragment in normalized for fragment in FORBIDDEN_METADATA_FIELD_FRAGMENTS):
         raise EmbeddingWorkflowTraceError(f"Unsafe workflow metadata field: {name}")
     if "token" in normalized and normalized not in SAFE_TOKEN_COUNT_FIELDS:
@@ -177,6 +162,7 @@ def _validate_metadata_name(name: str) -> None:
 
 
 def _safe_metadata_string(value: str, *, field_name: str) -> str:
+    """Validate a fixed-enum string for an approved metadata field."""
     if len(value) > MAX_METADATA_STRING_LENGTH:
         raise EmbeddingWorkflowTraceError("Workflow metadata string value exceeds maximum length")
     normalized = value.casefold()
@@ -194,6 +180,7 @@ def _safe_metadata_string(value: str, *, field_name: str) -> str:
 
 
 def _safe_nonnegative_integer(value: object, *, field_name: str) -> int:
+    """Return a strict non-negative integer or reject the trace value."""
     if type(value) is not int or value < 0:
         raise EmbeddingWorkflowTraceError(
             f"Workflow metadata field {field_name} must be a non-negative integer"
@@ -202,6 +189,7 @@ def _safe_nonnegative_integer(value: object, *, field_name: str) -> int:
 
 
 def _safe_metadata_value(field_name: str, value: object) -> SafeWorkflowMetadataValue:
+    """Validate and freeze one allowlisted metadata value."""
     if field_name in SAFE_METADATA_ENUM_VALUES:
         if not isinstance(value, str):
             raise EmbeddingWorkflowTraceError(
@@ -234,6 +222,7 @@ def _safe_metadata_value(field_name: str, value: object) -> SafeWorkflowMetadata
 def safe_workflow_metadata(
     metadata: Mapping[str, object] | None = None,
 ) -> Mapping[str, SafeWorkflowMetadataValue]:
+    """Return an immutable, field-validated workflow metadata snapshot."""
     if not metadata:
         return MappingProxyType({})
     safe: dict[str, SafeWorkflowMetadataValue] = {}
@@ -246,11 +235,14 @@ def safe_workflow_metadata(
 
 @dataclass(frozen=True, slots=True)
 class EmbeddingWorkflowContext:
+    """Safe request-level identity and runner context for one workflow."""
+
     workflow_id: str
     runner_mode: EmbeddingWorkflowRunnerMode
     endpoint_path: str = "/api/v1/embeddings"
 
     def __post_init__(self) -> None:
+        """Validate direct construction against the workflow ID contract."""
         _validate_workflow_id(self.workflow_id)
 
     @classmethod
@@ -259,7 +251,8 @@ class EmbeddingWorkflowContext:
         *,
         endpoint_path: str,
         runner_mode: EmbeddingWorkflowRunnerMode,
-    ) -> "EmbeddingWorkflowContext":
+    ) -> EmbeddingWorkflowContext:
+        """Create a context with a generated workflow-local identifier."""
         return cls(
             workflow_id=f"emb-wf-{uuid4().hex}",
             endpoint_path=endpoint_path,
@@ -269,6 +262,8 @@ class EmbeddingWorkflowContext:
 
 @dataclass(frozen=True, slots=True)
 class EmbeddingWorkflowEvent:
+    """Immutable typed event emitted by an Embeddings workflow runner."""
+
     event_type: EmbeddingWorkflowEventType
     workflow_id: str
     phase: EmbeddingWorkflowPhase | None = None
@@ -278,31 +273,41 @@ class EmbeddingWorkflowEvent:
     metadata: Mapping[str, SafeWorkflowMetadataValue] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        """Validate identity and freeze metadata before collection."""
         _validate_workflow_id(self.workflow_id)
         object.__setattr__(self, "metadata", safe_workflow_metadata(dict(self.metadata)))
 
 
 class EmbeddingWorkflowTraceCollector(Protocol):
+    """Collector contract for bounded workflow event recording."""
+
     enabled: bool
 
     def record(self, event: EmbeddingWorkflowEvent) -> None:
+        """Record one validated workflow event."""
         raise NotImplementedError
 
 
 class EmbeddingNoopWorkflowTraceCollector:
+    """Disabled production-default collector that retains no events."""
+
     enabled = False
 
     def record(self, event: EmbeddingWorkflowEvent) -> None:
+        """Discard a workflow event without retaining state."""
         del event
 
 
 @dataclass(slots=True)
 class EmbeddingInMemoryWorkflowTraceCollector:
+    """Bounded in-memory collector for tests and isolated callers."""
+
     max_events: int = 256
     enabled: bool = True
     events: list[EmbeddingWorkflowEvent] = field(default_factory=list)
 
     def record(self, event: EmbeddingWorkflowEvent) -> None:
+        """Append an event or fail closed when the event cap is reached."""
         if len(self.events) >= self.max_events:
             raise EmbeddingWorkflowTraceError("Workflow trace event limit exceeded")
         self.events.append(event)
