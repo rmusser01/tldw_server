@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs"
 import path from "node:path"
+import { runInNewContext } from "node:vm"
 import { describe, expect, it } from "vitest"
 
 const extensionRoot = path.resolve(__dirname, "..", "..")
@@ -34,5 +35,29 @@ describe("options theme bootstrap", () => {
 
   it("ships the referenced public script", () => {
     expect(existsSync(themeBootstrapPath)).toBe(true)
+  })
+
+  it("applies the stored dark theme before application code runs", () => {
+    const executionOrder: string[] = []
+    const themeBootstrap = readFileSync(themeBootstrapPath, "utf8")
+
+    runInNewContext(`${themeBootstrap}\napplicationCode()`, {
+      localStorage: {
+        getItem: (key: string) => key === "theme" ? "dark" : null,
+      },
+      window: {
+        matchMedia: () => ({ matches: false }),
+      },
+      document: {
+        documentElement: {
+          classList: {
+            add: (className: string) => executionOrder.push(`theme:${className}`),
+          },
+        },
+      },
+      applicationCode: () => executionOrder.push("application"),
+    })
+
+    expect(executionOrder).toEqual(["theme:dark", "application"])
   })
 })

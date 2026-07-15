@@ -13,11 +13,22 @@ import {
   mockSkillsBeginnerApi,
   mockSkillsListRecovery,
   mockSkillsTrashWorkflow,
+  validateSkillsFixtureRequest,
 } from "../../../tldw-frontend/e2e/utils/skills-fixtures"
 import { launchWithBuiltExtension } from "./utils/extension-build"
 
 const SKILLS_PARITY_SERVER_URL = "http://skills-parity.invalid"
 const SKILLS_PARITY_API_KEY = "skills-parity-test-key"
+const SKILLS_PARITY_REQUEST_CONTRACT = {
+  origin: SKILLS_PARITY_SERVER_URL,
+  apiKey: SKILLS_PARITY_API_KEY,
+}
+const SKILLS_PARITY_PUBLIC_REQUEST_CONTRACT = {
+  origin: SKILLS_PARITY_SERVER_URL,
+}
+const SKILLS_FIXTURE_OPTIONS = {
+  requestContract: SKILLS_PARITY_REQUEST_CONTRACT,
+}
 const DEFAULT_VIEWPORT = { width: 1280, height: 900 }
 const COMPACT_VIEWPORT = { width: 390, height: 844 }
 const MAX_DIAGNOSTIC_LENGTH = 300
@@ -172,10 +183,11 @@ async function mockChatHandoffBootstrap(page: Page): Promise<void> {
   await page.route(
     `${SKILLS_PARITY_SERVER_URL}/api/v1/config/docs-info`,
     async (route) => {
-      if (route.request().method() !== "GET") {
-        await route.fallback()
-        return
-      }
+      validateSkillsFixtureRequest(
+        route.request(),
+        "GET",
+        SKILLS_PARITY_PUBLIC_REQUEST_CONTRACT,
+      )
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -186,7 +198,10 @@ async function mockChatHandoffBootstrap(page: Page): Promise<void> {
 }
 
 async function launchSkillsParity<TApi>(
-  mockApi: (page: Page) => Promise<TApi>,
+  mockApi: (
+    page: Page,
+    options: typeof SKILLS_FIXTURE_OPTIONS,
+  ) => Promise<TApi>,
   viewport = DEFAULT_VIEWPORT,
   diagnosticOptions: DiagnosticOptions = {},
 ): Promise<{
@@ -216,7 +231,7 @@ async function launchSkillsParity<TApi>(
         diagnostics = captureDiagnostics(page, diagnosticOptions)
         await installUnexpectedApiGuard(page, diagnostics)
         await installDirectRequestFallback(context)
-        api = await mockApi(page)
+        api = await mockApi(page, SKILLS_FIXTURE_OPTIONS)
         await mockChatHandoffBootstrap(page)
       },
     })
@@ -590,7 +605,10 @@ test.describe("Skills parity (extension)", () => {
 
     try {
       const launch = await launchSkillsParity(
-        (page) => mockSkillsBeginnerApi(page, { seeded: true }),
+        (page, options) => mockSkillsBeginnerApi(page, {
+          ...options,
+          seeded: true,
+        }),
         COMPACT_VIEWPORT,
       )
       extensionContext = launch.context

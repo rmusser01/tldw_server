@@ -1,4 +1,44 @@
-import type { Page, Route } from "@playwright/test"
+import type { Page, Request, Route } from "@playwright/test"
+
+export type SkillsFixtureRequestContract = {
+  origin: string
+  apiKey?: string
+}
+
+export type SkillsFixtureOptions = {
+  requestContract?: SkillsFixtureRequestContract
+}
+
+export function validateSkillsFixtureRequest(
+  request: Pick<Request, "headers" | "method" | "url">,
+  expectedMethod: string | readonly string[],
+  contract?: SkillsFixtureRequestContract,
+): void {
+  const expectedMethods = typeof expectedMethod === "string"
+    ? [expectedMethod]
+    : expectedMethod
+  const method = request.method()
+
+  if (!expectedMethods.includes(method)) {
+    throw new Error(
+      `Expected ${expectedMethods.join(" or ")} request, received ${method}`,
+    )
+  }
+  if (!contract) return
+
+  if (new URL(request.url()).origin !== contract.origin) {
+    throw new Error(`Expected request origin ${contract.origin}`)
+  }
+  if (contract.apiKey === undefined) return
+
+  const apiKey = request.headers()["x-api-key"]
+  if (!apiKey) {
+    throw new Error("Expected x-api-key request header")
+  }
+  if (apiKey !== contract.apiKey) {
+    throw new Error("Unexpected x-api-key request header")
+  }
+}
 
 type SkillFixtureSummary = typeof seededSkillSummary & {
   allowed_tools?: string[] | null
@@ -57,20 +97,27 @@ const fulfillJson = async (route: Route, payload: unknown, status = 200) => {
   })
 }
 
-async function mockSkillsCapabilityRoutes(page: Page) {
+async function mockSkillsCapabilityRoutes(
+  page: Page,
+  requestContract?: SkillsFixtureRequestContract,
+) {
   await page.route(/\/api\/v1\/health(?:\?.*)?$/, async (route) => {
+    validateSkillsFixtureRequest(route.request(), "GET", requestContract)
     await fulfillJson(route, { status: "healthy" })
   })
 
   await page.route(/\/api\/v1\/health\/live(?:\?.*)?$/, async (route) => {
+    validateSkillsFixtureRequest(route.request(), "GET", requestContract)
     await fulfillJson(route, { status: "healthy" })
   })
 
   await page.route(/\/api\/v1\/rag\/health(?:\?.*)?$/, async (route) => {
+    validateSkillsFixtureRequest(route.request(), "GET", requestContract)
     await fulfillJson(route, { status: "healthy" })
   })
 
   await page.route(/\/openapi\.json(?:\?.*)?$/, async (route) => {
+    validateSkillsFixtureRequest(route.request(), "GET", requestContract)
     await fulfillJson(route, {
       openapi: "3.0.0",
       info: { title: "Mock tldw API", version: "test" },
@@ -93,19 +140,17 @@ async function mockSkillsCapabilityRoutes(page: Page) {
 
 export async function mockSkillsBeginnerApi(
   page: Page,
-  options: { seeded?: boolean } = {}
+  options: SkillsFixtureOptions & { seeded?: boolean } = {},
 ) {
   let seeded = Boolean(options.seeded)
   const seedRequests: URL[] = []
   const executeRequests: Array<{ args?: string; dry_run?: boolean }> = []
+  const { requestContract } = options
 
-  await mockSkillsCapabilityRoutes(page)
+  await mockSkillsCapabilityRoutes(page, requestContract)
 
   await page.route(/\/api\/v1\/skills(?:\/)?(?:\?.*)?$/, async (route) => {
-    if (route.request().method() !== "GET") {
-      await fulfillJson(route, {}, 405)
-      return
-    }
+    validateSkillsFixtureRequest(route.request(), "GET", requestContract)
     const url = new URL(route.request().url())
     const query = (url.searchParams.get("q") ?? "").trim().toLowerCase()
     const skills = seeded
@@ -124,6 +169,7 @@ export async function mockSkillsBeginnerApi(
   })
 
   await page.route(/\/api\/v1\/skills\/context(?:\/)?(?:\?.*)?$/, async (route) => {
+    validateSkillsFixtureRequest(route.request(), "GET", requestContract)
     await fulfillJson(route, {
       available_skills: seeded ? [seededSkillSummary] : [],
       context_text: seeded ? "/skill summarize [text]" : "",
@@ -131,26 +177,21 @@ export async function mockSkillsBeginnerApi(
   })
 
   await page.route(/\/api\/v1\/skills\/seed(?:\/)?(?:\?.*)?$/, async (route) => {
+    validateSkillsFixtureRequest(route.request(), "POST", requestContract)
     seedRequests.push(new URL(route.request().url()))
-    if (route.request().method() !== "POST") {
-      await fulfillJson(route, {}, 405)
-      return
-    }
     seeded = true
     await fulfillJson(route, { seeded: ["summarize"], count: 1 })
   })
 
   await page.route(/\/api\/v1\/skills\/summarize(?:\/)?(?:\?.*)?$/, async (route) => {
+    validateSkillsFixtureRequest(route.request(), "GET", requestContract)
     await fulfillJson(route, seededSkillResponse)
   })
 
   await page.route(
     /\/api\/v1\/skills\/summarize\/execute(?:\/)?(?:\?.*)?$/,
     async (route) => {
-      if (route.request().method() !== "POST") {
-        await fulfillJson(route, {}, 405)
-        return
-      }
+      validateSkillsFixtureRequest(route.request(), "POST", requestContract)
       const body = (route.request().postDataJSON() ?? {}) as {
         args?: string
         dry_run?: boolean
@@ -172,14 +213,19 @@ export async function mockSkillsBeginnerApi(
   return { executeRequests, seedRequests }
 }
 
-export async function mockSkillsTrashWorkflow(page: Page) {
+export async function mockSkillsTrashWorkflow(
+  page: Page,
+  options: SkillsFixtureOptions = {},
+) {
   let state: "active" | "trash" | "purged" = "active"
   let version = 1
   const operations: string[] = []
+  const { requestContract } = options
 
-  await mockSkillsCapabilityRoutes(page)
+  await mockSkillsCapabilityRoutes(page, requestContract)
 
   await page.route(/\/api\/v1\/skills(?:\/)?(?:\?.*)?$/, async (route) => {
+    validateSkillsFixtureRequest(route.request(), "GET", requestContract)
     const skills = state === "active"
       ? [{ ...seededSkillSummary, version }]
       : []
@@ -193,10 +239,7 @@ export async function mockSkillsTrashWorkflow(page: Page) {
   })
 
   await page.route(/\/api\/v1\/skills\/trash(?:\/)?(?:\?.*)?$/, async (route) => {
-    if (route.request().method() !== "GET") {
-      await fulfillJson(route, {}, 405)
-      return
-    }
+    validateSkillsFixtureRequest(route.request(), "GET", requestContract)
     const skills = state === "trash"
       ? [{
           ...seededSkillSummary,
@@ -218,6 +261,7 @@ export async function mockSkillsTrashWorkflow(page: Page) {
   })
 
   await page.route(/\/api\/v1\/skills\/context(?:\/)?(?:\?.*)?$/, async (route) => {
+    validateSkillsFixtureRequest(route.request(), "GET", requestContract)
     const availableSkills = state === "active"
       ? [{ ...seededSkillSummary, version }]
       : []
@@ -230,10 +274,7 @@ export async function mockSkillsTrashWorkflow(page: Page) {
   await page.route(
     /\/api\/v1\/skills\/summarize\/restore(?:\/)?(?:\?.*)?$/,
     async (route) => {
-      if (route.request().method() !== "POST") {
-        await fulfillJson(route, {}, 405)
-        return
-      }
+      validateSkillsFixtureRequest(route.request(), "POST", requestContract)
       if (state !== "trash") {
         await fulfillJson(
           route,
@@ -252,10 +293,7 @@ export async function mockSkillsTrashWorkflow(page: Page) {
   await page.route(
     /\/api\/v1\/skills\/summarize\/purge(?:\/)?(?:\?.*)?$/,
     async (route) => {
-      if (route.request().method() !== "DELETE") {
-        await fulfillJson(route, {}, 405)
-        return
-      }
+      validateSkillsFixtureRequest(route.request(), "DELETE", requestContract)
       if (state !== "trash") {
         await fulfillJson(
           route,
@@ -271,6 +309,11 @@ export async function mockSkillsTrashWorkflow(page: Page) {
   )
 
   await page.route(/\/api\/v1\/skills\/summarize(?:\/)?(?:\?.*)?$/, async (route) => {
+    validateSkillsFixtureRequest(
+      route.request(),
+      ["GET", "DELETE"],
+      requestContract,
+    )
     if (route.request().method() === "DELETE") {
       if (state !== "active") {
         await fulfillJson(route, { detail: "Skill not found" }, 404)
@@ -280,10 +323,6 @@ export async function mockSkillsTrashWorkflow(page: Page) {
       state = "trash"
       version += 1
       await fulfillJson(route, { deleted: true })
-      return
-    }
-    if (route.request().method() !== "GET") {
-      await fulfillJson(route, {}, 405)
       return
     }
     if (state !== "active") {
@@ -383,18 +422,19 @@ const filterLargeLibrarySkills = (url: URL) => {
   }
 }
 
-export async function mockPowerUserSkillsLibrary(page: Page) {
+export async function mockPowerUserSkillsLibrary(
+  page: Page,
+  options: SkillsFixtureOptions = {},
+) {
   const listUrls: URL[] = []
   const deleteRequests: unknown[] = []
   const exportRequests: Array<{ method: string; name: string }> = []
+  const { requestContract } = options
 
-  await mockSkillsCapabilityRoutes(page)
+  await mockSkillsCapabilityRoutes(page, requestContract)
 
   await page.route(/\/api\/v1\/skills(?:\/)?(?:\?.*)?$/, async (route) => {
-    if (route.request().method() !== "GET") {
-      await fulfillJson(route, {}, 405)
-      return
-    }
+    validateSkillsFixtureRequest(route.request(), "GET", requestContract)
     const url = new URL(route.request().url())
     listUrls.push(url)
     const result = filterLargeLibrarySkills(url)
@@ -408,6 +448,7 @@ export async function mockPowerUserSkillsLibrary(page: Page) {
   })
 
   await page.route(/\/api\/v1\/skills\/context(?:\/)?(?:\?.*)?$/, async (route) => {
+    validateSkillsFixtureRequest(route.request(), "GET", requestContract)
     await fulfillJson(route, {
       available_skills: largeLibrarySkills,
       context_text: "/skill target-research-formatter [source]",
@@ -415,6 +456,11 @@ export async function mockPowerUserSkillsLibrary(page: Page) {
   })
 
   await page.route(/\/api\/v1\/skills\/([^/?]+)(?:\/)?(?:\?.*)?$/, async (route) => {
+    validateSkillsFixtureRequest(
+      route.request(),
+      ["GET", "DELETE"],
+      requestContract,
+    )
     const segments = new URL(route.request().url()).pathname.split("/").filter(Boolean)
     const name = decodeURIComponent(segments.pop() ?? "")
     const skill = largeLibrarySkills.find((candidate) => candidate.name === name)
@@ -440,6 +486,7 @@ export async function mockPowerUserSkillsLibrary(page: Page) {
   })
 
   await page.route(/\/api\/v1\/skills\/([^/?]+)\/export(?:\?.*)?$/, async (route) => {
+    validateSkillsFixtureRequest(route.request(), "GET", requestContract)
     const segments = new URL(route.request().url()).pathname.split("/").filter(Boolean)
     const rawName = segments.at(-2) ?? ""
     let decodedName: string | undefined
@@ -451,11 +498,6 @@ export async function mockPowerUserSkillsLibrary(page: Page) {
 
     const method = route.request().method()
     exportRequests.push({ method, name: decodedName ?? rawName })
-    if (method !== "GET") {
-      await fulfillJson(route, {}, 405)
-      return
-    }
-
     if (
       decodedName === undefined
       || !largeLibrarySkills.some((candidate) => candidate.name === decodedName)
@@ -649,20 +691,21 @@ export async function mockSkillsSlowList(page: Page) {
   }
 }
 
-export async function mockSkillsListRecovery(page: Page) {
+export async function mockSkillsListRecovery(
+  page: Page,
+  options: SkillsFixtureOptions = {},
+) {
   let releaseFirst: () => void = () => {}
   const firstRequestReleased = new Promise<void>((resolve) => {
     releaseFirst = resolve
   })
   let listRequests = 0
+  const { requestContract } = options
 
-  await mockSkillsCapabilityRoutes(page)
+  await mockSkillsCapabilityRoutes(page, requestContract)
 
   await page.route(/\/api\/v1\/skills(?:\/)?(?:\?.*)?$/, async (route) => {
-    if (route.request().method() !== "GET") {
-      await fulfillJson(route, {}, 405)
-      return
-    }
+    validateSkillsFixtureRequest(route.request(), "GET", requestContract)
 
     listRequests += 1
     if (listRequests === 1) {
@@ -701,6 +744,7 @@ export async function mockSkillsListRecovery(page: Page) {
   })
 
   await page.route(/\/api\/v1\/skills\/context(?:\/)?(?:\?.*)?$/, async (route) => {
+    validateSkillsFixtureRequest(route.request(), "GET", requestContract)
     await fulfillJson(route, {
       available_skills: [seededSkillSummary],
       context_text: "/skill summarize [text]",
