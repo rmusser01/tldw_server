@@ -375,7 +375,6 @@ class TestEgressPolicy:
         [
             ("http://example.com:bad", "invalid_url"),
             ("file:///etc/passwd", "unsupported_scheme"),
-            ("https://user@example.com", "userinfo_not_allowed"),
             ("https://example.com:9443", "port_not_allowed"),
         ],
     )
@@ -388,6 +387,28 @@ class TestEgressPolicy:
 
         assert result.allowed is False
         assert result.reason_code == reason_code
+
+    def test_unscoped_permissive_url_with_userinfo_keeps_legacy_behavior(self) -> None:
+        result = egress.evaluate_url_policy(
+            "https://legacy-user:legacy-pass@example.com/resource",
+            block_private_override=False,
+        )
+
+        assert result.allowed is True
+
+    def test_unscoped_disallowed_port_precedes_denylist_like_legacy_policy(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv(egress.GLOBAL_DENYLIST_ENV, "blocked.example.com")
+
+        result = egress.evaluate_url_policy(
+            "https://blocked.example.com:9443/resource",
+            block_private_override=False,
+        )
+
+        assert result.allowed is False
+        assert result.reason_code == "port_not_allowed"
 
     def test_egress_policy_error_reason_code_is_optional(self) -> None:
         legacy = EgressPolicyError("message")

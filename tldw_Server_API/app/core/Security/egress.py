@@ -554,7 +554,7 @@ def evaluate_url_policy(
     if scheme not in DEFAULT_ALLOWED_SCHEMES:
         return URLPolicyResult(False, "Unsupported URL scheme", reason_code="unsupported_scheme")
 
-    if parsed.username is not None or parsed.password is not None:
+    if configured_endpoint is not None and (parsed.username is not None or parsed.password is not None):
         return URLPolicyResult(False, "URL userinfo is not allowed", reason_code="userinfo_not_allowed")
 
     try:
@@ -587,6 +587,8 @@ def evaluate_url_policy(
         return URLPolicyResult(False, "Invalid URL port", reason_code="invalid_url")
     if port is None:
         port = 443 if scheme == "https" else 80
+    if configured_endpoint is None and allowed_ports and port not in allowed_ports:
+        return URLPolicyResult(False, f"Port not allowed: {port}", reason_code="port_not_allowed")
 
     allowlist = list(allowlist) if allowlist is not None else None
     if allowlist is None:
@@ -623,8 +625,6 @@ def evaluate_url_policy(
     if configured_endpoint is not None:
         if not configured_endpoint.matches(url):
             return URLPolicyResult(False, "URL origin does not match configured endpoint", reason_code="origin_mismatch")
-    elif allowed_ports and port not in allowed_ports:
-        return URLPolicyResult(False, f"Port not allowed: {port}", reason_code="port_not_allowed")
 
     if configured_endpoint is None:
         if profile == "strict":
