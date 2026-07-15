@@ -492,6 +492,7 @@ def _is_approved_scoped_address(raw_ip: str) -> bool:
     if (
         address.is_multicast
         or address.is_link_local
+        or (isinstance(address, ipaddress.IPv6Address) and address.is_site_local)
         or address.is_unspecified
         or address.is_reserved
         or address.is_private

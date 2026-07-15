@@ -195,6 +195,7 @@ class TestEgressPolicy:
             "64:ff9b::808:808",  # IPv4/IPv6 translation
             "2001:3::1",  # AMT special-use range reported as global
             "3fff::1",  # IPv6 documentation
+            "fec0::1",  # deprecated IPv6 site-local
             "240.0.0.1",  # reserved
             "::ffff:192.168.1.20",  # IPv4-mapped IPv6
         ],
